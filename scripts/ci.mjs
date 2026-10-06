@@ -141,6 +141,23 @@ const rustCliTest = {
   env: { ...rustCache.env, RUST_TEST_THREADS: String(rustTestThreads) },
 };
 
+// The Windows gate runs the same suite through cargo-nextest, which runs the
+// test binaries side by side instead of one after another (the serial run
+// spent 2m18s there, 61s of it in one binary), each test in its own process.
+// Linux keeps `cargo test`, so both execution models stay exercised. Nextest
+// does not run doctests; the doctest pass keeps the suite complete.
+const rustCliNextest = {
+  ...rustCliTest,
+  label: "Test Rust CLI (nextest)",
+  args: ["nextest", "run", "--no-fail-fast", "--test-threads", String(rustTestThreads)],
+  env: { ...rustCache.env },
+};
+const rustCliDocTest = {
+  ...rustCliTest,
+  label: "Test Rust CLI doctests",
+  args: ["test", "--doc"],
+};
+
 const rustClippy = {
   label: "Check Clippy (-D warnings)",
   command: cargo,
@@ -191,13 +208,14 @@ const webBuildStep = {
   )],
 };
 
-// XMATRIX_PLAYWRIGHT_SHARD=<n>/<count> lets hosted CI spread the browser run
-// over parallel jobs. Playwright keeps a project's dependency chain in one
-// shard, so `performance` (ordered after the functional projects only to keep
-// host contention out of its wall-clock budget) would pull every functional
-// case into one shard. Sharded jobs therefore split the functional projects,
-// and the last one then runs `performance` alone on its own machine. Every
-// shard together is the full browser run.
+// XMATRIX_PLAYWRIGHT_SHARD lets hosted CI spread the browser run over parallel
+// jobs. `<n>/<count>` runs one shard of the functional projects; `performance`
+// runs only the browser performance budget. Playwright keeps a project's
+// dependency chain in one shard, so `performance` (ordered after the
+// functional projects only to keep host contention out of its wall-clock
+// budget) would pull every functional case into one shard; a sharded run
+// gives it a machine of its own instead. Every shard together is the full
+// browser run.
 function browserTestStages() {
   const shard = process.env.XMATRIX_PLAYWRIGHT_SHARD;
   const stage = (label, extraArgs) => ({
@@ -216,16 +234,15 @@ function browserTestStages() {
     },
   });
   if (!shard) return [stage("Test browser projects", [])];
-  const [index, count] = shard.split("/");
+  if (shard === "performance") {
+    return [stage("Test the browser performance budget", ["--project=performance", "--no-deps"])];
+  }
   return [
     stage(`Test functional browser projects (shard ${shard})`, [
       "--project=web",
       "--project=mock-app",
       `--shard=${shard}`,
     ]),
-    ...(index === count
-      ? [stage("Test the browser performance budget", ["--project=performance", "--no-deps"])]
-      : []),
   ];
 }
 
@@ -405,7 +422,7 @@ const partitions = {
   ],
   // The Windows required gate runs the same Cargo suite. Platform-independent
   // duplicate-source validation runs in its own parallel required partition.
-  "rust-cli-windows": [rustCliTest],
+  "rust-cli-windows": [rustCliNextest, rustCliDocTest],
 };
 
 function fail(message) {
