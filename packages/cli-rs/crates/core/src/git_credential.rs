@@ -62,6 +62,36 @@ pub enum CredentialDeclined {
 
 pub type CredentialDecision = std::result::Result<CredentialRequest, CredentialDeclined>;
 
+/// Repositories whose earlier history was retired to a private backup when they
+/// were published, each with the root commit of that retired history. A checkout
+/// made before the switch still holds those commits; one push of an old branch
+/// from it would publish all of them, and nothing on GitHub can refuse that push
+/// for a public repository. So the helper refuses it the credential instead.
+const RETIRED_HISTORY_ROOTS: &[(&str, &str)] = &[(
+    "LambdaLabsHQ/xmatrix",
+    "858e515ebaf0b4acc64a08b8364c7e69dd0d6e8b",
+)];
+
+/// Whether the repository Git is working in still holds the retired history of
+/// `repository`. Git runs its credential helper from inside that repository.
+pub fn holds_retired_history(repository: &str, cwd: &std::path::Path) -> bool {
+    RETIRED_HISTORY_ROOTS
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case(repository))
+        .any(|(_, root)| holds_commit(root, cwd))
+}
+
+fn holds_commit(commit: &str, cwd: &std::path::Path) -> bool {
+    std::process::Command::new("git")
+        .args(["cat-file", "-e", &format!("{commit}^{{commit}}")])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 /// Parse the `key=value` block Git writes to a helper's stdin.
 ///
 /// Git terminates the block with a blank line and may send a key more than
@@ -333,6 +363,34 @@ mod tests {
 
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn a_checkout_is_judged_by_whether_it_holds_the_retired_root() {
+        let dir = std::env::temp_dir().join(format!("xm-retired-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        git(&["init", "-q"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "old root"]);
+        let old_root = git(&["rev-parse", "HEAD"]);
+        assert!(holds_commit(&old_root, &dir));
+        // A fresh clone of the published repository has none of the old commits.
+        assert!(!holds_commit("858e515ebaf0b4acc64a08b8364c7e69dd0d6e8b", &dir));
+        assert!(!holds_retired_history("LambdaLabsHQ/xmatrix", &dir));
+        assert!(!holds_retired_history("other/repo", &dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn input(lines: &[&str]) -> BTreeMap<String, String> {
         parse_credential_input(&format!("{}\n", lines.join("\n")))
