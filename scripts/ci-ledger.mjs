@@ -33,11 +33,12 @@ export const HUB_SUITE_LEDGER_JOB = "hub-suite";
 
 /**
  * Pure: the CI job a job result belongs to. A matrix entry is named
- * `<job> (<entry>)` (`hub (3/6)`, `web (browser 1/4)`), and the Hub suite
- * covers both retired two-job names.
+ * `<job> (<entry>)` (`hub (3/6)`, `web (browser 1/4)`), a caller of the
+ * reusable workflow prefixes its own job (`validate / hub (3/6)`), and the
+ * Hub suite covers both retired two-job names.
  */
 export function ledgerJobOf(name) {
-  const job = name.replace(/ \([^()]*\)$/u, "");
+  const job = name.replace(/^.* \/ /u, "").replace(/ \([^()]*\)$/u, "");
   return job === "hub" || job === "hub-2" ? HUB_SUITE_LEDGER_JOB : job;
 }
 
@@ -119,6 +120,36 @@ function writeOutput(name, value) {
   process.stdout.write(line);
 }
 
+/**
+ * The named jobs that already passed this exact content, so the CI selector can
+ * leave them unscheduled. Like `lookup`, an unreachable ledger reuses nothing.
+ */
+function reused(jobs) {
+  for (const job of jobs) {
+    if (!LEDGER_JOBS.has(job)) throw new Error(`${job} is not a ledgered CI job`);
+  }
+  let hits = [];
+  if (process.env.XMATRIX_CI_LEDGER === "off") {
+    console.error("CI ledger disabled for this run; every job runs.");
+  } else {
+    const key = currentLedgerKey();
+    try {
+      const commits = remoteCommits(jobs.map((job) => ledgerRef(job, key)));
+      hits = jobs.filter((job) => commits.has(ledgerRef(job, key)));
+      for (const job of jobs) {
+        const commit = commits.get(ledgerRef(job, key));
+        console.error(commit
+          ? `${job}: content ${key} already passed at ${commit}`
+          : `${job}: no passing result for content ${key}`);
+      }
+    } catch (error) {
+      console.error(`CI ledger unavailable (${error instanceof Error ? error.message.split("\n")[0] : error}); every job runs.`);
+    }
+  }
+  // Space-delimited on both ends so a workflow can test ` <job> ` membership.
+  writeOutput("reused", ` ${hits.join(" ")} `);
+}
+
 /** A hit only when every named job already passed this exact content. */
 function lookup(jobs) {
   if (process.env.XMATRIX_CI_LEDGER === "off") {
@@ -180,6 +211,9 @@ export function unzipSingleFile(zip) {
   throw new Error(`unsupported artifact compression method ${method}`);
 }
 
+/** Pull request CI, and the push CI that calls it on the public main. */
+export const RECORDED_WORKFLOWS = new Set([".github/workflows/ci.yml", ".github/workflows/public-ci.yml"]);
+
 async function github(pathname, token) {
   const response = await fetch(`https://api.github.com${pathname}`, {
     headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
@@ -199,7 +233,7 @@ async function recordRun(runId) {
   const repo = process.env.GITHUB_REPOSITORY;
   if (!token || !repo) throw new Error("GITHUB_TOKEN and GITHUB_REPOSITORY are required");
   const run = await (await github(`/repos/${repo}/actions/runs/${runId}`, token)).json();
-  if (run.path !== ".github/workflows/ci.yml" || run.head_repository?.full_name !== repo) {
+  if (!RECORDED_WORKFLOWS.has(run.path) || run.head_repository?.full_name !== repo) {
     console.error(`Run ${runId} is not this repository's CI; nothing recorded.`);
     return;
   }
@@ -251,10 +285,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.stdout.write(`${currentLedgerKey(args[0])}\n`);
   } else if (command === "lookup" && args.length > 0) {
     lookup(args);
+  } else if (command === "reused" && args.length > 0) {
+    reused(args);
   } else if (command === "record-run" && /^\d+$/u.test(args[0] ?? "")) {
     await recordRun(args[0]);
   } else {
-    console.error("Usage: node scripts/ci-ledger.mjs key [rev] | lookup <job>... | record-run <ci-run-id>");
+    console.error("Usage: node scripts/ci-ledger.mjs key [rev] | lookup <job>... | reused <job>... | record-run <ci-run-id>");
     process.exit(2);
   }
 }

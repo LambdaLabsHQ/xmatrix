@@ -1,0 +1,35 @@
+name: CI ledger
+
+# Records which ledgered CI jobs a finished CI run passed, keyed by the content
+# it tested (scripts/ci-ledger.mjs). CI itself executes pull request code and
+# holds no write token; this workflow runs the default branch's code, verifies
+# the commit the run named, re-derives its content key and pushes only
+# refs/ci-ledger/<job>/<key>. Later runs of identical content (the squash
+# merge, the release train, a re-run) then skip those jobs.
+on:
+  workflow_run:
+    workflows: [CI, Public Snapshot CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  record:
+    if: github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Record the run's passed jobs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: node scripts/ci-ledger.mjs record-run "$RUN_ID"

@@ -8,8 +8,10 @@ inputs:
 runs:
   using: composite
   steps:
+    # A GitHub-hosted VM is fresh for every job: nothing stale to reclaim and
+    # no neighbours to measure. Both diagnostics serve persistent runners.
     - name: Reclaim stale Linux Actions descendants
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && runner.environment != 'github-hosted'
       shell: bash
       run: bash .github/scripts/cleanup-stale-actions-processes.sh
 
@@ -22,7 +24,7 @@ runs:
         package-manager-cache: false
 
     - name: Record Linux memory capacity
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && runner.environment != 'github-hosted'
       shell: bash
       run: |
         set -euo pipefail
@@ -75,9 +77,18 @@ runs:
     # job would download and extract the same large remote archive even when
     # its runner-local store is already warm. A future ephemeral workflow may
     # own a separate cache policy without taxing persistent runners.
+    # A persistent runner shares its host with other jobs, so its install is
+    # throttled; a hosted VM has the machine to itself and installs at full
+    # concurrency from the restored store.
     - name: Install dependencies
       if: inputs.install-deps == 'true'
       shell: bash
+      env:
+        HOSTED: ${{ runner.environment == 'github-hosted' }}
       run: |
-        echo "Using persistent runner-local PNPM store: $(pnpm store path --silent)"
-        pnpm install --frozen-lockfile --child-concurrency=1 --network-concurrency=4
+        if [ "$HOSTED" = true ]; then
+          pnpm install --frozen-lockfile --prefer-offline
+        else
+          echo "Using persistent runner-local PNPM store: $(pnpm store path --silent)"
+          pnpm install --frozen-lockfile --child-concurrency=1 --network-concurrency=4
+        fi

@@ -7,15 +7,22 @@ record_failure() {
   failed+=("$1")
 }
 
+# Ledger names (" web hub-suite ") whose job the selector left unscheduled
+# because this exact content already passed it (scripts/ci-ledger.mjs).
+reused=" ${REUSED:-} "
+
 check_partition() {
   local selector_name="$1"
   local selector_value="$2"
   local partition_name="$3"
   local partition_result="$4"
+  local ledger_name="${5:-$3}"
 
   case "$selector_value" in
     true)
-      if [ "$partition_result" != "success" ]; then
+      if [ "$partition_result" = "skipped" ] && [[ "$reused" == *" $ledger_name "* ]]; then
+        printf '%s: reused the passing result for identical content\n' "$partition_name"
+      elif [ "$partition_result" != "success" ]; then
         record_failure "$partition_name-required=$partition_result"
       fi
       ;;
@@ -37,7 +44,7 @@ fi
 
 check_partition "node-selector" "${NODE_CHANGED:-}" "node-checks" "${NODE_CHECKS_RESULT:-}"
 check_partition "web-selector" "${WEB_CHANGED:-}" "web" "${WEB_RESULT:-}"
-check_partition "hub-selector" "${HUB_CHANGED:-}" "hub" "${HUB_RESULT:-}"
+check_partition "hub-selector" "${HUB_CHANGED:-}" "hub" "${HUB_RESULT:-}" "hub-suite"
 check_partition "desktop-selector" "${DESKTOP_CHANGED:-}" "desktop" "${DESKTOP_RESULT:-}"
 check_partition "android-selector" "${ANDROID_CHANGED:-}" "android" "${ANDROID_RESULT:-}"
 check_partition "cli-selector" "${CLI_CHANGED:-}" "rust-cli" "${RUST_CLI_RESULT:-}"

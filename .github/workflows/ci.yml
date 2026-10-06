@@ -71,6 +71,10 @@ jobs:
       android: ${{ inputs.force_full_matrix || steps.filter.outputs.android == 'true' }}
       cli: ${{ inputs.force_full_matrix || steps.filter.outputs.cli == 'true' }}
       duplicates: ${{ inputs.force_full_matrix || steps.filter.outputs.duplicates == 'true' }}
+      # Ledgered jobs (" web hub-suite ") that already passed this exact
+      # content. They are never scheduled, so a squash merge, a release train
+      # or a re-run of tested content holds no runner.
+      reused: ${{ steps.ledger.outputs.reused || ' ' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -84,10 +88,11 @@ jobs:
         shell: bash
         run: git sparse-checkout disable || true
 
-      - uses: ./.github/actions/clear-linux-proxy
-      - uses: ./.github/actions/setup-pnpm-node
+      # The selector only runs dependency-free Node scripts: no PNPM.
+      - uses: actions/setup-node@v6
         with:
-          install-deps: "false"
+          node-version: 22
+          package-manager-cache: false
 
       # A release train already verified its stamped version (release-train.mjs).
       - name: Prevent release version downgrade
@@ -136,7 +141,41 @@ jobs:
           echo "Comparing changes against $base"
           immediate_diff="$RUNNER_TEMP/ci-immediate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.zlist"
           git diff --name-only --diff-filter=ACDMRTUXB -z "$base" "$GITHUB_SHA" > "$immediate_diff"
-          node scripts/ci-areas.mjs < "$immediate_diff" >> "$GITHUB_OUTPUT"
+          areas="$(node scripts/ci-areas.mjs < "$immediate_diff")"
+          # A push keeps the exact-SHA Hub gate on every commit, so undeployed
+          # main changes stay covered; a pull request runs it when its diff
+          # reaches the Hub, like every other partition.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            areas="$(printf '%s\n' "$areas" | sed 's/^hub=.*/hub=true/')"
+          fi
+          printf '%s\n' "$areas" | tee -a "$GITHUB_OUTPUT"
+
+      - id: ledger
+        name: Leave jobs that already passed this content unscheduled
+        env:
+          FORCE_FULL_MATRIX: ${{ inputs.force_full_matrix }}
+          WEB: ${{ steps.filter.outputs.web }}
+          HUB: ${{ steps.filter.outputs.hub }}
+          DESKTOP: ${{ steps.filter.outputs.desktop }}
+          ANDROID: ${{ steps.filter.outputs.android }}
+          CLI: ${{ steps.filter.outputs.cli }}
+          DUPLICATES: ${{ steps.filter.outputs.duplicates }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jobs=()
+          selected() { [ "$FORCE_FULL_MATRIX" = true ] || [ "$1" = true ]; }
+          if selected "$WEB"; then jobs+=(web); fi
+          if selected "$HUB"; then jobs+=(hub-suite); fi
+          if selected "$DESKTOP"; then jobs+=(desktop); fi
+          if selected "$ANDROID"; then jobs+=(android); fi
+          if selected "$CLI"; then jobs+=(rust-cli rust-cli-windows); fi
+          if selected "$DUPLICATES"; then jobs+=(duplicates); fi
+          if [ "${#jobs[@]}" -eq 0 ]; then
+            echo "reused= " >> "$GITHUB_OUTPUT"
+          else
+            node scripts/ci-ledger.mjs reused "${jobs[@]}"
+          fi
 
       # The exact commit this run tests (the PR merge ref, or the pushed SHA).
       # CI holds no write token; the ci-ledger workflow re-derives the content
@@ -180,7 +219,7 @@ jobs:
     needs: changes
     # A fast corrective push cancels the prior Next run. Re-run the release
     # surface on the final exact SHA instead of trusting only the last tiny diff.
-    if: inputs.force_full_matrix || needs.changes.outputs.web == 'true'
+    if: needs.changes.outputs.web == 'true' && !contains(needs.changes.outputs.reused, ' web ')
     name: ${{ matrix.name }}
     # Hosted runners split unit tests and the build from the browser projects,
     # which run as Playwright shards; each shard builds its own production tree
@@ -252,16 +291,16 @@ jobs:
           key: turbo-${{ runner.os }}-${{ matrix.partitions }}-${{ github.sha }}
 
   hub:
-    # The complete Hub suite in one job. The exact-SHA deploy gate starts in
-    # the first wave so selector latency cannot serialize it and undeployed
-    # main changes remain covered. It runs on the Linux test pool, like Web;
-    # its file pool widens with the host's headroom
-    # (packages/hub/test/hub-test-pool.mjs). It never waits on one machine.
-    # Hosted runners split it into a static job and duration-balanced shards
-    # of the test files; together they run exactly the `hub` partition. Six
-    # file shards keep a full hosted run within the account's 20 concurrent
-    # hosted jobs.
-    if: inputs.scope == '' || contains(format(',{0},', inputs.scope), ',hub,')
+    # The complete Hub suite. Every push runs this exact-SHA deploy gate, so
+    # undeployed main changes remain covered; a pull request runs it when its
+    # diff reaches the Hub. Waiting for the selector costs seconds and keeps
+    # seven hosted jobs free for other runs: the account runs at most 20 at
+    # once. Hosted runners split it into a static job and duration-balanced
+    # shards of the test files; together they run exactly the `hub` partition.
+    # A persistent runner's file pool widens with the host's headroom
+    # (packages/hub/test/hub-test-pool.mjs).
+    needs: changes
+    if: needs.changes.outputs.hub == 'true' && !contains(needs.changes.outputs.reused, ' hub-suite ')
     name: ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -309,7 +348,7 @@ jobs:
 
   desktop:
     needs: changes
-    if: inputs.force_full_matrix || needs.changes.outputs.desktop == 'true'
+    if: needs.changes.outputs.desktop == 'true' && !contains(needs.changes.outputs.reused, ' desktop ')
     # Use the shared Linux check runner (see node-checks).
     runs-on: *offload_runner
     steps:
@@ -325,7 +364,7 @@ jobs:
 
   android:
     needs: changes
-    if: inputs.force_full_matrix || needs.changes.outputs.android == 'true'
+    if: needs.changes.outputs.android == 'true' && !contains(needs.changes.outputs.reused, ' android ')
     runs-on: *linux_runner
     steps:
       - *checkout_selected_ref
@@ -347,7 +386,7 @@ jobs:
 
   rust-cli:
     needs: changes
-    if: inputs.force_full_matrix || needs.changes.outputs.cli == 'true'
+    if: needs.changes.outputs.cli == 'true' && !contains(needs.changes.outputs.reused, ' rust-cli ')
     # Hosted runners run Clippy and the tests as parallel jobs.
     name: ${{ matrix.name }}
     strategy:
@@ -393,7 +432,7 @@ jobs:
 
   duplicates:
     needs: changes
-    if: inputs.force_full_matrix || needs.changes.outputs.duplicates == 'true'
+    if: needs.changes.outputs.duplicates == 'true' && !contains(needs.changes.outputs.reused, ' duplicates ')
     # The uncapped repository scan is a full-source workload. Run it alongside
     # product checks instead of serializing it behind the short-job pool.
     runs-on: *linux_runner
@@ -415,7 +454,7 @@ jobs:
     # make every Next deployment depend on the self-hosted Windows builder;
     # Windows remains required whenever the immediate change actually touches
     # the CLI/toolchain surface, and the CLI release workflow still builds it.
-    if: inputs.force_full_matrix || needs.changes.outputs.cli == 'true'
+    if: needs.changes.outputs.cli == 'true' && !contains(needs.changes.outputs.reused, ' rust-cli-windows ')
     runs-on: ${{ fromJSON(inputs.windows_runner || '"windows-2025"') }}
     env:
       # Compile and test parallelism come from this job's share of the machine
@@ -538,4 +577,5 @@ jobs:
           RUST_CLI_WINDOWS_RESULT: ${{ needs.rust-cli-windows.result }}
           DUPLICATES_CHANGED: ${{ needs.changes.outputs.duplicates }}
           DUPLICATES_RESULT: ${{ needs.duplicates.result }}
+          REUSED: ${{ needs.changes.outputs.reused }}
         run: bash .github/scripts/check-ci-partitions.sh
