@@ -306,8 +306,10 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
         return c.redirect(appsRedirect("failed"), 302);
       }
 
-      // Always merge installation ids. Only set baseline scopes on the first successful
-      // connection so installing a second org cannot wipe channel/write/default-repo config.
+      // Merge, never replace: the installation is appended to the stored list under
+      // the connection's row lock, so a second org or "Manage access" keeps the
+      // other installations, default repository and channel/write config. Only set
+      // baseline scopes on the first successful connection.
       let hasExistingConnection = false;
       const listedExisting = await listAppConnections(c.env, { spaceId, actorUserId: userId })
         .catch(() => null);
@@ -335,7 +337,6 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
           "GITHUB_APP_PRIVATE_KEY",
           "GITHUB_WEBHOOK_SECRET",
         ],
-        metadata: { installationId },
       };
       if (!hasExistingConnection) {
         body.scopes = ["metadata:read", "issues:read"];
@@ -343,8 +344,11 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       }
 
       const connected = await upsertAppConnection(c.env, {
-        commandId: `github-setup:${spaceId}:${installationId}:${setupAction}`.slice(0, 200),
-        spaceId, providerId: "github", actorUserId: userId, body: body as unknown as Record<string, unknown>,
+        // The append is idempotent itself; a fresh command id keeps a repeated
+        // setup (whose body differs once a connection exists) from a replay mismatch.
+        commandId: `github-setup:${crypto.randomUUID()}`,
+        spaceId, providerId: "github", actorUserId: userId,
+        body: { ...body, metadataAppend: { installationIds: installationId } } as unknown as Record<string, unknown>,
       }).then(() => true, () => false);
       const status = connected
         ? setupAction === "update"
@@ -402,6 +406,10 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     // GitHub's is set by its own install callback, which alone may link an
     // installation, after proving the installing admin can reach it.
     const providerId = c.req.param("providerId").trim().toLowerCase();
+    if (body && typeof body === "object" && "metadataAppend" in body) {
+      // Appending installations belongs to the install callback alone.
+      return c.json({ error: "metadataAppend is not accepted here" }, 400);
+    }
     if (providerId !== "github" && body.status !== "disconnected" && body.status !== "error") {
       return c.json({ error: "Save the app's credentials and check it to connect" }, 400);
     }
