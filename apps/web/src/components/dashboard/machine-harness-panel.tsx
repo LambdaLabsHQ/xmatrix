@@ -14,6 +14,7 @@ import { harnessAutoUpdateSupported, harnessCommandLabel, harnessUpdateAvailable
 const ACTION_LABELS: Record<HarnessAction, string> = {
   install: "Install", update: "Update", uninstall: "Uninstall", auto_update_on: "Enable automatic updates",
   auto_update_off: "Disable automatic updates", refresh: "Refresh inventory", release: "Check for a new release",
+  login_start: "Sign in", login_finish: "Finish sign-in", login_cancel: "Cancel sign-in",
 };
 
 type HarnessRowState = ReturnType<typeof machineHarnessState>["rows"][number];

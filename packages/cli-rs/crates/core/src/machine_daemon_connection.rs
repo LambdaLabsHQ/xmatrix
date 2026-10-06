@@ -540,6 +540,9 @@ pub enum MachineDaemonCommand {
         request_id: String,
         preset_id: String,
         action: HarnessAction,
+        /// Only on `login_finish`: the code the sign-in page showed the owner.
+        #[serde(default)]
+        code: Option<String>,
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -556,12 +559,21 @@ pub enum HarnessAction {
     Refresh,
     /// The preset's registry published a version this daemon has not seen.
     Release,
+    /// Run the preset's official sign-in and answer with its URL and code.
+    LoginStart,
+    /// Hand the running sign-in the owner's code, if any, and wait for it.
+    LoginFinish,
+    LoginCancel,
 }
 
 include!("../../../shared/harness_action_names.rs");
 
 impl HarnessAction {
-    harness_action_names!();
+    harness_action_names!(
+        LoginStart => "login_start",
+        LoginFinish => "login_finish",
+        LoginCancel => "login_cancel",
+    );
 
     pub fn parse(value: &str) -> Option<Self> {
         serde_json::from_value(serde_json::Value::String(value.to_string())).ok()
@@ -591,6 +603,30 @@ pub struct HarnessActionResult {
     pub item: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub inventory: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub login: Option<HarnessLoginProgress>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessLoginState {
+    AwaitingUser,
+    SignedIn,
+    Failed,
+    Cancelled,
+}
+
+/// Where a remote sign-in stands; the URL and code exist only while it waits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessLoginProgress {
+    pub state: HarnessLoginState,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub flow: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub verification_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub user_code: Option<String>,
 }
 
 /// A bounded, read-only request for the quota facts of idle local Profiles.
@@ -3220,6 +3256,9 @@ mod tests {
             HarnessAction::AutoUpdateOff,
             HarnessAction::Refresh,
             HarnessAction::Release,
+            HarnessAction::LoginStart,
+            HarnessAction::LoginFinish,
+            HarnessAction::LoginCancel,
         ] {
             assert_eq!(HarnessAction::parse(action.as_str()), Some(action));
         }
@@ -3233,6 +3272,7 @@ mod tests {
                 output_tail: None,
                 item: None,
                 inventory: None,
+                login: None,
             },
             relay_lease: None,
         })

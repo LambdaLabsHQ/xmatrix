@@ -468,6 +468,7 @@ async fn execute_leased_harness_action(
         request_id,
         preset_id,
         action,
+        code,
         relay_lease,
     } = command
     else {
@@ -502,6 +503,15 @@ async fn execute_leased_harness_action(
     };
     // Re-reading inventory or a registry changes nothing a redelivery could repeat.
     let result = if matches!(
+        action,
+        machine_daemon_connection::HarnessAction::LoginStart
+            | machine_daemon_connection::HarnessAction::LoginFinish
+            | machine_daemon_connection::HarnessAction::LoginCancel
+    ) {
+        // A sign-in installs nothing; a redelivery at worst restarts it, and
+        // the code it carries is only ever handed to the sign-in it names.
+        crate::runtime_daemon_harness_login::execute(&preset_id, action, code.as_deref()).await
+    } else if matches!(
         action,
         machine_daemon_connection::HarnessAction::Refresh
             | machine_daemon_connection::HarnessAction::Release
@@ -2031,6 +2041,8 @@ async fn cmd_daemon_connected(
             "machine_harness_uninstall_v1",
             // The daemon parses and acts on the `release` harness action.
             "machine_harness_release_v1",
+            // The daemon parses and runs the `login_*` harness actions.
+            "machine_harness_login_v1",
             // A stop may push the Run's whole checkout to a handoff branch.
             "machine_handoff_export_v1",
         ],
@@ -2076,6 +2088,7 @@ async fn cmd_daemon_connected(
             "machine_harness_cursor_launcher_v1".to_string(),
             "machine_harness_uninstall_v1".to_string(),
             "machine_harness_release_v1".to_string(),
+            "machine_harness_login_v1".to_string(),
             "machine_handoff_export_v1".to_string(),
         ],
     );
