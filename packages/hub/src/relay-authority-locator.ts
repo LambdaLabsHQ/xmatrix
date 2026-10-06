@@ -1,6 +1,9 @@
 
 import { relayRuntimeOwnerCellName } from "./runtime-transport/runtime-cell-locator";
-import { runtimeRouteDirectoryShardName } from "./runtime-transport/runtime-route-directory-locator";
+import {
+  isRuntimeRouteDirectoryScopeId,
+  runtimeRouteDirectoryShardName,
+} from "./runtime-transport/runtime-route-directory-locator";
 
 /**
  * Runtime socket cells are selected by owner-principal hash under the
@@ -90,6 +93,23 @@ export function relayRuntimeRouteDirectory<Id, Stub>(
 ): Stub | undefined {
   const shardName = runtimeRouteDirectoryShardName(scopeId);
   return shardName ? namespace.get(namespace.idFromName(shardName)) : undefined;
+}
+
+/**
+ * One fanout object per channel. The scope id is checked before it becomes an
+ * object name, and the location hint is part of that name so a move creates a
+ * new object beside the database instead of reusing one pinned elsewhere.
+ */
+export function relayRuntimeChannelFanout<Id, Stub>(
+  namespace: DurableNamespaceLike<Id, Stub>,
+  scopeId: string,
+  env: { XMATRIX_RUNTIME_LOCATION_HINT?: string },
+): Stub | undefined {
+  if (!isRuntimeRouteDirectoryScopeId(scopeId)) return undefined;
+  const locationHint = relayRuntimeLocationHint(env.XMATRIX_RUNTIME_LOCATION_HINT);
+  const name = locationHint ? `fanout:${scopeId}@${locationHint}` : `fanout:${scopeId}`;
+  const id = namespace.idFromName(name);
+  return locationHint ? namespace.get(id, { locationHint }) : namespace.get(id);
 }
 
 /**

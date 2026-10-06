@@ -73,6 +73,7 @@ export const HUB_ENVIRONMENT = {
   RELAY_SPACE_ROOT_AUTHORITY: test("binding", "Pre-PostgreSQL Space root authority; bound only by test configs."),
   RELAY_RUNTIME: product("binding", "Runtime cells holding live Agent and client connections."),
   RELAY_RUNTIME_ROUTE_DIRECTORY: product("binding", "Runtime delivery-scope to cell directory."),
+  RELAY_RUNTIME_CHANNEL_FANOUT: product("binding", "Per-channel runtime fanout once a channel outgrows the direct cell list."),
   DEVICE_AUTH: product("binding", "Device-code login broker for the CLI and apps."),
 
   // PostgreSQL.
