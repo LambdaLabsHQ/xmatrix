@@ -37,7 +37,7 @@ function fixture({ linkedToken = "user-token", reachable = ["111"], stored = ["1
     `/api/apps/github/setup?state=signed&installation_id=${installationId}&setup_action=install`, {}, env);
   const patch = (metadata) => app.request("/api/spaces/space-1/app-connections/github", { method: "PATCH",
     headers: { "content-type": "application/json" }, body: JSON.stringify({ providerId: "github", metadata }) }, env);
-  return { setup, patch, upserts, reachability };
+  return { app, setup, patch, upserts, reachability };
 }
 
 const outcome = (response) => new URL(response.headers.get("location")).searchParams.get("github");
@@ -60,7 +60,31 @@ test("an installation the admin can reach is linked", async () => {
   const f = fixture({ reachable: ["111"] });
   assert.equal(outcome(await f.setup("111")), "connected");
   assert.equal(f.upserts.length, 1);
-  assert.equal(f.upserts[0].body.metadata.installationId, "111");
+  assert.deepEqual(f.upserts[0].body.metadataAppend, { installationIds: "111" });
+});
+
+test("setup appends its installation and never replaces the stored metadata", async () => {
+  const f = fixture({ reachable: ["111", "222"] });
+  assert.equal(outcome(await f.setup("222")), "connected");
+  assert.equal(outcome(await f.setup("222")), "connected");
+  assert.equal(outcome(await f.setup("111")), "connected");
+  assert.equal(f.upserts.length, 3);
+  for (const upsert of f.upserts) {
+    // No `metadata` key: the db keeps every stored field and only appends to installationIds.
+    assert.equal("metadata" in upsert.body, false);
+  }
+  assert.deepEqual(f.upserts.map((upsert) => upsert.body.metadataAppend.installationIds), ["222", "222", "111"]);
+  // A repeated setup is its own command, so its differing body cannot hit a replay mismatch.
+  assert.equal(new Set(f.upserts.map((upsert) => upsert.commandId)).size, 3);
+});
+
+test("Configure cannot append an installation", async () => {
+  const f = fixture({ stored: ["111"] });
+  const response = await f.app.request("/api/spaces/space-1/app-connections/github", { method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ providerId: "github", metadataAppend: { installationIds: "999" } }) }, env);
+  assert.equal(response.status, 400);
+  assert.deepEqual(f.upserts, []);
 });
 
 test("Configure may send the stored installations back but never different ones", async () => {
