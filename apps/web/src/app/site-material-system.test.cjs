@@ -91,3 +91,23 @@ test("navbar keeps the 3D logo off a centered sticky wood bar", () => {
   assert.doesNotMatch(siteCss, /\.site-navbar::before/);
   assert.doesNotMatch(navbarSource, /xmatrix-icon\.png/);
 });
+
+test("public connector list shows only connected services with checked-in icons", () => {
+  const connectorsSource = source("../components/landing/connectors.tsx");
+  const ids = [...connectorsSource.matchAll(/\{ id: "([a-z]+)", name: "[^"]+" \}/g)].map((match) => match[1]);
+  assert.deepEqual(ids, [
+    "github", "gitlab", "linear", "notion", "google", "slack", "sentry",
+    "vercel", "netlify", "cloudflare", "grafana", "buildkite", "webhook",
+  ]);
+  for (const id of ids) {
+    assert.ok(
+      fs.existsSync(path.join(appRoot, "../../public/app-connectors", `${id}.svg`)),
+      `${id} needs a checked-in icon`,
+    );
+  }
+  // Glass pills sit directly on one wood panel; no glass card wraps them.
+  assert.match(connectorsSource, /<WoodPanel[\s\S]*publicConnectors\.map[\s\S]*<LiquidGlassPill/);
+  assert.doesNotMatch(connectorsSource, /LiquidGlassCard/);
+  assert.match(source("page.tsx"), /<HowItWorks \/>\s*<Connectors \/>/);
+  assert.match(source("docs/page.tsx"), /<ConnectorList /);
+});
