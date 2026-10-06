@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import {
   agentPresetAvatarUrl,
@@ -13,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { formatAutomationNext } from "@/components/pages/page-automation-format";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
+import { useNow } from "./agent-work-intent";
 import { ListSkeleton } from "./content-skeleton";
 import { IdentityAvatar } from "./identity-avatar";
 import { MachineGlyph } from "./machine-glyph";
@@ -60,11 +60,7 @@ export function StatusView({
   const ready = Boolean(spaceId && token);
   const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", ready, { live: true });
   // Load samples and "seen" ages expire; re-read them between refreshes.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 15_000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const now = useNow(15_000);
 
   const registrations: Array<AgentRegistrationSummary & { harness: string }> = (catalog.data?.capabilities ?? [])
     .flatMap((group) => group.locations.filter(registrationListed).map((registration) => ({ ...registration, harness: group.harness })));
