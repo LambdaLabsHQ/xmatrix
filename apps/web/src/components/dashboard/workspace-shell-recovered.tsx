@@ -4,6 +4,7 @@ export { loadImage, canvasToBlob } from "./image-canvas";
 import { attachmentMediaMimeType } from "./attachment-media-type";
 import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
+import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
 import { channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
@@ -117,6 +118,7 @@ import { threadReplyPreviews } from "./thread-reply-preview";
 import {
   type ComponentProps,
   type ReactNode,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -2072,9 +2074,18 @@ export function GoalStatusBadge({
    so an in-place tip lost its ends (user 2026-09-26: goal 这里截断了). It is
    centred under the anchor, kept whole on screen, and opens upward when there
    is no room below. */
-export function useAnchoredTip<T extends HTMLElement>() {
+/* `lingerMs` keeps the tip up that long after the pointer leaves its anchor, so
+   the pointer can cross the gap into a tip that can itself be clicked. */
+export function useAnchoredTip<T extends HTMLElement>({ lingerMs = 0 }: { lingerMs?: number } = {}) {
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const ref = useRef<T>(null);
+  const hideTimer = useRef<number | null>(null);
+  const cancelHide = () => {
+    if (hideTimer.current === null) return;
+    window.clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+  };
+  useEffect(() => cancelHide, []);
   useLayoutEffect(() => {
     const tip = ref.current;
     if (!tip || !anchor) return;
@@ -2087,12 +2098,26 @@ export function useAnchoredTip<T extends HTMLElement>() {
     const above = anchor.top - gap - tip.offsetHeight;
     tip.style.top = `${below + tip.offsetHeight > window.innerHeight - margin && above >= margin ? above : below}px`;
   }, [anchor]);
-  const show = (event: { currentTarget: HTMLElement }) => setAnchor(event.currentTarget.getBoundingClientRect());
-  const hide = () => setAnchor(null);
+  const show = (event: { currentTarget: HTMLElement }) => {
+    cancelHide();
+    setAnchor(event.currentTarget.getBoundingClientRect());
+  };
+  const close = () => {
+    cancelHide();
+    setAnchor(null);
+  };
+  const hide = () => {
+    if (lingerMs <= 0) return close();
+    cancelHide();
+    hideTimer.current = window.setTimeout(close, lingerMs);
+  };
   return {
     open: anchor !== null,
     ref,
+    close,
     anchorProps: { onPointerEnter: show, onPointerLeave: hide, onFocus: show, onBlur: hide },
+    /** Spread on the tip when it lingers, so resting on it keeps it up. */
+    tipProps: lingerMs > 0 ? { onPointerEnter: cancelHide, onPointerLeave: hide } : {},
   };
 }
 
@@ -2129,6 +2154,7 @@ export function StatusChipBadge({
   const isMode = chipId === "mode";
   /* The icon names the field, so no tag ever spells it out again: owner, machine
      and name read the same as model and effort, through this one path. */
+  const openMachine = useOpenMachine(chipId === "machine" ? chip.machine : undefined);
   const registryIcon = statusTagIcon(chip.id);
   const Icon = registryIcon ? STATUS_TAG_ICON_COMPONENTS[registryIcon] : Zap;
   // Round once so 89.6% and 90.2% both read "90%" and pick the same fill,
@@ -2177,23 +2203,42 @@ export function StatusChipBadge({
       {text}
     </Tag>
   );
-  return chip.busy ? <MachineLoadTag tag={tag} name={value} label={title} glance={chip.busy.glance} /> : tag;
+  return chip.busy || openMachine
+    ? <MachineLoadTag tag={tag} name={value} label={title} glance={chip.busy?.glance} onOpen={openMachine} />
+    : tag;
 }
 
 /* The Machine tag opens the Machine's load the way its list row shows it, so
-   the tag's tone can be read without leaving the conversation. */
-function MachineLoadTag({ tag, name, label, glance }: {
-  tag: ReactNode; name?: string; label: string; glance: MachineGlanceReading[];
+   the tag's tone can be read without leaving the conversation. When the reader
+   has a page for that Machine, the tag and its card both open it. */
+function MachineLoadTag({ tag, name, label, glance, onOpen }: {
+  tag: ReactNode; name?: string; label: string; glance?: MachineGlanceReading[]; onOpen?: () => void;
 }) {
-  const tip = useAnchoredTip<HTMLSpanElement>();
+  const tip = useAnchoredTip<HTMLSpanElement>({ lingerMs: onOpen ? 160 : 0 });
+  const open = onOpen ? () => {
+    tip.close();
+    onOpen();
+  } : undefined;
   return (
-    <span className="relative inline-flex shrink-0 align-middle" tabIndex={0} aria-label={label}
-      data-machine-load-tag {...tip.anchorProps}>
+    <span className={cn("relative inline-flex shrink-0 align-middle", open && "cursor-pointer")} tabIndex={0}
+      aria-label={open ? `${label}\nOpen ${name || "this Machine"}` : label} role={open ? "link" : undefined}
+      data-machine-load-tag data-machine-link={open ? "" : undefined} {...tip.anchorProps}
+      onClick={open ? (event) => {
+        event.stopPropagation();
+        open();
+      } : undefined}
+      onKeyDown={open ? (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        open();
+      } : undefined}>
       {tag}
-      {tip.open && typeof document !== "undefined"
+      {glance && tip.open && typeof document !== "undefined"
         ? createPortal(
-            <span ref={tip.ref} role="tooltip" data-machine-load-tip
-              className="xmatrix-app app-goal-status-tooltip app-hint-tooltip app-machine-load-tip">
+            <span ref={tip.ref} role="tooltip" data-machine-load-tip {...tip.tipProps}
+              className={cn("xmatrix-app app-goal-status-tooltip app-hint-tooltip app-machine-load-tip",
+                open && "app-machine-load-tip-link")}
+              onClick={open}>
               {name ? <span className="app-machine-load-tip-name">{name}</span> : null}
               <MachineLoadGlanceBars glance={glance} />
             </span>,

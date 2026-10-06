@@ -1,4 +1,4 @@
-import { RuntimeClientOperationError } from "./runtime-operation-failure";
+import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
 import type {
   AgentInstanceClientMessage,
   AgentInstanceConnectMessage,
@@ -16,7 +16,7 @@ import {
   normalizeChannelActivity,
 } from "@xmatrix/protocol";
 
-import { verifyAuthToken, type AgentRunPrincipal, type AuthUser } from "../auth";
+import { InvalidAuthTokenError, verifyAuthToken, type AgentRunPrincipal, type AuthUser } from "../auth";
 import { relayRuntimeCellsForOwners } from "../relay-authority-locator";
 import type { Env } from "../types";
 import {
@@ -418,7 +418,16 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     run: AgentInstanceAuthorityRunBinding;
     presentation?: AgentInstancePresentation;
   }> {
-    const user = await this.dependencies.authenticate(token);
+    let user: AuthUser;
+    try {
+      user = await this.dependencies.authenticate(token);
+    } catch (error) {
+      // A refused credential, typically a run token that expired while its
+      // daemon could not refresh it, is the client's state to fix. Anything
+      // else (a key read failing) stays the failure it is.
+      if (error instanceof InvalidAuthTokenError) throw new RuntimeClientOperationError("agent_run_credential_invalid");
+      throw error;
+    }
     if (!user.agentRun) throw new RuntimeClientOperationError("agent_run_credential_required");
     const principal = runPrincipal(user.agentRun);
     const response = await queryAgentInstanceRun(this.dependencies.runtime, {
@@ -590,6 +599,11 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         actorUserId: session.principal.ownerUserId,
       });
     } catch (error) {
+      // The notice id is the Instance and the notice's opening text, so a
+      // later failure that opens the same way (or the same one reported by a
+      // later Run of the Instance) finds its notice already posted. That
+      // notice, and any handoff it started, stand; this one adds nothing.
+      if (error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict) return;
       console.error("Agent turn-failure notice could not be committed", error);
       return;
     }

@@ -16,6 +16,7 @@ import {
   retrieveStripeCheckoutSession,
   retrieveStripeSubscription,
   StripeBillingError,
+  stripeBillingErrorStatus,
   stripeCheckoutReturnUrls,
   stripeCheckoutSessionFact,
   stripeSubscriptionFact,
@@ -56,7 +57,7 @@ function billingRouteError(c: BillingContext, error: unknown): Response {
   if (error instanceof StripeBillingError) {
     return c.json(
       { error: error.message, ...(error.providerCode ? { code: error.providerCode } : {}) },
-      error.retryable ? 503 : 502,
+      stripeBillingErrorStatus(error),
     );
   }
   return requestErrorResponse(c, error);

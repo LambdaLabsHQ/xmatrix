@@ -43,3 +43,13 @@ export function registrationMachineBusy(registrations: readonly AgentRegistratio
   if (percent === undefined) return undefined;
   return { percent, glance: machineGlanceReadings(readings) };
 }
+
+export type MachineLinkTarget = { machineId: string; ownerUserId?: string };
+
+/** Whether a Machine tag's `target` is one of the reader's openable `machines`:
+ * the exact id, and the same owner when both sides name one. */
+export function machineLinkable(machines: readonly MachineLinkTarget[], target: MachineLinkTarget | undefined): boolean {
+  if (!target?.machineId) return false;
+  return machines.some((machine) => machine.machineId === target.machineId
+    && (!target.ownerUserId || !machine.ownerUserId || machine.ownerUserId === target.ownerUserId));
+}
