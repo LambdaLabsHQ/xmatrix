@@ -1,4 +1,4 @@
-import { hasOperationalAgentInvocation, parseAutoLaunchMentions,
+import { hasOperationalAgentInvocation, parseAgentStopInvocation, parseAutoLaunchMentions,
   type SerializedAgentMessageTarget, type AgentInvocationQueryPage, type SerializedFirstMessageLaunchChoice, type SerializedAgentContinuation, type SerializedAgentInvocationRejection, type SerializedAgentLaunch, type SerializedAgentMessageExecution, type SerializedAgentStop } from "@xmatrix/protocol";
 
 export class InvocationAccessError extends Error {
@@ -9,7 +9,9 @@ export interface InvocationSourceMessage { id: string; messageId?: string; body:
 export function invocationSourceMessages<T extends InvocationSourceMessage>(messages: readonly T[], visibleIds?: readonly string[]): T[] {
   const visible = visibleIds === undefined ? undefined : new Set(visibleIds);
   const candidates = visible ? messages.filter((message) => visible.has(message.messageId || message.id)) : messages.slice(-20);
-  return candidates.filter((message) => message.senderKind === "user" || hasOperationalAgentInvocation(message.body) || parseAutoLaunchMentions(message.body).length > 0);
+  // An Agent's stop command carries a receipt chip too, like a Human's.
+  return candidates.filter((message) => message.senderKind === "user" || hasOperationalAgentInvocation(message.body) ||
+    parseAutoLaunchMentions(message.body).length > 0 || parseAgentStopInvocation(message.body) !== undefined);
 }
 
 /** One channel reader, bounded pages and a single cancellation/deadline budget.
