@@ -96,31 +96,25 @@ function pushPayload(repository) {
   };
 }
 
-test("a private repository's events are not delivered into a public Channel", async () => {
-  for (const [label, repository, exposure] of [
-    ["private repository, open project", { private: true }, reader()],
-    ["privacy unstated", {}, reader()],
-    ["participation unknown", { private: true }, reader({ spaceError: true })],
-    ["Channel unreadable", { private: true }, reader({ channelError: true })],
-  ]) {
+async function assertDeliveries(expected, cases) {
+  for (const [label, repository, exposure] of cases) {
     const harness = webhookHarness(exposure);
     const result = await dispatchProductGitHubWebhook({ env: {}, event: "push", delivery: "d-1",
       payload: pushPayload(repository) }, harness.dependencies);
-    assert.equal(result.delivered, 0, label);
-    assert.deepEqual(harness.appended, [], label);
+    assert.equal(result.delivered, expected, label);
+    assert.equal(harness.appended.length, expected, label);
   }
-});
+}
 
-test("a repository's events still reach Channels that may carry them", async () => {
-  for (const [label, repository, exposure] of [
-    ["public repository, open project", { private: false, visibility: "public" }, reader()],
-    ["private repository, closed Channel", { private: true }, reader({ mode: "closed" })],
-    ["private repository, members-only Space", { private: true }, reader({ openParticipation: false })],
-  ]) {
-    const harness = webhookHarness(exposure);
-    const result = await dispatchProductGitHubWebhook({ env: {}, event: "push", delivery: "d-1",
-      payload: pushPayload(repository) }, harness.dependencies);
-    assert.equal(result.delivered, 1, label);
-    assert.equal(harness.appended.length, 1, label);
-  }
-});
+test("a private repository's events are not delivered into a public Channel", () => assertDeliveries(0, [
+  ["private repository, open project", { private: true }, reader()],
+  ["privacy unstated", {}, reader()],
+  ["participation unknown", { private: true }, reader({ spaceError: true })],
+  ["Channel unreadable", { private: true }, reader({ channelError: true })],
+]));
+
+test("a repository's events still reach Channels that may carry them", () => assertDeliveries(1, [
+  ["public repository, open project", { private: false, visibility: "public" }, reader()],
+  ["private repository, closed Channel", { private: true }, reader({ mode: "closed" })],
+  ["private repository, members-only Space", { private: true }, reader({ openParticipation: false })],
+]));
