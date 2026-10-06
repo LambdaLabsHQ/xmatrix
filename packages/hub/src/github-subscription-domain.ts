@@ -17,6 +17,13 @@ export function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
 }
 
+/** A repository counts as public only when GitHub says so; private, internal or unstated is not. */
+export function githubRepositoryIsPublic(repository: unknown): boolean {
+  const value = record(repository);
+  const visibility = text(value.visibility).toLowerCase();
+  return value.private === false && (visibility === "" || visibility === "public");
+}
+
 export interface GitHubWebhookRepositoryIdentity {
   owner: string;
   repo: string;

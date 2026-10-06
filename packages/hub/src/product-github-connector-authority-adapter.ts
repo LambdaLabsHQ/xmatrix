@@ -178,9 +178,10 @@ async function runGitHubConnectorStatement(
     principal,
   });
 
-  /* Subscriptions are Channel-local; every other action is a write the
-     Channel's policy decides (docs/design/connector-platform.md §3.5). */
-  if (action !== "subscribe" && action !== "unsubscribe") {
+  /* Every action but unsubscribe is the Channel's policy to decide
+     (docs/design/connector-platform.md §3.5): a subscription brings the
+     repository's content into the Channel. Unsubscribing only narrows it. */
+  if (action !== "unsubscribe") {
     const refusal = await channelActionRefusal(input.env, { providerId: "github", connectionId: connection.id,
       channelId: input.channelId, actionId: action, senderKind: input.senderKind });
     if (refusal) {
