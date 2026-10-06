@@ -3,30 +3,25 @@
 //
 // A CI job's outcome is a function of the repository content it checked out.
 // The same content keeps reaching CI under new commit SHAs: a squash merge
-// replays the PR's tested merge tree, a version bump changes nothing but the
-// version, and the production request re-checks the tree the PR already passed.
-// The ledger keys a job's success by that content, so an identical tree is
-// verified once.
+// replays the PR's tested merge tree, and the production request re-checks the
+// tree main already passed. The ledger keys a job's success by that content,
+// so an identical tree is verified once.
 //
-// Key: every tracked path, mode and blob of the checked-out commit; the files a
-// version bump rewrites are hashed with the release version replaced, so a bump
-// alone never invalidates a result. Nothing is excluded by directory — tests
-// read source across packages, so the whole tree is the input.
+// Key: the Git tree of the checked-out commit, or of its source when it is a
+// release commit. Nothing is excluded by directory — tests read source across
+// packages, so the whole tree is the input.
 //
 // Record: refs/ci-ledger/<job>/<key> -> the exact commit that passed, so every
 // reuse is traceable to the run that earned it.
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import process from "node:process";
 import { inflateRawSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { stampVersionText, versionedPaths } from "./version.mjs";
+import { releaseCommitProblemAt } from "./release-commit.mjs";
 
-const LEDGER_VERSION = "ci-ledger-v1";
-const LEDGER_VERSION_PLACEHOLDER = "0.0.0-ledger";
 // The complete Hub suite, recorded under a name that never held a single
 // shard's result. CI ran the suite as two jobs ("hub" and "hub-2") until
 // 2026-09-27; a run from that layout proves the suite only when both passed.
@@ -73,35 +68,19 @@ function git(args, { cwd } = {}) {
   return execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 1 << 30 });
 }
 
-function sha256(data) {
-  return createHash("sha256").update(data).digest("hex");
-}
-
-/** Pure: the ledger key for a `git ls-tree -r -z` listing plus the versioned files' contents. */
-export function ledgerKey(lsTree, versionedContents) {
-  // Stamp a placeholder into the release-version fields only: replacing every
-  // occurrence of the version text would also mask a dependency that shares it.
-  const normalized = new Map(
-    Object.entries(versionedContents).map(([file, text]) => [
-      file,
-      `normalized:${sha256(stampVersionText(file, text, LEDGER_VERSION_PLACEHOLDER))}`,
-    ]),
-  );
-  const entries = lsTree.split("\0").filter(Boolean).map((entry) => {
-    const tab = entry.indexOf("\t");
-    const [mode, type, object] = entry.slice(0, tab).split(" ");
-    const file = entry.slice(tab + 1);
-    return `${mode} ${type} ${normalized.get(file) ?? object}\t${file}`;
-  });
-  return sha256(`${LEDGER_VERSION}\n${entries.join("\n")}`).slice(0, 40);
-}
-
+/**
+ * The ledger key: the Git tree of the commit's content. A release commit is
+ * keyed by its source's tree, because it is verifiably that tree plus the
+ * release version stamp (scripts/release-commit.mjs), and the train's CI
+ * should reuse what the source already passed.
+ */
 export function currentLedgerKey(rev = "HEAD", cwd = undefined) {
-  const versionedContents = {};
-  for (const file of versionedPaths) {
-    versionedContents[file] = git(["show", `${rev}:${file}`], { cwd });
-  }
-  return ledgerKey(git(["ls-tree", "-r", "-z", rev], { cwd }), versionedContents);
+  const commit = git(["rev-parse", `${rev}^{commit}`], { cwd }).trim();
+  const parents = git(["rev-list", "--parents", "-n", "1", commit], { cwd }).trim().split(" ").slice(1);
+  const content = parents.length === 1 && releaseCommitProblemAt(cwd ?? process.cwd(), commit, parents[0]) === null
+    ? parents[0]
+    : commit;
+  return git(["rev-parse", `${content}^{tree}`], { cwd }).trim();
 }
 
 export function ledgerRef(job, key) {
