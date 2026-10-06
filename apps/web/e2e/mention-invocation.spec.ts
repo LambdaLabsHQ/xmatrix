@@ -238,17 +238,17 @@ test("an elsewhere handoff shows the parameters Jev picked on the successor chip
   const named = cards.nth(1);
   // Opened from history: the picks are already lit, and the arrival does not replay.
   await expect(auto.locator('[data-jev="true"]')).toHaveText([
-    "repo:LambdaLabsHQ/xmatrix", "model:grok-4", "effort:high", "harness:grok",
+    "harness:grok", "model:grok-4", "effort:high", "repo:LambdaLabsHQ/xmatrix",
   ]);
   await expect(auto.locator('[data-routing="true"]')).toHaveText(["machine:Workstation"]);
   await expect(auto).not.toContainText("placement:");
   await expect(auto.locator('[data-jev-arriving="true"]')).toHaveCount(0);
   await expect(auto.locator(".app-mention-invocation").nth(1)).toContainText("Starting");
   await expect(auto.locator(".app-mention-invocation").nth(1)).not.toContainText("Picking");
-  await expect(auto).toHaveAttribute("aria-label", /Jev filled repo:LambdaLabsHQ\/xmatrix, model:grok-4, effort:high, harness:grok\. Routing filled machine:Workstation/);
+  await expect(auto).toHaveAttribute("aria-label", /Jev filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ\/xmatrix\. Routing filled machine:Workstation/);
   // A successor the author named is already on the chip, so harness is not drawn again.
   await expect(named.locator('[data-jev="true"]')).toHaveText([
-    "repo:LambdaLabsHQ/xmatrix", "model:grok-4", "effort:high",
+    "model:grok-4", "effort:high", "repo:LambdaLabsHQ/xmatrix",
   ]);
   await expect(named.locator('[data-routing="true"]')).toHaveText(["machine:Workstation"]);
   await expect(named.locator(".app-mention-chip-label").nth(1)).toContainText("@grok");
@@ -275,7 +275,7 @@ test("a fresh @auto handoff stays on Picking until the picked launch arrives", a
     launches: [handoffPick(mention, "auto")], rejections: [], continuations: [],
   });
   await expect(card.locator('[data-jev="true"]')).toHaveText([
-    "repo:LambdaLabsHQ/xmatrix", "model:grok-4", "effort:high", "harness:grok",
+    "harness:grok", "model:grok-4", "effort:high", "repo:LambdaLabsHQ/xmatrix",
   ], { timeout: 10_000 });
   await expect(card.locator('[data-routing="true"]')).toHaveText(["machine:Workstation"]);
   await expect(card.locator(".app-mention-invocation").nth(1)).toContainText("Starting");
