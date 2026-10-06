@@ -9,6 +9,9 @@ import { deterministicConversationId, launchConversationAgent, openConversation 
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
 import { getChannel } from "./spaces";
+import {
+  channelExposureReader, githubContentAllowedInChannel, spaceMayBePublic, type ChannelExposureReader,
+} from "./github-channel-exposure";
 
 /**
  * Pre-review (docs/design/pages-and-conversations.md §5.6): a claimed pull
@@ -83,6 +86,19 @@ function pages(env: Env): PostgresPageRepository {
   }));
 }
 
+/**
+ * The review conversation's mode. Its prompt carries the pull request's diff,
+ * so a private repository's review is closed wherever the Space's open
+ * conversations may be read by participants (or that cannot be established).
+ */
+export async function preReviewConversationMode(reader: ChannelExposureReader, input: {
+  spaceId: string; restricted: boolean; repositoryPublic: boolean;
+}): Promise<"open" | "closed"> {
+  if (input.restricted) return "closed";
+  if (input.repositoryPublic) return "open";
+  return await spaceMayBePublic(reader, input.spaceId) ? "closed" : "open";
+}
+
 /** Opens the pull request's review conversation on its block and launches the pre-review there. */
 export async function startPreReview(env: Env, input: {
   spaceId: string; spaceOwnerUserId: string; connection: AppConnectorConnectionView; pull: PullRequestRef;
@@ -92,12 +108,19 @@ export async function startPreReview(env: Env, input: {
   const principal = { kind: "user" as const, id: input.spaceOwnerUserId };
   const review = await readGitHubPullRequestForReview(env, input.connection, pull, pull.number);
   if (review.draft) return;
+  const exposure = channelExposureReader(env);
+  const mode = await preReviewConversationMode(exposure, { spaceId, restricted: input.restricted,
+    repositoryPublic: review.repositoryPublic });
   // One review conversation per pull request in a Space.
   const channelId = await deterministicConversationId("pre-review", spaceId, pull.url);
   await openConversation(env, { spaceId, channelId, userId: input.spaceOwnerUserId,
-    name: `Review ${pull.owner}/${pull.repo}#${pull.number}`, mode: input.restricted ? "closed" : "open",
+    name: `Review ${pull.owner}/${pull.repo}#${pull.number}`, mode,
     metadata: { createdBy: "github", pullRequest: { url: pull.url, repository: `${pull.owner}/${pull.repo}`,
       number: pull.number, pageId: input.pageId, blockId: input.blockId } } });
+  /* An earlier review may have opened the conversation open; the diff goes
+     only where this repository's content may be read. */
+  if (!await githubContentAllowedInChannel(exposure, { repositoryPublic: review.repositoryPublic, channelId,
+    userId: input.spaceOwnerUserId })) return;
   await pages(env).link({ requestId: crypto.randomUUID(), spaceId, principal, conversationId: channelId,
     pageId: input.pageId, blockId: input.blockId, source: "reference" });
   await launchConversationAgent(env, input.spaceOwnerUserId, {
