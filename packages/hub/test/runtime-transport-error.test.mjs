@@ -13,6 +13,7 @@ import {
 } from "../src/runtime-transport/runtime-operation-failure.ts";
 import { PostgresAgentInstancePort } from "../src/runtime-transport/postgres-agent-instance-port.ts";
 import { InvalidAuthTokenError } from "../src/auth.ts";
+import { capturingConsole } from "./support/capturing-console.mjs";
 
 test("socket errors preserve actionable product messages only through a typed producer", async () => {
   assert.equal(
@@ -122,20 +123,6 @@ test("an unclassified failure logs where it was thrown, never what it said", () 
   assert.doesNotMatch(JSON.stringify(origin), /user-secret|expired/u);
   assert.deepEqual(runtimeFailureOrigin("plain text"), { errorClass: "string", origin: [] });
 });
-
-async function capturingConsole(callback) {
-  const logged = { error: [], warn: [] };
-  const previous = { error: console.error, warn: console.warn };
-  console.error = (...args) => { logged.error.push(args); };
-  console.warn = (...args) => { logged.warn.push(args); };
-  try {
-    await callback();
-  } finally {
-    console.error = previous.error;
-    console.warn = previous.warn;
-  }
-  return logged;
-}
 
 function credentialPort(authenticate) {
   return new PostgresAgentInstancePort({
