@@ -221,14 +221,14 @@ jobs:
     # surface on the final exact SHA instead of trusting only the last tiny diff.
     if: needs.changes.outputs.web == 'true' && !contains(needs.changes.outputs.reused, ' web ')
     name: ${{ matrix.name }}
-    # Hosted runners spread the browser projects over Playwright shards; each
-    # shard builds its own production tree from the restored Next.js cache,
-    # and the primary one also runs the unit tests, lint and type check in that
-    # same build. Together they are `web web-browser`.
+    # Hosted runners spread the functional browser projects over Playwright
+    # shards, each building its own production tree from the restored Next.js
+    # cache. The primary job runs the unit tests and the checked build, then
+    # the performance budget on that tree. Together they are `web web-browser`.
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web (1/4)","partitions":"web web-browser","shard":"1/4","primary":true},{"name":"web (2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
+        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web web-browser","shard":"performance","primary":true},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
     # Long tests must not occupy production upload/deploy runners.
     runs-on: &linux_runner ${{ fromJSON(inputs.linux_runner || '"ubuntu-24.04"') }}
     env:
@@ -285,7 +285,7 @@ jobs:
           path: ~/.cache/xmatrix/next-cache/hosted
           key: next-cache-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
       - name: Save the Turbo cache
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && (matrix.primary || startsWith(matrix.shard, '2/')) && success() && (github.ref == 'refs/heads/main' || steps.turbo-cache.outputs.cache-matched-key == '')
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && (matrix.primary || startsWith(matrix.shard, '1/')) && success() && (github.ref == 'refs/heads/main' || steps.turbo-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/xmatrix/turbo
@@ -494,6 +494,20 @@ jobs:
             kache-${{ runner.os }}-test-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-
             kache-${{ runner.os }}-test-
       - uses: ./.github/actions/setup-windows-rust-cli
+      # The pinned cargo-nextest release, next to cargo. A download, not an
+      # action: the native toolchain PATH above deliberately has no bash.
+      - name: Install cargo-nextest
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cargoBin = Split-Path -Parent (Get-Command cargo.exe).Source
+          $archive = Join-Path $env:RUNNER_TEMP 'cargo-nextest.zip'
+          Invoke-WebRequest -OutFile $archive -Uri 'https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.146/cargo-nextest-0.9.146-x86_64-pc-windows-msvc.zip'
+          $digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne '0fa689815c8157e4633225b6b173184b3d546eb6ffb754c3d0e6ea5973284a20') { throw "cargo-nextest archive digest $digest" }
+          Expand-Archive -LiteralPath $archive -DestinationPath $cargoBin -Force
+          cargo nextest --version
+          if ($LASTEXITCODE -ne 0) { throw 'cargo-nextest is not runnable' }
       - name: Verify installer on native PowerShell
         shell: powershell
         run: node --test scripts/install-daemon-setup.windows.test.mjs
