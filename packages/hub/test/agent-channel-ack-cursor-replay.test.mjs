@@ -287,3 +287,27 @@ test("catch-up gives a relayed answer as work only to the Instance that asked", 
 function joinAfterCursor18(corpus) {
   return port(18, corpus).join(session("instance-6"), { type: "join_channel", channelId: CHANNEL_ID, historyLimit: 0 });
 }
+
+/**
+ * Channel 48c27260 (2026-10-06): claude:1 stopped at a usage limit with its
+ * cursor parked before a peer's handoff and a human's `/kill all`. The reborn
+ * Instance's catch-up served both as work, although the Hub had carried them
+ * out when they were committed. Live delivery already gives control commands
+ * as context; catch-up must classify them the same way.
+ */
+test("catch-up gives lifecycle control commands as context, like live delivery", async () => {
+  const bodies = new Map([
+    [16, "/kill all"],
+    [17, "@grok:2:handoff:@opencode"],
+    [18, "@claude:1:stop"],
+    [19, "@claude:1:reborn"],
+  ]);
+  const corpus = CORPUS.map((message) => bodies.has(message.sequence)
+    ? { ...message, body: bodies.get(message.sequence) }
+    : message);
+  const batch = await port(15, corpus).join(session("reborn-instance"), {
+    type: "join_channel", channelId: CHANNEL_ID, historyLimit: 0,
+  });
+  assert.deepEqual(replayed(batch), [16, 17, 18, 19, 20]);
+  assert.deepEqual(intents(batch), ["context", "context", "context", "context", "work"]);
+});
