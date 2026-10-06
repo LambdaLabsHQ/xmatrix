@@ -5,7 +5,11 @@ The invoking `@` owns its status. Each Agent in a message updates independently,
 These screenshots use local synthetic fixtures and the repository theme, not production data.
 
 An authenticated pre-spawn failure produces an idempotent Channel notice even
-when the Launch already marked its Run failed. Invocation details show a fixed,
+when the Launch already marked its Run failed. A hint does not: Jev reading the
+mention as not a request, or telling the author to name the machine, stays on
+this card.
+
+Invocation details show a fixed,
 actionable classification for repository preparation failures: an unavailable
 default branch (including an empty repository), insufficient disk space, or a
 failed fetch. Raw daemon paths, command lines and credentials are excluded from

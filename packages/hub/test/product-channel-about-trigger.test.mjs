@@ -50,6 +50,32 @@ test("mixed summon results report only rejected allocations and bound unknown er
   assert.equal(success.length, 0);
 });
 
+test("a mention Jev declined posts no Channel notice; its card says why", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "summon",
+    senderKind: "user", senderId: "human", actorUserId: "human", body: "Correction: @claude was named in a heading" };
+  const notices = [];
+  assert.equal(await dispatchProductMessageLaunches(input, { registration: async () => ({ selectionCount: 1,
+    prepared: [], rejected: [{ code: "summon_intent_explanation" }, { code: "registration_quota_exhausted" }] }) },
+  async value => notices.push(value)), true);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].body, /registration_quota_exhausted/);
+});
+
+test("naming a machine is a card hint; quota and an offline machine still post", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "summon",
+    senderKind: "user", senderId: "human", actorUserId: "human", body: "@auto task" };
+  const notices = [];
+  assert.equal(await dispatchProductMessageLaunches(input, { registration: async () => ({ selectionCount: 4,
+    prepared: [], rejected: [
+      { code: "registration_machine_not_auto_assigned" },
+      { code: "registration_machine_ambiguous" },
+      { code: "registration_quota_exhausted" },
+      { code: "registration_daemon_offline" },
+    ] }) }, async value => notices.push(value)), true);
+  assert.deepEqual(notices.map(notice => notice.body.match(/\((registration_[a-z_]+)\)/)?.[1]),
+    ["registration_quota_exhausted", "registration_daemon_offline"]);
+});
+
 test("Human and Agent authors share lifecycle and intervention interpretation", () => {
   assert.deepEqual(productMessagePostCommitAuthorPolicy("agent"), {
     interpretAgentIntervention: true,
