@@ -15,7 +15,9 @@ import { recordAgentLaunchStage } from "./postgres-observability";
 import { mintGitHubRepositoryToken } from "./app-connectors";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
 import { listOwnerMachineDaemons, machineDaemonCommand, machineDatabase, machineRepository } from "./machines";
-import { updateAgentLaunch } from "./runtime";
+import { runtimeRepository, updateAgentLaunch } from "./runtime";
+import { controlErrorResponse } from "./postgres-authority-http";
+import { githubRepositoryTokenRunRefusal, legacyUnboundRepositoryTokenEnabled } from "./github-repository-token-run-binding";
 import { adoptLegacyMachineIds } from "@xmatrix/db";
 import { hasBetterAuthConfig, mockAuthUserForToken, readBearerToken, verifyAuthToken, type AuthSession, type AuthUser } from "./auth";
 import { betterAuthHandlerErrorResponse, betterAuthRouteErrorStatus, createAuth, createBetterAuthSessionForUser, refreshBetterAuthSession, sendBetterAuthLoginOtp, verifyBetterAuthEmailOtp } from "./better-auth";
@@ -571,20 +573,46 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
    * The caller names a channel, never a Space. The daemon takes that channel
    * from the spawn command it was given, so a run cannot reach past the Space
    * it belongs to even when its machine's owner belongs to several.
+   *
+   * The daemon also names the Run (`runId`, `executionKey`) the grant was
+   * issued for. The token is then minted only when that Run is live on this
+   * machine, in this Channel, and was launched into this repository, so a
+   * machine cannot mint for a repository no Run of its was admitted to.
+   * Daemons that predate the binding send no Run; they are admitted only while
+   * `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` is "true".
    */
   app.post(HUB_ROUTES.machine_daemon_github_repository_token, (c) => jsonErrors(c, async () => {
     const principal = await requireMachineDaemonAuth(c.req.raw, c.env);
     const body = await c.req.json().catch(() => ({})) as {
       channelId?: unknown;
       repository?: unknown;
+      runId?: unknown;
+      executionKey?: unknown;
     };
     const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
     const repository = typeof body.repository === "string" ? body.repository.trim() : "";
+    const runId = typeof body.runId === "string" ? body.runId.trim() : "";
+    const executionKey = typeof body.executionKey === "string" ? body.executionKey.trim() : "";
     if (!channelId) return c.json({ error: "channelId is required" }, 400);
     // One shared reader decides what names a GitHub repository, so a spelling
     // the picker offered cannot be one this mint rejects.
     const target = githubRepositoryReference(repository);
     if (!target) return c.json({ error: "repository must be owner/repo" }, 400);
+    if (runId || executionKey) {
+      if (!runId || !executionKey) {
+        return c.json({ error: "runId and executionKey are required together" }, 400);
+      }
+      const runResult = await runtimeRepository(c.env).getRun({ requestId: crypto.randomUUID(), runId,
+        actorUserId: principal.ownerUserId, requireExecutionAccess: true }).catch(controlErrorResponse);
+      if (runResult instanceof Response) {
+        return c.json({ error: "github_repository_token_run_unavailable" }, 403, { "cache-control": "no-store" });
+      }
+      const refusal = githubRepositoryTokenRunRefusal(runResult.run as Record<string, unknown>, principal,
+        { channelId, runId, executionKey, repository: target });
+      if (refusal) return c.json({ error: refusal }, 403, { "cache-control": "no-store" });
+    } else if (!legacyUnboundRepositoryTokenEnabled(c.env)) {
+      return c.json({ error: "github_repository_token_requires_run" }, 403, { "cache-control": "no-store" });
+    }
 
     // The Space is derived here rather than named by the caller. A machine
     // whose owner belongs to several Spaces could otherwise ask for a Space

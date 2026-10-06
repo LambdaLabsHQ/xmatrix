@@ -103,6 +103,31 @@ Selection does not follow the rule that credentials already follow.
    still re-resolves on every credential, so the cache decides how long a repo can
    be *offered* after access changed, never how long it can be used.
 
+6. **The mint is bound to a Run and to Git's permissions.** The daemon names
+   the Run (`runId`, `executionKey`) its credential grant was issued for, and
+   `POST /api/machine-daemon/github/repository-token` mints only when that Run
+   is active (`starting`, `running` or `stopping`, so a handoff export still
+   pushes), targets the calling machine, sits in the named Channel, and was
+   launched into the named repository (`metadata.remoteRepo`, compared
+   case-insensitively). A machine can therefore no longer mint for a
+   repository of the Space that none of its Runs was admitted to. The token
+   requests only `contents: write` and `metadata: read` (falling back to
+   `contents: read` for an installation without write), never pull requests,
+   issues, Actions, workflows or secrets; a push that changes
+   `.github/workflows` is refused by GitHub. The repository's installation is
+   resolved exactly: a repository of an unconnected installation is refused
+   as `github_installation_not_linked_to_space` and one the App is not
+   installed on as `github_repository_not_installed`; the Space's
+   installations are probed only when GitHub's lookup itself is unavailable,
+   and a probed token must cover exactly `owner/repo`.
+
+   Compatibility: daemons released before the binding name no Run. They keep
+   the earlier channel-level check only while
+   `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` is `"true"` (committed in
+   `wrangler.toml` during the rollout). Once the minimum supported CLI sends
+   the Run, the flag is removed and such requests fail closed with
+   `github_repository_token_requires_run`.
+
 ## What this does not fix
 
 `resolveAgentLaunchWorkspaces` and the Hub's local-path summon resolution still

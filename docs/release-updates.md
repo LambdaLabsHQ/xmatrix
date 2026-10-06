@@ -30,6 +30,18 @@ Migration evidence: before consolidation, the effective YAML definitions were sa
 Recovery remains the established Production Release Recovery workflow: it may cancel only the exact preflight-success/PostgreSQL-readiness-waiting shape before any build or deploy job materializes, then resume the same authorized replacement run. The parent graph and that proof are unchanged. A consolidation failure must be fixed through a new CI-validated main revision and Release Intent; do not modify immutable tags, publish unverified assets, or bypass train authorization. The existing CLI manifest/envelope `workflow: "cli-release.yml"` value remains the compatibility label expected by installed Rust update and Windows continuity consumers; relocating the reusable publisher does not rewrite that wire field. Signing helpers retain the original Developer ID leaf/team checks, pinned Apple intermediate, private keychain isolation, and cleanup; no signing identity or artifact format changed.
 
 
+## Unreleased: Repository tokens are bound to the Run
+
+The Hub mints an Agent's GitHub repository token only for the repository the
+Hub admitted for that live Run on the calling machine, and asks GitHub only for
+contents and metadata access (no pull requests, issues, Actions, workflows or
+secrets). A repository outside the Space's connected installations is refused
+with a precise reason (`github_installation_not_linked_to_space`,
+`github_repository_not_installed`), and a probed installation token is accepted
+only when it covers exactly that repository. Daemons that predate the Run
+binding keep working while `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` is
+on.
+
 ## Unreleased: Summon tags show the routed machine
 
 A summon chip shows the choices behind the launch. Jev fills repository, model,
