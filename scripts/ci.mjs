@@ -166,10 +166,16 @@ const rustClippy = {
   env: rustCache.env,
 };
 
-// `rust-cli` runs Clippy beside the tests: the suite mostly waits on spawned
-// processes and timers, so the check fits in its idle CPU. Clippy gets its own
-// target directory so neither waits on the other's Cargo build lock; kache
-// still shares compiled dependencies between them.
+// `rust-cli` compiles the tests first, then runs Clippy beside their run: the
+// suite mostly waits on spawned processes and timers, so the check fits in its
+// idle CPU, while two compiles side by side only slowed each other. Clippy
+// gets its own target directory so neither waits on the other's Cargo build
+// lock; kache still shares compiled dependencies between them.
+const rustCliTestBuild = {
+  ...rustCliTest,
+  label: "Build Rust CLI tests",
+  args: ["test", "--no-run"],
+};
 const rustClippyBesideTests = {
   ...rustClippy,
   env: {
@@ -429,7 +435,7 @@ const partitions = {
       env: androidToolchainEnv(),
     },
   ],
-  "rust-cli": [rustClippyBesideTests, rustCliTestBesideClippy],
+  "rust-cli": [rustCliTestBuild, rustClippyBesideTests, rustCliTestBesideClippy],
   duplicates: [
     {
       label: "Check duplicated code",
