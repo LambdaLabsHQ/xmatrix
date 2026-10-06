@@ -26,6 +26,7 @@ import { commitAutomation, getAutomation, listAutomations } from "./automations"
 import { publishAutomationSystemFact } from "./product-automation-system-fact";
 import { automationEvaluatorBinding } from "./automation-evaluator-binding";
 import * as pages from "./index-routes-page-automations";
+import { notifyWorkspaceResource } from "./workspace-resource-notification";
 
 /**
  * Everything these routes take from the Hub: authentication, the Automation
@@ -98,6 +99,14 @@ export type AutomationRecord = Record<string, unknown> & {
     reasonRequired: boolean;
   };
 };
+
+function notifyAutomationSpace(env: Env, automation: { spaceId?: unknown; channelId?: unknown }): Promise<void> {
+  if (typeof automation.spaceId !== "string" || automation.spaceId.length === 0) return Promise.resolve();
+  return notifyWorkspaceResource(env, {
+    spaceId: automation.spaceId, resource: "automations",
+    ...(typeof automation.channelId === "string" ? { channelId: automation.channelId } : {}),
+  });
+}
 
 function principalInput(boundary: AutomationRouteBoundary, user: AuthUser, agent?: AgentRunPrincipal) {
   return agent
@@ -288,6 +297,7 @@ async function mutateAutomation(boundary: AutomationRouteBoundary, input: {
     });
     if (messageFailure) return messageFailure;
   }
+  await notifyAutomationSpace(input.env, updated);
   return Response.json({ automation: updated });
 }
 
@@ -318,6 +328,7 @@ async function replaceAutomation(boundary: AutomationRouteBoundary, input: {
     principal: { kind: "user", id: input.user.id },
   });
   const created = await readAutomationRecord(boundary, input.env, automationId, input.user);
+  await notifyAutomationSpace(input.env, created.spaceId ? created : input.automation);
   return Response.json({ automation: created, replacedAutomationId: input.automation.id });
 }
 
@@ -438,6 +449,7 @@ export function registerIndexRoutesAutomation(
         automationId: current.id, channelId: current.channelId, runId: body.runId.trim(),
         principal: { kind: "user", id: user.id },
       });
+      await notifyAutomationSpace(c.env, current);
       return Response.json(result, { headers: { "cache-control": "private, no-store" } });
     } catch (error) {
       return boundary.requestErrorResponse(c, error);
@@ -478,6 +490,7 @@ export function registerIndexRoutesAutomation(
         });
         if (failure) return failure;
       }
+      await notifyAutomationSpace(c.env, automation);
       return c.json({ ok: true, automationId: automation.id });
     } catch (error) {
       return boundary.requestErrorResponse(c, error);

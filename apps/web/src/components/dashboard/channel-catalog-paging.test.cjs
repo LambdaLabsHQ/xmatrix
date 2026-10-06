@@ -7,11 +7,18 @@ const paging = fs.readFileSync(path.join(__dirname, "use-channel-catalog-paging.
 
 const refresh = fs.readFileSync(path.join(__dirname, "channel-catalog-refresh.ts"), "utf8");
 
-test("message activity refreshes unloaded flat rows and inactive filtered lists within its Space", async () => {
+async function openCatalogRefresh() {
   const { QueryClient } = require("@tanstack/react-query");
   const { refreshSpaceCatalogForEvent } = await import("./channel-catalog-refresh.ts");
-  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
-  const prefix = ["xmatrix", "hub", "user", "channels", "space"];
+  return {
+    refreshSpaceCatalogForEvent,
+    client: new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } }),
+    prefix: ["xmatrix", "hub", "user", "channels", "space"],
+  };
+}
+
+test("message activity refreshes unloaded flat rows and inactive filtered lists within its Space", async () => {
+  const { refreshSpaceCatalogForEvent, client, prefix } = await openCatalogRefresh();
   const fetched = [];
   const resolved = [];
   const keys = [
@@ -34,6 +41,46 @@ test("message activity refreshes unloaded flat rows and inactive filtered lists 
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(fetched.sort(), [0, 1]);
     assert.deepEqual(resolved, [["space", "unloaded"]]);
+  } finally { client.clear(); }
+});
+
+test("message activity promotes a loaded flat row and refetches only the lists that lack it", async () => {
+  const { refreshSpaceCatalogForEvent, client, prefix } = await openCatalogRefresh();
+  const loadedKey = [...prefix, "catalog", "flat", "all", null, ""];
+  const unreadKey = [...prefix, "catalog", "flat", "unread", null, ""];
+  const countsKey = [...prefix, "catalog-counts"];
+  const fetched = [];
+  const row = (id, at) => ({ channel: { id }, ownActivityAt: at });
+  try {
+    client.setQueryData(loadedKey, {
+      pages: [{
+        rows: [row("other", "2026-10-06T00:00:00.000Z"), row("known", "2026-10-05T00:00:00.000Z")],
+        protocolVersion: 1, catalogRevision: 1, nextCursor: null, counts: null,
+      }],
+      pageParams: [null],
+    });
+    await client.fetchQuery({ queryKey: unreadKey, queryFn: async () => {
+      fetched.push("unread");
+      return { pages: [{ rows: [], protocolVersion: 1, catalogRevision: 1, nextCursor: null, counts: null }], pageParams: [null] };
+    } });
+    await client.fetchQuery({ queryKey: countsKey, queryFn: async () => {
+      fetched.push("counts");
+      return { active: 2 };
+    } });
+    fetched.length = 0;
+    const resolved = [];
+    refreshSpaceCatalogForEvent({
+      client, spaceId: "space", prefix, countsKey,
+      detail: { kind: "message", channelId: "known", at: "2026-10-06T01:00:00.000Z" },
+      hasChannel: () => true, resolveChannel: (...args) => resolved.push(args),
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(fetched, ["unread"]);
+    assert.equal(client.getQueryState(countsKey).isInvalidated, true);
+    assert.deepEqual(resolved, []);
+    const rows = client.getQueryData(loadedKey).pages[0].rows;
+    assert.deepEqual(rows.map((item) => item.channel.id), ["known", "other"]);
+    assert.equal(rows[0].ownActivityAt, "2026-10-06T01:00:00.000Z");
   } finally { client.clear(); }
 });
 

@@ -14,6 +14,7 @@ import { productCommandId, requireAuth, requestErrorStatus } from "./index-share
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { commitAutomation } from "./automations";
 import { createChannel } from "./spaces";
+import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import { runPrincipalOf } from "./run-principal";
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
@@ -222,7 +223,9 @@ export async function createPageAutomation(env: Env, request: Request, authUser:
   });
   await editPageText(env, { ...page, spaceId }, authUser, channelId,
     (text) => insertAutomationReference(text, blockId, automationId, name));
-  return pageAutomation(env, spaceId, pageId, userId, automationId);
+  const created = await pageAutomation(env, spaceId, pageId, userId, automationId);
+  await notifyPageAutomations(env, spaceId);
+  return created;
 }
 
 /** The page, as someone who may edit it, and one of its Automations, read as the Human acting. */
@@ -278,7 +281,9 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
     });
     await editPageText(env, { ...page, spaceId }, authUser, current.channelId,
       (text) => replaceAutomationReference(text, current.id, replacementId));
-    return pageAutomation(env, spaceId, pageId, userId, replacementId);
+    const replaced = await pageAutomation(env, spaceId, pageId, userId, replacementId);
+    await notifyPageAutomations(env, spaceId);
+    return replaced;
   }
   const retimed = action === "resume" || parsed.intervalMinutes !== current.intervalMinutes;
   await command(env, request, `page-automation:${current.id}:${action}:${version}`, {
@@ -292,7 +297,9 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
       binding.authorityRootUserId, current.id),
     automationAction: action,
   });
-  return pageAutomation(env, spaceId, pageId, userId, current.id);
+  const updated = await pageAutomation(env, spaceId, pageId, userId, current.id);
+  await notifyPageAutomations(env, spaceId);
+  return updated;
 }
 
 /** Deletes a page's Automation and takes its reference out of the page. */
@@ -306,6 +313,7 @@ export async function deletePageAutomation(env: Env, request: Request, authUser:
   });
   await editPageText(env, { ...page, spaceId }, authUser, current.channelId,
     (text) => removeAutomationReference(text, current.id));
+  await notifyPageAutomations(env, spaceId);
 }
 
 /** Puts a detached Automation's reference back into a section, which resumes it. */
@@ -315,7 +323,13 @@ async function reattachPageAutomation(env: Env, authUser: AuthUser, spaceId: str
   await editPageText(env, { ...page, spaceId }, authUser, current.channelId, (text) =>
     insertAutomationReference(removeAutomationReference(text, current.id), blockOf(body), current.id,
       String(current.name || "Automation")));
-  return pageAutomation(env, spaceId, pageId, userId, current.id);
+  const attached = await pageAutomation(env, spaceId, pageId, userId, current.id);
+  await notifyPageAutomations(env, spaceId);
+  return attached;
+}
+
+function notifyPageAutomations(env: Env, spaceId: string): Promise<void> {
+  return notifyWorkspaceResource(env, { spaceId, resource: "automations" });
 }
 
 /** A refusal as its response; a repository's typed refusal by its status and code. */
