@@ -12,9 +12,9 @@ const TEAM_SPACE = {
 };
 
 // The bar naming the Space is the same wood plank on every dock tab. On a
-// tool page (Agents, Pages) a layered glass fill used to win over it and left
+// tool page (Status, Pages) a layered glass fill used to win over it and left
 // a white pill on the paper.
-for (const tab of ["channels", "agents", "pages"]) {
+for (const tab of ["channels", "status", "pages"]) {
   test(`the ${tab} tab names the Space on a wood plank`, async ({ page }) => {
     await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE, TEAM_SPACE], channels: [E2E_CHANNEL] });
     await page.goto(`/app/${TEAM_SPACE.id}/${tab}`);

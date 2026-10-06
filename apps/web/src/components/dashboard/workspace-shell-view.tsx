@@ -87,13 +87,13 @@ import { searchWorkspacePages } from "./workspace-message-search";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
 
 /**
- * The dock tab that owns a view. Pages, Channels and Agents own themselves;
+ * The dock tab that owns a view. Pages, Channels and Status own themselves;
  * every other tool view lives behind More. A phone keeps one mounted pane per
  * dock tab, chosen with this, so the panes stay orthogonal to one another
  * instead of sharing a single screen and swapping their contents.
  */
 function dockTabOf(view: AppView): AppView {
-  return view === "pages" || view === "messages" || view === "agents" ? view : "more";
+  return view === "pages" || view === "messages" || view === "status" ? view : "more";
 }
 
 export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
@@ -1070,7 +1070,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       layout={isMobileViewport ? "phone" : "desktop"} />
   );
 
-  // One tool surface per dock tab that needs one: Agents has its own, and the
+  // One tool surface per dock tab that needs one: Status has its own, and the
   // More tab holds the current tool view. Building it from a function keeps
   // the prop list in one place while letting each pane mount independently.
   const renderToolSurface = (surfaceView: Exclude<AppView, "messages">) => (
@@ -1163,7 +1163,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     />
   );
   const toolSurface = renderToolSurface(view === "messages" || view === "pages" ? "more" : view);
-  const agentsSurface = dockTabMounted("agents") ? renderToolSurface("agents") : null;
+  const statusSurface = dockTabMounted("status") ? renderToolSurface("status") : null;
   const moreSurface = dockTabMounted("more")
     ? renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
     : null;
@@ -1417,7 +1417,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
                     style={{ "--app-mobile-dock-slot": mobileDockSlot } as CSSProperties}
                   >
                     {/* One pane per dock tab, in DOCK_TAB_VIEWS order: Pages,
-                        Channels, Agents, More. Each is independent; nothing is
+                        Channels, Status, More. Each is independent; nothing is
                         swapped in place, so a tab's screen never rebuilds. */}
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 0}>
                       {pagesDockPane}
@@ -1426,7 +1426,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
                       {mobileChannelListPane}
                     </div>
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 2}>
-                      {agentsSurface}
+                      {statusSurface}
                     </div>
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 3}>
                       {moreSurface}

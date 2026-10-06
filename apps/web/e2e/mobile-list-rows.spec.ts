@@ -154,7 +154,8 @@ test.describe("a phone's list rows", () => {
     expect((await edges(create.locator("svg"))).right).toBeCloseTo(line.end, 0);
     expect((await edges(pageRow.locator(":scope > button svg").first())).right).toBeLessThanOrEqual(line.start);
 
-    await dock.getByRole("button", { name: "Agents" }).tap();
+    await dock.getByRole("button", { name: "More" }).tap();
+    await page.getByRole("button", { name: /^Agents/u }).first().tap();
     const heading = page.locator(".app-tool-list-group-title").first();
     const machine = page.locator(".app-tool-list-row").first();
     await expect(machine).toBeVisible();

@@ -164,6 +164,7 @@ export type AppView =
   | "local"
   | "machines"
   | "automation"
+  | "status"
   | "agents"
   | "apps"
   | "activity"
@@ -181,7 +182,7 @@ export type AppView =
 /** Destinations that show their own list beside the chosen item, in the conversation list's place. */
 export const SPLIT_TOOL_VIEWS: readonly AppView[] = ["automation", "settings", "admin", "machines", "local", "apps", "agents", "team"];
 
-export const DOCK_TAB_VIEWS: readonly AppView[] = ["pages", "messages", "agents", "more"];
+export const DOCK_TAB_VIEWS: readonly AppView[] = ["pages", "messages", "status", "more"];
 
 // Views that live behind the mobile "More" dock tab: the hub screen itself plus
 // every root view without a dedicated dock tab. The dock highlights "More" for
@@ -189,6 +190,7 @@ export const DOCK_TAB_VIEWS: readonly AppView[] = ["pages", "messages", "agents"
 export const MORE_TAB_VIEWS: readonly AppView[] = [
   "more",
   "activity",
+  "agents",
   "machines",
   "automation",
   "apps",
@@ -210,6 +212,7 @@ export const viewLabels: Record<AppView, string> = {
   local: "This Machine",
   machines: "Machines",
   automation: "Schedules",
+  status: "Status",
   agents: "Agents",
   apps: "App",
   activity: "Activity",
@@ -253,6 +256,7 @@ export function isAppView(value: string | null): value is AppView {
     value === "local" ||
     value === "machines" ||
     value === "automation" ||
+    value === "status" ||
     value === "agents" ||
     value === "apps" ||
     value === "activity" ||
