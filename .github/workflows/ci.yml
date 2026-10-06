@@ -494,9 +494,20 @@ jobs:
             kache-${{ runner.os }}-test-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-
             kache-${{ runner.os }}-test-
       - uses: ./.github/actions/setup-windows-rust-cli
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest@0.9.146
+      # The pinned cargo-nextest release, next to cargo. A download, not an
+      # action: the native toolchain PATH above deliberately has no bash.
+      - name: Install cargo-nextest
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cargoBin = Split-Path -Parent (Get-Command cargo.exe).Source
+          $archive = Join-Path $env:RUNNER_TEMP 'cargo-nextest.zip'
+          Invoke-WebRequest -OutFile $archive -Uri 'https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.146/cargo-nextest-0.9.146-x86_64-pc-windows-msvc.zip'
+          $digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne '0fa689815c8157e4633225b6b173184b3d546eb6ffb754c3d0e6ea5973284a20') { throw "cargo-nextest archive digest $digest" }
+          Expand-Archive -LiteralPath $archive -DestinationPath $cargoBin -Force
+          cargo nextest --version
+          if ($LASTEXITCODE -ne 0) { throw 'cargo-nextest is not runnable' }
       - name: Verify installer on native PowerShell
         shell: powershell
         run: node --test scripts/install-daemon-setup.windows.test.mjs
