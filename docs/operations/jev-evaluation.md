@@ -28,8 +28,12 @@ this package does not launch Agents, choose Machines or alter production routing
 A `summon_intent_reference`, `summon_intent_explanation` or
 `summon_intent_example` rejection means Jev read the mention as naming,
 explaining or quoting an Agent rather than asking one to start; its decision
-record holds the `intent` answer and probabilities. The author can write
-`launch:force` after the mention to skip that check.
+record holds the `intent` answer and probabilities. It is not a failure, so the
+Channel gets no notice: the mention's own card says why and offers Launch anyway. The author can write
+`launch:force` after the mention to skip that check. The same is true of a hint that only tells the
+author how to name the machine (`registration_machine_not_auto_assigned`, `registration_machine_ambiguous`):
+the card says it, and the Channel is not told. A launch that failed (quota, an offline machine, no
+registration, and the rest) still posts its notice.
 A new conversation's mention-less first message is read the same way with the
 start rubric; Jev's `conversation` answer starts nothing and records nothing
 visible (see `../architecture/auto-launch-completion.md`). The same eval script carries

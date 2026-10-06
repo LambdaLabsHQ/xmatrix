@@ -16,7 +16,7 @@ import {
   normalizeChannelActivity,
 } from "@xmatrix/protocol";
 
-import { verifyAuthToken, type AgentRunPrincipal, type AuthUser } from "../auth";
+import { InvalidAuthTokenError, verifyAuthToken, type AgentRunPrincipal, type AuthUser } from "../auth";
 import { relayRuntimeCellsForOwners } from "../relay-authority-locator";
 import type { Env } from "../types";
 import {
@@ -418,7 +418,16 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     run: AgentInstanceAuthorityRunBinding;
     presentation?: AgentInstancePresentation;
   }> {
-    const user = await this.dependencies.authenticate(token);
+    let user: AuthUser;
+    try {
+      user = await this.dependencies.authenticate(token);
+    } catch (error) {
+      // A refused credential, typically a run token that expired while its
+      // daemon could not refresh it, is the client's state to fix. Anything
+      // else (a key read failing) stays the failure it is.
+      if (error instanceof InvalidAuthTokenError) throw new RuntimeClientOperationError("agent_run_credential_invalid");
+      throw error;
+    }
     if (!user.agentRun) throw new RuntimeClientOperationError("agent_run_credential_required");
     const principal = runPrincipal(user.agentRun);
     const response = await queryAgentInstanceRun(this.dependencies.runtime, {

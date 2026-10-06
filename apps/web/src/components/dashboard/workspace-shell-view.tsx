@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { MessageReferenceCatalogProvider, type MessageReferenceCatalog } from "./message-reference-catalog";
+import { MachineLinkProvider, type MachineLinks } from "./machine-link";
+import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { useAndroidBackHandler } from "./use-android-back";
 import { Loader2, Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
@@ -537,6 +539,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     channels,
     onOpenChannel: (channelId) => navigateToChannelRef.current(channelId),
   }), [channels]);
+  const changeAppViewRef = useRef(changeAppView);
+  changeAppViewRef.current = changeAppView;
+  // The Machines the Machines view lists for this Space, scoped the same way, so
+  // a Machine tag only links where that view has the Machine's page.
+  const machineLinks = useMemo<MachineLinks>(() => ({
+    machines: machinesInSpace(machines, spaceChannelIdSet(channels, currentSpaceId), { ownerUserId: user?.id })
+      .flatMap((machine) => machine.machineId
+        ? [{ machineId: machine.machineId, ownerUserId: machine.daemon?.userId }] : []),
+    onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
+  }), [channels, currentSpaceId, machines, user?.id]);
   const openedPage = phonePageOpen ? pageTree.data?.find((page) => page.pageId === selectedPageId) ?? null : null;
   // A conversation, a new one and an open page are pushed screens: their back bar replaces the dock.
   const nativeMobileTabVisible = !loading && Boolean(user) &&
@@ -1161,6 +1173,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
     <MessageReferenceCatalogProvider catalog={messageReferenceCatalog}>
+    <MachineLinkProvider links={machineLinks}>
       {/* One live root subscription per loaded Space. Renders nothing. */}
       {channelCatalogPaging.roots}
       {children}
@@ -1478,6 +1491,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onConfirm={() => void confirmStopAgentInstance()}
       />
     </div>
+    </MachineLinkProvider>
     </MessageReferenceCatalogProvider>
     </AttachmentDropZoneProvider>
   );

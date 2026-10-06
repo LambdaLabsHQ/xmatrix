@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { preparationFailureSummary, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { declinedIntentCopy, type DeclinedIntent } from "./summon-intent";
@@ -155,6 +155,47 @@ function useDeclinedIntentConfidence(channelId: string, messageId: string, categ
   return confidence;
 }
 
+/** The dotted underline a hint settles into, and the card that opens from it.
+ *  A span, not a button: a button is always an atomic box, so the mention
+ *  could not wrap with the prose it settled back into. */
+function useMentionProseCard() {
+  const group = useContext(InvocationPopoverContext);
+  const popoverId = useId();
+  const portal = useAppPortalContainer();
+  return { group, popoverId, portal, open: group?.openId === popoverId };
+}
+
+function MentionProseCard({ card, sourceMention, labelContent, title, ariaLabel, className, launching, children }: {
+  card: ReturnType<typeof useMentionProseCard>;
+  sourceMention: string; labelContent?: ReactNode; title: string; ariaLabel: string; className: string;
+  launching?: boolean; children: ReactNode;
+}) {
+  const { group, popoverId, portal } = card;
+  return <Popover.Root {...(group ? {
+    open: group.openId === popoverId,
+    onOpenChange: (next: boolean) => group.setOpenId((current) => next ? popoverId : current === popoverId ? null : current),
+  } : {})}>
+    <Popover.Trigger ref={portal.triggerRef} openOnHover delay={250} closeDelay={180} nativeButton={false} render={<span />}
+      className={className}
+      data-launching={launching ? "true" : undefined}
+      aria-label={ariaLabel}
+      onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+      {labelContent ?? sourceMention}
+    </Popover.Trigger>
+    <Popover.Portal container={portal.container}>
+      <Popover.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="app-invocation-positioner">
+        <Popover.Popup className="app-invocation-popup app-intent-popup" data-tone="neutral" onClick={(event) => event.stopPropagation()}>
+          <div className="app-invocation-heading"><div>
+            <Popover.Title className="app-invocation-title">{title}</Popover.Title>
+            <p className="app-invocation-machine">{sourceMention}</p>
+          </div><Popover.Close className="app-invocation-close" aria-label="Close"><X size={16} /></Popover.Close></div>
+          {children}
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>;
+}
+
 /**
  * A launch mention Jev read as naming, explaining or quoting an Agent. It
  * settles back into the author's prose — no avatar, no status pill — and keeps
@@ -165,11 +206,8 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
   rejection: SerializedAgentInvocationRejection; category: DeclinedIntent; labelContent?: ReactNode;
   onLaunchAnyway?: () => Promise<void>;
 }) {
-  const group = useContext(InvocationPopoverContext);
-  const popoverId = useId();
-  const portal = useAppPortalContainer();
-  const open = group?.openId === popoverId;
-  const confidence = useDeclinedIntentConfidence(rejection.channelId, rejection.sourceMessageId, category, open);
+  const card = useMentionProseCard();
+  const confidence = useDeclinedIntentConfidence(rejection.channelId, rejection.sourceMessageId, category, card.open);
   const [launching, setLaunching] = useState<"idle" | "launching" | "sent" | "failed">("idle");
   const copy = declinedIntentCopy(category);
   const launch = async () => {
@@ -178,43 +216,25 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
     try { await onLaunchAnyway(); setLaunching("sent"); }
     catch { setLaunching("failed"); }
   };
-  return <Popover.Root {...(group ? {
-    open, onOpenChange: (next: boolean) => group.setOpenId((current) => next ? popoverId : current === popoverId ? null : current),
-  } : {})}>
-    {/* A span, not a button: a button is always an atomic box, so the declined
-        summon could not wrap with the prose it settled back into. */}
-    <Popover.Trigger ref={portal.triggerRef} openOnHover delay={250} closeDelay={180} nativeButton={false} render={<span />}
-      className="app-mention-intent-declined"
-      data-launching={launching === "launching" || launching === "sent" ? "true" : undefined}
-      aria-label={`${rejection.sourceMention}: not a summon. Jev read this as ${copy.reading}. Show details`}
-      onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
-      {labelContent ?? rejection.sourceMention}
-    </Popover.Trigger>
-    <Popover.Portal container={portal.container}>
-      <Popover.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="app-invocation-positioner">
-        <Popover.Popup className="app-invocation-popup app-intent-popup" data-tone="neutral" onClick={(event) => event.stopPropagation()}>
-          <div className="app-invocation-heading"><div>
-            <Popover.Title className="app-invocation-title">Not a summon</Popover.Title>
-            <p className="app-invocation-machine">{rejection.sourceMention}</p>
-          </div><Popover.Close className="app-invocation-close" aria-label="Close"><X size={16} /></Popover.Close></div>
-          <Popover.Description className="app-intent-reading">
-            Jev read this as <strong>{copy.reading}</strong>, so no Agent was started.
-          </Popover.Description>
-          {confidence !== undefined && <div className="app-intent-confidence" aria-label={`Jev confidence ${Math.round(confidence * 100)}%`}>
-            <span className="app-intent-confidence-bar"><span style={{ width: `${Math.round(confidence * 100)}%` }} /></span>
-            <span>{Math.round(confidence * 100)}%</span>
-          </div>}
-          {onLaunchAnyway && <button type="button" className="app-intent-launch" data-state={launching}
-            disabled={launching === "launching" || launching === "sent"} onClick={() => void launch()}>
-            <Zap aria-hidden="true" size={14} />
-            {launching === "launching" ? "Starting…" : launching === "sent" ? "Launch requested" : "Launch anyway"}
-          </button>}
-          {launching === "failed" && <p role="alert" className="app-invocation-action-error">The launch was not accepted. Refresh the message and try again.</p>}
-          <p className="app-invocation-description">To start an Agent directly next time, write <code>launch:force</code> after the mention.</p>
-        </Popover.Popup>
-      </Popover.Positioner>
-    </Popover.Portal>
-  </Popover.Root>;
+  return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title="Not a summon"
+    className="app-mention-intent-declined"
+    launching={launching === "launching" || launching === "sent"}
+    ariaLabel={`${rejection.sourceMention}: not a summon. Jev read this as ${copy.reading}. Show details`}>
+    <Popover.Description className="app-intent-reading">
+      Jev read this as <strong>{copy.reading}</strong>, so no Agent was started.
+    </Popover.Description>
+    {confidence !== undefined && <div className="app-intent-confidence" aria-label={`Jev confidence ${Math.round(confidence * 100)}%`}>
+      <span className="app-intent-confidence-bar"><span style={{ width: `${Math.round(confidence * 100)}%` }} /></span>
+      <span>{Math.round(confidence * 100)}%</span>
+    </div>}
+    {onLaunchAnyway && <button type="button" className="app-intent-launch" data-state={launching}
+      disabled={launching === "launching" || launching === "sent"} onClick={() => void launch()}>
+      <Zap aria-hidden="true" size={14} />
+      {launching === "launching" ? "Starting…" : launching === "sent" ? "Launch requested" : "Launch anyway"}
+    </button>}
+    {launching === "failed" && <p role="alert" className="app-invocation-action-error">The launch was not accepted. Refresh the message and try again.</p>}
+    <p className="app-invocation-description">To start an Agent directly next time, write <code>launch:force</code> after the mention.</p>
+  </MentionProseCard>;
 }
 
 /** A stop command. Its phase sits on the command the way a launch's phase sits
@@ -244,6 +264,30 @@ export function MentionStopChip({ invocation, receipts, sentAt, pending, unavail
     sourceAddress={invocation.text}
     subtitle={machines.length === 1 ? machines[0]! : machines.length > 1 ? `${machines.length} machines` : "Selected machine"}
     view={view} />;
+}
+
+const LAUNCH_HINT_TITLES: Record<string, string> = {
+  registration_machine_not_auto_assigned: "Name a machine",
+  registration_machine_ambiguous: "Which machine",
+};
+
+/**
+ * A launch the Hub understood and is telling the author how to write. It
+ * settles into the prose the same way a declined reading does: the card holds
+ * the prompt, and the Channel is not told. A launch that failed keeps its
+ * Failed chip.
+ */
+export function MentionLaunchHintChip({ rejection, labelContent }: {
+  rejection: SerializedAgentInvocationRejection; labelContent?: ReactNode;
+}) {
+  const card = useMentionProseCard();
+  const title = LAUNCH_HINT_TITLES[rejection.code] ?? "How to start";
+  const detail = preparationFailureSummary(rejection.code) ?? rejection.message;
+  return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title={title}
+    className="app-mention-intent-declined app-mention-launch-hint"
+    ariaLabel={`${rejection.sourceMention}: ${title}. Show details`}>
+    <Popover.Description className="app-intent-reading">{detail}</Popover.Description>
+  </MentionProseCard>;
 }
 
 /** A written summon the Hub has not answered yet. Right after sending, Jev is
