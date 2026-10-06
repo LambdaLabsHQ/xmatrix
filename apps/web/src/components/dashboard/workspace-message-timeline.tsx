@@ -209,6 +209,7 @@ import { buildMentionReadIndex, machineOfflineMentionSubjects, withInvocationMen
 
 import {
   formatMessageDateTime,
+  formatMessageClockTime,
   formatMessageTimestamp,
 } from "@/components/dashboard/channel-history";
 
@@ -1246,7 +1247,7 @@ function MessageSkeletonRows() {
 
 
 
-export function MessageTimestamp({ value, className }: { value: string; className?: string }) {
+export function MessageTimestamp({ value, clock = false, className }: { value: string; clock?: boolean; className?: string }) {
   const fullDateTime = formatMessageDateTime(value);
   return (
     <time
@@ -1254,7 +1255,7 @@ export function MessageTimestamp({ value, className }: { value: string; classNam
       title={fullDateTime}
       className={cn("app-message-timestamp shrink-0 tabular-nums", className)}
     >
-      {formatMessageTimestamp(value)}
+      {clock ? formatMessageClockTime(value) : formatMessageTimestamp(value)}
     </time>
   );
 }
@@ -1709,15 +1710,17 @@ export const MessageRow = memo(function MessageRow({
       return;
     }
 
-    const closeOnOutsideClick = (event: PointerEvent) => {
+    const closeOnOutsideClick = (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof Node && actionsRef.current?.contains(target))) {
         setActionsOpen(false);
       }
     };
 
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+    // On click, not pointerdown: closing collapses this row's action row, and
+    // a tap on the next message would land on whatever slid up under it.
+    document.addEventListener("click", closeOnOutsideClick);
+    return () => document.removeEventListener("click", closeOnOutsideClick);
   }, [actionsOpen]);
 
   const stableNavigateOpenImage = useStableCallback(navigateOpenImage);
@@ -2004,9 +2007,11 @@ export const MessageRow = memo(function MessageRow({
     >
       {message.continuation ? (
         // Same sender, moments later, same tags: the header above still says who.
-        <div className="app-message-continuation-gutter mt-0.5 w-9 shrink-0 self-start text-right">
-          <MessageTimestamp value={message.sentAt}
-            className="invisible text-[10px] text-muted-foreground group-hover:visible" />
+        // The hidden time is one body line tall and never wraps: wrapped, it
+        // stood two lines high and spread one-line messages apart (user 2026-10-06).
+        <div className="app-message-continuation-gutter mt-0.5 flex h-5 w-9 shrink-0 items-center justify-end self-start">
+          <MessageTimestamp value={message.sentAt} clock
+            className="invisible whitespace-nowrap text-[10px] text-muted-foreground group-hover:visible" />
         </div>
       ) : (
       <div
