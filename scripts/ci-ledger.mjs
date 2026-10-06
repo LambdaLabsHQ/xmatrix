@@ -23,9 +23,10 @@ import { inflateRawSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { versionedPaths } from "./version.mjs";
+import { stampVersionText, versionedPaths } from "./version.mjs";
 
 const LEDGER_VERSION = "ci-ledger-v1";
+const LEDGER_VERSION_PLACEHOLDER = "0.0.0-ledger";
 // The complete Hub suite, recorded under a name that never held a single
 // shard's result. CI ran the suite as two jobs ("hub" and "hub-2") until
 // 2026-09-27; a run from that layout proves the suite only when both passed.
@@ -77,11 +78,13 @@ function sha256(data) {
 }
 
 /** Pure: the ledger key for a `git ls-tree -r -z` listing plus the versioned files' contents. */
-export function ledgerKey(lsTree, versionedContents, version) {
+export function ledgerKey(lsTree, versionedContents) {
+  // Stamp a placeholder into the release-version fields only: replacing every
+  // occurrence of the version text would also mask a dependency that shares it.
   const normalized = new Map(
     Object.entries(versionedContents).map(([file, text]) => [
       file,
-      `normalized:${sha256(text.split(version).join("\0version\0"))}`,
+      `normalized:${sha256(stampVersionText(file, text, LEDGER_VERSION_PLACEHOLDER))}`,
     ]),
   );
   const entries = lsTree.split("\0").filter(Boolean).map((entry) => {
@@ -94,12 +97,11 @@ export function ledgerKey(lsTree, versionedContents, version) {
 }
 
 export function currentLedgerKey(rev = "HEAD", cwd = undefined) {
-  const version = JSON.parse(git(["show", `${rev}:version.json`], { cwd })).version;
   const versionedContents = {};
   for (const file of versionedPaths) {
     versionedContents[file] = git(["show", `${rev}:${file}`], { cwd });
   }
-  return ledgerKey(git(["ls-tree", "-r", "-z", rev], { cwd }), versionedContents, version);
+  return ledgerKey(git(["ls-tree", "-r", "-z", rev], { cwd }), versionedContents);
 }
 
 export function ledgerRef(job, key) {
