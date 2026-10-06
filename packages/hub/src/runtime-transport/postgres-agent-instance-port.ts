@@ -1,4 +1,4 @@
-import { RuntimeClientOperationError } from "./runtime-operation-failure";
+import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
 import type {
   AgentInstanceClientMessage,
   AgentInstanceConnectMessage,
@@ -590,6 +590,11 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         actorUserId: session.principal.ownerUserId,
       });
     } catch (error) {
+      // The notice id is the Instance and the notice's opening text, so a
+      // later failure that opens the same way (or the same one reported by a
+      // later Run of the Instance) finds its notice already posted. That
+      // notice, and any handoff it started, stand; this one adds nothing.
+      if (error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict) return;
       console.error("Agent turn-failure notice could not be committed", error);
       return;
     }
