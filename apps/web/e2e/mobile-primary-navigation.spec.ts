@@ -402,21 +402,38 @@ test("the end of the channel list can be scrolled clear of the tab dock", async 
       const overflowAtRest = viewport.scrollHeight - viewport.clientHeight;
       viewport.scrollTop = viewport.scrollHeight;
       const rows = [...pane.querySelectorAll(".app-mobile-chat-row")];
+      const titles = [...pane.querySelectorAll(".app-mobile-chat-title")];
       const last = rows[rows.length - 1].getBoundingClientRect();
       const hit = document.elementFromPoint(last.left + last.width / 2, last.top + last.height / 2);
       return {
         overflowAtRest,
         dockTop,
         lastRowBottom: last.bottom,
+        lastTitle: titles.at(-1)?.textContent?.trim() ?? "",
         tapLandsOnRow: Boolean(hit?.closest(".app-mobile-chat-row")),
       };
     });
 
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: channels(30) });
+  const many = channels(30);
+  // Same activity, so the fixture's catalog order is the channel id. The phone
+  // list virtualizes: only the rows near the viewport are mounted, so the DOM
+  // count is not 30. Scroll until the last conversation is mounted, then
+  // measure that row against the dock.
+  const lastName = many.map((channel) => channel.name).sort((left, right) => left.localeCompare(right)).at(-1);
+  if (!lastName) throw new Error("channel list fixture produced no name");
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: many });
   await page.goto("/app/personal-sspaceperso/channels");
-  await expect(page.locator(".app-mobile-chat-row")).toHaveCount(30);
+  const viewport = page.locator(".app-mobile-channel-list-pane .app-material-scroll-viewport");
+  await expect(viewport.locator(".app-mobile-chat-row").first()).toBeVisible();
+  await expect.poll(async () => {
+    await viewport.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    return (await viewport.locator(".app-mobile-chat-title").last().textContent())?.trim() ?? "";
+  }).toBe(lastName);
 
   const long = await measure();
+  expect(long.lastTitle).toBe(lastName);
   expect(long.lastRowBottom).toBeLessThanOrEqual(long.dockTop);
   expect(long.tapLandsOnRow).toBe(true);
 

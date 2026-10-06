@@ -3,7 +3,7 @@ import test from "node:test";
 import { PostgresSpaceControlRepository } from "@xmatrix/db";
 
 import { configureChannel, createChannel } from "../src/spaces.ts";
-import { publishHumanChannelCatalogChangedToSessions } from "../src/connections/human/registry.ts";
+import { publishHumanChannelCatalogChangedToSessions, publishHumanWorkspaceResourceChangedToSessions } from "../src/connections/human/registry.ts";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "../src/postgres-authority-http.ts";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "../src/postgres-message-database-policy.ts";
 
@@ -25,6 +25,30 @@ test("catalog revision fanout reaches only exact Space members", () => {
   });
   assert.equal(result.accepted, true);
   assert.deepEqual(delivered.map(([id]) => id), ["one", "two"]);
+});
+
+test("workspace resource fanout reaches only the named principals", () => {
+  const sockets = [{ id: "owner" }, { id: "member" }];
+  const sessions = sockets.map((socket) => [socket, { userId: socket.id }]);
+  const delivered = [];
+  const result = publishHumanWorkspaceResourceChangedToSessions({
+    message: {
+      type: "workspace_resource_changed", spaceId: "space", resource: "cross_space_reads",
+      channelId: "channel", revision: 3,
+    },
+    recipientUserIds: ["owner"],
+  }, sessions, (socket, message) => {
+    delivered.push([socket.id, message.resource, message.channelId]);
+    return true;
+  });
+  assert.equal(result.accepted, true);
+  assert.deepEqual(delivered, [["owner", "cross_space_reads", "channel"]]);
+  const rejected = publishHumanWorkspaceResourceChangedToSessions({
+    message: { type: "workspace_resource_changed", spaceId: "space", resource: "pages", revision: 1 },
+    recipientUserIds: ["owner"],
+  }, sessions, () => true);
+  assert.equal(rejected.accepted, false);
+  assert.equal(rejected.reason, "invalid_message");
 });
 
 test("catalog revision fanout rejects malformed metadata", () => {

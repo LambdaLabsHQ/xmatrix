@@ -83,9 +83,10 @@ import { useWorkspaceShellTailCache } from "./use-workspace-shell-tail-cache";
 import { removeRetiredBrowserReplica } from "@/lib/retired-browser-replica";
 import { maybePushRecipientScopedNativeMessageNotification } from "./recipient-scoped-native-message-notification";
 import { useHumanFocusHistoryHttpFallback } from "./use-human-focus-history-http-fallback";
+import { invalidateWorkspaceResources, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
-import { channelActivityOf, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage } from "@xmatrix/protocol";
+import { channelActivityOf, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -1523,6 +1524,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             }
           }
           relayPushConnectedRef.current = true;
+          setHumanPushConnected(true);
           reconnectAttempt.current = 0;
           reconcileUnconfirmedOnReconnectRef.current?.();
           sendHumanChannelFocus({
@@ -1543,6 +1545,16 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               kind: "revision",
               spaceId: message.spaceId,
               revision: message.revision,
+            },
+          }));
+          break;
+        case "workspace_resource_changed":
+          window.dispatchEvent(new CustomEvent("xmatrix:workspace-resource-changed", {
+            detail: {
+              spaceId: message.spaceId,
+              resource: message.resource,
+              revision: message.revision,
+              ...(message.channelId ? { channelId: message.channelId } : {}),
             },
           }));
           break;
@@ -1913,6 +1925,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               kind: "message",
               channelId: entry.channelId,
               spaceId: channelsRef.current.find((channel) => channel.id === entry.channelId)?.spaceId,
+              at: entry.sentAt,
             },
           }));
           break;
@@ -1964,11 +1977,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         try {
           const decoded = JSON.parse(String(event.data)) as unknown;
           const catalogChanged = parseHumanChannelCatalogChangedMessage(decoded);
-          const claimedCatalogChanged = decoded !== null && typeof decoded === "object" &&
-            !Array.isArray(decoded) &&
-            (decoded as { type?: unknown }).type === "space_channel_catalog_changed";
-          if (claimedCatalogChanged && !catalogChanged) return;
-          relayFrames.push(catalogChanged ?? decoded as HumanServerMessage);
+          const workspaceChanged = parseHumanWorkspaceResourceChangedMessage(decoded);
+          const claimedType = decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
+            ? (decoded as { type?: unknown }).type : undefined;
+          if ((claimedType === "space_channel_catalog_changed" && !catalogChanged) ||
+              (claimedType === "workspace_resource_changed" && !workspaceChanged)) return;
+          relayFrames.push(workspaceChanged ?? catalogChanged ?? decoded as HumanServerMessage);
         } catch {
           // Ignore malformed push payloads; REST refresh remains the fallback.
         }
@@ -1977,6 +1991,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         if (socket !== live) return;
         socket = null;
         relayPushConnectedRef.current = false;
+        setHumanPushConnected(false);
         relaySocketGenerationRef.current += 1;
         if (relaySocketRef.current === live) {
           relaySocketRef.current = null;
@@ -1999,6 +2014,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       cancelled = true;
       relayFrames.dispose();
       relayPushConnectedRef.current = false;
+      setHumanPushConnected(false);
       heartbeat.stop();
       relaySocketProbeRef.current = null;
       stopResume();
@@ -2032,6 +2048,22 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     token,
     user, markNativeMessageNotified,
   ]);
+
+  // Catch up when the socket connects, and restart the fallback polls when it drops.
+  // TanStack reads refetchInterval only after a fetch.
+  useEffect(() => {
+    const onPush = () => invalidateWorkspaceResources(queryClient);
+    const onResource = (event: Event) => {
+      const detail = (event as CustomEvent<WorkspaceResourceChange>).detail;
+      invalidateWorkspaceResources(queryClient, detail);
+    };
+    window.addEventListener("xmatrix:human-push", onPush);
+    window.addEventListener("xmatrix:workspace-resource-changed", onResource);
+    return () => {
+      window.removeEventListener("xmatrix:human-push", onPush);
+      window.removeEventListener("xmatrix:workspace-resource-changed", onResource);
+    };
+  }, [queryClient]);
 
   useEffect(() => {
     const focusedChannelId = conversationViewOpen(view) ? selectedChannelId : null;
@@ -2244,8 +2276,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }),
     enabled: Boolean(token && authenticatedUserId && resolvedSpaceId && startupBackgroundReady),
     staleTime: 15_000,
-    refetchInterval: () => typeof document !== "undefined" &&
-      document.visibilityState === "visible" ? AUTOMATION_REFRESH_INTERVAL_MS : false,
+    refetchInterval: () => refetchUnlessHumanPush(AUTOMATION_REFRESH_INTERVAL_MS),
     refetchIntervalInBackground: false,
   });
   useEffect(() => {

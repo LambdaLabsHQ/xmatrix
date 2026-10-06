@@ -84,6 +84,19 @@ export type HumanChannelCatalogChangedMessage = {
   revision: number;
 };
 
+/**
+ * "Re-read this workspace list." The frame carries no row facts. While the
+ * Human socket is up, the web client stops polling these lists and invalidates
+ * the named one. `revision` is only the committed-event watermark.
+ */
+export type HumanWorkspaceResourceChangedMessage = {
+  type: "workspace_resource_changed";
+  spaceId: string;
+  resource: "automations" | "channel_transfers" | "cross_space_reads";
+  channelId?: string;
+  revision: number;
+};
+
 export type HumanTraceAccessServerMessage =
   | { type: "trace_access_requested"; grant: TraceAccessGrant }
   | { type: "trace_access_updated"; grant: TraceAccessGrant };
@@ -120,6 +133,7 @@ export type HumanServerMessage =
   | { type: "space_member_upserted"; requestId?: string; space: SerializedSpace }
   | { type: "space_member_removed"; requestId?: string; space: SerializedSpace }
   | HumanChannelCatalogChangedMessage
+  | HumanWorkspaceResourceChangedMessage
   | { type: "channel_created"; requestId?: string; channel: SerializedChannel }
   | { type: "channel_updated"; requestId?: string; channel: SerializedChannel }
   | { type: "channel_deleted"; requestId?: string; channelId: string }
@@ -194,6 +208,35 @@ export function parseHumanChannelCatalogChangedMessage(
     type: "space_channel_catalog_changed",
     spaceId: value.spaceId,
     revision: value.revision as number,
+  };
+}
+
+const WORKSPACE_RESOURCE_KINDS = new Set([
+  "automations", "channel_transfers", "cross_space_reads",
+]);
+
+export function parseHumanWorkspaceResourceChangedMessage(
+  value: unknown,
+): HumanWorkspaceResourceChangedMessage | undefined {
+  if (!isRecord(value) ||
+      value.type !== "workspace_resource_changed" ||
+      !hasOnlyKeys(value, ["type", "spaceId", "resource", "channelId", "revision"]) ||
+      typeof value.spaceId !== "string" || value.spaceId.length === 0 ||
+      value.spaceId.length > 200 ||
+      typeof value.resource !== "string" || !WORKSPACE_RESOURCE_KINDS.has(value.resource) ||
+      !Number.isSafeInteger(value.revision) || (value.revision as number) < 1) {
+    return undefined;
+  }
+  if ("channelId" in value && (
+    typeof value.channelId !== "string" || value.channelId.length === 0 ||
+    value.channelId.length > 200
+  )) return undefined;
+  return {
+    type: "workspace_resource_changed",
+    spaceId: value.spaceId,
+    resource: value.resource as HumanWorkspaceResourceChangedMessage["resource"],
+    revision: value.revision as number,
+    ...("channelId" in value ? { channelId: value.channelId as string } : {}),
   };
 }
 

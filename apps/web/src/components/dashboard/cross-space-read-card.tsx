@@ -8,6 +8,7 @@ import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { actionClass } from "@/components/ui/action-tone";
 import { statusChipClass } from "@/components/ui/status-tone";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
+import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
 /**
  * The approval card for a cross-Space read grant (docs/cross-space-read-grants.md).
@@ -81,7 +82,7 @@ export function useChannelPendingCrossSpaceReads(userId: string, channelId: stri
     queryKey: ["channel-pending-cross-space-reads", userId, channelId],
     enabled: Boolean(enabled && token && channelId && userId),
     retry: false,
-    refetchInterval: 10_000,
+    refetchInterval: () => refetchUnlessHumanPush(10_000),
     refetchOnWindowFocus: true,
     queryFn: async ({ signal }): Promise<CrossSpaceReadMetadata[]> => {
       const response = await fetch(WEB_PROXY_ROUTES.channel_pending_cross_space_reads(channelId!), {
@@ -119,7 +120,7 @@ export function CrossSpaceReadCard({ request, token, userId }: {
     queryKey,
     enabled: Boolean(token && isOwner),
     retry: false,
-    refetchInterval: (query) => (query.state.data?.status === "pending" ? 10_000 : false),
+    refetchInterval: (query) => (query.state.data?.status === "pending" ? refetchUnlessHumanPush(10_000) : false),
     queryFn: ({ signal }) => readGrant(request, signal),
   });
   const grant = grantQuery.data;
