@@ -97,6 +97,7 @@ export const HUB_ENVIRONMENT = {
   RELAY_AUTOMATION_EXECUTION_ENABLED: product("var", "Runs Automation occurrences; off when unset."),
   RELAY_AUTOMATION_RUN_TIMEOUT_MS: product("var", "Default deadline for Automation runs without their own timeout."),
   CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED: product("var", "Admits the last client generation that sends no compatibility identity."),
+  GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED: product("var", "Mints repository tokens for daemons that name no Run (pre-binding CLI); refused unless \"true\"."),
   XMATRIX_RUNTIME_CELL_MODE: product("var", "Runtime cell routing; \"dual\" activates candidate cells."),
 
   // Storage, queues and platform bindings.

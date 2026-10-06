@@ -89,6 +89,11 @@ export interface Env {
    * explicit invalid or obsolete identities remain rejected.
    */
   CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED?: string;
+  /**
+   * Transitional: mint repository tokens for daemons that predate the Run
+   * binding and name no Run. Retire once the minimum supported CLI sends it.
+   */
+  GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED?: string;
   RELAY_R2_CAPABILITY_HMAC_SECRET?: string;
   RELAY_PAYLOAD_BUCKET?: R2Bucket;
   AUTH_DB?: D1Database;
