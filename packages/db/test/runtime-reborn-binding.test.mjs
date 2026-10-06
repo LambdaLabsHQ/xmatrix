@@ -28,7 +28,7 @@ function fixture() {
     if (query.name.endsWith("insert_v1") || query.name.endsWith("prepared_v1")) writes.push(query);
     return [];
   } };
-  return { tx, previous, writes, input: { run, instance, spawnPayload: spawn,
+  return { tx, previous, intent, writes, input: { run, instance, spawnPayload: spawn,
     sourceInstanceId: "instance", sourceRunId: "source", channelId: "channel" },
     advance: { intentId: runId, channelId: "channel" } };
 }
@@ -93,4 +93,35 @@ test("Reborn does not require a hostname and retains exact execution and directo
     await assert.rejects(prepareReborn(f.tx, f.input, "owner", "space", "2026-09-22T00:00:00Z"),
       error => error.code === "reborn_source_changed");
   }
+});
+
+function cursorFixture(kind, acknowledged) {
+  const f = fixture();
+  if (kind !== undefined) f.intent.kind = kind;
+  const cursorWrites = [];
+  const query = f.tx.query;
+  f.tx.query = async (statement) => {
+    if (statement.name === "reborn_backlog_head_v1") return [{ sequence: "24" }];
+    if (statement.name === "reborn_backlog_cursor_lock_v1") {
+      return acknowledged === undefined ? [] : [{ acknowledged_sequence: String(acknowledged) }];
+    }
+    if (statement.name === "reborn_backlog_cursor_write_v1") cursorWrites.push(statement.values);
+    return query(statement);
+  };
+  return { ...f, cursorWrites };
+}
+
+test("Reborn settles the Instance's cursor at the head so its stopped backlog is not replayed as work", async () => {
+  for (const kind of ["reborn", undefined]) {
+    const f = cursorFixture(kind, 15);
+    await advanceReborn(f.tx, f.advance, "owner", "space", "2026-09-22T00:00:00Z", async () => {});
+    assert.deepEqual(f.cursorWrites, [["space", "agent:instance", "channel", 24, "2026-09-22T00:00:00Z"]]);
+  }
+  const caughtUp = cursorFixture("reborn", 24);
+  await advanceReborn(caughtUp.tx, caughtUp.advance, "owner", "space", "2026-09-22T00:00:00Z", async () => {});
+  assert.deepEqual(caughtUp.cursorWrites, []);
+  // The message that woke an Instance is its work; a wake keeps its catch-up.
+  const wake = cursorFixture("wake", 15);
+  await advanceReborn(wake.tx, wake.advance, "owner", "space", "2026-09-22T00:00:00Z", async () => {});
+  assert.deepEqual(wake.cursorWrites, []);
 });
