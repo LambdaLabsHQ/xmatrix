@@ -131,7 +131,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p>
             {view.state ? LOGIN_STATE_LABEL[view.state] : "Not checked yet"}
-            <span className="text-muted-foreground"> · the harness's own account on {registration.machineName}</span>
+            <span className="text-muted-foreground"> · the harness&apos;s own account on {registration.machineName}</span>
           </p>
           {!prompt && (
             <Button size="sm" variant="outline" disabled={busy || Boolean(view.blocker)}
