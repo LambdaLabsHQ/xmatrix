@@ -2932,7 +2932,7 @@ export function ReplyPreview({
         event.preventDefault();
         onJump(reply.messageId, reply.sequence);
       }}
-      className="mb-1.5 mt-1 flex max-w-[min(36rem,100%)] items-start gap-2 rounded border-l-2 border-primary/60 bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+      className="mb-1.5 mt-1 flex max-w-[min(36rem,100%)] items-start gap-2 border-l-2 border-primary/60 bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
     >
       <Reply className="mt-0.5 size-3.5 shrink-0" />
       <span className="min-w-0">
