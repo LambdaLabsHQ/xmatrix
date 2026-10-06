@@ -46,8 +46,9 @@ mod platform {
 
     use tokio::process::Child;
     use windows_sys::Win32::Foundation::{
-        ERROR_INVALID_HANDLE, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES, FILETIME, GetLastError,
-        HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        ERROR_ACCESS_DENIED, ERROR_INVALID_HANDLE, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES,
+        FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_FAILED,
+        WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -371,6 +372,15 @@ mod platform {
                     Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) => {
                         continue;
                     }
+                    // An older process we may not terminate can still name a
+                    // recycled PID of ours as its parent. Skip it only when its
+                    // birth proves it is not a descendant; otherwise fail closed.
+                    Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+                        if !birth_proves_unrelated(child_pid, &handles[parent_index]) {
+                            return Err(error);
+                        }
+                        continue;
+                    }
                     Err(error) => return Err(error),
                 };
                 let (child_created, _) = process_times(&child)?;
@@ -398,6 +408,21 @@ mod platform {
             }
         }
         Ok(handles)
+    }
+
+    fn birth_proves_unrelated(child_pid: u32, parent: &OwnedHandle) -> bool {
+        let Ok(child) = process_handle(
+            child_pid,
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+        ) else {
+            return false;
+        };
+        let (Ok((child_created, _)), Ok((parent_created, parent_exited))) =
+            (process_times(&child), process_times(parent))
+        else {
+            return false;
+        };
+        !super::process_birth_within_parent_lifetime(parent_created, parent_exited, child_created)
     }
 
     #[cfg(test)]
@@ -451,6 +476,39 @@ mod platform {
                 unrelated.0.try_wait().unwrap().is_none(),
                 "unrelated fixture was terminated"
             );
+        }
+
+        fn older_protected_pid() -> u32 {
+            let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+            assert_ne!(raw, INVALID_HANDLE_VALUE);
+            let snapshot = unsafe { OwnedHandle::from_raw_handle(raw as RawHandle) };
+            let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+            entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+            let mut more =
+                unsafe { Process32FirstW(snapshot.as_raw_handle() as HANDLE, &mut entry) } != 0;
+            while more {
+                let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(0);
+                let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+                if name.eq_ignore_ascii_case("csrss.exe") {
+                    return entry.th32ProcessID;
+                }
+                more =
+                    unsafe { Process32NextW(snapshot.as_raw_handle() as HANDLE, &mut entry) } != 0;
+            }
+            panic!("csrss.exe is always running on Windows");
+        }
+
+        #[test]
+        fn recycled_parent_edge_to_an_unterminable_older_process_is_skipped() {
+            let protected = older_protected_pid();
+            let root = Fixture::spawn();
+            let parents = HashMap::from([(root.0.id(), vec![protected])]);
+            let handles =
+                owned_tree_handles_with_snapshot(stop_handle(root.0.id()).unwrap(), || {
+                    Ok(parents.clone())
+                })
+                .expect("an older process we may not open cannot block cleanup");
+            assert_eq!(handles.len(), 1);
         }
 
         #[test]
