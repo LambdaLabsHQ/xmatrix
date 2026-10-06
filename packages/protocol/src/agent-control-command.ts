@@ -36,12 +36,6 @@ export function parseAgentControlCommands(
   body: string,
 ): AgentControlCommand[] {
   if (body.length > MESSAGE_INTERACTION_LIMITS.bodyLength) return [];
-  const ranges = nonOperationalMentionRanges(body);
-  let offset = 0;
-  for (const line of body.split(/\n/u)) {
-    if (line.trim() && !isOperationalMentionStart(offset + line.search(/\S/u), ranges)) return [];
-    offset += line.length + 1;
-  }
   const lines = body.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
   if (lines.length === 0 || lines.length > AGENT_CONTROL_STATEMENT_LIMIT) return [];
   const commands: AgentControlCommand[] = [];
@@ -49,6 +43,14 @@ export function parseAgentControlCommands(
     const command = parseControlStatement(line);
     if (!command) return [];
     commands.push(command);
+  }
+  // The Markdown context check parses the whole body, so it runs only for a
+  // message whose every line already reads as a statement.
+  const ranges = nonOperationalMentionRanges(body);
+  let offset = 0;
+  for (const line of body.split(/\n/u)) {
+    if (line.trim() && !isOperationalMentionStart(offset + line.search(/\S/u), ranges)) return [];
+    offset += line.length + 1;
   }
   return commands;
 }

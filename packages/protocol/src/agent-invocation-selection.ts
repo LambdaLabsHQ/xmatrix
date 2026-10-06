@@ -101,7 +101,8 @@ export function parseAgentInvocationSelections(value: unknown, source: {
 export function deriveHarnessInvocationSelections(source: {
   spaceId: string; body: string; bodyHash: string; revision: number;
 }, createTargets: ReadonlyMap<string, AgentInvocationTarget> = new Map()): AgentInvocationSelections {
-  const ranges = nonOperationalMentionRanges(source.body);
+  // The body is parsed as Markdown only when some mention needs its context.
+  let ranges: ReturnType<typeof nonOperationalMentionRanges> | undefined;
   const envelope = (selections: unknown[]) => ({ schemaVersion: 1, sourceRevision: source.revision,
     sourceBodyHash: source.bodyHash, selections });
   const autos = parseAutoLaunchMentions(source.body)
@@ -116,7 +117,7 @@ export function deriveHarnessInvocationSelections(source: {
   const selections = [...parseHarnessCapabilityMentions(source.body).map(mention => ({ ...mention,
     target: { kind: "capability", harness: mention.harness } as AgentInvocationTarget })),
   ...autos.map(mention => ({ ...mention, target: { kind: "auto" } as AgentInvocationTarget })), ...creates]
-    .filter(mention => isOperationalMentionStart(mention.start, ranges))
+    .filter(mention => isOperationalMentionStart(mention.start, ranges ??= nonOperationalMentionRanges(source.body)))
     .sort((left, right) => left.start - right.start)
     .map(mention => ({ start: mention.start, end: mention.end, text: source.body.slice(mention.start, mention.end),
       target: mention.target }))
