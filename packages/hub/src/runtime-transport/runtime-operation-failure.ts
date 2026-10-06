@@ -89,6 +89,7 @@ const CLIENT_FAILURES = {
   human_auth_invalid: ["Your sign-in expired or is not valid here. Sign in again.", "relay.authenticate"],
   human_rate_limited: ["Too many connections from this account. Reconnecting shortly.", "relay.authenticate"],
   agent_run_credential_required: ["An Agent Instance run credential is required", "relay.authenticate"],
+  agent_run_credential_invalid: ["The Agent run credential is invalid or expired. Reconnect with a fresh credential.", "relay.authenticate"],
   agent_run_binding_mismatch: ["Agent credential does not match the live Authority run", "relay.validate_binding"],
   agent_run_not_live: ["The Agent Run is no longer active. Refresh its status before retrying.", "relay.validate_binding"],
   agent_instance_not_live: ["The Agent Instance is no longer active. Refresh its status before retrying.", "relay.validate_binding"],
@@ -101,18 +102,25 @@ const CLIENT_FAILURES = {
   invalid_channel_activity: ["Channel activity report is malformed", "request.validate"],
 } as const;
 
+// An expired sign-in or run credential, or a redial over the limit, is the
+// client's ordinary state, not a Hub fault.
+const ORDINARY_CLIENT_FAILURES = new Set<keyof typeof CLIENT_FAILURES>([
+  "human_auth_invalid", "human_rate_limited", "agent_run_credential_invalid",
+]);
+
 /** Only an owning boundary may choose this finite code; no exception text is public copy. */
 export class RuntimeClientOperationError extends Error {
   readonly failure: RuntimeOperationFailure;
   readonly publicMessage: string;
+  /** The client's ordinary state: logged, never reported as a Hub error. */
+  readonly ordinary: boolean;
   constructor(code: keyof typeof CLIENT_FAILURES) {
     const [message, stage] = CLIENT_FAILURES[code];
     super(message);
     this.publicMessage = message;
     this.failure = { code, stage, diagnosticId: `diag_${crypto.randomUUID()}`, retryable: false };
-    // An expired sign-in or a redial over the limit is the client's ordinary state, not a Hub fault.
-    (code === "human_auth_invalid" || code === "human_rate_limited" ? console.warn : console.error)(
-      "xMatrix runtime product rejection", this.failure);
+    this.ordinary = ORDINARY_CLIENT_FAILURES.has(code);
+    (this.ordinary ? console.warn : console.error)("xMatrix runtime product rejection", this.failure);
   }
 }
 
