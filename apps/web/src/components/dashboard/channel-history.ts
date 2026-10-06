@@ -56,6 +56,17 @@ export function formatMessageTimestamp(
   });
 }
 
+export function formatMessageClockTime(
+  value: string,
+  locale?: Intl.LocalesArgument,
+  timeZone?: string
+): string {
+  /* A header-less row sits under a header that already says the day, and its
+     gutter is one avatar wide: the clock alone fits there on one line. */
+  if (!Number.isFinite(new Date(value).getTime())) return value;
+  return formatInstant(value, locale, { hour: "numeric", minute: "2-digit", timeZone });
+}
+
 function capitalizeLabel(value: string, locale?: Intl.LocalesArgument): string {
   const [first, ...rest] = Array.from(value);
   return first ? `${first.toLocaleUpperCase(locale)}${rest.join("")}` : value;

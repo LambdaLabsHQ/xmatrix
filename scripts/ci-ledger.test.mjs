@@ -9,6 +9,7 @@ import { deflateRawSync } from "node:zlib";
 import {
   HUB_SUITE_LEDGER_JOB,
   LEDGER_JOBS,
+  RECORDED_WORKFLOWS,
   ledgerJobOf,
   ledgerKey,
   ledgerRef,
@@ -104,6 +105,33 @@ test("every ledgered job gates on its lookup and CI never holds a write token", 
   assert.match(ci, /name: ci-ledger-subject/u);
 });
 
+test("a selector-gated ledgered job is never scheduled for content that already passed it", () => {
+  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const changes = ci.slice(ci.indexOf("\n  changes:\n"), ci.indexOf("\n  node-checks:\n"));
+  for (const job of LEDGER_JOBS) {
+    // The shared Node gate starts before the selector and looks itself up.
+    if (job === "node-checks") continue;
+    const name = job === HUB_SUITE_LEDGER_JOB ? "hub" : job;
+    const start = ci.indexOf(`\n  ${name}:\n`);
+    const next = ci.slice(start + 1).search(/\n  [a-z][a-z0-9-]*:\n/u);
+    const block = ci.slice(start, next < 0 ? undefined : start + 1 + next);
+    assert.match(block, /^    needs: changes$/mu, job);
+    assert.ok(block.includes(`&& !contains(needs.changes.outputs.reused, ' ${job} ')`), job);
+    assert.ok(changes.includes(`jobs+=(`) && new RegExp(`jobs\\+=\\([^)]*\\b${job}\\b`, "u").test(changes), `selector looks up ${job}`);
+  }
+  assert.ok(changes.includes("node scripts/ci-ledger.mjs reused"));
+});
+
+test("the recorder runs for every workflow whose runs it accepts", () => {
+  const recorder = readFileSync(new URL("../.github/workflows/ci-ledger.yml", import.meta.url), "utf8");
+  const names = [...RECORDED_WORKFLOWS].map((file) =>
+    readFileSync(new URL(`../${file}`, import.meta.url), "utf8").match(/^name: (.+)$/mu)[1]);
+  assert.deepEqual(names, ["CI", "Public Snapshot CI"]);
+  assert.match(recorder, new RegExp(`workflows: \\[${names.join(", ")}\\]`, "u"));
+  assert.match(recorder, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/u);
+  assert.match(recorder, /run: node scripts\/ci-ledger\.mjs record-run "\$RUN_ID"/u);
+});
+
 test("one ls-remote reports exactly the recorded refs among many", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "xmatrix-ledger-"));
   const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -147,6 +175,19 @@ test("a job split over a matrix is recorded only when every entry passed", () =>
   assert.deepEqual(passedLedgerJobs([job("rust-cli (clippy)"), job("rust-cli (test)", "skipped")]), []);
   assert.equal(ledgerJobOf("rust-cli-windows"), "rust-cli-windows");
   assert.equal(ledgerJobOf("hub (static)"), HUB_SUITE_LEDGER_JOB);
+  // The current hosted layout: the primary web shard also runs the unit tests.
+  assert.deepEqual(
+    passedLedgerJobs([1, 2, 3, 4].map((shard) => job(`web (${shard}/4)`))),
+    ["web"],
+  );
+  assert.deepEqual(passedLedgerJobs([job("web (1/4)"), job("web (3/4)", "failure")]), []);
+  // The public snapshot calls CI as its `validate` job.
+  assert.equal(ledgerJobOf("validate / web (browser 1/4)"), "web");
+  assert.equal(ledgerJobOf("validate / hub (3/6)"), HUB_SUITE_LEDGER_JOB);
+  assert.deepEqual(
+    passedLedgerJobs(["rust-cli (clippy)", "rust-cli (test)"].map((name) => job(`validate / ${name}`))),
+    ["rust-cli"],
+  );
 });
 
 test("a retired single-shard hub record never satisfies a Hub suite lookup", () => {
