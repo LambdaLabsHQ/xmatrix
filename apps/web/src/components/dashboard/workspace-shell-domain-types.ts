@@ -39,6 +39,8 @@ export type StatusChip = {
   /** How busy the thing the tag names is, 0..100, toned behind its value; the Machine tag's load,
    * whose bars open on hover like the Machine's list row. */
   busy?: { percent: number; glance: MachineGlanceReading[] };
+  /** The Machine a Machine tag names, so the tag can open that Machine's page. */
+  machine?: { machineId: string; ownerUserId?: string };
   resetAt?: string;
   /** The limit verdict's word on this window (reset time, credits), added by the web. */
   note?: string;
