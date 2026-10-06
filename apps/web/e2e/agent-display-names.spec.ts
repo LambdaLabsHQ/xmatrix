@@ -206,3 +206,62 @@ test("a historical failure notice displays the current Machine name rather than 
   await expect(notice).toContainText("@grok · Grok Bot Machine");
   await expect(notice).not.toContainText("cursor");
 });
+
+test("a Machine tag and its hover card open that Machine's page, only for a Machine the reader can open", async ({ page }) => {
+  const agents = [
+    { instanceId: "channel-general:1", channelInstanceId: "1", hostName: "grok", machineName: "Grok",
+      registration: { ownerUserId: "e2e-user", machineId: "machine:grok", harness: "codex" } },
+    // Someone else's Machine: the reader's Machines view has no page for it.
+    { instanceId: "channel-general:2", channelInstanceId: "2", hostName: "elsewhere", machineName: "Elsewhere",
+      registration: { ownerUserId: "owner-1", machineId: "machine:elsewhere", harness: "codex" } },
+  ];
+  const channel = { ...E2E_CHANNEL, messageCount: 2, lastMessageSequence: 2,
+    memberPresence: Object.fromEntries(agents.map((agent) => [agent.instanceId, { kind: "agent", status: "busy",
+      label: "codex", registration: agent.registration, instances: [{ id: agent.instanceId,
+        channelInstanceId: agent.channelInstanceId, label: "codex", status: "busy", hostName: agent.hostName,
+        connectedAt: E2E_NOW, lastSeenAt: E2E_NOW }] }])) };
+  await installWorkspaceStubs(page, {
+    spaces: [{ ...E2E_SPACE, members: [...E2E_SPACE.members, { userId: "owner-1", name: "Owner 1",
+      email: "owner-1@example.test", role: "member", joinedAt: E2E_NOW }] }],
+    channels: [channel],
+    registrations: agents.map((agent) => ({ key: { spaceId: E2E_SPACE.id, ...agent.registration },
+      displayName: "codex", machineName: agent.machineName,
+      live: { machine: { online: true, resources: { observedAt: E2E_NOW, cpuUsagePercent: 40,
+        memoryTotalBytes: 100, memoryAvailableBytes: 40, diskTotalBytes: 100, diskAvailableBytes: 50 } }, running: [] },
+    })),
+    machineDaemons: [{ id: "daemon-grok", userId: "e2e-user", email: "e2e@xmatrix.test", name: "daemon-grok",
+      status: "online", machineId: "machine:grok", machineName: "Grok", hostId: "grok", hostName: "grok",
+      daemonVersion: "0.16.600", cliVersion: "0.16.600", connectedAt: E2E_NOW, lastSeenAt: new Date().toISOString(),
+      metadata: { platform: "linux" } }],
+  });
+  await fixtureJson(page, "machine-link-history", "**/api/xmatrix/channels/channel-general/history**", {
+    messages: agents.map((agent, index) => ({ messageId: `message-${index}`, channelId: E2E_CHANNEL.id,
+      sequence: index + 1, body: `Report from ${agent.hostName}`, sentAt: E2E_NOW,
+      from: { kind: "agent", identityId: `agent:${agent.instanceId}`, agentId: agent.instanceId,
+        userId: agent.registration.ownerUserId, email: "", label: "codex", agentName: "codex",
+        instanceId: agent.instanceId, channelInstanceId: agent.channelInstanceId, instanceLabel: "codex" } })),
+    hasMore: false,
+  });
+  await page.goto("/app/personal-sspaceperso/channels/channel-general");
+  const ownTag = page.locator(".app-message-row", { hasText: "Report from grok" }).locator("[data-machine-load-tag]");
+  const otherTag = page.locator(".app-message-row", { hasText: "Report from elsewhere" }).locator("[data-machine-load-tag]");
+  await expect(ownTag.locator("[data-status-chip=machine]")).toHaveText("Grok");
+  await expect(ownTag).toHaveAttribute("role", "link");
+  await expect(otherTag.locator("[data-status-chip=machine]")).toHaveText("Elsewhere");
+  await expect(otherTag).not.toHaveAttribute("role", "link");
+  await expect(otherTag).not.toHaveAttribute("data-machine-link", /.*/);
+
+  // The card stays up while the pointer crosses into it, and clicking it opens the Machine.
+  await ownTag.hover();
+  const tip = page.locator("[data-machine-load-tip]");
+  await expect(tip).toContainText("Grok");
+  await tip.click();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?item=machine%3Agrok$/);
+  await expect(page.locator('[data-testid="machine-row"]').filter({ hasText: "Grok" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Grok" })).toBeVisible();
+
+  // The tag itself opens the same page.
+  await page.goBack();
+  await ownTag.locator("[data-status-chip=machine]").click();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?item=machine%3Agrok$/);
+});
