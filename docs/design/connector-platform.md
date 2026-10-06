@@ -492,7 +492,14 @@ acceptance steps. See [Vercel webhook verification and payloads](https://vercel.
   6. fire Automations.
 - Subscriptions use one command for every provider:
   `@<provider>:subscribe:<source> <features…>`. GitHub's existing syntax is
-  already this shape.
+  already this shape. GitHub's `subscribe` is a `read` action, so a Channel
+  `deny` refuses it; `unsubscribe` is never refused.
+- A private GitHub repository's events (and any whose payload does not state
+  `private: false`) are delivered only into a closed Channel or an open one in
+  a Space not open to participants; a pull request's pre-review conversation
+  for such a repository is opened closed there, and its diff is not posted
+  into a conversation that participants can read. A failed Channel or
+  governance read counts as public.
 
 ### 3.4 Automation triggers
 

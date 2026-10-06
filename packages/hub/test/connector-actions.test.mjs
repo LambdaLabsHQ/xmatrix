@@ -90,7 +90,9 @@ test("a default-allow write runs for an Agent until the Channel denies it", () =
 test("a Channel policy names only the actions that act on the provider", () => {
   const github = APP_CONNECTOR_PROVIDER_MANIFESTS.find((provider) => provider.id === "github");
   assert.equal(isPolicyAction(github, "merge"), true);
-  assert.equal(isPolicyAction(github, "subscribe"), false);
+  // A subscription brings the repository's content into the Channel; unsubscribing only narrows it.
+  assert.equal(isPolicyAction(github, "subscribe"), true);
+  assert.equal(isPolicyAction(github, "unsubscribe"), false);
   assert.equal(isPolicyAction(github, "nope"), false);
 });
 
