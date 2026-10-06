@@ -166,6 +166,25 @@ const rustClippy = {
   env: rustCache.env,
 };
 
+// `rust-cli` runs Clippy beside the tests: the suite mostly waits on spawned
+// processes and timers, so the check fits in its idle CPU. Clippy gets its own
+// target directory so neither waits on the other's Cargo build lock; kache
+// still shares compiled dependencies between them.
+const rustClippyBesideTests = {
+  ...rustClippy,
+  env: {
+    ...rustClippy.env,
+    CARGO_TARGET_DIR: path.join(rootDir, "packages/cli-rs/target/clippy"),
+  },
+  parallelGroup: "rust-cli",
+  parallelLane: "clippy",
+};
+const rustCliTestBesideClippy = {
+  ...rustCliTest,
+  parallelGroup: "rust-cli",
+  parallelLane: "test",
+};
+
 // The production build remains part of the fast Web validation because it is
 // the authoritative Web typecheck. The standalone browser partition also
 // needs the same fixture-env build. When callers request both partitions in
@@ -410,7 +429,7 @@ const partitions = {
       env: androidToolchainEnv(),
     },
   ],
-  "rust-cli": [rustClippy, rustCliTest],
+  "rust-cli": [rustClippyBesideTests, rustCliTestBesideClippy],
   duplicates: [
     {
       label: "Check duplicated code",
