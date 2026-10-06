@@ -61,6 +61,8 @@ export interface Env {
   RELAY_RUNTIME: DurableObjectNamespace;
   /** Bounded, expiring Runtime delivery-scope to occupied-cell projection. */
   RELAY_RUNTIME_ROUTE_DIRECTORY: DurableObjectNamespace;
+  /** Per-channel fanout once a channel outgrows the direct cell list. */
+  RELAY_RUNTIME_CHANNEL_FANOUT?: DurableObjectNamespace;
   DEVICE_AUTH: DurableObjectNamespace;
   /** Optional until a reviewed Hyperdrive resource is provisioned; never enables routing by presence alone. */
   RELAY_POSTGRES?: Hyperdrive;

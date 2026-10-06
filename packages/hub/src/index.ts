@@ -53,6 +53,7 @@ export {
 } from "./retained-fact-namespaces";
 export { RelayRuntimeLive } from "./relay-runtime";
 export { RelayRuntimeRouteDirectory } from "./runtime-route-directory";
+export { RelayRuntimeChannelFanout } from "./runtime-channel-fanout";
 export { DeviceAuthBroker } from "./device-auth";
 import { registerIndexRoutesAdmin } from "./index-routes-admin";
 import { registerIndexRoutesAuthSpace } from "./index-routes-auth-space";
