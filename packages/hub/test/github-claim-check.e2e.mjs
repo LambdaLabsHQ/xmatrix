@@ -86,3 +86,66 @@ test("a pull request passes xmatrix/claim when its author holds the claim, and m
     assert.equal(github.checkRuns.length, before, "a pull request that names no block gets no check");
   });
 });
+
+// A pull request carries a claim only from an installation the claim's Space
+// connected: the same author, linking the same block, from another
+// installation (or a delivery naming none) neither attaches to the claim nor
+// completes it, and the section owes nothing.
+test("a pull request from an installation the Space did not connect neither attaches to nor completes its claim", async () => {
+  const userId = `claim-foreign-${randomUUID()}`;
+  await withGitHubUserScenario({ id: userId, email: "claim-foreign@example.com", name: "Claim Foreign" }, githubConfiguration(), secret,
+    async ({ worker, github, auth }) => {
+    const space = await createSpace(worker, `Claims ${randomUUID()}`);
+    await connectGitHubInstallation(worker, { spaceId: space.id, userId, installationId });
+    await inWorkerTransaction(worker, async (tx) => {
+      await tx.query({ text: `INSERT INTO control.auth_users (id,name,email,created_at,updated_at)
+        VALUES ($1,'Claim Foreign','claim-foreign@example.com',now(),now()) ON CONFLICT DO NOTHING`, values: [userId] });
+      await tx.query({ text: `INSERT INTO control.auth_accounts (id,account_id,provider_id,user_id,created_at,updated_at)
+        VALUES ($1,'4343','github',$2,now(),now())`, values: [randomUUID(), userId] });
+    });
+    const pages = `/api/spaces/${encodeURIComponent(space.id)}/pages`;
+    const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
+      body: JSON.stringify({ title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" }) }))).page;
+    const claims = `${pages}/${encodeURIComponent(page.pageId)}/claims`;
+    const { claim } = await json(await worker.fetch(claims, { method: "POST", headers: auth,
+      body: JSON.stringify({ blockId: "search" }) }));
+    const link = `https://xmatrix.sh/app/${space.id}/pages?page=${page.pageId}#search`;
+
+    let delivery = 0;
+    const deliver = async (action, { installation, repository = "acme/widgets", pullUrl, ...pull }) => {
+      const body = JSON.stringify({ action, ...(installation === undefined ? {} : { installation: { id: installation } }),
+        repository: { full_name: repository },
+        pull_request: { html_url: pullUrl, body: `Implements ${link}`, user: { id: 4343, login: "mallory" },
+          head: { sha: `sha-${delivery}` }, merged: false, ...pull } });
+      const response = await deliverGitHubWebhook(worker, { body, event: "pull_request", deliveryId: `f-${++delivery}`, secret });
+      assert.equal(response.status, 200, await response.clone().text());
+    };
+    const state = async () => (await inWorkerTransaction(worker, (tx) => tx.query({
+      text: "SELECT state, pull_request_url FROM data.page_claims WHERE space_id=$1 AND claim_id=$2",
+      values: [space.id, claim.claimId] })))[0];
+    const owed = async () => (await json(await worker.fetch(`${pages}/${encodeURIComponent(page.pageId)}/awareness`,
+      { headers: auth }))).blocks.find((block) => block.blockId === "search")?.owed ?? null;
+
+    // From a foreign installation, or a delivery naming none: no attach, no check.
+    const foreignUrl = "https://github.com/mallory/elsewhere/pull/1";
+    await deliver("opened", { installation: "foreign-installation", repository: "mallory/elsewhere", pullUrl: foreignUrl });
+    await deliver("opened", { installation: undefined, repository: "mallory/elsewhere", pullUrl: foreignUrl });
+    assert.equal(github.checkRuns.length, 0, "no claim check is published for another installation's pull request");
+    assert.deepEqual({ ...await state() }, { state: "active", pull_request_url: null }, "the claim does not attach");
+
+    // Once the Space's own pull request attached, a merge another installation reports still completes nothing.
+    const pullUrl = "https://github.com/acme/widgets/pull/9";
+    await deliver("opened", { installation: installationId, pullUrl });
+    assert.equal(github.checkRuns.at(-1).conclusion, "success");
+    assert.deepEqual({ ...await state() }, { state: "active", pull_request_url: pullUrl });
+    await deliver("closed", { installation: "foreign-installation", pullUrl, merged: true });
+    await deliver("closed", { installation: undefined, pullUrl, merged: true });
+    assert.equal((await state()).state, "active", "a foreign installation's merge does not complete the claim");
+    assert.equal(await owed(), null, "and the section owes no update");
+
+    // The Space's own installation still completes it.
+    await deliver("closed", { installation: installationId, pullUrl, merged: true });
+    assert.equal((await state()).state, "completed");
+    assert.equal((await owed())?.reason, "merged");
+  });
+});
