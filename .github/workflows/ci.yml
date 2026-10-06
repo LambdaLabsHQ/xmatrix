@@ -421,6 +421,14 @@ jobs:
       - name: Run Rust CLI tests
         if: steps.ledger.outputs.hit != 'true'
         run: node scripts/ci.mjs rust-cli
+      # A restored store keeps every earlier run's artifacts, so each save
+      # grew it (340 MiB to 670 MiB in a day). Least-recently-used entries
+      # beyond the cap go before it is saved again.
+      - name: Trim the kache store
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || steps.kache-cache.outputs.cache-matched-key == '')
+        env:
+          KACHE_MAX_SIZE: 640MiB
+        run: '"$RUSTC_WRAPPER" gc'
       - name: Save the kache store
         if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || steps.kache-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v6
@@ -520,6 +528,14 @@ jobs:
         if: steps.ledger.outputs.hit != 'true'
         shell: powershell
         run: node scripts/ci.mjs rust-cli-windows
+      - name: Trim the kache store
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || steps.kache-cache.outputs.cache-matched-key == '')
+        shell: powershell
+        env:
+          KACHE_MAX_SIZE: 640MiB
+        run: |
+          & $env:RUSTC_WRAPPER gc
+          if ($LASTEXITCODE -ne 0) { throw 'kache gc failed' }
       - name: Save the kache store
         if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || steps.kache-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v6
