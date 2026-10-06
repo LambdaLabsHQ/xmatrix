@@ -22,9 +22,30 @@ export function stripeCheckoutReturnUrls(publicAppOrigin: string, spaceId: strin
 }
 
 export class StripeBillingError extends Error {
-  constructor(message: string, readonly retryable = false, readonly providerCode?: string) {
+  constructor(
+    message: string,
+    readonly retryable = false,
+    readonly providerCode?: string,
+    /** Stripe's HTTP status, when Stripe itself answered the request. */
+    readonly providerStatus?: number,
+  ) {
     super(message);
   }
+
+  /**
+   * Stripe answered that the object xMatrix asked for does not exist, such as
+   * a recorded subscription Stripe no longer has. That is a fact about the
+   * referenced object, answered to the caller, not a failed Hub request.
+   */
+  get providerObjectMissing(): boolean {
+    return this.providerStatus === 404 && this.providerCode === "resource_missing";
+  }
+}
+
+/** The HTTP status a billing route answers a Stripe failure with. */
+export function stripeBillingErrorStatus(error: StripeBillingError): 409 | 502 | 503 {
+  if (error.providerObjectMissing) return 409;
+  return error.retryable ? 503 : 502;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -96,15 +117,19 @@ async function stripeRequest(
       && typeof (stripeError as Record<string, unknown>).code === "string"
       ? ((stripeError as Record<string, unknown>).code as string).trim().slice(0, 80)
       : undefined;
-    console.error(JSON.stringify({
-      event: "xmatrix_stripe_error",
+    const missing = response.status === 404 && providerCode === "resource_missing";
+    // A missing object is answered to the caller; every other refusal is a
+    // Stripe or configuration failure worth an error report.
+    (missing ? console.warn : console.error)(JSON.stringify({
+      event: missing ? "xmatrix_stripe_resource_missing" : "xmatrix_stripe_error",
       status: response.status,
       code: providerCode || null,
     }));
     throw new StripeBillingError(
-      "Stripe could not complete the billing request",
+      missing ? "Stripe has no record of this billing object" : "Stripe could not complete the billing request",
       response.status >= 500 || response.status === 429,
       providerCode || undefined,
+      response.status,
     );
   }
   return record(payload, "Stripe response");
