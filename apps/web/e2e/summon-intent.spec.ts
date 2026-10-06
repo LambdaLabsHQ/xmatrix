@@ -44,6 +44,25 @@ test("a mention Jev read as an explanation settles into prose and the author can
   expect(request.body).toContain("named @claude in bold");
 });
 
+test("a machine the author must name is a card, not a failed launch", async ({ page }) => {
+  await page.clock.install({ time: new Date(Date.parse(E2E_NOW) + 120_000) });
+  await install(page, "@auto check the deploy", {
+    rejections: [{ invocationId: "registration-launch:message-intent:0", channelId: E2E_CHANNEL.id, sourceMessageId: messageId,
+      sourceMention: "@auto", targetRef: "auto", code: "registration_machine_not_auto_assigned",
+      message: "Only machines their owners keep out of automatic assignment can run this; name one with machine:<name> to use it. No launch was allocated.",
+      rejectedAt: E2E_NOW, evidenceExpiresAt: "2099-01-01T00:00:00Z" }],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const hint = page.locator(".app-mention-launch-hint");
+  await expect(hint).toHaveText("@auto");
+  await expect(page.locator(".app-mention-invocation")).toHaveCount(0);
+  await hint.click();
+  const card = page.getByRole("dialog");
+  await expect(card).toContainText("Name a machine");
+  await expect(card).toContainText("machine:<name>");
+  await expect(card).not.toContainText("Failed");
+});
+
 test("a just-sent summon shows Jev reading it, and the shimmer ends on its own", async ({ page }) => {
   await page.clock.install({ time: new Date(Date.parse(E2E_NOW) + 2_000) });
   await install(page, "@claude fix the flaky registration test", {});
