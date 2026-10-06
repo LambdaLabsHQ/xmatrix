@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { messageMachineIdentity, registrationMachineBusy, registrationMachineName } = require("./machine-name-presentation.ts");
+const { machineLinkable, messageMachineIdentity, registrationMachineBusy, registrationMachineName } = require("./machine-name-presentation.ts");
 const row = (ownerUserId, machineId, machineName) => ({
   key: { spaceId: "space", ownerUserId, machineId, harness: "grok" }, machineName,
 });
@@ -57,4 +57,16 @@ test("a Machine tag excludes disk from its load but includes disk in its hover r
       { key: "disk", label: "Disk", percent: 95 }] });
   assert.equal(registrationMachineBusy([live(false)], "machine:grok", "owner"), undefined);
   assert.equal(registrationMachineBusy([row("owner", "machine:grok", "Grok")], "machine:grok", "owner"), undefined);
+});
+
+test("a Machine tag links only to a Machine the reader's Machines list shows, by exact id and owner", () => {
+  const listed = [{ machineId: "machine:grok", ownerUserId: "owner" }, { machineId: "machine:mac" }];
+  assert.equal(machineLinkable(listed, { machineId: "machine:grok", ownerUserId: "owner" }), true);
+  assert.equal(machineLinkable(listed, { machineId: "machine:grok" }), true);
+  assert.equal(machineLinkable(listed, { machineId: "machine:grok", ownerUserId: "other" }), false);
+  assert.equal(machineLinkable(listed, { machineId: "machine:mac", ownerUserId: "anyone" }), true);
+  assert.equal(machineLinkable(listed, { machineId: "machine:elsewhere" }), false);
+  assert.equal(machineLinkable(listed, { machineId: "" }), false);
+  assert.equal(machineLinkable(listed, undefined), false);
+  assert.equal(machineLinkable([], { machineId: "machine:grok" }), false);
 });

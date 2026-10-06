@@ -6,12 +6,14 @@ import {
   StripeBillingError,
   createStripeCheckoutSession,
   retrieveStripeSubscription,
+  stripeBillingErrorStatus,
   stripeCheckoutReturnUrls,
   stripeCheckoutSessionFact,
   stripeSubscriptionFact,
   stripeWebhookSubscriptionId,
   verifyStripeWebhookSignature,
 } from "../src/billing-stripe.ts";
+import { capturingConsole } from "./support/capturing-console.mjs";
 
 const checkoutReturn = stripeCheckoutReturnUrls("https://app.test.example", "space-1");
 
@@ -100,6 +102,46 @@ test("Stripe request failures expose the provider code without treating 4xx as r
         && error.providerCode === "more_permissions_required",
     );
   });
+});
+
+test("a subscription Stripe no longer has is answered as a conflict, not reported as an error (XMATRIX-HUB-64)", async () => {
+  let failure;
+  const logged = await capturingConsole(() => withFetch(async () => Response.json({
+    error: { type: "invalid_request_error", code: "resource_missing", message: "No such subscription: 'sub_gone'" },
+  }, { status: 404 }), async () => {
+    await assert.rejects(retrieveStripeSubscription("sk_test_secret", "sub_gone"), (error) => {
+      failure = error;
+      return error instanceof StripeBillingError;
+    });
+  }));
+  assert.equal(failure.retryable, false);
+  assert.equal(failure.providerCode, "resource_missing");
+  assert.equal(failure.providerObjectMissing, true);
+  assert.equal(stripeBillingErrorStatus(failure), 409);
+  assert.equal(logged.error.length, 0);
+  assert.equal(logged.warn.length, 1);
+  assert.deepEqual(JSON.parse(logged.warn[0][0]), { event: "xmatrix_stripe_resource_missing", status: 404, code: "resource_missing" });
+  // The provider's object description never reaches the log line.
+  assert.doesNotMatch(logged.warn[0][0], /sub_gone/);
+});
+
+test("Stripe refusals other than a missing object stay error reports", async () => {
+  for (const [status, code, expected] of [[403, "more_permissions_required", 502], [404, null, 502], [500, null, 503]]) {
+    let failure;
+    const logged = await capturingConsole(() => withFetch(async () => Response.json({
+      error: { type: "api_error", ...(code ? { code } : {}) },
+    }, { status }), async () => {
+      await assert.rejects(retrieveStripeSubscription("sk_test_secret", "sub_1"), (error) => {
+        failure = error;
+        return error instanceof StripeBillingError;
+      });
+    }));
+    assert.equal(failure.providerObjectMissing, false);
+    assert.equal(stripeBillingErrorStatus(failure), expected);
+    assert.equal(logged.warn.length, 0);
+    assert.equal(logged.error.length, 1);
+    assert.equal(JSON.parse(logged.error[0][0]).event, "xmatrix_stripe_error");
+  }
 });
 
 test("Stripe webhook signature verification accepts only a current matching v1 signature", async () => {

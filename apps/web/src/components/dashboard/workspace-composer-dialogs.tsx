@@ -1706,6 +1706,8 @@ export function ChannelDetails({
                     const instance = item.instance;
                     const owner = space?.members.find(member => member.userId === registration?.ownerUserId);
                     const ownerLabel = owner?.name || owner?.email || registration?.ownerUserId;
+                    const machineId = instance.machineId ?? registration?.machineId;
+                    const machineTarget = machineId ? { machineId, ownerUserId: registration?.ownerUserId } : undefined;
                     const machineLabel = registrationMachineName(machineCatalog.data?.registrations ?? [],
                       instance.machineId ?? registration?.machineId, registration?.ownerUserId) || "Unnamed machine";
                     const machineBusy = registrationMachineBusy(machineCatalog.data?.registrations ?? [],
@@ -1763,6 +1765,7 @@ export function ChannelDetails({
                                 owner={ownerLabel}
                                 machine={machineLabel}
                                 machineBusy={machineBusy}
+                                machineTarget={machineTarget}
                                 workspace={workspaceTag}
                                 wrap
                               />

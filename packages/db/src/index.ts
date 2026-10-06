@@ -128,6 +128,7 @@ export {
 } from "./assistant-memory-control.js";
 export {
   AppControlError,
+  appendMetadataLists,
   appExecutionView,
   appPrincipal,
   appRequestFields,
