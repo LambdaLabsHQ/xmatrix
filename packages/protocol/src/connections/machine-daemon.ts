@@ -489,6 +489,8 @@ export interface MachineDaemonHarnessActionCommand {
   requestId: string;
   presetId: string;
   action: import("../harness-management.js").HarnessAction;
+  /** Only on `login_finish`. */
+  code?: string;
   relayLease?: MachineDaemonCommandLease;
 }
 

@@ -133,6 +133,56 @@ pub struct LatestSource {
     pub package: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginFlow {
+    /// A URL and a one-time code the owner enters there.
+    DeviceCode,
+    /// A URL whose sign-in page shows a code the harness reads on stdin.
+    UrlPasteCode,
+}
+
+impl LoginFlow {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DeviceCode => "device_code",
+            Self::UrlPasteCode => "url_paste_code",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct LoginStart {
+    pub command: String,
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+/// Exit status 0 means signed in, unless `signed_in_regex` must also match.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginStatus {
+    pub command: String,
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub signed_in_regex: Option<String>,
+}
+
+/// The harness's own official sign-in, driven by the daemon without a
+/// terminal. Capture group 1 of each regex over control-stripped output.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessLogin {
+    pub flow: LoginFlow,
+    pub start: LoginStart,
+    pub url_regex: String,
+    #[serde(default)]
+    pub code_regex: Option<String>,
+    #[serde(default)]
+    pub status: Option<LoginStatus>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessManagement {
@@ -147,6 +197,9 @@ pub struct HarnessManagement {
     pub auto_update: AutoUpdate,
     #[serde(default)]
     pub latest: Option<LatestSource>,
+    /// Absent means no official sign-in the daemon can drive remotely.
+    #[serde(default)]
+    pub login: Option<HarnessLogin>,
 }
 
 #[cfg(test)]

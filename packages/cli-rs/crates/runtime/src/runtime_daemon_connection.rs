@@ -2030,6 +2030,8 @@ async fn cmd_daemon_connected(
             "machine_harness_uninstall_v1",
             // The daemon parses and acts on the `release` harness action.
             "machine_harness_release_v1",
+            // The daemon parses and runs the `login_*` harness actions.
+            "machine_harness_login_v1",
             // A stop may push the Run's whole checkout to a handoff branch.
             "machine_handoff_export_v1",
         ],
@@ -2075,6 +2077,7 @@ async fn cmd_daemon_connected(
             "machine_harness_cursor_launcher_v1".to_string(),
             "machine_harness_uninstall_v1".to_string(),
             "machine_harness_release_v1".to_string(),
+            "machine_harness_login_v1".to_string(),
             "machine_handoff_export_v1".to_string(),
         ],
     );

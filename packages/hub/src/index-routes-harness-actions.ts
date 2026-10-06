@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
-import { HARNESS_ACTIONS, HUB_ROUTES, hasControlCharacter, type HarnessAction, type SerializedMachineDaemon } from "@xmatrix/protocol";
+import { HARNESS_ACTIONS, HUB_ROUTES, hasControlCharacter, validHarnessLoginCode, type HarnessAction,
+  type SerializedMachineDaemon } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { readHarnessActionStatus } from "@xmatrix/db";
 import { privateRouteResponse } from "./private-route-response";
@@ -45,7 +46,7 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
     const authenticated = await port.authenticate(c.req.raw, c.env);
     if (authenticated.agentRun) return refuse("Harness actions require the Machine's owner", 403);
     const user = requireHumanAuth(authenticated);
-    const bytes = await readBoundedRequestBody(c.req.raw, 1_024);
+    const bytes = await readBoundedRequestBody(c.req.raw, 4_096);
     if (!bytes) return refuse("Harness action request too large", 413);
     let body: Record<string, unknown>;
     try { body = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>; } catch {
@@ -56,7 +57,12 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
       : isMachineField(body.hostId) ? body.hostId : null;
     const presetId = typeof body.presetId === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(body.presetId) ? body.presetId : undefined;
     const action = (HARNESS_ACTIONS as readonly string[]).includes(body.action as string) ? body.action as HarnessAction : undefined;
-    if (!machineId || hostId === null || !presetId || !action) return refuse("Invalid harness action request", 400);
+    // Only `login_finish` carries the code the harness's sign-in page showed the owner.
+    const code = body.code === undefined ? undefined
+      : action === "login_finish" && validHarnessLoginCode(body.code) ? body.code.trim() : null;
+    if (!machineId || hostId === null || !presetId || !action || code === null) {
+      return refuse("Invalid harness action request", 400);
+    }
     const daemons = await port.daemons(c.env, user.id);
     const online = daemons.filter(daemon => daemon.machineId === machineId && daemon.status === "online");
     if (online.length !== 1) {
@@ -68,7 +74,7 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
       ownerUserId: user.id, ownerEmail: daemon.email, machineId, hostId: daemon.hostId, daemonId: daemon.id,
       commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "harness_action",
       principal: { kind: "user", id: user.id },
-      payload: { type: "machine_harness_action", requestId, presetId, action },
+      payload: { type: "machine_harness_action", requestId, presetId, action, ...(code ? { code } : {}) },
     });
     return Response.json({ controlId: requestId, presetId, action, status: "queued" }, { status: 202, headers: NO_STORE });
   }));
