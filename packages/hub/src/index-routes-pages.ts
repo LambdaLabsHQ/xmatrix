@@ -316,7 +316,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
   }));
 
   // A pull request's review conversation records its pre-review verdict, as
-  // the Agent reviewing it there, on the pull request's current head.
+  // the Agent reviewing it there, on the head commit that Run reviewed.
   app.post("/api/channels/:channelId/pre-review", async (c) => {
     try {
       const authUser = await requireAuth(c.req.raw, c.env);
@@ -335,7 +335,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
         return c.json({ error: "summary is 1-4000 characters", code: "invalid_request" }, 400);
       }
       return c.json(await publishPreReviewVerdict(c.env, { channelId, actorUserId: run.ownerUserId,
-        verdict: body.verdict, summary }), 200, NO_STORE);
+        runId: run.runId, verdict: body.verdict, summary }), 200, NO_STORE);
     } catch (error) {
       if (error instanceof PreReviewError) return c.json({ error: error.message, code: error.code }, error.status as 403);
       return failure(c, error);
