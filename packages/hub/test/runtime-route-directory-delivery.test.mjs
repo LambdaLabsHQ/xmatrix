@@ -16,20 +16,42 @@ const PAYLOAD = { channelId: SCOPE, changeSeq: 1, event: { type: "test" } };
 
 const runtimeNamespace = (handlers, calls) => recordingRuntimeNamespace(calls, (name, request) => handlers[name](request));
 
-function directoryNamespace(routes, calls) {
+function jsonNamespace(calls, respond) {
   return {
     idFromName: (name) => ({ name }),
     get: () => ({
       fetch: async (request) => {
+        const url = new URL(request.url);
         const body = await request.clone().json();
-        calls.push({ path: new URL(request.url).pathname, body });
-        if (new URL(request.url).pathname.endsWith("/lookup")) {
-          return Response.json({ cells: routes.map((route) => route.cellName), routes });
-        }
-        return Response.json({ unregistered: 1 });
+        calls.push({ path: url.pathname, body });
+        return respond(url.pathname);
       },
     }),
   };
+}
+
+function directoryNamespace(routes, calls, { fanout = false } = {}) {
+  return jsonNamespace(calls, (pathname) => {
+    if (!pathname.endsWith("/lookup")) return Response.json({ unregistered: 1 });
+    if (fanout) return Response.json({ cells: [], routes: [], fanout: true });
+    return Response.json({ cells: routes.map((route) => route.cellName), routes });
+  });
+}
+
+function fanoutNamespace(calls, members = []) {
+  return jsonNamespace(calls, (pathname) => pathname.endsWith("/members")
+    ? Response.json({ cells: members.map((route) => route.cellName), routes: members })
+    : Response.json({ delivered: members.length }));
+}
+
+function echoRuntime(names) {
+  return Object.fromEntries(names.map((name) => [name, async () => Response.json({ cell: name })]));
+}
+
+async function probedCells(env) {
+  const cells = await runtimeCellsForChannel(env, SCOPE);
+  return Promise.all(cells.map(async (cell) =>
+    (await (await cell.fetch(new Request("https://relay-runtime/probe"))).json()).cell));
 }
 
 function input({ mode, handlers, routes = [] }) {
@@ -169,23 +191,16 @@ test("live fanout from an occupied owner cell does not RPC back into that same o
 });
 
 test("a channel's cells are the single cell plus every owner cell listed for it", async () => {
-  const runtimeCalls = [];
   const directoryCalls = [];
   const env = {
-    RELAY_RUNTIME: runtimeNamespace({
-      "cell-0": async () => Response.json({ cell: "cell-0" }),
-      "user-alice": async () => Response.json({ cell: "user-alice" }),
-    }, runtimeCalls),
+    RELAY_RUNTIME: runtimeNamespace(echoRuntime(["cell-0", "user-alice"]), []),
     RELAY_RUNTIME_ROUTE_DIRECTORY: directoryNamespace([
       { cellName: "cell-0", expiresAtMs: 1_700_000_000_000 },
       { cellName: "user-alice", expiresAtMs: 1_700_000_000_000 },
     ], directoryCalls),
     XMATRIX_RUNTIME_CELL_MODE: "dual",
   };
-  const cells = await runtimeCellsForChannel(env, SCOPE);
-  const answers = await Promise.all(cells.map(async (cell) =>
-    (await (await cell.fetch(new Request("https://relay-runtime/probe"))).json()).cell));
-  assert.deepEqual(answers, ["cell-0", "user-alice"]);
+  assert.deepEqual(await probedCells(env), ["cell-0", "user-alice"]);
   assert.equal(directoryCalls.length, 1);
 });
 
@@ -223,6 +238,89 @@ test("agent presence publish skips the cell that already delivered it", async ()
       new URL(call.request.url).pathname === "/internal/product/channel-agent-presence"),
     true,
   );
+});
+
+test("fanout delivery is one fanout fetch plus cell-0", async () => {
+  const runtimeCalls = [];
+  const directoryCalls = [];
+  const fanoutCalls = [];
+  const env = {
+    RELAY_RUNTIME: runtimeNamespace({
+      "cell-0": async () => Response.json({ delivered: 1 }),
+      "user-alice": async () => {
+        throw new Error("publisher must not fetch owner cells");
+      },
+      "user-bob": async () => {
+        throw new Error("publisher must not fetch owner cells");
+      },
+    }, runtimeCalls),
+    RELAY_RUNTIME_ROUTE_DIRECTORY: directoryNamespace([], directoryCalls, { fanout: true }),
+    RELAY_RUNTIME_CHANNEL_FANOUT: fanoutNamespace(fanoutCalls),
+    XMATRIX_RUNTIME_CELL_MODE: "dual",
+  };
+  let localFetches = 0;
+  const response = await publishRuntimeCommittedEvent({
+    env,
+    scopeId: SCOPE,
+    payload: PAYLOAD,
+    waitUntil: () => {},
+    self: {
+      cellName: "user-alice",
+      fetch: async () => {
+        localFetches += 1;
+        return Response.json({ delivered: 1 });
+      },
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(localFetches, 0);
+  assert.deepEqual(runtimeCalls.map((call) => call.cell), ["cell-0"]);
+  assert.equal(fanoutCalls.length, 1);
+  assert.equal(fanoutCalls[0].path, "/internal/runtime-channel-fanout/deliver");
+  assert.equal(fanoutCalls[0].body.url, "https://relay-runtime/internal/committed-event");
+  assert.equal(fanoutCalls[0].body.exceptCell, "user-alice");
+  assert.equal(JSON.parse(fanoutCalls[0].body.body).changeSeq, 1);
+});
+
+test("a fanout channel's cells come from the fanout membership", async () => {
+  const fanoutCalls = [];
+  const members = [
+    { cellName: "user-alice", expiresAtMs: 1_700_000_000_000 },
+    { cellName: "user-bob", expiresAtMs: 1_700_000_000_000 },
+  ];
+  const env = {
+    RELAY_RUNTIME: runtimeNamespace(echoRuntime(["cell-0", "user-alice", "user-bob"]), []),
+    RELAY_RUNTIME_ROUTE_DIRECTORY: directoryNamespace([], [], { fanout: true }),
+    RELAY_RUNTIME_CHANNEL_FANOUT: fanoutNamespace(fanoutCalls, members),
+    XMATRIX_RUNTIME_CELL_MODE: "dual",
+  };
+  assert.deepEqual(await probedCells(env), ["cell-0", "user-alice", "user-bob"]);
+  assert.deepEqual(fanoutCalls.map((call) => call.path), ["/internal/runtime-channel-fanout/members"]);
+});
+
+test("agent presence on a fanout channel skips the publishing cell inside the fanout fetch", async () => {
+  const fixture = input({
+    mode: "dual",
+    handlers: {
+      "cell-0": presenceOk,
+      "user-alice": async () => {
+        throw new Error("publisher must not fetch owner cells");
+      },
+    },
+  });
+  const fanoutCalls = [];
+  fixture.input.env.RELAY_RUNTIME_ROUTE_DIRECTORY = directoryNamespace([], fixture.directoryCalls, { fanout: true });
+  fixture.input.env.RELAY_RUNTIME_CHANNEL_FANOUT = fanoutNamespace(fanoutCalls);
+  await publishRuntimeChannelAgentPresence({
+    env: fixture.input.env,
+    channelId: SCOPE,
+    body: JSON.stringify({ channelId: SCOPE, reason: "update", recipients: [] }),
+    exceptCell: "user-alice",
+  });
+  assert.deepEqual(fixture.runtimeCalls.map((call) => call.cell), ["cell-0"]);
+  assert.equal(fanoutCalls.length, 1);
+  assert.equal(fanoutCalls[0].body.exceptCell, "user-alice");
+  assert.equal(fanoutCalls[0].body.url, "https://relay-runtime/internal/product/channel-agent-presence");
 });
 
 test("agent presence outside dual routing reaches cell-0 unless that cell published it", async () => {
