@@ -361,6 +361,9 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
     actions: [
       {
         id: "subscribe",
+        /* Writes nothing to GitHub, but brings its content into the Channel,
+           so a Channel's policy may deny it. */
+        effect: "read",
         label: "Subscribe repository, issue, or PR",
         description: "Link the current channel or thread to repository-wide commit, issue, and pull request updates, or to one issue or PR. Use all for every repository feature; each feature requires its matching read access.",
         completion: {
