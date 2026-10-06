@@ -1075,7 +1075,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             WHERE a.owner_user_id=$1 AND a.machine_id=$2 AND a.state<>'released') AS machine_allocations,
           (SELECT count(*)::int FROM control.registration_execution_allocations a
             WHERE a.owner_user_id=$1 AND a.machine_id=$2 AND a.harness=$3 AND a.state<>'released') AS registration_allocations,
-          q.remaining,q.observed_at,q.expires_at,q.source
+          q.remaining,q.observed_at,q.expires_at,q.source,q.windows_json,q.account_json
           FROM control.agent_registration_environments e
           ${currentRegistrationQuotaJoin("q")}
           WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,

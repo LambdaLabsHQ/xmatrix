@@ -464,6 +464,12 @@ export function routingQuotaObservation(usage: unknown, now: number): RoutingObs
   for (const value of windows) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const window = value as Record<string, unknown>;
+    // Cursor's API bucket is a separate on-demand spend meter. It is shown in
+    // the Agents UI, but a full API bucket must not collapse routing headroom
+    // to 0% while the plan (1mo) / Auto windows still have share left.
+    const label = typeof window.label === "string" ? window.label.trim().toLowerCase()
+      : typeof window.window === "string" ? window.window.trim().toLowerCase() : "";
+    if (label === "api") continue;
     // percent is the provider's 0..100 usage; remaining is not an inferred balance.
     if (typeof window.percent !== "number" || !Number.isFinite(window.percent) ||
         window.percent < 0 || window.percent > 100) continue;

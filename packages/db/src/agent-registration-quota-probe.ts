@@ -1,4 +1,5 @@
-import { digestCanonicalCloneCborV1, routingQuotaProbeObservations, type LlmQuotaAccount,
+import { digestCanonicalCloneCborV1, parseLlmQuotaAccount, routingQuotaObservation,
+  routingQuotaProbeObservations, type LlmQuotaAccount,
   type RoutingQuotaProbeRequest, type RoutingQuotaWindow } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -23,9 +24,43 @@ export function currentRegistrationQuotaJoin(alias: string): string {
 }
 
 /** The joined reading as a share of headroom with its times, or none when the
- * row is missing or its share is not between 0 and 100. */
-export function registrationQuotaReading(row: { remaining?: unknown; observed_at?: unknown; expires_at?: unknown } | undefined):
+ * row is missing or its share is not between 0 and 100.
+ *
+ * When `windows_json` is present, headroom is recomputed with
+ * `routingQuotaObservation` so a stored `remaining` that was collapsed by a
+ * Cursor API bucket at 100% cannot keep refusing launches after that rule
+ * changed; Agents still shows every stored window. */
+export function registrationQuotaReading(row: {
+  remaining?: unknown; observed_at?: unknown; expires_at?: unknown;
+  windows_json?: unknown; account_json?: unknown;
+} | undefined):
   { remainingPercent: number; observedAt: string; expiresAt: string } | undefined {
+  const observedAt = typeof row?.observed_at === "string" ? row.observed_at : undefined;
+  if (observedAt && row?.windows_json != null) {
+    const stored = Array.isArray(row.windows_json) ? row.windows_json : [];
+    const quotaUsages = stored.flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const window = item as Record<string, unknown>;
+      const percent = typeof window.usedPercent === "number" ? window.usedPercent
+        : typeof window.percent === "number" ? window.percent : NaN;
+      if (!Number.isFinite(percent)) return [];
+      return [{
+        ...(typeof window.label === "string" && window.label ? { label: window.label } : {}),
+        percent,
+        ...(window.resetAt !== undefined ? { resetAt: window.resetAt }
+          : window.reset_at !== undefined ? { reset_at: window.reset_at } : {}),
+      }];
+    });
+    const account = parseLlmQuotaAccount(row.account_json);
+    const observation = routingQuotaObservation({
+      quotaSource: "provider_api", quotaObservedAt: observedAt, quotaUsages,
+      ...(account ? { quotaAccount: account } : {}),
+    }, Date.now());
+    if (observation) {
+      return { remainingPercent: observation.value, observedAt: observation.observedAt,
+        expiresAt: observation.expiresAt };
+    }
+  }
   const remaining = row?.remaining == null ? NaN : Number(row.remaining);
   const observed = new Date(row?.observed_at as string).getTime(), expires = new Date(row?.expires_at as string).getTime();
   return Number.isFinite(remaining) && remaining >= 0 && remaining <= 100 && Number.isFinite(observed) && Number.isFinite(expires)
