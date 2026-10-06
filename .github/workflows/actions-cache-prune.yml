@@ -1,0 +1,36 @@
+name: Actions cache prune
+
+# Deletes Actions caches no run will restore again (scripts/prune-actions-caches.mjs)
+# so the repository's 10 GB budget holds only caches CI still uses, and
+# GitHub's eviction never removes the main compile caches a run is about to
+# restore.
+on:
+  workflow_run:
+    workflows: [CI, Public Snapshot CI]
+    types: [completed]
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: actions-cache-prune
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: scripts
+      - name: Delete caches no run will restore
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/prune-actions-caches.mjs
