@@ -114,3 +114,60 @@ integration("harness actions need the owner and a capable daemon, answer exactly
     assert.deepEqual(leased.commands.map(command => command.payload.requestId), [uninstallId]);
   } finally { await fixture.close(); }
 });
+
+integration("a remote sign-in needs a login-capable daemon, delivers the pasted code once, and forgets it", async () => {
+  const fixture = await isolatedPostgres("harness_login", { shard: true });
+  const { client, session } = fixture;
+  try {
+    const controls = new PostgresMachineControlRepository(session);
+    const machine = { ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "login-machine",
+      hostId: "login-host", daemonId: "login-daemon" };
+    const principal = { kind: "machine", id: "machine-daemon:owner:login-machine:login-host",
+      ownerUserId: "owner", machineId: "login-machine", hostId: "login-host" };
+    const connect = capabilities => controls.command({ ...machine, commandId: randomUUID(), action: "connect",
+      principal, capabilities, payload: {}, metadata: {} });
+    const issue = (requestId, patch = {}) => controls.command({ ...machine, commandId: randomUUID(),
+      action: "issue", principal: { kind: "user", id: "owner" }, controlId: requestId, commandType: "harness_action",
+      payload: { type: "machine_harness_action", requestId, presetId: "claude", action: "login_start", ...patch } });
+    const claim = connected => controls.command({ ...machine, commandId: randomUUID(), action: "claim",
+      principal, connectionEpoch: connected.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
+    const id = () => `harness:${randomUUID()}`;
+
+    await connect(["machine_harness_action_v1"]);
+    await assert.rejects(issue(id()), error => error.code === "harness_action_unavailable");
+    let connected = await connect(["machine_harness_action_v1", "machine_harness_login_v1"]);
+    // No official headless sign-in for this preset; a code belongs to login_finish only.
+    await assert.rejects(issue(id(), { presetId: "goose" }), error => error.code === "invalid_harness_action");
+    await assert.rejects(issue(id(), { code: "abc" }), error => error.code === "invalid_harness_action");
+
+    const startId = id();
+    await issue(startId);
+    // A daemon that lost the capability never leases a sign-in it cannot parse.
+    const older = await connect(["machine_harness_action_v1"]);
+    assert.equal((await claim(older)).commands.length, 0);
+    connected = await connect(["machine_harness_action_v1", "machine_harness_login_v1"]);
+    const started = await claim(connected);
+    assert.deepEqual(started.commands.map(command => command.payload.requestId), [startId]);
+    const waiting = { state: "awaiting_user", flow: "url_paste_code", verificationUri: "https://claude.com/cai/oauth/authorize?x=1" };
+    await controls.command({ ...machine, commandId: randomUUID(), action: "complete", principal,
+      connectionEpoch: connected.connectionEpoch, controlId: startId, eventType: "machine_harness_action_result",
+      relayLease: started.commands[0].payload.relayLease, payload: { type: "machine_harness_action_result", requestId: startId,
+        result: { presetId: "claude", action: "login_start", status: "succeeded", login: waiting } } });
+    const startStatus = await readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "owner", controlId: startId });
+    assert.deepEqual([startStatus.status, startStatus.result.login], ["succeeded", waiting]);
+
+    const finishId = id();
+    await issue(finishId, { action: "login_finish", code: "pasted#code" });
+    const finishing = await claim(connected);
+    assert.equal(finishing.commands[0].payload.code, "pasted#code");
+    await controls.command({ ...machine, commandId: randomUUID(), action: "complete", principal,
+      connectionEpoch: connected.connectionEpoch, controlId: finishId, eventType: "machine_harness_action_result",
+      relayLease: finishing.commands[0].payload.relayLease, payload: { type: "machine_harness_action_result", requestId: finishId,
+        result: { presetId: "claude", action: "login_finish", status: "succeeded", login: { state: "signed_in", flow: "url_paste_code" } } } });
+    const stored = (await client.query("SELECT payload_json FROM data.machine_daemon_commands WHERE command_id=$1",
+      [finishId])).rows[0].payload_json;
+    assert.equal(stored.code, undefined, "a spent sign-in code is not kept");
+    const finished = await readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "owner", controlId: finishId });
+    assert.deepEqual([finished.status, finished.result.login.state], ["succeeded", "signed_in"]);
+  } finally { await fixture.close(); }
+});

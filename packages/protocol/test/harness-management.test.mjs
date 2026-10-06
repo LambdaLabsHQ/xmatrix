@@ -103,3 +103,46 @@ test("uninstall removes only the program, never settings or sessions", () => {
     }
   }
 });
+
+test("a remote sign-in carries a pasted code only on login_finish and answers with an https link", () => {
+  const requestId = "harness:00000000-0000-4000-8000-000000000000";
+  assert.deepEqual(parseHarnessActionRequest({ requestId, presetId: "claude", action: "login_finish", code: "abc#def" }),
+    { requestId, presetId: "claude", action: "login_finish", code: "abc#def" });
+  for (const patch of [{ action: "login_start", code: "abc" }, { action: "update", code: "abc" },
+    { action: "login_finish", code: "" }, { action: "login_finish", code: "a\nb" },
+    { action: "login_finish", code: "x".repeat(2049) }]) {
+    assert.throws(() => parseHarnessActionRequest({ requestId, presetId: "claude", ...patch }), JSON.stringify(patch));
+  }
+  const issued = { requestId, presetId: "codex", action: "login_start" };
+  const waiting = { state: "awaiting_user", flow: "device_code", verificationUri: "https://auth.openai.com/codex/device",
+    userCode: "I3YY-8QZ91" };
+  assert.deepEqual(parseHarnessActionResult({ presetId: "codex", action: "login_start", status: "succeeded", login: waiting },
+    issued).login, waiting);
+  for (const login of [{ ...waiting, verificationUri: "http://auth.openai.com/" },
+    { ...waiting, verificationUri: "javascript:alert(1)" }, { state: "awaiting_user" },
+    { ...waiting, userCode: "x".repeat(65) }, { ...waiting, state: "signed_in" }, { state: "invented" }]) {
+    assert.throws(() => parseHarnessActionResult({ presetId: "codex", action: "login_start", status: "succeeded", login },
+      issued), JSON.stringify(login));
+  }
+  // Progress belongs to sign-in actions only.
+  assert.throws(() => parseHarnessActionResult({ presetId: "codex", action: "update", status: "succeeded",
+    login: { state: "signed_in" } }, { requestId, presetId: "codex", action: "update" }));
+  assert.equal(parseHarnessInventory({ ...inventory, items: [{ ...inventory.items[0], login: "signed_in" }] }).items[0].login,
+    "signed_in");
+  assert.equal(parseHarnessInventory({ ...inventory, items: [{ ...inventory.items[0], login: "yes" }] }), undefined);
+});
+
+test("sign-in is offered exactly for presets with an official headless sign-in", () => {
+  const signIn = AGENT_PRESETS.filter(preset => harnessActionAvailable(preset.management, "login_start")).map(preset => preset.id);
+  assert.deepEqual(signIn.sort(), ["claude", "codex", "copilot", "cursor", "grok", "hermes", "kimi", "kiro", "opencode",
+    "zcode"]);
+  for (const preset of AGENT_PRESETS) {
+    const login = preset.management.login;
+    if (!login) continue;
+    assert.ok(["device_code", "url_paste_code"].includes(login.flow), preset.id);
+    assert.ok(preset.launcherNames.includes(login.start.command) || login.start.command === preset.runtime, preset.id);
+    for (const pattern of [login.urlRegex, login.codeRegex, login.rejectedRegex, login.status?.signedInRegex]) {
+      if (pattern) assert.doesNotThrow(() => new RegExp(pattern.replace(/^\(\?[a-z]+\)/u, "")), `${preset.id}: ${pattern}`);
+    }
+  }
+});

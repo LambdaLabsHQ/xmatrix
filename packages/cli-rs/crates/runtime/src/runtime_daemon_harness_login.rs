@@ -19,9 +19,7 @@ use xmatrix_cli_core::machine_daemon_connection::{
     HarnessLoginState,
 };
 
-use crate::runtime_daemon_harness_action::{
-    probed_item, registry_preset, result, with_tail,
-};
+use crate::runtime_daemon_harness_action::{probed_item, registry_preset, result, with_tail};
 use crate::runtime_daemon_harness_inventory::{
     harness_command, resolve_launcher, resolve_recipe_program,
 };
@@ -75,7 +73,13 @@ pub(crate) fn plain_output(bytes: &[u8]) -> String {
 }
 
 fn capture(pattern: &str, text: &str) -> Option<String> {
-    let found = Regex::new(pattern).ok()?.captures(text)?.get(1)?.as_str().trim().to_string();
+    let found = Regex::new(pattern)
+        .ok()?
+        .captures(text)?
+        .get(1)?
+        .as_str()
+        .trim()
+        .to_string();
     (!found.is_empty()).then_some(found)
 }
 
@@ -128,7 +132,10 @@ async fn pump(mut reader: impl AsyncRead + Unpin, output: Arc<Mutex<Vec<u8>>>) {
 }
 
 fn snapshot(output: &Mutex<Vec<u8>>) -> Vec<u8> {
-    output.lock().map(|output| output.clone()).unwrap_or_default()
+    output
+        .lock()
+        .map(|output| output.clone())
+        .unwrap_or_default()
 }
 
 /// The harness's own launcher binds the same binary inventory reports.
@@ -186,16 +193,23 @@ pub(crate) async fn execute(
     outcome
 }
 
+fn sign_in_failed(
+    preset: &AgentPreset,
+    action: HarnessAction,
+    login: &HarnessLogin,
+    text: &str,
+) -> HarnessActionResult {
+    let mut failed = with_tail(
+        result(&preset.id, action, HarnessActionStatus::Failed),
+        text,
+    );
+    failed.login = Some(progress(HarnessLoginState::Failed, login.flow));
+    failed
+}
+
 async fn start(preset: &AgentPreset, login: &HarnessLogin) -> HarnessActionResult {
+    let failed = |text: &str| sign_in_failed(preset, HarnessAction::LoginStart, login, text);
     let action = HarnessAction::LoginStart;
-    let failed = |text: &str| {
-        let mut failed = with_tail(
-            result(&preset.id, action, HarnessActionStatus::Failed),
-            text,
-        );
-        failed.login = Some(progress(HarnessLoginState::Failed, login.flow));
-        failed
-    };
     if let Some(mut previous) = take_session(&preset.id) {
         previous.end();
     }
@@ -288,15 +302,8 @@ async fn finish(
     login: &HarnessLogin,
     code: Option<&str>,
 ) -> HarnessActionResult {
+    let failed = |text: &str| sign_in_failed(preset, HarnessAction::LoginFinish, login, text);
     let action = HarnessAction::LoginFinish;
-    let failed = |text: &str| {
-        let mut failed = with_tail(
-            result(&preset.id, action, HarnessActionStatus::Failed),
-            text,
-        );
-        failed.login = Some(progress(HarnessLoginState::Failed, login.flow));
-        failed
-    };
     let Some(mut session) = take_session(&preset.id) else {
         return failed("no sign-in is waiting on this machine; start it again");
     };
@@ -312,7 +319,10 @@ async fn finish(
         let written = match session.stdin.as_mut() {
             Some(stdin) => {
                 let line = format!("{code}\n");
-                stdin.write_all(line.as_bytes()).await.and(stdin.flush().await)
+                stdin
+                    .write_all(line.as_bytes())
+                    .await
+                    .and(stdin.flush().await)
             }
             None => Err(std::io::Error::other("the sign-in no longer reads input")),
         };
@@ -386,7 +396,11 @@ async fn refused(login: &HarnessLogin, session: &Session, mark: usize) -> Option
         let output = snapshot(&session.output);
         let text = plain_output(output.get(mark.min(output.len())..).unwrap_or_default());
         if let Some(found) = pattern.find(&text) {
-            let line = text[found.start()..].lines().next().unwrap_or_default().trim();
+            let line = text[found.start()..]
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim();
             return Some(line.to_string());
         }
         tokio::time::sleep(POLL).await;
@@ -397,7 +411,13 @@ async fn refused(login: &HarnessLogin, session: &Session, mark: usize) -> Option
 /// The harness's own answer to whether it is signed in; `None` when it has
 /// no status command or did not answer.
 pub(crate) async fn status(preset: &AgentPreset) -> Option<bool> {
-    let recipe = preset.management.as_ref()?.login.as_ref()?.status.as_ref()?;
+    let recipe = preset
+        .management
+        .as_ref()?
+        .login
+        .as_ref()?
+        .status
+        .as_ref()?;
     let program = program(preset, &recipe.command)?;
     let mut child = harness_command(&program, &recipe.args).spawn().ok()?;
     let mut tree = crate::process_tree::ProcessTreeGuard::bind_tokio_child(&child).ok()?;
@@ -433,7 +453,13 @@ pub(crate) async fn status(preset: &AgentPreset) -> Option<bool> {
 
 /// The inventory's sign-in observation for an installed preset.
 pub(crate) async fn inventory_state(preset: &AgentPreset) -> Option<&'static str> {
-    preset.management.as_ref()?.login.as_ref()?.status.as_ref()?;
+    preset
+        .management
+        .as_ref()?
+        .login
+        .as_ref()?
+        .status
+        .as_ref()?;
     Some(match status(preset).await {
         Some(true) => "signed_in",
         Some(false) => "signed_out",
@@ -476,7 +502,10 @@ mod tests {
             "Opening browser to sign in…\nIf the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&state=U8\nPaste code here if prompted > ".as_bytes(),
         );
         let (url, code) = prompt(login("claude"), &text).unwrap();
-        assert_eq!(url, "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&state=U8");
+        assert_eq!(
+            url,
+            "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&state=U8"
+        );
         assert_eq!(code, None);
         assert_eq!(login("claude").flow, LoginFlow::UrlPasteCode);
     }
@@ -547,7 +576,11 @@ mod tests {
                 "{}: a sign-in runs the harness's own launcher",
                 preset.id
             );
-            if let Some(pattern) = login.status.as_ref().and_then(|s| s.signed_in_regex.as_ref()) {
+            if let Some(pattern) = login
+                .status
+                .as_ref()
+                .and_then(|s| s.signed_in_regex.as_ref())
+            {
                 Regex::new(pattern).unwrap_or_else(|_| panic!("{} status", preset.id));
             }
         }
