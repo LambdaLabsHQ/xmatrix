@@ -271,6 +271,7 @@ export { canonicalJsonStringify } from "./relay-v2/canonical-json.js";
 export type {
   HumanClientMessage,
   HumanChannelCatalogChangedMessage,
+  HumanWorkspaceResourceChangedMessage,
   HumanConnectMessage,
   HumanFocusChannelMessage,
   HumanPresenceDigestMessage,
@@ -282,6 +283,7 @@ export {
   HUMAN_AUTH_INVALID_FAILURE_CODE,
   HUMAN_AUTH_REQUIRED_CLOSE_CODE,
   parseHumanChannelCatalogChangedMessage,
+  parseHumanWorkspaceResourceChangedMessage,
   parseHumanTraceAccessServerMessage,
   parseTraceAccessGrant,
 } from "./connections/human.js";

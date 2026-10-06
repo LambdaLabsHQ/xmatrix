@@ -11,6 +11,7 @@ import type { AgentRunPrincipal } from "./auth";
 import { appendChannelMessage } from "./channel-messages";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
+import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import { XMATRIX_MANAGEMENT_AVATAR_URL } from "./management-identity";
 import type { Env } from "./types";
 
@@ -153,6 +154,7 @@ export function registerCrossSpaceReadRoutes(app: Hono<{ Bindings: Env }>): void
           noticeError = (error as Error).message;
         }
       }
+      await notifyCrossSpaceRead(c.env, grant);
       return c.json({ grant: publicGrant(grant), created, ...(noticeError ? { noticeError } : {}) },
         created ? 201 : 200, { "cache-control": "private, no-store" });
     } catch (error) {
@@ -190,11 +192,20 @@ export function registerCrossSpaceReadRoutes(app: Hono<{ Bindings: Env }>): void
         (body.scope !== undefined && body.scope !== "channel" && body.scope !== "space")) {
       return c.json({ error: "action must be approve, deny, or revoke", code: "invalid_request" }, 400);
     }
-    return repository(c.env).decide({ requestId: crypto.randomUUID(),
+    const grant = await repository(c.env).decide({ requestId: crypto.randomUUID(),
       spaceId: c.req.param("spaceId"), grantId: c.req.param("grantId"), ownerUserId: authUser.id,
       action: body.action as "approve" | "deny" | "revoke",
       ...(body.scope ? { scope: body.scope as "channel" | "space" } : {}) });
+    if (!(grant instanceof Response)) await notifyCrossSpaceRead(c.env, grant);
+    return grant;
   }));
+}
+
+function notifyCrossSpaceRead(env: Env, grant: CrossSpaceReadGrant): Promise<void> {
+  return notifyWorkspaceResource(env, {
+    spaceId: grant.spaceId, resource: "cross_space_reads", channelId: grant.sourceChannelId,
+    recipientUserIds: [grant.ownerUserId],
+  });
 }
 
 /**

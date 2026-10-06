@@ -17,6 +17,8 @@ export interface ChannelCatalogChangeDetail {
   channelId?: string;
   spaceId?: string;
   revision?: number;
+  /** Message `sentAt`, used to reorder a row the sidebar already holds. */
+  at?: string;
 }
 
 const revisionWatermarks = new WeakMap<QueryClient, Map<string, number>>();
@@ -118,14 +120,34 @@ export function refreshSpaceCatalogForEvent(input: {
     return;
   }
 
+  // A message in a Channel the loaded page already shows only moves that row.
+  // The socket already delivered the message. Refetching every flat page would
+  // repeat GET /channels/page once per message.
+  if (detail?.kind === "message" && detail.channelId) {
+    const channelId = detail.channelId;
+    const catalogQueries = client.getQueryCache().findAll({ queryKey: prefix })
+      .filter((query) => query.queryKey[5] === "catalog");
+    let refetch = false;
+    for (const query of catalogQueries) {
+      const data = query.state.data as InfiniteData<ChannelCatalogPage, unknown> | undefined;
+      const flat = query.queryKey[6] === "flat";
+      if (data && promoteCatalogChannel(client, query.queryKey, data, channelId, detail.at)) continue;
+      if (flat) {
+        void client.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: "all" });
+        refetch = true;
+      }
+    }
+    if (refetch) void client.invalidateQueries({ queryKey: countsKey, exact: true });
+    if (!input.hasChannel(channelId)) input.resolveChannel(spaceId, channelId);
+    return;
+  }
+
   // `presence`: an Instance left or changed its rest, so the channel's member
   // presence must be read again even though the channel is already known.
-  if ((detail?.kind === "message" || detail?.kind === "presence") && detail.channelId) {
+  if (detail?.kind === "presence" && detail.channelId) {
     const channelId = detail.channelId;
     const affected = client.getQueryCache().findAll({ queryKey: prefix }).filter((query) => {
       if (query.queryKey[5] !== "catalog") return false;
-      // Activity can move an unloaded Channel into the first flat page, or
-      // make it enter a filtered list. Existing row membership is insufficient.
       if (query.queryKey[6] === "flat") return true;
       const data = query.state.data as InfiniteData<ChannelCatalogPage, string | null> | undefined;
       return rowsFromData(data).some((row) => row.channel.id === channelId);
@@ -134,8 +156,7 @@ export function refreshSpaceCatalogForEvent(input: {
       void client.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: "all" });
     }
     void client.invalidateQueries({ queryKey: countsKey, exact: true });
-    if (detail.kind === "presence") input.resolveChannel(spaceId, channelId, true);
-    else if (!input.hasChannel(channelId)) input.resolveChannel(spaceId, channelId);
+    input.resolveChannel(spaceId, channelId, true);
     return;
   }
 
@@ -172,7 +193,11 @@ export function coalesceCatalogChanges(
       if (!revision || detail.revision > revision.revision!) revision = detail;
     } else if ((detail.kind === "message" || detail.kind === "presence") && detail.channelId) {
       const known = perChannel.get(detail.channelId);
-      if (!known || detail.kind === "presence") perChannel.set(detail.channelId, detail);
+      // A later message keeps its sentAt. Presence still absorbs a message,
+      // because presence has to re-read the Channel.
+      if (!known || detail.kind === "presence" || known.kind === "message") {
+        perChannel.set(detail.channelId, detail);
+      }
     } else {
       structure ??= detail;
     }
@@ -189,6 +214,33 @@ export function coalesceCatalogChanges(
  * end. A Space with many working Agents would otherwise cancel and restart its
  * catalog read on every change and never finish one.
  */
+function promoteCatalogChannel(
+  client: QueryClient,
+  queryKey: QueryKey,
+  data: InfiniteData<ChannelCatalogPage, unknown>,
+  channelId: string,
+  at: string | undefined,
+): boolean {
+  let found: ChannelCatalogPageRow | undefined;
+  for (const page of data.pages) {
+    const row = page.rows.find((item) => item.channel.id === channelId);
+    if (row) found = row;
+  }
+  if (!found || data.pages.length === 0) return false;
+  if (at && found.ownActivityAt && at < found.ownActivityAt) return true;
+  const nextRow = at && at !== found.ownActivityAt ? { ...found, ownActivityAt: at } : found;
+  const alreadyFirst = data.pages[0]?.rows[0]?.channel.id === channelId && nextRow === found;
+  if (alreadyFirst) return true;
+  const pages = data.pages.map((page) => ({
+    ...page,
+    rows: page.rows.filter((row) => row.channel.id !== channelId),
+  }));
+  const first = pages[0]!;
+  pages[0] = { ...first, rows: [nextRow, ...first.rows] };
+  client.setQueryData(queryKey, { ...data, pages });
+  return true;
+}
+
 export function createCatalogRefreshThrottle(
   apply: (spaceId: string, details: ChannelCatalogChangeDetail[]) => void,
   windowMs = CATALOG_REFRESH_WINDOW_MS,
