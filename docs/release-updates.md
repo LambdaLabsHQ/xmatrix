@@ -42,6 +42,17 @@ only when it covers exactly that repository. Daemons that predate the Run
 binding keep working while `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` is
 on.
 
+## 1.0.0: first source-available release
+
+1.0.0 is the first release built from the public repository `LambdaLabsHQ/xmatrix` under FSL-1.1-ALv2. The source is published; self-hosting is not documented or supported, and external pull requests are closed in favour of the Prompt request issue template. The version moves from the 0.16 train to 1.0.0 with no protocol, storage, or update-channel break: `scripts/release-train.mjs` takes `version.json` because it is above the newest tag, the Windows continuity sequence orders 1.0.0 above every 0.x release, and installed CLI, desktop, and iOS clients update through the same channels.
+
+Since 0.16.854 this release adds:
+
+- GitHub: Agent repository tokens are bound to their Run and Git permissions; private repository events stay out of public channels; the `xmatrix/claim` check verifies the Space's installation; a second App install merges into the Space connection; the pre-review verdict lands only on the reviewed head commit.
+- Web: workspace lists update by push instead of polling; declined summons show on their card instead of a Channel notice; the summon panel shows Jev's input and answers; a Machine tag and its hover card open the Machine's page; message rhythm and composer alignment follow the avatar column; square jump highlight and reply quote card.
+- Runtime: crowded channels fan out across owner cells and sockets carry their owner; Cursor quota headroom follows the bucket of the selected model.
+- Reliability: Windows tree cleanup skips an unterminable older process on a recycled parent edge; expected Stripe, notice, and expired-credential conflicts are classified instead of reported as Hub errors.
+
 ## Unreleased: Summon tags show the routed machine
 
 A summon chip shows the choices behind the launch. Jev fills repository, model,
