@@ -152,7 +152,7 @@ async fn run_bounded(
     })
 }
 
-fn result(
+pub(crate) fn result(
     preset_id: &str,
     action: HarnessAction,
     status: HarnessActionStatus,
@@ -165,10 +165,11 @@ fn result(
         output_tail: None,
         item: None,
         inventory: None,
+        login: None,
     }
 }
 
-fn with_tail(mut result: HarnessActionResult, text: &str) -> HarnessActionResult {
+pub(crate) fn with_tail(mut result: HarnessActionResult, text: &str) -> HarnessActionResult {
     let tail = output_tail(text.as_bytes());
     result.output_tail = (!tail.is_empty()).then_some(tail);
     result
@@ -359,7 +360,7 @@ pub(crate) fn refused_request(
     )
 }
 
-fn registry_preset(preset_id: &str) -> Option<&'static AgentPreset> {
+pub(crate) fn registry_preset(preset_id: &str) -> Option<&'static AgentPreset> {
     agent_preset_by_id(preset_id).filter(|preset| preset.id == preset_id)
 }
 
@@ -447,13 +448,19 @@ async fn set_auto_update(preset: &AgentPreset, enabled: bool) -> HarnessActionRe
     result
 }
 
-async fn probed_item(preset: &AgentPreset) -> Option<serde_json::Value> {
+pub(crate) async fn probed_item(preset: &AgentPreset) -> Option<serde_json::Value> {
     serde_json::to_value(probe(preset, &HarnessPolicy::load()).await).ok()
 }
 
 /// The shared executor: unknown presets and missing platform recipes are
 /// `unsupported`; every completed action re-probes its preset.
 pub(crate) async fn execute(preset_id: &str, action: HarnessAction) -> HarnessActionResult {
+    if matches!(
+        action,
+        HarnessAction::LoginStart | HarnessAction::LoginFinish | HarnessAction::LoginCancel
+    ) {
+        return crate::runtime_daemon_harness_login::execute(preset_id, action, None).await;
+    }
     let preset = registry_preset(preset_id);
     if action == HarnessAction::Release {
         return match preset {

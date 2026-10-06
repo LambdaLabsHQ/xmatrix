@@ -89,3 +89,17 @@ test("harness action status is read within its owner", async () => {
     { controlId, presetId: "goose", action: "install", status: "queued" });
   assert.deepEqual(queries[0].values, [controlId, "owner"]);
 });
+
+test("only login_finish carries the code the owner pasted", async () => {
+  const owner = route({ id: "owner" });
+  const response = await owner.post({ machineId: "machine:a", presetId: "claude", action: "login_finish", code: "  pasted#code  " });
+  assert.equal(response.status, 202);
+  const issued = owner.calls.find(call => call.name === "issue").input;
+  assert.deepEqual({ ...issued.payload, requestId: "x" },
+    { type: "machine_harness_action", requestId: "x", presetId: "claude", action: "login_finish", code: "pasted#code" });
+  for (const body of [{ action: "login_start", code: "abc" }, { action: "update", code: "abc" },
+    { action: "login_finish", code: "a\nb" }, { action: "login_finish", code: "" }, { action: "login_finish", code: 7 }]) {
+    assert.equal((await owner.post({ machineId: "machine:a", presetId: "claude", ...body })).status, 400, JSON.stringify(body));
+  }
+  assert.equal(owner.calls.filter(call => call.name === "issue").length, 1);
+});
