@@ -359,6 +359,24 @@ export function compareChannelsByRecentActivity(
   return channelTitle(a).localeCompare(channelTitle(b));
 }
 
+/**
+ * A catalog page's loaded rows in the order their own times read.
+ *
+ * The Hub ranks a page when it is read, but each row then shows its live
+ * Channel, whose newest message can be later than that read. Ranking the rows
+ * again by that same activity keeps a later time from sitting below an earlier
+ * one until the next read. Pinned rows keep the lead the Hub gives them.
+ */
+export function rankCatalogChannels(
+  channels: readonly SerializedChannel[],
+  pinnedChannelIds: readonly string[]
+): SerializedChannel[] {
+  const pinRank = new Map(pinnedChannelIds.map((id, index) => [id, index]));
+  const rank = (channel: SerializedChannel) => pinRank.get(channel.id) ?? pinnedChannelIds.length;
+  return [...channels].sort((a, b) =>
+    rank(a) - rank(b) || channelRecentActivityMs(b) - channelRecentActivityMs(a));
+}
+
 export function channelRecentActivityMs(channel: SerializedChannel): number {
   return Math.max(
     timestampMs(channel.lastMessage?.sentAt),
