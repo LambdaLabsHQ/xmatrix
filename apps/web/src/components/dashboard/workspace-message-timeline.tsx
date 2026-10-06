@@ -2001,7 +2001,9 @@ export const MessageRow = memo(function MessageRow({
         // Every message sits on the same paper: whose it is reads from the
         // header, not from a tinted row. An open action row is a state, not
         // an author, so it keeps its tone.
-        message.continuation ? "py-0.5" : "py-1.5",
+        // Only a header row opens with extra room; every row closes alike, so
+        // the lines of one sender's run sit at one even pitch.
+        message.continuation ? "py-0.5" : "pt-1.5 pb-0.5",
         actionsOpen && "bg-muted"
       )}
     >
