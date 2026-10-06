@@ -7756,6 +7756,12 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   white-space: nowrap;
 }
 
+/* A Machine the reader has a page for: its card stays up under the pointer and opens it. */
+.xmatrix-app.app-machine-load-tip.app-machine-load-tip-link {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
 .xmatrix-app.app-machine-load-tip .app-machine-load-tip-name {
   font-weight: 650;
 }

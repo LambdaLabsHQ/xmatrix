@@ -1430,7 +1430,8 @@ function NamedAgentIdentityLabels({ message, spaceId, token }: {
   const machine = messageMachineIdentity(registrations, message);
   return <AgentIdentityLabels owner={message.senderOwnerLabel} wrap
     machine={registrationMachineName(registrations, machine?.machineId, machine?.ownerUserId) || "Unnamed machine"}
-    machineBusy={registrationMachineBusy(registrations, machine?.machineId, machine?.ownerUserId)} />;
+    machineBusy={registrationMachineBusy(registrations, machine?.machineId, machine?.ownerUserId)}
+    machineTarget={machine} />;
 }
 
 function NamedMachineRunFailureNotice({ body, metadata, spaceId, token }: {
