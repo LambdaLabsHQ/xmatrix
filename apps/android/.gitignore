@@ -1,0 +1,4 @@
+.gradle/
+local.properties
+captures/
+app/src/main/assets/xmatrix-web/

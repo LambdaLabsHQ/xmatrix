@@ -1,0 +1,6 @@
+<svg role="img" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>OpenCode</title>
+  <rect width="64" height="64" rx="14" fill="#131010"/>
+  <path fill="#5A5858" transform="translate(8 8) scale(2)" d="M8 6h8v12H8z"/>
+  <path fill="#fff" fill-rule="evenodd" transform="translate(8 8) scale(2)" d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/>
+</svg>

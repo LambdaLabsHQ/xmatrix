@@ -1,0 +1,401 @@
+{
+  "schemaVersion": 1,
+  "revision": "1",
+  "limits": {
+    "bodyLength": 131072,
+    "statements": 8,
+    "targets": 2048,
+    "operations": 32,
+    "rules": 32,
+    "terms": 32,
+    "depth": 4
+  },
+  "rules": [
+    {
+      "id": "runtime.model.v1",
+      "operation": "model",
+      "mode": "line",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "@",
+            "\uff20"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "target",
+          "format": "address"
+        },
+        {
+          "type": "space"
+        },
+        {
+          "type": "literal",
+          "values": [
+            "/model"
+          ]
+        },
+        {
+          "type": "optional",
+          "terms": [
+            {
+              "type": "space"
+            },
+            {
+              "type": "argument",
+              "name": "value",
+              "format": "token"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "runtime.effort.v1",
+      "operation": "effort",
+      "mode": "line",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "@",
+            "\uff20"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "target",
+          "format": "address"
+        },
+        {
+          "type": "space"
+        },
+        {
+          "type": "literal",
+          "values": [
+            "/effort",
+            "/reasoning"
+          ]
+        },
+        {
+          "type": "optional",
+          "terms": [
+            {
+              "type": "space"
+            },
+            {
+              "type": "argument",
+              "name": "value",
+              "format": "token"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "lifecycle.reborn.v1",
+      "operation": "reborn",
+      "mode": "mention",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "@",
+            "\uff20"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "agent",
+          "format": "address"
+        },
+        {
+          "type": "literal",
+          "values": [
+            ":"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "ordinal",
+          "format": "ordinal"
+        },
+        {
+          "type": "literal",
+          "values": [
+            ":reborn"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "lifecycle.handoff.v1",
+      "operation": "handoff",
+      "mode": "mention",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "@",
+            "\uff20"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "agent",
+          "format": "address"
+        },
+        {
+          "type": "literal",
+          "values": [
+            ":"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "ordinal",
+          "format": "ordinal"
+        },
+        {
+          "type": "literal",
+          "values": [
+            ":handoff:"
+          ]
+        },
+        {
+          "type": "literal",
+          "values": [
+            "@",
+            "\uff20"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "successor",
+          "format": "address"
+        }
+      ]
+    },
+    {
+      "id": "lifecycle.stop.v1",
+      "operation": "stop",
+      "mode": "message",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "@",
+            "\uff20"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "target",
+          "format": "address"
+        },
+        {
+          "type": "literal",
+          "values": [
+            ":stop",
+            ":kill"
+          ]
+        },
+        {
+          "type": "optional",
+          "terms": [
+            {
+              "type": "space"
+            },
+            {
+              "type": "argument",
+              "name": "reason",
+              "format": "remainder"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "channel.stop.v1",
+      "operation": "stop",
+      "mode": "message",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "/stop",
+            "/kill"
+          ]
+        },
+        {
+          "type": "space"
+        },
+        {
+          "type": "argument",
+          "name": "target",
+          "format": "token"
+        },
+        {
+          "type": "optional",
+          "terms": [
+            {
+              "type": "space"
+            },
+            {
+              "type": "argument",
+              "name": "reason",
+              "format": "remainder"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "channel.named-stop.v1",
+      "operation": "stop",
+      "mode": "message",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "xmatrix",
+            "@xmatrix",
+            "\uff20xmatrix"
+          ]
+        },
+        {
+          "type": "space"
+        },
+        {
+          "type": "literal",
+          "values": [
+            "stop",
+            "kill"
+          ]
+        },
+        {
+          "type": "space"
+        },
+        {
+          "type": "argument",
+          "name": "target",
+          "format": "token"
+        },
+        {
+          "type": "optional",
+          "terms": [
+            {
+              "type": "space"
+            },
+            {
+              "type": "argument",
+              "name": "reason",
+              "format": "remainder"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "connector.action.v1",
+      "operation": "connector",
+      "mode": "message",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "@",
+            "\uff20"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "provider",
+          "format": "provider"
+        },
+        {
+          "type": "literal",
+          "values": [
+            ":"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "action",
+          "format": "action"
+        },
+        {
+          "type": "optional",
+          "terms": [
+            {
+              "type": "literal",
+              "values": [
+                ":"
+              ]
+            },
+            {
+              "type": "argument",
+              "name": "target",
+              "format": "connector-target"
+            }
+          ]
+        },
+        {
+          "type": "optional",
+          "terms": [
+            {
+              "type": "space"
+            },
+            {
+              "type": "argument",
+              "name": "text",
+              "format": "remainder"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "launch.address.v1",
+      "operation": "launch",
+      "mode": "mention",
+      "boundary": "space",
+      "terms": [
+        {
+          "type": "literal",
+          "values": [
+            "@",
+            "\uff20"
+          ]
+        },
+        {
+          "type": "argument",
+          "name": "name",
+          "format": "launch-name"
+        }
+      ]
+    }
+  ],
+  "argumentFormats": {
+    "address": "[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}",
+    "ordinal": "[1-9][0-9]{0,15}",
+    "token": "[^\\s]+",
+    "remainder": "[\\s\\S]+",
+    "provider": "[a-zA-Z][a-zA-Z0-9_-]{0,79}",
+    "action": "[a-z_]{1,100}",
+    "connector-target": "[^\\s]*",
+    "launch-name": "[a-zA-Z][a-zA-Z0-9_-]{0,79}"
+  },
+  "launchFields": [
+    "repo",
+    "pwd",
+    "machine",
+    "model",
+    "effort",
+    "harness",
+    "launch",
+    "parameters"
+  ]
+}

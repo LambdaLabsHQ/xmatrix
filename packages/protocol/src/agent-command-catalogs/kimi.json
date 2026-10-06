@@ -1,0 +1,90 @@
+{
+  "runtime": "kimi",
+  "sourceUrl": "https://moonshotai.github.io/kimi-code/en/reference/slash-commands.html",
+  "sourceKind": "docs-table",
+  "version": "2026-08-01",
+  "notes": "ACP configOptions and available_commands_update remain authoritative for live model, thinking effort, mode, and runtime commands; this catalog supplies documented controls the ACP SDK layer cannot enumerate.",
+  "commands": [
+    {
+      "token": "/model",
+      "label": "Switch model",
+      "description": "Switch the active model.",
+      "mode": "typed",
+      "argumentSource": "agent-models"
+    },
+    {
+      "token": "/effort",
+      "label": "Thinking effort",
+      "description": "Set the thinking effort reported by the current model.",
+      "mode": "typed",
+      "argumentSource": "agent-efforts"
+    },
+    {
+      "token": "/new",
+      "label": "New session",
+      "description": "Start a fresh session.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/sessions",
+      "label": "Sessions",
+      "description": "Browse and restore historical sessions.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/help",
+      "label": "Help",
+      "description": "Show keyboard shortcuts and available commands.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/usage",
+      "label": "Usage",
+      "description": "Show token, context, and quota usage.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/status",
+      "label": "Status",
+      "description": "Show current runtime state and model.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/compact",
+      "label": "Compact history",
+      "description": "Compact conversation context.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/fork",
+      "label": "Fork session",
+      "description": "Fork the current conversation into a new session.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/settings",
+      "label": "Settings",
+      "description": "Open the settings panel.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/permission",
+      "label": "Permission mode",
+      "description": "Select the permission mode.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/mcp",
+      "label": "MCP servers",
+      "description": "List MCP servers and their status.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/plugins",
+      "label": "Plugins",
+      "description": "Open the plugin manager.",
+      "mode": "passthrough"
+    }
+  ]
+}

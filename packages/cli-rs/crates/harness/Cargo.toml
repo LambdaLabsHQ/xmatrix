@@ -1,0 +1,31 @@
+[package]
+name = "xmatrix-harness"
+version = "0.0.0"
+edition.workspace = true
+description = "Agent harness library: provider account-quota probes and the usage types that Claude Code, Codex, and ACP agent harnesses report."
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/LambdaLabsHQ/xmatrix"
+keywords = ["agent", "claude", "codex", "acp", "quota"]
+categories = ["api-bindings", "development-tools"]
+
+# Independently publishable: this crate must not depend on any other xmatrix-*
+# crate. The CLI core and runtime consume it, never the reverse.
+#
+# Like every CLI library crate it stays at 0.0.0 in the repository so a release
+# bump does not invalidate its build cache (scripts/version.mjs); a crates.io
+# publication sets its own version at publish time.
+
+[dependencies]
+colored = { workspace = true }
+dirs = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["process", "rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

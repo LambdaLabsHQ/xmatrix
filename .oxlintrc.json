@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "react", "nextjs"],
+  "categories": { "correctness": "warn" },
+  "ignorePatterns": ["apps/web/next-env.d.ts"],
+  "rules": { "nextjs/no-html-link-for-pages": "off" }
+}

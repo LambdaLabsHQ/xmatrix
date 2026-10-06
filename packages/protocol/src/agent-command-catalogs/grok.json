@@ -1,0 +1,103 @@
+{
+  "runtime": "grok",
+  "sourceUrl": "https://docs.x.ai/build/modes-and-commands",
+  "sourceKind": "docs-table",
+  "version": "2026-07-12",
+  "notes": "User-invocable skills also appear as /skill-name at runtime; scan skills paths as additive overlay later.",
+  "commands": [
+    {
+      "token": "/model",
+      "label": "Switch model",
+      "description": "Switch the active model.",
+      "mode": "typed",
+      "argumentSource": "agent-models"
+    },
+    {
+      "token": "/effort",
+      "label": "Effort",
+      "description": "Set reasoning effort for the current model.",
+      "mode": "typed",
+      "argumentSource": "agent-efforts"
+    },
+    {
+      "token": "/help",
+      "label": "Help",
+      "description": "Browse commands and keyboard shortcuts.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/compact",
+      "label": "Compact history",
+      "description": "Compact conversation history.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/plan",
+      "label": "Plan mode",
+      "description": "Enter plan mode.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/context",
+      "label": "Context usage",
+      "description": "View context usage.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/new",
+      "label": "New session",
+      "description": "Start a new session.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/clear",
+      "label": "Clear",
+      "description": "Alias for new session.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/settings",
+      "label": "Settings",
+      "description": "Open the settings modal.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/skills",
+      "label": "Skills",
+      "description": "Open skills extensions tab.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/mcps",
+      "label": "MCP servers",
+      "description": "Open MCP extensions tab.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/hooks",
+      "label": "Hooks",
+      "description": "Open hooks extensions tab.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/plugins",
+      "label": "Plugins",
+      "description": "Open plugins extensions tab.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/always-approve",
+      "label": "Always approve",
+      "description": "Toggle always-approve permission mode.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/quit",
+      "label": "Quit",
+      "description": "Quit the application.",
+      "mode": "passthrough"
+    }
+  ]
+}

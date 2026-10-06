@@ -1,0 +1,31 @@
+name: Deny scan
+
+# The public repository refuses any change that carries the official
+# deployment's identifiers or a credential. The identifiers come from the
+# XMATRIX_DENY_IDENTIFIERS secret, so the list itself is never public; a
+# pull request that cannot read it (a fork) fails closed.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    # The private repository legitimately holds the identifiers this refuses.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Scan every tracked file
+        env:
+          XMATRIX_DENY_IDENTIFIERS: ${{ secrets.XMATRIX_DENY_IDENTIFIERS }}
+          XMATRIX_DENY_REQUIRE_IDENTIFIERS: "true"
+        run: node scripts/deny-scan.mjs

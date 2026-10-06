@@ -1,0 +1,22 @@
+{
+  "runtime": "zcode",
+  "sourceUrl": "https://zcode.z.ai/en/docs/commands",
+  "sourceKind": "docs-table",
+  "version": "2026-07-12",
+  "notes": "Built-in commands only. User/workspace commands live under ~/.zcode/commands and can be merged later.",
+  "commands": [
+    {
+      "token": "/goal",
+      "label": "Goal",
+      "description": "Show, set, replace, pause, resume, or clear the current session goal.",
+      "mode": "typed",
+      "freeform": true
+    },
+    {
+      "token": "/compact",
+      "label": "Compact context",
+      "description": "Compact the current conversation context while preserving key information.",
+      "mode": "passthrough"
+    }
+  ]
+}

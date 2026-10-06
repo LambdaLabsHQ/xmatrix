@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "ci",
+  "cloudflare": {
+    "accountId": "00000000000000000000000000000000"
+  },
+  "hub": {
+    "workerName": "xmatrix-hub",
+    "origin": "https://hub.ci.invalid",
+    "placementRegion": "aws:ap-southeast-1",
+    "hyperdrive": {
+      "RELAY_POSTGRES": "00000000000000000000000000000001",
+      "RELAY_POSTGRES_SHARD_1": "00000000000000000000000000000002"
+    },
+    "vars": {
+      "RELAY_POSTGRES_SHARD_1_ID": "shard-1",
+      "AUTH_COOKIE_DOMAIN": ".ci.invalid"
+    }
+  },
+  "web": {
+    "workerName": "xmatrix-web",
+    "origin": "https://ci.invalid"
+  }
+}

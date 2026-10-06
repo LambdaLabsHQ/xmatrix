@@ -1,0 +1,45 @@
+[package]
+name = "xmatrix-windows-continuity"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+autobins = false
+
+[[bin]]
+name = "xmatrix-bootstrap"
+path = "src/bin/xmatrix-bootstrap.rs"
+
+[[bin]]
+name = "xmatrix-supervisor"
+path = "src/bin/xmatrix-supervisor.rs"
+
+[[bin]]
+name = "xmatrix-recovery-adapter"
+path = "src/bin/xmatrix-recovery-adapter.rs"
+
+[[bin]]
+name = "xmatrix-control-probe"
+path = "src/bin/xmatrix-control-probe.rs"
+
+[[bin]]
+name = "xmatrix-release-envelope"
+path = "src/bin/xmatrix-release-envelope.rs"
+
+[dependencies]
+fs2 = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Cryptography",
+  "Win32_Security_Cryptography_Catalog",
+  "Win32_Security_Cryptography_Sip",
+  "Win32_Security_WinTrust",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Pipes",
+] }

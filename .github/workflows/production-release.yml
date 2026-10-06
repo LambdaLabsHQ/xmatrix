@@ -1,0 +1,622 @@
+name: Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_run_id:
+        description: Production Release Request run that passed the selected gates
+        required: true
+        type: string
+      release_scope:
+        description: Exact scope authorized by the request marker
+        required: true
+        type: string
+
+# Runtime cell location (a Durable Object location hint) for the rendered profile.
+env:
+  XMATRIX_RUNTIME_LOCATION_HINT: ${{ vars.XMATRIX_RUNTIME_LOCATION_HINT }}
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-release-train
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: startsWith(github.ref, 'refs/tags/xmatrix-v')
+    runs-on: &release_runner ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      deploy_sha: ${{ steps.identity.outputs.deploy_sha }}
+      version: ${{ steps.identity.outputs.version }}
+      tag: ${{ steps.identity.outputs.tag }}
+      scope: ${{ steps.identity.outputs.scope }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - &restore_release_checkout
+        name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+
+      - name: Resolve exact immutable release identity
+        id: identity
+        run: |
+          set -euo pipefail
+          git fetch --force origin refs/heads/main:refs/remotes/origin/main
+          sha="$(git rev-parse HEAD)"
+          tag="$GITHUB_REF_NAME"
+          version="$(node -p "require('./version.json').version")"
+          test "$(git rev-parse "$tag^{commit}")" = "$sha"
+          test -z "$(git status --porcelain)"
+          echo "deploy_sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "scope=${{ inputs.release_scope }}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve production version floor
+        id: floor
+        uses: actions/github-script@v7
+        env:
+          CURRENT_TAG: ${{ steps.identity.outputs.tag }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            if (releases.some((release) => !release.draft && release.tag_name === process.env.CURRENT_TAG)) {
+              core.setFailed(`Production receipt ${process.env.CURRENT_TAG} already exists; use its authoritative run`);
+              return;
+            }
+            const versions = releases
+              .filter((release) => !release.draft && /^xmatrix-v\d+\.\d+\.\d+$/.test(release.tag_name))
+              .map((release) => release.tag_name.slice("xmatrix-v".length).split(".").map(Number))
+              .sort((a, b) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2]);
+            const latest = versions[0]?.join(".") || "0.16.2";
+            core.setOutput("latest_version", latest);
+
+      - name: Validate tag, versions, ancestry, cleanliness, and monotonicity
+        env:
+          XMATRIX_LAST_PRODUCTION_VERSION: ${{ steps.floor.outputs.latest_version }}
+        run: |
+          node scripts/version.mjs check
+          node scripts/production-release-policy.mjs validate-checkout "$GITHUB_REF_NAME"
+
+      - name: Require successful exact-SHA selected request evidence
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_SHA: ${{ steps.identity.outputs.deploy_sha }}
+          REQUEST_RUN_ID: ${{ inputs.request_run_id }}
+          RELEASE_SCOPE: ${{ inputs.release_scope }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const scope = process.env.RELEASE_SCOPE;
+            const components = ["hub", "web", "cli", "desktop", "android", "ios"];
+            const selected = scope.split(",");
+            if (!selected.length || selected.some((item) => !components.includes(item)) ||
+                components.filter((item) => selected.includes(item)).join(",") !== scope ||
+                (selected.includes("desktop") && !selected.includes("cli"))) {
+              core.setFailed("Invalid release scope");
+              return;
+            }
+            const productionRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "production-release.yml",
+              branch: context.ref.replace("refs/tags/", ""),
+              event: "workflow_dispatch",
+              per_page: 100,
+            });
+            const authoritative = productionRuns
+              .filter((run) => run.head_sha === process.env.DEPLOY_SHA)
+              .sort((left, right) => left.id - right.id)[0];
+            if (!authoritative || authoritative.id !== context.runId) {
+              core.setFailed(`Another authoritative production run already exists: ${authoritative?.html_url ?? "unknown"}`);
+              return;
+            }
+            if (!/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
+              core.setFailed("request_run_id must identify the authorizing Production Release Request");
+              return;
+            }
+            const { data: requestRun } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: Number(process.env.REQUEST_RUN_ID),
+            });
+            if (requestRun.path !== ".github/workflows/production-release-request.yml" ||
+                requestRun.event !== "workflow_dispatch" ||
+                requestRun.head_branch !== "main") {
+              core.setFailed("Production request does not authorize this exact main revision");
+              return;
+            }
+            // The request tested either this exact main revision or its release
+            // commit (that revision plus the stamped release version).
+            try {
+              require("child_process").execFileSync("node",
+                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
+                { stdio: "inherit" });
+            } catch {
+              core.setFailed("Production request does not authorize this exact main revision");
+              return;
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...context.repo, run_id: requestRun.id, per_page: 100,
+            });
+            // The request's `gates` job passes only when every gate its scope
+            // selects passed (ci.yml's aggregate and the iOS gate).
+            for (const name of ["plan", "gates"]) {
+              if (jobs.find((job) => job.name === name)?.conclusion !== "success") {
+                core.setFailed(`Production request ${scope} gate ${name} is not successful`);
+                return;
+              }
+            }
+            const dispatcher = jobs.find((job) => job.name === "authorize-and-dispatch");
+            const marker = dispatcher?.steps?.find((step) =>
+              step.name === `Record successful ${scope} production authorization`
+            );
+            if (marker?.conclusion !== "success") {
+              core.setFailed("Production request is missing its successful scope authorization marker");
+            }
+
+  verify-production-postgres:
+    needs: preflight
+    if: contains(format(',{0},', needs.preflight.outputs.scope), ',hub,')
+    environment: production
+    runs-on: *release_runner
+    # Normal expand apply is expected below five minutes; retain 3x margin.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_sha }}
+          fetch-depth: 0
+      - *restore_release_checkout
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+
+      - name: Require isolated production PostgreSQL credentials
+        shell: bash
+        env:
+          PRIMARY_DATABASE_URL: ${{ secrets.POSTGRES_MIGRATION_DATABASE_URL }}
+          SHARD_1_DATABASE_URL: ${{ secrets.POSTGRES_SHARD_1_MIGRATION_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          for name in PRIMARY_DATABASE_URL SHARD_1_DATABASE_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing $name"
+              exit 1
+            fi
+          done
+          if [[ "$PRIMARY_DATABASE_URL" = "$SHARD_1_DATABASE_URL" ]]; then
+            echo "::error::Production PostgreSQL shard credentials must be isolated"
+            exit 1
+          fi
+
+      - name: Plan and apply exact-tag expand migrations
+        shell: bash
+        working-directory: packages/db
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
+          PRIMARY_DATABASE_URL: ${{ secrets.POSTGRES_MIGRATION_DATABASE_URL }}
+          SHARD_1_DATABASE_URL: ${{ secrets.POSTGRES_SHARD_1_MIGRATION_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          DATABASE_URL="$PRIMARY_DATABASE_URL" POSTGRES_SHARD_ID=shard-0 \
+            node scripts/migrate.mjs plan --existing-expand-only --revision="$DEPLOY_SHA" \
+            | tee "$RUNNER_TEMP/production-postgres-primary-plan.json"
+          DATABASE_URL="$SHARD_1_DATABASE_URL" POSTGRES_SHARD_ID=shard-1 \
+            node scripts/migrate.mjs plan --existing-expand-only --revision="$DEPLOY_SHA" \
+            | tee "$RUNNER_TEMP/production-postgres-shard-1-plan.json"
+          DATABASE_URL="$PRIMARY_DATABASE_URL" POSTGRES_RUNTIME_ROLE=xmatrix_prod_runtime \
+            POSTGRES_SHARD_ID=shard-0 node scripts/migrate.mjs apply \
+            --existing-expand-only --revision="$DEPLOY_SHA" \
+            | tee "$RUNNER_TEMP/production-postgres-primary-apply.json"
+          DATABASE_URL="$SHARD_1_DATABASE_URL" \
+            POSTGRES_RUNTIME_ROLE=xmatrix_prod_shard_1_runtime \
+            POSTGRES_SHARD_ID=shard-1 node scripts/migrate.mjs apply \
+            --existing-expand-only --revision="$DEPLOY_SHA" \
+            | tee "$RUNNER_TEMP/production-postgres-shard-1-apply.json"
+
+      - name: Verify production PostgreSQL primary substrate and runtime access
+        shell: bash
+        working-directory: packages/db
+        env:
+          DATABASE_URL: ${{ secrets.POSTGRES_MIGRATION_DATABASE_URL }}
+          POSTGRES_RUNTIME_ROLE: xmatrix_prod_runtime
+          POSTGRES_SHARD_ID: shard-0
+          POSTGRES_FLEET_SHARD_IDS: shard-0,shard-1
+          POSTGRES_CAPACITY_CLASS: shared-single-node-v1
+        run: |
+          set -euo pipefail
+          pnpm substrate:verify | tee "$RUNNER_TEMP/production-postgres-primary-substrate.json"
+          node scripts/substrate.mjs runtime-access \
+            | tee "$RUNNER_TEMP/production-postgres-primary-runtime-access.json"
+
+      - name: Verify production PostgreSQL shard-1 substrate and runtime access
+        shell: bash
+        working-directory: packages/db
+        env:
+          DATABASE_URL: ${{ secrets.POSTGRES_SHARD_1_MIGRATION_DATABASE_URL }}
+          POSTGRES_RUNTIME_ROLE: xmatrix_prod_shard_1_runtime
+          POSTGRES_SHARD_ID: shard-1
+          POSTGRES_FLEET_SHARD_IDS: shard-0,shard-1
+          POSTGRES_CAPACITY_CLASS: shared-single-node-v1
+        run: |
+          set -euo pipefail
+          pnpm substrate:verify | tee "$RUNNER_TEMP/production-postgres-shard-1-substrate.json"
+          node scripts/substrate.mjs runtime-access \
+            | tee "$RUNNER_TEMP/production-postgres-shard-1-runtime-access.json"
+
+      - name: Verify pinned production Hyperdrive bindings and policy
+        shell: bash
+        working-directory: packages/hub
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          XMATRIX_HYPERDRIVE_ID: ${{ secrets.XMATRIX_HYPERDRIVE_ID }}
+          XMATRIX_HYPERDRIVE_SHARD_1_ID: ${{ secrets.XMATRIX_HYPERDRIVE_SHARD_1_ID }}
+          XMATRIX_PLATFORM_ADMIN_EMAILS: ${{ secrets.XMATRIX_PLATFORM_ADMIN_EMAILS }}
+          XMATRIX_PLATFORM_ADMIN_SPACE_ID: ${{ secrets.XMATRIX_PLATFORM_ADMIN_SPACE_ID }}
+        run: |
+          set -euo pipefail
+          node ../../scripts/deploy-config.mjs render production hub
+          node ../../scripts/production-postgres-config-policy.mjs verify-config wrangler.generated.production.toml \
+            | tee "$RUNNER_TEMP/production-postgres-config-policy.json"
+
+      - name: Retain production PostgreSQL readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-postgres-readiness-${{ needs.preflight.outputs.deploy_sha }}
+          path: |
+            ${{ runner.temp }}/production-postgres-primary-plan.json
+            ${{ runner.temp }}/production-postgres-primary-apply.json
+            ${{ runner.temp }}/production-postgres-primary-substrate.json
+            ${{ runner.temp }}/production-postgres-primary-runtime-access.json
+            ${{ runner.temp }}/production-postgres-shard-1-plan.json
+            ${{ runner.temp }}/production-postgres-shard-1-apply.json
+            ${{ runner.temp }}/production-postgres-shard-1-substrate.json
+            ${{ runner.temp }}/production-postgres-shard-1-runtime-access.json
+            ${{ runner.temp }}/production-postgres-config-policy.json
+          if-no-files-found: error
+          retention-days: 30
+
+  hub:
+    needs: [preflight, verify-production-postgres]
+    if: contains(format(',{0},', needs.preflight.outputs.scope), ',hub,')
+    uses: ./.github/workflows/server-release.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      target: hub
+      deploy_sha: ${{ needs.preflight.outputs.deploy_sha }}
+      request_run_id: ${{ inputs.request_run_id }}
+      release_scope: ${{ needs.preflight.outputs.scope }}
+    secrets: inherit
+
+  # Building the Web bundle mutates nothing users can reach, so it starts
+  # alongside the Hub deploy; only the deploy waits for Hub. It waits for
+  # PostgreSQL readiness like the Hub deploy, so a train blocked there keeps the
+  # exact preflight/PG-readiness shape production-release-recovery.yml proves.
+  web-build:
+    needs: [preflight, verify-production-postgres]
+    if: >-
+      always() && needs.preflight.result == 'success' &&
+      (needs.verify-production-postgres.result == 'skipped' || needs.verify-production-postgres.result == 'success') &&
+      contains(format(',{0},', needs.preflight.outputs.scope), ',web,')
+    uses: ./.github/workflows/server-release.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      target: web-build
+      deploy_sha: ${{ needs.preflight.outputs.deploy_sha }}
+      request_run_id: ${{ inputs.request_run_id }}
+      release_scope: ${{ needs.preflight.outputs.scope }}
+    secrets: inherit
+
+  web:
+    needs: [preflight, hub, web-build]
+    if: >-
+      always() && needs.preflight.result == 'success' &&
+      contains(format(',{0},', needs.preflight.outputs.scope), ',web,') &&
+      (needs.hub.result == 'skipped' || needs.hub.result == 'success') &&
+      needs.web-build.result == 'success'
+    uses: ./.github/workflows/server-release.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      target: web
+      deploy_sha: ${{ needs.preflight.outputs.deploy_sha }}
+      request_run_id: ${{ inputs.request_run_id }}
+      release_scope: ${{ needs.preflight.outputs.scope }}
+    secrets: inherit
+
+  client-readiness:
+    needs: [preflight, hub, web]
+    if: >-
+      always() && needs.preflight.result == 'success' &&
+      (contains(format(',{0},', needs.preflight.outputs.scope), ',cli,') ||
+       contains(format(',{0},', needs.preflight.outputs.scope), ',android,') ||
+       contains(format(',{0},', needs.preflight.outputs.scope), ',ios,')) &&
+      (needs.hub.result == 'skipped' || needs.hub.result == 'success') &&
+      (needs.web.result == 'skipped' || needs.web.result == 'success')
+    runs-on: *release_runner
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_sha }}
+      - name: Restore full checkout before local actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      - name: Require live Hub admission for selected client version
+        env:
+          RELEASE_SCOPE: ${{ needs.preflight.outputs.scope }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          compatibility_args=()
+          if [[ ",$RELEASE_SCOPE," == *,cli,* ]]; then
+            compatibility_args+=(--cli-version "$version")
+          fi
+          if [[ ",$RELEASE_SCOPE," == *,desktop,* || ",$RELEASE_SCOPE," == *,android,* || ",$RELEASE_SCOPE," == *,ios,* ]]; then
+            compatibility_args+=(--web-version "$version")
+          fi
+          XMATRIX_HUB_ORIGIN="$(node scripts/deploy-config.mjs origin production hub)"
+          node scripts/hub-postdeploy-smoke.mjs \
+            --url "$XMATRIX_HUB_ORIGIN/" \
+            --attempts 12 --delay-ms 5000 \
+            "${compatibility_args[@]}"
+
+  # Building and uploading CLI release parts mutates nothing users can reach, so it
+  # starts alongside the Hub deploy instead of behind Hub, Web, and
+  # client-readiness. It waits for PostgreSQL readiness like the Hub deploy, so
+  # a train blocked there keeps the exact preflight/PG-readiness shape that
+  # production-release-recovery.yml proves before clearing serialization.
+  cli-build:
+    needs: [preflight, verify-production-postgres]
+    if: >-
+      always() && needs.preflight.result == 'success' &&
+      (needs.verify-production-postgres.result == 'skipped' || needs.verify-production-postgres.result == 'success') &&
+      contains(format(',{0},', needs.preflight.outputs.scope), ',cli,')
+    uses: ./.github/workflows/cli-build.yml
+    permissions:
+      actions: read
+      contents: read
+    secrets: inherit
+
+  cli:
+    needs: [preflight, client-readiness, cli-build]
+    if: >-
+      always() && needs.preflight.result == 'success' && needs.client-readiness.result == 'success' &&
+      needs.cli-build.result == 'success' &&
+      contains(format(',{0},', needs.preflight.outputs.scope), ',cli,')
+    uses: ./.github/workflows/client-publish.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      component: cli
+      tag: ${{ needs.cli-build.outputs.tag }}
+      parts: linux-x64,macos-arm64,windows-x64
+      checksums: true
+    secrets: inherit
+
+  desktop:
+    needs: [preflight, cli]
+    if: >-
+      always() && needs.preflight.result == 'success' && needs.cli.result == 'success' &&
+      contains(format(',{0},', needs.preflight.outputs.scope), ',desktop,')
+    uses: ./.github/workflows/desktop-release.yml
+    permissions:
+      actions: read
+      contents: read
+    secrets: inherit
+
+  android:
+    needs: [preflight, client-readiness]
+    if: >-
+      always() && needs.preflight.result == 'success' && needs.client-readiness.result == 'success' &&
+      contains(format(',{0},', needs.preflight.outputs.scope), ',android,')
+    uses: ./.github/workflows/android-deploy.yml
+    permissions:
+      actions: read
+      contents: read
+    secrets: inherit
+
+  ios:
+    needs: [preflight, client-readiness]
+    if: >-
+      always() && needs.preflight.result == 'success' && needs.client-readiness.result == 'success' &&
+      contains(format(',{0},', needs.preflight.outputs.scope), ',ios,')
+    uses: ./.github/workflows/ios-testflight.yml
+    permissions:
+      actions: write
+      contents: read
+    secrets: inherit
+
+  deployment-receipt:
+    name: deployment receipt
+    needs: [preflight, verify-production-postgres, hub, web, client-readiness, cli, desktop, android, ios]
+    if: >-
+      always() && needs.preflight.result == 'success' &&
+      (contains(format(',{0},', needs.preflight.outputs.scope), ',hub,') == (needs.hub.result == 'success')) &&
+      (contains(format(',{0},', needs.preflight.outputs.scope), ',hub,') == (needs.verify-production-postgres.result == 'success')) &&
+      (contains(format(',{0},', needs.preflight.outputs.scope), ',web,') == (needs.web.result == 'success')) &&
+      (contains(format(',{0},', needs.preflight.outputs.scope), ',cli,') == (needs.cli.result == 'success')) &&
+      (contains(format(',{0},', needs.preflight.outputs.scope), ',desktop,') == (needs.desktop.result == 'success')) &&
+      (contains(format(',{0},', needs.preflight.outputs.scope), ',android,') == (needs.android.result == 'success')) &&
+      (contains(format(',{0},', needs.preflight.outputs.scope), ',ios,') == (needs.ios.result == 'success')) &&
+      ((contains(format(',{0},', needs.preflight.outputs.scope), ',cli,') || contains(format(',{0},', needs.preflight.outputs.scope), ',android,') || contains(format(',{0},', needs.preflight.outputs.scope), ',ios,')) == (needs.client-readiness.result == 'success')) &&
+      (needs.verify-production-postgres.result == 'success' || needs.verify-production-postgres.result == 'skipped') &&
+      (needs.hub.result == 'success' || needs.hub.result == 'skipped') &&
+      (needs.web.result == 'success' || needs.web.result == 'skipped') &&
+      (needs.cli.result == 'success' || needs.cli.result == 'skipped') &&
+      (needs.desktop.result == 'success' || needs.desktop.result == 'skipped') &&
+      (needs.android.result == 'success' || needs.android.result == 'skipped') &&
+      (needs.ios.result == 'success' || needs.ios.result == 'skipped') &&
+      (needs.client-readiness.result == 'success' || needs.client-readiness.result == 'skipped')
+    environment: production
+    runs-on: *release_runner
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_sha }}
+      - &restore_release_checkout9
+        name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Record successful ${{ needs.preflight.outputs.scope }} component deployment
+        id: receipt
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_SHA: ${{ needs.preflight.outputs.deploy_sha }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_SCOPE: ${{ needs.preflight.outputs.scope }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const fs = require("fs");
+            const origin = (component) => require("child_process")
+              .execFileSync("node", ["scripts/deploy-config.mjs", "origin", "production", component], { encoding: "utf8" }).trim();
+            const origins = { XMATRIX_HUB_ORIGIN: origin("hub"), XMATRIX_APP_ORIGIN: origin("web") };
+            const receipt = {
+              schemaVersion: 1,
+              scope: process.env.RELEASE_SCOPE,
+              components: process.env.RELEASE_SCOPE.split(","),
+              releaseTag: process.env.RELEASE_TAG,
+              version: process.env.RELEASE_VERSION,
+              deploySha: process.env.DEPLOY_SHA,
+              ...(process.env.RELEASE_SCOPE.split(",").includes("hub") ? { hubUrl: origins.XMATRIX_HUB_ORIGIN } : {}),
+              ...(process.env.RELEASE_SCOPE.split(",").includes("web") ? { webUrl: origins.XMATRIX_APP_ORIGIN } : {}),
+              runId: context.runId,
+              runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              recordedAt: new Date().toISOString(),
+            };
+            const receiptPath = `${process.env.RUNNER_TEMP}/production-deployment-receipt.json`;
+            await fs.promises.writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+            core.setOutput("path", receiptPath);
+            await core.summary
+              .addHeading(`Production deployment completed: ${receipt.releaseTag}`)
+              .addTable([
+                [{ data: "Surface", header: true }, { data: "Result", header: true }],
+                ["Scope", receipt.scope],
+                ...(receipt.hubUrl ? [["Hub", receipt.hubUrl]] : []),
+                ...(receipt.webUrl ? [["Web", receipt.webUrl]] : []),
+                ...receipt.components.filter((component) => !["hub", "web"].includes(component))
+                  .map((component) => [component, "published"]),
+                ["SHA", receipt.deploySha],
+              ])
+              .write();
+      - name: Persist deployment receipt to R2
+        env:
+          R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
+          R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          XMATRIX_RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          XMATRIX_RELEASE_COMPONENT: production-deployment-receipt
+          XMATRIX_RELEASE_SHA: ${{ needs.preflight.outputs.deploy_sha }}
+        run: |
+          set -euo pipefail
+          receipt_dir="$RUNNER_TEMP/production-deployment-receipt"
+          rm -rf "$receipt_dir"
+          mkdir -p "$receipt_dir"
+          cp "${{ steps.receipt.outputs.path }}" "$receipt_dir/"
+          node scripts/r2-release-store.mjs upload-directory \
+            --bucket xmatrix-release-receipts \
+            --prefix "production/${{ needs.preflight.outputs.tag }}/deployment" \
+            --directory "$receipt_dir"
+
+  receipt:
+    name: selected train receipt
+    needs: [preflight, deployment-receipt]
+    if: always() && needs.preflight.result == 'success' && needs.deployment-receipt.result == 'success'
+    environment: production
+    runs-on: *release_runner
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.deploy_sha }}
+      - *restore_release_checkout9
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      - name: Publish immutable selected release receipt
+        env:
+          GITHUB_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN || github.token }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_TITLE: xMatrix v${{ needs.preflight.outputs.version }}
+          RELEASE_NOTES: |
+            Production ${{ needs.preflight.outputs.scope }} release completed from `${{ needs.preflight.outputs.deploy_sha }}`.
+
+            - Scope: `${{ needs.preflight.outputs.scope }}` (only selected components were published)
+            - Components: `${{ needs.preflight.outputs.scope }}`
+            - Deployment receipt: R2 `xmatrix-release-receipts/production/${{ needs.preflight.outputs.tag }}/deployment`
+            - Authoritative run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+          RELEASE_DRAFT: "false"
+          RELEASE_PRERELEASE: "false"
+          RELEASE_FORCE_TAG: "false"
+          RELEASE_ALLOW_EMPTY_ASSETS: "true"
+          RELEASE_KEEP_STALE_ASSETS: "true"
+          RELEASE_IMMUTABLE_VERSION: "true"
+          RELEASE_TRANSACTION_ID: ${{ github.run_id }}:${{ github.run_attempt }}
+        run: node scripts/publish-github-release.mjs

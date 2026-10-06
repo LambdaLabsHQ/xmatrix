@@ -1,0 +1,73 @@
+name: Release Promote
+
+# A production train publishes each client release to the dev channel. Once it
+# has been confirmed on dev, this points the stable channel at the same sealed
+# release: no rebuild, the bytes users get are the bytes that were checked.
+# r2-release-store.mjs refuses to move a channel back to an older release.
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Client to promote
+        required: true
+        type: choice
+        options:
+          - cli
+          - desktop
+          - android
+      tag:
+        description: Sealed <component>-v<version> release to promote (the dev channel's current release)
+        required: true
+        type: string
+
+concurrency:
+  group: release-promote-${{ inputs.component }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      # A sparse cone another job left on this persistent runner survives
+      # checkout when HEAD is already on the ref: restore the full tree.
+      - name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/setup-pnpm-node/action.yml
+
+      - uses: ./.github/actions/setup-pnpm-node
+
+      - name: Point the stable channel at the sealed release
+        timeout-minutes: 10
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
+          R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
+          RELEASE_COMPONENT: ${{ inputs.component }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^${RELEASE_COMPONENT}-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Promotion needs a ${RELEASE_COMPONENT}-v<version> tag, got '$RELEASE_TAG'." >&2
+            exit 1
+          fi
+          node scripts/r2-release-store.mjs publish-channel \
+            --bucket xmatrix-release-assets \
+            --component "$RELEASE_COMPONENT" \
+            --channel stable \
+            --prefix "releases/$RELEASE_TAG"

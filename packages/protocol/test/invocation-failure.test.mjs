@@ -1,0 +1,51 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { launchRefusalCode, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
+  preparationRejectionMessage, parseDecisionAnswerFailure,
+  REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
+
+test("every registered summon rejection has a public, bounded explanation", () => {
+  for (const code of REGISTRATION_PREPARATION_REJECTION_CODES) {
+    assert.match(preparationRejectionMessage(code), /[Nn]o launch was allocated\.$/);
+  }
+  assert.match(preparationFailureSummary("registration_directory_unavailable"), /requested directory is not authorized/);
+  assert.equal(preparationFailureSummary("registration_repository_unavailable"), undefined);
+  assert.equal(preparationRejectionMessage("registration_environment_private_provider_payload"), undefined);
+  // An offline machine is told apart from a missing registration or Workspace.
+  assert.match(preparationFailureSummary("registration_daemon_offline"), /machine is offline.*when it reconnects\.$/);
+  assert.doesNotMatch(preparationRejectionMessage("registration_daemon_offline"), /workspace|registered environment/i);
+});
+
+test("a named offline machine is not reported as a missing registration", () => {
+  const offline = [{ machineId: "laptop-id", machineName: "Laptop", reason: "daemon_offline" }];
+  assert.equal(launchRefusalCode("registration_machine_unavailable", "Laptop", offline), "registration_daemon_offline");
+  assert.equal(launchRefusalCode("registration_not_found", "machine:laptop-id", [{ machineId: "machine:laptop-id", reason: "daemon_offline" }]), "registration_daemon_offline");
+  assert.equal(launchRefusalCode("registration_machine_unavailable", "Other", offline), "registration_machine_unavailable");
+  assert.equal(launchRefusalCode("registration_not_found", undefined, offline), "registration_not_found");
+  assert.equal(launchRefusalCode("registration_harness_unavailable", "Laptop", offline), "registration_harness_unavailable");
+});
+
+test("historical failure evidence resolves to the same public cause as new rejections", () => {
+  for (const [record, expected] of [
+    [{ status: "failed", reason: "timeout" }, "routing_parameter_jev_aborted"],
+    [{ status: "failed", reason: "invalid_answer" }, "routing_parameter_invalid_answer"],
+    [{ status: "failed", reason: "provider_error", code: "jev_rate_limited" }, "routing_parameter_jev_rate_limited"],
+    [{ status: "failed", reason: "timeout", code: "jev_rate_limited" }, "routing_parameter_jev_aborted"],
+    [{ status: "failed", reason: "provider_error", code: "jev_secret_private" }, "routing_parameter_jev_evaluation_failed"],
+  ]) {
+    assert.equal(parameterFailureCodeFromDecisionRecord(record), expected);
+    assert.ok(preparationFailureSummary(expected));
+    assert.match(preparationRejectionMessage(expected), /No launch was allocated\.$/);
+  }
+  assert.equal(parameterFailureCodeFromDecisionRecord({ status: "succeeded", code: "jev_rate_limited" }), undefined);
+  assert.equal(preparationRejectionMessage("private_provider_error"), undefined);
+});
+
+test("answer failures name the actual request key without a fixed parameter list", () => {
+  const detail = { questionKey: "browserMode", issue: "choice_not_offered" };
+  assert.deepEqual(parseDecisionAnswerFailure(detail), detail);
+  assert.equal(preparationFailureSummary("routing_parameter_invalid_answer", detail),
+    `Jev's "browserMode" answer selected an option that was not offered.`);
+  assert.equal(parseDecisionAnswerFailure({ questionKey: "private\ntext", issue: "choice_not_offered" }), undefined);
+  assert.equal(parseDecisionAnswerFailure({ questionKey: "browserMode", issue: "private error" }), undefined);
+});

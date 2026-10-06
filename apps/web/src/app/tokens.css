@@ -1,0 +1,423 @@
+/* Design tokens: the one place each custom property gets its value on
+   the document, the body canvas and the app shell. The app shell sits inside
+   the canvas, so it inherits every canvas value it does not set itself. */
+
+:root {
+  --font-sans-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-heading-family: Manrope, var(--font-sans-family);
+  --font-mono-family: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  --background: oklch(0.975 0.006 235);
+  --foreground: oklch(0.19 0.013 238);
+  --card: oklch(0.99 0.004 235);
+  --card-foreground: oklch(0.19 0.013 238);
+  --popover: oklch(0.99 0.004 235);
+  --popover-foreground: oklch(0.19 0.013 238);
+  --primary: oklch(0.38 0.034 220);
+  --primary-foreground: oklch(0.985 0.004 235);
+  --secondary: oklch(0.93 0.01 232);
+  --secondary-foreground: oklch(0.22 0.014 238);
+  --muted: oklch(0.93 0.01 232);
+  --muted-foreground: oklch(0.48 0.018 232);
+  --accent: oklch(0.72 0.075 77);
+  --accent-foreground: oklch(0.2 0.012 238);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.34 0.018 232 / 14%);
+  --input: oklch(0.34 0.018 232 / 18%);
+  --ring: oklch(0.5 0.035 215);
+  --chart-1: oklch(0.48 0.04 215);
+  --chart-2: oklch(0.64 0.08 78);
+  --chart-3: oklch(0.55 0.07 168);
+  --chart-4: oklch(0.62 0.085 20);
+  --chart-5: oklch(0.56 0.055 278);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.96 0.008 235);
+  --sidebar-foreground: oklch(0.2 0.014 238);
+  --sidebar-primary: oklch(0.38 0.034 220);
+  --sidebar-primary-foreground: oklch(0.985 0.004 235);
+  --sidebar-accent: oklch(0.9 0.014 232);
+  --sidebar-accent-foreground: oklch(0.22 0.014 238);
+  --sidebar-border: oklch(0.34 0.018 232 / 14%);
+  --sidebar-ring: oklch(0.5 0.035 215);
+
+  /* Stacking ladder. Every layer of chrome and floating UI maps to one of these
+     six stops; do not introduce new z-index literals. Declared on :root so
+     overlays portaled to <body> resolve them too.
+     content(0) < raised(10, composer/sticky heads/in-view docks)
+     < nav(40, topbar + tab dock) < overlay(50, sheets/dialogs + backdrops)
+     < popover(60, menus/suggestions/command panels) < toast(70). */
+  --z-content: 0;
+  --z-raised: 10;
+  --z-nav: 40;
+  --z-overlay: 50;
+  --z-popover: 60;
+  --z-toast: 70;
+
+  /* THEME: wood — values only; structure lives in materials.css */
+
+  /* plaque ink (empty states) */
+  --m-plaque-ink: oklch(0.26 0.05 58);
+  --m-plaque-ink-sub: oklch(0.38 0.05 60);
+
+  /* in-panel controls */
+  --m-trough-bg: oklch(1 0.02 88 / 0.16);
+  --m-trough-shadow: inset 0 1.5px 3px oklch(0.35 0.06 60 / 0.28),
+    inset 0 0 0 0.5px oklch(0.4 0.07 60 / 0.18),
+    inset 0 -1px 0 oklch(1 0.02 90 / 0.55),
+    0 1px 0 oklch(1 0.02 90 / 0.45);
+  --m-trough-focus: inset 0 1.5px 3px oklch(0.35 0.06 60 / 0.22),
+    inset 0 0 0 1px oklch(0.72 0.11 70 / 0.7),
+    inset 0 -1px 0 oklch(1 0.02 90 / 0.55),
+    0 0 0 3px oklch(0.78 0.1 70 / 0.25);
+  --m-paper-bg: oklch(0.965 0.012 85 / 0.85);
+  --m-paper-edge: inset 0 0 0 1px oklch(0.6 0.05 65 / 0.25),
+    0 1px 3px oklch(0.35 0.06 60 / 0.18);
+  --m-chip-bg: oklch(0.965 0.012 85);
+  --m-chip-ink: oklch(0.3 0.04 55);
+  --m-chip-edge: inset 0 0 0 0.5px oklch(0.6 0.05 65 / 0.3),
+    0 1px 2px oklch(0.35 0.06 60 / 0.15);
+
+  /* liquid glass pills on the planks */
+  --m-pill-fill: oklch(1 0.02 88 / 0.2);
+  --m-pill-rim: var(--app-glass-edge);
+  --m-channel-pill-rim: var(--app-glass-edge);
+  --m-slabglass-fill: oklch(1 0.015 88 / 0.1);
+  --m-slabglass-fill-strong: oklch(1 0.015 88 / 0.16);
+  --m-slabglass-fill-muted: oklch(1 0.015 88 / 0.06);
+
+  /* popovers */
+  --m-pop-bg: oklch(0.97 0.015 85 / 0.68);
+  --m-pop-shadow: inset 0 0 0 0.5px oklch(1 0.02 90 / 0.7),
+    inset 0 1px 0 oklch(1 0.02 90 / 0.9),
+    0 10px 28px oklch(0.3 0.06 55 / 0.3),
+    0 2px 8px oklch(0.3 0.06 55 / 0.18);
+  --m-pop-hover: oklch(0.88 0.06 75 / 0.5);
+  --m-pop-checked: oklch(0.86 0.07 74 / 0.55);
+
+  /* segmented */
+  --m-seg-tray-shadow: inset 0 1.5px 3px oklch(0.35 0.06 60 / 0.25),
+    inset 0 0 0 0.5px oklch(0.4 0.07 60 / 0.15),
+    inset 0 -1px 0 oklch(1 0.02 90 / 0.45);
+  --m-thumb-bg: oklch(0.985 0.012 85);
+  --m-thumb-ink: oklch(0.28 0.04 55);
+  --m-thumb-shadow: inset 0 0 0 0.5px oklch(1 0.02 90 / 0.8),
+    0 1px 3px oklch(0.35 0.06 60 / 0.3),
+    0 0.5px 1px oklch(0.35 0.06 60 / 0.2);
+
+  /* Status ink. The language is monochrome plus one brass accent, so a state
+     is told in *ink* on the shared chip material — never in a tinted box. A
+     Tailwind colour utility cannot say this: the monochrome sweep in
+     globals.css flattens every `amber-*`/`emerald-*`/`sky-*`/`orange-*` class
+     to grey, so a state written that way renders as no state at all. These
+     four tiers are the whole vocabulary:
+     attention  brass — a person has to do something
+     settled    plain plank ink — nothing to do, this is the resting state
+     secondary  stepped back — true but not what you are here for
+     alert      the Space/record cannot proceed
+     The Space plan mark is the original of this pattern and now reads from it
+     rather than carrying its own values. */
+  --m-ink-attention: oklch(0.42 0.11 66);
+  --m-ink-settled: oklch(0.44 0.015 60);
+  --m-ink-secondary: oklch(0.5 0.03 62);
+  --m-ink-alert: var(--destructive);
+
+  /* Space plan mark: brass says the Space is spending, plain ink says it is on
+     Free, and the alert ink says it cannot send at all. `ending` is Pro without
+     its brass — still Pro, but no longer renewing. */
+  --m-plan-pro-ink: var(--m-ink-attention);
+  --m-plan-free-ink: var(--m-ink-settled);
+  --m-plan-ending-ink: var(--m-ink-secondary);
+  --m-plan-blocked-ink: var(--m-ink-alert);
+
+  /* Plan card. Paid is a pane of glass on the wood plank, black text with
+     brass for the plan's name and marks; Free is ink on the paper. */
+  --m-plan-wood-ink: oklch(0.2 0.03 55);
+  --m-plan-wood-muted: oklch(0.36 0.04 58);
+  --m-plan-wood-rule: oklch(0.42 0.09 66 / 0.55);
+  --m-plan-brass: oklch(0.5 0.11 68);
+  --m-plan-action: oklch(0.2 0.03 55);
+  --m-plan-card-ink: oklch(0.3 0.03 55);
+  --m-plan-free-muted: oklch(0.5 0.025 60);
+  --m-plan-free-rule: oklch(0.4 0.03 60 / 0.22);
+  --m-plan-pip-empty: oklch(0.4 0.03 60 / 0.4);
+  --m-plan-stub: oklch(0.975 0.01 85);
+
+  /* Notice block: a flat neutral surface with an inset rail in the tone's ink.
+     A rail rather than a wash because the wash is what the sweep kills, and a
+     `::before` rail would lose — every bordered card's pseudo elements are
+     already spent on the liquid-glass fill and caustics. */
+  --m-notice-bg: oklch(0 0 0 / 0.05);
+  --m-notice-rail: 3px;
+
+  /* reading island */
+  --m-island-bg: oklch(0.97 0.012 85);
+  --m-island-edge: inset 0 1px 0 oklch(1 0.02 90 / 0.7),
+    inset 0 0 0 1px oklch(0.85 0.04 78 / 0.4),
+    0 12px 22px -12px oklch(0.35 0.07 60 / 0.4);
+}
+
+.site-canvas {
+  /* iOS 26 Liquid Glass, light appearance, the regular variant. Values are
+     measured from Apple's iOS 26 Messages screenshots (Apple Newsroom, June
+     2025) at 1.736 image px per pt, where 1pt is 1 CSS px:
+     - fill: a light grey at .4: on white the glass reads 252/255, and content
+     behind it (a blue glyph under the Phone app's search button) stays vivid;
+     - material: a small blur (2px) first, then the lens, then saturation. The
+     lens bends the already-softened backdrop, so what it squeezes into the
+     rim comes out as a crisp arc, as in iOS;
+     - lens: only the outer 8px bends, pulling content from up to 18px inward
+     out to the edge, so a glyph near the rim reappears as a thin arc hugging
+     it (`--app-liquid-lens`, set per surface by liquid-glass-lens.tsx, on
+     Chromium and Electron only);
+     - rim: there is no border. Apple's glass "has no inherent color, and
+     instead takes on colors from the content directly behind it" (HIG,
+     Color), and is defined by lensing that "bends, shapes, and concentrates
+     light" (WWDC25, Meet Liquid Glass). So the lens also brightens the
+     backdrop's own colour along a 1pt rim, brightest where the edge faces a
+     light at the top left and, weaker, at the bottom right
+     (`--app-liquid-edge-light`). Over wood the rim is a paler wood; over
+     white it vanishes. Apple's own renders measure about 30-45% toward white
+     at the lit edge and nothing on the sides. Where there is no lens (Safari,
+     WebKit, Firefox) only a faint 1px glint on the lit sides remains, white
+     at .14 and .06. Nothing inside the rim: no inner glow or shade;
+     - shadow: soft and heavier below. Under the 40pt back button it darkens
+     the page by 27 levels at the edge and 15 at 20px, 7 above;
+     `0 10px 30px` at .2 reproduces that within 2 levels, and glass over a
+     plain light background carries about .14 of it (Apple: the shadow is
+     lighter "over a solid light background").
+     Every surface composes these tokens; themes change values, never structure. */
+  --app-liquid-surface-bg: oklch(0.97 0 0 / 0.4);
+  --app-liquid-shared-surface-bg: oklch(0.97 0 0 / 0.4);
+  --app-liquid-bezel-width: 8;
+  --app-liquid-glass-thickness: 18;
+  --app-liquid-refraction-level: 1;
+  --app-liquid-material: blur(2px);
+  --app-liquid-vibrancy: saturate(1.5);
+  --app-liquid-fill-tint: transparent;
+  --app-liquid-edge-light: 0.65;
+  --app-liquid-specular-lead: oklch(1 0 0 / 0.14);
+  --app-liquid-specular-trail: oklch(1 0 0 / 0.06);
+  --app-liquid-float-shadow: oklch(0 0 0 / 0.14);
+  --app-liquid-caustic-a: transparent;
+  --app-liquid-caustic-b: transparent;
+
+  /* Two glints in one 1px band: a zero-blur inset shadow offset by 1px paints
+     only the edges it is offset from, thinning to nothing at the corners
+     between them. No uniform ring. */
+  --app-liquid-rim-layers: inset 1px 1px 0 0 var(--app-liquid-specular-lead),
+    inset -1px -1px 0 0 var(--app-liquid-specular-trail);
+  --app-liquid-shadow: 0 10px 30px var(--app-liquid-float-shadow);
+  --app-liquid-shadow-small: 0 3px 10px var(--app-liquid-float-shadow);
+  --app-liquid-edge-meniscus: var(--app-liquid-rim-layers),
+    var(--app-liquid-shadow);
+  --app-glass-caustics: transparent;
+
+  /* /app material system: wood chrome slabs + borderless liquid glass.
+     Spec: gradients live on WOOD chrome only; glass surfaces are borderless smoked
+     panes that refract the wood behind them (SVG displacement backdrop). */
+
+  /* glass fills: milky frost, slightly lighter than whatever sits behind */
+  --app-glass-fill: oklch(0 0 0 / 0.1);
+  --app-glass-fill-strong: oklch(0 0 0 / 0.16);
+  --app-glass-fill-muted: oklch(0 0 0 / 0.06);
+  --app-glass-fill-active: oklch(0 0 0 / 0.04);
+  --app-glass-fill-overlay: oklch(0.04 0 0 / 0.46);
+
+  /* NO BORDER on glass: every border token resolves to transparent */
+  --app-glass-border: transparent;
+  --app-glass-border-strong: transparent;
+  --app-glass-border-low: transparent;
+
+  /* specular edge light replaces borders — crisp top arc, soft bottom
+     thickness-glow (light pooling in the glass slab), tight contact shadow */
+  --app-specular: oklch(1 0 0 / 0.65);
+  --app-specular-soft: oklch(1 0 0 / 0.1);
+  --app-ink-shadow: oklch(0 0 0 / 0.32);
+  --app-glass-edge: var(--app-liquid-edge-meniscus);
+
+  /* hero glass: pure function chain (feImage url() filters displace the
+     whole backdrop uniformly inside Chromium backdrop-filter — seam bug) */
+  --app-glass-filter: blur(2px) saturate(1.16);
+
+  /* bulk glass: cheap frosted tier, no displacement (perf);
+     blur low enough that the brush texture ghosts through */
+  --app-glass-filter-soft: blur(7px) saturate(1.12);
+  --app-wood-chrome-base: oklch(0.83 0.07 76);
+
+  /* cream honey — birch was 太淡 */
+
+  /* WOOD MAPS — the slab pseudos below own the full-bleed version; smaller
+     panels (mobile floating topbar) blend the same two maps onto a single
+     element, so the material is declared once and stays theme-fixed wood.
+     It is one baked tile (scripts/bake-wood-texture.mjs explains why it is
+     not the SVG maps it was baked from). */
+  --app-wood-panel-base: oklch(0.83 0.07 76);
+  --app-wood-texture: url("/textures/wood.webp");
+
+  /* VERTICALLY BALANCED light field (user 2026-06-11): no top-to-bottom
+     gradient — several narrow anisotropic reflection bands spread across the
+     whole slab; the drama comes from band/texture contrast, not a sink */
+
+  /* WOOD: the plank map carries ALL color; the slab only gets a whisper of
+     satin sheen (wood scatters light, no speculars, no warm vignettes —
+     warm dark corners dye the pale plank 泛黄) */
+
+  /* pale birch chrome: whisper grain; the reference GOLD concentrates in
+     accents (active pill, badges) instead of flooding the chrome */
+  --app-wood-chrome-bg: linear-gradient(176deg, oklch(1 0.02 90 / 0.5) 0%, transparent 30%, transparent 80%, oklch(0.6 0.05 70 / 0.08) 100%);
+  --app-wood-chrome-shadow: inset 0 1px 0 oklch(1 0 0 / 0.45),
+    inset 1px 0 0 oklch(1 0 0 / 0.18),
+    inset 0 -1px 0 oklch(0 0 0 / 0.3),
+    inset -1px 0 0 oklch(0 0 0 / 0.18),
+    
+    0 12px 22px -12px oklch(0 0 0 / 0.5);
+
+  /* Public site layout. Material fill comes from the app primitives
+     (WoodPanel, LiquidGlassCard, LiquidGlassPill) so homepage glass/wood
+     matches the product app instead of a second blur/paper recipe. */
+  --background: oklch(0.975 0.014 84);
+  --foreground: oklch(0.255 0.025 58);
+  --card: oklch(0.992 0.008 86);
+  --card-foreground: oklch(0.255 0.025 58);
+  --popover: oklch(0.985 0.012 84 / 0.92);
+  --popover-foreground: oklch(0.255 0.025 58);
+  --primary: oklch(0.43 0.055 60);
+  --primary-foreground: oklch(0.985 0.01 88);
+  --secondary: oklch(0.925 0.027 78);
+  --secondary-foreground: oklch(0.3 0.035 58);
+  --muted: oklch(0.936 0.021 82);
+  --muted-foreground: oklch(0.49 0.03 62);
+  --accent: oklch(0.79 0.075 76);
+  --accent-foreground: oklch(0.28 0.035 57);
+  --border: oklch(0.45 0.05 62 / 16%);
+  --input: oklch(0.45 0.05 62 / 20%);
+  --ring: oklch(0.59 0.075 67);
+  --radius: 0.85rem;
+  --site-paper: oklch(0.992 0.008 86);
+  --site-paper-soft: oklch(0.965 0.017 82);
+  --site-ink: oklch(0.255 0.025 58);
+  --site-ink-muted: oklch(0.49 0.03 62);
+  --site-wood: oklch(0.805 0.075 73);
+  --site-wood-deep: oklch(0.46 0.065 58);
+  --site-wood-line: oklch(0.43 0.065 58 / 20%);
+  --site-paper-shadow: inset 0 1px 0 oklch(1 0 0 / 0.86),
+    0 1px 2px oklch(0.39 0.045 58 / 0.08),
+    0 18px 55px -34px oklch(0.39 0.06 58 / 0.34);
+}
+
+.xmatrix-app {
+
+  /* `font-black` is 760 inside the app, not 900. */
+  --font-weight-black: 760;
+  --app-safe-area-top: env(safe-area-inset-top, 0px);
+  --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --destructive: oklch(0.6 0.12 25);
+  --radius: 0.45rem;
+  --popover-foreground: oklch(0.21 0 0);
+  --primary: oklch(0.26 0 0);
+  --primary-foreground: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.24 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --ring: oklch(0.45 0 0);
+  --chart-1: oklch(0.3 0 0);
+  --chart-2: oklch(0.45 0 0);
+  --chart-3: oklch(0.58 0 0);
+  --chart-4: oklch(0.7 0 0);
+  --chart-5: oklch(0.8 0 0);
+  --sidebar: oklch(0.92 0 0);
+  --sidebar-foreground: oklch(0.22 0 0);
+  --sidebar-primary: oklch(0.26 0 0);
+  --sidebar-primary-foreground: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0 0 0 / 0.08);
+  --sidebar-accent-foreground: oklch(0.18 0 0);
+  --sidebar-border: transparent;
+  --sidebar-ring: oklch(0.45 0 0);
+  --glass-highlight: oklch(1 0 0 / 0.72);
+  --glass-glint: oklch(1 0 0 / 0.6);
+  --glass-line: oklch(0 0 0 / 0.14);
+  --glass-shadow: oklch(0.2 0 0 / 0.18);
+  --glass-groove: oklch(0.25 0 0 / 0.12);
+  --app-glass-line: oklch(0 0 0 / 0.18);
+  --app-glass-sheen: oklch(1 0 0 / 0.46);
+  --app-glass-backdrop: blur(0.35px) saturate(1.08) contrast(1.02) brightness(1.02);
+  --app-glass-lens-backdrop: blur(0.16px) saturate(1.08) contrast(1.03) brightness(1.02);
+  --app-glass-edge-backdrop: blur(0.16px) saturate(1.08) contrast(1.03) brightness(1.02);
+  --app-void-surface: oklch(1 0 0 / 0.9);
+  --app-light-border: oklch(0 0 0 / 0.045);
+  --app-light-card: oklch(1 0 0);
+  --app-light-panel: oklch(0.995 0 0);
+  --app-light-glass: oklch(1 0 0 / 0.72);
+  --app-light-glass-shadow: inset 0 1px 0 oklch(1 0 0 / 0.95),
+      inset 0 -1px 0 oklch(0 0 0 / 0.025),
+      0 0 22px oklch(0 0 0 / 0.04);
+  --app-light-glass-row-shadow: inset 0 1px 0 oklch(1 0 0 / 0.95),
+      inset 0 -1px 0 oklch(0 0 0 / 0.02),
+      0 0 12px oklch(0 0 0 / 0.03);
+  --app-liquid-glass-fill: oklch(1 0 0 / 0.56);
+
+  /* light paper glass fills */
+  --app-glass-fill: oklch(1 0 0 / 0.22);
+  --app-glass-fill-strong: oklch(1 0 0 / 0.32);
+  --app-glass-fill-muted: oklch(1 0 0 / 0.12);
+  --app-glass-fill-active: oklch(1 0 0 / 0.5);
+  --app-glass-fill-overlay: oklch(0.96 0 0 / 0.5);
+  --app-specular: oklch(1 0 0 / 0.9);
+  --app-specular-soft: oklch(1 0 0 / 0.34);
+  --app-ink-shadow: oklch(0.25 0 0 / 0.16);
+  --app-light-glass-rim: oklch(0.24 0.014 238 / 0.16);
+  --app-light-glass-rim-soft: oklch(1 0 0 / 0.58);
+  --app-light-glass-rim-shadow: oklch(0.24 0.014 238 / 0.1);
+  --app-light-chat-surface: oklch(1 0 0 / 0.18);
+  --app-instance-card-radius: 1.5rem;
+  --app-composer-radius: 1.5rem;
+  --app-field-radius: 0.25rem;
+  --app-field-shell-radius: 0.375rem;
+
+  /* The action vocabulary: one shape, one glass, two densities. Primary is
+     the denser pour; secondary the card's own glass; both carry dark ink and
+     the same meniscus edge. Used by the bg-foreground / inline-flex-border
+     button rules and by `actionClass()` in `ui/action-tone.ts`. */
+  --app-action-radius: 12px;
+  --app-action-ink: oklch(0.16 0.02 55);
+  --app-action-ink-muted: oklch(0.4 0.04 58);
+  --app-action-fill: oklch(1 0 0 / 0.28);
+  --app-action-fill-hover: oklch(1 0.02 88 / 0.42);
+  --app-action-fill-primary: oklch(1 0.012 92 / 0.66);
+  --app-action-fill-primary-hover: oklch(1 0.012 92 / 0.8);
+  --app-action-edge: inset 0 0 0 0.5px oklch(1 0.02 90 / 0.6),
+    inset 0 1px 0 oklch(1 0.02 90 / 0.5),
+    0 0 12px -4px oklch(0.35 0.07 60 / 0.45);
+  --app-topbar-search-width: clamp(14rem, 34vw, 28rem);
+  --app-topbar-search-max-width: calc(100vw - 2rem);
+
+  /* Where a list row's content starts and ends. Beside a desktop's rail it
+     starts 20px inside its list. A phone's list runs edge to edge, like the
+     plank above it, so its rows carry the screen's side margin themselves:
+     their content starts and ends on the plank's content line. */
+  --app-list-row-start: 20px;
+  --app-list-row-end: 18px;
+
+  /* Theme tint for the older edge recipes that still read these tokens; the
+     shared glass edge takes its values from liquid-glass.css. */
+  --app-liquid-meniscus-top: oklch(1 0.02 90 / 0.45);
+
+  /* warm paper surfaces — the cold gray-white clashed with the wood chrome */
+  --background: oklch(0.975 0.012 85);
+  --card: oklch(0.985 0.01 85);
+  --popover: oklch(0.985 0.01 85);
+  --muted: oklch(0.93 0.018 82);
+  --muted-foreground: oklch(0.46 0.035 65);
+  --secondary: oklch(0.94 0.018 82);
+  --accent: oklch(0.92 0.025 80);
+  --border: oklch(0.885 0.02 80);
+  --input: oklch(0.885 0.02 80);
+  --foreground: oklch(0.24 0.03 60);
+  --card-foreground: oklch(0.24 0.03 60);
+
+  /* The panel's paper, its lists' tone and its inks, on a phone as beside a
+     desktop's rail: a phone's lists are the same lists. */
+  --app-panel-paper: oklch(0.97 0.012 85);
+  --app-panel-list: oklch(0.935 0.018 82);
+  --app-panel-ink: oklch(0.24 0.03 60);
+  --app-panel-ink-muted: oklch(0.46 0.03 65);
+  --app-panel-ink-faint: oklch(0.6 0.028 70);
+}

@@ -1,0 +1,231 @@
+name: Production Release Request
+run-name: Production Release train from ${{ github.sha }}
+
+# The release train. People and agents ask for a release through Production
+# Release Intent, which records the components wanted and wakes this workflow;
+# a finished Production Release wakes it too (Release Train Next). Each train
+# reconciles the intents already in flight, freezes this main revision, ships
+# the union of every open intent it contains, and chooses the version itself
+# (scripts/release-train.mjs). Trains run one at a time; one GitHub displaces
+# while pending loses nothing, because intents live in refs.
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-release-request
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    outputs:
+      deploy_sha: ${{ steps.stamp.outputs.deploy_sha }}
+      scope: ${{ steps.plan.outputs.scope }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - name: Require the default branch
+        uses: actions/github-script@v7
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            if (context.ref !== `refs/heads/${context.payload.repository.default_branch}`) {
+              core.setFailed("Production Release Request must be dispatched from the default branch");
+            }
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Disable stale sparse checkout
+        shell: bash
+        run: git sparse-checkout disable || true
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      # Reconcile in-flight intents, then freeze this revision for the union of
+      # the open intents it contains. The version is claimed before anything
+      # else runs (scripts/release-claim.mjs, an atomic compare-and-swap ref),
+      # and the shipped intents move to refs/release-inflight/<tag>/.
+      - id: plan
+        name: Plan the train from open release intents
+        env:
+          RELEASE_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_TOKEN" || { echo "XMATRIX_RELEASE_GITHUB_TOKEN is required to plan a release train" >&2; exit 1; }
+          auth="$(printf 'x-access-token:%s' "$RELEASE_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$auth"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          node scripts/release-train.mjs plan
+      # The release is this frozen revision with the release version stamped on
+      # as one child commit: main never needs a version-bump commit, and later
+      # merges to main never reach this release. When main already carries the
+      # version, the release commit is the revision itself.
+      - id: stamp
+        name: Stamp the release commit
+        if: steps.plan.outputs.scope != ''
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          VERSION_TAG: ${{ steps.plan.outputs.tag }}
+          RELEASE_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$RELEASE_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$auth"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          node scripts/version.mjs set "$VERSION" >/dev/null
+          if git diff --quiet; then
+            deploy_sha="$SOURCE_SHA"
+          else
+            git -c user.name="xMatrix Release" -c user.email="release@xmatrix.sh" \
+              commit --quiet --all --no-verify --message "Release $VERSION"
+            deploy_sha="$(git rev-parse HEAD)"
+            git push --force origin "$deploy_sha:refs/release-candidates/$VERSION_TAG"
+          fi
+          node scripts/release-commit.mjs verify "$deploy_sha" "$SOURCE_SHA"
+          node scripts/version.mjs check-release-order --require-new-version
+          echo "deploy_sha=$deploy_sha" >> "$GITHUB_OUTPUT"
+
+  # The gates are the CI jobs themselves (ci.yml), run on the exact release
+  # commit for the components this train ships: the same partitions, layout,
+  # caches and content ledger as pull request CI, on whichever fleet
+  # XMATRIX_RUNNER_FLEET selects. On the repository's own machines they take
+  # the release test runners, so a train never waits behind PR CI. Identical
+  # content (a squash merge of the PR's tested tree, a version-only bump)
+  # already passed these exact partitions and is not run again.
+  ci:
+    needs: plan
+    if: needs.plan.outputs.scope != ''
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      ref: ${{ needs.plan.outputs.deploy_sha }}
+      scope: ${{ needs.plan.outputs.scope }}
+      hosted: ${{ vars.XMATRIX_RUNNER_FLEET != 'self-hosted' }}
+      linux_runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["xmatrix-release-test"]' || '"ubuntu-24.04"' }}
+      offload_runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["xmatrix-ci-offload"]' || '"ubuntu-24.04"' }}
+      windows_runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","local-windows-x64"]' || '"windows-2025"' }}
+
+  ios:
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.scope), ',ios,')
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.deploy_sha }}
+      - name: Build and test iOS on the exact release revision
+        run: >-
+          xcodebuild -project apps/ios/xMatrix.xcodeproj -scheme xMatrix
+          -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest' test
+
+  # One job whose success means every gate this train's scope selects passed.
+  # ci.yml fails its own aggregate unless each selected partition passed, so
+  # the deployment workflows check this job instead of CI's job layout.
+  gates:
+    needs: [plan, ci, ios]
+    if: >-
+      always() && needs.plan.result == 'success' && needs.ci.result == 'success' &&
+      (contains(format(',{0},', needs.plan.outputs.scope), ',ios,') == (needs.ios.result == 'success')) &&
+      (needs.ios.result == 'success' || needs.ios.result == 'skipped')
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["xmatrix-ci-offload"]') || 'ubuntu-24.04' }}
+    steps:
+      - name: Record the passed ${{ needs.plan.outputs.scope }} gates
+        run: echo "Every ${{ needs.plan.outputs.scope }} gate passed on ${{ needs.plan.outputs.deploy_sha }}"
+
+  authorize-and-dispatch:
+    needs: [plan, gates]
+    # A gate skipped outside the scope (iOS) sits upstream of `gates`, and the
+    # default success() would skip this job too; `gates` already decided.
+    if: always() && needs.plan.result == 'success' && needs.gates.result == 'success'
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Record successful ${{ needs.plan.outputs.scope }} production authorization
+        run: echo "Selected production gates passed for ${{ needs.plan.outputs.deploy_sha }}"
+
+      # One train deploys at a time: this one's gates may run while the previous
+      # train deploys, but it tags and dispatches only once no Production
+      # Release, PostgreSQL contract migration, or lifecycle cleanup is active, so the
+      # production group never holds a pending run that a later one could
+      # displace, and a contract never runs beside a deploy.
+      - name: Wait for the previous train to finish deploying
+        uses: actions/github-script@v7
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const deadline = Date.now() + 3 * 60 * 60 * 1000;
+            for (;;) {
+              // Migration and lifecycle cleanup workflows also hold the train,
+              // including their preflight, before another deployment is dispatched.
+              const active = [];
+              for (const workflow_id of ["production-release.yml", "postgres-contract-migration.yml", "production-agent-lifecycle-cleanup.yml"]) {
+                const { data } = await github.rest.actions.listWorkflowRuns({
+                  ...context.repo, workflow_id, per_page: 20,
+                });
+                active.push(...data.workflow_runs.filter((run) => run.status !== "completed"));
+              }
+              if (!active.length) break;
+              if (Date.now() > deadline) {
+                core.setFailed(`Production Release, contract migration, or lifecycle cleanup still active after 3 hours: ${active.map((run) => run.html_url).join(", ")}`);
+                return;
+              }
+              core.info(`Waiting for ${active.map((run) => run.html_url).join(", ")}`);
+              await new Promise((resolve) => setTimeout(resolve, 30_000));
+            }
+
+      - name: Create the immutable tag and dispatch its production workflow
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_SHA: ${{ needs.plan.outputs.deploy_sha }}
+          VERSION_TAG: ${{ needs.plan.outputs.tag }}
+          RELEASE_SCOPE: ${{ needs.plan.outputs.scope }}
+          RELEASE_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          github-token: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+          script: |
+            if (!process.env.RELEASE_TOKEN) {
+              core.setFailed("XMATRIX_RELEASE_GITHUB_TOKEN is required to freeze a production revision");
+              return;
+            }
+            const annotation = await github.rest.git.createTag({
+              ...context.repo,
+              tag: process.env.VERSION_TAG,
+              message: `xMatrix production ${process.env.VERSION_TAG}`,
+              object: process.env.DEPLOY_SHA,
+              type: "commit",
+            });
+            await github.rest.git.createRef({
+              ...context.repo,
+              ref: `refs/tags/${process.env.VERSION_TAG}`,
+              sha: annotation.data.sha,
+            });
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: "production-release.yml",
+              ref: process.env.VERSION_TAG,
+              inputs: { request_run_id: String(context.runId), release_scope: process.env.RELEASE_SCOPE },
+            });
+            core.notice(`Dispatched ${process.env.RELEASE_SCOPE} Production Release from ${process.env.VERSION_TAG}`);

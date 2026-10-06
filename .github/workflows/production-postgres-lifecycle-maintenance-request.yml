@@ -1,0 +1,82 @@
+name: Production PostgreSQL Lifecycle Maintenance Request
+run-name: PostgreSQL lifecycle request ${{ github.event_name == 'schedule' && 'false-100000' || format('{0}-{1}', inputs.dry_run, inputs.max_rows) }}
+
+on:
+  schedule:
+    - cron: "37 18 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report eligible rows without deleting them
+        required: true
+        default: true
+        type: boolean
+      max_rows:
+        description: Maximum expired idempotency rows per database
+        required: true
+        default: "10000"
+        type: choice
+        options: ["10000", "100000"]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: production-postgres-lifecycle-maintenance-request
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 6
+    steps:
+      # This broker checks out no code and receives no production credentials.
+      - name: Dispatch from the latest successful production tag
+        uses: actions/github-script@v7
+        env:
+          REQUEST_DRY_RUN: ${{ inputs.dry_run }}
+          REQUEST_MAX_ROWS: ${{ inputs.max_rows }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const dryRun = context.eventName === "schedule" ? "false" : process.env.REQUEST_DRY_RUN;
+            const maxRows = context.eventName === "schedule" ? "100000" : process.env.REQUEST_MAX_ROWS;
+            if (!/^(?:true|false)$/.test(dryRun)) throw new Error("invalid dry_run");
+            if (!/^(?:10000|100000)$/.test(maxRows)) throw new Error("invalid max_rows");
+            // Self-hosted runners have been served run lists days out of date
+            // (they dispatched 0.16.316 and 0.16.336 after 0.16.347 shipped).
+            // Ask for an uncached list and log what was seen.
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...context.repo, workflow_id: "production-release.yml",
+              event: "workflow_dispatch", status: "success", per_page: 100,
+              uncached: String(context.runId), headers: { "cache-control": "no-cache" },
+            });
+            // The list order is not a recency guarantee: it has returned old
+            // releases first. Choose exactly as the executor's policy does --
+            // the highest successful release run id -- or it refuses the tag.
+            const production = runs
+              .filter((run) => run.conclusion === "success" && run.event === "workflow_dispatch" &&
+                /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(run.head_branch))
+              .sort((left, right) => right.id - left.id)[0];
+            if (!production) throw new Error("no successful production release tag is available");
+            core.info(`Saw ${runs.length} successful releases; newest ${production.head_branch} (run ${production.id})`);
+            const tagRef = (await github.rest.git.getRef({
+              ...context.repo, ref: `tags/${production.head_branch}`,
+            })).data.object;
+            if (tagRef.type !== "tag") throw new Error("production tag must be annotated");
+            const tagObject = (await github.rest.git.getTag({
+              ...context.repo, tag_sha: tagRef.sha,
+            })).data.object;
+            if (tagObject.type !== "commit" || tagObject.sha !== production.head_sha) {
+              throw new Error("production tag no longer targets its successful release SHA");
+            }
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: "production-postgres-lifecycle-maintenance.yml",
+              ref: production.head_branch,
+              inputs: { broker_run_id: String(context.runId), dry_run: dryRun, max_rows: maxRows },
+            });
+            core.notice(`Dispatched lifecycle maintenance from ${production.head_branch}`);

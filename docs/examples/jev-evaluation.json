@@ -1,0 +1,16 @@
+{
+  "state": { "message": "The build passed. Please review the change today." },
+  "questions": {
+    "passed": { "type": "boolean", "instructions": "Did the build pass?" },
+    "next": {
+      "type": "choice",
+      "instructions": "What is the requested next step?",
+      "criteria": { "review": "Review the change", "retry": "Retry a failed build" }
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "How urgent is the request?",
+      "criteria": ["No deadline", "Due today", "Immediate incident"]
+    }
+  }
+}

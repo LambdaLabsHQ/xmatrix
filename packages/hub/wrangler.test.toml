@@ -1,0 +1,118 @@
+name = "xmatrix-hub-test"
+main = "src/index-scoped-authority-test.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[durable_objects]
+bindings = [
+  { name = "RELAY_SCOPED_CONTROL_AUTHORITY", class_name = "RelayScopedControlAuthority" },
+  { name = "RELAY_CHANNEL_FAMILY_DATA", class_name = "RelayChannelFamilyData" },
+  { name = "RELAY_CHANNEL_FAMILY_DIRECTORY", class_name = "RelayChannelFamilyDirectory" },
+  { name = "RELAY_POSTGRES_CHANNEL_COORDINATOR", class_name = "RelayPostgresChannelCoordinator" },
+  { name = "RELAY_SUMMON_DECISION_CLOCK", class_name = "RelaySummonDecisionClock" },
+  { name = "RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL", class_name = "RelayPostgresAgentLaunchChannel" },
+  { name = "RELAY_POSTGRES_BACKGROUND_ADMISSION", class_name = "RelayPostgresBackgroundAdmission" },
+  { name = "RELAY_SPACE_DELETION_CLOCK", class_name = "RelaySpaceDeletionClock" },
+  { name = "RELAY_PAGE_SESSION", class_name = "RelayPageSession" },
+  { name = "RELAY_CHANNEL_CATALOG_AUTHORITY", class_name = "RelayChannelCatalogAuthority" },
+  { name = "RELAY_SCHEDULER_AUTHORITY", class_name = "RelaySchedulerAuthority" },
+  { name = "RELAY_PROJECTION_AUTHORIZATION_AUTHORITY", class_name = "RelayProjectionAuthorizationAuthority" },
+  { name = "RELAY_SPACE_MEMBERSHIP_AUTHORITY", class_name = "RelaySpaceMembershipAuthority" },
+  { name = "RELAY_USER_PREFERENCE_AUTHORITY", class_name = "RelayUserPreferenceAuthority" },
+  { name = "RELAY_TRACE_ACCESS_AUTHORITY", class_name = "RelayTraceAccessAuthority" },
+  { name = "RELAY_TRACE_ACCESS_LOCATOR", class_name = "RelayTraceAccessLocator" },
+  { name = "RELAY_TRACE_ACCESS_USER_INDEX", class_name = "RelayTraceAccessUserIndex" },
+  { name = "RELAY_CONTROL_PLANE_DIRECTORY", class_name = "RelayControlPlaneDirectory" },
+  { name = "RELAY_RANK_AUTHORITY_DIRECTORY", class_name = "RelayRankAuthorityDirectory" },
+  { name = "RELAY_GLOBAL_DIRECTORY_AUTHORITY", class_name = "RelayGlobalDirectoryAuthority" },
+  { name = "RELAY_AGENT_APP_POLICY_AUTHORITY", class_name = "RelayAgentAppPolicyAuthority" },
+  { name = "RELAY_AGENT_APP_POLICY_LOCATOR", class_name = "RelayAgentAppPolicyLocator" },
+  { name = "RELAY_SPACE_PROJECTION", class_name = "RelaySpaceProjection" },
+  { name = "RELAY_SPACE_CAPACITY_AUTHORITY", class_name = "RelaySpaceCapacityAuthority" },
+  { name = "RELAY_SPACE_ROOT_AUTHORITY", class_name = "RelaySpaceRootAuthority" },
+  { name = "RELAY_RUNTIME", class_name = "RelayRuntimeLive" },
+  { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "RelayRuntimeRouteDirectory" },
+  { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" }
+]
+
+[[r2_buckets]]
+binding = "ATTACHMENT_BUCKET"
+bucket_name = "xmatrix-hub-test-attachments"
+
+[[r2_buckets]]
+binding = "RELAY_PAYLOAD_BUCKET"
+bucket_name = "xmatrix-hub-test-payloads"
+
+[[d1_databases]]
+binding = "AUTH_DB"
+database_name = "xmatrix-hub-test-auth"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[analytics_engine_datasets]]
+binding = "DIAGNOSTICS_AE"
+dataset = "xmatrix_hub_test_diagnostics"
+
+[[analytics_engine_datasets]]
+binding = "RELAY_AUTHORITY_OBSERVABILITY_AE"
+dataset = "xmatrix_hub_test_relay_authority_observability"
+
+[[migrations]]
+tag = "current"
+new_sqlite_classes = ["RelayScopedControlAuthority", "RelayChannelFamilyData", "RelayChannelFamilyDirectory", "RelayPostgresChannelCoordinator", "RelayPostgresAgentLaunchCoordinator", "RelayChannelCatalogAuthority", "RelaySchedulerAuthority", "RelayProjectionAuthorizationAuthority", "RelaySpaceMembershipAuthority", "RelayUserPreferenceAuthority", "RelayTraceAccessAuthority", "RelayTraceAccessLocator", "RelayTraceAccessUserIndex", "RelayControlPlaneDirectory", "RelayRankAuthorityDirectory", "RelayGlobalDirectoryAuthority", "RelayAgentAppPolicyAuthority", "RelayAgentAppPolicyLocator", "RelaySpaceProjection", "RelaySpaceCapacityAuthority", "RelaySpaceRootAuthority", "RelayRuntimeLive", "RelayRuntimeRouteDirectory", "RelaySecretAuthority", "DeviceAuthBroker"]
+
+[[migrations]]
+tag = "postgres-automation-coordinator-test"
+new_sqlite_classes = ["RelayPostgresAutomationCoordinator"]
+
+[vars]
+RELAY_AUTHORITY_OBSERVABILITY_ENABLED = "true"
+RELAY_AUTOMATION_EXECUTION_ENABLED = "false"
+RELAY_AUTOMATION_RUN_TIMEOUT_MS = "1800000"
+APP_URL = "https://xmatrix.test"
+HUB_URL = "https://xmatrix-hub.test"
+
+[[migrations]]
+tag = "decision-clock-test"
+new_sqlite_classes = ["RelaySummonDecisionClock"]
+
+
+# One Agent Launch coordinator per Channel: a new Launch is claimed by its own
+# Channel's object and never queues behind another Channel or reconciliation.
+[[migrations]]
+tag = "agent-launch-channel-test"
+new_sqlite_classes = ["RelayPostgresAgentLaunchChannel"]
+
+
+# Every Channel coordinates its own launch work; the global coordinator held
+# only its alarm.
+[[migrations]]
+tag = "agent-launch-coordinator-retired-test"
+deleted_classes = ["RelayPostgresAgentLaunchCoordinator"]
+
+[[migrations]]
+tag = "automation-coordinator-retired-test"
+deleted_classes = ["RelayPostgresAutomationCoordinator"]
+
+[[migrations]]
+tag = "space-deletion-clock-test"
+new_sqlite_classes = ["RelaySpaceDeletionClock"]
+
+# Per-shard permits bounding how many Channel coordinator passes use
+# PostgreSQL at once; holds no work and no durable state.
+[[migrations]]
+tag = "background-admission-test"
+new_sqlite_classes = ["RelayPostgresBackgroundAdmission"]
+
+# One live co-editing session per page (docs/design/pages-and-conversations.md).
+# PostgreSQL owns the committed page; the object holds only session state.
+[[migrations]]
+tag = "page-session-test"
+new_sqlite_classes = ["RelayPageSession"]
+
+[[migrations]]
+tag = "secret-authority-retired-test"
+deleted_classes = ["RelaySecretAuthority"]

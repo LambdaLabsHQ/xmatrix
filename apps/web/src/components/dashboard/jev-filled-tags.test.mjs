@@ -1,0 +1,114 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { consumeJevFillArrival, decidedMachineLabel, jevFilledAnnouncement, jevFilledTags, jevFilledTagsForHandoff, jevFillShouldArrive, launchMachineLabel, noteJevReading } from "./jev-filled-tags.ts";
+
+const DIGEST = "a".repeat(64);
+
+function evidence(extra = {}) {
+  return {
+    rubricVersion: "registration-parameters-v7",
+    evaluatedAt: "2026-10-06T08:45:00.000Z",
+    inputDigest: DIGEST,
+    selections: { model: "grok-4", effort: "high", workspaceKind: "repo", repo: "LambdaLabsHQ/xmatrix" },
+    choices: [
+      { key: "modelEffort", selected: "model_1", probabilities: { model_0: 0.2, model_1: 0.8 } },
+      { key: "workspace", selected: "workspace_0", probabilities: { workspace_0: 1 } },
+      { key: "placement", selected: "placement_stationary", probabilities: { placement_any: 0.3, placement_stationary: 0.7 } },
+    ],
+    harness: { inputDigest: DIGEST, selected: "grok", probabilities: { grok: 0.7, claude: 0.3 } },
+    ...extra,
+  };
+}
+
+/** The fields a parsed summon would carry. Offsets are unused by the fill. */
+function mention(tags, error) {
+  return { start: 0, end: 0, text: "", tags, conditions: [], ...(error ? { error } : {}) };
+}
+
+test("Jev's choices fill only the fields the author left blank", () => {
+  const tags = jevFilledTags(mention({}), evidence());
+  assert.deepEqual(tags, [
+    { field: "repo", value: "LambdaLabsHQ/xmatrix" },
+    { field: "model", value: "grok-4" },
+    { field: "effort", value: "high" },
+    { field: "harness", value: "grok" },
+  ]);
+  assert.equal(jevFilledAnnouncement(tags),
+    "Jev filled repo:LambdaLabsHQ/xmatrix, model:grok-4, effort:high, harness:grok");
+});
+
+test("a field the author wrote is not drawn again, even when Jev disagrees", () => {
+  const tags = jevFilledTags(mention({ harness: "grok", repo: "other/repo", model: "opus" }), evidence());
+  assert.deepEqual(tags.map(tag => tag.field), ["effort"]);
+});
+
+test("an older placement choice is not a tag", () => {
+  assert.equal(jevFilledTags(mention({}), evidence()).some(tag => tag.field === "placement"), false);
+});
+
+test("routing's Machine is a machine tag, and a Machine the author named is not drawn again", () => {
+  const tags = jevFilledTags(mention({}), evidence(), "Workstation");
+  assert.deepEqual(tags.map(tag => tag.field), ["repo", "machine", "model", "effort", "harness"]);
+  assert.deepEqual(tags.find(tag => tag.field === "machine"), { field: "machine", value: "Workstation", source: "routing" });
+  assert.equal(jevFilledAnnouncement(tags),
+    "Jev filled repo:LambdaLabsHQ/xmatrix, model:grok-4, effort:high, harness:grok. Routing filled machine:Workstation");
+  assert.deepEqual(jevFilledTags(mention({ machine: "Laptop" }), evidence(), "Workstation").map(tag => tag.field),
+    ["repo", "model", "effort", "harness"]);
+});
+
+test("a Machine tag uses the owner's name or the recorded binding, never a hostname", () => {
+  const selected = { machineId: "machine:abc", machineLabel: "星豆号" };
+  assert.equal(decidedMachineLabel({ selected }), "星豆号");
+  assert.equal(decidedMachineLabel({ recorded: { id: "machine:abc", name: "Workstation" } }), "Workstation");
+  assert.equal(decidedMachineLabel({}), undefined);
+  assert.equal(decidedMachineLabel({ written: "Laptop", recorded: { id: "machine:abc", name: "Workstation" } }), undefined);
+  assert.equal(decidedMachineLabel({ recorded: { id: "machine:abc", name: "11111111-1111-1111-1111-111111111111" } }), undefined);
+  assert.equal(decidedMachineLabel({ recorded: { id: "machine:abc", name: "Registered machine" } }), undefined);
+  assert.equal(decidedMachineLabel({ selected: { machineId: "machine:abc" } }), undefined);
+  const onlyMachine = jevFilledTags(mention({}), undefined, decidedMachineLabel({ recorded: { id: "machine:abc", name: "星豆号" } }));
+  assert.deepEqual(onlyMachine, [{ field: "machine", value: "星豆号", source: "routing" }]);
+  assert.equal(jevFilledAnnouncement(onlyMachine), "Routing filled machine:星豆号");
+});
+
+test("a directory Jev chose is never named", () => {
+  const local = evidence({
+    selections: { model: "grok-4", workspaceKind: "local-path" },
+    harness: undefined,
+    choices: [
+      { key: "modelEffort", selected: "model_0", probabilities: { model_0: 1 } },
+      { key: "workspace", selected: "workspace_0", probabilities: { workspace_0: 1 } },
+    ],
+  });
+  assert.deepEqual(jevFilledTags(mention({}), local), [{ field: "model", value: "grok-4" }]);
+});
+
+test("@auto shows the harness Jev picked; a named successor does not repeat it", () => {
+  assert.deepEqual(jevFilledTagsForHandoff("auto", evidence()).map(tag => tag.field),
+    ["repo", "model", "effort", "harness"]);
+  assert.deepEqual(jevFilledTagsForHandoff("  Grok ", evidence()).map(tag => tag.field),
+    ["repo", "model", "effort"]);
+  assert.deepEqual(jevFilledTagsForHandoff("auto", undefined), []);
+  const decision = { rows: [{ selected: true, machineId: "machine:abc", machineLabel: "星豆号" }], machine: { id: "machine:abc", name: "Workstation" } };
+  assert.equal(launchMachineLabel(decision), "星豆号");
+  assert.equal(launchMachineLabel({ rows: [], machine: { id: "machine:abc", name: "Workstation" } }), "Workstation");
+  assert.equal(launchMachineLabel(decision, "Laptop"), undefined);
+  const picked = jevFilledTagsForHandoff("auto", evidence(), launchMachineLabel(decision));
+  assert.deepEqual(picked.map(tag => tag.field), ["repo", "machine", "model", "effort", "harness"]);
+  assert.deepEqual(picked.find(tag => tag.field === "machine"), { field: "machine", value: "星豆号", source: "routing" });
+  assert.deepEqual(jevFilledTagsForHandoff("Grok", evidence(), "Workstation").map(tag => tag.field),
+    ["repo", "machine", "model", "effort"]);
+});
+
+test("a broken summon and a missing decision add nothing", () => {
+  assert.deepEqual(jevFilledTags(mention({}, "Invalid launch parameter value."), evidence()), []);
+  assert.deepEqual(jevFilledTags(mention({}), undefined), []);
+  assert.equal(jevFilledAnnouncement([]), undefined);
+});
+
+test("the arrival plays once, only after a reading the reader actually saw", () => {
+  noteJevReading("message:1");
+  assert.equal(jevFillShouldArrive("message:1"), true);
+  assert.equal(jevFillShouldArrive("message:2"), false);
+  consumeJevFillArrival("message:1");
+  assert.equal(jevFillShouldArrive("message:1"), false);
+});

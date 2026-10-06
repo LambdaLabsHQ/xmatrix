@@ -1,0 +1,34 @@
+name: PNPM install on the macOS release runner
+description: >-
+  Run a PNPM install using the macOS host's registry and network environment,
+  with a bounded fetch budget that survives one stalled tarball.
+inputs:
+  pnpm:
+    description: Command that runs PNPM (for example `npx --yes pnpm@11.3.0`).
+    default: pnpm
+  args:
+    description: Arguments passed to PNPM.
+    default: install --frozen-lockfile
+runs:
+  using: composite
+  steps:
+    - name: Install dependencies
+      shell: bash
+      env:
+        PNPM_BIN: ${{ inputs.pnpm }}
+        PNPM_ARGS: ${{ inputs.args }}
+        # PNPM's defaults (60s timeout, 2 retries) abort the whole install
+        # when one large tarball stalls on the runner's registry path.
+        pnpm_config_fetch_timeout: "300000"
+        pnpm_config_fetch_retries: "5"
+        pnpm_config_fetch_retry_mintimeout: "10000"
+        pnpm_config_fetch_retry_maxtimeout: "120000"
+        pnpm_config_network_concurrency: "8"
+      run: |
+        set -euo pipefail
+        # Host routing owns domestic mirror bypass and overseas proxy traffic.
+        # Preserve its environment for PNPM, npx, and lifecycle scripts alike.
+        echo "PNPM registry: $($PNPM_BIN config get registry)"
+        echo "PNPM store: $($PNPM_BIN store path --silent)"
+        # shellcheck disable=SC2086 # both inputs are word lists
+        $PNPM_BIN $PNPM_ARGS

@@ -1,0 +1,259 @@
+[
+  {
+    "rule": "runtime.model.v1",
+    "body": "@codex:3 /model gpt-test",
+    "matches": [
+      {
+        "start": 0,
+        "end": 24,
+        "arguments": {
+          "target": "codex:3",
+          "value": "gpt-test"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "runtime.effort.v1",
+    "body": "＠codex:3 /reasoning high",
+    "matches": [
+      {
+        "start": 0,
+        "end": 24,
+        "arguments": {
+          "target": "codex:3",
+          "value": "high"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "runtime.effort.v1",
+    "body": "@codex /effort",
+    "matches": [
+      {
+        "start": 0,
+        "end": 14,
+        "arguments": {
+          "target": "codex"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "runtime.model.v1",
+    "body": "@codex /model one two",
+    "matches": []
+  },
+  {
+    "rule": "runtime.model.v1",
+    "body": "@codex /models one",
+    "matches": []
+  },
+  {
+    "rule": "lifecycle.reborn.v1",
+    "body": "😀 @codex:3:reborn",
+    "matches": [
+      {
+        "start": 3,
+        "end": 18,
+        "arguments": {
+          "agent": "codex",
+          "ordinal": "3"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "lifecycle.reborn.v1",
+    "body": "@codex:0:reborn",
+    "matches": []
+  },
+  {
+    "rule": "lifecycle.reborn.v1",
+    "body": "@codex:3:reborned",
+    "matches": []
+  },
+  {
+    "rule": "lifecycle.reborn.v1",
+    "body": "(@agent.name:13:reborn)",
+    "matches": [
+      {
+        "start": 1,
+        "end": 22,
+        "arguments": {
+          "agent": "agent.name",
+          "ordinal": "13"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "lifecycle.handoff.v1",
+    "body": "@codex:3:handoff:@claude",
+    "matches": [
+      {
+        "start": 0,
+        "end": 24,
+        "arguments": {
+          "agent": "codex",
+          "ordinal": "3",
+          "successor": "claude"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "lifecycle.handoff.v1",
+    "body": "@codex:3:handoff:@auto",
+    "matches": [
+      {
+        "start": 0,
+        "end": 22,
+        "arguments": {
+          "agent": "codex",
+          "ordinal": "3",
+          "successor": "auto"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "lifecycle.handoff.v1",
+    "body": "@codex:3:handoff:",
+    "matches": []
+  },
+  {
+    "rule": "lifecycle.stop.v1",
+    "body": "@codex:3:kill reason",
+    "matches": [
+      {
+        "start": 0,
+        "end": 20,
+        "arguments": {
+          "target": "codex:3",
+          "reason": "reason"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "channel.stop.v1",
+    "body": "/stop all done",
+    "matches": [
+      {
+        "start": 0,
+        "end": 14,
+        "arguments": {
+          "target": "all",
+          "reason": "done"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "channel.stop.v1",
+    "body": "/stop all",
+    "matches": [
+      {
+        "start": 0,
+        "end": 9,
+        "arguments": {
+          "target": "all"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "channel.stop.v1",
+    "body": "/stopper all",
+    "matches": []
+  },
+  {
+    "rule": "channel.named-stop.v1",
+    "body": "@xmatrix kill @codex:3 done",
+    "matches": [
+      {
+        "start": 0,
+        "end": 27,
+        "arguments": {
+          "target": "@codex:3",
+          "reason": "done"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "connector.action.v1",
+    "body": "@github:comment:owner/repo#1 hello",
+    "matches": [
+      {
+        "start": 0,
+        "end": 34,
+        "arguments": {
+          "provider": "github",
+          "action": "comment",
+          "target": "owner/repo#1",
+          "text": "hello"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "connector.action.v1",
+    "body": "@slack:subscribe:* all",
+    "matches": [
+      {
+        "start": 0,
+        "end": 22,
+        "arguments": {
+          "provider": "slack",
+          "action": "subscribe",
+          "target": "*",
+          "text": "all"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "unknown.v2",
+    "body": "@codex:3:stop",
+    "matches": []
+  },
+  {
+    "rule": "launch.address.v1",
+    "body": "﻿@codex",
+    "matches": [
+      {
+        "start": 1,
+        "end": 7,
+        "arguments": {
+          "name": "codex"
+        }
+      }
+    ]
+  },
+  {
+    "rule": "launch.address.v1",
+    "body": "@codex",
+    "matches": []
+  },
+  {
+    "rule": "launch.address.v1",
+    "body": "@codex",
+    "matches": []
+  },
+  {
+    "rule": "launch.address.v1",
+    "body": "@codex﻿",
+    "matches": [
+      {
+        "start": 0,
+        "end": 6,
+        "arguments": {
+          "name": "codex"
+        }
+      }
+    ]
+  }
+]

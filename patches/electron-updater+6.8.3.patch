@@ -1,0 +1,12 @@
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -23,7 +23,7 @@
+     "lodash.isequal": "^4.5.0",
+     "semver": "~7.7.3",
+     "tiny-typed-emitter": "^2.1.0",
+-    "builder-util-runtime": "9.5.1"
++    "builder-util-runtime": "9.7.0"
+   },
+   "devDependencies": {
+     "@types/fs-extra": "9.0.13",

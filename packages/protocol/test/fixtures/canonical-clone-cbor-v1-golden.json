@@ -1,0 +1,125 @@
+{
+  "format": "xmatrix-canonical-clone-cbor-v1-golden",
+  "encoding": "canonical-clone-cbor-v1",
+  "digestDomain": "canonical-clone-cbor-v1\u0000",
+  "applicationTags": {
+    "undefined": 60000,
+    "hole": 60001,
+    "number": 60002,
+    "bigint": 60003,
+    "date": 60004,
+    "arrayBuffer": 60005,
+    "arrayBufferView": 60006,
+    "object": 60007,
+    "fieldPresence": 60008,
+    "array": 60009,
+    "logicalRecord": 60010,
+    "cloneString": 60011
+  },
+  "viewSubtypes": {
+    "DataView": 0,
+    "Int8": 1,
+    "Uint8": 2,
+    "Uint8Clamped": 3,
+    "Int16": 4,
+    "Uint16": 5,
+    "Int32": 6,
+    "Uint32": 7,
+    "Float32": 8,
+    "Float64": 9,
+    "BigInt64": 10,
+    "BigUint64": 11
+  },
+  "vectors": [
+    {
+      "name": "null",
+      "hex": "f6",
+      "digest": "9b05bc676d4cfc20d7b477e8c979bd7caaf5d7503acaf353d5654c467effdbbd"
+    },
+    {
+      "name": "false",
+      "hex": "f4",
+      "digest": "c90b3855d318a8e3187d2add09f42f840b43ad643e285c9a1aafe320538bc742"
+    },
+    {
+      "name": "true",
+      "hex": "f5",
+      "digest": "5b4815f82058caf75dd459fe97a208695ad685d09c8acc9bfaa6b7edddab90b1"
+    },
+    {
+      "name": "undefined",
+      "hex": "d9ea6040",
+      "digest": "f9834627dd1722286a9a4eb68215e104e4a4e5e33298e026c6574c83d89f4429"
+    },
+    {
+      "name": "negative-zero",
+      "hex": "d9ea62488000000000000000",
+      "digest": "38b8e86c85c74aafe1230fd7ac2629dab868e04a780baf5aeb725328c3d190b9"
+    },
+    {
+      "name": "nan",
+      "hex": "d9ea62487ff8000000000000",
+      "digest": "8a4d43d223b5c608c7d3ba1ca93d3e3d94e7797bef2d84d267ff08548eab9476"
+    },
+    {
+      "name": "positive-infinity",
+      "hex": "d9ea62487ff0000000000000",
+      "digest": "dd38cf8c1cea359d968424f37868acae2b7c1334b31a083cd262a944add20933"
+    },
+    {
+      "name": "bigint-negative",
+      "hex": "d9ea638201420102",
+      "digest": "290eebfacbfd1c263b8dcfbe2acfe14ca91b2c79fd3d6cc027bdb185b73a11cc"
+    },
+    {
+      "name": "date-valid",
+      "hex": "d9ea6482f520",
+      "digest": "62fd39b67f4ef26e6403e44fdfd285f1f728736896044f056425b3b5a1b42c91"
+    },
+    {
+      "name": "date-invalid",
+      "hex": "d9ea6481f4",
+      "digest": "42c591149009390e3041040c06d6f66b1404e04a476adeb146741ee7c6f65b50"
+    },
+    {
+      "name": "array-buffer",
+      "hex": "d9ea654300ff10",
+      "digest": "78d97f6f590e0277372fe582c44b95fd81e4124d08400cefa720897dd98eac9c"
+    },
+    {
+      "name": "uint16-view",
+      "hex": "d9ea668405020246000102030405",
+      "digest": "2f383669a511620802f28133bfbc73d773c663c2fe9e16758cfda8530b8c5c8b"
+    },
+    {
+      "name": "sparse-array",
+      "hex": "d9ea69820383d9ea6140d9ea6040f6",
+      "digest": "1cc254e3814793f08ceee6587b90c4af1c2a3651233ca863a649ca6c382143df"
+    },
+    {
+      "name": "plain-object",
+      "hex": "d9ea6782008282d9ea6b420061d9ea62483ff000000000000082d9ea6b42d800d9ea6b48006c006f006e0065",
+      "digest": "75f470bcaa334cf8fb2a51d183820f3f102265ede31218f50c91dc527ae39e4c"
+    },
+    {
+      "name": "null-object",
+      "hex": "d9ea6782018282d9ea6b420061d9ea62483ff000000000000082d9ea6b42dfffd9ea6b48007400610069006c",
+      "digest": "de7004817d5fdb102699de80a75872b4122db72acc2efd17f6ad9040ebdb67af"
+    },
+    {
+      "name": "clone-string",
+      "hex": "d9ea6b4600410000d800",
+      "digest": "f50b236173e1f0248194919afb31d32c13b7629b45b6e4fe2a6f858c6ef7fbc9"
+    },
+    {
+      "name": "field-presence",
+      "hex": "d9ea6883820100820401820702",
+      "digest": "088fb0bca5a818e93317361a904d160c093c85db7bd3f8bd23dc4e38d8049b1b"
+    },
+    {
+      "name": "logical-record",
+      "hex": "d9ea6a838201d9ea6b4600690064d8008202d9ea68838201008204018207028209d9ea6782008282d9ea6b420061f682d9ea6b42007ad9ea6040",
+      "digest": "ddd8edaadfd73dec52570430d8f937d128354a6664e27cb4e55cc7c5b642d631"
+    }
+  ]
+}

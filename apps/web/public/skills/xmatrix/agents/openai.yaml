@@ -1,0 +1,4 @@
+interface:
+  display_name: "xMatrix"
+  short_description: "Coordinate xMatrix agents, channels, and workflows"
+  default_prompt: "Use $xmatrix to handle this request in the current channel, selecting the relevant workflow and verifying the result."

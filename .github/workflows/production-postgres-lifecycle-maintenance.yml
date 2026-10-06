@@ -1,0 +1,179 @@
+name: Production PostgreSQL Lifecycle Maintenance
+run-name: Production PostgreSQL lifecycle ${{ inputs.broker_run_id }} ${{ inputs.dry_run }} ${{ inputs.max_rows }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      broker_run_id:
+        description: Authorized main-ref broker run
+        required: true
+        type: string
+      dry_run:
+        description: Report eligible rows without deleting them
+        required: true
+        type: boolean
+      max_rows:
+        description: Maximum expired idempotency rows per database
+        required: true
+        type: choice
+        options: ["10000", "100000"]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-postgres-lifecycle-maintenance
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: startsWith(github.ref, 'refs/tags/xmatrix-v')
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 6
+    outputs:
+      maintenance_sha: ${{ steps.authority.outputs.maintenance_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify immutable production and broker authority
+        id: authority
+        uses: actions/github-script@v7
+        env:
+          BROKER_RUN_ID: ${{ inputs.broker_run_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          MAX_ROWS: ${{ inputs.max_rows }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const { requireLifecycleExecutionAuthority } = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/postgres-lifecycle-maintenance-policy.mjs`);
+            const tag = context.ref.replace("refs/tags/", "");
+            let broker;
+            for (let attempt = 1; attempt <= 90; attempt += 1) {
+              broker = (await github.rest.actions.getWorkflowRun({
+                ...context.repo, run_id: Number(process.env.BROKER_RUN_ID),
+              })).data;
+              if (broker.status === "completed") break;
+              await new Promise((resolve) => setTimeout(resolve, 2_000));
+            }
+            const productionRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...context.repo, workflow_id: "production-release.yml",
+              event: "workflow_dispatch", status: "success", per_page: 100,
+              uncached: String(context.runId), headers: { "cache-control": "no-cache" },
+            });
+            const sameTagRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...context.repo, workflow_id: "production-postgres-lifecycle-maintenance.yml",
+              branch: tag, event: "workflow_dispatch", per_page: 100,
+              uncached: String(context.runId), headers: { "cache-control": "no-cache" },
+            });
+            // Read this run directly: run lists on self-hosted runners have been
+            // served stale and then omit the very run that is executing.
+            const currentRun = (await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: context.runId,
+            })).data;
+            const tagRef = (await github.rest.git.getRef({
+              ...context.repo, ref: `tags/${tag}`,
+            })).data.object;
+            if (tagRef.type !== "tag") throw new Error(`${tag} must be an annotated tag`);
+            const tagObject = (await github.rest.git.getTag({
+              ...context.repo, tag_sha: tagRef.sha,
+            })).data.object;
+            const mainSha = (await github.rest.git.getRef({
+              ...context.repo, ref: "heads/main",
+            })).data.object.sha;
+            const comparison = await github.rest.repos.compareCommitsWithBasehead({
+              ...context.repo, basehead: `${broker.head_sha}...${mainSha}`,
+            });
+            requireLifecycleExecutionAuthority({
+              broker, productionRuns, sameTagRuns, tag, tagCommitSha: tagObject.sha,
+              currentRunId: context.runId, currentDisplayTitle: currentRun?.display_title,
+              currentSha: context.sha,
+              dryRun: process.env.DRY_RUN, maxRows: process.env.MAX_ROWS,
+              brokerIsInMain: comparison.data.status === "identical" || comparison.data.status === "ahead",
+            });
+            core.setOutput("maintenance_sha", context.sha);
+      # Persistent self-hosted runners can keep sparse-checkout state from a
+      # release job; the local actions below then do not exist. Restore the
+      # full tagged tree with plain git before using any local action.
+      - name: Materialize the full tagged tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git sparse-checkout disable || true
+          git config --unset-all core.sparseCheckout || true
+          git config --unset-all core.sparseCheckoutCone || true
+          rm -f "$(git rev-parse --git-path info/sparse-checkout)"
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Verify exact tagged source and bounded operator
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ steps.authority.outputs.maintenance_sha }}"
+          test -z "$(git status --porcelain)"
+          pnpm --dir packages/db exec node --test test/postgres-lifecycle-maintenance.test.mjs
+
+  maintain:
+    needs: preflight
+    environment: production
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    # Expected runtime is below five minutes; retain the required 3x margin.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.maintenance_sha }}
+          persist-credentials: false
+      # Persistent self-hosted runners can keep sparse-checkout state from a
+      # release job; the local actions below then do not exist. Restore the
+      # full tagged tree with plain git before using any local action.
+      - name: Materialize the full tagged tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git sparse-checkout disable || true
+          git config --unset-all core.sparseCheckout || true
+          git config --unset-all core.sparseCheckoutCone || true
+          rm -f "$(git rev-parse --git-path info/sparse-checkout)"
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Maintain both production databases
+        shell: bash
+        env:
+          PRIMARY_URL: ${{ secrets.POSTGRES_MIGRATION_DATABASE_URL }}
+          SHARD_URL: ${{ secrets.POSTGRES_SHARD_1_MIGRATION_DATABASE_URL }}
+          DISPATCH_DRY_RUN: ${{ inputs.dry_run }}
+          DISPATCH_MAX_ROWS: ${{ inputs.max_rows }}
+        run: |
+          set -euo pipefail
+          [[ "$DISPATCH_DRY_RUN" == true || "$DISPATCH_DRY_RUN" == false ]]
+          [[ "$DISPATCH_MAX_ROWS" == 10000 || "$DISPATCH_MAX_ROWS" == 100000 ]]
+          args=(--batch-size=1000 "--max-rows=$DISPATCH_MAX_ROWS" --budget-ms=30000)
+          [[ "$DISPATCH_DRY_RUN" == true ]] && args+=(--dry-run)
+          for database in primary shard-1; do
+            if [[ "$database" == primary ]]; then
+              url="$PRIMARY_URL"
+            else
+              url="$SHARD_URL"
+            fi
+            POSTGRES_DATABASE_URL="$url" node \
+              packages/db/scripts/postgres-lifecycle-maintenance.mjs "${args[@]}" \
+              >"$RUNNER_TEMP/postgres-lifecycle-$database.json"
+          done
+      - name: Retain secret-free lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-postgres-lifecycle-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/postgres-lifecycle-*.json
+          if-no-files-found: warn
+          retention-days: 30

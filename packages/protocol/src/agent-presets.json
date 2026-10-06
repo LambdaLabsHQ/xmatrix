@@ -1,0 +1,1053 @@
+[
+  {
+    "id": "codex",
+    "displayName": "Codex",
+    "description": "OpenAI Codex CLI through the app-server WebSocket backend (non-PTY; stdio fallback available).",
+    "runtime": "codex",
+    "avatarUrl": "/agent-vendors/openai.svg",
+    "defaultArgs": [],
+    "backend": "codex-app",
+    "launcherNames": ["codex", "codex.exe", "codex.cmd", "codex.bat"],
+    "classicConfigDirs": ["~/.codex"],
+    "management": {
+      "version": {
+        "command": "codex",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@openai/codex@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@openai/codex@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@openai/codex@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@openai/codex@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@openai/codex"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@openai/codex"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": { "kind": "npm", "package": "@openai/codex" },
+      "sources": ["https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "claude",
+    "displayName": "Claude Code",
+    "description": "Claude Code CLI through the print backend.",
+    "runtime": "claude",
+    "agentType": "claude_code",
+    "avatarUrl": "/agent-vendors/claude.svg",
+    "defaultArgs": ["--dangerously-skip-permissions"],
+    "backend": "claude-print",
+    "launcherNames": ["claude", "claude-code", "claude_code", "claude.exe", "claude.cmd", "claude.bat"],
+    "classicConfigDirs": ["~/.claude"],
+    "installHint": "curl -fsSL https://claude.ai/install.sh | bash",
+    "management": {
+      "version": {
+        "command": "claude",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://claude.ai/install.sh | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://claude.ai/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "claude",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "claude",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "rm -f ~/.local/bin/claude && rm -rf ~/.local/share/claude"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "Remove-Item -Path \"$env:USERPROFILE\\.local\\bin\\claude.exe\" -Force; Remove-Item -Path \"$env:USERPROFILE\\.local\\share\\claude\" -Recurse -Force"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "env",
+            "key": "DISABLE_AUTOUPDATER",
+            "enabled": null,
+            "disabled": "1"
+          }
+        ],
+        "disabledBy": [
+          { "kind": "env", "key": "DISABLE_UPDATES" },
+          { "kind": "env", "key": "DISABLE_AUTOUPDATER", "values": ["1", "true", "yes", "on"] },
+          { "kind": "env", "key": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" },
+          {
+            "kind": "json",
+            "path": "~/.claude.json",
+            "key": "autoUpdates",
+            "value": false,
+            "unless": { "installMethod": "native", "autoUpdatesProtectedForNative": true }
+          }
+        ],
+        "envFiles": ["~/.claude/settings.json"],
+        "interactiveOnly": true,
+        "notes": "Native installer updates automatically, but only in interactive sessions: --print (xMatrix's launch mode) never checks. Homebrew/WinGet/apk installations remain package-manager owned. disabledBy mirrors Claude Code 2.1.281's updater gate."
+      },
+      "latest": { "kind": "npm", "package": "@anthropic-ai/claude-code" },
+      "sources": ["https://code.claude.com/docs/en/setup"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "zcode",
+    "displayName": "ZCode",
+    "description": "ZCode CLI through the ZCode Protocol app-server backend.",
+    "runtime": "zcode",
+    "avatarUrl": "/agent-vendors/zcode.svg",
+    "defaultArgs": [],
+    "backend": "zcode-app",
+    "launcherNames": ["zcode", "zcode.exe", "zcode.cmd", "zcode.bat"],
+    "classicConfigDirs": ["~/.zcode"],
+    "management": {
+      "version": null,
+      "install": {
+        "unix": null,
+        "windows": null
+      },
+      "update": {
+        "unix": null,
+        "windows": null
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "unsupported",
+        "controls": []
+      },
+      "sources": ["https://docs.z.ai/devpack/tool/zcode"],
+      "checkedAt": "2026-09-30",
+      "notes": "No verified public CLI installer or updater; keep the existing runtime integration and report launcher presence without executing a guessed version command."
+    }
+  },
+  {
+    "id": "grok",
+    "displayName": "Grok Build",
+    "description": "Grok Build CLI through the ACP agent WebSocket serve backend (non-PTY; stdio fallback available).",
+    "runtime": "grok",
+    "avatarUrl": "/agent-vendors/grok.svg",
+    "defaultArgs": [],
+    "backend": "grok-acp",
+    "launcherNames": ["grok", "grok.exe", "grok.cmd", "grok.bat"],
+    "classicConfigDirs": ["~/.grok"],
+    "installHint": "curl -fsSL https://x.ai/cli/install.sh | bash",
+    "management": {
+      "version": {
+        "command": "grok",
+        "args": ["version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://x.ai/cli/install.sh | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://x.ai/cli/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "grok",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "grok",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [
+          {
+            "kind": "env",
+            "key": "GROK_DISABLE_AUTOUPDATER",
+            "enabled": null,
+            "disabled": "1"
+          }
+        ],
+        "notes": "Official reference permits suppressing the auto-updater but does not establish unattended installation semantics."
+      },
+      "latest": { "kind": "npm", "package": "@xai-official/grok" },
+      "sources": ["https://docs.x.ai/build/overview", "https://docs.x.ai/build/cli/reference", "https://docs.x.ai/build/settings/reference"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "kimi",
+    "displayName": "Kimi Code",
+    "description": "Kimi Code CLI through the generic ACP backend (`kimi acp`; PTY remains the last-resort fallback).",
+    "runtime": "kimi",
+    "avatarUrl": "/agent-vendors/kimi.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["kimi", "kimi.exe", "kimi.cmd", "kimi.bat"],
+    "classicConfigDirs": ["~/.kimi-code"],
+    "management": {
+      "version": {
+        "command": "kimi",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://code.kimi.com/kimi-code/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "kimi",
+          "args": ["upgrade", "--yes"]
+        },
+        "windows": {
+          "command": "kimi",
+          "args": ["upgrade", "--yes"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "env",
+            "key": "KIMI_CODE_NO_AUTO_UPDATE",
+            "enabled": null,
+            "disabled": "1"
+          }
+        ],
+        "notes": "Install-source dependent; native downloads swap on next start; package-manager installs use their own update command."
+      },
+      "latest": { "kind": "npm", "package": "@moonshot-ai/kimi-code" },
+      "sources": ["https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html", "https://www.kimi.com/code/docs/en/kimi-code-cli/configuration/env-vars"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "cursor",
+    "displayName": "Cursor",
+    "description": "Cursor Agent CLI through the generic ACP backend (`cursor-agent acp`).",
+    "runtime": "cursor-agent",
+    "avatarUrl": "/agent-vendors/cursor.png",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["agent", "agent.exe", "agent.cmd", "agent.bat", "cursor-agent", "cursor-agent.exe", "cursor-agent.cmd", "cursor-agent.bat"],
+    "classicConfigDirs": ["~/.cursor"],
+    "management": {
+      "version": {
+        "command": "agent",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://cursor.com/install | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://cursor.com/install?win32=true' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "agent",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "agent",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [],
+        "notes": "No documented disable switch. Current launcher is agent; legacy cursor-agent aliases remain discoverable."
+      },
+      "sources": ["https://cursor.com/docs/cli/installation"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "opencode",
+    "displayName": "OpenCode",
+    "description": "OpenCode CLI through the generic ACP backend (`opencode acp`, the vendor's native ACP server).",
+    "runtime": "opencode",
+    "avatarUrl": "/agent-vendors/opencode.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["opencode", "opencode.exe", "opencode.cmd", "opencode.bat"],
+    "classicConfigDirs": ["~/.config/opencode", "~/.local/share/opencode"],
+    "installHint": "npm install -g opencode-ai",
+    "management": {
+      "version": {
+        "command": "opencode",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "opencode-ai@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "opencode-ai@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "opencode",
+          "args": ["upgrade"]
+        },
+        "windows": {
+          "command": "opencode",
+          "args": ["upgrade"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "opencode",
+          "args": ["uninstall", "--keep-config", "--keep-data", "--force"]
+        },
+        "windows": {
+          "command": "opencode",
+          "args": ["uninstall", "--keep-config", "--keep-data", "--force"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "json",
+            "path": "~/.config/opencode/opencode.json",
+            "key": "autoupdate",
+            "enabled": true,
+            "disabled": false
+          }
+        ],
+        "notes": "Package-manager ownership can suppress native updates; autoupdate also accepts notify."
+      },
+      "latest": { "kind": "npm", "package": "opencode-ai" },
+      "sources": ["https://opencode.ai/docs/", "https://opencode.ai/docs/config/", "https://opencode.ai/docs/cli/"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "pi",
+    "displayName": "Pi",
+    "description": "Pi coding agent through the generic ACP backend (`pi-acp`, the ACP-registry adapter that drives `pi --mode rpc`; Pi itself has no ACP server).",
+    "runtime": "pi-acp",
+    "avatarUrl": "/agent-vendors/pi.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": [],
+    "launcherNames": ["pi-acp", "pi-acp.cmd", "pi-acp.bat"],
+    "classicConfigDirs": ["~/.pi"],
+    "installHint": "npm install -g @earendil-works/pi-coding-agent pi-acp",
+    "management": {
+      "version": {
+        "command": "pi",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent@latest", "pi-acp@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent@latest", "pi-acp@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent@latest", "pi-acp@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "--ignore-scripts", "@earendil-works/pi-coding-agent@latest", "pi-acp@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@earendil-works/pi-coding-agent", "pi-acp"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@earendil-works/pi-coding-agent", "pi-acp"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "No verified unattended-install switch. pi update without --self updates extensions, not the CLI."
+      },
+      "latest": { "kind": "npm", "package": "@earendil-works/pi-coding-agent" },
+      "sources": ["https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md", "https://github.com/svkozak/pi-acp", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-09-30",
+      "notes": "Pi CLI and its ACP adapter are separate packages; inventory checks the adapter launcher and probes pi for the upstream version."
+    }
+  },
+  {
+    "id": "copilot",
+    "displayName": "GitHub Copilot CLI",
+    "description": "GitHub Copilot CLI through the generic ACP backend (`copilot --acp`, the vendor's native ACP server).",
+    "runtime": "copilot",
+    "avatarUrl": "/agent-vendors/copilot.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--acp"],
+    "launcherNames": ["copilot", "copilot.exe", "copilot.cmd", "copilot.bat"],
+    "classicConfigDirs": ["~/.copilot"],
+    "installHint": "npm install -g @github/copilot",
+    "management": {
+      "version": {
+        "command": "copilot",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@github/copilot@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@github/copilot@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@github/copilot@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@github/copilot@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@github/copilot"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@github/copilot"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "json",
+            "path": "~/.copilot/settings.json",
+            "key": "autoUpdate",
+            "enabled": true,
+            "disabled": false
+          },
+          {
+            "kind": "env",
+            "key": "COPILOT_AUTO_UPDATE",
+            "enabled": "true",
+            "disabled": "false"
+          }
+        ]
+      },
+      "latest": { "kind": "npm", "package": "@github/copilot" },
+      "sources": ["https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli", "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference", "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "gemini",
+    "displayName": "Gemini CLI",
+    "description": "Google Gemini CLI through the generic ACP backend (`gemini --acp`, the vendor's native ACP server).",
+    "runtime": "gemini",
+    "avatarUrl": "/agent-vendors/gemini.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--acp"],
+    "launcherNames": ["gemini", "gemini.exe", "gemini.cmd", "gemini.bat"],
+    "classicConfigDirs": ["~/.gemini"],
+    "installHint": "npm install -g @google/gemini-cli",
+    "management": {
+      "version": {
+        "command": "gemini",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@google/gemini-cli@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@google/gemini-cli@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@google/gemini-cli@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@google/gemini-cli@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@google/gemini-cli"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@google/gemini-cli"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "json",
+            "path": "~/.gemini/settings.json",
+            "key": "general.enableAutoUpdate",
+            "enabled": true,
+            "disabled": false
+          }
+        ]
+      },
+      "latest": { "kind": "npm", "package": "@google/gemini-cli" },
+      "sources": ["https://geminicli.com/docs/get-started/installation/", "https://geminicli.com/docs/reference/configuration/", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "qwen",
+    "displayName": "Qwen Code",
+    "description": "Qwen Code CLI through the generic ACP backend (`qwen --acp`, the vendor's native ACP server).",
+    "runtime": "qwen",
+    "avatarUrl": "/agent-vendors/qwen.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--acp"],
+    "launcherNames": ["qwen", "qwen.exe", "qwen.cmd", "qwen.bat"],
+    "classicConfigDirs": ["~/.qwen"],
+    "installHint": "npm install -g @qwen-code/qwen-code",
+    "management": {
+      "version": {
+        "command": "qwen",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@qwen-code/qwen-code@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@qwen-code/qwen-code@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@qwen-code/qwen-code@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@qwen-code/qwen-code@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@qwen-code/qwen-code"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@qwen-code/qwen-code"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "json",
+            "path": "~/.qwen/settings.json",
+            "key": "general.enableAutoUpdate",
+            "enabled": true,
+            "disabled": false
+          }
+        ]
+      },
+      "latest": { "kind": "npm", "package": "@qwen-code/qwen-code" },
+      "sources": ["https://qwenlm.github.io/qwen-code-docs/en/blog/quickstart/getting-started/", "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "goose",
+    "displayName": "goose",
+    "description": "Block goose CLI through the generic ACP backend (`goose acp`, the vendor's native ACP server).",
+    "runtime": "goose",
+    "avatarUrl": "/agent-vendors/goose.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["goose", "goose.exe", "goose.cmd", "goose.bat"],
+    "classicConfigDirs": ["~/.config/goose", "~/.local/share/goose"],
+    "installHint": "curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash",
+    "management": {
+      "version": {
+        "command": "goose",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "Invoke-WebRequest -Uri \"https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1\" -OutFile \"download_cli.ps1\"; .\\download_cli.ps1"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "goose",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "goose",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "manual",
+        "defaultEnabled": false,
+        "controls": [],
+        "notes": "CLI update is explicit; desktop application update behavior is separate."
+      },
+      "sources": ["https://github.com/aaif-goose/goose/blob/main/documentation/docs/getting-started/installation.md", "https://github.com/aaif-goose/goose/blob/main/documentation/docs/guides/goose-cli-commands.md"],
+      "checkedAt": "2026-09-30",
+      "notes": "Windows installer downloads the upstream PowerShell installer into its working directory; run through an approved installation workspace."
+    }
+  },
+  {
+    "id": "junie",
+    "displayName": "Junie",
+    "description": "JetBrains Junie CLI through the generic ACP backend (`junie --acp=true`, the vendor's native ACP server).",
+    "runtime": "junie",
+    "avatarUrl": "/agent-vendors/junie.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--acp=true"],
+    "launcherNames": ["junie", "junie.exe", "junie.cmd", "junie.bat"],
+    "classicConfigDirs": ["~/.junie"],
+    "installHint": "npm install -g @jetbrains/junie",
+    "management": {
+      "version": {
+        "command": "junie",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://junie.jetbrains.com/install.sh | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://junie.jetbrains.com/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "junie",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "junie",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "flag",
+            "disabled": "--skip-update-check"
+          }
+        ],
+        "notes": "Managed launcher checks and downloads updates on startup."
+      },
+      "latest": { "kind": "npm", "package": "@jetbrains/junie" },
+      "sources": ["https://junie.jetbrains.com/docs/junie-cli.html", "https://junie.jetbrains.com/docs/parameters.html"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "vibe",
+    "displayName": "Mistral Vibe",
+    "description": "Mistral Vibe through the generic ACP backend (`vibe-acp`, the ACP entrypoint the mistral-vibe package ships beside `vibe`).",
+    "runtime": "vibe-acp",
+    "avatarUrl": "/agent-vendors/vibe.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": [],
+    "launcherNames": ["vibe-acp", "vibe-acp.exe", "vibe-acp.cmd", "vibe-acp.bat"],
+    "classicConfigDirs": ["~/.vibe"],
+    "installHint": "uv tool install mistral-vibe",
+    "management": {
+      "version": {
+        "command": "vibe",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "uv",
+          "args": ["tool", "install", "mistral-vibe"]
+        },
+        "windows": {
+          "command": "uv",
+          "args": ["tool", "install", "mistral-vibe"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "uv",
+          "args": ["tool", "upgrade", "mistral-vibe"]
+        },
+        "windows": {
+          "command": "uv",
+          "args": ["tool", "upgrade", "mistral-vibe"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "uv",
+          "args": ["tool", "uninstall", "mistral-vibe"]
+        },
+        "windows": {
+          "command": "uv",
+          "args": ["tool", "uninstall", "mistral-vibe"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "No verified automatic-install switch; use the installation package manager."
+      },
+      "latest": { "kind": "pypi", "package": "mistral-vibe" },
+      "sources": ["https://docs.mistral.ai/getting-started/quickstarts/vibe-code/install-cli", "https://docs.astral.sh/uv/concepts/tools/"],
+      "checkedAt": "2026-09-30",
+      "notes": "Requires uv and Python 3.12+; vibe-acp ships alongside vibe."
+    }
+  },
+  {
+    "id": "kiro",
+    "displayName": "Kiro CLI",
+    "description": "Kiro CLI through the generic ACP backend (`kiro-cli acp`, the vendor's native ACP server).",
+    "runtime": "kiro-cli",
+    "avatarUrl": "/agent-vendors/kiro.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["kiro-cli", "kiro-cli.exe", "kiro-cli.cmd", "kiro-cli.bat"],
+    "classicConfigDirs": ["~/.kiro", "~/.local/share/kiro-cli", "~/Library/Application Support/kiro-cli"],
+    "installHint": "curl -fsSL https://cli.kiro.dev/install | bash",
+    "management": {
+      "version": {
+        "command": "kiro-cli",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://cli.kiro.dev/install | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://cli.kiro.dev/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "kiro-cli",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "kiro-cli",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "command",
+            "enable": {
+              "command": "kiro-cli",
+              "args": ["settings", "app.disableAutoupdates", "false"]
+            },
+            "disable": {
+              "command": "kiro-cli",
+              "args": ["settings", "app.disableAutoupdates", "true"]
+            }
+          }
+        ],
+        "notes": "Script installations auto-update; package-managed installations use their package manager and kiro-cli update only reports availability."
+      },
+      "sources": ["https://kiro.dev/docs/getting-started/installation/", "https://kiro.dev/docs/cli/reference/settings/"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "hermes",
+    "displayName": "Hermes Agent",
+    "description": "Nous Research Hermes Agent through the generic ACP backend (`hermes acp`, the vendor's native ACP server).",
+    "runtime": "hermes",
+    "avatarUrl": "/agent-vendors/hermes.png",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["hermes", "hermes.exe", "hermes.cmd", "hermes.bat"],
+    "classicConfigDirs": ["~/.hermes"],
+    "installHint": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+    "management": {
+      "version": {
+        "command": "hermes",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://hermes-agent.nousresearch.com/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "hermes",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "hermes",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Source CLI uses hermes update; desktop/Store/Docker/Nix installs have separate update owners."
+      },
+      "sources": ["https://hermes-agent.nousresearch.com/docs/getting-started/installation/", "https://hermes-agent.nousresearch.com/docs/getting-started/updating/", "https://hermes-agent.nousresearch.com/docs/reference/cli-commands/"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "openclaw",
+    "displayName": "OpenClaw",
+    "description": "OpenClaw through the generic ACP backend (`openclaw acp`, the ACP bridge into a running OpenClaw Gateway).",
+    "runtime": "openclaw",
+    "avatarUrl": "/agent-vendors/openclaw.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["openclaw", "openclaw.exe", "openclaw.cmd", "openclaw.bat"],
+    "classicConfigDirs": ["~/.openclaw"],
+    "installHint": "npm install -g openclaw",
+    "management": {
+      "version": {
+        "command": "openclaw",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://openclaw.ai/install.sh | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://openclaw.ai/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "openclaw",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "openclaw",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": false,
+        "controls": [
+          {
+            "kind": "json",
+            "path": "~/.openclaw/openclaw.json",
+            "key": "update.auto.enabled",
+            "enabled": true,
+            "disabled": false
+          },
+          {
+            "kind": "env",
+            "key": "OPENCLAW_NO_AUTO_UPDATE",
+            "enabled": null,
+            "disabled": "1"
+          }
+        ],
+        "notes": "Gateway automatic updates require a managed service and checkOnStart; foreground CLI does not auto-replace. Headless nodes have a separate policy."
+      },
+      "latest": { "kind": "npm", "package": "openclaw" },
+      "sources": ["https://docs.openclaw.ai/install", "https://docs.openclaw.ai/install/updating/automatic-updates"],
+      "checkedAt": "2026-09-30"
+    }
+  },
+  {
+    "id": "custom",
+    "displayName": "Custom",
+    "description": "A custom terminal agent runtime.",
+    "runtime": "",
+    "defaultArgs": [],
+    "backend": "pty",
+    "launcherNames": [],
+    "classicConfigDirs": [],
+    "management": {
+      "version": null,
+      "install": {
+        "unix": null,
+        "windows": null
+      },
+      "update": {
+        "unix": null,
+        "windows": null
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "unsupported",
+        "controls": []
+      },
+      "sources": [],
+      "checkedAt": "2026-09-30",
+      "notes": "User-defined runtime has no universal installer, updater, or version command."
+    }
+  }
+]

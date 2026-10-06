@@ -1,0 +1,126 @@
+{
+  "formatVersion": 1,
+  "normalizations": [
+    {
+      "input": "  CAFÉ\r\nCafé  ",
+      "expected": "café café"
+    },
+    {
+      "input": "ΟΣ　İ",
+      "expected": "ος i̇"
+    }
+  ],
+  "terms": [
+    {
+      "field": "body",
+      "input": "你好 FooBar AI",
+      "expected": [
+        "body:cjk:你",
+        "body:cjk:好",
+        "body:lex:ai",
+        "body:tri:bar",
+        "body:tri:foo",
+        "body:tri:oba",
+        "body:tri:oob"
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "input": {
+        "text": "roadmap",
+        "fields": ["body"]
+      },
+      "expectedFingerprint": "{\"fields\":[\"body\"],\"filters\":{},\"mode\":\"auto\",\"normalizedQuery\":\"roadmap\",\"normalizerVersion\":1,\"quotedPhrases\":[],\"rankingVersion\":1,\"unquotedTerms\":[\"roadmap\"]}",
+      "expectedHash": "70b27f2a8778d4fd65dd3ef969362f4b5e3c80e77a32b4d52dbbc54d74b4b086",
+      "expectedFields": ["body"],
+      "expectedQuotedPhrases": [],
+      "expectedUnquotedTerms": ["roadmap"],
+      "requiresCanonicalScan": false
+    },
+    {
+      "input": {
+        "text": "\"Foo Bar\" baz",
+        "fields": ["body", "title"]
+      },
+      "expectedHash": "cce64e6c74a5c25c819836776f0e4299e2e4c9f26360797dadf299da94cfdf83",
+      "expectedFields": ["title", "body"],
+      "expectedQuotedPhrases": ["foo bar"],
+      "expectedUnquotedTerms": ["baz"],
+      "requiresCanonicalScan": false
+    }
+  ],
+  "exactMatches": [
+    {
+      "query": {
+        "text": "\"foo bar\" baz",
+        "fields": ["body"]
+      },
+      "document": {
+        "stableEntityId": "message:2",
+        "searchRankSeq": "0000000000000002",
+        "fields": {
+          "body": "😀 Before FOO BAR baz after"
+        }
+      },
+      "expected": {
+        "matchTier": "quoted_phrase",
+        "field": "body",
+        "fieldPriority": 1,
+        "normalizedRange": {"start": 10, "end": 21},
+        "sourceRange": {"start": 10, "end": 21}
+      }
+    },
+    {
+      "query": {
+        "text": "\"foo bar\" baz",
+        "fields": ["body"]
+      },
+      "document": {
+        "stableEntityId": "message:false-positive",
+        "searchRankSeq": "0000000000000003",
+        "fields": {
+          "body": "foo and baz without the phrase"
+        }
+      },
+      "expected": null
+    }
+  ],
+  "lease": {
+    "scopes": [
+      {
+        "visibilityScopeId": "scope:b",
+        "grantVersion": 1,
+        "snapshotEpoch": 2,
+        "appliedChangeSeq": 8,
+        "appliedRedactionHead": 3
+      },
+      {
+        "visibilityScopeId": "scope:a",
+        "grantVersion": 4,
+        "snapshotEpoch": 1,
+        "appliedChangeSeq": 9,
+        "appliedRedactionHead": 2
+      }
+    ],
+    "expectedMaterial": "[{\"appliedChangeSeq\":9,\"appliedRedactionHead\":2,\"grantVersion\":4,\"snapshotEpoch\":1,\"visibilityScopeId\":\"scope:a\"},{\"appliedChangeSeq\":8,\"appliedRedactionHead\":3,\"grantVersion\":1,\"snapshotEpoch\":2,\"visibilityScopeId\":\"scope:b\"}]",
+    "expectedHash": "0ab314b6daa73dd0a7e391e831b193777adbeee7a15f578340905ab82a29c5e4"
+  },
+  "cursor": {
+    "binding": {
+      "queryHash": "70b27f2a8778d4fd65dd3ef969362f4b5e3c80e77a32b4d52dbbc54d74b4b086",
+      "scopeLeaseHash": "0ab314b6daa73dd0a7e391e831b193777adbeee7a15f578340905ab82a29c5e4",
+      "scopeCount": 2,
+      "authorizationEpoch": 5,
+      "entitlementDigest": "entitlement:5",
+      "projectionSchema": 1
+    },
+    "after": {
+      "matchTier": "verified_substring",
+      "fieldPriority": 1,
+      "searchRankSeq": "0000000000000009",
+      "stableEntityId": "message:9"
+    },
+    "expectedSerialized": "{\"after\":{\"fieldPriority\":1,\"matchTier\":\"verified_substring\",\"searchRankSeq\":\"0000000000000009\",\"stableEntityId\":\"message:9\"},\"binding\":{\"authorizationEpoch\":5,\"entitlementDigest\":\"entitlement:5\",\"normalizerVersion\":1,\"projectionSchema\":1,\"queryHash\":\"70b27f2a8778d4fd65dd3ef969362f4b5e3c80e77a32b4d52dbbc54d74b4b086\",\"rankingVersion\":1,\"scopeCount\":2,\"scopeLeaseHash\":\"0ab314b6daa73dd0a7e391e831b193777adbeee7a15f578340905ab82a29c5e4\"},\"version\":1}"
+  }
+}

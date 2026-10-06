@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refresh Agent Command Catalogs"
+  short_description: "Update data-driven Codex/Claude/Grok/ZCode slash command JSON from vendor docs"
+  default_prompt: "Refresh xMatrix agent command catalogs from the official vendor documentation URLs and open a data-only PR."

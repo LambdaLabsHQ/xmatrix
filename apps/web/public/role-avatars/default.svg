@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Role Card avatar">
+  <rect width="96" height="96" rx="24" fill="#191b24"/>
+  <circle cx="48" cy="35" r="18" fill="#8b5cf6"/>
+  <path d="M20 82c2-17 13-26 28-26s26 9 28 26" fill="#a78bfa"/>
+  <path d="M34 34h28M48 20v28" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".88"/>
+</svg>

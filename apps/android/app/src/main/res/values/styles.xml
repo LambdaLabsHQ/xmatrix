@@ -1,0 +1,12 @@
+<resources>
+  <style name="AppTheme.Base" parent="@android:style/Theme.Material.Light.NoActionBar">
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:windowActionBar">false</item>
+    <item name="android:windowLightStatusBar">true</item>
+    <item name="android:windowBackground">#f5efe5</item>
+    <item name="android:statusBarColor">#f5efe5</item>
+    <!-- API 26 has no light-navigation-bar theme attribute. Keep its white icons readable. -->
+    <item name="android:navigationBarColor">#171717</item>
+  </style>
+  <style name="AppTheme" parent="AppTheme.Base" />
+</resources>

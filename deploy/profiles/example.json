@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "name": "example",
+  "cloudflare": {
+    "accountId": {
+      "env": "CLOUDFLARE_ACCOUNT_ID"
+    }
+  },
+  "hub": {
+    "workerName": "xmatrix-hub",
+    "origin": {
+      "env": "XMATRIX_HUB_ORIGIN"
+    },
+    "hyperdrive": {
+      "RELAY_POSTGRES": {
+        "env": "XMATRIX_HYPERDRIVE_ID"
+      }
+    },
+    "omitBindings": [
+      "RELAY_POSTGRES_SHARD_1"
+    ],
+    "vars": {
+      "AUTH_COOKIE_DOMAIN": {
+        "env": "XMATRIX_COOKIE_DOMAIN"
+      },
+      "XMATRIX_EMAIL_FROM": {
+        "env": "XMATRIX_EMAIL_FROM"
+      },
+      "PLATFORM_ADMIN_EMAILS": {
+        "env": "XMATRIX_PLATFORM_ADMIN_EMAILS"
+      }
+    }
+  },
+  "web": {
+    "workerName": "xmatrix-web",
+    "origin": {
+      "env": "XMATRIX_APP_ORIGIN"
+    },
+    "omitBindings": [
+      "RELEASE_ASSETS"
+    ]
+  }
+}

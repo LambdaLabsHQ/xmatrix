@@ -1,0 +1,218 @@
+# Long-lived cloud test deployment. This is deliberately standalone rather
+# than an [env.test] overlay so no production binding can be inherited.
+# Deployment identity comes from deploy/profiles/test.json:
+#   node scripts/deploy-config.mjs render test hub
+name = "xmatrix-hub-test"
+main = "src/index-scoped-authority-test.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[triggers]
+crons = []
+
+[durable_objects]
+bindings = [
+  { name = "RELAY_SCOPED_CONTROL_AUTHORITY", class_name = "RelayScopedControlAuthority" },
+  { name = "RELAY_CHANNEL_FAMILY_DATA", class_name = "RelayChannelFamilyData" },
+  { name = "RELAY_CHANNEL_FAMILY_DIRECTORY", class_name = "RelayChannelFamilyDirectory" },
+  { name = "RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL", class_name = "RelayPostgresAgentLaunchChannel" },
+  { name = "RELAY_POSTGRES_BACKGROUND_ADMISSION", class_name = "RelayPostgresBackgroundAdmission" },
+  { name = "RELAY_CHANNEL_CATALOG_AUTHORITY", class_name = "RelayChannelCatalogAuthority" },
+  { name = "RELAY_SCHEDULER_AUTHORITY", class_name = "RelaySchedulerAuthority" },
+  { name = "RELAY_PROJECTION_AUTHORIZATION_AUTHORITY", class_name = "RelayProjectionAuthorizationAuthority" },
+  { name = "RELAY_SPACE_MEMBERSHIP_AUTHORITY", class_name = "RelaySpaceMembershipAuthority" },
+  { name = "RELAY_USER_PREFERENCE_AUTHORITY", class_name = "RelayUserPreferenceAuthority" },
+  { name = "RELAY_TRACE_ACCESS_AUTHORITY", class_name = "RelayTraceAccessAuthority" },
+  { name = "RELAY_TRACE_ACCESS_LOCATOR", class_name = "RelayTraceAccessLocator" },
+  { name = "RELAY_TRACE_ACCESS_USER_INDEX", class_name = "RelayTraceAccessUserIndex" },
+  { name = "RELAY_CONTROL_PLANE_DIRECTORY", class_name = "RelayControlPlaneDirectory" },
+  { name = "RELAY_RANK_AUTHORITY_DIRECTORY", class_name = "RelayRankAuthorityDirectory" },
+  { name = "RELAY_GLOBAL_DIRECTORY_AUTHORITY", class_name = "RelayGlobalDirectoryAuthority" },
+  { name = "RELAY_AGENT_APP_POLICY_AUTHORITY", class_name = "RelayAgentAppPolicyAuthority" },
+  { name = "RELAY_AGENT_APP_POLICY_LOCATOR", class_name = "RelayAgentAppPolicyLocator" },
+  { name = "RELAY_SPACE_PROJECTION", class_name = "RelaySpaceProjection" },
+  { name = "RELAY_SPACE_CAPACITY_AUTHORITY", class_name = "RelaySpaceCapacityAuthority" },
+  { name = "RELAY_SPACE_ROOT_AUTHORITY", class_name = "RelaySpaceRootAuthority" },
+  { name = "RELAY_RUNTIME", class_name = "RelayRuntimeLive" },
+  { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "RelayRuntimeRouteDirectory" },
+  { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" }
+]
+
+[[send_email]]
+name = "SEND_EMAIL"
+
+[[r2_buckets]]
+binding = "ATTACHMENT_BUCKET"
+bucket_name = "xmatrix-attachments-test"
+
+[[r2_buckets]]
+binding = "RELAY_PAYLOAD_BUCKET"
+bucket_name = "xmatrix-relay-v2-test"
+
+[[d1_databases]]
+binding = "AUTH_DB"
+database_name = "xmatrix-auth-test"
+# database_id comes from the profile (TEST_AUTH_D1_DATABASE_ID).
+migrations_dir = "migrations"
+
+[[analytics_engine_datasets]]
+binding = "DIAGNOSTICS_AE"
+dataset = "xmatrix_diagnostics_test"
+
+[[analytics_engine_datasets]]
+binding = "RELAY_AUTHORITY_OBSERVABILITY_AE"
+dataset = "xmatrix_relay_authority_observability_test"
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DeviceAuthBroker"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RelayCore", "RelayRuntime"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["RelaySecretAuthority"]
+
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["RelayRuntimeLive"]
+
+[[migrations]]
+tag = "v6"
+deleted_classes = ["RelayRoom", "RelayRuntime"]
+
+[[migrations]]
+tag = "v7"
+new_sqlite_classes = ["RelayRuntimeRouteDirectory"]
+
+[[migrations]]
+tag = "v8"
+new_sqlite_classes = ["RelayChannelFamilyData"]
+
+[[migrations]]
+tag = "v9"
+new_sqlite_classes = ["RelayChannelFamilyDirectory"]
+
+[[migrations]]
+tag = "v10"
+new_sqlite_classes = ["RelaySpaceProjection"]
+
+[[migrations]]
+tag = "v11"
+new_sqlite_classes = ["RelayControlPlaneDirectory"]
+
+[[migrations]]
+tag = "v12"
+new_sqlite_classes = ["RelaySpaceCapacityAuthority"]
+
+[[migrations]]
+tag = "v13"
+new_sqlite_classes = ["RelaySpaceRootAuthority"]
+
+[[migrations]]
+tag = "v14"
+new_sqlite_classes = ["RelayGlobalDirectoryAuthority"]
+
+[[migrations]]
+tag = "v15"
+new_sqlite_classes = ["RelayAgentAppPolicyAuthority"]
+
+[[migrations]]
+tag = "v16"
+new_sqlite_classes = ["RelayRankAuthorityDirectory"]
+
+[[migrations]]
+tag = "v17"
+new_sqlite_classes = ["RelayAgentAppPolicyLocator"]
+
+[[migrations]]
+tag = "v18"
+new_sqlite_classes = ["RelayChannelCatalogAuthority"]
+
+[[migrations]]
+tag = "v19"
+new_sqlite_classes = ["RelaySchedulerAuthority"]
+
+[[migrations]]
+tag = "v20"
+new_sqlite_classes = ["RelayProjectionAuthorizationAuthority"]
+
+[[migrations]]
+tag = "v21"
+new_sqlite_classes = ["RelaySpaceMembershipAuthority"]
+
+[[migrations]]
+tag = "v22"
+new_sqlite_classes = ["RelayUserPreferenceAuthority"]
+
+[[migrations]]
+tag = "v23"
+new_sqlite_classes = ["RelayTraceAccessAuthority"]
+
+[[migrations]]
+tag = "v24"
+new_sqlite_classes = ["RelayTraceAccessLocator"]
+
+[[migrations]]
+tag = "v25"
+new_sqlite_classes = ["RelayTraceAccessUserIndex"]
+
+[[migrations]]
+tag = "v26"
+new_sqlite_classes = ["RelayScopedControlAuthority"]
+
+[[migrations]]
+tag = "v27"
+deleted_classes = ["RelayCore"]
+
+[[migrations]]
+tag = "v28"
+new_sqlite_classes = ["RelayPostgresAgentLaunchCoordinator"]
+
+# One Agent Launch coordinator per Channel: a new Launch is claimed by its own
+# Channel's object and never queues behind another Channel or reconciliation.
+[[migrations]]
+tag = "v29"
+new_sqlite_classes = ["RelayPostgresAgentLaunchChannel"]
+
+# Every Channel coordinates its own launch work; the global coordinator held
+# only its alarm.
+[[migrations]]
+tag = "v30"
+deleted_classes = ["RelayPostgresAgentLaunchCoordinator"]
+
+# Per-shard permits bounding how many Channel coordinator passes use
+# PostgreSQL at once; holds no work and no durable state.
+[[migrations]]
+tag = "v31"
+new_sqlite_classes = ["RelayPostgresBackgroundAdmission"]
+
+
+
+[vars]
+RELAY_AUTHORITY_OBSERVABILITY_ENABLED = "true"
+RELAY_AUTOMATION_EXECUTION_ENABLED = "false"
+RELAY_AUTOMATION_RUN_TIMEOUT_MS = "1800000"
+CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED = "true"
+# One-time synthetic-principal rotation after the pre-fix archive path left the
+# original smoke principal fail-closed on projection entitlement drift.
+XMATRIX_MOCK_AUTH_USER_ID = "test-release-smoke-v2"
+XMATRIX_MOCK_AUTH_EMAIL = "test-release-smoke-v2@invalid.example"
+XMATRIX_MOCK_AUTH_NAME = "Test Release Smoke v2"
+
+[[migrations]]
+tag = "v32"
+deleted_classes = ["RelaySecretAuthority"]

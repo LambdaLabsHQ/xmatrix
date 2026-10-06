@@ -1,0 +1,97 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "package.json",
+    "scripts/*.mjs",
+  ],
+  "ignoreBinaries": ["open", "SELECT", "wrangler"],
+  "ignoreDependencies": ["wrangler"],
+  "ignoreUnresolved": ["cloudflare:workers"],
+  "ignoreExportsUsedInFile": true,
+  // `@testonly` marks an export that exists for its tests; `@dormant`, staged
+  // code no production path constructs yet. `check:reachability` also runs knip
+  // in production mode, so any other export reached only by tests fails CI.
+  "tags": ["-public", "-testonly", "-dormant"],
+  "ignore": [
+    "scratch/**",
+    "apps/android/app/build/**",
+    "apps/android/app/src/main/assets/xmatrix-web/**",
+    "packages/cli-rs/crates/runtime/tests/fixtures/**",
+  ],
+  "workspaces": {
+    ".": {
+      "entry": [
+        // Script tests are entries in their own right; nothing else should
+        // depend on a package script happening to run `node --test`.
+        "scripts/**/*.test.mjs",
+        // The node test suite spawns these by path (`--import`, `--test-reporter`,
+        // child processes), never through an import knip can follow.
+        "scripts/test-telemetry/{node-resource-probe,ordered-node-test-runner,node-test-reporter}.mjs",
+        // Hub Deploy runs this gate before the live deploy, but knip can only
+        // see a workflow invocation it can parse: once the runner interposed
+        // proxy flags (`node "${node_args[@]}" scripts/...`) the reference was
+        // lost and the gate read as dead code, and nothing else points at it.
+        // Declared here rather than reshaping a production deploy step to suit
+        // the scanner.
+        "scripts/hub-client-compatibility-release-gate.mjs",
+        // A CLI gate over runner-temporary provider readbacks; declare it and
+        // its negative contract tests explicitly.
+        "scripts/hyperdrive-cache-policy.mjs",
+        "scripts/hyperdrive-cache-policy.test.mjs",
+      ],
+    },
+    "apps/desktop": {
+      "entry": ["src/main.ts", "src/preload.ts", "src/*.test.cjs", "package.json"],
+    },
+    "apps/web": {
+      "entry": [
+        "next.config.ts",
+        "open-next.config.ts",
+        "postcss.config.mjs",
+        "src/middleware.ts",
+        "src/app/**/*.{ts,tsx}",
+        "src/components/dashboard/agent-trace-stream.ts",
+        "src/components/**/*.test.cjs",
+        "src/lib/relay-v2/*.test.cjs",
+        // Playwright's global setup spawns it by path to hold the shared browser.
+        "e2e/hold-shared-browser.mjs",
+        // Run by hand (`pnpm exec node scripts/...`).
+        "scripts/*.mjs",
+      ],
+      "ignoreDependencies": ["eslint", "eslint-config-next", "shadcn", "tailwindcss", "tw-animate-css"],
+    },
+    // Internal libraries: every consumer lives in this repository, so an
+    // export no workspace imports is dead even though package.json exports it.
+    "packages/db": {
+      "entry": [
+        "package.json",
+      ],
+      "includeEntryExports": true,
+    },
+    "packages/protocol": {
+      "includeEntryExports": true,
+    },
+    "packages/hub": {
+      "entry": [
+        "src/index.ts",
+        "src/index-scoped-authority-test.ts",
+        "scripts/*.mjs",
+        "test/*.e2e.mjs",
+        "package.json",
+      ],
+      "ignoreDependencies": ["cloudflare", "tsx"],
+    },
+    "packages/mock-agent": {
+      "entry": ["src/index.mjs", "package.json"],
+    },
+    "packages/decision-model": {
+      "entry": [
+        "src/jev.mjs",
+        "src/cli.mjs",
+        // TypeScript pairs this declaration with jev.mjs; nothing imports it by name.
+        "src/jev.d.mts",
+        "package.json",
+      ],
+    },
+  },
+}

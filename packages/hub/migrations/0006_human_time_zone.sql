@@ -1,0 +1,17 @@
+-- The zone a person reads time in.
+--
+-- Expand only, and nullable: every account that already exists has no zone and
+-- must keep working untouched. A reader that finds NULL renders in its own zone
+-- and says which one that is, which is what it does today — so there is nothing
+-- to backfill and no window where a read is wrong.
+--
+-- Stored rather than detected per render because a rendered time does not carry
+-- its zone: once "4:23 AM" has been screenshotted or quoted into a channel,
+-- only a stored zone can answer whose 4:23 it was. That question is exactly
+-- what a Focus review got wrong when it read a UTC transcript against a UTC+8
+-- wall clock and reported four minutes of silence as eight hours.
+--
+-- An IANA name (`Asia/Shanghai`), never a fixed offset: an offset is a fact
+-- about one instant, and storing it makes every later render wrong by an hour
+-- across a daylight-saving boundary.
+ALTER TABLE "user" ADD COLUMN "timeZone" TEXT;

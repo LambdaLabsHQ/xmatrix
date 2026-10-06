@@ -1,0 +1,168 @@
+name: Configure Windows runner tools
+description: Native PATH, MSVC, and tool locations for a Windows runner (no app-level proxy; TUN handles routing).
+runs:
+  using: composite
+  steps:
+    - name: Configure Windows runner tools
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $utf8 = [System.Text.UTF8Encoding]::new($false)
+        function Add-GitHubLine([string] $Path, [string] $Value) {
+          [System.IO.File]::AppendAllText($Path, "$Value`n", $utf8)
+        }
+        function Resolve-NativePe(
+          [string] $Label,
+          [string[]] $Candidates,
+          [string] $ForbiddenPattern = ''
+        ) {
+          foreach ($candidate in $Candidates) {
+            if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+            try {
+              $resolved = (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
+            } catch {
+              continue
+            }
+            if (
+              -not (Test-Path -LiteralPath $resolved -PathType Leaf) -or
+              [System.IO.Path]::GetExtension($resolved) -ne '.exe' -or
+              ($ForbiddenPattern -and $resolved -match $ForbiddenPattern)
+            ) {
+              continue
+            }
+            $stream = [System.IO.File]::OpenRead($resolved)
+            try {
+              if ($stream.ReadByte() -ne 0x4d -or $stream.ReadByte() -ne 0x5a) {
+                continue
+              }
+            } finally {
+              $stream.Dispose()
+            }
+            return $resolved
+          }
+          throw "$Label native PE executable was not found"
+        }
+
+        if (
+          [string]::IsNullOrWhiteSpace($env:GITHUB_ENV) -or
+          [string]::IsNullOrWhiteSpace($env:GITHUB_PATH)
+        ) {
+          throw 'GitHub environment files are unavailable'
+        }
+        $homeDir = if ($HOME) { $HOME } else { [Environment]::GetFolderPath('UserProfile') }
+        if ([string]::IsNullOrWhiteSpace($homeDir)) { throw 'Windows user home is unavailable' }
+
+        # A job compiles on its share of the machine. A shared self-hosted
+        # machine keeps four logical processors for the runner service and
+        # native linker/OS work, derived on the selected machine rather than
+        # hard-coding its current processor count. A GitHub-hosted runner is a
+        # machine of its own (scripts/ci-machine.mjs) with as few as two, where
+        # the same reserve would serialize the whole compile.
+        $logicalProcessorCount = [Environment]::ProcessorCount
+        if ($logicalProcessorCount -lt 1) {
+          throw "Windows reported an invalid logical processor count: $logicalProcessorCount"
+        }
+        $cargoBuildJobs = if ($env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
+          $logicalProcessorCount
+        } else {
+          [Math]::Max($logicalProcessorCount - 4, 1)
+        }
+        Add-GitHubLine $env:GITHUB_ENV "CARGO_BUILD_JOBS=$cargoBuildJobs"
+        Write-Host "Windows Rust compile parallelism: $cargoBuildJobs of $logicalProcessorCount logical processors"
+
+        # Enter the installed native MSVC environment explicitly. Do not rely
+        # on a persistent runner profile or on a Git Bash toolchain shim.
+        $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+        $vswhere = Resolve-NativePe 'vswhere' @(
+          (Join-Path $programFilesX86 'Microsoft Visual Studio\Installer\vswhere.exe')
+        ) '(?i)\\(?:Git|msys|cygwin)\\'
+        $vswhereOutput = @(& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+        if ($LASTEXITCODE -ne 0) { throw 'vswhere failed while locating the native x64 C++ toolchain' }
+        $vsInstall = $vswhereOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($vsInstall)) {
+          throw 'Visual Studio with the native x64 C++ toolchain was not found'
+        }
+        $devShell = Join-Path $vsInstall 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
+        if (-not (Test-Path -LiteralPath $devShell -PathType Leaf)) {
+          throw "Visual Studio developer shell module was not found at $devShell"
+        }
+        Import-Module $devShell
+        Enter-VsDevShell -VsInstallPath $vsInstall -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64' | Out-Null
+
+        $pathGit = Get-Command git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        $pathNode = Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        $pathCurl = Get-Command curl.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        $git = Resolve-NativePe 'Git' @(
+          (Join-Path $homeDir 'scoop\apps\git\current\cmd\git.exe')
+          (Join-Path $env:ProgramFiles 'Git\cmd\git.exe')
+          $pathGit.Source
+        ) '(?i)\\Git\\(?:bin|usr\\bin)\\git\.exe$|\\(?:msys|cygwin)\\'
+        $node = Resolve-NativePe 'Node.js' @(
+          (Join-Path $env:ProgramFiles 'nodejs\node.exe')
+          $pathNode.Source
+        ) '(?i)\\(?:Git|msys|cygwin|Strawberry|perl)\\'
+        $curl = Resolve-NativePe 'curl' @(
+          (Join-Path $env:SystemRoot 'System32\curl.exe')
+          $pathCurl.Source
+        ) '(?i)\\(?:Git|msys|cygwin|Strawberry|perl)\\'
+        $cl = Resolve-NativePe 'MSVC compiler' @(
+          (Get-Command cl.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+        ) '(?i)\\(?:Git|msys|cygwin|Strawberry|perl)\\'
+        $link = Resolve-NativePe 'MSVC linker' @(
+          (Get-Command link.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+        ) '(?i)\\(?:Git|msys|cygwin|Strawberry|perl)\\'
+        if (
+          -not $cl.StartsWith($vsInstall, [StringComparison]::OrdinalIgnoreCase) -or
+          -not $link.StartsWith($vsInstall, [StringComparison]::OrdinalIgnoreCase)
+        ) {
+          throw 'cl.exe or link.exe did not resolve inside the selected Visual Studio installation'
+        }
+
+        # Keep the Windows job native. Git's cmd shim is sufficient for
+        # git.exe; adding Git Bash bin/usr/bin would shadow native tools such
+        # as Perl and silently turn this into an MSYS build environment.
+        $nativePaths = @(
+          (Split-Path -Parent $git)
+          (Split-Path -Parent $node)
+          (Split-Path -Parent $curl)
+          (Split-Path -Parent $cl)
+          (Split-Path -Parent $link)
+        )
+        $filteredPaths = @($env:PATH -split ';' | Where-Object {
+          $_ -and
+          $_ -notmatch '(?i)\\Git\\(?:[^\\]+\\)*(?:bin|usr\\bin)$' -and
+          $_ -notmatch '(?i)\\(?:mingw(?:32|64)|msys[^\\]*)\\bin$' -and
+          $_ -notmatch '(?i)\\scoop\\apps\\git\\[^\\]+\\(?:bin|usr\\bin)$' -and
+          $_ -notmatch '(?i)\\scoop\\apps\\perl\\' -and
+          $_ -notmatch '(?i)\\Strawberry\\' -and
+          $_ -notmatch '(?i)\\native-perl\\' -and
+          $_ -notmatch '(?i)\\perl\\(?:site\\)?bin$' -and
+          $_ -notmatch '(?i)\\scoop\\shims$'
+        })
+        $nativePath = (@($nativePaths + $filteredPaths) | Select-Object -Unique) -join ';'
+        if ($nativePath -match '(?i)\\Git\\(?:[^;\\]+\\)*(?:bin|usr\\bin)(?:;|$)|\\(?:mingw(?:32|64)|msys[^\\]*)\\bin(?:;|$)|\\scoop\\apps\\perl\\|\\Strawberry\\|\\native-perl\\|\\perl\\(?:site\\)?bin(?:;|$)|\\scoop\\shims(?:;|$)') {
+          throw 'native Windows PATH still contains a forbidden Git Bash, Perl, or Scoop shim directory'
+        }
+        $nativePaths | ForEach-Object { Add-GitHubLine $env:GITHUB_PATH $_ }
+        Add-GitHubLine $env:GITHUB_ENV "PATH=$nativePath"
+        $env:PATH = $nativePath
+
+        # Persist the native compiler environment for subsequent composite and
+        # workflow steps. Values come only from the selected VS installation.
+        @(
+          'DevEnvDir', 'INCLUDE', 'LIB', 'LIBPATH', 'NETFXSDKDir',
+          'UCRTVersion', 'UniversalCRTSdkDir', 'VCIDEInstallDir', 'VCINSTALLDIR',
+          'VCToolsInstallDir', 'VCToolsRedistDir', 'VCToolsVersion',
+          'VisualStudioVersion', 'VSINSTALLDIR', 'WindowsLibPath',
+          'WindowsSdkBinPath', 'WindowsSdkDir', 'WindowsSDKLibVersion',
+          'WindowsSDKVersion'
+        ) | ForEach-Object {
+          $value = [Environment]::GetEnvironmentVariable($_, 'Process')
+          if (-not [string]::IsNullOrWhiteSpace($value)) {
+            Add-GitHubLine $env:GITHUB_ENV "$_=$value"
+          }
+        }
+
+        # Self-hosted Windows runners use system TUN. Do not set HTTP(S)_PROXY
+        # or git http.proxy here — that doubles up with TUN and breaks fetches.
+

@@ -1,0 +1,13 @@
+diff --git a/dist/typescript/visitors/helpers.js b/dist/typescript/visitors/helpers.js
+index a53dae1..a58629f 100644
+--- a/dist/typescript/visitors/helpers.js
++++ b/dist/typescript/visitors/helpers.js
+@@ -4,7 +4,7 @@ import { extname } from '../../util/path.js';
+ import { EMPTY_TAGS } from './jsdoc.js';
+ const defaultParseOptions = {
+     sourceType: 'unambiguous',
+-    experimentalRawTransfer: rawTransferSupported(),
++    experimentalRawTransfer: process.env.KNIP_OXC_RAW_TRANSFER !== '0' && rawTransferSupported(),
+ };
+ export const parseFile = (filePath, sourceText) => {
+     const ext = extname(filePath);

@@ -1,0 +1,11 @@
+<svg role="img" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Pi</title>
+  <rect width="64" height="64" rx="14" fill="#111111"/>
+  <g transform="translate(9.6 9.6) scale(0.08)" fill="#F6F6F6">
+    <g transform="translate(84 84) scale(0.7)">
+      <path d="M420 280H280V140H0V0H420V280Z"/>
+      <path d="M560 560H420V280H560V560Z"/>
+      <path d="M140 560H0V140H140V280H280V420H140V560Z"/>
+    </g>
+  </g>
+</svg>

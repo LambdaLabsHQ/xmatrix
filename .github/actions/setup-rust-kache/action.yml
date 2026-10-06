@@ -1,0 +1,150 @@
+name: Setup Rust toolchain and kache
+description: Install the reviewed Rust toolchain, put cargo on PATH, and enable the pinned kache compile cache.
+runs:
+  using: composite
+  steps:
+    - name: Reclaim stale Linux Actions descendants
+      if: runner.os != 'Windows'
+      shell: bash
+      run: bash .github/scripts/cleanup-stale-actions-processes.sh
+
+    - name: Install pinned Unix Rust toolchain
+      if: runner.os != 'Windows'
+      env:
+        # rustup 1.29 downloads and unpacks concurrently by default. The
+        # dedicated Linux runner has a tight memory cgroup, so keep toolchain
+        # installation inside rustup's documented low-memory floor.
+        RUSTUP_CONCURRENT_DOWNLOADS: "1"
+        RUSTUP_UNPACK_RAM: "220200960"
+      uses: dtolnay/rust-toolchain@1.96.0
+      with:
+        components: clippy
+
+    - name: Install pinned Windows Rust toolchain
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        # rustc 1.97.1 crashes inside rustc_driver with 0xc0000005 on the
+        # managed Windows builder. Keep Windows validation and release on the
+        # last qualified stable compiler until a newer compiler is explicitly
+        # qualified by the complete native suite.
+        $windowsRustToolchain = '1.96.0'
+        $homeDir = if ($HOME) { $HOME } else { [Environment]::GetFolderPath('UserProfile') }
+        if ([string]::IsNullOrWhiteSpace($homeDir)) { throw 'Windows user home is unavailable' }
+        $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $homeDir '.cargo' }
+        $pathRustup = Get-Command rustup.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        $rustup = @(
+          (Join-Path $cargoHome 'bin\rustup.exe')
+          (Join-Path $homeDir '.cargo\bin\rustup.exe')
+          $pathRustup.Source
+        ) | Where-Object {
+          $_ -and (Test-Path -LiteralPath $_ -PathType Leaf)
+        } | Select-Object -First 1
+        if (-not $rustup) { throw 'rustup.exe was not found on the Windows runner' }
+        if (
+          -not [System.IO.Path]::IsPathRooted($rustup) -or
+          $rustup -match '(?i)\\(?:Git|msys|cygwin|Strawberry|perl)\\'
+        ) {
+          throw "rustup.exe did not resolve to a native absolute path: $rustup"
+        }
+        & $rustup toolchain install $windowsRustToolchain --profile minimal
+        if ($LASTEXITCODE -ne 0) { throw "failed to install Rust $windowsRustToolchain" }
+        & $rustup default $windowsRustToolchain
+        if ($LASTEXITCODE -ne 0) { throw "failed to select Rust $windowsRustToolchain" }
+
+    - name: Add Cargo to PATH on Unix
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        for candidate in \
+          "${CARGO_HOME:-$HOME/.cargo}/bin" \
+          "$HOME/.cargo/bin"; do
+          if [ -d "$candidate" ]; then
+            echo "$candidate" >> "$GITHUB_PATH"
+            export PATH="$candidate:$PATH"
+          fi
+        done
+        rustc --version
+        cargo --version
+        rustc_verbose_version="$(rustc -vV)"
+        if ! grep -Fqx 'release: 1.96.0' <<< "$rustc_verbose_version"; then
+          echo "required Unix Rust release must be 1.96.0" >&2
+          exit 1
+        fi
+        # Bound compiler parallelism by this machine's memory so cold release
+        # worktrees cannot exceed the runner's memory boundary. This changes
+        # scheduling, not the validated or released artifacts.
+        cargo_build_jobs="$(bash .github/scripts/rust-compile-jobs.sh)"
+        {
+          echo "CARGO_BUILD_JOBS=$cargo_build_jobs"
+          # CI does not consume debug symbols. Omitting them keeps large test
+          # crates below the runner's peak-memory boundary while preserving
+          # the code and assertions under test.
+          echo "CARGO_PROFILE_DEV_DEBUG=0"
+          echo "CARGO_PROFILE_TEST_DEBUG=0"
+        } >> "$GITHUB_ENV"
+
+    - name: Add Cargo to PATH on Windows
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $utf8 = [System.Text.UTF8Encoding]::new($false)
+        $homeDir = if ($HOME) { $HOME } else { [Environment]::GetFolderPath('UserProfile') }
+        if ([string]::IsNullOrWhiteSpace($homeDir)) { throw 'Windows user home is unavailable' }
+        $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $homeDir '.cargo' }
+        $candidates = @(
+          (Join-Path $cargoHome 'bin')
+          (Join-Path $homeDir '.cargo\bin')
+        ) | Select-Object -Unique
+        $foundCargo = $false
+        foreach ($candidate in $candidates) {
+          if (Test-Path -LiteralPath $candidate -PathType Container) {
+            if ($candidate -match '(?i)\\(?:Git|msys|cygwin|Strawberry|perl)\\') {
+              throw "Cargo bin directory is not a native tool path: $candidate"
+            }
+            [System.IO.File]::AppendAllText($env:GITHUB_PATH, "$candidate`n", $utf8)
+            $env:PATH = "$candidate;$env:PATH"
+            $foundCargo = $true
+          }
+        }
+        if (-not $foundCargo) { throw 'Cargo bin directory was not found after rustup setup' }
+        rustc --version
+        if ($LASTEXITCODE -ne 0) { throw 'rustc --version failed after rustup setup' }
+        cargo --version
+        if ($LASTEXITCODE -ne 0) { throw 'cargo --version failed after rustup setup' }
+        $rustcVerboseVersion = @(rustc -vV)
+        if ($LASTEXITCODE -ne 0) { throw 'rustc -vV failed after rustup setup' }
+        $releaseLine = $rustcVerboseVersion | Where-Object { $_ -like 'release: *' } | Select-Object -First 1
+        if ($releaseLine -ne 'release: 1.96.0') {
+          throw "required Windows Rust release must be 1.96.0; got $releaseLine"
+        }
+        $hostLine = $rustcVerboseVersion | Where-Object { $_ -like 'host: *' } | Select-Object -First 1
+        if ($hostLine -ne 'host: x86_64-pc-windows-msvc') {
+          throw "required Windows Rust host must be x86_64-pc-windows-msvc; got $hostLine"
+        }
+        # CI does not consume incremental state or native debug symbols. These
+        # settings substantially reduce target/ growth on the bounded
+        # self-hosted runner without changing the code or assertions tested.
+        @(
+          'CARGO_INCREMENTAL=0'
+          'CARGO_PROFILE_DEV_DEBUG=0'
+          'CARGO_PROFILE_TEST_DEBUG=0'
+        ) | ForEach-Object {
+          [System.IO.File]::AppendAllText($env:GITHUB_ENV, "$_`n", $utf8)
+        }
+
+    - name: Set up kache on Unix
+      if: runner.os != 'Windows'
+      shell: bash
+      run: bash .github/scripts/setup-kache.sh
+
+    - name: Set up kache on Windows
+      if: runner.os == 'Windows'
+      shell: powershell
+      env:
+        # Pass the authoritative Actions identity rather than a host fallback.
+        KACHE_GITHUB_RUNNER_NAME: ${{ runner.name }}
+      run: .github/scripts/setup-kache.ps1

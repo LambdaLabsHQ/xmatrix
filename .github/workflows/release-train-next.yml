@@ -1,0 +1,30 @@
+name: Release Train Next
+
+# When a Production Release finishes, wake the train from the reviewed default
+# branch: it closes the intents that release delivered, reopens those of a
+# failed one, and ships whatever else is waiting (scripts/release-train.mjs).
+on:
+  workflow_run:
+    workflows: ["Production Release"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  wake:
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    steps:
+      - name: Wake the release train
+        uses: actions/github-script@v7
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: "production-release-request.yml",
+              ref: context.payload.repository.default_branch,
+            });
+            core.notice(`Woke the release train after Production Release ${context.payload.workflow_run.html_url}`);

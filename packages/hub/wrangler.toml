@@ -1,0 +1,322 @@
+# Product configuration of the Hub Worker. Deployment identity (account,
+# routes, placement, Hyperdrive ids, operator and cookie/mail vars) comes from a
+# profile in deploy/profiles/; deploy with the rendered config:
+#   node scripts/deploy-config.mjs render <profile> hub
+name = "xmatrix-hub"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Every console log is kept. Per-invocation logs are off: they were ~87% of
+# Workers Logs events (about 27M a month, above the 20M included), and the
+# per-script and per-DO CPU, wall time, and outcome they carried are also in
+# Workers Analytics.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+invocation_logs = false
+
+[triggers]
+# Bounded passes that need the Worker's network: Sentry receipt recovery,
+# connector room cleanup, and the harness release watch (registries publish no
+# push feed). PostgreSQL owns its jobs. This trigger cannot call the retired
+# projection exporter or its queue.
+crons = ["* * * * *"]
+
+[durable_objects]
+# PostgreSQL-authoritative fact targets are intentionally unbound after the
+# cutover. Their classes remain in migration history so legacy SQLite state is
+# retained read-only for bounded repair without keeping a live write surface.
+bindings = [
+  { name = "RELAY_SCOPED_CONTROL_AUTHORITY", class_name = "RelayScopedControlAuthority" },
+  { name = "RELAY_CHANNEL_FAMILY_DATA", class_name = "RelayChannelFamilyData" },
+  { name = "RELAY_CHANNEL_FAMILY_DIRECTORY", class_name = "RelayChannelFamilyDirectory" },
+  { name = "RELAY_POSTGRES_CHANNEL_COORDINATOR", class_name = "RelayPostgresChannelCoordinator" },
+  { name = "RELAY_SUMMON_DECISION_CLOCK", class_name = "RelaySummonDecisionClock" },
+  { name = "RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL", class_name = "RelayPostgresAgentLaunchChannel" },
+  { name = "RELAY_POSTGRES_BACKGROUND_ADMISSION", class_name = "RelayPostgresBackgroundAdmission" },
+  { name = "RELAY_SPACE_DELETION_CLOCK", class_name = "RelaySpaceDeletionClock" },
+  { name = "RELAY_PAGE_SESSION", class_name = "RelayPageSession" },
+  { name = "RELAY_CONTROL_PLANE_DIRECTORY", class_name = "RelayControlPlaneDirectory" },
+  { name = "RELAY_RANK_AUTHORITY_DIRECTORY", class_name = "RelayRankAuthorityDirectory" },
+  { name = "RELAY_GLOBAL_DIRECTORY_AUTHORITY", class_name = "RelayGlobalDirectoryAuthority" },
+  { name = "RELAY_AGENT_APP_POLICY_LOCATOR", class_name = "RelayAgentAppPolicyLocator" },
+  { name = "RELAY_SPACE_PROJECTION", class_name = "RelaySpaceProjection" },
+  { name = "RELAY_SPACE_CAPACITY_AUTHORITY", class_name = "RelaySpaceCapacityAuthority" },
+  { name = "RELAY_RUNTIME", class_name = "RelayRuntimeLive" },
+  { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "RelayRuntimeRouteDirectory" },
+  { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" }
+]
+
+[[send_email]]
+name = "SEND_EMAIL"
+
+[[r2_buckets]]
+binding = "ATTACHMENT_BUCKET"
+bucket_name = "xmatrix-attachments"
+
+[[r2_buckets]]
+binding = "RELAY_PAYLOAD_BUCKET"
+bucket_name = "xmatrix-relay-v2"
+
+# Correctness reads and all writes use the uncached primary binding.
+[[hyperdrive]]
+binding = "RELAY_POSTGRES"
+
+# The finite correctness shard is selected only for exact `shard-1` placement.
+[[hyperdrive]]
+binding = "RELAY_POSTGRES_SHARD_1"
+
+[[analytics_engine_datasets]]
+binding = "DIAGNOSTICS_AE"
+dataset = "xmatrix_diagnostics"
+
+# Scoped-authority phase observation. Kept out of xmatrix_diagnostics because that
+# dataset indexes on a per-user hash; a low-cardinality schema key in the same
+# index would break both its cost profile and its query contract.
+[[analytics_engine_datasets]]
+binding = "RELAY_AUTHORITY_OBSERVABILITY_AE"
+dataset = "xmatrix_relay_authority_observability"
+
+# Request allowances (Workers Rate Limiting: per-key counters kept at the edge,
+# no storage). Over-limit requests are logged as "xMatrix rate limit exceeded";
+# they are refused with 429 only while RATE_LIMIT_ENFORCED is "true".
+# Credential: every request carrying a bearer token, per token.
+[[ratelimits]]
+name = "RATE_LIMIT_CREDENTIAL"
+namespace_id = "3801"
+simple = { limit = 1200, period = 60 }
+
+# Anonymous: requests without a credential, per client IP.
+[[ratelimits]]
+name = "RATE_LIMIT_ANONYMOUS"
+namespace_id = "3802"
+simple = { limit = 600, period = 60 }
+
+# Human socket sign-ins, per verified user, checked before the presence fanout.
+[[ratelimits]]
+name = "RATE_LIMIT_HUMAN_CONNECT"
+namespace_id = "3803"
+simple = { limit = 30, period = 60 }
+
+# Native deploy identity, so a datapoint can be attributed to an exact version
+# instead of a guessed one. Read-only; never synthesised in code.
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DeviceAuthBroker"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RelayCore", "RelayRuntime"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["RelaySecretAuthority"]
+
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["RelayRuntimeLive"]
+
+[[migrations]]
+tag = "v6"
+deleted_classes = ["RelayRoom", "RelayRuntime"]
+
+[[migrations]]
+tag = "v7"
+new_sqlite_classes = ["RelayRuntimeRouteDirectory"]
+
+[[migrations]]
+tag = "v8"
+new_sqlite_classes = ["RelayChannelFamilyData"]
+
+[[migrations]]
+tag = "v9"
+new_sqlite_classes = ["RelayChannelFamilyDirectory"]
+
+[[migrations]]
+tag = "v10"
+new_sqlite_classes = ["RelaySpaceProjection"]
+
+[[migrations]]
+tag = "v11"
+new_sqlite_classes = ["RelayControlPlaneDirectory"]
+
+[[migrations]]
+tag = "v12"
+new_sqlite_classes = ["RelaySpaceCapacityAuthority"]
+
+[[migrations]]
+tag = "v13"
+new_sqlite_classes = ["RelaySpaceRootAuthority"]
+
+[[migrations]]
+tag = "v14"
+new_sqlite_classes = ["RelayGlobalDirectoryAuthority"]
+
+[[migrations]]
+tag = "v15"
+new_sqlite_classes = ["RelayAgentAppPolicyAuthority"]
+
+[[migrations]]
+tag = "v16"
+new_sqlite_classes = ["RelayRankAuthorityDirectory"]
+
+[[migrations]]
+tag = "v17"
+new_sqlite_classes = ["RelayAgentAppPolicyLocator"]
+
+[[migrations]]
+tag = "v18"
+new_sqlite_classes = ["RelayChannelCatalogAuthority"]
+
+[[migrations]]
+tag = "v19"
+new_sqlite_classes = ["RelaySchedulerAuthority"]
+
+[[migrations]]
+tag = "v20"
+new_sqlite_classes = ["RelayProjectionAuthorizationAuthority"]
+
+[[migrations]]
+tag = "v21"
+new_sqlite_classes = ["RelaySpaceMembershipAuthority"]
+
+[[migrations]]
+tag = "v22"
+new_sqlite_classes = ["RelayUserPreferenceAuthority"]
+
+[[migrations]]
+tag = "v23"
+new_sqlite_classes = ["RelayTraceAccessAuthority"]
+
+[[migrations]]
+tag = "v24"
+new_sqlite_classes = ["RelayTraceAccessLocator"]
+
+[[migrations]]
+tag = "v25"
+new_sqlite_classes = ["RelayTraceAccessUserIndex"]
+
+[[migrations]]
+tag = "v26"
+new_sqlite_classes = ["RelayScopedControlAuthority"]
+
+[[migrations]]
+tag = "v27"
+deleted_classes = ["RelayCore"]
+
+[[migrations]]
+tag = "v28"
+new_sqlite_classes = ["RelayPostgresAgentLaunchCoordinator"]
+
+[[migrations]]
+tag = "v29"
+new_sqlite_classes = ["RelayPostgresChannelCoordinator"]
+
+[[migrations]]
+tag = "v30"
+new_sqlite_classes = ["RelayPostgresBillingCoordinator"]
+
+[[migrations]]
+tag = "v31"
+new_sqlite_classes = ["RelayPostgresScheduledTaskCoordinator"]
+
+[vars]
+# Scoped-authority phase observation. Observation-only: it changes no transaction,
+# ordering, idempotency, query, timeout or partitioning behaviour, and writes
+# are best-effort. Setting this to anything but "true" stops every write.
+RELAY_AUTHORITY_OBSERVABILITY_ENABLED = "true"
+RELAY_POSTGRES_SHARD_ID = "shard-0"
+# Over-limit requests are measured, not refused, until the limits are tuned on
+# production traffic. "true" answers them with 429 and Retry-After.
+RATE_LIMIT_ENFORCED = "false"
+# The release workflow records the final D1 fence and verified receipt before
+# this configuration can deploy. There is deliberately no D1 fallback.
+AUTH_AUTHORITY = "postgres"
+MACHINE_NAME_REQUIRED = "true"
+# Automation execution changes external machine state. Production enables the
+# reviewed Channel-family-owned path; an exact-SHA rollback sets this back to "false".
+RELAY_AUTOMATION_EXECUTION_ENABLED = "true"
+# Scheduled Agents are one-shot executions. The owning Channel family durably stops any process
+# that has not reported its terminal lifecycle within thirty minutes.
+RELAY_AUTOMATION_RUN_TIMEOUT_MS = "1800000"
+# Runtime route-directory, socket occupancy, and per-cell committed-event
+# delivery are all present. Exact "dual" activates candidate Runtime cells;
+# every other value remains the compatibility single-cell path.
+XMATRIX_RUNTIME_CELL_MODE = "dual"
+# Transitional compatibility adapter for published 0.15.53-0.15.63
+# CLI/daemon binaries. Those binaries report their version in the realtime
+# connect frame but predate request-level compatibility headers. Keep one Hub
+# authority and retire this flag after the first post-boundary release is
+# broadly available; never route old code to a second authority Worker.
+CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED = "true"
+# RELAY_R2_CAPABILITY_HMAC_SECRET is a dedicated Worker secret, configured with
+# `wrangler secret put`; it must never be added to this vars table.
+
+[[migrations]]
+tag = "v32"
+new_sqlite_classes = ["RelaySummonDecisionClock"]
+
+# The Automation coordinator is named for its product concept; storage and
+# pending alarms move with the class.
+[[migrations]]
+tag = "v33"
+renamed_classes = [{ from = "RelayPostgresScheduledTaskCoordinator", to = "RelayPostgresAutomationCoordinator" }]
+
+# The Free allowance is enforced when a message is written, so reaching it
+# queues no follow-up notice. The notice coordinator held only its alarm.
+[[migrations]]
+tag = "v34"
+deleted_classes = ["RelayPostgresBillingCoordinator"]
+
+# One Agent Launch coordinator per Channel: a new Launch is claimed by its own
+# Channel's object and never queues behind another Channel or reconciliation.
+[[migrations]]
+tag = "v35"
+new_sqlite_classes = ["RelayPostgresAgentLaunchChannel"]
+
+
+# Every Channel coordinates its own launch work; the global coordinator held
+# only its alarm.
+[[migrations]]
+tag = "v36"
+deleted_classes = ["RelayPostgresAgentLaunchCoordinator"]
+
+# Automations are timed by their Channel's coordinator; the global Automation
+# clock held only its alarm.
+[[migrations]]
+tag = "v37"
+deleted_classes = ["RelayPostgresAutomationCoordinator"]
+
+# Per-Space alarm that purges a deleted Space once its restore window ends.
+# PostgreSQL owns the deletion; the object stores only its Space id and alarm.
+[[migrations]]
+tag = "v38"
+new_sqlite_classes = ["RelaySpaceDeletionClock"]
+
+# Per-shard permits bounding how many Channel coordinator passes use
+# PostgreSQL at once; holds no work and no durable state.
+[[migrations]]
+tag = "v39"
+new_sqlite_classes = ["RelayPostgresBackgroundAdmission"]
+
+# One live co-editing session per page (docs/design/pages-and-conversations.md).
+# PostgreSQL owns the committed page; the object holds only session state.
+[[migrations]]
+tag = "v40"
+new_sqlite_classes = ["RelayPageSession"]
+
+# Secrets belong to Spaces in PostgreSQL, and Slack sessions keep their own
+# token there; no Worker has bound this class since its values moved.
+[[migrations]]
+tag = "v41"
+deleted_classes = ["RelaySecretAuthority"]

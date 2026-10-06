@@ -1,0 +1,98 @@
+name: Client Publish
+
+# Each build machine has already uploaded its verified files straight into
+# releases/<tag> as run-attempt parts. Publishing moves no artifact: it seals
+# the release manifest that names the newest complete part of each build, then
+# points the dev channel at it. release-promote.yml later points stable at the
+# same sealed release once it has been confirmed on dev.
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: Client whose release this train publishes (cli, desktop, or android)
+        required: true
+        type: string
+      tag:
+        description: Immutable <component>-v<version> release tag the parts were uploaded to
+        required: true
+        type: string
+      parts:
+        description: Comma-separated release parts the build machines uploaded
+        required: true
+        type: string
+      checksums:
+        description: Publish a checksums.txt over every part's files
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  release:
+    environment: production
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    concurrency:
+      group: ${{ inputs.component }}-publish-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      # A sparse cone another job left on this persistent runner survives
+      # checkout when HEAD is already on the ref: restore the full tree.
+      - name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/setup-pnpm-node/action.yml
+
+      - uses: ./.github/actions/setup-pnpm-node
+
+      - name: Require an explicit supported client release
+        env:
+          RELEASE_COMPONENT: ${{ inputs.component }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          node --input-type=module <<'SCRIPT'
+          const component = process.env.RELEASE_COMPONENT;
+          if (!['cli', 'desktop', 'android'].includes(component)) throw new Error('Unsupported release component');
+          if (!new RegExp(`^${component}-v\\d+\\.\\d+\\.\\d+$`).test(process.env.RELEASE_TAG || '')) {
+            throw new Error(`${component} publication requires its immutable release tag`);
+          }
+          SCRIPT
+
+      - name: Seal the release and publish it to the dev channel
+        timeout-minutes: 10
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
+          R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
+          XMATRIX_RELEASE_TAG: ${{ inputs.tag }}
+          XMATRIX_RELEASE_COMPONENT: ${{ inputs.component }}
+          XMATRIX_RELEASE_CHANNEL: dev
+          XMATRIX_RELEASE_SHA: ${{ github.sha }}
+          RELEASE_PARTS: ${{ inputs.parts }}
+          RELEASE_CHECKSUMS: ${{ inputs.checksums && '--checksums' || '' }}
+        run: |
+          set -euo pipefail
+          node scripts/r2-release-store.mjs seal-release \
+            --bucket xmatrix-release-assets \
+            --prefix "releases/$XMATRIX_RELEASE_TAG" \
+            --parts "$RELEASE_PARTS" \
+            $RELEASE_CHECKSUMS
+          node scripts/r2-release-store.mjs publish-channel \
+            --bucket xmatrix-release-assets \
+            --component "$XMATRIX_RELEASE_COMPONENT" \
+            --channel dev \
+            --prefix "releases/$XMATRIX_RELEASE_TAG"

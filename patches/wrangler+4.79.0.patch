@@ -1,0 +1,87 @@
+diff --git a/wrangler-dist/cli.js b/wrangler-dist/cli.js
+index c30ce77..10b51cb 100644
+--- a/wrangler-dist/cli.js
++++ b/wrangler-dist/cli.js
+@@ -131841,7 +131841,10 @@ async function bundleWorker(entry, destination, {
+       }
+       stop = /* @__PURE__ */ __name(async function() {
+-        tmpDir.remove();
+-        await ctx.dispose();
++        try {
++          await ctx.dispose();
++        } finally {
++          tmpDir.remove();
++        }
+       }, "stop");
+     } else {
+       result = await esbuild__namespace.build(buildOptions);
+@@ -306509,12 +306512,15 @@ var BundlerController = class extends Controller {
+         logger.debug("BundlerController teardown beginning...");
+         await super.teardown();
+         this.#customBuildAborter?.abort();
+-        this.#tmpDir?.remove();
+-        await Promise.all([
+-          this.#bundlerCleanup?.(),
+-          this.#customBuildWatcher?.close(),
+-          this.#assetsWatcher?.close()
+-        ]);
++        try {
++          await Promise.all([
++            this.#bundlerCleanup?.(),
++            this.#customBuildWatcher?.close(),
++            this.#assetsWatcher?.close()
++          ]);
++        } finally {
++          this.#tmpDir?.remove();
++        }
+         logger.debug("BundlerController teardown complete");
+       }
+       emitBundleStartEvent(config) {
+@@ -307865,3 +307865,4 @@
+       onReloadComplete(data) {
++        this.latestProxyData = data.proxyData;
+         this.localServerReady.resolve();
+         this.latestConfig = data.config;
+@@ -312738,13 +312738,29 @@
+   const { port, address } = await readyPromise;
++  const directLocalFetch = local && options?.experimental?.directLocalFetch === true;
++  const directDispatcher = directLocalFetch ? new import_undici30.Agent({ pipelining: 0 }) : void 0;
+   return {
+     port,
+     address,
+     stop: /* @__PURE__ */ __name(async () => {
+-      await devServer.devEnv.teardown.bind(devServer.devEnv)();
+-      devServer.unregisterHotKeys?.();
++      try {
++        await devServer.devEnv.teardown.bind(devServer.devEnv)();
++        devServer.unregisterHotKeys?.();
++      } finally {
++        await directDispatcher?.close();
++      }
+     }, "stop"),
+     fetch: /* @__PURE__ */ __name(async (input, init4) => {
++      if (directLocalFetch) {
++        await devServer.devEnv.proxy.localServerReady.promise;
++        const proxyData = devServer.devEnv.proxy.latestProxyData;
++        const target = proxyData.userWorkerUrl;
++        const [url, request] = parseRequestInput(target.hostname, target.port, input, init4, target.protocol.replace(/:$/, ""));
++        for (const [key, value] of Object.entries(proxyData.headers ?? {})) {
++          request.headers.set(key, value);
++        }
++        return await (0, import_undici30.fetch)(new import_undici30.Request(url, request), { dispatcher: directDispatcher });
++      }
+       return await (0, import_undici30.fetch)(
+         ...parseRequestInput(address, port, input, init4, options?.localProtocol)
+       );
+     }, "fetch"),
+diff --git a/wrangler-dist/ProxyWorker.js b/wrangler-dist/ProxyWorker.js
+--- a/wrangler-dist/ProxyWorker.js
++++ b/wrangler-dist/ProxyWorker.js
+@@ -119,6 +119,6 @@
+         deferredResponse.resolve(res);
+       }).catch((error) => {
+-        const newUserWorkerUrl = this.proxyData && urlFromParts(this.proxyData.userWorkerUrl);
++        const newUserWorkerUrl = this.proxyData && urlFromParts(this.proxyData.userWorkerUrl, request.url);
+         if (userWorkerUrl.href === newUserWorkerUrl?.href) {
+           void sendMessageToProxyController(this.env, {
+             type: "error",

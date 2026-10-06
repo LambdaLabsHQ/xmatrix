@@ -1,0 +1,276 @@
+name: Archive Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact commit deployed by the successful production run
+        required: true
+        type: string
+      source_run_id:
+        description: Successful production workflow run ID
+        required: true
+        type: string
+      source_run_attempt:
+        description: Successful production workflow run attempt
+        required: true
+        type: string
+      source_scope:
+        description: Canonical comma-separated components in the completed production receipt
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: archive-release-assets-${{ inputs.source_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: mirror R2 releases to GitHub Releases
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
+      SOURCE_SCOPE: ${{ inputs.source_scope }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GITHUB_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: release-tooling
+
+      - name: Restore full checkout before local actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/setup-pnpm-node/action.yml
+
+      - uses: ./.github/actions/setup-pnpm-node
+
+      - name: Require the completed exact-scope production train
+        id: source
+        uses: actions/github-script@v7
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ inputs.source_run_attempt }}
+          SOURCE_SCOPE: ${{ inputs.source_scope }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const components = ["hub", "web", "cli", "desktop", "android", "ios"];
+            const scope = process.env.SOURCE_SCOPE;
+            const selected = scope.split(",");
+            if (!selected.length || selected.some((item) => !components.includes(item)) ||
+                components.filter((item) => selected.includes(item)).join(",") !== scope ||
+                (selected.includes("desktop") && !selected.includes("cli"))) {
+              core.setFailed("Invalid source_scope");
+              return;
+            }
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: Number(process.env.SOURCE_RUN_ID),
+            });
+            if (run.path !== ".github/workflows/production-release.yml" ||
+                run.head_sha !== process.env.SOURCE_SHA || run.conclusion !== "success" ||
+                !/^[1-9]\d*$/.test(process.env.SOURCE_RUN_ATTEMPT || "") ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT)) {
+              core.setFailed("Archive source is not a successful exact-SHA Production Release");
+              return;
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...context.repo, run_id: run.id, filter: "latest", per_page: 100,
+            });
+            const deployment = jobs.find(job => job.name === "deployment receipt");
+            if (!deployment?.steps?.some(step =>
+                step.name === `Record successful ${scope} component deployment` &&
+                step.conclusion === "success")) {
+              core.setFailed("Archive source lacks exact-scope deployment receipt");
+              return;
+            }
+            const deployedJobs = {
+              hub: "hub / deploy",
+              web: "web / deploy",
+              cli: "cli / release",
+              desktop: "desktop / publish-desktop-release",
+              android: ["android / release", "android / release / release"],
+              ios: "ios / upload",
+            };
+            for (const [component, name] of Object.entries(deployedJobs)) {
+              const names = Array.isArray(name) ? name : [name];
+              const matches = jobs.filter(job => names.includes(job.name));
+              if (matches.length > 1) {
+                core.setFailed(`Archive source ${component} has ambiguous publisher evidence`);
+                return;
+              }
+              const conclusion = matches[0]?.conclusion;
+              if ((selected.includes(component) && conclusion !== "success") ||
+                  (!selected.includes(component) && conclusion === "success")) {
+                core.setFailed(`Archive source ${component} job does not match the published scope`);
+                return;
+              }
+            }
+            if (jobs.find(job => job.name === "verify-production-postgres")?.conclusion !==
+                (selected.includes("hub") ? "success" : "skipped")) {
+              core.setFailed("Archive source verify-production-postgres does not match Hub scope");
+              return;
+            }
+            const finalizer = jobs.find(job => job.name === "selected train receipt");
+            if (finalizer?.conclusion !== "success" && finalizer?.conclusion !== "skipped") {
+              core.setFailed("Archive source has no determinate production finalizer result");
+              return;
+            }
+            core.setOutput("recover_receipt", String(finalizer.conclusion === "skipped"));
+
+      - name: Verify source production identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          version="$(node -p "require('./version.json').version")"
+          production_tag="xmatrix-v$version"
+          git fetch --force origin "refs/tags/$production_tag:refs/tags/$production_tag"
+          test "$(git rev-parse "$production_tag^{commit}")" = "$SOURCE_SHA"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Read back and verify the missing production deployment receipt
+        if: steps.source.outputs.recover_receipt == 'true'
+        shell: bash
+        env:
+          RELEASE_TAG: xmatrix-v${{ steps.identity.outputs.version }}
+        run: |
+          set -euo pipefail
+          receipt_dir="$RUNNER_TEMP/production-receipt-recovery"
+          rm -rf "$receipt_dir"
+          mkdir -p "$receipt_dir"
+          node scripts/r2-release-store.mjs download-directory \
+            --bucket xmatrix-release-receipts \
+            --prefix "production/$RELEASE_TAG/deployment" \
+            --directory "$receipt_dir"
+          node release-tooling/scripts/verify-production-deployment-receipt.mjs \
+            "$receipt_dir/production-deployment-receipt.json"
+
+      - name: Publish the missing immutable production GitHub receipt
+        if: steps.source.outputs.recover_receipt == 'true'
+        env:
+          RELEASE_TAG: xmatrix-v${{ steps.identity.outputs.version }}
+          RELEASE_TITLE: xMatrix v${{ steps.identity.outputs.version }}
+          RELEASE_NOTES: |
+            Production ${{ inputs.source_scope }} release completed from `${{ inputs.source_sha }}`.
+
+            - Scope: `${{ inputs.source_scope }}` (only selected components were published)
+            - Components: `${{ inputs.source_scope }}`
+            - Deployment receipt: R2 `xmatrix-release-receipts/production/xmatrix-v${{ steps.identity.outputs.version }}/deployment`
+            - Authoritative run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.source_run_id }}`
+          RELEASE_DRAFT: "false"
+          RELEASE_PRERELEASE: "false"
+          RELEASE_FORCE_TAG: "false"
+          RELEASE_ALLOW_EMPTY_ASSETS: "true"
+          RELEASE_KEEP_STALE_ASSETS: "true"
+          RELEASE_IMMUTABLE_VERSION: "true"
+        run: |
+          set -euo pipefail
+          GITHUB_SHA="$SOURCE_SHA" \
+          RELEASE_TRANSACTION_ID="$SOURCE_RUN_ID:$SOURCE_RUN_ATTEMPT" \
+            node scripts/publish-github-release.mjs
+
+      - name: Download and archive component releases
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          archive_component() {
+            component="$1"
+            tag="$2"
+            title="$3"
+            notes="$4"
+            release_dir="$RUNNER_TEMP/archive-$component"
+
+            node scripts/r2-release-store.mjs download-directory \
+              --bucket xmatrix-release-assets \
+              --prefix "releases/$tag" \
+              --directory "$release_dir" \
+              --allow-missing
+            if [ ! -f "$release_dir/xmatrix-r2-manifest.json" ]; then
+              echo "Selected R2 release $tag is missing." >&2
+              exit 1
+            fi
+
+            release_state="$(curl --silent --show-error --fail-with-body \
+              --header "Authorization: Bearer $GITHUB_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$tag" \
+              2>/dev/null || true)"
+            if [ -n "$release_state" ] && [ "$(printf '%s' "$release_state" | node -e \
+              "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(String(JSON.parse(s).draft)))")" = "false" ]; then
+              echo "GitHub Release $tag is already published; preserving the verified archive."
+              return
+            fi
+
+            mapfile -t assets < <(find "$release_dir" -maxdepth 1 -type f \
+              ! -name xmatrix-r2-manifest.json -print | sort)
+            if [ "${#assets[@]}" -eq 0 ]; then
+              echo "R2 release $tag contains no archive assets." >&2
+              exit 1
+            fi
+            required_names="$(printf '%s\n' "${assets[@]##*/}")"
+            asset_paths="$(printf '%s\n' "${assets[@]}")"
+
+            GITHUB_SHA="$SOURCE_SHA" \
+            RELEASE_TAG="$tag" \
+            RELEASE_TITLE="$title" \
+            RELEASE_NOTES="$notes" \
+            RELEASE_PRERELEASE=false \
+            RELEASE_DRAFT=true \
+            RELEASE_PUBLISH_AFTER_UPLOAD=true \
+            RELEASE_FORCE_TAG=false \
+            RELEASE_KEEP_STALE_ASSETS=true \
+            RELEASE_IMMUTABLE_VERSION=true \
+            RELEASE_TRANSACTION_ID="r2-archive-$SOURCE_RUN_ID:$SOURCE_RUN_ATTEMPT" \
+            RELEASE_REQUIRED_ASSET_NAMES="$required_names" \
+            RELEASE_ASSETS="$asset_paths" \
+            GITHUB_RELEASE_UPLOAD_TIMEOUT_MS=1200000 \
+            node scripts/publish-github-release.mjs
+          }
+
+          if [[ ",$SOURCE_SCOPE," == *,cli,* ]]; then
+            archive_component \
+              cli "cli-v$RELEASE_VERSION" "CLI v$RELEASE_VERSION" \
+              "CLI release v$RELEASE_VERSION. Install from https://xmatrix.sh/api/cli/install."
+          fi
+          if [[ ",$SOURCE_SCOPE," == *,desktop,* ]]; then
+            archive_component \
+              desktop "desktop-v$RELEASE_VERSION" "Desktop v$RELEASE_VERSION" \
+              "macOS and Windows desktop release v$RELEASE_VERSION."
+          fi
+          if [[ ",$SOURCE_SCOPE," == *,android,* ]]; then
+            archive_component \
+              android "android-v$RELEASE_VERSION" "Android v$RELEASE_VERSION" \
+              "Android release v$RELEASE_VERSION. APK: https://xmatrix.sh/api/android/releases/stable/latest.apk"
+          fi
+
+      - name: Prune only verified historical R2 releases older than 90 days
+        if: steps.source.outputs.recover_receipt != 'true'
+        run: node scripts/prune-r2-release-assets.mjs

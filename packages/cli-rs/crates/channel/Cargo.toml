@@ -1,0 +1,27 @@
+[package]
+name = "xmatrix-cli-channel"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+colored = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["io-std", "io-util", "time"] }
+urlencoding = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+xmatrix-cli-args = { path = "../args" }
+xmatrix-cli-core = { path = "../core" }
+xmatrix-cli-workspace = { path = "../workspace" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_System_Diagnostics_ToolHelp",
+] }
+
+[dev-dependencies]
+rustls = { workspace = true, features = ["ring"] }

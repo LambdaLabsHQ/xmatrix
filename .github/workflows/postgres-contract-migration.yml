@@ -1,0 +1,144 @@
+name: PostgreSQL Contract Migration
+run-name: PostgreSQL contract ${{ inputs.migration_id }} on ${{ inputs.environment }} at ${{ inputs.revision }}
+
+# The release trains apply expand migrations only. A contract migration renames
+# or removes what running code may still use, so it runs here, alone, from an
+# exact reviewed revision, against one environment's shards.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target PostgreSQL environment
+        required: true
+        type: choice
+        options: [production]
+      revision:
+        description: Exact reviewed commit SHA (open PR head against main, or main head)
+        required: true
+        type: string
+      migration_id:
+        description: The single pending contract migration, e.g. 0080_contract_automation_storage_names
+        required: true
+        type: string
+      confirmation:
+        description: Enter APPLY <migration_id> TO <environment>
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: production-postgres-migration-operator
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    outputs:
+      revision: ${{ steps.authorize.outputs.revision }}
+    steps:
+      - name: Require an administrator, the exact confirmation and a green reviewed revision
+        id: authorize
+        uses: actions/github-script@v7
+        env:
+          TARGET: ${{ inputs.environment }}
+          REVISION: ${{ inputs.revision }}
+          MIGRATION_ID: ${{ inputs.migration_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const { TARGET, REVISION, MIGRATION_ID, CONFIRMATION } = process.env;
+            if (!/^[0-9a-f]{40}$/.test(REVISION)) return core.setFailed("revision must be a full lowercase commit SHA");
+            if (!/^\d{4}_contract_[a-z0-9_]+$/.test(MIGRATION_ID)) return core.setFailed("migration_id must name a contract migration");
+            if (CONFIRMATION !== `APPLY ${MIGRATION_ID} TO ${TARGET}`) return core.setFailed("exact confirmation is required");
+            const { owner, repo } = context.repo;
+            const permission = (await github.rest.repos.getCollaboratorPermissionLevel({
+              owner, repo, username: context.actor })).data.permission;
+            if (permission !== "admin") return core.setFailed("contract migrations require a repository administrator");
+            const main = (await github.rest.repos.getBranch({ owner, repo, branch: "main" })).data.commit.sha;
+            const pulls = await github.paginate(github.rest.pulls.list, { owner, repo, state: "open", base: "main", per_page: 100 });
+            const pull = pulls.find((candidate) => candidate.head.sha === REVISION);
+            if (REVISION !== main && !pull) return core.setFailed("revision is neither main nor an open PR head against main");
+            const ciRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: "ci.yml", head_sha: REVISION, status: "success", per_page: 100 });
+            if (!ciRuns.some((run) => run.head_sha === REVISION && run.conclusion === "success")) {
+              return core.setFailed(`No successful CI exists for exact SHA ${REVISION}`);
+            }
+            // Only a deploying Production Release excludes a contract. A release
+            // train may be testing meanwhile: it waits for this run to finish
+            // before it tags and dispatches its Production Release.
+            const releases = await github.paginate(github.rest.actions.listWorkflowRuns,
+              { owner, repo, workflow_id: "production-release.yml", per_page: 100 });
+            if (releases.some((run) => run.status !== "completed")) {
+              return core.setFailed("production-release.yml has an active run");
+            }
+            core.setOutput("revision", REVISION);
+
+  apply:
+    needs: authorize
+    environment: ${{ inputs.environment }}
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.authorize.outputs.revision }}
+          fetch-depth: 0
+      - name: Disable stale sparse checkout
+        shell: bash
+        run: timeout 30s git sparse-checkout disable || true
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+
+      - name: Bind the exact migration to this checkout
+        shell: bash
+        env:
+          REVISION: ${{ needs.authorize.outputs.revision }}
+          MIGRATION_ID: ${{ inputs.migration_id }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$REVISION"
+          test -z "$(git status --porcelain)"
+          test -f "packages/db/migrations/${MIGRATION_ID}.sql"
+
+      - name: Plan, require exactly the reviewed contract migration, and apply per shard
+        shell: bash
+        env:
+          TARGET: ${{ inputs.environment }}
+          REVISION: ${{ needs.authorize.outputs.revision }}
+          MIGRATION_ID: ${{ inputs.migration_id }}
+          PRIMARY_DATABASE_URL: ${{ secrets.POSTGRES_MIGRATION_DATABASE_URL }}
+          PRODUCTION_SHARD_1_DATABASE_URL: ${{ secrets.POSTGRES_SHARD_1_MIGRATION_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$PRIMARY_DATABASE_URL"
+          test "$TARGET" = production
+          SHARD_1_DATABASE_URL="$PRODUCTION_SHARD_1_DATABASE_URL"
+          PRIMARY_ROLE=xmatrix_prod_runtime
+          SHARD_1_ROLE=xmatrix_prod_shard_1_runtime
+          test -n "$SHARD_1_DATABASE_URL"
+          test "$PRIMARY_DATABASE_URL" != "$SHARD_1_DATABASE_URL"
+          flags=(--allow-contract "--revision=$REVISION")
+          for shard in primary shard-1; do
+            if [[ "$shard" = primary ]]; then url="$PRIMARY_DATABASE_URL"; else url="$SHARD_1_DATABASE_URL"; fi
+            DATABASE_URL="$url" node packages/db/scripts/migrate.mjs plan "${flags[@]}" \
+              > "$RUNNER_TEMP/$shard-plan.json"
+            node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const plan = JSON.parse(readFileSync(process.argv[1], "utf8"));
+              const ids = plan.pending.map(({ id }) => id);
+              if (ids.length !== 1 || ids[0] !== process.env.MIGRATION_ID) {
+                throw new Error(`pending migrations must be exactly ${process.env.MIGRATION_ID}; found ${ids.join(",") || "none"}`);
+              }
+            ' "$RUNNER_TEMP/$shard-plan.json"
+          done
+          DATABASE_URL="$PRIMARY_DATABASE_URL" POSTGRES_RUNTIME_ROLE="$PRIMARY_ROLE" \
+            node packages/db/scripts/migrate.mjs apply "${flags[@]}" | tee "$RUNNER_TEMP/primary-apply.json"
+          DATABASE_URL="$SHARD_1_DATABASE_URL" POSTGRES_RUNTIME_ROLE="$SHARD_1_ROLE" \
+            node packages/db/scripts/migrate.mjs apply "${flags[@]}" | tee "$RUNNER_TEMP/shard-1-apply.json"

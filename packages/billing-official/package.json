@@ -1,0 +1,28 @@
+{
+  "name": "@xmatrix/billing-official",
+  "version": "0.16.344",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run build && node --test test/official-billing.test.mjs",
+    "test:postgres": "pnpm run build && node --test test/official-billing-postgres.test.mjs"
+  },
+  "dependencies": {
+    "@xmatrix/billing": "workspace:*"
+  },
+  "devDependencies": {
+    "pg": "8.22.0",
+    "typescript": "5.9.3"
+  }
+}

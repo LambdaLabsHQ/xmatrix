@@ -1,0 +1,22 @@
+name: Public Snapshot CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    # Private main integration keeps its existing no-CI behavior. Dispatch is
+    # also available privately to verify the hosted path before exporting it.
+    if: github.event.repository.private == false || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/ci.yml
+    with:
+      force_full_matrix: true
+      linux_runner: '"ubuntu-24.04"'
+      offload_runner: '"ubuntu-24.04"'
+      windows_runner: '"windows-2025"'
+      hosted: true

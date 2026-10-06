@@ -1,0 +1,133 @@
+name: Candidate Release Checks
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  cli:
+    runs-on: &release_runner ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+      - name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-rust-kache/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-rust-kache
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      - name: Verify exact candidate and CLI release shape
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+          test -z "$(git status --porcelain)"
+          node scripts/version.mjs check
+          node scripts/ci.mjs rust-cli
+
+  desktop:
+    runs-on: *release_runner
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Verify exact candidate and Desktop release shape
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+          test -z "$(git status --porcelain)"
+          node scripts/version.mjs check
+          node scripts/ci.mjs desktop
+          pnpm --filter @xmatrix/desktop build
+
+  android:
+    runs-on: *release_runner
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/setup-android-java/action.yml
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/setup-android-java
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      - name: Verify exact candidate and Android release shape
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+          test -z "$(git status --porcelain)"
+          node scripts/version.mjs check
+          node scripts/android-env.mjs --install
+          node scripts/ci.mjs android
+
+  # Temporarily disabled while the xmatrix-macos-release runners are unavailable.
+  # Restore this job by uncommenting it after those runners return.
+  # ios:
+  #   runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #       with:
+  #         ref: ${{ inputs.candidate_sha }}
+  #     - uses: actions/setup-node@v6
+  #       with:
+  #         node-version: 22
+  #     - name: Verify exact candidate and unsigned iOS release shape
+  #       run: |
+  #         set -euo pipefail
+  #         test "$(git rev-parse HEAD)" = "${{ inputs.candidate_sha }}"
+  #         test -z "$(git status --porcelain)"
+  #         node scripts/version.mjs check
+  #         xcodebuild \
+  #           -project apps/ios/xMatrix.xcodeproj \
+  #           -scheme xMatrix \
+  #           -configuration Release \
+  #           -sdk iphonesimulator \
+  #           -derivedDataPath "$RUNNER_TEMP/xmatrix-ios-candidate" \
+  #           CODE_SIGNING_ALLOWED=NO \
+  #           build

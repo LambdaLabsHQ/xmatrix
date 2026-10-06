@@ -1,0 +1,269 @@
+/* Shared recipes expand at each use so cascade order and per-element lens
+   variables are preserved. */
+@utility app-liquid-material-recipe {
+  -webkit-backdrop-filter: var(--app-liquid-backdrop-filter, var(--app-liquid-material) var(--app-liquid-lens,) var(--app-liquid-vibrancy)) !important;
+  backdrop-filter: var(--app-liquid-backdrop-filter, var(--app-liquid-material) var(--app-liquid-lens,) var(--app-liquid-vibrancy)) !important;
+  box-shadow: var(--app-glass-edge) !important;
+}
+
+@utility app-rail-light-recipe {
+  border-color: oklch(1 0 0 / 0.58);
+  background:
+    radial-gradient(80% 90% at 36% 24%, oklch(1 0 0 / 0.82), transparent 54%),
+    linear-gradient(145deg, oklch(1 0 0 / 0.66), oklch(0.64 0.014 232 / 0.18) 46%, oklch(0.24 0.012 238 / 0.18)),
+    oklch(1 0 0 / 0.48);
+  color: oklch(0.42 0.018 238);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.9),
+    inset 0 0 0 1px oklch(1 0 0 / 0.28),
+    inset 0 -1px 0 oklch(0.26 0.012 238 / 0.1),
+    0 0 14px -2px oklch(0.26 0.012 238 / 0.16);
+}
+
+@utility app-sidebar-sheen-recipe {
+  opacity: 0.55;
+  background:
+    radial-gradient(75% 160% at 8% 0%, oklch(1 0 0 / 0.48), transparent 34%),
+    linear-gradient(105deg, transparent 16%, oklch(1 0 0 / 0.2) 44%, transparent 70%);
+  filter: url("#xm-liquid-glass");
+}
+
+@utility app-sidebar-rim-recipe {
+  background:
+    linear-gradient(180deg, oklch(1 0 0 / 0.36), transparent 34%),
+    radial-gradient(120% 100% at 100% 0%, oklch(1 0 0 / 0.24), transparent 34%);
+  box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.18);
+  opacity: 0.52;
+}
+
+@utility app-command-input-recipe {
+  border: 0 !important;
+  border-radius: 9999px !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  color: var(--foreground) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+@utility app-wood-panel-recipe {
+  background-color: var(--app-wood-panel-base) !important;
+  background-image: var(--app-wood-texture) !important;
+  background-size: 400px 400px !important;
+  background-repeat: repeat !important;
+  background-position: center !important;
+  background-blend-mode: normal !important;
+}
+
+@utility app-reference-popup-recipe {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 12px 40px color-mix(in oklab, var(--foreground) 14%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Chromium snaps a backdrop-filter's region to whole pixels but paints the
+   fill at the true edge, so glass of fractional height shows a 1px strip of
+   unveiled, saturated backdrop along its bottom: an orange line on wood. 11px
+   chip text at its normal line height made chips 19.7px tall; a whole-pixel
+   line height keeps every chip 20px. */
+:is(.xmatrix-app, .site-canvas) .app-shared-chip {
+  line-height: 1rem;
+}
+
+/* Chips and avatar discs bend through the composer's own lens (the same
+   bezel and offset; a thinner lens read as no refraction at all), but Apple
+   scales the shadow with the glass: the fitted shadow belongs to a 40pt
+   control, so 18-46px glass casts a third of it. A context or a surface
+   tunes both shadows through liquidGlassMaterialStyle. */
+:is(.xmatrix-app, .site-canvas) :is(.app-shared-chip, .identity-avatar-face, .identity-avatar-badge) {
+  --app-glass-edge: var(--app-liquid-rim-layers), var(--app-liquid-shadow-small);
+}
+
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill.app-liquid-glass-fill {
+  isolation: isolate !important;
+  overflow: hidden;
+  border-color: transparent !important;
+  background: var(--app-liquid-surface-bg) !important;
+  background-color: var(--app-liquid-surface-bg) !important;
+  /* One bounded CSS recipe is shared by every engine. Keep refraction out of
+     per-element JS so responsive sizes cannot create unbounded bitmap and
+     compositor work. */
+  @apply app-liquid-material-recipe;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill::after {
+  content: "" !important;
+  position: absolute !important;
+  inset: 2px !important;
+  z-index: 0 !important;
+  border-radius: inherit !important;
+  pointer-events: none !important;
+  background: var(--app-liquid-fill-tint) !important;
+  opacity: 0.72 !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill > :not(.app-usage-meter-fill) {
+  position: relative !important;
+  z-index: 2 !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface,
+.xmatrix-app :is(.app-agent-work-action-menu):not(.message-image-attachment):not(.composer-image-attachment) {
+  position: relative !important;
+  isolation: isolate !important;
+  overflow: hidden;
+  border-color: transparent !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface {
+  border-color: transparent !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill::before,
+.xmatrix-app :is(.app-agent-work-action-menu):not(.message-image-attachment):not(.composer-image-attachment)::before {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 1 !important;
+  border-radius: inherit !important;
+  pointer-events: none !important;
+  background: var(--app-glass-caustics) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none;
+  -webkit-mask: none;
+  mask: none;
+  opacity: 1 !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface > :not(.app-composer-glass):not(.app-usage-meter-fill),
+.xmatrix-app :is(.app-agent-work-action-menu):not(.message-image-attachment):not(.composer-image-attachment) > :not(.app-composer-glass) {
+  position: relative !important;
+  z-index: 2 !important;
+}
+
+
+/* Press, as on iOS: a glass control swells toward the finger on a springy
+   curve, lights up from within, and settles back on release. `scale`
+   composes with any transform another rule sets, so compositor hints
+   elsewhere keep working. Content surfaces (cards, the composer) do not
+   move. */
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill:not(.app-composer-box):not(.app-channel-row) {
+  transition: box-shadow 160ms ease, scale 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+:is(.xmatrix-app, .site-canvas) :is(button, a, [role="button"]).app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill:not(.app-composer-box):not(.app-channel-row):active {
+  --app-liquid-surface-bg: oklch(1 0 0 / 0.94);
+  scale: 1.07;
+  transition-duration: 160ms, 220ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill:not(.app-composer-box):not(.app-channel-row),
+  :is(.xmatrix-app, .site-canvas) :is(button, a, [role="button"]).app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill:not(.app-composer-box):not(.app-channel-row):active {
+    transition: none;
+    scale: none;
+  }
+}
+
+
+/* wood-era light: the liquid is in the LENS — defocus the grain under the
+   pane (clear heart, no frost) */
+html[data-app-theme="wood"] :is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill {
+  -webkit-backdrop-filter: var(--app-liquid-backdrop-filter, var(--app-liquid-material) var(--app-liquid-lens,) var(--app-liquid-vibrancy)) !important;
+  backdrop-filter: var(--app-liquid-backdrop-filter, var(--app-liquid-material) var(--app-liquid-lens,) var(--app-liquid-vibrancy)) !important;
+}
+
+/* On-slab glass: same fill tokens as every other surface, but no nested
+   backdrop-filter. A second compositor surface on the wood sidebar paints a
+   white strip under 32px rows. Opt in with .app-glass-on-slab, or by being a
+   channel row / pane header inside .app-sidebar. Never retune
+   .app-material-liquid-pill to get this exception. */
+:is(.xmatrix-app, .site-canvas) .app-liquid-glass-surface.app-liquid-glass-surface.app-liquid-glass-fill.app-glass-on-slab,
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-sidebar.app-sidebar .app-channel-row.app-liquid-glass-fill,
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-sidebar.app-sidebar .app-channel-row.app-channel-row-active,
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-sidebar.app-sidebar .app-channel-row:focus-within {
+  --app-liquid-backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-sidebar.app-sidebar .app-channel-row:hover {
+  border-color: transparent !important;
+  background: var(--app-liquid-surface-bg) !important;
+  background-color: var(--app-liquid-surface-bg) !important;
+  box-shadow: var(--app-glass-edge) !important;
+  --app-liquid-backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar.app-sidebar .app-channel-row.app-liquid-glass-fill:not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex) {
+  overflow: visible !important;
+}
+
+@utility app-card-backdrop-recipe {
+  -webkit-backdrop-filter: blur(10px) saturate(1.12);
+  backdrop-filter: blur(10px) saturate(1.12);
+  -webkit-backdrop-filter: blur(0.5px) saturate(1.12) contrast(1.01) !important;
+  backdrop-filter: blur(0.5px) saturate(1.12) contrast(1.01) !important;
+  box-shadow: var(--app-glass-edge) !important;
+}
+
+@utility app-hidden-decoration-recipe {
+  content: none !important;
+  display: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+@utility app-work-card-shadow-recipe {
+  box-shadow:
+    0 22px 46px rgb(0 0 0 / 0.24),
+    0 8px 18px rgb(0 0 0 / 0.16),
+    0 0 0 1px rgb(0 0 0 / 0.04) !important;
+}
+
+@utility app-command-panel-recipe {
+  background: oklch(1 0 0 / 0.92) !important;
+  background-color: oklch(1 0 0 / 0.92) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.18) !important;
+  backdrop-filter: blur(24px) saturate(1.18) !important;
+  box-shadow:
+    inset 0 1px 0 var(--app-specular),
+    inset 0 -1px 0 var(--app-specular-soft),
+    0 18px 48px var(--app-ink-shadow) !important;
+}
+
+@utility app-glass-filter-recipe {
+  -webkit-backdrop-filter: var(--app-glass-filter-soft);
+  backdrop-filter: var(--app-glass-filter-soft);
+  -webkit-backdrop-filter: var(--app-glass-filter) !important;
+  backdrop-filter: var(--app-glass-filter) !important;
+}
+
+@utility app-glass-caustic-recipe {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 0 !important;
+  border-radius: inherit !important;
+  pointer-events: none !important;
+  background: var(--app-glass-caustics) !important;
+}
+
+@utility app-flat-control-recipe {
+  background-image: none !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}

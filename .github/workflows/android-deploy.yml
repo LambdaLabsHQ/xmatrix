@@ -1,0 +1,122 @@
+name: Android Release
+
+on:
+  workflow_call:
+    inputs:
+      deploy_to_play:
+        description: "Upload the signed bundle to the fixed internal Play track"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    environment: production
+    outputs:
+      tag: ${{ steps.release_tag.outputs.tag }}
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    env:
+      ANDROID_PROJECT_DIR: ${{ vars.ANDROID_PROJECT_DIR || 'apps/android' }}
+      ANDROID_BUILD_TASK: ${{ vars.ANDROID_BUILD_TASK || ':app:assembleRelease :app:bundleRelease' }}
+      ANDROID_DEPLOY_TASK: ${{ vars.ANDROID_DEPLOY_TASK || ':app:publishReleaseBundle' }}
+      ANDROID_PLAY_TRACK: ${{ vars.ANDROID_PLAY_TRACK || 'internal' }}
+      ANDROID_VERSION_NAME: ${{ vars.ANDROID_VERSION_NAME || '' }}
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+      ANDROID_GRADLE_ARGS: ${{ vars.ANDROID_GRADLE_ARGS || '' }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64 }}
+      NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL }}
+      SKIP_ANDROID_DEPLOY: ${{ (inputs.deploy_to_play || vars.ANDROID_DEPLOY_ON_PRODUCTION == 'true') && '0' || '1' }}
+      SKIP_ANDROID_RELEASE: "0"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Restore full checkout metadata
+        run: |
+          git rev-parse --verify "$GITHUB_SHA^{commit}" >/dev/null || git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git sparse-checkout disable || true
+          git config --local --unset-all extensions.worktreeConfig || true
+          rm -f yarn.lock
+          git reset --hard "$GITHUB_SHA"
+          git clean -ffdx || true
+          git archive "$GITHUB_SHA" | tar -x -f -
+          pwd
+          git ls-tree --name-only "$GITHUB_SHA" package.json pnpm-lock.yaml pnpm-workspace.yaml || true
+          test -f pnpm-lock.yaml || git show "$GITHUB_SHA:pnpm-lock.yaml" > pnpm-lock.yaml
+          test -f pnpm-workspace.yaml || git show "$GITHUB_SHA:pnpm-workspace.yaml" > pnpm-workspace.yaml
+          ls -la package.json pnpm-lock.yaml pnpm-workspace.yaml
+          git status --short
+          test -f pnpm-lock.yaml
+          test -f pnpm-workspace.yaml
+
+      - uses: ./.github/actions/setup-pnpm-node
+
+      - uses: ./.github/actions/setup-android-java
+
+      - name: Resolve Android SDK
+        run: node scripts/android-env.mjs --install
+
+      - name: Print tool versions
+        run: |
+          node --version
+          java -version
+
+      - name: Verify release version
+        env:
+          XMATRIX_RELEASE_BASE_REF: ${{ github.event.before || '' }}
+        run: node scripts/check-release-version.mjs
+
+      - name: Build and deploy Android
+        env:
+          NEXT_TEST_WASM: "1"
+        run: node scripts/android-deploy.mjs
+
+      - name: Stage Android release assets
+        id: release_assets
+        if: env.SKIP_ANDROID_RELEASE != '1'
+        run: node scripts/android-release-assets.mjs
+
+      - name: Resolve Android release tag
+        id: release_tag
+        if: env.SKIP_ANDROID_RELEASE != '1'
+        run: echo "tag=android-v$(node -p "require('./version.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Android release part to R2
+        if: env.SKIP_ANDROID_RELEASE != '1'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
+          R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
+          XMATRIX_RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          XMATRIX_RELEASE_COMPONENT: android
+          XMATRIX_RELEASE_SHA: ${{ github.sha }}
+        run: >-
+          node scripts/r2-release-store.mjs upload-release-part
+          --bucket xmatrix-release-assets
+          --prefix "releases/${{ steps.release_tag.outputs.tag }}"
+          --part assets
+          --directory "${{ steps.release_assets.outputs.stage_dir }}"
+
+  release:
+    needs: [build]
+    uses: ./.github/workflows/client-publish.yml
+    permissions:
+      contents: read
+    with:
+      component: android
+      tag: ${{ needs.build.outputs.tag }}
+      parts: assets
+    secrets: inherit

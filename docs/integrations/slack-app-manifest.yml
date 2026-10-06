@@ -1,0 +1,18 @@
+display_information:
+  name: xMatrix Slack Migration
+  description: Migrate Slack channels and history into xMatrix.
+  background_color: "#4a154b"
+oauth_config:
+  redirect_urls:
+    - https://xmatrix-hub.xmatrix.sh/api/migrations/slack/oauth/callback
+  scopes:
+    user:
+      - channels:read
+      - channels:history
+      - groups:read
+      - groups:history
+      - users:read
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

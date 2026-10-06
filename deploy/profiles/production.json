@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "name": "production",
+  "cloudflare": {
+    "accountId": {
+      "env": "CLOUDFLARE_ACCOUNT_ID"
+    }
+  },
+  "billing": "packages/billing-official",
+  "hub": {
+    "workerName": "xmatrix-hub",
+    "origin": "https://xmatrix-hub.xmatrix.sh",
+    "placementRegion": "aws:ap-southeast-1",
+    "hyperdrive": {
+      "RELAY_POSTGRES": {
+        "env": "XMATRIX_HYPERDRIVE_ID"
+      },
+      "RELAY_POSTGRES_SHARD_1": {
+        "env": "XMATRIX_HYPERDRIVE_SHARD_1_ID"
+      }
+    },
+    "vars": {
+      "RELAY_POSTGRES_SHARD_1_ID": "shard-1",
+      "AUTH_COOKIE_DOMAIN": ".xmatrix.sh",
+      "PLATFORM_ADMIN_EMAILS": {
+        "env": "XMATRIX_PLATFORM_ADMIN_EMAILS"
+      },
+      "PLATFORM_ADMIN_SPACE_ID": {
+        "env": "XMATRIX_PLATFORM_ADMIN_SPACE_ID"
+      },
+      "TEST_ENVIRONMENT_ACCESS_SPACE_ID": {
+        "env": "XMATRIX_PLATFORM_ADMIN_SPACE_ID"
+      },
+      "XMATRIX_RUNTIME_LOCATION_HINT": {
+        "env": "XMATRIX_RUNTIME_LOCATION_HINT"
+      }
+    }
+  },
+  "web": {
+    "workerName": "xmatrix-web",
+    "origin": "https://xmatrix.sh",
+    "workersDev": true,
+    "previewUrls": true
+  }
+}

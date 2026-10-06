@@ -1,0 +1,19 @@
+{
+  "name": "@xmatrix/decision-model",
+  "version": "0.16.854",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": "./src/jev.mjs",
+  "scripts": {
+    "evaluate": "node --env-file-if-exists=../../.env.jev.local src/cli.mjs",
+    "test": "node --test ../../scripts/jev-evaluate.test.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "4.0.85",
+    "ai": "7.0.105"
+  }
+}

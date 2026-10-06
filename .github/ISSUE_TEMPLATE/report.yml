@@ -1,0 +1,28 @@
+name: Report a problem
+description: Something in xMatrix is broken, confusing or missing.
+title: "report: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is a public issue. Leave out tokens, secrets, private repository names and anything else you would not post publicly, including in screenshots and logs.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did and what you saw. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Filled in by the app's Report an issue link.
+    validations:
+      required: false

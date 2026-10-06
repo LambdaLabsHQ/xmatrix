@@ -1,0 +1,65 @@
+{
+  "name": "@xmatrix/protocol",
+  "version": "0.16.854",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./connections/human": {
+      "types": "./dist/connections/human.d.ts",
+      "default": "./dist/connections/human.js"
+    },
+    "./connections/agent-instance": {
+      "types": "./dist/connections/agent-instance.d.ts",
+      "default": "./dist/connections/agent-instance.js"
+    },
+    "./connections/machine-daemon": {
+      "types": "./dist/connections/machine-daemon.d.ts",
+      "default": "./dist/connections/machine-daemon.js"
+    },
+    "./relay-v2/projection": {
+      "types": "./dist/relay-v2/projection.d.ts",
+      "default": "./dist/relay-v2/projection.js"
+    },
+    "./relay-v2/message-attachment": {
+      "types": "./dist/relay-v2/message-attachment.d.ts",
+      "default": "./dist/relay-v2/message-attachment.js"
+    },
+    "./page-document": {
+      "types": "./dist/page-document.d.ts",
+      "default": "./dist/page-document.js"
+    },
+    "./error-reporting": {
+      "types": "./dist/error-reporting.d.ts",
+      "default": "./dist/error-reporting.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@sentry/core": "11.4.0",
+    "mdast-util-from-markdown": "2.0.3",
+    "mdast-util-gfm": "3.1.0",
+    "mdast-util-to-markdown": "2.1.2",
+    "micromark-extension-gfm": "3.0.0",
+    "micromark-util-decode-string": "2.0.1",
+    "node-diff3": "3.2.1",
+    "prosemirror-model": "1.25.12"
+  }
+}

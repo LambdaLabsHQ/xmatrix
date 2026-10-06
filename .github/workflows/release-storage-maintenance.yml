@@ -1,0 +1,25 @@
+name: Release Storage Maintenance
+
+on:
+  schedule:
+    - cron: "41 18 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    name: prune verified historical R2 releases
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Preserve current channels and prune only verified 90-day GitHub archives
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN || github.token }}
+        run: node scripts/prune-r2-release-assets.mjs

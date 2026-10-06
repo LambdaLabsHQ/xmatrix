@@ -1,0 +1,93 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+
+const appRoot = __dirname;
+const source = (relativePath) => fs.readFileSync(path.join(appRoot, relativePath), "utf8");
+const layoutSource = source("layout.tsx");
+const siteCss = source("themes/site.css");
+const tokensCss = source("tokens.css");
+const navbarSource = source("../components/shared/navbar.tsx");
+const heroSource = source("../components/landing/hero.tsx");
+
+test("public routes share one warm material layer", () => {
+  assert.match(layoutSource, /import "\.\/themes\/wood\.css";\s*import "\.\/themes\/site\.css";/);
+  assert.match(layoutSource, /<body className="site-canvas antialiased">/);
+  assert.match(tokensCss, /--site-wood:/);
+  assert.match(tokensCss, /--site-paper:/);
+  assert.doesNotMatch(tokensCss, /--site-glass-fill:/);
+
+  for (const route of [
+    "page.tsx",
+    "docs/page.tsx",
+    "download/page.tsx",
+    "login/page.tsx",
+    "billing/page.tsx",
+    "console/page.tsx",
+  ]) {
+    assert.match(source(route), /site-page/, `${route} must opt into the shared public material layer`);
+  }
+});
+
+test("hero image can extend under the fixed public navbar", () => {
+  assert.match(heroSource, /min-h-svh/);
+  assert.match(heroSource, /pt-20/);
+  assert.match(heroSource, /md:absolute md:inset-0/);
+});
+
+test("public actions use shared liquid glass and the Hero has one CTA", () => {
+  assert.match(layoutSource, /LiquidGlassFilter/);
+  assert.match(navbarSource, /WoodPanel/);
+  assert.match(navbarSource, /LiquidGlassPill/);
+  assert.doesNotMatch(navbarSource, /x-glass-button/);
+  assert.doesNotMatch(navbarSource, /bg-\[#68462f\]|bg-\[#513522\]/);
+  assert.match(heroSource, /LiquidGlassPill[\s\S]*as=\{Link\}[\s\S]*href="\/login"/);
+  assert.doesNotMatch(heroSource, /landing-liquid-button/);
+  assert.match(heroSource, /Start Free/);
+  assert.doesNotMatch(heroSource, /Set up with your agent|See How It Works|Shared space|clear handoffs/);
+});
+
+test("homepage panels reuse app wood and liquid-glass primitives", () => {
+  assert.match(siteCss, /\.site-page \.app-material-wood-panel/);
+  assert.doesNotMatch(siteCss, /backdrop-filter:\s*blur\(1[468]px\)/);
+  assert.doesNotMatch(siteCss, /\.site-page :is\(\.x-card, \.matrix-panel, \[data-slot="card"\]\)/);
+  assert.doesNotMatch(
+    siteCss,
+    /--app-liquid-surface-bg:\s*oklch\(1 0 0 \/ 0\.72\)/,
+    "site pills must not retune the selected-channel glass fill to opaque white",
+  );
+  assert.match(siteCss, /--site-wood-ink:/);
+  assert.match(siteCss, /font-weight:\s*700/);
+});
+
+test("docs content panels use wood instead of large glass cards", () => {
+  const docsSource = source("docs/page.tsx");
+  assert.match(docsSource, /WoodPanel/);
+  assert.match(docsSource, /quickStart\.map[\s\S]*<WoodPanel /);
+  assert.match(docsSource, /launchCommands\.map[\s\S]*<WoodPanel /);
+  assert.match(docsSource, /<WoodPanel className="min-w-0 p-6">[\s\S]*Recommended flow/);
+});
+
+test("navbar keeps wood chrome beside selected-channel glass pills and woods the mobile sheet", () => {
+  assert.match(navbarSource, /<WoodPanel className="site-navbar-inner\b[^"]*">/);
+  assert.match(navbarSource, /site-nav-sheet app-material-wood-panel/);
+  assert.match(navbarSource, /navLinks\.map\([\s\S]*LiquidGlassPill/);
+  assert.match(navbarSource, /WoodPanel/);
+});
+
+test("navbar keeps the 3D logo off a centered sticky wood bar", () => {
+  const brandIndex = navbarSource.indexOf("<BrandMark");
+  const woodIndex = navbarSource.indexOf('<WoodPanel className="site-navbar-inner');
+  assert.ok(brandIndex >= 0 && woodIndex > brandIndex, "brand mark must sit outside the wood bar");
+  assert.match(navbarSource, /iconSrc="\/brand\/xmatrix-icon-transparent\.png"/);
+  assert.match(navbarSource, /site-navbar-brand/);
+  assert.match(navbarSource, /--navbar-wood-reveal/);
+  assert.match(navbarSource, /className="site-navbar fixed top-0/);
+  assert.match(siteCss, /--site-navbar-brand-slot:/);
+  assert.match(siteCss, /\.site-navbar-bar \{[\s\S]*margin-inline:\s*auto/);
+  assert.match(siteCss, /\.site-navbar \.site-navbar-inner \{[\s\S]*opacity:\s*var\(--navbar-wood-reveal\)/);
+  assert.match(siteCss, /\.site-navbar \{[\s\S]*background:\s*transparent/);
+  assert.doesNotMatch(siteCss, /\.site-navbar::before/);
+  assert.doesNotMatch(navbarSource, /xmatrix-icon\.png/);
+});

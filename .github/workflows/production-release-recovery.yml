@@ -1,0 +1,268 @@
+name: Production Release Recovery
+run-name: Recover production train ${{ inputs.blocked_run_id }} -> ${{ inputs.replacement_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      blocked_run_id:
+        description: Waiting Production Release run to supersede
+        required: true
+        type: string
+      blocked_version_tag:
+        description: Immutable tag owned by the waiting run
+        required: true
+        type: string
+      replacement_run_id:
+        description: Pending newer Production Release run to resume
+        required: true
+        type: string
+      replacement_version_tag:
+        description: Immutable tag owned by the pending replacement
+        required: true
+        type: string
+      confirmation:
+        description: Enter cancel-waiting-no-mutation-run
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+# Recovery requests are serialized separately. The production lock is acquired
+# only by the unlock job, after the code-free validation job proves that the
+# displaced train has not crossed its first production mutation.
+concurrency:
+  group: production-release-recovery
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    outputs:
+      replacement_run_id: ${{ steps.validate.outputs.replacement_run_id }}
+    steps:
+      - name: Prove exact pre-mutation zombie and pending replacement
+        id: validate
+        uses: actions/github-script@v7
+        env:
+          BLOCKED_RUN_ID: ${{ inputs.blocked_run_id }}
+          BLOCKED_VERSION_TAG: ${{ inputs.blocked_version_tag }}
+          REPLACEMENT_RUN_ID: ${{ inputs.replacement_run_id }}
+          REPLACEMENT_VERSION_TAG: ${{ inputs.replacement_version_tag }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const stableTag = /^xmatrix-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+            const parseRunId = (name, value) => {
+              if (!/^[1-9]\d*$/.test(value)) {
+                throw new Error(`${name} must be a positive workflow run id`);
+              }
+              const parsed = Number(value);
+              if (!Number.isSafeInteger(parsed)) {
+                throw new Error(`${name} is outside the safe integer range`);
+              }
+              return parsed;
+            };
+            const parseVersion = (tag) => tag
+              .slice("xmatrix-v".length)
+              .split(".")
+              .map(Number);
+            const compareVersion = (left, right) =>
+              left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+            const getRun = async (runId) => (await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            })).data;
+            const getJobs = async (runId) => github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: runId,
+                filter: "latest",
+                per_page: 100,
+              },
+            );
+            const peelTag = async (tag) => {
+              const ref = (await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${tag}`,
+              })).data.object;
+              if (ref.type !== "tag") {
+                throw new Error(`${tag} must remain an annotated candidate tag`);
+              }
+              const annotated = (await github.rest.git.getTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_sha: ref.sha,
+              })).data.object;
+              if (annotated.type !== "commit") {
+                throw new Error(`${tag} annotated object must target a commit`);
+              }
+              return annotated.sha;
+            };
+
+            if (process.env.CONFIRMATION !== "cancel-waiting-no-mutation-run") {
+              throw new Error("confirmation must be cancel-waiting-no-mutation-run");
+            }
+            const repository = (await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            })).data;
+            if (context.ref !== `refs/heads/${repository.default_branch}`) {
+              throw new Error("Production recovery must run from the current default branch");
+            }
+            const branch = (await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: repository.default_branch,
+            })).data;
+            if (branch.commit.sha !== context.sha) {
+              throw new Error("Production recovery workflow is not the current reviewed default-branch revision");
+            }
+            const permission = (await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.actor,
+            })).data.permission;
+            if (permission !== "admin") {
+              throw new Error("Production recovery requires a repository administrator");
+            }
+
+            const blockedRunId = parseRunId("blocked_run_id", process.env.BLOCKED_RUN_ID);
+            const replacementRunId = parseRunId("replacement_run_id", process.env.REPLACEMENT_RUN_ID);
+            if (blockedRunId === replacementRunId) {
+              throw new Error("blocked and replacement runs must differ");
+            }
+            const blockedTag = process.env.BLOCKED_VERSION_TAG;
+            const replacementTag = process.env.REPLACEMENT_VERSION_TAG;
+            if (!stableTag.test(blockedTag) || !stableTag.test(replacementTag)) {
+              throw new Error("both version tags must be stable xmatrix-vMAJOR.MINOR.PATCH tags");
+            }
+            if (compareVersion(parseVersion(replacementTag), parseVersion(blockedTag)) <= 0) {
+              throw new Error("replacement version must be newer than the blocked version");
+            }
+
+            const [blocked, replacement, blockedSha, replacementSha] = await Promise.all([
+              getRun(blockedRunId),
+              getRun(replacementRunId),
+              peelTag(blockedTag),
+              peelTag(replacementTag),
+            ]);
+            const requireProductionRun = (label, run, runId, tag, sha) => {
+              if (run.id !== runId || run.path !== ".github/workflows/production-release.yml" ||
+                  run.event !== "workflow_dispatch" || run.head_branch !== tag || run.head_sha !== sha) {
+                throw new Error(`${label} is not the exact immutable-tag Production Release run`);
+              }
+              if (run.conclusion !== null) {
+                throw new Error(`${label} already has conclusion ${run.conclusion}`);
+              }
+            };
+            requireProductionRun("blocked run", blocked, blockedRunId, blockedTag, blockedSha);
+            requireProductionRun("replacement run", replacement, replacementRunId, replacementTag, replacementSha);
+            if (blocked.status !== "waiting") {
+              throw new Error(`blocked run must be waiting, observed ${blocked.status}`);
+            }
+            if (replacement.status !== "pending") {
+              throw new Error(`replacement run must be pending, observed ${replacement.status}`);
+            }
+            if (Date.parse(blocked.created_at) >= Date.parse(replacement.created_at)) {
+              throw new Error("replacement run must have been created after the blocked run");
+            }
+            if (Date.now() - Date.parse(blocked.created_at) < 10 * 60 * 1000) {
+              throw new Error("blocked run must remain waiting for at least ten minutes before recovery");
+            }
+
+            const [blockedJobs, replacementJobs, pendingDeployments, releases] = await Promise.all([
+              getJobs(blockedRunId),
+              getJobs(replacementRunId),
+              github.rest.actions.getPendingDeploymentsForRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: blockedRunId,
+              }).then((response) => response.data),
+              github.paginate(github.rest.repos.listReleases, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+              }),
+            ]);
+            const preflight = blockedJobs.find((job) => job.name === "preflight");
+            const postgresReadiness = blockedJobs.find((job) => job.name === "verify-production-postgres");
+            if (blockedJobs.length !== 2 || !preflight || !postgresReadiness ||
+                preflight.status !== "completed" || preflight.conclusion !== "success" ||
+                postgresReadiness.status !== "waiting" || postgresReadiness.conclusion !== null ||
+                (postgresReadiness.steps ?? []).length !== 0) {
+              throw new Error("blocked run is not the exact pre-deploy preflight-success/PG-readiness-waiting shape");
+            }
+            if (replacementJobs.length !== 0) {
+              throw new Error("replacement run has already materialized jobs");
+            }
+            if (pendingDeployments.length !== 1 ||
+                pendingDeployments[0].environment?.name !== "production") {
+              throw new Error("blocked run must have exactly one pending production deployment");
+            }
+            if (releases.some((release) => !release.draft && release.tag_name === blockedTag)) {
+              throw new Error("blocked tag already has a published production receipt");
+            }
+
+            core.setOutput("replacement_run_id", String(replacementRunId));
+            await core.summary
+              .addHeading("Production release recovery validated")
+              .addRaw(`Blocked pre-mutation run: ${blocked.html_url}\n\n`)
+              .addRaw(`Pending replacement run: ${replacement.html_url}\n`)
+              .write();
+
+  unlock:
+    needs: validate
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    concurrency:
+      group: production-release-train
+      cancel-in-progress: true
+    steps:
+      - name: Acquire train, preserve run identity, and resume replacement
+        uses: actions/github-script@v7
+        env:
+          REPLACEMENT_RUN_ID: ${{ needs.validate.outputs.replacement_run_id }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const replacementRunId = Number(process.env.REPLACEMENT_RUN_ID);
+            const getReplacement = async () => (await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: replacementRunId,
+            })).data;
+            let replacement;
+            for (let attempt = 1; attempt <= 30; attempt += 1) {
+              replacement = await getReplacement();
+              if (replacement.status === "completed" && replacement.conclusion === "cancelled") {
+                break;
+              }
+              if (replacement.status !== "pending") {
+                throw new Error(
+                  `replacement run left the expected pending/cancelled transition: ` +
+                  `${replacement.status}/${replacement.conclusion ?? "none"}`,
+                );
+              }
+              await new Promise((resolve) => setTimeout(resolve, 2_000));
+            }
+            if (replacement.status !== "completed" || replacement.conclusion !== "cancelled") {
+              throw new Error("replacement run was not cancelled by the reviewed concurrency recovery");
+            }
+            await github.rest.actions.reRunWorkflow({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: replacementRunId,
+            });
+            core.notice(`Re-ran the same authoritative replacement run: ${replacement.html_url}`);
+            await core.summary
+              .addHeading("Production train recovered")
+              .addRaw(`Re-ran the same authoritative replacement: ${replacement.html_url}\n`)
+              .write();

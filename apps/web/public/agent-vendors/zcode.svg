@@ -1,0 +1,6 @@
+<svg role="img" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>ZCode</title>
+  <rect width="64" height="64" rx="14" fill="#111827"/>
+  <path d="M18 18h28v6L28.5 40H46v6H18v-6l17.5-16H18z" fill="#f8fafc"/>
+  <path d="M22 49h20" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,448 @@
+name: CLI Build
+
+on:
+  workflow_call:
+    outputs:
+      tag:
+        description: "The cli-v<version> release the build uploaded its parts to"
+        value: ${{ jobs.prepare-release.outputs.tag }}
+      version:
+        description: "The CLI version the build uploaded"
+        value: ${{ jobs.prepare-release.outputs.version }}
+
+# Builds and signs every CLI binary, and each build machine uploads its own
+# binary straight into the release as a run-attempt part. Nothing here is
+# reachable: client-publish.yml seals the release and moves the stable channel
+# only after the train's client-readiness gate, so the builds may run while Hub
+# and Web are still deploying.
+concurrency:
+  group: cli-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    environment: production
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Configure Linux runner proxy
+        shell: bash
+        run: |
+          proxy=http://127.0.0.1:7897
+          if curl -fsSIL --connect-timeout 3 --max-time 8 -x "$proxy" https://github.com >/dev/null; then
+            {
+              echo "HTTPS_PROXY=$proxy"
+              echo "HTTP_PROXY=$proxy"
+              echo "ALL_PROXY=$proxy"
+              echo "NO_PROXY=localhost,127.0.0.1,::1"
+              echo "GIT_CONFIG_COUNT=1"
+              echo "GIT_CONFIG_KEY_0=http.proxy"
+              echo "GIT_CONFIG_VALUE_0=$proxy"
+            } >> "$GITHUB_ENV"
+          else
+            echo "Linux proxy $proxy is unavailable; using direct GitHub access."
+          fi
+
+      # A full checkout, like every other job on this persistent runner. The
+      # sparse one this used to take could not survive the shared workspace:
+      # when another job had left it on a newer commit, checking out an older
+      # train tag sparsely failed with "Path '…' not uptodate; will not
+      # remove from working tree" (0.16.431's CLI stage, 2026-09-26), and
+      # its sparse state had to be undone after the job for the next one.
+      - uses: actions/checkout@v6
+        with:
+          clean: true
+          fetch-depth: 0
+
+      # A full checkout does not undo a sparse cone another job left on this
+      # persistent runner: with HEAD already on the train tag, checkout keeps
+      # the cone and `git clean` has emptied everything outside it.
+      - &restore_cli_checkout
+        name: Restore full checkout after stale sparse state
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f scripts/install-release-node.sh
+
+      - name: Install Node
+        run: |
+          set -euo pipefail
+          NODE_VERSION=22.21.1
+          LOCAL_BIN="$HOME/.local/bin"
+          if [ -d "$LOCAL_BIN" ]; then
+            echo "$LOCAL_BIN" >> "$GITHUB_PATH"
+            export PATH="$LOCAL_BIN:$PATH"
+          fi
+
+          need_node_install=true
+          if command -v node >/dev/null 2>&1; then
+            major="$(node -p "process.versions.node.split('.')[0]")"
+            if [ "$major" -ge 22 ]; then
+              need_node_install=false
+            fi
+          fi
+
+          if [ "$need_node_install" = "true" ]; then
+            source scripts/install-release-node.sh
+            install_release_node "$NODE_VERSION"
+          fi
+
+          node --version
+
+      - name: Verify release version
+        env:
+          XMATRIX_RELEASE_BASE_REF: ${{ github.event.before || '' }}
+        run: node scripts/check-release-version.mjs
+
+      - name: Resolve version
+        id: version
+        run: |
+          version=$(node -p "require('./version.json').version")
+          tag="cli-v${version}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    environment: production
+    needs: prepare-release
+    # The managed macOS label may resolve to multiple runner services on one
+    # host. Keep the Apple Silicon target serialized because signing mutates
+    # the user's Keychain search list under an exact read/modify/write transaction.
+    concurrency:
+      group: cli-release-${{ contains(matrix.target, 'apple-darwin') && 'macos' || format('{0}-{1}', github.run_id, matrix.target) }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-us-release"]' || '"ubuntu-24.04"' }}
+            asset: xmatrix-linux-x64
+            binary: xmatrix
+            part: linux-x64
+          - target: aarch64-apple-darwin
+            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-macos-release"]' || '"macos-26"' }}
+            asset: xmatrix-macos-arm64
+            binary: xmatrix
+            part: macos-arm64
+          - target: x86_64-pc-windows-msvc
+            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","local-windows-x64"]' || '"windows-2025"' }}
+            asset: xmatrix-windows-x64.exe
+            binary: xmatrix.exe
+            part: windows-x64
+
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    permissions:
+      contents: read
+    env:
+      CARGO_INCREMENTAL: "0"
+    timeout-minutes: 45
+
+    steps:
+      # Keep Windows on native PowerShell/MSVC. Do not put Git Bash bin/usr/bin
+      # on PATH. Pure-Rust encrypted store no longer needs OpenSSL build Perl.
+      # macOS inherits its host-managed network, including proxy variables.
+      # Checkout and release uploads exercise the real path.
+      # Default clean checkout. Cross-job compile reuse is kache, not a preserved
+      # worktree target. In-package packages/cli-rs/target stays job-local.
+      # Do not inject a macOS proxy endpoint here; its runner service owns it.
+      # Windows retains its separately configured system TUN route.
+      - uses: actions/checkout@v6
+
+      # One Windows path shared with rust-cli-windows CI: native MSVC + kache.
+      # validate-kache-contract is CI-only; release still uses the same
+      # toolchain and cargo feature set.
+      - name: Setup Windows Rust CLI
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-windows-rust-cli
+        with:
+          validate-kache-contract: "false"
+          rust-target: ${{ matrix.target }}
+
+      - *restore_cli_checkout
+
+      - name: Set up Node
+        if: runner.os != 'Windows'
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_VERSION=22.21.1
+          for candidate in "$HOME/.local/bin" "$HOME/.cache/xmatrix-actions/node/bin" /opt/homebrew/bin /usr/local/bin; do
+            if [ -d "$candidate" ]; then
+              echo "$candidate" >> "$GITHUB_PATH"
+              export PATH="$candidate:$PATH"
+            fi
+          done
+          if command -v node >/dev/null 2>&1; then
+            major="$(node -p "process.versions.node.split('.')[0]")"
+            if [ "$major" -ge 22 ]; then
+              node --version
+              exit 0
+            fi
+          fi
+
+          os="$(uname -s)"
+          arch="$(uname -m)"
+          case "$os:$arch" in
+            Darwin:arm64|Darwin:aarch64) node_platform=darwin; node_arch=arm64; archive_ext=tar.gz ;;
+            Darwin:x86_64) node_platform=darwin; node_arch=x64; archive_ext=tar.gz ;;
+            Linux:x86_64) node_platform=linux; node_arch=x64; archive_ext=tar.gz ;;
+            Linux:aarch64) node_platform=linux; node_arch=arm64; archive_ext=tar.gz ;;
+            *) echo "Unsupported Node runner platform: $os $arch" >&2; exit 1 ;;
+          esac
+
+          safe_target="$(printf '%s' '${{ matrix.target }}' | tr -c 'A-Za-z0-9_.-' '-')"
+          if [ "$node_platform" = "darwin" ]; then
+            NODE_ROOT="$HOME/.cache/xmatrix-actions/node"
+          else
+            NODE_ROOT="$RUNNER_TEMP"
+          fi
+          mkdir -p "$NODE_ROOT"
+          NODE_DIR="$NODE_ROOT/node-v$NODE_VERSION-$node_platform-$node_arch"
+          if [ ! -x "$NODE_DIR/bin/node" ]; then
+            lock_dir="$NODE_ROOT/node-v$NODE_VERSION-$node_platform-$node_arch.lock"
+            lock_acquired=false
+            wait_seconds=0
+            until mkdir "$lock_dir" 2>/dev/null; do
+              echo "Waiting for Node $NODE_VERSION $node_platform-$node_arch download lock..."
+              sleep 5
+              wait_seconds=$((wait_seconds + 5))
+              if [ -x "$NODE_DIR/bin/node" ]; then
+                break
+              fi
+              if [ "$wait_seconds" -ge 90 ]; then
+                echo "Removing stale Node download lock: $lock_dir"
+                rm -rf "$lock_dir"
+                wait_seconds=0
+              fi
+            done
+            if [ ! -x "$NODE_DIR/bin/node" ]; then
+              lock_acquired=true
+            fi
+            if [ "$lock_acquired" = "true" ]; then
+              trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+            fi
+            if [ ! -x "$NODE_DIR/bin/node" ]; then
+              archive="$NODE_ROOT/node-v$NODE_VERSION-$node_platform-$node_arch.$archive_ext"
+              curl --fail --show-error --location --continue-at - \
+                --retry 8 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 600 \
+                "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-$node_platform-$node_arch.$archive_ext" \
+                -o "$archive"
+              extract_dir="$RUNNER_TEMP/node-extract-$safe_target"
+              rm -rf "$extract_dir" "$NODE_DIR"
+              mkdir -p "$extract_dir"
+              case "$archive_ext" in
+                tar.gz) tar -xzf "$archive" -C "$extract_dir" ;;
+                tar.xz) tar -xJf "$archive" -C "$extract_dir" ;;
+              esac
+              mv "$extract_dir/node-v$NODE_VERSION-$node_platform-$node_arch" "$NODE_DIR"
+            fi
+          fi
+          echo "$NODE_DIR/bin" >> "$GITHUB_PATH"
+          export PATH="$NODE_DIR/bin:$PATH"
+          node --version
+
+      - name: Verify Node on Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $node = Get-Command node.exe -ErrorAction Stop
+          $major = & $node.Source -p "process.versions.node.split('.')[0]"
+          if ($LASTEXITCODE -ne 0) { throw 'node version probe failed' }
+          if ([int]$major -lt 22) {
+            throw "Node 22+ is required on Windows CLI release runners; got major=$major from $($node.Source)"
+          }
+          & $node.Source --version
+
+      # Every builder invokes the repository R2 uploader after producing its
+      # binary. Clean self-hosted checkouts cannot rely on another job's
+      # node_modules, so install the root package that owns the pinned S3 SDK
+      # before the release part can be uploaded.
+      - name: Install pinned release upload dependencies
+        if: runner.os == 'macOS'
+        timeout-minutes: 20
+        uses: ./.github/actions/macos-pnpm-install
+        with:
+          pnpm: npx --yes pnpm@11.3.0
+          args: install --frozen-lockfile --filter xmatrix --child-concurrency=1
+
+      - name: Install pinned release upload dependencies
+        if: runner.os != 'macOS'
+        timeout-minutes: 20
+        run: >-
+          npx --yes pnpm@11.3.0 install
+          --frozen-lockfile
+          --filter xmatrix
+          --child-concurrency=1
+          --network-concurrency=4
+
+      - name: Install Rust target
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in "$HOME/.cache/xmatrix-actions/cargo/bin" "$HOME/.cargo/bin"; do
+            if [ -d "$candidate" ]; then
+              echo "$candidate" >> "$GITHUB_PATH"
+              export PATH="$candidate:$PATH"
+            fi
+          done
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --fail --show-error --location \
+              --retry 5 --retry-all-errors --connect-timeout 15 --max-time 180 \
+              https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            export PATH="$HOME/.cargo/bin:$PATH"
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          if ! rustup default >/dev/null 2>&1; then
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          rustup target add ${{ matrix.target }}
+          rustc --version
+          cargo --version
+
+      - name: Set up kache
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash .github/scripts/setup-kache.sh
+
+      - name: Build release binary
+        if: runner.os != 'Windows'
+        working-directory: packages/cli-rs
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build release binary
+        if: runner.os == 'Windows'
+        working-directory: packages/cli-rs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not [string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+            throw 'CARGO_TARGET_DIR must stay unset so release builds use packages/cli-rs/target'
+          }
+          if ($env:PATH -match '(?i)\\Git\\(?:[^;\\]+\\)*(?:bin|usr\\bin)(?:;|$)|\\(?:mingw(?:32|64)|msys[^\\]*)\\bin(?:;|$)') {
+            throw 'Windows CLI build PATH still contains Git Bash or MSYS bin directories'
+          }
+          cargo build --release --target ${{ matrix.target }}
+          if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+
+      - name: Rename binary on Windows
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = "packages\cli-rs\target\${{ matrix.target }}\release\${{ matrix.binary }}"
+          Copy-Item -LiteralPath $source -Destination "${{ matrix.asset }}" -Force
+          Get-Item -LiteralPath "${{ matrix.asset }}" | Format-List FullName, Length, LastWriteTime
+
+      - name: Rename binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cp packages/cli-rs/target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.asset }}
+          chmod +x ${{ matrix.asset }}
+
+      - name: Sign and verify macOS CLI identity
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          MACOS_CLI_IDENTIFIER: net.madebyrobot.xmatrix.cli
+          MACOS_RELEASE_TEAM_ID: VWN9V9V56Z
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -z "${CSC_LINK:-}" ]; then
+            echo "MACOS_CSC_LINK is required; refusing to publish an unsigned macOS CLI." >&2
+            exit 1
+          fi
+
+          signing_root="$RUNNER_TEMP/xmatrix-cli-signing-${{ matrix.target }}"
+          certificate="$signing_root/developer-id.p12"
+          intermediate="$signing_root/DeveloperIDG2CA.cer"
+          keychain="$signing_root/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          mkdir -p "$signing_root"
+          remove_signing_keychain_from_search_list() {
+            scripts/macos-keychain-search-list.sh remove "$keychain"
+          }
+          cleanup_signing_keychain() {
+            remove_signing_keychain_from_search_list >/dev/null 2>&1 || true
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -f "$certificate" "$intermediate" "$keychain"
+            rmdir "$signing_root" >/dev/null 2>&1 || true
+          }
+          trap cleanup_signing_keychain EXIT
+
+          source scripts/macos-signing-keychain.sh
+          prepare_developer_id_keychain "$certificate" "$intermediate" "$keychain" "$keychain_password"
+
+          if [ -z "$identity" ]; then
+            echo "No Developer ID Application identity for team $MACOS_RELEASE_TEAM_ID." >&2
+            exit 1
+          fi
+
+          codesign --force --options runtime --timestamp \
+            --identifier "$MACOS_CLI_IDENTIFIER" \
+            --keychain "$keychain" \
+            --sign "$identity" \
+            "${{ matrix.asset }}"
+          scripts/verify-macos-cli-signature.sh \
+            "${{ matrix.asset }}" \
+            "$MACOS_CLI_IDENTIFIER" \
+            "$MACOS_RELEASE_TEAM_ID" \
+            "${{ matrix.asset }}"
+
+      - name: Stage CLI release part
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage_dir="$RUNNER_TEMP/xmatrix-cli-${{ matrix.part }}-release"
+          rm -rf "$stage_dir"
+          mkdir -p "$stage_dir"
+          cp "${{ matrix.asset }}" "$stage_dir/${{ matrix.asset }}"
+          echo "CLI_RELEASE_PART_DIR=$stage_dir" >> "$GITHUB_ENV"
+
+      - name: Stage CLI release part
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stageDir = Join-Path $env:RUNNER_TEMP 'xmatrix-cli-${{ matrix.part }}-release'
+          Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $stageDir | Out-Null
+          Copy-Item -LiteralPath '${{ matrix.asset }}' -Destination (Join-Path $stageDir '${{ matrix.asset }}')
+          "CLI_RELEASE_PART_DIR=$stageDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload CLI release part to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
+          R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
+          XMATRIX_RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+          XMATRIX_RELEASE_COMPONENT: cli
+          XMATRIX_RELEASE_SHA: ${{ github.sha }}
+        run: >-
+          node scripts/r2-release-store.mjs upload-release-part
+          --bucket xmatrix-release-assets
+          --prefix releases/${{ needs.prepare-release.outputs.tag }}
+          --part ${{ matrix.part }}
+          --directory "${{ env.CLI_RELEASE_PART_DIR }}"

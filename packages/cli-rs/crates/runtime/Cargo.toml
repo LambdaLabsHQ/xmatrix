@@ -1,0 +1,66 @@
+[package]
+name = "xmatrix-cli-runtime"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+clap = { workspace = true }
+colored = { workspace = true }
+dirs = { workspace = true }
+fs2 = { workspace = true }
+futures-util = { workspace = true }
+gethostname = { workspace = true }
+getrandom = { workspace = true }
+ed25519-dalek = { workspace = true }
+keyring = { workspace = true, features = ["v1"] }
+libc = { workspace = true }
+open = { workspace = true }
+portable-pty = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+regex = { workspace = true }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+urlencoding = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+which = { workspace = true }
+unicode-normalization = { workspace = true }
+zeroize = { workspace = true }
+xmatrix-cli-args = { path = "../args" }
+xmatrix-cli-account = { path = "../account" }
+xmatrix-cli-agent = { path = "../agent" }
+xmatrix-cli-channel = { path = "../channel" }
+xmatrix-cli-core = { path = "../core" }
+xmatrix-harness = { path = "../harness" }
+xmatrix-cli-machine = { path = "../machine" }
+xmatrix-cli-memory = { path = "../memory" }
+xmatrix-history-cache = { path = "../history-cache" }
+xmatrix-cli-migrate = { path = "../migrate" }
+xmatrix-cli-terminal = { path = "../terminal" }
+xmatrix-cli-update = { path = "../update" }
+xmatrix-cli-workspace = { path = "../workspace" }
+xmatrix-process-tree = { path = "../process-tree" }
+xmatrix-repo-pool = { path = "../repo-pool" }
+xmatrix-windows-continuity = { path = "../windows-continuity" }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system", "disk"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
+  "Win32_System_Power",
+  "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

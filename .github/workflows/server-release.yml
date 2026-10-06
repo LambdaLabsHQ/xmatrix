@@ -1,0 +1,796 @@
+name: Server Release
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: Hub deployment, Web build, or Web deployment in the immutable train
+        required: true
+        type: string
+      deploy_sha:
+        description: Exact immutable production tag commit
+        required: true
+        type: string
+      request_run_id:
+        description: Exact successful request authorizing the tested SHA
+        required: true
+        type: string
+      release_scope:
+        description: Scope bound to the successful request marker
+        required: true
+        type: string
+
+# Runtime cell location (a Durable Object location hint) for the rendered profile.
+env:
+  XMATRIX_RUNTIME_LOCATION_HINT: ${{ vars.XMATRIX_RUNTIME_LOCATION_HINT }}
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  hub:
+    name: ${{ inputs.target == 'hub' && 'deploy' || 'inactive-hub' }}
+    if: startsWith(github.ref, 'refs/tags/xmatrix-v') && inputs.target == 'hub'
+    concurrency:
+      group: hub-production-deploy
+      cancel-in-progress: false
+    environment: production
+    # Release jobs run on the US release runners (xmatrix-us-release).
+    runs-on: &server_release_runner ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 900
+    env:
+      XMATRIX_DEPLOY_SHA: ${{ inputs.deploy_sha }}
+      GITHUB_TOKEN: ${{ github.token }}
+      NODE_USE_ENV_PROXY: "1"
+    steps:
+      - name: Configure Linux runner proxy before checkout
+        shell: bash
+        run: |
+          proxy=http://127.0.0.1:7897
+          if curl -fsSIL --connect-timeout 3 --max-time 8 -x "$proxy" https://github.com >/dev/null; then
+            {
+              echo "HTTPS_PROXY=$proxy"
+              echo "HTTP_PROXY=$proxy"
+              echo "ALL_PROXY=$proxy"
+              echo "NO_PROXY=localhost,127.0.0.1,::1"
+              echo "GIT_CONFIG_COUNT=1"
+              echo "GIT_CONFIG_KEY_0=http.proxy"
+              echo "GIT_CONFIG_VALUE_0=$proxy"
+            } >> "$GITHUB_ENV"
+          else
+            echo "Linux proxy $proxy is unavailable; using direct GitHub access."
+          fi
+
+      - &server_checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.deploy_sha }}
+          fetch-depth: 0
+
+      - &restore_server_checkout
+        name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+
+      - &clear_server_proxy
+        uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+
+      - name: Verify exact clean tagged checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$XMATRIX_DEPLOY_SHA"
+          test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$XMATRIX_DEPLOY_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Reverify exact selected request before reusing its test result
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_SHA: ${{ inputs.deploy_sha }}
+          REQUEST_RUN_ID: ${{ inputs.request_run_id }}
+          RELEASE_SCOPE: ${{ inputs.release_scope }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const scope = process.env.RELEASE_SCOPE;
+            if (!scope.split(",").includes("hub")) {
+              core.setFailed("Hub deployment requires selected Hub authorization");
+              return;
+            }
+            if (!/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
+              core.setFailed("Hub gate reuse requires an exact request run ID");
+              return;
+            }
+            const { data: productionRun } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: context.runId,
+            });
+            if (productionRun.path !== ".github/workflows/production-release.yml" ||
+                productionRun.event !== "workflow_dispatch" ||
+                productionRun.head_sha !== process.env.DEPLOY_SHA) {
+              core.setFailed("Hub deployment must be called by the tagged Production Release run");
+              return;
+            }
+            const { data: requestRun } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: Number(process.env.REQUEST_RUN_ID),
+            });
+            if (requestRun.path !== ".github/workflows/production-release-request.yml" ||
+                requestRun.event !== "workflow_dispatch" ||
+                requestRun.head_branch !== "main") {
+              core.setFailed("Hub gate reuse is not authorized for this exact tagged SHA");
+              return;
+            }
+            // The request tested either this exact main revision or its release
+            // commit (that revision plus the stamped release version).
+            try {
+              require("child_process").execFileSync("node",
+                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
+                { stdio: "inherit" });
+            } catch {
+              core.setFailed("Hub gate reuse is not authorized for this exact tagged SHA");
+              return;
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...context.repo, run_id: requestRun.id, per_page: 100,
+            });
+            // The request's `gates` job passes only when every gate its scope
+            // selects passed, and the scope selects Hub.
+            for (const name of ["plan", "gates"]) {
+              if (!jobs.some(job => job.name === name && job.conclusion === "success")) {
+                core.setFailed(`Hub gate reuse is missing successful ${name}`);
+                return;
+              }
+            }
+            const dispatch = jobs.find(job => job.name === "authorize-and-dispatch");
+            if (!dispatch?.steps?.some(step =>
+                step.name === `Record successful ${scope} production authorization` &&
+                step.conclusion === "success")) {
+              core.setFailed("Hub gate reuse is missing the request authorization marker");
+            }
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build protocol package for exact Hub bundle
+        run: |
+          set -euo pipefail
+          pnpm --filter @xmatrix/protocol build
+          test -f packages/protocol/dist/index.js
+
+      - name: Check exact release version after reusing the Hub gate
+        run: node scripts/version.mjs check
+
+      # The reused Hub gate built these as a side effect; the bundle below
+      # resolves them through their dist/ exports, so build them here.
+      - name: Build Hub workspace dependencies
+        run: pnpm exec turbo run build --filter='@xmatrix/hub^...'
+
+      # Deployment identity (account, route, Hyperdrive ids, operator vars)
+      # comes from the reviewed production profile, not the product config.
+      - name: Render the production deployment config
+        env: &production_profile_environment
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          XMATRIX_HYPERDRIVE_ID: ${{ secrets.XMATRIX_HYPERDRIVE_ID }}
+          XMATRIX_HYPERDRIVE_SHARD_1_ID: ${{ secrets.XMATRIX_HYPERDRIVE_SHARD_1_ID }}
+          XMATRIX_PLATFORM_ADMIN_EMAILS: ${{ secrets.XMATRIX_PLATFORM_ADMIN_EMAILS }}
+          XMATRIX_PLATFORM_ADMIN_SPACE_ID: ${{ secrets.XMATRIX_PLATFORM_ADMIN_SPACE_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/deploy-config.mjs render production hub
+          node scripts/deploy-config.mjs env production >> "$GITHUB_ENV"
+
+      - name: Verify source and production bundle
+        run: |
+          set -euo pipefail
+          node scripts/hub-deploy-source-guard.mjs source --expected-sha "$XMATRIX_DEPLOY_SHA"
+          pnpm --dir packages/hub exec wrangler deploy --dry-run --config "$XMATRIX_HUB_CONFIG" --outdir "$RUNNER_TEMP/hub-wrangler-dry-run"
+          node scripts/hub-deploy-source-guard.mjs source --expected-sha "$XMATRIX_DEPLOY_SHA"
+
+      - name: Deploy tagged Hub to production
+        working-directory: packages/hub
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          XMATRIX_SECRET_CATALOG_KEY: ${{ secrets.XMATRIX_SECRET_CATALOG_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRO_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_PRO_MONTHLY_PRICE_ID }}
+          STRIPE_PRO_ANNUAL_PRICE_ID: ${{ secrets.STRIPE_PRO_ANNUAL_PRICE_ID }}
+          CONNECTOR_NOTION_CLIENT_ID: ${{ secrets.CONNECTOR_NOTION_CLIENT_ID }}
+          CONNECTOR_NOTION_CLIENT_SECRET: ${{ secrets.CONNECTOR_NOTION_CLIENT_SECRET }}
+          CONNECTOR_SLACK_CLIENT_ID: ${{ secrets.CONNECTOR_SLACK_CLIENT_ID }}
+          CONNECTOR_SLACK_CLIENT_SECRET: ${{ secrets.CONNECTOR_SLACK_CLIENT_SECRET }}
+          CONNECTOR_LINEAR_CLIENT_ID: ${{ secrets.CONNECTOR_LINEAR_CLIENT_ID }}
+          CONNECTOR_LINEAR_CLIENT_SECRET: ${{ secrets.CONNECTOR_LINEAR_CLIENT_SECRET }}
+          CONNECTOR_SENTRY_CLIENT_ID: ${{ secrets.CONNECTOR_SENTRY_CLIENT_ID }}
+          CONNECTOR_SENTRY_CLIENT_SECRET: ${{ secrets.CONNECTOR_SENTRY_CLIENT_SECRET }}
+          CONNECTOR_SENTRY_APP_UUID: ${{ secrets.CONNECTOR_SENTRY_APP_UUID }}
+          CONNECTOR_SENTRY_APP_SLUG: ${{ secrets.CONNECTOR_SENTRY_APP_SLUG }}
+          CONNECTOR_GITLAB_CLIENT_ID: ${{ secrets.CONNECTOR_GITLAB_CLIENT_ID }}
+          CONNECTOR_GITLAB_CLIENT_SECRET: ${{ secrets.CONNECTOR_GITLAB_CLIENT_SECRET }}
+          CONNECTOR_JIRA_CLIENT_ID: ${{ secrets.CONNECTOR_JIRA_CLIENT_ID }}
+          CONNECTOR_JIRA_CLIENT_SECRET: ${{ secrets.CONNECTOR_JIRA_CLIENT_SECRET }}
+          CONNECTOR_VERCEL_CLIENT_ID: ${{ secrets.CONNECTOR_VERCEL_CLIENT_ID }}
+          CONNECTOR_VERCEL_CLIENT_SECRET: ${{ secrets.CONNECTOR_VERCEL_CLIENT_SECRET }}
+          CONNECTOR_PAGERDUTY_CLIENT_ID: ${{ secrets.CONNECTOR_PAGERDUTY_CLIENT_ID }}
+          CONNECTOR_PAGERDUTY_CLIENT_SECRET: ${{ secrets.CONNECTOR_PAGERDUTY_CLIENT_SECRET }}
+          CONNECTOR_DISCORD_CLIENT_ID: ${{ secrets.CONNECTOR_DISCORD_CLIENT_ID }}
+          CONNECTOR_DISCORD_CLIENT_SECRET: ${{ secrets.CONNECTOR_DISCORD_CLIENT_SECRET }}
+          CONNECTOR_DISCORD_BOT_TOKEN: ${{ secrets.CONNECTOR_DISCORD_BOT_TOKEN }}
+          CONNECTOR_DISCORD_PUBLIC_KEY: ${{ secrets.CONNECTOR_DISCORD_PUBLIC_KEY }}
+          CONNECTOR_BITBUCKET_CLIENT_ID: ${{ secrets.CONNECTOR_BITBUCKET_CLIENT_ID }}
+          CONNECTOR_BITBUCKET_CLIENT_SECRET: ${{ secrets.CONNECTOR_BITBUCKET_CLIENT_SECRET }}
+          CONNECTOR_NETLIFY_CLIENT_ID: ${{ secrets.CONNECTOR_NETLIFY_CLIENT_ID }}
+          CONNECTOR_NETLIFY_CLIENT_SECRET: ${{ secrets.CONNECTOR_NETLIFY_CLIENT_SECRET }}
+          CONNECTOR_CLOUDFLARE_CLIENT_ID: ${{ secrets.CONNECTOR_CLOUDFLARE_CLIENT_ID }}
+          CONNECTOR_CLOUDFLARE_CLIENT_SECRET: ${{ secrets.CONNECTOR_CLOUDFLARE_CLIENT_SECRET }}
+          CONNECTOR_GOOGLE_CLIENT_ID: ${{ secrets.CONNECTOR_GOOGLE_CLIENT_ID }}
+          CONNECTOR_GOOGLE_CLIENT_SECRET: ${{ secrets.CONNECTOR_GOOGLE_CLIENT_SECRET }}
+          CONNECTOR_GOOGLE_PICKER_API_KEY: ${{ secrets.CONNECTOR_GOOGLE_PICKER_API_KEY }}
+          CONNECTOR_GOOGLE_PICKER_APP_ID: ${{ secrets.CONNECTOR_GOOGLE_PICKER_APP_ID }}
+          CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON: ${{ secrets.CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON }}
+          CONNECTOR_GOOGLECHAT_APP_ID: ${{ secrets.CONNECTOR_GOOGLECHAT_APP_ID }}
+          CONNECTOR_GOOGLECHAT_SYSTEM_SERVICE_ACCOUNT_EMAIL: ${{ secrets.CONNECTOR_GOOGLECHAT_SYSTEM_SERVICE_ACCOUNT_EMAIL }}
+          CONNECTOR_DINGTALK_SUITE_KEY: ${{ secrets.CONNECTOR_DINGTALK_SUITE_KEY }}
+          CONNECTOR_DINGTALK_SUITE_SECRET: ${{ secrets.CONNECTOR_DINGTALK_SUITE_SECRET }}
+          CONNECTOR_DINGTALK_CALLBACK_TOKEN: ${{ secrets.CONNECTOR_DINGTALK_CALLBACK_TOKEN }}
+          CONNECTOR_DINGTALK_ENCODING_AES_KEY: ${{ secrets.CONNECTOR_DINGTALK_ENCODING_AES_KEY }}
+          CONNECTOR_DINGTALK_COMPANY_CONFIG: ${{ secrets.CONNECTOR_DINGTALK_COMPANY_CONFIG }}
+          CONNECTOR_WECOM_SUITE_ID: ${{ secrets.CONNECTOR_WECOM_SUITE_ID }}
+          CONNECTOR_WECOM_SUITE_SECRET: ${{ secrets.CONNECTOR_WECOM_SUITE_SECRET }}
+          CONNECTOR_WECOM_CALLBACK_TOKEN: ${{ secrets.CONNECTOR_WECOM_CALLBACK_TOKEN }}
+          CONNECTOR_WECOM_ENCODING_AES_KEY: ${{ secrets.CONNECTOR_WECOM_ENCODING_AES_KEY }}
+          CONNECTOR_TEAMS_APP_ID: ${{ secrets.CONNECTOR_TEAMS_APP_ID }}
+          CONNECTOR_TEAMS_APP_SECRET: ${{ secrets.CONNECTOR_TEAMS_APP_SECRET }}
+          CONNECTOR_TEAMS_TENANT_ID: ${{ secrets.CONNECTOR_TEAMS_TENANT_ID }}
+          CONNECTOR_TELEGRAM_BOT_TOKEN: ${{ secrets.CONNECTOR_TELEGRAM_BOT_TOKEN }}
+          CONNECTOR_TELEGRAM_WEBHOOK_SECRET: ${{ secrets.CONNECTOR_TELEGRAM_WEBHOOK_SECRET }}
+          CONNECTOR_FEISHU_APP_ID: ${{ secrets.CONNECTOR_FEISHU_APP_ID }}
+          CONNECTOR_FEISHU_APP_SECRET: ${{ secrets.CONNECTOR_FEISHU_APP_SECRET }}
+          CONNECTOR_FEISHU_VERIFICATION_TOKEN: ${{ secrets.CONNECTOR_FEISHU_VERIFICATION_TOKEN }}
+          CONNECTOR_FEISHU_ENCRYPT_KEY: ${{ secrets.CONNECTOR_FEISHU_ENCRYPT_KEY }}
+          CONNECTOR_SLACK_SIGNING_SECRET: ${{ secrets.CONNECTOR_SLACK_SIGNING_SECRET }}
+          CONNECTOR_LINEAR_SIGNING_SECRET: ${{ secrets.CONNECTOR_LINEAR_SIGNING_SECRET }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN_HUB }}
+        run: |
+          set -euo pipefail
+          node ../../scripts/production-release-policy.mjs verify-remote-tag \
+            "$GITHUB_REF_NAME" "$XMATRIX_DEPLOY_SHA"
+          node ../../scripts/hub-deploy-source-guard.mjs source \
+            --expected-sha "$XMATRIX_DEPLOY_SHA"
+          test "$(git rev-parse HEAD)" = "$XMATRIX_DEPLOY_SHA"
+          test -z "$(git status --porcelain)"
+          secrets_file="$RUNNER_TEMP/production-hub-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          umask 077
+          node <<'EOF' > "$secrets_file"
+          const required = [
+            "XMATRIX_SECRET_CATALOG_KEY",
+          ];
+          const payload = Object.fromEntries(required.map((key) => {
+            if (!process.env[key]) throw new Error(`Missing production secret ${key}`);
+            return [key, process.env[key]];
+          }));
+          if (payload.XMATRIX_SECRET_CATALOG_KEY.trim().length < 32) {
+            throw new Error("Production catalog key must contain at least 32 characters");
+          }
+          const billing = [
+            "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
+            "STRIPE_PRO_MONTHLY_PRICE_ID", "STRIPE_PRO_ANNUAL_PRICE_ID",
+          ];
+          if (billing.some((key) => process.env[key])) {
+            for (const key of billing) {
+              if (!process.env[key]?.trim()) throw new Error(`Missing production billing secret ${key}`);
+              if (process.env[key] !== process.env[key].trim()) throw new Error(`Invalid production billing secret ${key}`);
+              payload[key] = process.env[key];
+            }
+            if (!/^(sk|rk)_live_[A-Za-z0-9]+$/.test(payload.STRIPE_SECRET_KEY) ||
+                !/^whsec_[A-Za-z0-9]+$/.test(payload.STRIPE_WEBHOOK_SECRET) ||
+                !/^price_[A-Za-z0-9]+$/.test(payload.STRIPE_PRO_MONTHLY_PRICE_ID) ||
+                !/^price_[A-Za-z0-9]+$/.test(payload.STRIPE_PRO_ANNUAL_PRICE_ID)) {
+              throw new Error("Invalid live production billing configuration");
+            }
+          }
+          // Each optional registered application rotates as a complete pair.
+          // Unregistered providers preserve their existing Worker settings.
+          const providers = ["NOTION", "SLACK", "LINEAR", "SENTRY", "GITLAB", "JIRA", "NETLIFY", "VERCEL", "GOOGLE", "BITBUCKET", "PAGERDUTY", "CLOUDFLARE"];
+          const validConnectorSecret = (key) => {
+            const value = process.env[key];
+            if (!value?.trim()) throw new Error(`Missing production connector secret ${key}`);
+            if (value !== value.trim() || /\s|https?:\/\//iu.test(value)) {
+              throw new Error(`Invalid production connector secret ${key}`);
+            }
+            return value;
+          };
+          for (const provider of providers) {
+            const keys = ["CLIENT_ID", "CLIENT_SECRET"].map((suffix) => `CONNECTOR_${provider}_${suffix}`);
+            if (keys.some((key) => process.env[key])) {
+              for (const key of keys) payload[key] = validConnectorSecret(key);
+            }
+          }
+          const discord = ["CONNECTOR_DISCORD_CLIENT_ID", "CONNECTOR_DISCORD_CLIENT_SECRET", "CONNECTOR_DISCORD_BOT_TOKEN"];
+          if (discord.some(key => process.env[key])) {
+            for (const key of discord) payload[key] = validConnectorSecret(key);
+            if (!/^[1-9][0-9]{14,24}$/.test(payload.CONNECTOR_DISCORD_CLIENT_ID) ||
+                discord.some(key => Buffer.byteLength(payload[key]) > 4096)) {
+              throw new Error("Invalid Discord company application configuration");
+            }
+          }
+          if (process.env.CONNECTOR_DISCORD_PUBLIC_KEY) {
+            const key = validConnectorSecret("CONNECTOR_DISCORD_PUBLIC_KEY");
+            if (!payload.CONNECTOR_DISCORD_CLIENT_ID || !/^[a-fA-F0-9]{64}$/.test(key)) {
+              throw new Error("Invalid Discord webhook public key configuration");
+            }
+            payload.CONNECTOR_DISCORD_PUBLIC_KEY = key;
+          }
+          for (const provider of ["SLACK", "LINEAR"]) {
+            const key = `CONNECTOR_${provider}_SIGNING_SECRET`;
+            if (process.env[key]) payload[key] = validConnectorSecret(key);
+          }
+          const sentryApp = ["CONNECTOR_SENTRY_APP_UUID", "CONNECTOR_SENTRY_APP_SLUG"];
+          if (sentryApp.some((key) => process.env[key])) {
+            for (const key of sentryApp) payload[key] = validConnectorSecret(key);
+            if (!payload.CONNECTOR_SENTRY_CLIENT_ID || !payload.CONNECTOR_SENTRY_CLIENT_SECRET ||
+                !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(payload.CONNECTOR_SENTRY_APP_UUID) ||
+                !/^[a-z0-9][a-z0-9_-]{0,99}$/.test(payload.CONNECTOR_SENTRY_APP_SLUG)) {
+              throw new Error("Incomplete or invalid Sentry Public Integration identity");
+            }
+          }
+          // The native Chat app has one complete outbound/inbound identity. A partial rotation cannot deploy.
+          const chat = ["CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON", "CONNECTOR_GOOGLECHAT_APP_ID",
+            "CONNECTOR_GOOGLECHAT_SYSTEM_SERVICE_ACCOUNT_EMAIL"];
+          if (chat.some((key) => process.env[key])) {
+            const raw = process.env[chat[0]];
+            let account;
+            try { if (typeof raw !== "string" || Buffer.byteLength(raw) > 16_384) throw new Error(); account = JSON.parse(raw); }
+            catch { throw new Error("Invalid production Google Chat service account"); }
+            const id = validConnectorSecret(chat[1]), system = validConnectorSecret(chat[2]);
+            if (!/^[1-9][0-9]{0,31}$/.test(id) || system !== `service-${id}@gcp-sa-gsuiteaddons.iam.gserviceaccount.com` ||
+                !account || account.type !== "service_account" || !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(account.project_id ?? "") ||
+                typeof account.client_email !== "string" || !/^[A-Za-z0-9_.-]{1,128}@[a-z0-9-]{4,63}\.iam\.gserviceaccount\.com$/.test(account.client_email) ||
+                !account.client_email.endsWith(`@${account.project_id}.iam.gserviceaccount.com`) ||
+                !/^[a-f0-9]{40}$/.test(account.private_key_id ?? "") || typeof account.private_key !== "string" ||
+                account.private_key.length > 8192 ||
+                !/^-----BEGIN PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n]+\r?\n-----END PRIVATE KEY-----\r?\n?$/.test(account.private_key) ||
+                account.token_uri !== "https://oauth2.googleapis.com/token" ||
+                (account.universe_domain !== undefined && account.universe_domain !== "googleapis.com")) {
+              throw new Error("Incomplete or invalid production Google Chat application identity");
+            }
+            payload[chat[0]] = raw; payload[chat[1]] = id; payload[chat[2]] = system;
+          }
+          // Company store-app keys rotate atomically. Absent optional credentials preserve existing Worker configuration.
+          const dingtalk = ["CONNECTOR_DINGTALK_SUITE_KEY", "CONNECTOR_DINGTALK_SUITE_SECRET", "CONNECTOR_DINGTALK_CALLBACK_TOKEN", "CONNECTOR_DINGTALK_ENCODING_AES_KEY"];
+          if (dingtalk.some(key => process.env[key])) {
+            for (const key of dingtalk) payload[key] = validConnectorSecret(key);
+            const aes = payload.CONNECTOR_DINGTALK_ENCODING_AES_KEY;
+            if (!/^[A-Za-z0-9_-]{3,128}$/.test(payload.CONNECTOR_DINGTALK_SUITE_KEY) ||
+                !/^[A-Za-z0-9_.-]{8,256}$/.test(payload.CONNECTOR_DINGTALK_SUITE_SECRET) ||
+                !/^[A-Za-z0-9]{3,32}$/.test(payload.CONNECTOR_DINGTALK_CALLBACK_TOKEN) ||
+                !/^[A-Za-z0-9+/]{43}$/.test(aes) || Buffer.from(aes + "=", "base64").toString("base64") !== aes + "=") {
+              throw new Error("Invalid DingTalk company suite configuration");
+            }
+          }
+          if (process.env.CONNECTOR_DINGTALK_COMPANY_CONFIG) {
+            const value = process.env.CONNECTOR_DINGTALK_COMPANY_CONFIG;
+            let config;
+            try { config = JSON.parse(value); } catch { throw new Error("Invalid DingTalk company protocol metadata"); }
+            if (!payload.CONNECTOR_DINGTALK_SUITE_KEY || value.length > 4096 || !config || Array.isArray(config) ||
+                JSON.stringify(config) !== value || Object.keys(config).length !== 7 ||
+                Object.keys(config).some(key => !["protocol", "delivery", "suiteId", "developerCorpId", "appId", "templateId", "templateField"].includes(key)) ||
+                config.protocol !== "suite-ticket" || config.delivery !== "sync-http" ||
+                typeof config.suiteId !== "string" || !/^[1-9][0-9]{0,15}$/.test(config.suiteId) ||
+                typeof config.developerCorpId !== "string" || !/^ding[A-Za-z0-9_-]{3,124}$/.test(config.developerCorpId) ||
+                !Number.isSafeInteger(config.appId) || config.appId < 1 ||
+                typeof config.templateId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(config.templateId) ||
+                typeof config.templateField !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(config.templateField)) {
+              throw new Error("Invalid DingTalk company protocol metadata");
+            }
+            payload.CONNECTOR_DINGTALK_COMPANY_CONFIG = value;
+          }
+          const wecom = ["CONNECTOR_WECOM_SUITE_ID", "CONNECTOR_WECOM_SUITE_SECRET", "CONNECTOR_WECOM_CALLBACK_TOKEN", "CONNECTOR_WECOM_ENCODING_AES_KEY"];
+          if (wecom.some(key => process.env[key])) {
+            for (const key of wecom) payload[key] = validConnectorSecret(key);
+            const aes = payload.CONNECTOR_WECOM_ENCODING_AES_KEY;
+            if (!/^(?:ww|wx)[A-Za-z0-9]{8,64}$/.test(payload.CONNECTOR_WECOM_SUITE_ID) ||
+                !/^[A-Za-z0-9_.-]{8,256}$/.test(payload.CONNECTOR_WECOM_SUITE_SECRET) ||
+                !/^[A-Za-z0-9]{1,32}$/.test(payload.CONNECTOR_WECOM_CALLBACK_TOKEN) ||
+                !/^[A-Za-z0-9+/]{43}$/.test(aes) || Buffer.from(aes + "=", "base64").toString("base64") !== aes + "=") {
+              throw new Error("Invalid WeCom company suite configuration");
+            }
+          }
+          const teams = ["CONNECTOR_TEAMS_APP_ID", "CONNECTOR_TEAMS_APP_SECRET", "CONNECTOR_TEAMS_TENANT_ID"];
+          if (teams.some(key => process.env[key])) {
+            for (const key of teams) payload[key] = validConnectorSecret(key);
+            const guid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+            if (!guid.test(payload.CONNECTOR_TEAMS_APP_ID) || !guid.test(payload.CONNECTOR_TEAMS_TENANT_ID) ||
+                !/^[^\s]{8,256}$/.test(payload.CONNECTOR_TEAMS_APP_SECRET)) {
+              throw new Error("Invalid Teams company bot configuration");
+            }
+          }
+          const telegram = ["CONNECTOR_TELEGRAM_BOT_TOKEN", "CONNECTOR_TELEGRAM_WEBHOOK_SECRET"];
+          if (telegram.some(key => process.env[key])) {
+            for (const key of telegram) payload[key] = validConnectorSecret(key);
+            const botId = payload.CONNECTOR_TELEGRAM_BOT_TOKEN.split(":")[0];
+            if (!/^[1-9][0-9]{4,15}:[A-Za-z0-9_-]{20,64}$/.test(payload.CONNECTOR_TELEGRAM_BOT_TOKEN) ||
+                !Number.isSafeInteger(Number(botId)) || !/^[A-Za-z0-9_-]{32,256}$/.test(payload.CONNECTOR_TELEGRAM_WEBHOOK_SECRET)) {
+              throw new Error("Invalid Telegram company bot configuration");
+            }
+          }
+          const feishu = ["CONNECTOR_FEISHU_APP_ID", "CONNECTOR_FEISHU_APP_SECRET", "CONNECTOR_FEISHU_VERIFICATION_TOKEN", "CONNECTOR_FEISHU_ENCRYPT_KEY"];
+          if (feishu.some(key => process.env[key])) {
+            for (const key of feishu) payload[key] = validConnectorSecret(key);
+            if (!/^cli_[A-Za-z0-9]{8,64}$/.test(payload.CONNECTOR_FEISHU_APP_ID) ||
+                feishu.some(key => !/^[A-Za-z0-9_-]{8,256}$/.test(payload[key]))) {
+              throw new Error("Invalid Feishu company store application configuration");
+            }
+          }
+          const picker = ["CONNECTOR_GOOGLE_PICKER_API_KEY", "CONNECTOR_GOOGLE_PICKER_APP_ID"];
+          if (picker.some((key) => process.env[key])) {
+            for (const key of picker) payload[key] = validConnectorSecret(key);
+            if (!payload.CONNECTOR_GOOGLE_CLIENT_ID || !payload.CONNECTOR_GOOGLE_CLIENT_SECRET ||
+                !/^[A-Za-z0-9_-]{20,200}$/.test(payload.CONNECTOR_GOOGLE_PICKER_API_KEY) ||
+                !/^\d{6,20}$/.test(payload.CONNECTOR_GOOGLE_PICKER_APP_ID)) {
+              throw new Error("Invalid production Google Picker configuration");
+            }
+          }
+          process.stdout.write(JSON.stringify(payload));
+          EOF
+          chmod 600 "$secrets_file"
+          # Retain only names for the post-deploy readback; values are removed by the trap.
+          node -e 'const fs = require("node:fs"); process.stdout.write(JSON.stringify(Object.keys(JSON.parse(fs.readFileSync(process.argv[1], "utf8")))));' \
+            "$secrets_file" > "$RUNNER_TEMP/production-hub-expected-secret-names.json"
+          if [ -n "$STRIPE_SECRET_KEY" ]; then
+            echo "XMATRIX_STRIPE_CONFIGURED=1" >> "$GITHUB_ENV"
+          fi
+          # Error reporting is compiled in only once the deployment has a DSN.
+          error_reporting=()
+          if [ -n "$SENTRY_DSN" ]; then
+            if ! [[ "$SENTRY_DSN" =~ ^https://[a-f0-9]+@[a-z0-9.-]+/[0-9]+$ ]]; then
+              echo "Invalid production Sentry DSN" >&2
+              exit 1
+            fi
+            error_reporting=(--define "XMATRIX_SENTRY_DSN:\"$SENTRY_DSN\"" --define "XMATRIX_SENTRY_RELEASE:\"$GITHUB_REF_NAME\"")
+          fi
+          for attempt in 1 2 3; do
+            if pnpm exec wrangler deploy --config "$XMATRIX_HUB_CONFIG" --secrets-file "$secrets_file" \
+                "${error_reporting[@]}"; then
+              break
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 3 ]; then exit "$status"; fi
+            sleep $((attempt * 20))
+          done
+
+      - name: Verify production Hub secret policy
+        working-directory: packages/hub
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          secret_names_file="$RUNNER_TEMP/production-hub-secret-names.json"
+          for attempt in 1 2 3; do
+            if pnpm exec wrangler secret list --config "$XMATRIX_HUB_CONFIG" --format json > "$secret_names_file"; then
+              break
+            fi
+            rm -f "$secret_names_file"
+            if [ "$attempt" -eq 3 ]; then
+              echo "Timed out reading deployed production Hub secret names after ${attempt} attempts" >&2
+              exit 1
+            fi
+            sleep "$((attempt * 2))"
+          done
+          test -s "$secret_names_file"
+          node ../../scripts/wrangler-secret-policy.mjs \
+            "$secret_names_file" \
+            --policy=production-hub
+          node --input-type=module - "$secret_names_file" "$RUNNER_TEMP/production-hub-expected-secret-names.json" <<'EOF'
+          import { readFileSync } from "node:fs";
+          import { assertSecretPolicy, secretNamesFromWrangler } from "../../scripts/wrangler-secret-policy.mjs";
+          const names = secretNamesFromWrangler(readFileSync(process.argv[2], "utf8"));
+          const required = JSON.parse(readFileSync(process.argv[3], "utf8"));
+          assertSecretPolicy(names, { required });
+          console.log("All secrets selected for this Hub deployment are present.");
+          EOF
+          if [ "${XMATRIX_STRIPE_CONFIGURED:-}" = "1" ]; then
+            node ../../scripts/wrangler-secret-policy.mjs \
+              "$secret_names_file" --policy=production-hub-billing
+          fi
+
+      - name: Verify deployed production Hub health
+        run: >-
+          node scripts/hub-postdeploy-smoke.mjs
+          --url "$XMATRIX_HUB_ORIGIN/"
+          --attempts 12
+          --delay-ms 5000
+
+      - name: Verify HTTP redirects to HTTPS
+        run: node scripts/https-postdeploy-smoke.mjs "$XMATRIX_HUB_ORIGIN"
+
+  build:
+    name: ${{ inputs.target == 'web-build' && 'build' || 'inactive-build' }}
+    if: startsWith(github.ref, 'refs/tags/xmatrix-v') && inputs.target == 'web-build'
+    permissions:
+      contents: read
+    environment: production
+    runs-on: *server_release_runner
+    env: &web_build_environment
+      XMATRIX_DEPLOY_SHA: ${{ inputs.deploy_sha }}
+      NEXT_PUBLIC_XMATRIX_WEB_BUILD_ID: ${{ inputs.deploy_sha }}
+      NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_WEB }}
+      NEXT_PUBLIC_SENTRY_RELEASE: ${{ github.ref_name }}
+      NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED: ${{ vars.NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED }}
+    steps:
+      - *server_checkout
+
+      # Persistent self-hosted worktrees can retain sparse-checkout config and
+      # skip-worktree bits that hide a newly added local action even when
+      # actions/checkout reports the correct HEAD. Restore the complete tagged
+      # tree before asking the runner to load any action from this repository.
+      - *restore_server_checkout
+
+      - *clear_server_proxy
+      - &setup_web_release
+        uses: ./.github/actions/setup-pnpm-node
+
+      # Origins and the Web config come from the reviewed production profile.
+      - name: Load the production deployment profile
+        env: *production_profile_environment
+        run: |
+          set -euo pipefail
+          node scripts/deploy-config.mjs env production >> "$GITHUB_ENV"
+
+      - &verify_web_checkout
+        name: Verify exact clean tagged checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$XMATRIX_DEPLOY_SHA"
+          test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$XMATRIX_DEPLOY_SHA"
+          test -z "$(git status --porcelain)"
+          node scripts/version.mjs check
+
+      - name: Typecheck and build production Web
+        env:
+          NEXT_TEST_WASM: "1"
+          XMATRIX_WEB_SOURCE_MAPS: ${{ secrets.SENTRY_AUTH_TOKEN != '' && '1' || '' }}
+        run: |
+          pnpm exec turbo typecheck --filter=@xmatrix/web
+          pnpm --filter @xmatrix/web build:cloudflare
+
+      # Browser stack traces resolve against maps held by error reporting; the
+      # deployed assets never serve them.
+      - name: Upload browser source maps to error reporting
+        working-directory: apps/web
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT_WEB }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then exit 0; fi
+          assets=.open-next/assets/_next/static
+          pnpm exec sentry-cli sourcemaps inject "$assets"
+          # Error reporting never blocks shipping: a rejected upload only
+          # leaves this release's browser stacks unresolved.
+          if ! pnpm exec sentry-cli sourcemaps upload --release "$GITHUB_REF_NAME" "$assets"; then
+            echo "::warning::Browser source maps were not uploaded to error reporting"
+          fi
+          find .open-next/assets -name '*.map' -delete
+
+      - name: Prepare verified Web build handoff
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          node scripts/web-release-handoff.mjs create \
+            "$RUNNER_TEMP/xmatrix-web-handoff" apps/web "$XMATRIX_DEPLOY_SHA"
+
+      - name: Upload verified Web build handoff to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
+          R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
+          XMATRIX_RELEASE_COMPONENT: web-handoff
+          XMATRIX_RELEASE_SHA: ${{ inputs.deploy_sha }}
+        run: >-
+          node scripts/r2-release-store.mjs upload-directory
+          --bucket xmatrix-release-assets
+          --prefix handoffs/web/${{ github.run_id }}/${{ github.run_attempt }}/bundle
+          --directory "${{ runner.temp }}/xmatrix-web-handoff"
+
+  web:
+    name: ${{ inputs.target == 'web' && 'deploy' || 'inactive-web' }}
+    if: startsWith(github.ref, 'refs/tags/xmatrix-v') && inputs.target == 'web'
+    concurrency:
+      group: web-production-deploy
+      cancel-in-progress: false
+    environment: production
+    # Release jobs run on the US release runners (xmatrix-us-release).
+    runs-on: *server_release_runner
+    env: *web_build_environment
+    steps:
+      - *server_checkout
+
+      # Persistent self-hosted worktrees can retain sparse-checkout config and
+      # skip-worktree bits that hide a newly added local action even when
+      # actions/checkout reports the correct HEAD. Restore the complete tagged
+      # tree before asking the runner to load any action from this repository.
+      - *restore_server_checkout
+
+      - *clear_server_proxy
+      - *setup_web_release
+
+      # Origins and the Web config come from the reviewed production profile.
+      - name: Load the production deployment profile
+        env: *production_profile_environment
+        run: |
+          set -euo pipefail
+          node scripts/deploy-config.mjs env production >> "$GITHUB_ENV"
+          node scripts/deploy-config.mjs render production web
+
+      - *verify_web_checkout
+
+      - name: Reverify exact selected request before reusing the Web test result
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_SHA: ${{ inputs.deploy_sha }}
+          REQUEST_RUN_ID: ${{ inputs.request_run_id }}
+          RELEASE_SCOPE: ${{ inputs.release_scope }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const scope = process.env.RELEASE_SCOPE;
+            if (!scope.split(",").includes("web") || !/^\d+$/.test(process.env.REQUEST_RUN_ID || "")) {
+              core.setFailed("Web deployment requires an exact request selecting Web");
+              return;
+            }
+            const { data: productionRun } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: context.runId,
+            });
+            if (productionRun.path !== ".github/workflows/production-release.yml" ||
+                productionRun.event !== "workflow_dispatch" ||
+                productionRun.head_sha !== process.env.DEPLOY_SHA) {
+              core.setFailed("Web deployment must be called by the tagged Production Release run");
+              return;
+            }
+            const { data: requestRun } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: Number(process.env.REQUEST_RUN_ID),
+            });
+            if (requestRun.path !== ".github/workflows/production-release-request.yml" ||
+                requestRun.event !== "workflow_dispatch" ||
+                requestRun.head_branch !== "main") {
+              core.setFailed("Web gate reuse is not authorized for this exact tagged SHA");
+              return;
+            }
+            // The request tested either this exact main revision or its release
+            // commit (that revision plus the stamped release version).
+            try {
+              require("child_process").execFileSync("node",
+                ["scripts/release-commit.mjs", "verify", process.env.DEPLOY_SHA, requestRun.head_sha],
+                { stdio: "inherit" });
+            } catch {
+              core.setFailed("Web gate reuse is not authorized for this exact tagged SHA");
+              return;
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...context.repo, run_id: requestRun.id, per_page: 100,
+            });
+            // The request's `gates` job passes only when every gate its scope
+            // selects passed, and the scope selects Web.
+            for (const name of ["plan", "gates"]) {
+              if (!jobs.some(job => job.name === name && job.conclusion === "success")) {
+                core.setFailed(`Web gate reuse is missing successful ${name}`);
+                return;
+              }
+            }
+            const dispatch = jobs.find(job => job.name === "authorize-and-dispatch");
+            if (!dispatch?.steps?.some(step =>
+                step.name === `Record successful ${scope} production authorization` &&
+                step.conclusion === "success")) {
+              core.setFailed("Web gate reuse is missing the request authorization marker");
+            }
+
+      # The build target built this exact commit in this run, alongside the Hub
+      # deploy. Restore only a handoff whose checksums and commit match.
+      - name: Download verified Web build handoff from R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/r2-release-store.mjs download-latest-attempt \
+            --bucket xmatrix-release-assets \
+            --prefix "handoffs/web/${GITHUB_RUN_ID}" \
+            --suffix bundle \
+            --attempt "$GITHUB_RUN_ATTEMPT" \
+            --directory "$RUNNER_TEMP/xmatrix-web-handoff" \
+            --exclude-manifest
+
+      - name: Restore verified production Web build
+        run: |
+          set -euo pipefail
+          node scripts/web-release-handoff.mjs restore \
+            "$RUNNER_TEMP/xmatrix-web-handoff" apps/web "$XMATRIX_DEPLOY_SHA"
+
+      - name: Require compatibility-ready production Hub
+        run: |
+          node scripts/hub-postdeploy-smoke.mjs \
+            --url "$XMATRIX_HUB_ORIGIN/" \
+            --attempts 12 \
+            --delay-ms 5000 \
+            --web-version "$(node -p "require('./version.json').version")"
+
+      - name: Deploy tagged Web to production
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          XMATRIX_RELEASE_GITHUB_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node ../../scripts/production-release-policy.mjs verify-remote-tag \
+            "$GITHUB_REF_NAME" "$XMATRIX_DEPLOY_SHA"
+          test "$(git rev-parse HEAD)" = "$XMATRIX_DEPLOY_SHA"
+          test -z "$(git status --porcelain)"
+          secrets_file="$RUNNER_TEMP/production-web-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          node <<'EOF' > "$secrets_file"
+          if (!process.env.XMATRIX_RELEASE_GITHUB_TOKEN) throw new Error("Missing production GitHub release token");
+          process.stdout.write(JSON.stringify({ GITHUB_TOKEN: process.env.XMATRIX_RELEASE_GITHUB_TOKEN }));
+          EOF
+          chmod 600 "$secrets_file"
+          for attempt in 1 2 3; do
+            if pnpm exec wrangler deploy --config "$XMATRIX_WEB_CONFIG" --secrets-file "$secrets_file"; then
+              break
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 3 ]; then exit "$status"; fi
+            sleep $((attempt * 20))
+          done
+          secret_names_file="$RUNNER_TEMP/production-web-secret-names.json"
+          for attempt in 1 2 3; do
+            if pnpm exec wrangler secret list --config "$XMATRIX_WEB_CONFIG" --format json > "$secret_names_file"; then
+              break
+            fi
+            rm -f "$secret_names_file"
+            if [ "$attempt" -eq 3 ]; then
+              echo "Timed out reading deployed production Web secret names after ${attempt} attempts" >&2
+              exit 1
+            fi
+            sleep "$((attempt * 2))"
+          done
+          test -s "$secret_names_file"
+          node ../../scripts/wrangler-secret-policy.mjs \
+            "$secret_names_file" --policy=web
+
+      - name: Verify live production Web build identity
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            build_id="$(curl -fsS --max-time 15 "$XMATRIX_APP_ORIGIN/api/web-build" | node -pe 'JSON.parse(fs.readFileSync(0,"utf8")).buildId' || true)"
+            if [ "$build_id" = "$XMATRIX_DEPLOY_SHA" ]; then exit 0; fi
+            sleep 5
+          done
+          echo "$XMATRIX_APP_ORIGIN did not expose build $XMATRIX_DEPLOY_SHA" >&2
+          exit 1
+
+      - name: Verify production login preflight remains reachable
+        run: curl -fsS --max-time 15 "$XMATRIX_HUB_ORIGIN/api/auth/get-session" > /dev/null
+
+      - name: Verify HTTP redirects to HTTPS
+        run: node scripts/https-postdeploy-smoke.mjs "$XMATRIX_APP_ORIGIN" "$XMATRIX_HUB_ORIGIN"

@@ -1,0 +1,6 @@
+dist/
+release/
+# Same-version signed CLI seed, fetched by the release workflow. The
+# directory itself stays so local electron-builder runs find it.
+resources/cli/*
+!resources/cli/.gitkeep

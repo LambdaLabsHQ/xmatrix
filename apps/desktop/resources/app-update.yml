@@ -1,0 +1,3 @@
+provider: generic
+url: https://xmatrix.sh/api/desktop/releases/stable
+updaterCacheDirName: "@xmatrixdesktop-updater"

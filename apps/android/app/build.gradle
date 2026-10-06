@@ -1,0 +1,62 @@
+import groovy.json.JsonSlurper
+
+plugins {
+  id "com.android.application"
+  id "com.github.triplet.play"
+}
+
+def repoRoot = rootDir.parentFile.parentFile
+def rootPackage = new JsonSlurper().parse(new File(repoRoot, "package.json"))
+def resolvedVersionName = findProperty("xmatrixVersionName") ?: findProperty("versionName") ?: rootPackage.version
+def resolvedVersionCode = (findProperty("xmatrixVersionCode") ?: findProperty("versionCode") ?: "1").toString().toInteger()
+def playCredentials = findProperty("play.serviceAccountCredentials") ?: System.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+android {
+  namespace "sh.xmatrix.app"
+  compileSdk 36
+
+  defaultConfig {
+    applicationId "sh.xmatrix.app"
+    minSdk 26
+    targetSdk 36
+    versionCode resolvedVersionCode
+    versionName resolvedVersionName
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+
+  buildTypes {
+    debug {
+      applicationIdSuffix ".debug"
+      versionNameSuffix "-debug"
+    }
+    release {
+      minifyEnabled true
+      shrinkResources true
+      proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+dependencies {
+  implementation "androidx.activity:activity:1.13.0"
+  implementation "androidx.core:core:1.18.0"
+  implementation "androidx.webkit:webkit:1.16.0"
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "org.json:json:20250517"
+}
+
+play {
+  track.set((findProperty("track") ?: "internal").toString())
+  defaultToAppBundles.set(true)
+  if (playCredentials) {
+    serviceAccountCredentials.set(file(playCredentials))
+  }
+}

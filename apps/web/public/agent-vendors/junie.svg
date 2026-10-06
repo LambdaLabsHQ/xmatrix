@@ -1,0 +1,9 @@
+<svg role="img" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Junie</title>
+  <rect width="64" height="64" rx="14" fill="#1F1F1F"/>
+  <svg x="14" y="14" width="36" height="36" viewBox="0 0 40 40" color="#47E054" fill="none">
+<path d="M25 15H35V16.75C35 29 30.5001 35 16.5001 35H15V25H16.5001C22.6251 25 25 22.875 25 16.75V15Z" fill="currentColor"/>
+  <rect x="5" y="15" width="10" height="10" fill="currentColor"/>
+  <rect x="15" y="5" width="10" height="10" fill="currentColor"/>
+  </svg>
+</svg>

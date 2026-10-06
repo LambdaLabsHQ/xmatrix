@@ -1,0 +1,14 @@
+{
+  "name": "@xmatrix/mock-agent",
+  "version": "0.16.854",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "bin": {
+    "xmatrix-mock-agent": "./src/index.mjs"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "smoke": "node src/index.mjs --once"
+  }
+}

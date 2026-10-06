@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bump xMatrix Version"
+  short_description: "Explain or set the xMatrix release version (releases stamp it; no bump PR)"
+  default_prompt: "Use $bump-xmatrix-version to bump xMatrix to the next release version and verify the manifests."

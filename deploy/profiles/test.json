@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "name": "test",
+  "cloudflare": {
+    "accountId": {
+      "env": "CLOUDFLARE_ACCOUNT_ID"
+    }
+  },
+  "billing": "packages/billing-official",
+  "hub": {
+    "config": "packages/hub/wrangler.test-deploy.toml",
+    "workerName": "xmatrix-hub-test",
+    "origin": "https://xmatrix-hub.test.xmatrix.sh",
+    "workersDev": false,
+    "previewUrls": false,
+    "d1": {
+      "AUTH_DB": {
+        "databaseId": {
+          "env": "TEST_AUTH_D1_DATABASE_ID"
+        }
+      }
+    },
+    "vars": {
+      "AUTH_COOKIE_DOMAIN": ".test.xmatrix.sh",
+      "AUTH_COOKIE_PREFIX": "xmatrix-test",
+      "XMATRIX_EMAIL_FROM": "noreply@test.xmatrix.sh",
+      "PLATFORM_ADMIN_EMAILS": "",
+      "PLATFORM_ADMIN_SPACE_ID": "",
+      "TEST_ENVIRONMENT_ACCESS_SPACE_ID": ""
+    }
+  },
+  "web": {
+    "workerName": "xmatrix-web-test",
+    "origin": "https://test.xmatrix.sh",
+    "workersDev": false,
+    "previewUrls": false,
+    "omitBindings": [
+      "RELEASE_ASSETS"
+    ]
+  }
+}

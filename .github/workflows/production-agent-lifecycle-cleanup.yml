@@ -1,0 +1,157 @@
+name: Production Oneshot Cleanup
+run-name: Remove oneshot records at ${{ github.ref_name }} (preview=${{ inputs.dry_run }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview the fixed retirement without changing data
+        required: true
+        default: true
+        type: boolean
+      max_rows:
+        description: Maximum records scanned per database
+        required: true
+        default: '10000'
+        type: choice
+        options: ['10000', '100000']
+      confirmation:
+        description: For apply, enter REMOVE ONESHOT FROM followed by this release tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-postgres-migration-operator
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: startsWith(github.ref, 'refs/tags/xmatrix-v')
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Restore the tagged tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git sparse-checkout disable || true
+          git config --unset-all core.sparseCheckout || true
+          git config --unset-all core.sparseCheckoutCone || true
+          rm -f "$(git rev-parse --git-path info/sparse-checkout)"
+          git read-tree -mu HEAD
+      - name: Require an administrator and the latest successful immutable production
+        uses: actions/github-script@v7
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          MAX_ROWS: ${{ inputs.max_rows }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const { authorizeAgentLifecycleCleanup } = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/agent-lifecycle-cleanup-policy.mjs`);
+            await authorizeAgentLifecycleCleanup({ github, context, dryRun: process.env.DRY_RUN,
+              maxRows: process.env.MAX_ROWS, confirmation: process.env.CONFIRMATION });
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Test the fixed operator policy
+        run: node --test scripts/agent-lifecycle-cleanup-policy.test.mjs scripts/postgres-lifecycle-maintenance-policy.test.mjs
+
+  cleanup:
+    needs: preflight
+    environment: production
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Restore the tagged tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git sparse-checkout disable || true
+          git config --unset-all core.sparseCheckout || true
+          git config --unset-all core.sparseCheckoutCone || true
+          rm -f "$(git rev-parse --git-path info/sparse-checkout)"
+          git read-tree -mu HEAD
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Build the exact tagged parser without production credentials
+        run: pnpm --filter @xmatrix/protocol build
+      - name: Recheck production authority before accessing the databases
+        uses: actions/github-script@v7
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          MAX_ROWS: ${{ inputs.max_rows }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const { authorizeAgentLifecycleCleanup } = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/agent-lifecycle-cleanup-policy.mjs`);
+            await authorizeAgentLifecycleCleanup({ github, context, dryRun: process.env.DRY_RUN,
+              maxRows: process.env.MAX_ROWS, confirmation: process.env.CONFIRMATION });
+      - name: Preview both shards, optionally apply, and verify zero remaining changes
+        shell: bash
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/agent-lifecycle-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
+          PRIMARY_URL: ${{ secrets.POSTGRES_MIGRATION_DATABASE_URL }}
+          SHARD_URL: ${{ secrets.POSTGRES_SHARD_1_MIGRATION_DATABASE_URL }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          MAX_ROWS: ${{ inputs.max_rows }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test ! -e "$EVIDENCE_DIR"
+          mkdir "$EVIDENCE_DIR"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          test -n "$PRIMARY_URL" && test -n "$SHARD_URL" && test "$PRIMARY_URL" != "$SHARD_URL"
+          [[ "$DRY_RUN" == true || "$DRY_RUN" == false ]]
+          [[ "$MAX_ROWS" == 10000 || "$MAX_ROWS" == 100000 ]]
+          if [[ "$DRY_RUN" == false ]]; then
+            test "$CONFIRMATION" = "REMOVE ONESHOT FROM $GITHUB_REF_NAME"
+          fi
+          export AGENT_LIFECYCLE_CLEANUP_MAX_ROWS="$MAX_ROWS"
+          # Both previews must succeed before either database can be changed.
+          for shard in primary shard-1; do
+            if [[ "$shard" == primary ]]; then url="$PRIMARY_URL"; else url="$SHARD_URL"; fi
+            DATABASE_URL="$url" AGENT_LIFECYCLE_CLEANUP_DATABASE="$shard" timeout 180s node packages/db/scripts/agent-lifecycle-cleanup.mjs --dry-run \
+              >"$EVIDENCE_DIR/agent-lifecycle-$shard-plan.json"
+          done
+          if [[ "$DRY_RUN" == false ]]; then
+            for shard in primary shard-1; do
+              if [[ "$shard" == primary ]]; then url="$PRIMARY_URL"; else url="$SHARD_URL"; fi
+              DATABASE_URL="$url" AGENT_LIFECYCLE_CLEANUP_DATABASE="$shard" timeout 180s node packages/db/scripts/agent-lifecycle-cleanup.mjs --apply \
+                >"$EVIDENCE_DIR/agent-lifecycle-$shard-apply.json"
+              DATABASE_URL="$url" AGENT_LIFECYCLE_CLEANUP_DATABASE="$shard" timeout 180s node packages/db/scripts/agent-lifecycle-cleanup.mjs --dry-run \
+                >"$EVIDENCE_DIR/agent-lifecycle-$shard-verify.json"
+              node --input-type=module -e '
+                import { readFileSync } from "node:fs";
+                const result = JSON.parse(readFileSync(process.argv[1], "utf8"));
+                if (!Object.values(result.changed).every(value => value === 0)) throw new Error("retired fields remain");
+              ' "$EVIDENCE_DIR/agent-lifecycle-$shard-verify.json"
+            done
+          fi
+          cat "$EVIDENCE_DIR"/agent-lifecycle-*.json
+      - name: Retain bounded retirement evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-lifecycle-cleanup-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-lifecycle-cleanup-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+          if-no-files-found: warn
+          retention-days: 90

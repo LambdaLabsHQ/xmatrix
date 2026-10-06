@@ -1,0 +1,31 @@
+[package]
+name = "xmatrix-cli-core"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+regex = { workspace = true }
+dirs = { workspace = true }
+fs2 = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+time = { workspace = true }
+urlencoding = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+# Usage wire types (protocol::LlmUsage / LlmQuotaUsage) are owned by the
+# independently publishable harness crate and re-exported from protocol.
+xmatrix-harness = { path = "../harness" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Globalization"] }
+
+[dev-dependencies]
+rustls = { workspace = true, features = ["ring", "std"] }
+tokio = { workspace = true, features = ["test-util"] }

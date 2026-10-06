@@ -1,0 +1,31 @@
+diff --git a/dist/cli/commands/utils/run-wrangler.js b/dist/cli/commands/utils/run-wrangler.js
+index 9256131..91254b0 100644
+--- a/dist/cli/commands/utils/run-wrangler.js
++++ b/dist/cli/commands/utils/run-wrangler.js
+@@ -60,18 +60,18 @@ function injectPassthroughFlagForArgs(options, args) {
+ export function runWrangler(options, args, wranglerOpts = {}) {
+     const noLogs = wranglerOpts.logging === "none";
+     const shouldPipeLogs = wranglerOpts.logging === "error";
++    const wranglerArgs = [
++        ...args,
++        ...(wranglerOpts.environment ? ["--env", wranglerOpts.environment] : []),
++        ...(wranglerOpts.configPath ? ["--config", wranglerOpts.configPath] : []),
++        wranglerOpts.target === "remote" && "--remote",
++        wranglerOpts.target === "local" && "--local",
++    ].filter((v) => !!v);
+     const result = spawnSync(options.packager, [
+         options.packager === "bun" ? "x" : "exec",
+         "wrangler",
+-        ...injectPassthroughFlagForArgs(options, [
+-            ...args,
+-            wranglerOpts.environment && `--env ${wranglerOpts.environment}`,
+-            wranglerOpts.configPath && `--config ${wranglerOpts.configPath}`,
+-            wranglerOpts.target === "remote" && "--remote",
+-            wranglerOpts.target === "local" && "--local",
+-        ].filter((v) => !!v)),
++        ...injectPassthroughFlagForArgs(options, wranglerArgs),
+     ], {
+-        shell: true,
+         // Always pipe stderr so that we can capture it for inspection.
+         // Keep stdin and stdout as "inherit" when not piping logs to maintain TTY detection
+         // (wrangler checks `process.stdin.isTTY && process.stdout.isTTY` for interactive mode).

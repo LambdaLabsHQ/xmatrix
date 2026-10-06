@@ -1,0 +1,715 @@
+name: Desktop Release
+
+on:
+  workflow_call:
+
+# Desktop publishes only the stable channel from Production Release. The macOS
+# and Windows build machines upload their signed files straight into the
+# release as run-attempt parts; client-publish.yml seals it and moves the
+# channel without transferring any artifact again.
+concurrency:
+  group: desktop-release-stable
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: &release_runner ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - &configure_linux_proxy
+        name: Configure Linux runner proxy
+        shell: bash
+        run: |
+          proxy=http://127.0.0.1:7897
+          if curl -fsSIL --connect-timeout 3 --max-time 8 -x "$proxy" https://github.com >/dev/null; then
+            {
+              echo "HTTPS_PROXY=$proxy"
+              echo "HTTP_PROXY=$proxy"
+              echo "ALL_PROXY=$proxy"
+              echo "NO_PROXY=localhost,127.0.0.1,::1"
+              echo "GIT_CONFIG_COUNT=1"
+              echo "GIT_CONFIG_KEY_0=http.proxy"
+              echo "GIT_CONFIG_VALUE_0=$proxy"
+            } >> "$GITHUB_ENV"
+          else
+            echo "Linux proxy $proxy is unavailable; using direct GitHub access."
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # A sparse cone another job left on this persistent runner survives
+      # checkout when HEAD is already on the ref: restore the full tree.
+      - &restore_desktop_checkout
+        name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f scripts/install-release-node.sh
+          test -f .github/actions/setup-pnpm-node/action.yml
+
+      - name: Install Node
+        run: |
+          set -euo pipefail
+          NODE_VERSION=22.21.1
+          LOCAL_BIN="$HOME/.local/bin"
+          candidate_bins=(
+            "$LOCAL_BIN"
+            "$HOME/.nvm/versions/node/v24.15.0/bin"
+            "$HOME/.nvm/versions/node/v22.21.1/bin"
+            "$HOME/.nvm/versions/node/v22.22.2/bin"
+            "/opt/homebrew/bin"
+            "/usr/local/bin"
+          )
+          for candidate_bin in "${candidate_bins[@]}"; do
+            if [ -d "$candidate_bin" ]; then
+              echo "$candidate_bin" >> "$GITHUB_PATH"
+              export PATH="$candidate_bin:$PATH"
+            fi
+          done
+
+          if command -v node >/dev/null 2>&1; then
+            major="$(node -p "process.versions.node.split('.')[0]")"
+            if [ "$major" -ge 22 ]; then
+              node --version
+              exit 0
+            fi
+          fi
+
+          source scripts/install-release-node.sh
+          install_release_node "$NODE_VERSION"
+          node --version
+
+      - name: Verify release version
+        env:
+          XMATRIX_RELEASE_BASE_REF: ${{ github.event.before || '' }}
+        run: node scripts/check-release-version.mjs
+
+      - name: Plan desktop release
+        id: plan
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=desktop-v$version" >> "$GITHUB_OUTPUT"
+
+  preflight:
+    needs: plan
+    runs-on: *release_runner
+    permissions:
+      contents: read
+    outputs:
+      exists: ${{ steps.release_state.outputs.exists }}
+      complete: ${{ steps.release_state.outputs.complete }}
+      tag_exists: ${{ steps.release_state.outputs.tag_exists }}
+    steps:
+      - *configure_linux_proxy
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - *restore_desktop_checkout
+
+      - name: Check existing release
+        id: release_state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          release_assets="$RUNNER_TEMP/stable-release-assets.txt"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > "$release_assets" 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            complete=true
+            for asset in \
+              "xMatrix-$RELEASE_VERSION-arm64.dmg" \
+              "xMatrix-$RELEASE_VERSION-arm64.zip" \
+              "xMatrix-$RELEASE_VERSION-arm64.dmg.blockmap" \
+              "xMatrix-$RELEASE_VERSION-arm64.zip.blockmap" \
+              "latest-mac.yml" \
+              "xMatrix-$RELEASE_VERSION-x64.exe" \
+              "xMatrix-$RELEASE_VERSION-x64.exe.blockmap" \
+              "latest.yml"
+            do
+              if ! grep -Fxq "$asset" "$release_assets"; then
+                complete=false
+                echo "Missing stable release asset: $asset"
+              fi
+            done
+            echo "complete=$complete" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require a new stable release version
+        if: steps.release_state.outputs.exists == 'true' || steps.release_state.outputs.tag_exists == 'true'
+        run: |
+          echo "Stable release ${{ needs.plan.outputs.tag }} already exists or its tag has been consumed." >&2
+          echo "Bump version.json before publishing Desktop again; published versions cannot be resumed or replaced." >&2
+          exit 1
+
+  release:
+    needs:
+      - plan
+      - preflight
+    environment: production
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
+    permissions:
+      contents: read
+    timeout-minutes: 120
+    env:
+      CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+      ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+      ASC_P8_BASE64: ${{ secrets.ASC_P8_BASE64 }}
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.MACOS_CSC_LINK == '' && 'false' || 'true' }}
+      # Squirrel.Mac accepts an update only when it satisfies the installed
+      # app's signing requirement. Treat this identity as release compatibility,
+      # not as optional packaging metadata.
+      MACOS_RELEASE_TEAM_ID: VWN9V9V56Z
+      MACOS_RELEASE_APP_ID: net.madebyrobot.xmatrix
+      # The self-hosted macOS runner cannot reliably complete large GitHub
+      # binary downloads. Use the same checksum-aware mirrors supported by
+      # Electron and electron-builder, and retain their bounded local caches.
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+    steps:
+      # macOS inherits its host-managed network, including proxy variables.
+      # Checkout and release transfers exercise the real path; a separate
+      # short curl probe can fail before any release work begins.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Install Node
+        run: |
+          set -euo pipefail
+          NODE_VERSION=22.21.1
+          LOCAL_BIN="$HOME/.local/bin"
+          candidate_bins=(
+            "$LOCAL_BIN"
+            "$HOME/.nvm/versions/node/v24.15.0/bin"
+            "$HOME/.nvm/versions/node/v22.21.1/bin"
+            "$HOME/.nvm/versions/node/v22.22.2/bin"
+            "/opt/homebrew/bin"
+            "/usr/local/bin"
+          )
+          for candidate_bin in "${candidate_bins[@]}"; do
+            if [ -d "$candidate_bin" ]; then
+              echo "$candidate_bin" >> "$GITHUB_PATH"
+              export PATH="$candidate_bin:$PATH"
+            fi
+          done
+
+          if command -v node >/dev/null 2>&1; then
+            major="$(node -p "process.versions.node.split('.')[0]")"
+            if [ "$major" -ge 22 ]; then
+              node --version
+              exit 0
+            fi
+          fi
+
+          arch="$(uname -m)"
+          case "$arch" in
+            arm64) node_arch=arm64 ;;
+            x86_64) node_arch=x64 ;;
+            *)
+              echo "Unsupported macOS architecture: $arch" >&2
+              exit 1
+              ;;
+          esac
+
+          NODE_DIR="$RUNNER_TEMP/node-v$NODE_VERSION-darwin-$node_arch"
+          if [ ! -x "$NODE_DIR/bin/node" ]; then
+            curl --fail --show-error --location \
+              --retry 5 --retry-all-errors --connect-timeout 15 --max-time 180 \
+              "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-darwin-$node_arch.tar.gz" \
+              -o "$RUNNER_TEMP/node.tar.gz"
+            tar -xzf "$RUNNER_TEMP/node.tar.gz" -C "$RUNNER_TEMP"
+          fi
+          echo "$NODE_DIR/bin" >> "$GITHUB_PATH"
+          export PATH="$NODE_DIR/bin:$PATH"
+          node --version
+
+      - name: Enable package manager
+        run: |
+          set -euo pipefail
+          if command -v corepack >/dev/null 2>&1; then
+            corepack enable
+            corepack prepare pnpm@11.3.0 --activate
+          elif command -v pnpm >/dev/null 2>&1; then
+            pnpm --version
+          else
+            echo "Neither corepack nor PNPM is available on the macOS release runner." >&2
+            exit 1
+          fi
+
+      - name: Reclaim macOS runner disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          bash .github/scripts/cleanup-macos-runner-workspace.sh
+          df -h /
+
+      - name: Install dependencies
+        uses: ./.github/actions/macos-pnpm-install
+
+      - name: Check version consistency
+        run: node scripts/version.mjs check
+
+      - name: Build protocol package
+        run: pnpm --filter @xmatrix/protocol build
+
+      - name: Typecheck desktop
+        run: pnpm --filter @xmatrix/desktop build
+
+      - name: Resolve desktop version
+        id: version
+        run: |
+          version="${{ needs.plan.outputs.version }}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=${{ needs.plan.outputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the signed CLI seed for the App
+        timeout-minutes: 10
+        env: &release_credentials_3
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
+          R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
+          DESKTOP_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The App installs the CLI from this seed (`xmatrix setup daemon`),
+          # so it must be the exact same-version signed release binary.
+          seed_dir="apps/desktop/resources/cli"
+          rm -rf "$seed_dir"
+          mkdir -p "$seed_dir"
+          download_dir="$RUNNER_TEMP/xmatrix-cli-seed"
+          node scripts/r2-release-store.mjs download-directory \
+            --bucket xmatrix-release-assets \
+            --prefix "releases/cli-v${DESKTOP_VERSION}" \
+            --directory "$download_dir" \
+            --exclude-manifest \
+            --only xmatrix-macos-arm64
+          cp "$download_dir/xmatrix-macos-arm64" "$seed_dir/xmatrix"
+          chmod +x "$seed_dir/xmatrix"
+          reported="$("$seed_dir/xmatrix" --version | head -n 1)"
+          case "$reported" in
+            *"$DESKTOP_VERSION"*) ;;
+            *)
+              echo "CLI seed reports '$reported'; expected version $DESKTOP_VERSION." >&2
+              exit 1
+              ;;
+          esac
+          codesign --verify --strict --verbose=2 "$seed_dir/xmatrix"
+
+      - name: Require macOS release signing identity
+        run: |
+          set -euo pipefail
+          if [ -z "${CSC_LINK:-}" ]; then
+            echo "MACOS_CSC_LINK is required; refusing to publish an unsigned macOS app." >&2
+            exit 1
+          fi
+          if [ -z "${MACOS_RELEASE_TEAM_ID:-}" ]; then
+            echo "MACOS_RELEASE_TEAM_ID is required for updater signature continuity." >&2
+            exit 1
+          fi
+          if [ -z "${MACOS_RELEASE_APP_ID:-}" ]; then
+            echo "MACOS_RELEASE_APP_ID is required for updater signature continuity." >&2
+            exit 1
+          fi
+
+      - name: Prepare isolated Developer ID signing keychain
+        run: |
+          set -euo pipefail
+          umask 077
+          signing_root="$RUNNER_TEMP/xmatrix-desktop-signing-${{ github.run_id }}-${{ github.run_attempt }}"
+          certificate="$signing_root/developer-id.p12"
+          intermediate="$signing_root/DeveloperIDG2CA.cer"
+          keychain="$signing_root/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          mkdir -p "$signing_root"
+          echo "CSC_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "DESKTOP_SIGNING_ROOT=$signing_root" >> "$GITHUB_ENV"
+
+          source scripts/macos-signing-keychain.sh
+          prepare_developer_id_keychain "$certificate" "$intermediate" "$keychain" "$keychain_password"
+
+          if [ -z "$identity" ]; then
+            echo "No trusted Developer ID Application identity for team $MACOS_RELEASE_TEAM_ID." >&2
+            exit 1
+          fi
+
+      - name: Build signed macOS app (arm64)
+        timeout-minutes: 10
+        env:
+          APPLE_ID: ""
+          APPLE_APP_SPECIFIC_PASSWORD: ""
+        run: |
+          set -euo pipefail
+          unset CSC_LINK CSC_KEY_PASSWORD
+          rm -rf apps/desktop/release
+          cd apps/desktop
+
+          pnpm exec electron-builder --mac --dir --publish never \
+            --config.mac.notarize=false \
+            --arm64 \
+            --config.directories.output=release/build-arm64
+
+      - name: Verify macOS app signing identity
+        run: |
+          set -euo pipefail
+          cd apps/desktop
+
+          arm64_app="$(find release/build-arm64 -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
+          "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
+            "$arm64_app" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "arm64 app"
+
+      - name: Package macOS artifacts
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          unset CSC_LINK CSC_KEY_PASSWORD
+          cd apps/desktop
+
+          arm64_app="$(find release/build-arm64 -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
+
+          if [ -z "$arm64_app" ]; then
+            echo "Expected an arm64 app bundle before packaging." >&2
+            exit 1
+          fi
+
+          update_config="$arm64_app/Contents/Resources/app-update.yml"
+          if [ ! -f "$update_config" ]; then
+            echo "Expected updater config at $update_config." >&2
+            exit 1
+          fi
+          if ! grep -q "https://xmatrix.sh/api/desktop/releases/stable" "$update_config"; then
+            echo "Updater config in $arm64_app does not point at the stable feed." >&2
+            exit 1
+          fi
+
+          ELECTRON_MIRROR="$ELECTRON_BUILDER_BINARIES_MIRROR" \
+          pnpm exec electron-builder --mac dmg zip --arm64 \
+            --prepackaged "$arm64_app" \
+            --publish never \
+            --config.mac.notarize=false \
+            --config.directories.output=release/package-arm64
+
+          find release/package-arm64 -maxdepth 1 -type f \
+            \( -name "*.dmg" -o -name "*.zip" -o -name "*.blockmap" \) \
+            -exec cp {} release/ \;
+
+          verify_root="$RUNNER_TEMP/xmatrix-packaged-signatures"
+          rm -rf "$verify_root"
+          mkdir -p "$verify_root"
+          extract_dir="$verify_root/arm64"
+          mkdir -p "$extract_dir"
+          ditto -x -k "release/xMatrix-$DESKTOP_VERSION-arm64.zip" "$extract_dir"
+          app_bundle="$(find "$extract_dir" -maxdepth 3 -path "*/xMatrix.app" -print -quit)"
+          if [ -z "$app_bundle" ]; then
+            echo "Packaged arm64 ZIP does not contain xMatrix.app." >&2
+            exit 1
+          fi
+          "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
+            "$app_bundle" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "packaged arm64 ZIP app"
+
+          node ../../scripts/desktop-updater-manifest.mjs release
+
+          ls -lh release
+        env:
+          DESKTOP_VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Stage stable macOS release assets on runner
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.version.outputs.version }}"
+          stage_dir="$HOME/xmatrix-desktop-release/${{ steps.version.outputs.tag }}"
+          rm -rf "$stage_dir"
+          mkdir -p "$stage_dir"
+
+          for asset in \
+            "xMatrix-$version-arm64.dmg" \
+            "xMatrix-$version-arm64.zip" \
+            "xMatrix-$version-arm64.dmg.blockmap" \
+            "xMatrix-$version-arm64.zip.blockmap" \
+            "latest-mac.yml"
+          do
+            cp "apps/desktop/release/$asset" "$stage_dir/"
+          done
+
+          if find "$stage_dir" -maxdepth 1 -type f -name '*universal*' | grep -q .; then
+            echo "Refusing to stage universal macOS assets." >&2
+            exit 1
+          fi
+
+          echo "STABLE_STAGE_DIR=$stage_dir" >> "$GITHUB_ENV"
+          echo "Staged stable macOS release assets in $stage_dir"
+          ls -lh "$stage_dir"
+
+      - name: Upload macOS release part to R2
+        env: &release_credentials_7
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_RELEASE_ACCESS_KEY_ID: ${{ secrets.R2_RELEASE_ACCESS_KEY_ID }}
+          R2_RELEASE_SECRET_ACCESS_KEY: ${{ secrets.R2_RELEASE_SECRET_ACCESS_KEY }}
+          XMATRIX_RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          XMATRIX_RELEASE_COMPONENT: desktop
+          XMATRIX_RELEASE_CHANNEL: stable
+          XMATRIX_RELEASE_SHA: ${{ github.sha }}
+        run: >-
+          node scripts/r2-release-store.mjs upload-release-part
+          --bucket xmatrix-release-assets
+          --prefix releases/${{ needs.plan.outputs.tag }}
+          --part macos
+          --directory "$STABLE_STAGE_DIR"
+
+      - name: Remove isolated Developer ID signing keychain
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${CSC_KEYCHAIN:-}" ]; then
+            scripts/macos-keychain-search-list.sh remove "$CSC_KEYCHAIN"
+            security delete-keychain "$CSC_KEYCHAIN"
+          fi
+          if [ -n "${DESKTOP_SIGNING_ROOT:-}" ]; then
+            rm -f \
+              "$DESKTOP_SIGNING_ROOT/developer-id.p12" \
+              "$DESKTOP_SIGNING_ROOT/DeveloperIDG2CA.cer" \
+              "$DESKTOP_SIGNING_ROOT/signing.keychain-db"
+            rmdir "$DESKTOP_SIGNING_ROOT"
+          fi
+
+  windows-release:
+    needs:
+      - plan
+      - preflight
+    environment: production
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","local-windows-x64"]') || 'windows-2025' }}
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    env:
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+    steps:
+      - name: Configure Windows runner tools
+        shell: cmd
+        run: |
+          >> "%GITHUB_PATH%" echo C:\Users\Daniel\scoop\apps\git\current\cmd
+          >> "%GITHUB_PATH%" echo C:\Users\Daniel\scoop\apps\git\current\bin
+          >> "%GITHUB_PATH%" echo C:\Users\Daniel\scoop\apps\git\current\usr\bin
+          >> "%GITHUB_PATH%" echo C:\Users\Daniel\scoop\shims
+          >> "%GITHUB_PATH%" echo C:\Users\Daniel\scoop\apps\nodejs\current
+          >> "%GITHUB_PATH%" echo C:\Program Files\nodejs
+          >> "%GITHUB_PATH%" echo C:\Users\Daniel\.local\bin
+          rem Self-hosted Windows uses system TUN; do not inject HTTP(S)_PROXY
+          rem or git http.proxy (that doubles routing and fights TUN).
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node
+        timeout-minutes: 20
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nodeVersion = '22.21.1'
+          $nodeArchiveSha256 = '3c624e9fbe07e3217552ec52a0f84e2bdc2e6ffa7348f3fdfb9fbf8f42e23fcf'
+          $toolRoot = Join-Path $env:LOCALAPPDATA 'xmatrix-release-tools'
+          $nodeDirectory = Join-Path $toolRoot "node-v$nodeVersion-win-x64"
+          $nodeExecutable = Join-Path $nodeDirectory 'node.exe'
+
+          if (-not (Test-Path -LiteralPath $nodeExecutable)) {
+            $archive = Join-Path $env:RUNNER_TEMP "node-v$nodeVersion-win-x64.zip"
+            $extractDirectory = Join-Path $env:RUNNER_TEMP "node-extract-$nodeVersion-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            Remove-Item -LiteralPath $archive, $extractDirectory -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
+            curl.exe --fail --show-error --location `
+              --retry 8 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 600 `
+              "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-win-x64.zip" `
+              --output $archive
+            if ($LASTEXITCODE -ne 0) { throw 'Node download failed' }
+            $actualArchiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualArchiveSha256 -ne $nodeArchiveSha256) {
+              throw "Node archive SHA-256 mismatch: $actualArchiveSha256"
+            }
+            Expand-Archive -LiteralPath $archive -DestinationPath $extractDirectory -Force
+            $extractedNodeDirectory = Join-Path $extractDirectory "node-v$nodeVersion-win-x64"
+            try {
+              Move-Item -LiteralPath $extractedNodeDirectory -Destination $nodeDirectory -ErrorAction Stop
+            } catch {
+              if (-not (Test-Path -LiteralPath $nodeExecutable)) { throw }
+            } finally {
+              Remove-Item -LiteralPath $archive, $extractDirectory -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          $actualNodeVersion = & $nodeExecutable -p 'process.versions.node'
+          if ($actualNodeVersion -ne $nodeVersion) {
+            throw "Expected Node $nodeVersion at $nodeExecutable; found $actualNodeVersion"
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $nodeDirectory
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "XMATRIX_RELEASE_NODE_DIR=$nodeDirectory"
+          Write-Host "Node $actualNodeVersion from $nodeExecutable"
+
+      - name: Enable package manager
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pnpmVersion = '11.3.0'
+          $toolRoot = Join-Path $env:LOCALAPPDATA 'xmatrix-release-tools'
+          $pnpmDirectory = Join-Path $toolRoot "pnpm-$pnpmVersion"
+          $pnpmExecutable = Join-Path $pnpmDirectory 'pnpm.cmd'
+          if (-not (Test-Path -LiteralPath $pnpmExecutable)) {
+            $stagingDirectory = Join-Path $env:RUNNER_TEMP "pnpm-$pnpmVersion-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $toolRoot -Force | Out-Null
+            $npmExecutable = Join-Path $env:XMATRIX_RELEASE_NODE_DIR 'npm.cmd'
+            & $npmExecutable install --global --prefix $stagingDirectory --no-audit --no-fund "pnpm@$pnpmVersion"
+            if ($LASTEXITCODE -ne 0) { throw 'PNPM install failed' }
+            try {
+              Move-Item -LiteralPath $stagingDirectory -Destination $pnpmDirectory -ErrorAction Stop
+            } catch {
+              if (-not (Test-Path -LiteralPath $pnpmExecutable)) { throw }
+            } finally {
+              Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          $actualPnpmVersion = & $pnpmExecutable --version
+          if ($actualPnpmVersion -ne $pnpmVersion) {
+            throw "Expected PNPM $pnpmVersion at $pnpmExecutable; found $actualPnpmVersion"
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $pnpmDirectory
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "PNPM_HOME=$pnpmDirectory"
+          Write-Host "PNPM $actualPnpmVersion from $pnpmExecutable"
+
+      - name: Install dependencies
+        shell: powershell
+        run: pnpm.cmd install --frozen-lockfile
+
+      - name: Check version consistency
+        shell: powershell
+        run: node scripts/version.mjs check
+
+      - name: Build protocol package
+        shell: powershell
+        run: pnpm.cmd --filter @xmatrix/protocol build
+
+      - name: Typecheck desktop
+        shell: powershell
+        run: pnpm.cmd --filter @xmatrix/desktop build
+
+      - name: Fetch the signed CLI seed for the App
+        timeout-minutes: 10
+        shell: powershell
+        env: *release_credentials_3
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Same-version signed CLI, packaged as the App's installer seed.
+          $seedDir = Join-Path 'apps/desktop/resources' 'cli'
+          Remove-Item -LiteralPath $seedDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $seedDir -Force | Out-Null
+          $downloadDir = Join-Path $env:RUNNER_TEMP 'xmatrix-cli-seed'
+          node scripts/r2-release-store.mjs download-directory `
+            --bucket xmatrix-release-assets `
+            --prefix "releases/cli-v$($env:DESKTOP_VERSION)" `
+            --directory $downloadDir `
+            --exclude-manifest `
+            --only xmatrix-windows-x64.exe
+          if ($LASTEXITCODE -ne 0) { throw 'CLI seed download failed' }
+          $seed = Join-Path $seedDir 'xmatrix.exe'
+          Copy-Item -LiteralPath (Join-Path $downloadDir 'xmatrix-windows-x64.exe') -Destination $seed -Force
+          $reported = @(& $seed --version) | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0 -or $reported -notlike "*$($env:DESKTOP_VERSION)*") {
+            throw "CLI seed reports '$reported'; expected version $($env:DESKTOP_VERSION)."
+          }
+
+      - name: Build Windows installer
+        timeout-minutes: 20
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -LiteralPath apps/desktop/release -Recurse -Force -ErrorAction SilentlyContinue
+          Push-Location apps/desktop
+          try {
+            if ([string]::IsNullOrWhiteSpace($env:CSC_LINK)) {
+              Remove-Item Env:CSC_LINK, Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+            }
+            pnpm.cmd exec electron-builder --win nsis --x64 --publish never --config.directories.output=release/build-win-x64
+            if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed' }
+          } finally {
+            Pop-Location
+          }
+        env:
+          DESKTOP_VERSION: ${{ needs.plan.outputs.version }}
+
+      - name: Stage Windows release assets
+        shell: powershell
+        env:
+          DESKTOP_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stageDirectory = Join-Path $env:RUNNER_TEMP 'xmatrix-desktop-windows-release'
+          node scripts/prepare-windows-desktop-release.mjs `
+            apps/desktop/release/build-win-x64 `
+            $stageDirectory `
+            $env:DESKTOP_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release staging failed' }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "WINDOWS_RELEASE_STAGE_DIR=$stageDirectory"
+          Get-ChildItem -LiteralPath $stageDirectory | Select-Object Name, Length
+
+      - name: Upload Windows release part to R2
+        shell: powershell
+        env: *release_credentials_7
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/r2-release-store.mjs upload-release-part `
+            --bucket xmatrix-release-assets `
+            --prefix releases/${{ needs.plan.outputs.tag }} `
+            --part windows `
+            --directory $env:WINDOWS_RELEASE_STAGE_DIR
+          if ($LASTEXITCODE -ne 0) { throw 'Windows desktop R2 release part upload failed' }
+
+  publish-desktop-release:
+    needs:
+      - plan
+      - release
+      - windows-release
+    uses: ./.github/workflows/client-publish.yml
+    permissions:
+      contents: read
+    with:
+      component: desktop
+      tag: ${{ needs.plan.outputs.tag }}
+      parts: macos,windows
+    secrets: inherit

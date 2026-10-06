@@ -1,0 +1,83 @@
+name: Setup Node and PNPM
+description: Install Node 22, activate the pinned PNPM version, and optionally install workspace dependencies.
+inputs:
+  install-deps:
+    description: When true, run pnpm install --frozen-lockfile
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Reclaim stale Linux Actions descendants
+      if: runner.os == 'Linux'
+      shell: bash
+      run: bash .github/scripts/cleanup-stale-actions-processes.sh
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 22
+        # setup-node v6 enables package-manager caching by default when the
+        # repository declares one. Persistent product runners already retain
+        # PNPM's store locally, so opt out of its remote cache explicitly.
+        package-manager-cache: false
+
+    - name: Record Linux memory capacity
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        free -h || true
+        for file in \
+          /sys/fs/cgroup/memory.max \
+          /sys/fs/cgroup/memory.current \
+          /sys/fs/cgroup/memory.events; do
+          if [[ -r "$file" ]]; then
+            echo "--- $file"
+            cat "$file"
+          fi
+        done
+        ps -eo pid=,ppid=,rss=,comm= --sort=-rss | head -n 20 || true
+        ps -eo rss=,comm= | awk '
+          { count[$2] += 1; rss[$2] += $1 }
+          END { for (name in rss) printf "%12d %8d %s\n", rss[name], count[name], name }
+        ' | sort -nr | head -n 20 || true
+
+    - name: Enable PNPM
+      shell: bash
+      run: |
+        pnpm_prefix="$RUNNER_TEMP/xmatrix-pnpm-11.3.0"
+        npm install --global --prefix "$pnpm_prefix" --no-audit --no-fund pnpm@11.3.0
+        echo "$pnpm_prefix/bin" >> "$GITHUB_PATH"
+        node --version
+        "$pnpm_prefix/bin/pnpm" --version
+
+    # An ephemeral GitHub-hosted runner starts with an empty store, so it
+    # restores one from the Actions cache, keyed by the lockfile. Persistent
+    # runners never take this path (see below).
+    - name: Locate the PNPM store on a GitHub-hosted runner
+      id: hosted-store
+      if: inputs.install-deps == 'true' && runner.environment == 'github-hosted'
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the PNPM store on a GitHub-hosted runner
+      if: inputs.install-deps == 'true' && runner.environment == 'github-hosted'
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.hosted-store.outputs.path }}
+        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-store-${{ runner.os }}-
+
+    # Supported product jobs use persistent self-hosted runners. PNPM's
+    # content-addressed store lives outside each checkout, so clean worktrees
+    # reuse the machine-local packages and download only missing lockfile
+    # entries. Do not wrap this shared action in a GitHub Actions cache: every
+    # job would download and extract the same large remote archive even when
+    # its runner-local store is already warm. A future ephemeral workflow may
+    # own a separate cache policy without taxing persistent runners.
+    - name: Install dependencies
+      if: inputs.install-deps == 'true'
+      shell: bash
+      run: |
+        echo "Using persistent runner-local PNPM store: $(pnpm store path --silent)"
+        pnpm install --frozen-lockfile --child-concurrency=1 --network-concurrency=4

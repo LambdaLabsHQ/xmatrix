@@ -1,0 +1,487 @@
+/*
+ * A page as a document (docs/design/pages-live-document.md §4): the live
+ * editor, the read-ahead preview and public pages share these styles.
+ */
+.page-document {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--foreground);
+  outline: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  padding-bottom: 48px;
+}
+.page-document > * + * { margin-top: 0.75em; }
+.page-document h1 { font-size: 1.75em; font-weight: 800; line-height: 1.3; margin-top: 1.2em; }
+.page-document h2 { font-size: 1.35em; font-weight: 750; line-height: 1.35; margin-top: 1.1em; }
+.page-document h3 { font-size: 1.12em; font-weight: 700; margin-top: 1em; }
+.page-document h4, .page-document h5, .page-document h6 { font-weight: 700; margin-top: 0.9em; }
+.page-document > :first-child { margin-top: 0; }
+.page-document a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.page-document code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+  border-radius: 4px;
+  background: var(--muted);
+  padding: 0.1em 0.3em;
+}
+.page-document pre {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.88em;
+  line-height: 1.55;
+  border-radius: 8px;
+  background: var(--muted);
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  white-space: pre;
+}
+.page-document pre code { background: none; padding: 0; font-size: inherit; }
+.page-document pre[data-markdown] { color: var(--muted-foreground); }
+.page-document blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); }
+.page-document ul { list-style: disc; padding-left: 1.5em; }
+.page-document ol { list-style: decimal; padding-left: 1.5em; }
+.page-document li + li { margin-top: 0.15em; }
+.page-document li.page-task { list-style: none; margin-left: -1.5em; display: flex; gap: 0.5em; align-items: flex-start; }
+.page-document li.page-task > input { margin-top: 0.4em; width: 1em; height: 1em; accent-color: var(--primary); cursor: pointer; }
+.page-document li.page-task > div { flex: 1; min-width: 0; }
+.page-document li.page-task[data-checked="true"] > div { color: var(--muted-foreground); text-decoration: line-through; }
+.page-document hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.page-document img { max-width: 100%; border-radius: 6px; }
+.page-document table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 0.95em; }
+.page-document th, .page-document td { border: 1px solid var(--border); padding: 0.35em 0.6em; vertical-align: top; }
+.page-document th { background: var(--muted); font-weight: 650; text-align: left; }
+.page-document .selectedCell { background: color-mix(in oklab, var(--primary) 12%, transparent); }
+/* Typora markers: the line's own type, muted, so a heading's # is the heading's size. */
+.page-document .page-md-syntax {
+  color: var(--muted-foreground);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 500;
+  font-style: normal;
+  line-height: inherit;
+  letter-spacing: 0;
+  text-decoration: none;
+  opacity: 0.6;
+  vertical-align: baseline;
+  user-select: none;
+  pointer-events: none;
+}
+.page-document .page-md-syntax[data-edit-link] { pointer-events: auto; cursor: pointer; }
+.page-document[data-editable="false"] .page-md-syntax { display: none; }
+.page-document pre.page-md-open::before {
+  content: "```" attr(data-language);
+  display: block;
+  margin-bottom: 0.35em;
+  color: var(--muted-foreground);
+  font-size: 0.8em;
+}
+.page-document[data-editable="false"] pre.page-md-open::before { content: none; }
+.page-document .page-placeholder::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+.page-document .ProseMirror-gapcursor { position: relative; }
+
+/* Other people's and Agents' cursors (y-prosemirror). */
+.ProseMirror-yjs-cursor {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 2px solid;
+  word-break: normal;
+}
+.ProseMirror-yjs-cursor > div {
+  opacity: 0;
+  transition: opacity 0.2s;
+  position: absolute;
+  top: -1.45em;
+  left: -2px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  font-style: normal;
+  color: white;
+  padding: 0 5px;
+  border-radius: 4px 4px 4px 0;
+  white-space: nowrap;
+  user-select: none;
+}
+.ProseMirror-yjs-selection { opacity: 0.35; }
+
+/* Beside each section's heading (pages-live-document.md §3.2): who is on it, who has taken it, what it owes. */
+.page-document h1, .page-document h2, .page-document h3,
+.page-document h4, .page-document h5, .page-document h6 { position: relative; }
+.page-section-present {
+  float: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  user-select: none;
+}
+.page-section-present:empty { display: none; }
+/* Who has taken the section: its holder, and the pull request doing the work. */
+.page-section-claim {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+  color: var(--foreground);
+  text-decoration: none;
+}
+a.page-section-claim:hover { text-decoration: underline; }
+/* The Agents working in conversations about the section, on the page or not: idle ones dimmed. */
+.page-section-agents { display: inline-flex; align-items: center; gap: 3px; }
+.page-section-working { opacity: 0.55; }
+.page-section-working.is-busy { opacity: 1; box-shadow: 0 0 0 2px var(--background), 0 0 0 3.5px var(--primary); }
+.page-section-talk {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted-foreground);
+}
+.page-section-talk:hover { color: var(--foreground); }
+/* What a heading offers, at the row's right edge while it is hovered or holds the cursor. */
+.page-heading-tools {
+  float: right;
+  display: inline-flex;
+  gap: 1px;
+  margin: 0.2em 0 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+  user-select: none;
+}
+.page-heading-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  min-width: 22px;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+}
+.page-heading-tools button:hover { background: var(--accent); color: var(--foreground); }
+.page-document :is(h1, h2, h3, h4, h5, h6):hover .page-heading-tools,
+.page-document .page-heading-current .page-heading-tools,
+.page-heading-tools:focus-within { opacity: 1; pointer-events: auto; }
+
+/* A discussion anchored in the text (§4.3): the passage, and a bubble that opens its conversation. */
+.page-discussion {
+  background: color-mix(in oklab, #f59e0b 22%, transparent);
+  border-bottom: 2px solid color-mix(in oklab, #f59e0b 70%, transparent);
+  border-radius: 2px;
+  transition: background 0.12s;
+}
+.page-discussion-focus { background: color-mix(in oklab, #f59e0b 45%, transparent); }
+/* Marks along the page's scrollbar (§3.2), in the colors the page uses for them. */
+.page-scroll-mark-discussion { background: color-mix(in oklab, #f59e0b 80%, transparent); }
+.page-scroll-mark-owed { background: #b45309; }
+.page-discussion-bubble {
+  display: inline-flex;
+  margin-left: 3px;
+  vertical-align: -2px;
+  color: #d97706;
+  cursor: pointer;
+  user-select: none;
+}
+.page-discussion-bubble:hover { color: var(--foreground); }
+/* Where the margin shows the page's conversations (§4.4), bubbles and heading counts would repeat it. */
+.pages-margin-on .page-discussion-bubble,
+.pages-margin-on .page-section-talk,
+.pages-margin-on .page-section-agents { display: none; }
+/*
+ * The margin reads as comments do in Google Docs (§4.4). A card at rest is flat
+ * and tinted a step off the page; the one being read lifts. The open one is
+ * the selected thread: white, raised, nudged toward the text, sized to what it
+ * says, with comment-sized messages and a one-line reply box. Its selectors
+ * outweigh the themes' reading-island and composer geometry, which are for a
+ * whole column.
+ */
+.page-margin-card { background: color-mix(in oklab, var(--foreground) 5%, transparent); }
+.page-margin-card:hover { background: color-mix(in oklab, var(--foreground) 8%, transparent); }
+.page-margin-card-focused,
+.page-margin-card-focused:hover {
+  background: var(--card);
+  box-shadow: 0 1px 2px oklch(0.3 0.02 60 / 0.18), 0 1px 3px 1px oklch(0.3 0.02 60 / 0.1);
+}
+.page-margin-quote { border-left: 2px solid color-mix(in oklab, #f59e0b 70%, transparent); }
+.page-margin-open {
+  background: var(--card);
+  box-shadow: 0 1px 3px oklch(0.3 0.02 60 / 0.22), 0 4px 10px 3px oklch(0.3 0.02 60 / 0.12);
+}
+/* One avatar size and one text indent in every card, open or at rest. */
+.page-margin-card .identity-avatar-face {
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.625rem;
+}
+
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-surface {
+  margin: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-timeline {
+  background: transparent !important;
+}
+/* A message is a comment: small round avatar, name and time on one line, the text below. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-row {
+  gap: 0.5rem !important;
+  padding: 0.5rem 0.75rem 0.25rem !important;
+  background: transparent !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar {
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  min-width: 1.5rem !important;
+  min-height: 1.5rem !important;
+  max-width: 1.5rem !important;
+  max-height: 1.5rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar .identity-avatar-face {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  font-size: 0.625rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-author-avatar {
+  margin-top: 0 !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-continuation-gutter {
+  width: 1.5rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-meta {
+  min-height: 1.5rem;
+  flex-wrap: nowrap;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-author-name {
+  overflow: hidden;
+  flex-shrink: 1;
+  text-overflow: ellipsis;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-meta > :nth-child(2) {
+  font-size: 0.6875rem;
+}
+/* Tags, and the actions on each message, stay with the whole conversation. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-meta > :nth-child(n+3),
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-head > :not(.app-message-meta) {
+  display: none !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .rich-message {
+  margin-top: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+/* The card already names the conversation; an empty one just says so. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-empty-conversation-mark, .app-empty-conversation-title) {
+  display: none;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-empty-conversation {
+  height: auto;
+  align-items: flex-start;
+  padding: 0.25rem 0.75rem 0.5rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-empty-conversation-body {
+  margin: 0;
+  font-size: 0.75rem;
+}
+/* The reply box: one flat line, as under a comment. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer {
+  padding: 0.25rem 0.75rem 0.75rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-shell {
+  gap: 0.25rem !important;
+  align-items: center !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-attach {
+  display: none !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card) {
+  min-height: 2.25rem !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 1.125rem !important;
+  background: var(--card) !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card):focus-within {
+  border-color: var(--ring) !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-input-row {
+  min-height: 2.125rem !important;
+  gap: 0.125rem !important;
+  padding: 0 0.25rem 0 0.75rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box:not(.app-agent-work-card) .composer-textarea {
+  min-height: 2rem !important;
+  padding: 0.45rem 0 !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.35 !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-inline-actions .app-composer-inline-icon {
+  width: 1.75rem !important;
+  height: 1.75rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-send {
+  width: 2rem !important;
+  height: 2rem !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-send svg {
+  width: 1rem;
+  height: 1rem;
+}
+/* An Agent's caret label opens the conversation it works from. */
+.ProseMirror-yjs-cursor > [data-conversation] { cursor: pointer; }
+.page-section-owed {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, #f59e0b 16%, transparent);
+  color: #b45309;
+}
+.page-section-owed:hover { background: color-mix(in oklab, #f59e0b 28%, transparent); }
+
+/* A caret's name shows while its person moves or types and goes about five seconds later, as in
+   Google Docs, leaving the caret with a square at its top; hovering brings the name back. */
+@keyframes page-cursor-name {
+  0%, 95% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.ProseMirror-yjs-cursor.is-active > div { animation: page-cursor-name 5s forwards; }
+.ProseMirror-yjs-cursor::before {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: -3px;
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  pointer-events: none;
+}
+/* Someone idle, or an Agent whose Run is not working: its caret stays where it was, dimmed. */
+.ProseMirror-yjs-cursor.is-idle { opacity: 0.45; }
+.ProseMirror-yjs-cursor:hover > div { opacity: 1; animation: none; }
+.ProseMirror-yjs-cursor::after { content: ""; position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; }
+
+/* A page's Automation (§6.1): its reference reads as a chip with its live state beside it. */
+.page-automation-chip {
+  padding: 1px 6px;
+  border-radius: 9999px 0 0 9999px;
+  background: color-mix(in oklab, #0ea5e9 14%, transparent);
+  text-decoration: none;
+  font-weight: 600;
+}
+.page-automation-chip[data-state="paused"] { background: color-mix(in oklab, var(--muted-foreground) 16%, transparent); }
+.page-automation-chip[data-state="missing"] {
+  background: color-mix(in oklab, var(--destructive) 14%, transparent);
+  text-decoration: line-through;
+}
+.page-automation-status {
+  display: inline-flex;
+  padding: 1px 6px;
+  border-radius: 0 9999px 9999px 0;
+  background: color-mix(in oklab, #0ea5e9 8%, transparent);
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+  cursor: pointer;
+  user-select: none;
+}
+.page-automation-status[data-state="paused"] { background: color-mix(in oklab, var(--muted-foreground) 8%, transparent); }
+.page-automation-status[data-state="missing"] { cursor: default; }
+.page-automation-status:hover:not(:disabled) { color: var(--foreground); }
+
+/* What someone else just wrote (§3.1): tinted in their caret's colour, fading over REMOTE_CHANGE_MS. */
+@keyframes page-remote-change {
+  0%, 40% { background-color: color-mix(in oklab, var(--page-change-color) 24%, transparent); }
+  100% { background-color: transparent; }
+}
+.page-document .page-remote-change {
+  border-radius: 2px;
+  animation: page-remote-change 4s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-document .page-remote-change { animation-timing-function: steps(1, end); }
+}
+
+/*
+ * What changed since this reader last had the page on screen (§3.1), played as it scrolls into view
+ * over READER_CHANGE_MS: new text surfaces out of a blur on a tint that then fades; text taken out is
+ * struck, then folds away. A change still waiting below the fold holds the first frame.
+ */
+@keyframes page-reader-arrive {
+  0% { opacity: 0; filter: blur(4px); background-color: color-mix(in oklab, var(--primary) 30%, transparent); }
+  14% { opacity: 1; filter: blur(0); }
+  50% { background-color: color-mix(in oklab, var(--primary) 20%, transparent); }
+  100% { opacity: 1; filter: blur(0); background-color: transparent; }
+}
+@keyframes page-reader-arrive-block {
+  0% { opacity: 0; transform: translateY(6px); background-color: color-mix(in oklab, var(--primary) 16%, transparent); }
+  16% { opacity: 1; transform: none; }
+  50% { background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
+  100% { opacity: 1; transform: none; background-color: transparent; }
+}
+@keyframes page-reader-leave {
+  0%, 50% { opacity: 0.85; font-size: 1em; }
+  100% { opacity: 0; font-size: 0; }
+}
+.page-document .page-reader-change {
+  border-radius: 2px;
+  animation: page-reader-arrive 4.2s ease-out both;
+}
+.page-document .page-reader-change.is-block {
+  border-radius: 6px;
+  animation-name: page-reader-arrive-block;
+}
+.page-document .page-reader-removed {
+  border-radius: 2px;
+  color: var(--destructive);
+  text-decoration: line-through;
+  background: color-mix(in oklab, var(--destructive) 10%, transparent);
+  white-space: pre-wrap;
+  user-select: none;
+  pointer-events: none;
+  animation: page-reader-leave 2.4s ease-in both;
+}
+.page-document .page-reader-removed.is-block { display: block; overflow: hidden; }
+@keyframes page-reader-tint {
+  0%, 50% { background-color: color-mix(in oklab, var(--primary) 20%, transparent); }
+  100% { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-document .page-reader-change, .page-document .page-reader-change.is-block { animation-name: page-reader-tint; }
+  .page-document .page-reader-removed { animation-timing-function: steps(1, end); }
+}
+
+/* Someone out of view (§3.2): the dot beside their name pulses while they write. */
+@keyframes page-offscreen-typing {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.page-offscreen-typing { animation: page-offscreen-typing 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .page-offscreen-typing { animation: none; }
+}

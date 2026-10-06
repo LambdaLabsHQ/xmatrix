@@ -1,0 +1,81 @@
+{
+  "runtime": "codex",
+  "sourceUrl": "https://learn.chatgpt.com/codex/reference/slash-commands",
+  "sourceKind": "docs-table",
+  "version": "2026-07-12",
+  "commands": [
+    {
+      "token": "/model",
+      "label": "Switch model",
+      "description": "Choose the model for the current session.",
+      "mode": "typed",
+      "argumentSource": "agent-models"
+    },
+    {
+      "token": "/reasoning",
+      "label": "Reasoning effort",
+      "description": "Choose reasoning effort for the current session (Codex app/CLI).",
+      "mode": "typed",
+      "argumentSource": "agent-efforts"
+    },
+    {
+      "token": "/effort",
+      "label": "Effort",
+      "description": "Switch reasoning effort (CLI alias used by some Codex builds).",
+      "mode": "typed",
+      "argumentSource": "agent-efforts"
+    },
+    {
+      "token": "/goal",
+      "label": "Set goal",
+      "description": "Set a persistent goal for the session.",
+      "mode": "typed",
+      "freeform": true
+    },
+    {
+      "token": "/compact",
+      "label": "Compact context",
+      "description": "Compact the current session context.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/review",
+      "label": "Review",
+      "description": "Start code review mode.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/status",
+      "label": "Status",
+      "description": "Show session id, context usage, and rate limits.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/plan",
+      "label": "Plan mode",
+      "description": "Toggle plan mode for multi-step planning.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/init",
+      "label": "Init AGENTS.md",
+      "description": "Generate an AGENTS.md scaffold for the project.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/mcp",
+      "label": "MCP status",
+      "description": "View connected MCP servers.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/fast",
+      "label": "Fast mode",
+      "description": "Toggle Fast mode, or use on, off or status when the runtime advertises a Fast service tier.",
+      "mode": "typed",
+      "freeform": true
+    }
+  ]
+}

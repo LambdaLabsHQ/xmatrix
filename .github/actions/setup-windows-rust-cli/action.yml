@@ -1,0 +1,55 @@
+name: Setup Windows Rust CLI
+description: >
+  One Windows toolchain path for rust-cli-windows CI and CLI release.
+  Native MSVC PATH and full kache (RUSTC_WRAPPER + executable/hardlink restore).
+  Pure-Rust encrypted store needs no OpenSSL/SQLCipher toolchain. Cargo keeps
+  the default in-package target directory.
+inputs:
+  validate-kache-contract:
+    description: When true, run the per-runner kache cache contract test.
+    required: false
+    default: "true"
+  rust-target:
+    description: Optional extra rustup target triple (for example release cross-target).
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Configure Windows runner tools
+      uses: ./.github/actions/configure-windows-runner
+
+    - name: Disable stale sparse checkout
+      shell: powershell
+      continue-on-error: true
+      run: git sparse-checkout disable
+
+    - name: Validate per-runner kache cache contract
+      if: inputs.validate-kache-contract == 'true'
+      shell: powershell
+      run: |
+        .github/scripts/test-kache-cache.ps1
+        .github/scripts/test-reclaim-windows-rust-disk.ps1
+
+    - name: Reclaim runner-scoped Rust disk when below floor
+      shell: powershell
+      env:
+        XMATRIX_GITHUB_RUNNER_NAME: ${{ runner.name }}
+      run: >-
+        .github/scripts/reclaim-windows-rust-disk.ps1
+        -Workspace $env:GITHUB_WORKSPACE
+        -GitHubRunnerName $env:XMATRIX_GITHUB_RUNNER_NAME
+
+    - uses: ./.github/actions/setup-rust-kache
+
+    - name: Add optional Rust target
+      if: inputs.rust-target != ''
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        rustup target add ${{ inputs.rust-target }}
+        if ($LASTEXITCODE -ne 0) { throw 'rustup target add failed' }
+        rustc --version
+        if ($LASTEXITCODE -ne 0) { throw 'rustc --version failed' }
+        cargo --version
+        if ($LASTEXITCODE -ne 0) { throw 'cargo --version failed' }

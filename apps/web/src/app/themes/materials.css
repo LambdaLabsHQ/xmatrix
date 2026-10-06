@@ -1,0 +1,730 @@
+@reference "../liquid-glass.css";
+
+/* ============================================================
+   MATERIAL STRUCTURE — written once, themed via --m-* variables.
+   Wood values live in wood.css; this file only defines shared structure.
+   ============================================================ */
+
+/* Mobile: panels SLIDE (drawer) and pages scroll as a whole — every material
+   layer must travel with its panel, so no viewport-anchored backgrounds.
+   (background-attachment: fixed also misrenders on iOS Safari.) */
+@media (max-width: 767px) {
+  /* tripled class outguns every per-theme `attachment: fixed !important` */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app,
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app * {
+    background-attachment: scroll !important;
+  }
+}
+
+/* When a label wraps an icon and an input, the label is the field shell: it is
+   what `focus-within:` is written on and what the user reads as the box. The
+   input inside it draws nothing, or one field wears two rings (the Team invite
+   row did). Checkboxes are excluded: their label is a caption, not a shell. */
+html[data-app-theme] .xmatrix-app :is(label, div):is(.rounded-md, .rounded-lg):has(
+  > input:not([type="checkbox"]):not([type="radio"])
+) > input {
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-page-title, .app-empty-state) :is(h1, h2, p) {
+  color: var(--m-plaque-ink);
+  text-shadow: none;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-page-title, .app-empty-state) p {
+  color: var(--m-plaque-ink-sub);
+}
+
+/* ---- controls inside panels: glass troughs ---- */
+html[data-app-theme] .xmatrix-app :is(.app-tool-surface, .app-details) :is(input, textarea, select) {
+  background: var(--m-trough-bg) !important;
+  border-color: transparent !important;
+  box-shadow: var(--m-trough-shadow) !important;
+  -webkit-backdrop-filter: blur(2px) saturate(1.08);
+  backdrop-filter: blur(2px) saturate(1.08);
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-tool-surface, .app-details) :is(input, textarea):focus {
+  box-shadow: var(--m-trough-focus) !important;
+}
+
+/* ---- primary actions: the board's denser glass pour ---- */
+html[data-app-theme] .xmatrix-app :is(.app-tool-surface, .app-details) button.bg-primary {
+  background: var(--app-action-fill-primary) !important;
+  color: var(--app-action-ink) !important;
+  border-color: transparent !important;
+  box-shadow: var(--app-action-edge) !important;
+}
+
+/* ---- nested / dashed info cards: paper insets ---- */
+html[data-app-theme] .xmatrix-app .app-tool-surface .rounded-lg.border.border-dashed {
+  background: var(--m-paper-bg) !important;
+  border: none !important;
+  box-shadow: var(--m-paper-edge) !important;
+}
+
+/* ---- code chips: paper labels ---- */
+html[data-app-theme] .xmatrix-app :is(.app-tool-surface, .app-details) code {
+  background: var(--m-chip-bg) !important;
+  color: var(--m-chip-ink) !important;
+  box-shadow: var(--m-chip-edge) !important;
+}
+
+/* ---- popovers / dropdown panels ---- */
+html[data-app-theme] .xmatrix-app .bg-popover,
+html[data-app-theme] .xmatrix-app.bg-popover {
+  background: var(--m-pop-bg) !important;
+  border-color: transparent !important;
+  border-radius: 14px !important;
+  padding: 5px !important;
+  box-shadow: var(--m-pop-shadow) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(1.1) !important;
+  backdrop-filter: blur(10px) saturate(1.1) !important;
+}
+
+html[data-app-theme] .xmatrix-app .bg-popover :is([role="option"], [role="menuitem"], [role="menuitemradio"]):hover,
+html[data-app-theme] .xmatrix-app .bg-popover :is([role="option"], [role="menuitem"], [role="menuitemradio"])[data-highlighted],
+html[data-app-theme] .xmatrix-app.bg-popover :is([role="option"], [role="menuitem"], [role="menuitemradio"]):hover {
+  background: var(--m-pop-hover) !important;
+  border-radius: 10px !important;
+}
+
+html[data-app-theme] .xmatrix-app .bg-popover :is([data-state="checked"], [aria-checked="true"], [aria-selected="true"]),
+html[data-app-theme] .xmatrix-app.bg-popover :is([data-state="checked"], [aria-checked="true"], [aria-selected="true"]) {
+  background: var(--m-pop-checked) !important;
+  border-radius: 10px !important;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.5) !important;
+}
+
+/* ---- the reading island (message panel) ---- */
+html[data-app-theme] .xmatrix-app .app-message-surface {
+  background: var(--m-island-bg) !important;
+}
+
+@media (min-width: 768px) {
+  html[data-app-theme] .xmatrix-app .app-message-surface {
+    margin: 10px 8px;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: var(--m-island-edge);
+  }
+}
+
+html[data-app-theme] .xmatrix-app .app-message-surface :is(.app-panel-header, .app-composer) {
+  background: transparent !important;
+}
+
+/* Message goal chips are status labels, not glass controls. Keep them readable
+   even when a material theme overrides utility backgrounds inside the timeline. */
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-goal-status-badge,
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-message-surface span[title^="Goal:"].bg-foreground.text-background {
+  border-color: var(--goal-badge-border, oklch(0.5 0.134 242.749)) !important;
+  background: var(--goal-badge-bg, oklch(0.5 0.134 242.749)) !important;
+  background-color: var(--goal-badge-bg, oklch(0.5 0.134 242.749)) !important;
+  background-image: none !important;
+  color: var(--goal-badge-fg, white) !important;
+  box-shadow: 0 1px 2px oklch(0.2 0.02 240 / 0.18) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-goal-status-badge > :is(svg, span),
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-message-surface span[title^="Goal:"].bg-foreground.text-background > :is(svg, span) {
+  color: inherit !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-goal-status-badge-active {
+  --goal-badge-bg: oklch(0.448 0.119 151.328);
+  --goal-badge-border: oklch(0.448 0.119 151.328);
+  --goal-badge-fg: white;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-goal-status-badge-complete {
+  --goal-badge-bg: oklch(0.5 0.134 242.749);
+  --goal-badge-border: oklch(0.5 0.134 242.749);
+  --goal-badge-fg: white;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-goal-status-badge-blocked {
+  --goal-badge-bg: oklch(0.555 0.163 48.998);
+  --goal-badge-border: oklch(0.555 0.163 48.998);
+  --goal-badge-fg: white;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-goal-status-badge-neutral {
+  --goal-badge-bg: oklch(0.37 0.013 285.805);
+  --goal-badge-border: oklch(0.37 0.013 285.805);
+  --goal-badge-fg: white;
+}
+
+/* The composer capsule is iOS glass like every other control; its attach and
+   send buttons sit inside it and share its one material. Older
+   composer rules paint their own fill and backdrop, so this block pins the
+   shared tokens: the blur softens the backdrop, the lens bends it, then
+   saturation lifts it. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-composer-box:not(.app-agent-work-card).app-material-liquid-pill {
+  background: var(--app-liquid-surface-bg) !important;
+  background-color: var(--app-liquid-surface-bg) !important;
+  --app-liquid-backdrop-filter: var(--app-liquid-material) var(--app-liquid-lens,) var(--app-liquid-vibrancy) !important;
+  -webkit-backdrop-filter: var(--app-liquid-backdrop-filter) !important;
+  backdrop-filter: var(--app-liquid-backdrop-filter) !important;
+}
+
+@media (max-width: 767px) {
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app-shell .app-composer-shell {
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    filter: none !important;
+  }
+}
+
+/* the slab-level glass tokens (consumed by LiquidGlassSurface panes) */
+html[data-app-theme] .xmatrix-app :is(.app-rail, .app-sidebar, .app-details, .app-mobile-chat-pane) {
+  --app-glass-fill: var(--m-slabglass-fill);
+  --app-glass-fill-strong: var(--m-slabglass-fill-strong);
+  --app-glass-fill-muted: var(--m-slabglass-fill-muted);
+  --app-glass-fill-active: var(--m-pill-fill);
+}
+
+/* Semantic material primitives. Pages select one of these explicit physical
+   roles instead of relying on rounded-* utilities to infer both material and
+   geometry. Wood is the page/slab; glass cards and pills float on that slab. */
+html[data-app-theme="wood"] :is(.xmatrix-app, .site-canvas) .app-material-wood-panel,
+html[data-app-theme] .xmatrix-app .app-message-surface.app-message-surface-space-setup {
+  background-color: var(--app-wood-panel-base) !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow:
+    inset 0 1px 0 oklch(1 0.02 90 / 0.48),
+    inset 0 -1px 0 oklch(0.4 0.07 60 / 0.2),
+    0 12px 24px -14px oklch(0.18 0.04 55 / 0.72) !important;
+}
+
+/* (0,6,1): the texture sweep in globals.css (`.xmatrix-app *:not(…)`, (0,6,0))
+   blanks every background-image it does not whitelist, so a WoodPanel inside
+   a view would otherwise be a flat tan board. */
+html[data-app-theme="wood"] :is(.xmatrix-app, .site-canvas) .app-material-wood-panel.app-material-wood-panel.app-material-wood-panel.app-material-wood-panel {
+  /* Preserve the Summary's original maps, alignment, and normal blending.
+     Chrome planks use this same recipe. */
+  @apply app-wood-panel-recipe;
+}
+
+/* Setup paints its grain on pseudo-elements; that exception must not erase
+   the background texture of the reusable WoodPanel primitive. */
+html[data-app-theme] .xmatrix-app .app-message-surface.app-message-surface-space-setup {
+  background-image: none !important;
+}
+
+html[data-app-theme] .xmatrix-app .app-message-surface-space-setup .app-space-setup-canvas {
+  background: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-material-liquid-card.app-material-liquid-card {
+  border-color: transparent !important;
+  border-radius: 20px !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-material-liquid-card.app-material-liquid-card:hover,
+:is(.xmatrix-app, .site-canvas) .app-material-liquid-card.app-material-liquid-card:active {
+  transform: none !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-material-liquid-pill.app-material-liquid-pill,
+:is(.xmatrix-app, .site-canvas) .app-material-chip.app-material-chip {
+  border-radius: 999px !important;
+}
+
+:is(.xmatrix-app, .site-canvas) .app-material-chip.app-material-chip {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  border: 0;
+  background: var(--m-chip-bg);
+  color: oklch(0.06 0 0) !important;
+  box-shadow: var(--m-chip-edge);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.xmatrix-app .app-material-chip[data-tone="success"],
+.xmatrix-app .app-material-chip[data-tone="warning"],
+.xmatrix-app .app-material-chip[data-tone="muted"] {
+  color: oklch(0.06 0 0) !important;
+}
+
+.xmatrix-app .app-material-chip::before,
+.xmatrix-app .app-material-chip::after {
+  content: none !important;
+  display: none !important;
+}
+
+html[data-app-theme] .xmatrix-app .app-space-setup-card {
+  border: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+html[data-app-theme] .xmatrix-app .app-space-setup-card :is(.rounded-md.border, textarea) {
+  background-color: var(--m-paper-bg) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: var(--m-paper-edge) !important;
+}
+
+html[data-app-theme] .xmatrix-app .app-space-setup-card :is(.rounded-md.border, textarea)::before,
+html[data-app-theme] .xmatrix-app .app-space-setup-card :is(.rounded-md.border, textarea)::after {
+  content: none !important;
+}
+
+/* Agent choices are one liquid-glass surface directly on the wood board.
+   Everything inside is flat black ink: another glass chip or button would
+   nest compositor surfaces and turn the card milky again. */
+html[data-app-theme="wood"] .xmatrix-app .app-space-agent-candidate.app-liquid-glass-fill {
+  --app-liquid-surface-bg: oklch(1 0 0 / 0.28);
+  color: oklch(0.16 0.02 55) !important;
+}
+
+html[data-app-theme="wood"] .xmatrix-app .app-space-agent-candidate .app-space-agent-used-label {
+  color: oklch(0.16 0.02 55) !important;
+  background-image: none !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-app-theme="wood"] .xmatrix-app .app-space-agent-used-label {
+  background: transparent !important;
+  box-shadow: none !important;
+  opacity: 0.68;
+}
+
+/* ---- Space plan: the plan mark ----
+   The mark is `COUNT_CHIP_MATERIAL_CLASS` plus ink. It deliberately invents no
+   material: every chip-scale element in the app wears the selected channel
+   row's liquid glass, and a bespoke gilt recipe would be a second chip
+   material. Brass is the theme's own accent, so it survives the monochrome
+   sweep in globals.css that flattens `amber-*` utilities to grey — which is
+   also why the ink is a token here rather than a Tailwind colour class.
+   Note the display is set here, not with the `inline-flex` utility: the glass
+   rules exclude `.inline-flex`, so that class would strip the chip's glass. */
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-space-plan-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 1rem;
+  padding: 0 0.4375rem;
+  color: var(--m-plan-free-ink) !important;
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-space-plan-mark[data-plan="pro"] {
+  color: var(--m-plan-pro-ink) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-space-plan-mark[data-state="ending"] {
+  color: var(--m-plan-ending-ink) !important;
+}
+
+/* Blocked outranks the plan: a Space that cannot send says so whichever plan
+   it is on, so this rule follows the per-plan ones rather than preceding them. */
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-space-plan-mark[data-state="blocked"] {
+  color: var(--m-plan-blocked-ink) !important;
+}
+
+/* ---- plan cards (Settings → Billing) ----
+   A paid plan is a LiquidGlassCard on a WoodPanel (the shared primitives, as
+   on the details plank), black text with the plan's
+   name and marks in brass; Free is an ink outline on the paper. These rules
+   only lay the card out and colour its ink; the materials are the
+   primitives'. (0,7,1) outranks the shared control rules on the paper. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card {
+  overflow: hidden !important;
+  border-radius: 20px !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-card-face {
+  padding: 1.25rem 1.375rem 1.375rem !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card[data-plan="pro"] {
+  color: var(--m-plan-wood-ink) !important;
+}
+
+/* The glass sits on the plank with the plank showing round it. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card[data-plan="pro"] > .app-plan-card-face {
+  margin: 12px !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card[data-plan="free"] {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px var(--m-plan-free-rule) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-name {
+  font-size: 1.875rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.025em !important;
+  line-height: 1 !important;
+  color: var(--m-plan-card-ink) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card[data-plan="pro"] .app-plan-name {
+  color: var(--m-plan-brass) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card :is(.app-plan-aside, .app-plan-meter-label) {
+  font-size: 0.8125rem !important;
+  color: var(--m-plan-free-muted) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card[data-plan="pro"] :is(.app-plan-aside, .app-plan-meter-label) {
+  color: var(--m-plan-wood-muted) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-title {
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-pip {
+  width: 0.625rem !important;
+  height: 0.625rem !important;
+  border-radius: 999px !important;
+  box-shadow: inset 0 0 0 1.5px var(--m-plan-pip-empty) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-pip[data-used="true"] {
+  background: var(--m-plan-card-ink) !important;
+  box-shadow: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card[data-plan="pro"] .app-plan-pip {
+  box-shadow: inset 0 0 0 1.5px var(--m-plan-wood-rule) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card[data-plan="pro"] .app-plan-pip[data-used="true"] {
+  background: var(--m-plan-brass) !important;
+  box-shadow: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-meter-track {
+  display: block !important;
+  height: 3px !important;
+  overflow: hidden !important;
+  border-radius: 999px !important;
+  background: var(--m-plan-free-rule) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-meter-fill {
+  display: block !important;
+  height: 100% !important;
+  background: var(--m-plan-card-ink) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-meter[data-full="true"] .app-plan-meter-fill {
+  background: var(--m-plan-blocked-ink) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card[data-plan="pro"] .app-plan-check {
+  color: var(--m-plan-brass) !important;
+}
+
+/* The offer's one action is set in the plank's own ink. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-stub .app-action-primary {
+  color: var(--m-plan-stub) !important;
+  background: var(--m-plan-action) !important;
+  box-shadow: none !important;
+}
+
+/* The stub is paper again, so the controls on it are the app's own. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-plan-card.app-plan-card .app-plan-stub {
+  padding: 1rem 1.375rem 1.125rem !important;
+  color: var(--foreground) !important;
+  text-shadow: none !important;
+  background: var(--m-plan-stub) !important;
+}
+
+/* ---- dialogs and form pages ----
+   A form page (New agent, Configure agent, Review) is the Space setup board:
+   the wood column with liquid-glass cards in a narrow centre column. A small dialog
+   (confirmations, summon, crop) is one liquid-glass pane floating over the
+   board with no full-screen scrim; the overlay only catches the outside click.
+   Both share one control grammar, and all of it is the same liquid glass:
+   glass troughs for inputs, glass blocks for facts and options, and flat
+   capsules for actions — solid ink for the primary, a faint tint otherwise. */
+html[data-app-theme] .xmatrix-app.app-dialog-overlay {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-app-theme="wood"] .xmatrix-app .app-dialog-panel.app-liquid-glass-fill {
+  --app-liquid-surface-bg: oklch(1 0.012 92 / 0.8);
+  --app-liquid-backdrop-filter: blur(22px) var(--app-liquid-lens,) saturate(1.6) brightness(1.04);
+  --muted-foreground: oklch(0.38 0.04 60);
+  --border: oklch(0.4 0.07 60 / 0.16);
+  color: oklch(0.16 0.02 55) !important;
+  box-shadow:
+    var(--app-glass-edge),
+    0 28px 56px -24px oklch(0.2 0.05 55 / 0.6) !important;
+}
+
+html[data-app-theme] .xmatrix-app .app-dialog-panel :is(.app-dialog-header, .app-dialog-footer) {
+  border-color: var(--border) !important;
+}
+
+/* controls and facts are liquid glass too — the app has one material on the
+   board and it is glass (design owner, 2026-09-17: "所有这些都必须是 liquid
+   glass", "从没有过纸质的标准"). What separates a control from the card it
+   sits in is fill density and the meniscus rim, not a second material.
+   No nested backdrop-filter: the card already refracts the grain, and a
+   second compositor pass over it only frosts the result — the same reason
+   `.app-glass-on-slab` exists. */
+html[data-app-theme="wood"] .xmatrix-app :is(.app-dialog-panel, .app-form-page) {
+  /* Dense enough to type on, thin enough that the grain still reads through
+     it — that visible grain is the whole difference between a glass well and
+     a white box, so these two numbers are the recipe, not a taste setting. */
+  --app-liquid-control-bg: oklch(1 0 0 / 0.34);
+  --app-liquid-fact-bg: oklch(1 0 0 / 0.2);
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select,
+  .app-glass-select-trigger
+) {
+  border-radius: 12px !important;
+  border-color: transparent !important;
+  background: var(--app-liquid-control-bg) !important;
+  background-color: var(--app-liquid-control-bg) !important;
+  background-image: none !important;
+  color: oklch(0.16 0.02 55) !important;
+  box-shadow:
+    var(--app-glass-edge),
+    inset 0 1px 0 var(--app-liquid-meniscus-top) !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) :is(input, textarea, select, .app-glass-select-trigger):focus,
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) :is(input, textarea, select, .app-glass-select-trigger):focus-visible {
+  outline: none !important;
+  box-shadow:
+    var(--app-glass-edge),
+    inset 0 0 0 1.5px oklch(0.72 0.11 70 / 0.75),
+    0 0 0 3px oklch(0.78 0.1 70 / 0.22) !important;
+}
+
+/* A disabled control is the same glass, thinner: it still belongs to the
+   board, it just no longer invites typing. */
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) :is(input, textarea, select, .app-glass-select-trigger):disabled {
+  background: var(--app-liquid-fact-bg) !important;
+  background-color: var(--app-liquid-fact-bg) !important;
+  color: var(--m-plaque-ink-sub) !important;
+  opacity: 1 !important;
+  box-shadow: var(--app-glass-edge) !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) :is(input, textarea)::placeholder {
+  color: var(--m-plaque-ink-sub) !important;
+  opacity: 0.7;
+}
+
+/* glass facts: read-only summaries, options, review blocks, list wells */
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) :is(.app-dialog-inset, .app-dialog-scroll) {
+  border-radius: 14px !important;
+  border-color: transparent !important;
+  background: var(--app-liquid-fact-bg) !important;
+  background-color: var(--app-liquid-fact-bg) !important;
+  background-image: none !important;
+  box-shadow: var(--app-glass-edge) !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  transform: none !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) :is(.app-dialog-inset, .app-dialog-scroll)::before,
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) :is(.app-dialog-inset, .app-dialog-scroll)::after {
+  content: none !important;
+  display: none !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) .app-dialog-inset-destructive {
+  background: color-mix(in oklch, oklch(0.62 0.2 25 / 0.28), var(--app-liquid-control-bg) 82%) !important;
+  color: oklch(0.42 0.16 27) !important;
+  box-shadow:
+    var(--app-glass-edge),
+    inset 0 0 0 1px oklch(0.62 0.2 25 / 0.32) !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) .app-dialog-inset-warning {
+  background: color-mix(in oklch, oklch(0.8 0.15 80 / 0.3), var(--app-liquid-control-bg) 78%) !important;
+  box-shadow:
+    var(--app-glass-edge),
+    inset 0 0 0 1px oklch(0.7 0.14 75 / 0.4) !important;
+}
+
+/* The open list is the glass fact block (`.app-dialog-inset`) with rows in it,
+   unrolled in flow under its trigger — not a panel of its own and not a window
+   over the board. Rows only need the two states a list has: the one the
+   keyboard or pointer is on, and the one already chosen. */
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) .app-glass-select-option[data-active="true"] {
+  background: var(--app-liquid-control-bg) !important;
+  box-shadow: inset 0 0 0 1px oklch(0.4 0.07 60 / 0.16) !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) .app-glass-select-option[aria-selected="true"] {
+  font-weight: 800;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) .app-glass-select-option[data-disabled="true"] {
+  color: var(--m-plaque-ink-sub) !important;
+  cursor: default;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) .app-glass-select-trigger {
+  cursor: pointer;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) .app-glass-select-trigger:disabled {
+  cursor: default;
+}
+
+/* actions: Apple's alert buttons, measured from the HIG's iOS 26 and macOS 26
+   alert images (design owner, 2026-10-01: the espresso stamp and then a
+   raised white capsule were both "丑"). Every action is a flat capsule — no
+   gradient, rim, bevel or shadow, one crisp edge. The primary is a solid fill
+   of the theme's tint, which in this monochrome theme is the dark ink; every
+   other action is the pane darkened by ~7% (measured 235 → 218 on iOS,
+   248 → 231 in the roles figure). Destructive is that same quiet capsule with
+   red ink, exactly the HIG's role figure: danger is told in ink, never by
+   making the dangerous choice the prominent one.
+
+   The selectors carry the panel/form class three times to outrank the
+   app-wide `.xmatrix-app *:not(...)` background sweep in globals.css, and
+   state `background-color` and `background-image` explicitly so a future
+   `:not` there cannot silently blank the action. */
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) {
+  --app-dialog-action-fill: oklch(0.3 0.03 55 / 0.075);
+  --app-dialog-action-fill-hover: oklch(0.3 0.03 55 / 0.11);
+  --app-dialog-action-fill-primary: oklch(0.24 0.02 55);
+  --app-dialog-action-fill-primary-hover: oklch(0.32 0.025 55);
+  --app-dialog-action-ink-primary: oklch(0.99 0.005 85);
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel.app-dialog-panel.app-dialog-panel, .app-form-page.app-form-page.app-form-page) :is(button.bg-primary, button.app-dialog-button-secondary, button.app-dialog-button-destructive) {
+  border-radius: 999px !important;
+  border: none !important;
+  background: var(--app-dialog-action-fill) !important;
+  background-color: var(--app-dialog-action-fill) !important;
+  background-image: none !important;
+  color: var(--app-action-ink) !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+  filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  transition: background-color 120ms ease;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel.app-dialog-panel.app-dialog-panel, .app-form-page.app-form-page.app-form-page) button.bg-primary {
+  background: var(--app-dialog-action-fill-primary) !important;
+  background-color: var(--app-dialog-action-fill-primary) !important;
+  color: var(--app-dialog-action-ink-primary) !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel.app-dialog-panel.app-dialog-panel, .app-form-page.app-form-page.app-form-page) button.app-dialog-button-destructive {
+  color: oklch(0.56 0.2 27) !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel.app-dialog-panel.app-dialog-panel, .app-form-page.app-form-page.app-form-page) :is(button.app-dialog-button-secondary, button.app-dialog-button-destructive):hover {
+  background: var(--app-dialog-action-fill-hover) !important;
+  background-color: var(--app-dialog-action-fill-hover) !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel.app-dialog-panel.app-dialog-panel, .app-form-page.app-form-page.app-form-page) button.bg-primary:hover {
+  background: var(--app-dialog-action-fill-primary-hover) !important;
+  background-color: var(--app-dialog-action-fill-primary-hover) !important;
+}
+
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) .app-dialog-button:focus-visible {
+  outline: 2px solid oklch(0.72 0.11 70 / 0.8);
+  outline-offset: 2px;
+}
+
+/* code labels inside dialogs are the same paper chips as inside panels */
+html[data-app-theme] .xmatrix-app :is(.app-dialog-panel, .app-form-page) code {
+  border-radius: 4px !important;
+  background: var(--m-chip-bg) !important;
+  color: var(--m-chip-ink) !important;
+  box-shadow: var(--m-chip-edge) !important;
+}
+
+/* Form-page cards sit on the setup board like the agent candidates: glass
+   on wood, flat ink inside. The chosen runtime row is the same glass with a
+   denser fill, so the choice is visible without a second material. */
+html[data-app-theme="wood"] .xmatrix-app .app-form-page .app-form-page-card.app-liquid-glass-fill {
+  --app-liquid-surface-bg: oklch(1 0 0 / 0.28);
+  color: oklch(0.16 0.02 55) !important;
+}
+
+/* The default-setup card carries the page, so it is the densest glass on the
+   board; the runtime tiles that edit it stay lighter and smaller. Without the
+   split every card weighs the same and the page reads as a stack of equals. */
+html[data-app-theme="wood"] .xmatrix-app .app-form-page .app-setup-hero.app-form-page-card.app-liquid-glass-fill {
+  --app-liquid-surface-bg: oklch(1 0 0 / 0.46);
+}
+
+html[data-app-theme="wood"] .xmatrix-app .app-form-page .app-runtime-tile.app-liquid-glass-fill {
+  --app-liquid-surface-bg: oklch(1 0 0 / 0.22);
+}
+
+html[data-app-theme="wood"] .xmatrix-app .app-form-page .app-runtime-choice[data-selected="true"].app-liquid-glass-fill {
+  --app-liquid-surface-bg: oklch(1 0 0 / 0.6);
+  box-shadow:
+    var(--app-glass-edge),
+    inset 0 0 0 2px oklch(0.35 0.06 55 / 0.38) !important;
+}
+
+html[data-app-theme="wood"] .xmatrix-app .app-form-page .app-runtime-choice[data-selected="false"].app-liquid-glass-fill:hover {
+  --app-liquid-surface-bg: oklch(1 0 0 / 0.36);
+}
+
+html[data-app-theme] .xmatrix-app .app-form-page .app-form-page-divider {
+  border-color: oklch(0.4 0.07 60 / 0.16) !important;
+}
+
+/* The setup board flattens rounded-md.border chrome to paper; the page's
+   glass cards must keep their glass, so exempt them from that rule. */
+html[data-app-theme] .xmatrix-app .app-space-setup-card .app-form-page-card.app-liquid-glass-fill,
+html[data-app-theme] .xmatrix-app .app-space-setup-card .app-runtime-choice.app-liquid-glass-fill {
+  background-color: var(--app-liquid-surface-bg) !important;
+}

@@ -1,0 +1,35 @@
+name: Prompt request
+description: Ask for a change by describing the outcome. External pull requests are closed.
+title: "prompt: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the change. A maintainer's agent implements it. Do not open a pull request.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should be true after the change?
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior
+    validations:
+      required: true
+  - type: textarea
+    id: prompt
+    attributes:
+      label: Prompt
+      description: A prompt a maintainer can hand to an agent, including the files to read and the check that proves the change.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: What must not change.
+    validations:
+      required: false

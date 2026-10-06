@@ -1,0 +1,38 @@
+{
+  "name": "@xmatrix/db",
+  "version": "0.16.854",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run build && node --test test/*.test.mjs",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run migrations:check",
+    "migrations:check": "node scripts/migrate.mjs check",
+    "migrations:plan": "node scripts/migrate.mjs plan",
+    "migrations:apply": "node scripts/migrate.mjs apply",
+    "substrate:seed": "node scripts/substrate.mjs seed",
+    "substrate:verify": "node scripts/substrate.mjs verify",
+    "sql:prepare-audit": "node scripts/sql-prepare-audit.mjs",
+    "compatibility:smoke": "node scripts/compatibility-smoke.mjs",
+    "capacity:inspect": "node scripts/substrate.mjs capacity",
+    "shard:admission": "node scripts/shard-admission.mjs",
+    "lifecycle:maintain": "node scripts/postgres-lifecycle-maintenance.mjs",
+    "space:move": "node scripts/space-shard-move.mjs",
+    "lifecycle:cleanup": "node scripts/agent-lifecycle-cleanup.mjs",
+    "test:postgres": "node scripts/test-dingtalk-crossdb.mjs"
+  },
+  "dependencies": {
+    "@xmatrix/billing": "workspace:*",
+    "@xmatrix/protocol": "workspace:*",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0",
+    "libpg-query": "17.7.4",
+    "typescript": "5.9.3"
+  }
+}

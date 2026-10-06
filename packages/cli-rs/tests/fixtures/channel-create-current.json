@@ -1,0 +1,36 @@
+{
+  "channel": {
+    "id": "ch-1",
+    "spaceId": "space-1",
+    "name": "stability-perf",
+    "mode": "open",
+    "messageCount": 1,
+    "memberPresence": {
+      "user:u1": {
+        "kind": "user",
+        "status": "online",
+        "focused": true,
+        "label": "Legend Wang",
+        "email": "legend@example.com",
+        "avatarUrl": "https://example.com/avatar.png",
+        "lastSeenAt": "2026-05-17T09:17:21.878Z",
+        "activity": "reading",
+        "files": ["packages/cli-rs/src/protocol.rs"],
+        "intent": "reviewing"
+      },
+      "agent:a1": {
+        "kind": "agent",
+        "label": "codex",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 2,
+          "totalTokens": 12
+        },
+        "instances": []
+      }
+    },
+    "createdBy": "user:u1",
+    "createdAt": "2026-05-17T09:17:21.878Z",
+    "updatedAt": "2026-05-17T09:20:00.068Z"
+  }
+}

@@ -1,0 +1,42 @@
+name: Wait for candidate Test Release
+description: >-
+  Waits while a production-candidate Test Release is in progress, so a
+  same-version test deployment never overwrites the candidate's exact-SHA test
+  evidence mid-run. Only in-progress runs count: waiting for a merely queued
+  candidate could hold the runner that candidate is queued for.
+inputs:
+  timeout-minutes:
+    description: Upper bound before proceeding with a warning
+    required: false
+    default: "45"
+runs:
+  using: composite
+  steps:
+    - name: Wait while a candidate Test Release is in progress
+      uses: actions/github-script@v7
+      env:
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+      with:
+        script: |
+          const candidateTitle = /^Test Release [0-9a-f]{40} candidate$/u;
+          const deadline = Date.now() + Number(process.env.TIMEOUT_MINUTES) * 60_000;
+          for (;;) {
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "test-release.yml",
+              status: "in_progress",
+              per_page: 100,
+            });
+            const candidates = data.workflow_runs.filter(
+              (run) => run.id !== context.runId && candidateTitle.test(run.display_title || ""),
+            );
+            if (candidates.length === 0) return;
+            const urls = candidates.map((run) => run.html_url).join(", ");
+            if (Date.now() >= deadline) {
+              core.warning(`Proceeding after ${process.env.TIMEOUT_MINUTES} minutes with a candidate Test Release still in progress: ${urls}`);
+              return;
+            }
+            core.info(`Waiting for candidate Test Release: ${urls}`);
+            await new Promise((resolve) => setTimeout(resolve, 30_000));
+          }

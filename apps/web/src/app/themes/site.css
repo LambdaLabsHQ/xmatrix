@@ -1,0 +1,344 @@
+/* Public site layout. Material fill comes from the app primitives
+   (WoodPanel, LiquidGlassCard, LiquidGlassPill) so homepage glass/wood
+   matches the product app instead of a second blur/paper recipe. */
+
+.site-canvas {
+  color: var(--foreground);
+  background:
+    radial-gradient(circle at 15% -8%, oklch(1 0.018 92 / 0.95), transparent 34rem),
+    linear-gradient(180deg, oklch(0.988 0.01 88), oklch(0.955 0.019 80));
+  background-attachment: fixed;
+}
+
+.site-page {
+  min-height: 100dvh;
+  color: var(--site-ink);
+  background: var(--background);
+}
+
+html:has(.site-page) {
+  scroll-padding-top: 5.5rem;
+}
+
+.site-page ::selection {
+  color: var(--site-ink);
+  background: oklch(0.82 0.085 75 / 0.34);
+}
+
+.site-page :is(h1, h2, h3) {
+  text-wrap: balance;
+}
+
+.site-page :is(p, li) {
+  text-wrap: pretty;
+}
+
+/* Quiet warm grid: alignment aid rather than a sci-fi motif. */
+.site-page .matrix-grid,
+.site-footer .matrix-grid {
+  background-image:
+    linear-gradient(var(--site-wood-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--site-wood-line) 1px, transparent 1px);
+  background-size: 64px 64px;
+  opacity: 0.12 !important;
+  mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);
+}
+
+.site-page .x-section {
+  padding-block: clamp(5.5rem, 9vw, 8.5rem);
+  border-top: 0;
+  background:
+    radial-gradient(circle at 8% 0%, oklch(1 0.014 90 / 0.84), transparent 28rem),
+    linear-gradient(180deg, var(--background), oklch(0.957 0.02 80));
+}
+
+.site-page .x-section:nth-of-type(even) {
+  background:
+    radial-gradient(circle at 92% 12%, oklch(1 0.014 90 / 0.86), transparent 30rem),
+    linear-gradient(180deg, oklch(0.95 0.025 78), var(--background));
+}
+
+.site-page .x-section::before {
+  background:
+    linear-gradient(90deg, transparent 7%, var(--site-wood-line) 7%, var(--site-wood-line) calc(7% + 1px), transparent calc(7% + 1px)),
+    linear-gradient(90deg, transparent 93%, var(--site-wood-line) 93%, var(--site-wood-line) calc(93% + 1px), transparent calc(93% + 1px));
+  opacity: 0.48;
+}
+
+.site-page .x-container {
+  max-width: 76rem;
+}
+
+.site-page .x-eyebrow {
+  gap: 0.5rem;
+  width: fit-content;
+  border: 0;
+  padding: 0;
+  color: var(--site-wood-deep);
+  background: transparent;
+  box-shadow: none;
+  font-size: 0.68rem;
+  font-weight: 760;
+  letter-spacing: 0.19em;
+}
+
+.site-page .x-eyebrow::before {
+  content: "";
+  width: 1.8rem;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--site-wood-deep), var(--site-wood));
+}
+
+.site-page .app-material-wood-panel,
+.site-nav-sheet.app-material-wood-panel {
+  --site-wood-ink: oklch(0.12 0.015 55);
+  overflow: hidden;
+  border: 0;
+  border-radius: 1.35rem;
+  color: var(--site-wood-ink);
+  font-weight: 700;
+  box-shadow:
+    inset 0 1px 0 oklch(1 0.02 90 / 0.48),
+    inset 0 -1px 0 oklch(0.4 0.07 60 / 0.2),
+    0 12px 24px -14px oklch(0.18 0.04 55 / 0.72);
+}
+
+.site-page .app-material-wood-panel :where(h1, h2, h3, h4, h5, p, li, span, a, label, small, strong, em, code, button),
+.site-nav-sheet.app-material-wood-panel :where(h1, h2, h3, h4, h5, p, li, span, a, label, small, strong, em, code, button) {
+  color: var(--site-wood-ink) !important;
+  font-weight: 700 !important;
+}
+
+.site-page .app-material-liquid-card,
+.site-page .app-material-liquid-pill,
+.site-nav-sheet .app-material-liquid-pill {
+  color: var(--site-wood-ink, var(--site-ink));
+  font-weight: 700;
+}
+
+.site-page .app-material-liquid-card {
+  overflow: hidden;
+}
+
+/* `.app-glass-select-trigger` is in this list because a picker on a marketing
+   page is a `<button>` now, not a `<select>` — the native control is banned
+   app-wide. Without it the billing Space picker would be the one control on
+   the page wearing plain `bg-background` instead of paper. */
+.site-page :is(input, textarea, select, .app-glass-select-trigger):not(.xmatrix-app *) {
+  border-color: oklch(0.46 0.05 60 / 18%);
+  border-radius: 0.75rem;
+  background: oklch(1 0.008 88 / 0.7);
+  box-shadow:
+    inset 0 1px 2px oklch(0.4 0.04 58 / 0.08),
+    0 1px 0 oklch(1 0 0 / 0.74);
+}
+
+.site-page :is(input, textarea, select, .app-glass-select-trigger):focus-visible:not(.xmatrix-app *) {
+  border-color: oklch(0.57 0.075 66 / 54%);
+  box-shadow: 0 0 0 3px oklch(0.73 0.07 72 / 0.18);
+}
+
+/* The open list is the same paper, lifted. `.app-glass-select-list` carries
+   `.app-dialog-inset` too, but that is `.xmatrix-app`-scoped, so out here the
+   list would otherwise be a transparent rectangle of rows on the page. */
+.site-page .app-glass-select-list:not(.xmatrix-app *) {
+  border-radius: 0.75rem;
+  background: var(--m-paper-bg, oklch(1 0.008 88 / 0.92));
+  box-shadow:
+    inset 0 0 0 1px oklch(0.46 0.05 60 / 18%),
+    0 10px 28px -12px oklch(0.4 0.04 58 / 0.35);
+}
+
+.site-page .app-glass-select-option[data-active="true"]:not(.xmatrix-app *) {
+  background: oklch(0.46 0.05 60 / 8%);
+}
+
+.site-page .app-glass-select-option[aria-selected="true"]:not(.xmatrix-app *) {
+  font-weight: 800;
+}
+
+.site-navbar {
+  --site-navbar-brand-slot: 10.75rem;
+  --navbar-wood-reveal: 0;
+  padding: 0.75rem;
+  pointer-events: none;
+  background: transparent;
+}
+
+.site-navbar-layout {
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+  max-width: 76rem;
+  min-height: 3.5rem;
+}
+
+.site-navbar-brand {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+}
+
+.site-navbar-bar {
+  position: relative;
+  height: 3.5rem;
+  width: calc(100% - (2 * var(--site-navbar-brand-slot)));
+  max-width: 100%;
+  margin-inline: auto;
+  border-radius: 1rem;
+}
+
+.site-navbar .site-navbar-inner {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--navbar-wood-reveal);
+}
+
+.site-navbar-content {
+  padding-inline: 1rem;
+}
+
+.site-navbar a:not(.app-material-liquid-pill) {
+  color: color-mix(in oklch, var(--site-ink), transparent 28%);
+  font-weight: 700;
+}
+
+.site-navbar a:not(.app-material-liquid-pill):hover {
+  color: var(--site-ink);
+}
+
+.site-nav-sheet {
+  color: var(--site-ink);
+}
+
+.site-canvas .site-nav-sheet.app-material-wood-panel[data-side="right"] {
+  inset: 0.75rem 0.75rem auto auto;
+  height: auto;
+  max-height: calc(100dvh - 1.5rem);
+  width: min(20rem, calc(100vw - 1.5rem));
+  padding: 3.25rem 1rem 1.15rem;
+}
+
+.site-nav-sheet [data-slot="sheet-close"] {
+  border-radius: 999px;
+  background: oklch(1 0 0 / 0.46);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.72),
+    0 6px 16px -10px oklch(0.2 0.04 55 / 0.55);
+}
+
+.site-footer.app-material-wood-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0;
+  border-top: 1px solid var(--site-wood-line);
+  color: var(--site-ink);
+}
+
+.site-footer :is(a, p, span, h4) {
+  color: var(--site-wood-ink, oklch(0.12 0.015 55));
+  font-weight: 700;
+}
+
+.site-hero {
+  background: oklch(0.985 0.01 88);
+}
+
+.site-login {
+  background:
+    radial-gradient(circle at 50% 8%, oklch(1 0.02 90 / 0.95), transparent 30rem),
+    linear-gradient(150deg, oklch(0.94 0.027 78), var(--background));
+}
+
+.site-login-panel {
+  border: 1px solid var(--site-wood-line) !important;
+  border-radius: 1.5rem !important;
+  background: var(--site-paper) !important;
+  box-shadow: var(--site-paper-shadow) !important;
+}
+
+.site-document-hero {
+  background:
+    linear-gradient(90deg, oklch(0.88 0.057 76 / 0.52), transparent 58%),
+    var(--site-paper-soft);
+  box-shadow: inset 0 -1px 0 var(--site-wood-line);
+}
+
+.site-legal-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-color: var(--site-wood-line);
+  background: oklch(0.985 0.012 86 / 0.94);
+}
+
+.site-legal-article.app-material-wood-panel {
+  padding: clamp(1.35rem, 4vw, 3rem);
+}
+
+@media (max-width: 1023px) {
+  .site-navbar {
+    --site-navbar-brand-slot: 0px;
+  }
+
+  .site-navbar-layout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .site-navbar-brand {
+    position: static;
+    transform: none;
+  }
+
+  .site-navbar-bar {
+    width: auto;
+    flex: 1 1 auto;
+    margin-inline: 0;
+  }
+
+  .site-navbar-content {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 767px) {
+  .site-canvas {
+    background-attachment: scroll;
+  }
+
+  .site-navbar {
+    padding: 0.5rem;
+  }
+
+  .site-navbar-bar,
+  .site-navbar .site-navbar-inner {
+    border-radius: 0.9rem;
+  }
+
+  .site-navbar-content {
+    padding-inline: 0.8rem;
+  }
+
+  .site-page .x-section {
+    padding-block: 5rem;
+  }
+
+  .site-page .x-mobile-card-scroller > * {
+    border-radius: 1.15rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-page :is(.app-material-liquid-card, .app-material-liquid-pill) {
+    transition: none;
+  }
+}

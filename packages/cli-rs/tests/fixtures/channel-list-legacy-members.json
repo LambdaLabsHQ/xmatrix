@@ -1,0 +1,12 @@
+{
+  "channels": [
+    {
+      "id": "ch-legacy",
+      "name": "legacy",
+      "mode": "closed",
+      "members": ["user:u1"],
+      "createdBy": "user:u1",
+      "createdAt": "2026-05-17T09:17:21.878Z"
+    }
+  ]
+}

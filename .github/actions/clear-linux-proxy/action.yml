@@ -1,0 +1,37 @@
+name: Clear Linux runner proxy
+description: >-
+  Make sure no HTTP proxy is set for the job. Self-hosted Linux runners route
+  through their host-managed network. This action is Linux-only; macOS may
+  require the proxy environment supplied by its runner service.
+runs:
+  using: composite
+  steps:
+    # Do not inject HTTP(S)_PROXY / git http.proxy — that fights TUN. This step
+    # replaces configure-linux-proxy, which probed a local proxy and wrote
+    # HTTP_PROXY / GIT_CONFIG http.proxy into $GITHUB_ENV for every later step.
+    #
+    # This deliberately does NOT probe reachability. An earlier version ran
+    # `git ls-remote https://github.com/...` to fail fast on a dead tunnel, but
+    # that carried no information and added a flake: actions/checkout runs
+    # immediately before this step, unproxied, so a job that reaches here has
+    # already proven its git egress — and github.com is the one host measured to
+    # be intermittent from these runners (resolvers disagree on its real IP, and
+    # a probe to it has timed out). Gating six jobs on the least stable signal
+    # available bought nothing. When egress is genuinely broken, the step that
+    # needs it reports a more specific error than any probe here could: see
+    # rustup failing on static.rust-lang.org, which named the exact host.
+    - name: Clear proxy environment for this job
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          echo "HTTPS_PROXY="
+          echo "HTTP_PROXY="
+          echo "ALL_PROXY="
+          echo "https_proxy="
+          echo "http_proxy="
+          echo "all_proxy="
+          echo "NO_PROXY=*"
+          echo "no_proxy=*"
+        } >> "$GITHUB_ENV"
+        echo "Proxy variables cleared; this runner uses system TUN routing."

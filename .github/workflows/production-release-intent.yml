@@ -1,0 +1,68 @@
+name: Production Release Intent
+run-name: Production Release Intent ${{ inputs.release_components }} from ${{ github.sha }}
+
+# Asking for a production release records an intent and wakes the train. The
+# train (Production Release Request) is serialized repository-wide, chooses the
+# version itself, and ships the union of every open intent its frozen main
+# revision contains (scripts/release-train.mjs). Intents live in refs, so a
+# train that GitHub displaces while pending loses nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      release_components:
+        description: Comma-separated hub,web,cli,desktop,android,ios or all
+        required: true
+        default: hub
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  record:
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Record the intent and wake the train
+        uses: actions/github-script@v7
+        env:
+          RELEASE_COMPONENTS: ${{ inputs.release_components }}
+          RELEASE_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          github-token: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+          script: |
+            if (!process.env.RELEASE_TOKEN) {
+              core.setFailed("XMATRIX_RELEASE_GITHUB_TOKEN is required to record a release intent");
+              return;
+            }
+            if (context.ref !== `refs/heads/${context.payload.repository.default_branch}`) {
+              core.setFailed("A production release intent must be dispatched from the default branch");
+              return;
+            }
+            const components = ["hub", "web", "cli", "desktop", "android", "ios"];
+            const requested = process.env.RELEASE_COMPONENTS === "all"
+              ? components : process.env.RELEASE_COMPONENTS.split(",");
+            if (!requested.length || requested.some((item) => !components.includes(item)) ||
+                new Set(requested).size !== requested.length ||
+                (requested.includes("desktop") && !requested.includes("cli"))) {
+              core.setFailed("release_components must name unique supported components; desktop requires cli");
+              return;
+            }
+            const scope = components.filter((item) => requested.includes(item));
+            const ref = `refs/release-intents/${context.runId}/${scope.join("+")}`;
+            await github.rest.git.createRef({ ...context.repo, ref, sha: context.sha });
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: "production-release-request.yml",
+              ref: context.payload.repository.default_branch,
+            });
+            core.notice(`Recorded ${scope.join(",")} at ${context.sha} as ${ref} and woke the release train`);
+            await core.summary
+              .addHeading("Production release intent recorded")
+              .addRaw(`Components: ${scope.join(", ")}\n\nMain revision: ${context.sha}\n\nIntent: ${ref}\n`)
+              .write();

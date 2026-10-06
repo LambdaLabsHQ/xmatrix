@@ -1,0 +1,9 @@
+[cache]
+# Keep final test executables cacheable and restore immutable artifacts as NTFS
+# hard links. Cargo target directories stay private to each worktree.
+cache_executables = true
+windows_hardlink = true
+# Bound the shared compile cache on self-hosted runners so a busy machine cannot
+# fill its disk; least-recently-used artifacts are reclaimed by auto_gc.
+local_max_size = "100GiB"
+auto_gc = true

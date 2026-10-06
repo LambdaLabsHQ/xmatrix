@@ -1,0 +1,813 @@
+name: Test Release
+run-name: Test Release ${{ inputs.deploy_sha }}${{ inputs.candidate == 'true' && ' candidate' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_sha:
+        description: Exact main SHA authorized for test deployment
+        required: true
+        type: string
+      previous_sha:
+        description: Previous main SHA used only to detect a version freeze
+        required: false
+        type: string
+      candidate:
+        description: "true when the push bumped version.json: the run gets its own concurrency group so no later push can replace it"
+        required: false
+        default: "false"
+        type: string
+      ci_run_id:
+        description: CI run whose successful Hub and aggregate gates authorized a normal deploy
+        required: false
+        type: string
+      release_mode:
+        description: "Authorization path: ci or hotfix"
+        required: false
+        default: ci
+        type: string
+      hotfix_pr_number:
+        description: Exact merged hotfix PR number, required only for release_mode=hotfix
+        required: false
+        type: string
+      hotfix_broker_run_id:
+        description: CI broker run whose pre-dispatch marker authorized the exact merged hotfix
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Same-version test deployments serialize in one group, where GitHub keeps a
+# single pending run and lets the newest tip replace it. A production-candidate
+# train must never be replaced that way, so it runs in a group keyed by its own
+# exact SHA; ordinary runs wait for it before mutating test instead.
+concurrency:
+  group: ${{ inputs.candidate == 'true' && format('test-release-candidate-{0}', inputs.deploy_sha) || 'test-release' }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Require the exact upstream main CI gates or merged hotfix PR
+        uses: actions/github-script@v7
+        env:
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          DEPLOY_SHA: ${{ inputs.deploy_sha }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+          CANDIDATE: ${{ inputs.candidate }}
+          HOTFIX_PR_NUMBER: ${{ inputs.hotfix_pr_number }}
+          HOTFIX_BROKER_RUN_ID: ${{ inputs.hotfix_broker_run_id }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const releaseMode = process.env.RELEASE_MODE;
+            const deploySha = process.env.DEPLOY_SHA;
+            if (context.actor !== "github-actions[bot]") {
+              core.setFailed("Test Release must be dispatched by a repository workflow token");
+              return;
+            }
+            if (releaseMode !== "ci" && releaseMode !== "hotfix") {
+              core.setFailed("release_mode must be ci or hotfix");
+              return;
+            }
+            if (process.env.CANDIDATE !== "true" && process.env.CANDIDATE !== "false") {
+              core.setFailed("candidate must be true or false");
+              return;
+            }
+            if (releaseMode === "hotfix") {
+              const rawBrokerRunId = process.env.HOTFIX_BROKER_RUN_ID;
+              if (!/^[1-9]\d*$/.test(rawBrokerRunId || "")) {
+                core.setFailed("hotfix_broker_run_id must be a positive GitHub Actions run id");
+                return;
+              }
+              const brokerRunId = Number(rawBrokerRunId);
+              if (!Number.isSafeInteger(brokerRunId)) {
+                core.setFailed("hotfix_broker_run_id is outside the supported integer range");
+                return;
+              }
+              const { data: brokerRun } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: brokerRunId,
+              });
+              if (
+                brokerRun.path !== ".github/workflows/ci.yml" ||
+                brokerRun.event !== "push" ||
+                brokerRun.head_branch !== "main" ||
+                brokerRun.head_sha !== deploySha
+              ) {
+                core.setFailed(`Hotfix broker run ${brokerRunId} does not authorize exact main SHA ${deploySha}`);
+                return;
+              }
+              const brokerJobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: brokerRunId,
+                filter: "latest",
+                per_page: 100,
+              });
+              const brokerJob = brokerJobs.find((candidate) => candidate.name === "hotfix-test-release");
+              const authorizationMarker = brokerJob?.steps?.find(
+                (step) => step.name === "Record exact merged hotfix authorization",
+              );
+              if (!authorizationMarker || authorizationMarker.conclusion !== "success") {
+                core.setFailed(`Hotfix broker run ${brokerRunId} has no successful pre-dispatch authorization marker`);
+                return;
+              }
+              const rawPullNumber = process.env.HOTFIX_PR_NUMBER;
+              if (!/^[1-9]\d*$/.test(rawPullNumber || "")) {
+                core.setFailed("hotfix_pr_number must be a positive pull request number");
+                return;
+              }
+              const pullNumber = Number(rawPullNumber);
+              if (!Number.isSafeInteger(pullNumber)) {
+                core.setFailed("hotfix_pr_number is outside the supported integer range");
+                return;
+              }
+              const associated = await github.paginate(
+                github.rest.repos.listPullRequestsAssociatedWithCommit,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: deploySha,
+                  per_page: 100,
+                },
+              );
+              if (associated.length !== 1) {
+                core.setFailed(`Expected exactly one PR associated with hotfix SHA ${deploySha}, found ${associated.length}`);
+                return;
+              }
+              const pull = associated[0];
+              const hotfixTitle = /^hotfix(?:\([^)]+\))?:\s+\S/u;
+              if (
+                pull.number !== pullNumber ||
+                !pull.merged_at ||
+                pull.base?.ref !== "main" ||
+                pull.merge_commit_sha !== deploySha ||
+                !hotfixTitle.test(pull.title || "")
+              ) {
+                core.setFailed(`PR #${pullNumber} does not authorize the hotfix deploy of ${deploySha}`);
+              }
+              return;
+            }
+            const rawRunId = process.env.CI_RUN_ID;
+            if (!/^[1-9]\d*$/.test(rawRunId)) {
+              core.setFailed("ci_run_id must be a positive GitHub Actions run id");
+              return;
+            }
+
+            const runId = Number(rawRunId);
+            if (!Number.isSafeInteger(runId)) {
+              core.setFailed("ci_run_id is outside the supported integer range");
+              return;
+            }
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+            if (
+              run.path !== ".github/workflows/ci.yml" ||
+              run.event !== "push" ||
+              run.head_branch !== "main" ||
+              run.head_sha !== process.env.DEPLOY_SHA
+            ) {
+              core.setFailed(`CI run ${runId} does not authorize exact main SHA ${process.env.DEPLOY_SHA}`);
+              return;
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              filter: "latest",
+              per_page: 100,
+            });
+            for (const required of ["hub", "ci"]) {
+              const job = jobs.find((candidate) => candidate.name === required);
+              if (!job || job.conclusion !== "success") {
+                core.setFailed(`CI run ${runId} has no successful ${required} gate`);
+                return;
+              }
+            }
+
+  candidate-plan:
+    needs: authorize
+    environment: test
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    outputs:
+      required: ${{ steps.plan.outputs.required }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.deploy_sha }}
+          fetch-depth: 0
+      # Persistent release runners can retain sparse paths and skip-worktree
+      # bits from a previous job. Restore the complete reviewed tree before
+      # loading any local composite action from this checkout.
+      - name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      - id: plan
+        name: Decide whether this SHA freezes a production candidate
+        env:
+          CANDIDATE_SHA: ${{ inputs.deploy_sha }}
+          PREVIOUS_SHA: ${{ inputs.previous_sha }}
+          CANDIDATE_INPUT: ${{ inputs.candidate }}
+          TAGGING_ENABLED: ${{ vars.XMATRIX_PRODUCTION_CANDIDATE_TAGGING_ENABLED }}
+        run: |
+          set -euo pipefail
+          echo "required=false" >> "$GITHUB_OUTPUT"
+          if [ "$TAGGING_ENABLED" != "true" ]; then
+            echo "Candidate tagging kill switch is disabled; skipping candidate-only checks."
+            exit 0
+          fi
+          git fetch --no-tags --force origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/main; then
+            echo "Candidate SHA $CANDIDATE_SHA is not in current main history; skipping candidate-only checks."
+            exit 0
+          fi
+          if ! printf '%s' "$PREVIOUS_SHA" | grep -Eq '^[0-9a-f]{40}$' || printf '%s' "$PREVIOUS_SHA" | grep -Eq '^0+$'; then
+            echo "No trustworthy previous main SHA; not inferring a version bump."
+            exit 0
+          fi
+          git cat-file -e "$PREVIOUS_SHA^{commit}"
+          node scripts/version.mjs check
+          current_version="$(node -p "require('./version.json').version")"
+          previous_version="$(git show "$PREVIOUS_SHA:version.json" | node -pe 'JSON.parse(fs.readFileSync(0,"utf8")).version')"
+          tag="xmatrix-v$current_version"
+          git fetch --tags --force origin
+          existing="$(git rev-parse -q --verify "$tag^{commit}" 2>/dev/null || true)"
+          if [ "$current_version" = "$previous_version" ]; then
+            if [ -n "$existing" ]; then
+              echo "version.json did not change and $tag is already frozen; skipping candidate-only checks."
+              exit 0
+            fi
+            echo "version.json did not change; a missing tag is not a new candidate freeze."
+            exit 0
+          fi
+          echo "required=true" >> "$GITHUB_OUTPUT"
+          echo "Planning candidate checks for version $previous_version -> $current_version at $CANDIDATE_SHA."
+          if [ "$CANDIDATE_INPUT" != "true" ]; then
+            echo "::warning title=Candidate train dispatched without isolation::This run freezes $tag but was dispatched with candidate=false, so it shares the replaceable test-release queue."
+          fi
+
+  candidate-ci:
+    # A hotfix test deployment intentionally does not wait for CI. Candidate
+    # freezing still must: a production tag can never be created from that
+    # fast lane unless the same exact main SHA later passes Hub and aggregate.
+    needs: [authorize, candidate-plan]
+    if: needs.candidate-plan.outputs.required == 'true'
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 22
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Wait for the exact main CI gates before candidate tagging
+        uses: actions/github-script@v7
+        env:
+          DEPLOY_SHA: ${{ inputs.deploy_sha }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+        with:
+          # A runner-side "fetch failed" is retried rather than failing the job.
+          retries: 3
+          script: |
+            const deploySha = process.env.DEPLOY_SHA;
+            const releaseMode = process.env.RELEASE_MODE;
+            if (releaseMode === "ci") return;
+            if (releaseMode !== "hotfix") {
+              core.setFailed("candidate CI gate received an invalid release_mode");
+              return;
+            }
+            for (let attempt = 1; attempt <= 40; attempt += 1) {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "ci.yml",
+                event: "push",
+                branch: "main",
+                per_page: 100,
+              });
+              const exactRuns = data.workflow_runs.filter((run) =>
+                run.event === "push" &&
+                run.head_branch === "main" &&
+                run.head_sha === deploySha,
+              );
+              if (exactRuns.length > 1) {
+                core.setFailed(`Found ${exactRuns.length} CI runs for candidate SHA ${deploySha}; refusing ambiguous authorization.`);
+                return;
+              }
+              if (exactRuns.length === 1) {
+                const run = exactRuns[0];
+                if (run.status === "completed") {
+                  if (run.conclusion !== "success") {
+                    core.setFailed(`Exact main CI run ${run.id} concluded ${run.conclusion || "without success"}`);
+                    return;
+                  }
+                  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    run_id: run.id,
+                    filter: "latest",
+                    per_page: 100,
+                  });
+                  for (const required of ["hub", "ci"]) {
+                    const job = jobs.find((candidate) => candidate.name === required);
+                    if (!job || job.conclusion !== "success") {
+                      core.setFailed(`CI run ${run.id} has no successful ${required} gate`);
+                      return;
+                    }
+                  }
+                  return;
+                }
+              }
+              if (attempt === 40) break;
+              await new Promise((resolve) => setTimeout(resolve, 30_000));
+            }
+            core.setFailed(`Timed out waiting for exact main CI success for candidate SHA ${deploySha}`);
+
+  candidates:
+    needs: candidate-plan
+    if: needs.candidate-plan.outputs.required == 'true'
+    uses: ./.github/workflows/candidate-release.yml
+    with:
+      candidate_sha: ${{ inputs.deploy_sha }}
+
+  deploy:
+    needs: authorize
+    environment: test
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      actions: read
+      contents: read
+    env:
+      XMATRIX_DEPLOY_SHA: ${{ inputs.deploy_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.deploy_sha }}
+          fetch-depth: 0
+      # Restore the complete tree before the local proxy/setup actions; a
+      # previous sparse release checkout can otherwise hide their manifests.
+      - name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Verify exact clean main checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$XMATRIX_DEPLOY_SHA"
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags --force origin refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$XMATRIX_DEPLOY_SHA" refs/remotes/origin/main
+          node scripts/version.mjs check
+
+      # Deployment identity comes from the reviewed test profile; its D1 id is
+      # the fixed TEST_AUTH_D1_DATABASE_ID test-environment variable.
+      - name: Render the test deployment config
+        env:
+          TEST_AUTH_D1_DATABASE_ID: ${{ vars.TEST_AUTH_D1_DATABASE_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/deploy-config.mjs render test
+          node scripts/deploy-config.mjs env test >> "$GITHUB_ENV"
+
+      - name: Verify the exact test D1 identity
+        working-directory: packages/hub
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TEST_AUTH_D1_DATABASE_ID: ${{ vars.TEST_AUTH_D1_DATABASE_ID }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 info AUTH_DB --config "$XMATRIX_HUB_CONFIG" --json \
+            > "$RUNNER_TEMP/test-d1-identity.json"
+          node ../../scripts/wrangler-d1-readback.mjs database \
+            "$RUNNER_TEMP/test-d1-identity.json" \
+            xmatrix-auth-test \
+            "$TEST_AUTH_D1_DATABASE_ID"
+
+      - name: List pending test D1 migrations
+        working-directory: packages/hub
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node ../../scripts/d1-expand-only-migration-policy.mjs migrations
+          pnpm exec wrangler d1 migrations list AUTH_DB --config "$XMATRIX_HUB_CONFIG" --remote
+
+      # A same-version deployment must not overwrite a candidate train's test
+      # evidence while that train is still proving its exact SHA.
+      - name: Wait for an in-progress candidate Test Release before test D1 mutation
+        if: inputs.candidate != 'true'
+        uses: ./.github/actions/wait-for-candidate-test-release
+
+      - name: Recheck main ancestry before test D1 mutation
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force origin refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$XMATRIX_DEPLOY_SHA" refs/remotes/origin/main
+          test -z "$(git status --porcelain)"
+
+      - name: Apply test D1 migrations
+        working-directory: packages/hub
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler d1 migrations apply AUTH_DB --config "$XMATRIX_HUB_CONFIG" --remote
+
+      - name: Read back test D1 schema and ledger
+        working-directory: packages/hub
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          read_d1_json() {
+            local output_file="$1"
+            local query="$2"
+            for attempt in 1 2 3; do
+              if pnpm exec wrangler d1 execute AUTH_DB --config "$XMATRIX_HUB_CONFIG" \
+                --remote --json --command "$query" > "$output_file"; then
+                return 0
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "Test D1 readback failed after ${attempt} attempts" >&2
+                if [ -s "$output_file" ]; then cat "$output_file" >&2; fi
+                return 1
+              fi
+              rm -f "$output_file"
+              sleep "$((attempt * 2))"
+            done
+          }
+          read_d1_json "$RUNNER_TEMP/test-d1-tables.json" \
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('signup_invite_code', 'signup_invite_claim') ORDER BY name;"
+          node ../../scripts/wrangler-d1-readback.mjs tables "$RUNNER_TEMP/test-d1-tables.json" \
+            signup_invite_claim,signup_invite_code
+          read_d1_json "$RUNNER_TEMP/test-d1-ledger.json" \
+            "SELECT name FROM d1_migrations ORDER BY name;"
+          node ../../scripts/wrangler-d1-readback.mjs ledger "$RUNNER_TEMP/test-d1-ledger.json" migrations
+
+      - name: Verify exact-SHA Hub source and bundle
+        run: |
+          set -euo pipefail
+          node scripts/hub-deploy-source-guard.mjs source --expected-sha "$XMATRIX_DEPLOY_SHA"
+          pnpm --filter @xmatrix/protocol build
+          pnpm --dir packages/hub exec wrangler deploy --config "$XMATRIX_HUB_CONFIG" \
+            --dry-run --outdir "$RUNNER_TEMP/test-hub-bundle"
+          node scripts/hub-deploy-source-guard.mjs source --expected-sha "$XMATRIX_DEPLOY_SHA"
+
+      - name: Wait for an in-progress candidate Test Release before test Hub mutation
+        if: inputs.candidate != 'true'
+        uses: ./.github/actions/wait-for-candidate-test-release
+
+      - name: Recheck main ancestry before test Hub mutation
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force origin refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$XMATRIX_DEPLOY_SHA" refs/remotes/origin/main
+          test -z "$(git status --porcelain)"
+
+      - name: Deploy test Hub with secrets atomically
+        working-directory: packages/hub
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          GOOGLE_ENABLED: ${{ vars.NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          RELAY_R2_CAPABILITY_HMAC_SECRET: ${{ secrets.RELAY_R2_CAPABILITY_HMAC_SECRET }}
+          XMATRIX_MOCK_AUTH_TOKEN: ${{ secrets.XMATRIX_MOCK_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          secrets_file="$RUNNER_TEMP/test-hub-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          node <<'EOF' > "$secrets_file"
+          const googleEnabled = process.env.GOOGLE_ENABLED?.trim();
+          if (googleEnabled !== "true" && googleEnabled !== "false") {
+            throw new Error("NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED must be exactly true or false");
+          }
+          const required = [
+            "BETTER_AUTH_SECRET",
+            "RELAY_R2_CAPABILITY_HMAC_SECRET",
+            "XMATRIX_MOCK_AUTH_TOKEN",
+          ];
+          if (googleEnabled === "true") {
+            required.push("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET");
+          } else if (process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_SECRET) {
+            throw new Error("Remove test Google OAuth secrets while Google login is disabled");
+          }
+          const payload = Object.fromEntries(required.map((key) => {
+            if (!process.env[key]) throw new Error(`Missing test secret ${key}`);
+            return [key, process.env[key]];
+          }));
+          process.stdout.write(JSON.stringify(payload));
+          EOF
+          chmod 600 "$secrets_file"
+          pnpm exec wrangler deploy --config "$XMATRIX_HUB_CONFIG" --secrets-file "$secrets_file"
+          secret_names_file="$RUNNER_TEMP/test-hub-secret-names.json"
+          for attempt in 1 2 3; do
+            if pnpm exec wrangler secret list --config "$XMATRIX_HUB_CONFIG" --format json > "$secret_names_file"; then
+              break
+            fi
+            rm -f "$secret_names_file"
+            if [ "$attempt" -eq 3 ]; then
+              echo "Timed out reading deployed test Hub secret names after ${attempt} attempts" >&2
+              exit 1
+            fi
+            sleep "$((attempt * 2))"
+          done
+          test -s "$secret_names_file"
+          secret_policy=test-hub-email-only
+          if [ "$GOOGLE_ENABLED" = "true" ]; then secret_policy=test-hub-google; fi
+          node ../../scripts/wrangler-secret-policy.mjs \
+            "$secret_names_file" \
+            --policy="$secret_policy"
+
+      - name: Verify test Hub health
+        run: >-
+          node scripts/hub-postdeploy-smoke.mjs
+          --url "$XMATRIX_HUB_ORIGIN/"
+          --attempts 12
+          --delay-ms 5000
+
+      - name: Build test Web with fixed isolated origins
+        env:
+          NEXT_TEST_WASM: "1"
+          NEXT_PUBLIC_XMATRIX_WEB_BUILD_ID: ${{ inputs.deploy_sha }}
+          NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED: ${{ vars.NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED }}
+        run: pnpm --filter @xmatrix/web build:cloudflare
+
+      - name: Wait for an in-progress candidate Test Release before test Web mutation
+        if: inputs.candidate != 'true'
+        uses: ./.github/actions/wait-for-candidate-test-release
+
+      - name: Recheck main ancestry before test Web mutation
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force origin refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$XMATRIX_DEPLOY_SHA" refs/remotes/origin/main
+          test -z "$(git status --porcelain)"
+
+      - name: Deploy test Web
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          XMATRIX_RELEASE_GITHUB_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          secrets_file="$RUNNER_TEMP/test-web-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          node <<'EOF' > "$secrets_file"
+          if (!process.env.XMATRIX_RELEASE_GITHUB_TOKEN) throw new Error("Missing test GitHub release token");
+          process.stdout.write(JSON.stringify({ GITHUB_TOKEN: process.env.XMATRIX_RELEASE_GITHUB_TOKEN }));
+          EOF
+          chmod 600 "$secrets_file"
+          pnpm exec wrangler deploy --config "$XMATRIX_WEB_CONFIG" --secrets-file "$secrets_file"
+          pnpm exec wrangler secret list --config "$XMATRIX_WEB_CONFIG" --format json \
+            > "$RUNNER_TEMP/test-web-secret-names.json"
+          node ../../scripts/wrangler-secret-policy.mjs \
+            "$RUNNER_TEMP/test-web-secret-names.json" --policy=web
+
+      - name: Verify live test Web build identity
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            build_id="$(curl -fsS --max-time 15 "$XMATRIX_APP_ORIGIN/api/web-build" | node -pe 'JSON.parse(fs.readFileSync(0,"utf8")).buildId' || true)"
+            if [ "$build_id" = "$XMATRIX_DEPLOY_SHA" ]; then exit 0; fi
+            sleep 5
+          done
+          echo "$XMATRIX_APP_ORIGIN did not expose build $XMATRIX_DEPLOY_SHA" >&2
+          exit 1
+
+      - name: Verify test login preflight remains reachable
+        run: curl -fsS --max-time 15 "$XMATRIX_HUB_ORIGIN/api/auth/get-session" > /dev/null
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        continue-on-error: true
+        with:
+          name: test-release-evidence-${{ inputs.deploy_sha }}
+          path: |
+            ${{ runner.temp }}/test-d1-identity.json
+            ${{ runner.temp }}/test-d1-ledger.json
+            ${{ runner.temp }}/test-d1-tables.json
+          retention-days: 30
+
+      - name: Verify test HTTP redirects to HTTPS
+        run: node scripts/https-postdeploy-smoke.mjs "$XMATRIX_APP_ORIGIN" "$XMATRIX_HUB_ORIGIN"
+
+  deep-smoke:
+    needs: [candidate-plan, deploy]
+    if: needs.candidate-plan.outputs.required == 'true'
+    environment: test
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.deploy_sha }}
+      # Candidate smoke shares persistent release runners with deployment.
+      # Do not load local actions until the exact checked-out tree is whole.
+      - name: Restore full checkout after stale sparse state
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s git sparse-checkout disable || true
+          git config --worktree --unset-all core.sparseCheckout || true
+          git config --worktree --unset-all core.sparseCheckoutCone || true
+          git config --local --unset-all core.sparseCheckout || true
+          git config --local --unset-all core.sparseCheckoutCone || true
+          git read-tree -mu HEAD
+          test -f .github/actions/clear-linux-proxy/action.yml
+          test -f .github/actions/setup-pnpm-node/action.yml
+      - uses: ./.github/actions/clear-linux-proxy
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      - name: Verify candidate authenticated message, reconnect, R2, and cleanup paths
+        env:
+          XMATRIX_MOCK_AUTH_TOKEN: ${{ secrets.XMATRIX_MOCK_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          XMATRIX_HUB_ORIGIN="$(node scripts/deploy-config.mjs origin test hub)"
+          node scripts/hub-postdeploy-smoke.mjs --url "$XMATRIX_HUB_ORIGIN/" --attempts 12 --delay-ms 5000
+          node scripts/hub-network-e2e/run-reconnect-catchup.mjs \
+            --hub-url "$XMATRIX_HUB_ORIGIN" \
+            --token "$XMATRIX_MOCK_AUTH_TOKEN" \
+            --messages 3 --exercise-attachment --cleanup --skip-local-worker \
+            --results-dir "$RUNNER_TEMP/test-release-smoke"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        continue-on-error: true
+        with:
+          name: test-release-deep-smoke-${{ inputs.deploy_sha }}
+          path: ${{ runner.temp }}/test-release-smoke/*.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  candidate-tag-authorize:
+    needs: [candidate-plan, candidate-ci, candidates, deploy, deep-smoke]
+    if: >-
+      always() &&
+      needs.candidate-plan.outputs.required == 'true' &&
+      needs.candidate-ci.result == 'success' &&
+      needs.candidates.result == 'success' &&
+      needs.deploy.result == 'success' &&
+      needs.deep-smoke.result == 'success'
+    environment: test
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions: {}
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - id: gate
+        name: Read the candidate-tag kill switch from test
+        env:
+          TAGGING_ENABLED: ${{ vars.XMATRIX_PRODUCTION_CANDIDATE_TAGGING_ENABLED }}
+        run: |
+          if [ "$TAGGING_ENABLED" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Candidate tagging kill switch is disabled."
+          fi
+
+  candidate-tag:
+    needs: [candidate-tag-authorize]
+    if: >-
+      always() &&
+      needs.candidate-tag-authorize.result == 'success' &&
+      needs.candidate-tag-authorize.outputs.enabled == 'true'
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    outputs:
+      available: ${{ steps.freeze.outputs.available }}
+      created: ${{ steps.freeze.outputs.created }}
+      tag: ${{ steps.freeze.outputs.tag }}
+    steps:
+      - name: Require the candidate-tag GitHub token
+        env:
+          XMATRIX_RELEASE_GITHUB_TOKEN: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$XMATRIX_RELEASE_GITHUB_TOKEN" ]; then
+            echo "Missing repository candidate-tag GitHub token" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.deploy_sha }}
+          fetch-depth: 0
+          token: ${{ secrets.XMATRIX_RELEASE_GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-pnpm-node
+        with:
+          install-deps: "false"
+      - id: freeze
+        name: Create immutable annotated candidate tag on version bump
+        env:
+          CANDIDATE_SHA: ${{ inputs.deploy_sha }}
+          PREVIOUS_SHA: ${{ inputs.previous_sha }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$PREVIOUS_SHA" | grep -Eq '^[0-9a-f]{40}$' || printf '%s' "$PREVIOUS_SHA" | grep -Eq '^0+$'; then
+            echo "No trustworthy previous main SHA; not inferring a version bump."
+            exit 0
+          fi
+          git fetch --no-tags --force origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/main; then
+            echo "Candidate SHA $CANDIDATE_SHA is not in current main history; refusing to freeze it." >&2
+            exit 1
+          fi
+          current_version="$(node -p "require('./version.json').version")"
+          previous_version="$(git show "$PREVIOUS_SHA:version.json" | node -pe 'JSON.parse(fs.readFileSync(0,"utf8")).version')"
+          tag="xmatrix-v$current_version"
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          echo "created=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          git fetch --tags --force origin
+          existing="$(git rev-parse -q --verify "$tag^{commit}" 2>/dev/null || true)"
+          if [ "$current_version" = "$previous_version" ]; then
+            if [ -n "$existing" ]; then
+              echo "version.json did not change and $tag is already frozen; test passed without moving it."
+              exit 0
+            fi
+            echo "version.json did not change; a missing tag is not a new candidate freeze."
+            exit 0
+          fi
+          node scripts/production-release-policy.mjs validate-candidate "$current_version" "$CANDIDATE_SHA" "$existing"
+          if [ -n "$existing" ] && [ "$(git cat-file -t "refs/tags/$tag")" != "tag" ]; then
+            echo "$tag exists but is not an annotated tag." >&2
+            exit 1
+          fi
+          if [ "$existing" = "$CANDIDATE_SHA" ]; then
+            echo "$tag already points to the exact candidate SHA."
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "$tag" "$CANDIDATE_SHA" -m "xMatrix production candidate $current_version"
+          git push origin "refs/tags/$tag"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+  release-annotation:
+    needs: [deploy, candidate-tag]
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
+    permissions: {}
+    steps:
+      - name: Annotate test and production-candidate status
+        env:
+          CANDIDATE_AVAILABLE: ${{ needs.candidate-tag.outputs.available }}
+          CANDIDATE_CREATED: ${{ needs.candidate-tag.outputs.created }}
+          CANDIDATE_RESULT: ${{ needs.candidate-tag.result }}
+          CANDIDATE_TAG: ${{ needs.candidate-tag.outputs.tag }}
+          DEPLOY_SHA: ${{ inputs.deploy_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$CANDIDATE_CREATED" = "true" ]; then
+            echo "::notice title=Test deployed; production candidate created::$DEPLOY_SHA was deployed to test. New tag $CANDIDATE_TAG can be used to request a production release."
+          elif [ "$CANDIDATE_AVAILABLE" = "true" ]; then
+            echo "::notice title=Test deployed; production candidate already available::$DEPLOY_SHA was deployed to test. Existing tag $CANDIDATE_TAG can be used to request a production release."
+          elif [ "$CANDIDATE_RESULT" = "failure" ]; then
+            echo "::warning title=Test deployed; production candidate failed::$DEPLOY_SHA was deployed to test, but production-candidate tagging failed. This SHA cannot be used for a production release."
+          else
+            echo "::notice title=Test-only deployment::$DEPLOY_SHA was deployed to test without a new production-candidate tag. This SHA cannot be used for a production release."
+          fi

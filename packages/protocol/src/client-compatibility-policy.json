@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 2,
+  "minimumVersions": {
+    "app": "0.16.160",
+    "cli": "0.16.698",
+    "daemon": "0.16.698"
+  },
+  "upgradeUrl": "https://xmatrix.sh/download"
+}

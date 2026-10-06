@@ -1,0 +1,106 @@
+{
+  "runtime": "claude",
+  "sourceUrl": "https://code.claude.com/docs/en/commands",
+  "sourceKind": "docs-table",
+  "version": "2026-07-12",
+  "notes": "Live sessions may also advertise slash_commands via system/init; merge as additive overlay later.",
+  "commands": [
+    {
+      "token": "/model",
+      "label": "Switch model",
+      "description": "Adjust which model Claude Code uses.",
+      "mode": "typed",
+      "argumentSource": "agent-models"
+    },
+    {
+      "token": "/effort",
+      "label": "Effort",
+      "description": "Adjust how much reasoning the model applies.",
+      "mode": "typed",
+      "argumentSource": "agent-efforts"
+    },
+    {
+      "token": "/goal",
+      "label": "Set goal",
+      "description": "Set a goal Claude keeps working toward.",
+      "mode": "typed",
+      "freeform": true
+    },
+    {
+      "token": "/compact",
+      "label": "Compact context",
+      "description": "Summarize conversation to free context.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/clear",
+      "label": "Clear conversation",
+      "description": "Start a new conversation with empty context.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/context",
+      "label": "Context usage",
+      "description": "Visualize current context usage.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/help",
+      "label": "Help",
+      "description": "Show help and available commands.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/plan",
+      "label": "Plan mode",
+      "description": "Switch into plan mode before a large change.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/resume",
+      "label": "Resume",
+      "description": "Return to an earlier conversation.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/config",
+      "label": "Settings",
+      "description": "Open Claude Code settings.",
+      "mode": "passthrough",
+      "freeform": true
+    },
+    {
+      "token": "/mcp",
+      "label": "MCP",
+      "description": "Manage MCP server configuration.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/permissions",
+      "label": "Permissions",
+      "description": "Set approval rules for tools.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/doctor",
+      "label": "Doctor",
+      "description": "Run a setup checkup.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/usage",
+      "label": "Usage",
+      "description": "Show usage / cost information.",
+      "mode": "passthrough"
+    },
+    {
+      "token": "/init",
+      "label": "Init CLAUDE.md",
+      "description": "Initialize project CLAUDE.md guide.",
+      "mode": "passthrough"
+    }
+  ]
+}

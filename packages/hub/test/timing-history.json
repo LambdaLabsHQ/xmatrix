@@ -1,0 +1,2144 @@
+{
+  "schemaVersion": 1,
+  "suite": "hub",
+  "generatedAt": "2026-10-04T21:17:47.472Z",
+  "sourceRevision": "8c73449f164a817b1b8ce50c5cc1b6a355d8eac0",
+  "files": {
+    "test/machine-name-routes.test.mjs": {
+      "durationMs": 700,
+      "peakRssBytes": 230000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-repository-catalog.test.mjs": {
+      "durationMs": 200,
+      "peakRssBytes": 150000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-repository-summon.e2e.mjs": {
+      "durationMs": 11000,
+      "peakRssBytes": 200000000,
+      "peakFdCount": 24,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/reborn-failure-notice-postgres.test.mjs": {
+      "durationMs": 363,
+      "peakRssBytes": 155615232,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-routing-quota-refresh.test.mjs": {
+      "durationMs": 655,
+      "peakRssBytes": 166363136,
+      "peakFdCount": 15,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-quota-persistence.test.mjs": {
+      "durationMs": 745,
+      "peakRssBytes": 270499840,
+      "peakFdCount": 15,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-routing-evaluation.test.mjs": {
+      "durationMs": 270,
+      "peakRssBytes": 118521856,
+      "peakFdCount": 15,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-routing-prerequisite-input.test.mjs": {
+      "durationMs": 275,
+      "peakRssBytes": 137920512,
+      "peakFdCount": 15,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/admin-platform-access.test.mjs": {
+      "durationMs": 135,
+      "peakRssBytes": 83927046,
+      "peakFdCount": 20,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-attachment-live-delivery.e2e.mjs": {
+      "durationMs": 2833,
+      "peakRssBytes": 438828306,
+      "peakFdCount": 37,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-channel-ack-cursor-replay.test.mjs": {
+      "durationMs": 186,
+      "peakRssBytes": 99947519,
+      "peakFdCount": 20,
+      "samples": 51,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-authority-routing.test.mjs": {
+      "durationMs": 137,
+      "peakRssBytes": 82313216,
+      "peakFdCount": 20,
+      "samples": 2,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-interrupt-status.test.mjs": {
+      "durationMs": 157,
+      "peakRssBytes": 93240775,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-presence-idempotency.test.mjs": {
+      "durationMs": 237,
+      "peakRssBytes": 121141120,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-presentation.test.mjs": {
+      "durationMs": 223,
+      "peakRssBytes": 108913911,
+      "peakFdCount": 20,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-scheduled-unregister.test.mjs": {
+      "durationMs": 135,
+      "peakRssBytes": 83682058,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-trace-publication-queue.test.mjs": {
+      "durationMs": 156,
+      "peakRssBytes": 92257165,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-mention-daemon-reconnect.e2e.mjs": {
+      "durationMs": 8313,
+      "peakRssBytes": 941258704,
+      "peakFdCount": 63,
+      "samples": 53,
+      "failures": 2,
+      "timeouts": 1
+    },
+    "test/agent-mention-daemon-lifecycle.e2e.mjs": {
+      "durationMs": 7007,
+      "peakRssBytes": 941258704,
+      "peakFdCount": 63,
+      "samples": 53,
+      "failures": 2,
+      "timeouts": 1
+    },
+    "test/agent-instance-owner-delete.e2e.mjs": {
+      "durationMs": 12707,
+      "peakRssBytes": 941258704,
+      "peakFdCount": 63,
+      "samples": 53,
+      "failures": 2,
+      "timeouts": 1
+    },
+    "test/agent-mention-workspace-spawn.e2e.mjs": {
+      "durationMs": 9744,
+      "peakRssBytes": 521401325,
+      "peakFdCount": 41,
+      "samples": 53,
+      "failures": 1,
+      "timeouts": 1
+    },
+    "test/agent-message-header-presentation.e2e.mjs": {
+      "durationMs": 3889,
+      "peakRssBytes": 450592768,
+      "peakFdCount": 33,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-terminal-cleanup.e2e.mjs": {
+      "durationMs": 5575,
+      "peakRssBytes": 498622018,
+      "peakFdCount": 39,
+      "samples": 53,
+      "failures": 1,
+      "timeouts": 1
+    },
+    "test/agent-run-token-context.test.mjs": {
+      "durationMs": 136,
+      "peakRssBytes": 84590758,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-run-upload-scope.test.mjs": {
+      "durationMs": 134,
+      "peakRssBytes": 83976125,
+      "peakFdCount": 20,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-start-failure-notice.e2e.mjs": {
+      "durationMs": 2844,
+      "peakRssBytes": 446895040,
+      "peakFdCount": 38,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/app-connector-message-author.test.mjs": {
+      "durationMs": 189,
+      "peakRssBytes": 102350353,
+      "peakFdCount": 20,
+      "samples": 42,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/auth-authority-write-fence.test.mjs": {
+      "durationMs": 64,
+      "peakRssBytes": 51095175,
+      "peakFdCount": 15,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/auth-authority.test.mjs": {
+      "durationMs": 188,
+      "peakRssBytes": 104549184,
+      "peakFdCount": 19,
+      "samples": 45,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/auth-jwks-cache.test.mjs": {
+      "durationMs": 226,
+      "peakRssBytes": 110588725,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/auth-postgres-models.test.mjs": {
+      "durationMs": 132,
+      "peakRssBytes": 83660499,
+      "peakFdCount": 20,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/auth-postgres-shadow-outbox.test.mjs": {
+      "durationMs": 63,
+      "peakRssBytes": 50206607,
+      "peakFdCount": 15,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/channel-about-session.e2e.mjs": {
+      "durationMs": 8056,
+      "peakRssBytes": 912640283,
+      "peakFdCount": 50,
+      "samples": 53,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/authority-probe-backoff.test.mjs": {
+      "durationMs": 139,
+      "peakRssBytes": 87270069,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 2,
+      "timeouts": 0
+    },
+    "test/authority-product-pagination.e2e.mjs": {
+      "durationMs": 4981,
+      "peakRssBytes": 500786018,
+      "peakFdCount": 43,
+      "samples": 53,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/automation-member-replacement-route.test.mjs": {
+      "durationMs": 400,
+      "peakRssBytes": 103481826,
+      "peakFdCount": 19,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/better-auth-cookie-domain.test.mjs": {
+      "durationMs": 135,
+      "peakRssBytes": 83465130,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/better-auth-error-policy.test.mjs": {
+      "durationMs": 133,
+      "peakRssBytes": 84178886,
+      "peakFdCount": 19,
+      "samples": 43,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/better-auth-request-lifecycle.test.mjs": {
+      "durationMs": 143,
+      "peakRssBytes": 87217738,
+      "peakFdCount": 19,
+      "samples": 43,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/billing-read-access.test.mjs": {
+      "durationMs": 152,
+      "peakRssBytes": 88607130,
+      "peakFdCount": 21,
+      "samples": 3,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/billing-stripe-behavior.test.mjs": {
+      "durationMs": 148,
+      "peakRssBytes": 89054621,
+      "peakFdCount": 20,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/channel-catalog-deadline.test.mjs": {
+      "durationMs": 155,
+      "peakRssBytes": 87196959,
+      "peakFdCount": 21,
+      "samples": 3,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/channel-catalog-observability.test.mjs": {
+      "durationMs": 135,
+      "peakRssBytes": 83742447,
+      "peakFdCount": 21,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/channel-catalog-sync.test.mjs": {
+      "durationMs": 141,
+      "peakRssBytes": 86550216,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/channel-create-member-permission.e2e.mjs": {
+      "durationMs": 3112,
+      "peakRssBytes": 442283205,
+      "peakFdCount": 38,
+      "samples": 53,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/channel-delivery-intent.test.mjs": {
+      "durationMs": 149,
+      "peakRssBytes": 90478778,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/channel-duplicate-names.e2e.mjs": {
+      "durationMs": 2803,
+      "peakRssBytes": 439090848,
+      "peakFdCount": 38,
+      "samples": 43,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/channel-family-authority.e2e.mjs": {
+      "durationMs": 5895,
+      "peakRssBytes": 670600845,
+      "peakFdCount": 48,
+      "samples": 53,
+      "failures": 1,
+      "timeouts": 1
+    },
+    "test/channel-history-content-revision.e2e.mjs": {
+      "durationMs": 4624,
+      "peakRssBytes": 501253115,
+      "peakFdCount": 39,
+      "samples": 53,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/channel-history-page-window.e2e.mjs": {
+      "durationMs": 6419,
+      "peakRssBytes": 512393173,
+      "peakFdCount": 43,
+      "samples": 53,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/channel-message-shape-contract.test.mjs": {
+      "durationMs": 171,
+      "peakRssBytes": 95188940,
+      "peakFdCount": 19,
+      "samples": 51,
+      "failures": 1,
+      "timeouts": 0
+    },
+    "test/channel-response-human-presence.test.mjs": {
+      "durationMs": 400,
+      "peakRssBytes": 102813332,
+      "peakFdCount": 19,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/client-compatibility-gate.test.mjs": {
+      "durationMs": 169,
+      "peakRssBytes": 95281787,
+      "peakFdCount": 19,
+      "samples": 51,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/client-compatibility-runtime-gate.test.mjs": {
+      "durationMs": 195,
+      "peakRssBytes": 101068859,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/client-network-metrics.test.mjs": {
+      "durationMs": 130,
+      "peakRssBytes": 83927028,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/device-auth-redemption.test.mjs": {
+      "durationMs": 202,
+      "peakRssBytes": 73990144,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/github-actions-write.test.mjs": {
+      "durationMs": 315,
+      "peakRssBytes": 95055380,
+      "peakFdCount": 20,
+      "samples": 3,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/github-pull-request-merge.test.mjs": {
+      "durationMs": 541,
+      "peakRssBytes": 95839683,
+      "peakFdCount": 20,
+      "samples": 3,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/github-repository-completion-activity.test.mjs": {
+      "durationMs": 361,
+      "peakRssBytes": 95778999,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/github-repository-token-scope.test.mjs": {
+      "durationMs": 307,
+      "peakRssBytes": 94400647,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/github-subscription-restoration.test.mjs": {
+      "durationMs": 139,
+      "peakRssBytes": 85362088,
+      "peakFdCount": 19,
+      "samples": 41,
+      "failures": 2,
+      "timeouts": 0
+    },
+    "test/hub-test-resources.test.mjs": {
+      "durationMs": 65,
+      "peakRssBytes": 49201474,
+      "peakFdCount": 15,
+      "samples": 41,
+      "failures": 1,
+      "timeouts": 0
+    },
+    "test/hub-test-pool.test.mjs": {
+      "durationMs": 1200,
+      "peakRssBytes": 90000000,
+      "peakFdCount": 20,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/hub-test-slots.test.mjs": {
+      "durationMs": 1500,
+      "peakRssBytes": 120000000,
+      "peakFdCount": 24,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/human-avatar-contract.test.mjs": {
+      "durationMs": 162,
+      "peakRssBytes": 92979859,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/human-handle-mint.test.mjs": {
+      "durationMs": 259,
+      "peakRssBytes": 129708442,
+      "peakFdCount": 20,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/human-live-delivery-parity.test.mjs": {
+      "durationMs": 153,
+      "peakRssBytes": 92274515,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/human-member-presence-labels.test.mjs": {
+      "durationMs": 134,
+      "peakRssBytes": 84017778,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/index-routes-admin-operator-token.test.mjs": {
+      "durationMs": 143,
+      "peakRssBytes": 87586215,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/live-delivery-retry.test.mjs": {
+      "durationMs": 139,
+      "peakRssBytes": 85650345,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-daemon-activation-transport.test.mjs": {
+      "durationMs": 154,
+      "peakRssBytes": 92673770,
+      "peakFdCount": 19,
+      "samples": 41,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-machine-daemon-port.test.mjs": {
+      "durationMs": 276,
+      "peakRssBytes": 129979169,
+      "peakFdCount": 21,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-daemon-deliverable.test.mjs": {
+      "durationMs": 20,
+      "peakRssBytes": 45000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-daemon-wake-signals.test.mjs": {
+      "durationMs": 145,
+      "peakRssBytes": 83583490,
+      "peakFdCount": 20,
+      "samples": 28,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-daemon-wake.test.mjs": {
+      "durationMs": 173,
+      "peakRssBytes": 97501240,
+      "peakFdCount": 19,
+      "samples": 51,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-run-failure-humanize.test.mjs": {
+      "durationMs": 164,
+      "peakRssBytes": 95385272,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/management-agent-identity.e2e.mjs": {
+      "durationMs": 4014,
+      "peakRssBytes": 475843764,
+      "peakFdCount": 37,
+      "samples": 53,
+      "failures": 2,
+      "timeouts": 0
+    },
+    "test/mention-attention-family.e2e.mjs": {
+      "durationMs": 3321,
+      "peakRssBytes": 684531765,
+      "peakFdCount": 46,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/message-attachment-product-media.test.mjs": {
+      "durationMs": 158,
+      "peakRssBytes": 92202827,
+      "peakFdCount": 20,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/message-permanent-delete.e2e.mjs": {
+      "durationMs": 2739,
+      "peakRssBytes": 437271404,
+      "peakFdCount": 38,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/message-receipt-selection.test.mjs": {
+      "durationMs": 132,
+      "peakRssBytes": 73220096,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/persistent-agent-run-permissions.e2e.mjs": {
+      "durationMs": 6986,
+      "peakRssBytes": 794964469,
+      "peakFdCount": 42,
+      "samples": 53,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/platform-admin-overview.e2e.mjs": {
+      "durationMs": 14197,
+      "peakRssBytes": 512137511,
+      "peakFdCount": 37,
+      "samples": 53,
+      "failures": 1,
+      "timeouts": 1
+    },
+    "test/postgres-admin-overview.test.mjs": {
+      "durationMs": 198,
+      "peakRssBytes": 107860333,
+      "peakFdCount": 19,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-agent-launch-coordinator.test.mjs": {
+      "durationMs": 256,
+      "peakRssBytes": 127533838,
+      "peakFdCount": 21,
+      "samples": 28,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-authority-fleet.test.mjs": {
+      "durationMs": 189,
+      "peakRssBytes": 104932199,
+      "peakFdCount": 19,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/spaces.test.mjs": {
+      "durationMs": 400,
+      "peakRssBytes": 150000000,
+      "peakFdCount": 20,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/request-error-status.test.mjs": {
+      "durationMs": 400,
+      "peakRssBytes": 150000000,
+      "peakFdCount": 20,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-content-authority.test.mjs": {
+      "durationMs": 201,
+      "peakRssBytes": 107741938,
+      "peakFdCount": 19,
+      "samples": 46,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-error-classification.test.mjs": {
+      "durationMs": 141,
+      "peakRssBytes": 87467488,
+      "peakFdCount": 19,
+      "samples": 41,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-issue-batch-wake.test.mjs": {
+      "durationMs": 255,
+      "peakRssBytes": 127669039,
+      "peakFdCount": 19,
+      "samples": 45,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-message-authority.test.mjs": {
+      "durationMs": 276,
+      "peakRssBytes": 134687034,
+      "peakFdCount": 19,
+      "samples": 46,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-message-inspect.test.mjs": {
+      "durationMs": 250,
+      "peakRssBytes": 111050752,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-observability.test.mjs": {
+      "durationMs": 135,
+      "peakRssBytes": 84209908,
+      "peakFdCount": 19,
+      "samples": 48,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-readiness.test.mjs": {
+      "durationMs": 210,
+      "peakRssBytes": 109412153,
+      "peakFdCount": 20,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-runtime-domain-routing.test.mjs": {
+      "durationMs": 212,
+      "peakRssBytes": 112831037,
+      "peakFdCount": 20,
+      "samples": 25,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-scheduled-occurrence-fleet.test.mjs": {
+      "durationMs": 184,
+      "peakRssBytes": 105423310,
+      "peakFdCount": 19,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-scheduled-run-cleanup.test.mjs": {
+      "durationMs": 187,
+      "peakRssBytes": 105238282,
+      "peakFdCount": 20,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-trace-access-authority.test.mjs": {
+      "durationMs": 214,
+      "peakRssBytes": 111173434,
+      "peakFdCount": 19,
+      "samples": 45,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-user-preference-authority.test.mjs": {
+      "durationMs": 213,
+      "peakRssBytes": 111357385,
+      "peakFdCount": 19,
+      "samples": 43,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-workspace-authority.test.mjs": {
+      "durationMs": 200,
+      "peakRssBytes": 108558476,
+      "peakFdCount": 20,
+      "samples": 31,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/product-agent-intervention.e2e.mjs": {
+      "durationMs": 3079,
+      "peakRssBytes": 452496140,
+      "peakFdCount": 37,
+      "samples": 53,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/product-agent-intervention.test.mjs": {
+      "durationMs": 152,
+      "peakRssBytes": 90898157,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/product-agent-mention-workspace-required.test.mjs": {
+      "durationMs": 311,
+      "peakRssBytes": 141626534,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/product-agent-model-effort.test.mjs": {
+      "durationMs": 232,
+      "peakRssBytes": 107184128,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/product-channel-about-trigger.test.mjs": {
+      "durationMs": 235,
+      "peakRssBytes": 121520397,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/product-channel-read-fanout.test.mjs": {
+      "durationMs": 144,
+      "peakRssBytes": 89475725,
+      "peakFdCount": 19,
+      "samples": 47,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/relay-authority-locator.test.mjs": {
+      "durationMs": 163,
+      "peakRssBytes": 86839261,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/relay-authority-schedule-occurrence.contract.test.mjs": {
+      "durationMs": 343,
+      "peakRssBytes": 161426993,
+      "peakFdCount": 15,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/relay-channel-cold-history.test.mjs": {
+      "durationMs": 201,
+      "peakRssBytes": 102798337,
+      "peakFdCount": 19,
+      "samples": 51,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/relay-postgres-channel-coordinator.e2e.mjs": {
+      "durationMs": 1368,
+      "peakRssBytes": 434053404,
+      "peakFdCount": 32,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/relay-postgres-channel-coordinator.test.mjs": {
+      "durationMs": 152,
+      "peakRssBytes": 92555503,
+      "peakFdCount": 19,
+      "samples": 44,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/relay-r2-upload-private-api.test.mjs": {
+      "durationMs": 136,
+      "peakRssBytes": 84447780,
+      "peakFdCount": 20,
+      "samples": 41,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/reply-recovery-result.test.mjs": {
+      "durationMs": 200,
+      "peakRssBytes": 101072896,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/runtime-cell-locator.test.mjs": {
+      "durationMs": 144,
+      "peakRssBytes": 86897375,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/runtime-channel-family-history-routing.test.mjs": {
+      "durationMs": 253,
+      "peakRssBytes": 125058342,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/runtime-route-directory-delivery.test.mjs": {
+      "durationMs": 654,
+      "peakRssBytes": 88589603,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/runtime-route-directory.contract.test.mjs": {
+      "durationMs": 153,
+      "peakRssBytes": 88281875,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/runtime-transport-error.test.mjs": {
+      "durationMs": 304,
+      "peakRssBytes": 147636904,
+      "peakFdCount": 15,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/scheduled-message-authority.test.mjs": {
+      "durationMs": 167,
+      "peakRssBytes": 97016517,
+      "peakFdCount": 19,
+      "samples": 51,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/scheduled-run-cleanup.contract.test.mjs": {
+      "durationMs": 333,
+      "peakRssBytes": 156978903,
+      "peakFdCount": 15,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/scheduled-run-terminal-reap.test.mjs": {
+      "durationMs": 266,
+      "peakRssBytes": 135176339,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/automation-api.e2e.mjs": {
+      "durationMs": 10865,
+      "peakRssBytes": 522404395,
+      "peakFdCount": 67,
+      "samples": 53,
+      "failures": 2,
+      "timeouts": 1
+    },
+    "test/automation-delivery.e2e.mjs": {
+      "durationMs": 11810,
+      "peakRssBytes": 522404395,
+      "peakFdCount": 67,
+      "samples": 53,
+      "failures": 2,
+      "timeouts": 1
+    },
+    "test/automation-evaluator-binding.test.mjs": {
+      "durationMs": 130,
+      "peakRssBytes": 73007104,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/automation-lifecycle.test.mjs": {
+      "durationMs": 250,
+      "peakRssBytes": 119794076,
+      "peakFdCount": 20,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/automation-rollout-config.test.mjs": {
+      "durationMs": 62,
+      "peakRssBytes": 48692412,
+      "peakFdCount": 15,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/server-error-diagnostic.test.mjs": {
+      "durationMs": 135,
+      "peakRssBytes": 83841464,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/space-fanout-channel-catalog.test.mjs": {
+      "durationMs": 154,
+      "peakRssBytes": 90753633,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/space-invite-token.test.mjs": {
+      "durationMs": 133,
+      "peakRssBytes": 83127993,
+      "peakFdCount": 20,
+      "samples": 3,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/space-member-creation-policy.e2e.mjs": {
+      "durationMs": 5946,
+      "peakRssBytes": 501685789,
+      "peakFdCount": 55,
+      "samples": 53,
+      "failures": 0,
+      "timeouts": 1
+    },
+    "test/space-update-idempotency.test.mjs": {
+      "durationMs": 64,
+      "peakRssBytes": 51288460,
+      "peakFdCount": 15,
+      "samples": 50,
+      "failures": 1,
+      "timeouts": 0
+    },
+    "test/test-environment-access.test.mjs": {
+      "durationMs": 133,
+      "peakRssBytes": 83770834,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/trace-authorization-batch.test.mjs": {
+      "durationMs": 133,
+      "peakRssBytes": 83730236,
+      "peakFdCount": 19,
+      "samples": 50,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/user-preference-postgres-authority.test.mjs": {
+      "durationMs": 187,
+      "peakRssBytes": 104602199,
+      "peakFdCount": 19,
+      "samples": 45,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/user-space-preferences.e2e.mjs": {
+      "durationMs": 4600,
+      "peakRssBytes": 501253115,
+      "peakFdCount": 39,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/workspace-registry.e2e.mjs": {
+      "durationMs": 2405,
+      "peakRssBytes": 438955548,
+      "peakFdCount": 37,
+      "samples": 52,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-launch-choice.test.mjs": {
+      "durationMs": 278,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-launch-context.test.mjs": {
+      "durationMs": 301,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-launch-dispatch.test.mjs": {
+      "durationMs": 423,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-execution-admission.test.mjs": {
+      "durationMs": 276,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-routing-routes.test.mjs": {
+      "durationMs": 2001,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/product-registered-reborn.test.mjs": {
+      "durationMs": 255,
+      "peakRssBytes": 160000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-canary.e2e.mjs": {
+      "durationMs": 1910,
+      "peakRssBytes": 260000000,
+      "peakFdCount": 24,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-host-trace-paging.test.mjs": {
+      "durationMs": 279,
+      "peakRssBytes": 104054784,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-run-human-parity.test.mjs": {
+      "durationMs": 2400,
+      "peakRssBytes": 232000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-launch-anyway.test.mjs": {
+      "durationMs": 1300,
+      "peakRssBytes": 176000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/cross-space-read.test.mjs": {
+      "durationMs": 2300,
+      "peakRssBytes": 230000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/cross-space-read.e2e.mjs": {
+      "durationMs": 6400,
+      "peakRssBytes": 400000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-agent-launch-coordinator-lanes.test.mjs": {
+      "durationMs": 1300,
+      "peakRssBytes": 170000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/no-global-coordinator.test.mjs": {
+      "durationMs": 900,
+      "peakRssBytes": 160000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/space-deletion-clock.test.mjs": {
+      "durationMs": 193,
+      "peakRssBytes": 90243072,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/space-deletion.e2e.mjs": {
+      "durationMs": 5726,
+      "peakRssBytes": 1292361728,
+      "peakFdCount": 300,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/postgres-background-admission.test.mjs": {
+      "durationMs": 600,
+      "peakRssBytes": 122000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-revocation-reconcile.test.mjs": {
+      "durationMs": 1300,
+      "peakRssBytes": 176000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-session.test.mjs": {
+      "durationMs": 1800,
+      "peakRssBytes": 190000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-routes.test.mjs": {
+      "durationMs": 2600,
+      "peakRssBytes": 210000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-attachment.test.mjs": {
+      "durationMs": 1200,
+      "peakRssBytes": 190000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-migration-routes.test.mjs": {
+      "durationMs": 2500,
+      "peakRssBytes": 210000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/github-claim-check.test.mjs": {
+      "durationMs": 2140,
+      "peakRssBytes": 227151872,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-git-inflate.test.mjs": {
+      "durationMs": 260,
+      "peakRssBytes": 95617024,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-git.test.mjs": {
+      "durationMs": 380,
+      "peakRssBytes": 98856960,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/github-claim-check.e2e.mjs": {
+      "durationMs": 5220,
+      "peakRssBytes": 470970368,
+      "peakFdCount": 67,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-claims.e2e.mjs": {
+      "durationMs": 6660,
+      "peakRssBytes": 510152704,
+      "peakFdCount": 67,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-git.e2e.mjs": {
+      "durationMs": 5640,
+      "peakRssBytes": 469401600,
+      "peakFdCount": 67,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-migration-draft.e2e.mjs": {
+      "durationMs": 7100,
+      "peakRssBytes": 473321472,
+      "peakFdCount": 67,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/public-pages.e2e.mjs": {
+      "durationMs": 5130,
+      "peakRssBytes": 470200320,
+      "peakFdCount": 67,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-import.e2e.mjs": {
+      "durationMs": 6900,
+      "peakRssBytes": 489218048,
+      "peakFdCount": 67,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/governance.e2e.mjs": {
+      "durationMs": 5380,
+      "peakRssBytes": 467509248,
+      "peakFdCount": 67,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/resting-instance-wake.test.mjs": {
+      "durationMs": 1850,
+      "peakRssBytes": 193384448,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/reborn-reconcile.test.mjs": {
+      "durationMs": 1360,
+      "peakRssBytes": 172302336,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/product-agent-reborn-control.test.mjs": {
+      "durationMs": 600,
+      "peakRssBytes": 121896960,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/runtime-presence-snapshot.test.mjs": {
+      "durationMs": 330,
+      "peakRssBytes": 97865728,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-run-terminal-finalizer.test.mjs": {
+      "durationMs": 1620,
+      "peakRssBytes": 186667008,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/summon-decision-content.test.mjs": {
+      "durationMs": 2200,
+      "peakRssBytes": 170307584,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-automations.e2e.mjs": {
+      "durationMs": 12000,
+      "peakRssBytes": 420000000,
+      "peakFdCount": 40,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/automation-triggers.e2e.mjs": {
+      "durationMs": 7000,
+      "peakRssBytes": 400000000,
+      "peakFdCount": 40,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/automation-triggers.test.mjs": {
+      "durationMs": 3000,
+      "peakRssBytes": 230000000,
+      "peakFdCount": 40,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-channel-activity.test.mjs": {
+      "durationMs": 4500,
+      "peakRssBytes": 222000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/message-supersession.test.mjs": {
+      "durationMs": 2000,
+      "peakRssBytes": 173000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/registration-owner-disable.e2e.mjs": {
+      "durationMs": 10550,
+      "peakRssBytes": 500000000,
+      "peakFdCount": 24,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-webhook.test.mjs": {
+      "durationMs": 2800,
+      "peakRssBytes": 236000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-cloudflare.test.mjs": {
+      "durationMs": 1200,
+      "peakRssBytes": 233000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-event-providers.test.mjs": {
+      "durationMs": 2700,
+      "peakRssBytes": 233000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-event-constructor.test.mjs": {
+      "durationMs": 600,
+      "peakRssBytes": 150000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-actions.test.mjs": {
+      "durationMs": 1400,
+      "peakRssBytes": 185000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-control-switch.test.mjs": {
+      "durationMs": 1100,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-machine-offline-projection.test.mjs": {
+      "durationMs": 1200,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-turn-failure-notice.test.mjs": {
+      "durationMs": 2600,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/continuation-stop-status.test.mjs": {
+      "durationMs": 2900,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-account-quota-sharing.test.mjs": {
+      "durationMs": 5000,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-presence-fanout.test.mjs": {
+      "durationMs": 4900,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-connection-fencing.test.mjs": {
+      "durationMs": 4900,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-registration-routes.test.mjs": {
+      "durationMs": 4800,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-usage-limit-handoff.test.mjs": {
+      "durationMs": 5000,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/jev-evaluation-handler.test.mjs": {
+      "durationMs": 1000,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/channel-catalog-paging-presence.test.mjs": {
+      "durationMs": 5500,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-run-read-recovery.test.mjs": {
+      "durationMs": 5900,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/ordered-socket-dispatch.test.mjs": {
+      "durationMs": 700,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-execution-report.test.mjs": {
+      "durationMs": 2400,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/product-agent-stop-finalization.test.mjs": {
+      "durationMs": 1000,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/relay-v2-primitives-sha256.test.mjs": {
+      "durationMs": 1100,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/harness-action-routes.test.mjs": {
+      "durationMs": 4700,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/summon-decision-cleanup.test.mjs": {
+      "durationMs": 500,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/summon-decision-clock.test.mjs": {
+      "durationMs": 500,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/runtime-hibernation-restore.test.mjs": {
+      "durationMs": 1300,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/retained-fact-namespaces.test.mjs": {
+      "durationMs": 1600,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/wrangler-proxy-errors.test.mjs": {
+      "durationMs": 500,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-retirement-routes.test.mjs": {
+      "durationMs": 4500,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/handoff-elsewhere.test.mjs": {
+      "durationMs": 1900,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/wrangler-direct-fetch.e2e.mjs": {
+      "durationMs": 2800,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-attributed-owner-send.e2e.mjs": {
+      "durationMs": 13300,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-run-list-spaces.e2e.mjs": {
+      "durationMs": 12700,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-mention-only-source.e2e.mjs": {
+      "durationMs": 12900,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-mention-human-notification.e2e.mjs": {
+      "durationMs": 12900,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-instance-connect-retry.e2e.mjs": {
+      "durationMs": 13300,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/scheduled-timeout-postgres.integration.test.mjs": {
+      "durationMs": 6200,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-conversations.e2e.mjs": {
+      "durationMs": 8100,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/page-awareness.e2e.mjs": {
+      "durationMs": 8700,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/github-pre-review.e2e.mjs": {
+      "durationMs": 12200,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/usage-limit-cross-machine-handoff.e2e.mjs": {
+      "durationMs": 11400,
+      "peakRssBytes": null,
+      "peakFdCount": null,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/hub-environment-doc.test.mjs": {
+      "durationMs": 400,
+      "peakRssBytes": 120000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/deployment-origins.test.mjs": {
+      "durationMs": 300,
+      "peakRssBytes": 100000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/no-internal-dynamic-imports.test.mjs": {
+      "durationMs": 300,
+      "peakRssBytes": 90000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/agent-launch-spawned-due-postgres.test.mjs": {
+      "durationMs": 1200,
+      "peakRssBytes": 160000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-run-failure-notice.test.mjs": {
+      "durationMs": 600,
+      "peakRssBytes": 220000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/message-search-match.test.mjs": {
+      "durationMs": 200,
+      "peakRssBytes": 150000000,
+      "peakFdCount": 16,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-googlechat-app-auth.test.mjs": {
+      "durationMs": 756,
+      "peakRssBytes": 151351296,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-googlechat-events.test.mjs": {
+      "durationMs": 1734,
+      "peakRssBytes": 264982528,
+      "peakFdCount": 43,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-googlechat-link.test.mjs": {
+      "durationMs": 1348,
+      "peakRssBytes": 248598528,
+      "peakFdCount": 30,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-googlechat-native.test.mjs": {
+      "durationMs": 976,
+      "peakRssBytes": 176709632,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-discord-oauth.test.mjs": {
+      "durationMs": 1831,
+      "peakRssBytes": 256933478,
+      "peakFdCount": 40,
+      "samples": 2,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-discord-native.test.mjs": {
+      "durationMs": 1830,
+      "peakRssBytes": 253142221,
+      "peakFdCount": 39,
+      "samples": 2,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-discord-connect.test.mjs": {
+      "durationMs": 2464,
+      "peakRssBytes": 320704512,
+      "peakFdCount": 30,
+      "samples": 2,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-feishu-app-events.test.mjs": {
+      "durationMs": 2114,
+      "peakRssBytes": 263184384,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-feishu-link.test.mjs": {
+      "durationMs": 1911,
+      "peakRssBytes": 284946432,
+      "peakFdCount": 30,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-feishu-native.test.mjs": {
+      "durationMs": 1202,
+      "peakRssBytes": 167063552,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-wecom-company.test.mjs": {
+      "durationMs": 2007,
+      "peakRssBytes": 288559104,
+      "peakFdCount": 48,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-wecom-ingress.test.mjs": {
+      "durationMs": 2040,
+      "peakRssBytes": 297209856,
+      "peakFdCount": 49,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-wecom-install-route.test.mjs": {
+      "durationMs": 1195,
+      "peakRssBytes": 233738240,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-wecom-suite.test.mjs": {
+      "durationMs": 1725,
+      "peakRssBytes": 262631424,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-dingtalk-suite.test.mjs": {
+      "durationMs": 1678,
+      "peakRssBytes": 262467584,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/harness-release-watch.test.mjs": {
+      "durationMs": 600,
+      "peakRssBytes": 170000000,
+      "peakFdCount": 15,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-additional-verification.test.mjs": {
+      "durationMs": 4100,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-app-events.test.mjs": {
+      "durationMs": 4100,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-bitbucket-work.test.mjs": {
+      "durationMs": 5300,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-execution-summary.test.mjs": {
+      "durationMs": 2800,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-google-picker.test.mjs": {
+      "durationMs": 4900,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-google-sheets.test.mjs": {
+      "durationMs": 3900,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-google.test.mjs": {
+      "durationMs": 5100,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-grafana-identity.test.mjs": {
+      "durationMs": 1300,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-jira-read.test.mjs": {
+      "durationMs": 4000,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-notion-read.test.mjs": {
+      "durationMs": 3900,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-notion-refresh.test.mjs": {
+      "durationMs": 5000,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-oauth.test.mjs": {
+      "durationMs": 4000,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-pagerduty-context.test.mjs": {
+      "durationMs": 3800,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-pagerduty-oauth.test.mjs": {
+      "durationMs": 5100,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-provider-verification.test.mjs": {
+      "durationMs": 3800,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-sentry-context.test.mjs": {
+      "durationMs": 3700,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-sentry-durable-events.test.mjs": {
+      "durationMs": 3200,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-sentry-installation.test.mjs": {
+      "durationMs": 4500,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-sentry-lifecycle.test.mjs": {
+      "durationMs": 2600,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-task-context.test.mjs": {
+      "durationMs": 3700,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-telegram-company.test.mjs": {
+      "durationMs": 3500,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-telegram-verification.test.mjs": {
+      "durationMs": 3600,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-vercel-app-events.test.mjs": {
+      "durationMs": 3600,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/connector-vercel-oauth.test.mjs": {
+      "durationMs": 3900,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-hostname-observation.test.mjs": {
+      "durationMs": 2072,
+      "peakRssBytes": 90112000,
+      "peakFdCount": 22,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-name-notice.test.mjs": {
+      "durationMs": 3122,
+      "peakRssBytes": 198180864,
+      "peakFdCount": 35,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-principal-hostname.test.mjs": {
+      "durationMs": 5580,
+      "peakRssBytes": 161513472,
+      "peakFdCount": 29,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/retired-export-queue.test.mjs": {
+      "durationMs": 4500,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/secret-request-card.e2e.mjs": {
+      "durationMs": 2500,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/secret-request-card.test.mjs": {
+      "durationMs": 1000,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/openconnector-boundaries.test.mjs": {
+      "durationMs": 461,
+      "peakRssBytes": 118226944,
+      "peakFdCount": 28,
+      "samples": 1,
+      "failures": 0,
+      "timeouts": 0
+    },
+    "test/machine-daemon-result-causality.test.mjs": {
+      "durationMs": 397,
+      "peakRssBytes": 182372137,
+      "peakFdCount": 19,
+      "samples": 52,
+      "failures": 1,
+      "timeouts": 0
+    }
+  }
+}

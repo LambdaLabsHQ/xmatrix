@@ -1,0 +1,15 @@
+[package]
+name = "xmatrix-history-cache"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+# Sans-IO by construction: this crate decides, callers do IO. It is the one
+# shared implementation of the channel-history cache rules for every client
+# (CLI/daemon natively; web — and the iOS/Android/desktop shells that embed
+# it — through wasm-bindgen glue in a separate crate). Keep dependencies to
+# serde only so the wasm build stays trivial.
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

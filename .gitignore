@@ -1,0 +1,92 @@
+# dependencies
+node_modules/
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# build
+.next/
+build/
+!apps/desktop/build/
+!apps/desktop/build/icon.icns
+!apps/desktop/build/icon-source.png
+dist/
+.turbo/
+.wrangler/
+.cloudflare/
+.open-next/
+
+# env
+.env
+.env.local
+.env.*.local
+.dev.vars
+# Snapshot export writes this at the root. It is not a living file on main.
+RELEASE_SOURCE
+
+# IDE
+.idea/
+.vscode/
+**/xcuserdata/
+*.xcuserstate
+*.swp
+*.swo
+.DS_Store
+._*
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.web-dev*.log
+scripts/hub-network-e2e/results/*.json
+!scripts/hub-network-e2e/results/.gitkeep
+
+# misc
+*.tsbuildinfo
+.vercel
+.output/
+
+# package build artifacts
+packages/*/bin/
+packages/*/releases/
+*.tgz
+
+# rust
+**/target/
+!Cargo.lock
+
+# local agent scratch + machine-local config
+tmp/
+scratch/
+.tmp-*-probe/
+.tmp-*-dry-run/
+.aider.chat.history.md
+.aider.input.history
+.claude/
+.xmatrix/
+# unit tests transpile TS next to the source so `@xmatrix/protocol` resolves
+.xmatrix-*.cjs
+# Browser-storage tests mkdtemp scratch trees beside their source. An
+# interrupted run leaves them behind, where `git add -A` stages them and jscpd
+# reads the same file twice and trips the zero-duplicate gate.
+apps/web/src/lib/relay-v2/.xmatrix-*/
+
+# local scratch build dirs
+packages/cli-rs/target-*/
+
+# local xMatrix run artifacts
+artifacts/
+
+# playwright e2e artifacts
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/e2e/.shared-browser/
+
+# Rendered deployment configs (scripts/deploy-config.mjs)
+wrangler.generated.*
+# Local full stack state (scripts/dev-stack.mjs)
+.xmatrix-dev/
