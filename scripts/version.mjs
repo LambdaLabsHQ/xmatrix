@@ -83,36 +83,38 @@ function syncCargoLockPackageVersion(cargoLock, packageName, version) {
   return cargoLock.replace(pattern, `$1"${version}"`);
 }
 
+/**
+ * Pure: `text`, the contents of the versioned file `relativePath`, with only
+ * its release-version fields set to `version`. Anything else that happens to
+ * equal the version, such as a dependency's version, is left alone.
+ */
+export function stampVersionText(relativePath, text, version) {
+  if ([canonicalVersionPath, "package.json", ...packageJsonPaths].includes(relativePath)) {
+    return `${JSON.stringify({ ...JSON.parse(text), version }, null, 2)}\n`;
+  }
+  if (relativePath === cargoTomlPath) {
+    return text.replace(/^version = ".*"$/m, `version = "${version}"`);
+  }
+  if (relativePath === cargoLockPath) {
+    let cargoLock = text;
+    for (const packageName of cargoLockPackageNames) {
+      cargoLock = syncCargoLockPackageVersion(cargoLock, packageName, version);
+    }
+    return cargoLock;
+  }
+  if (relativePath === iosProjectPath) {
+    return text.replace(/MARKETING_VERSION = [^;]+;/g, `MARKETING_VERSION = ${version};`);
+  }
+  throw new Error(`${relativePath} is not a versioned file.`);
+}
+
 function sync(version) {
   assertSemver(version);
 
   writeJson(canonicalVersionPath, { version });
-
-  const rootPackage = readJson("package.json");
-  rootPackage.version = version;
-  writeJson("package.json", rootPackage);
-
-  for (const relativePath of packageJsonPaths) {
-    const manifest = readJson(relativePath);
-    manifest.version = version;
-    writeJson(relativePath, manifest);
+  for (const relativePath of versionedPaths.filter((file) => file !== canonicalVersionPath)) {
+    writeText(relativePath, stampVersionText(relativePath, readText(relativePath), version));
   }
-
-  writeText(
-    cargoTomlPath,
-    readText(cargoTomlPath).replace(/^version = ".*"$/m, `version = "${version}"`),
-  );
-
-  let cargoLock = readText(cargoLockPath);
-  for (const packageName of cargoLockPackageNames) {
-    cargoLock = syncCargoLockPackageVersion(cargoLock, packageName, version);
-  }
-  writeText(cargoLockPath, cargoLock);
-
-  writeText(
-    iosProjectPath,
-    readText(iosProjectPath).replace(/MARKETING_VERSION = [^;]+;/g, `MARKETING_VERSION = ${version};`),
-  );
 }
 
 function collectMismatches(expectedVersion) {

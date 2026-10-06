@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { releaseCommitProblem, verifyReleaseCommit } from "./release-commit.mjs";
 import { isReleaseCommitOfMain } from "./production-release-policy.mjs";
-import { versionedPaths } from "./version.mjs";
+import { stampVersionText, versionedPaths } from "./version.mjs";
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const a = "a".repeat(40);
@@ -29,7 +29,6 @@ function fixtureRepository() {
   git("config", "user.email", "test@example.com");
   git("config", "user.name", "Test");
   git("config", "commit.gpgsign", "false");
-  const version = JSON.parse(readFileSync(path.join(repoRoot, "version.json"), "utf8")).version;
   for (const file of versionedPaths) {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     writeFileSync(path.join(root, file), readFileSync(path.join(repoRoot, file), "utf8"));
@@ -45,7 +44,7 @@ function fixtureRepository() {
   const stamp = (next) => () => {
     for (const file of versionedPaths) {
       const target = path.join(root, file);
-      writeFileSync(target, readFileSync(target, "utf8").split(version).join(next));
+      writeFileSync(target, stampVersionText(file, readFileSync(target, "utf8"), next));
     }
   };
   return { root, git, commit, stamp, source: git("rev-parse", "HEAD") };

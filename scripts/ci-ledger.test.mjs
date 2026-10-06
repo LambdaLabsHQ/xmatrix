@@ -39,6 +39,20 @@ test("a version-only bump keeps the key; any other change moves it", () => {
     { "version.json": '{ "version": "0.16.340" }\n' }, "0.16.340"), before);
 });
 
+test("a dependency sharing the release version does not break a version-only bump", () => {
+  const lock = (own) =>
+    `[[package]]\nname = "anstream"\nversion = "1.0.0"\n\n[[package]]\nname = "xmatrix"\nversion = "${own}"\n`;
+  const listing = tree([["aaa", "version.json"], ["bbb", "packages/cli-rs/Cargo.lock"]]);
+  const key = (own, lockText = lock(own)) => ledgerKey(listing, {
+    "version.json": `{\n  "version": "${own}"\n}\n`,
+    "packages/cli-rs/Cargo.lock": lockText,
+  });
+  assert.equal(key("1.0.1"), key("1.0.0"));
+  // Changing the dependency's version is still a real change.
+  assert.notEqual(key("1.0.0", lock("1.0.0").replace('"anstream"\nversion = "1.0.0"', '"anstream"\nversion = "1.0.1"')),
+    key("1.0.0"));
+});
+
 test("a run vouches only for the commit it could have tested", () => {
   const head = "a".repeat(40);
   const base = "b".repeat(40);
