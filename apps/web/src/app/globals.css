@@ -913,12 +913,12 @@
     white-space: pre-wrap;
   }
 
-  /* Jump-target marker uses its own geometry so the reading accent stays a
-     narrow strip independently of the surrounding message shape. */
+  /* Jump-target marker is a faint tint with a square-ended strip on the left
+     edge; no rounding, so it never reads as a card around the message. */
   .xmatrix-app .message-jump-highlight {
     background: color-mix(in oklab, var(--primary) 10%, transparent);
     box-shadow: inset 3px 0 0 var(--primary);
-    border-radius: 8px;
+    border-radius: 0;
   }
 
   /* Image/video attachments stay cards rather than inheriting surrounding
