@@ -16,6 +16,26 @@ function githubConfiguration() {
   return { installationId, repository: "acme/widgets", permissions: { metadata: "read", checks: "write" } };
 }
 
+/** A Space connected to the claim installation, with a Roadmap page whose Search block a pull request links. */
+async function roadmapSpace(worker, { userId, auth }) {
+  const space = await createSpace(worker, `Claims ${randomUUID()}`);
+  await connectGitHubInstallation(worker, { spaceId: space.id, userId, installationId });
+  const pages = `/api/spaces/${encodeURIComponent(space.id)}/pages`;
+  const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
+    body: JSON.stringify({ title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" }) }))).page;
+  return { pages, page, link: `https://xmatrix.sh/app/${space.id}/pages?page=${page.pageId}#search`, space };
+}
+
+/** The person links their GitHub account (`githubId`) to xMatrix. */
+function linkGitHubAccount(worker, { userId, name, email, githubId }) {
+  return inWorkerTransaction(worker, async (tx) => {
+    await tx.query({ text: `INSERT INTO control.auth_users (id,name,email,created_at,updated_at)
+      VALUES ($1,$2,$3,now(),now()) ON CONFLICT DO NOTHING`, values: [userId, name, email] });
+    await tx.query({ text: `INSERT INTO control.auth_accounts (id,account_id,provider_id,user_id,created_at,updated_at)
+      VALUES ($1,$2,'github',$3,now(),now())`, values: [randomUUID(), githubId, userId] });
+  });
+}
+
 // The claim check end to end: a pull request that links a page block passes
 // only when its author, through their linked GitHub account, holds a claim on
 // it, and merging it completes the claim.
@@ -23,12 +43,7 @@ test("a pull request passes xmatrix/claim when its author holds the claim, and m
   const userId = `claim-check-${randomUUID()}`;
   await withGitHubUserScenario({ id: userId, email: "claim-check@example.com", name: "Claim Check" }, githubConfiguration(), secret,
     async ({ worker, github, auth }) => {
-    const space = await createSpace(worker, `Claims ${randomUUID()}`);
-    await connectGitHubInstallation(worker, { spaceId: space.id, userId, installationId });
-    const pages = `/api/spaces/${encodeURIComponent(space.id)}/pages`;
-    const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
-      body: JSON.stringify({ title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" }) }))).page;
-    const link = `https://xmatrix.sh/app/${space.id}/pages?page=${page.pageId}#search`;
+    const { pages, page, link, space } = await roadmapSpace(worker, { userId, auth });
     const pullUrl = "https://github.com/acme/widgets/pull/7";
 
     let delivery = 0;
@@ -48,12 +63,7 @@ test("a pull request passes xmatrix/claim when its author holds the claim, and m
     assert.equal(unlinked.output.title, "GitHub account not linked to xMatrix");
 
     // The author links their GitHub account; they have not claimed the block yet.
-    await inWorkerTransaction(worker, async (tx) => {
-      await tx.query({ text: `INSERT INTO control.auth_users (id,name,email,created_at,updated_at)
-        VALUES ($1,'Claim Check','claim-check@example.com',now(),now()) ON CONFLICT DO NOTHING`, values: [userId] });
-      await tx.query({ text: `INSERT INTO control.auth_accounts (id,account_id,provider_id,user_id,created_at,updated_at)
-        VALUES ($1,'4242','github',$2,now(),now())`, values: [randomUUID(), userId] });
-    });
+    await linkGitHubAccount(worker, { userId, name: "Claim Check", email: "claim-check@example.com", githubId: "4242" });
     const unclaimed = await deliver("synchronize");
     assert.equal(unclaimed.conclusion, "failure");
     assert.equal(unclaimed.output.title, "No claim on the referenced block");
@@ -95,21 +105,11 @@ test("a pull request from an installation the Space did not connect neither atta
   const userId = `claim-foreign-${randomUUID()}`;
   await withGitHubUserScenario({ id: userId, email: "claim-foreign@example.com", name: "Claim Foreign" }, githubConfiguration(), secret,
     async ({ worker, github, auth }) => {
-    const space = await createSpace(worker, `Claims ${randomUUID()}`);
-    await connectGitHubInstallation(worker, { spaceId: space.id, userId, installationId });
-    await inWorkerTransaction(worker, async (tx) => {
-      await tx.query({ text: `INSERT INTO control.auth_users (id,name,email,created_at,updated_at)
-        VALUES ($1,'Claim Foreign','claim-foreign@example.com',now(),now()) ON CONFLICT DO NOTHING`, values: [userId] });
-      await tx.query({ text: `INSERT INTO control.auth_accounts (id,account_id,provider_id,user_id,created_at,updated_at)
-        VALUES ($1,'4343','github',$2,now(),now())`, values: [randomUUID(), userId] });
-    });
-    const pages = `/api/spaces/${encodeURIComponent(space.id)}/pages`;
-    const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
-      body: JSON.stringify({ title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" }) }))).page;
+    const { pages, page, link, space } = await roadmapSpace(worker, { userId, auth });
+    await linkGitHubAccount(worker, { userId, name: "Claim Foreign", email: "claim-foreign@example.com", githubId: "4343" });
     const claims = `${pages}/${encodeURIComponent(page.pageId)}/claims`;
     const { claim } = await json(await worker.fetch(claims, { method: "POST", headers: auth,
       body: JSON.stringify({ blockId: "search" }) }));
-    const link = `https://xmatrix.sh/app/${space.id}/pages?page=${page.pageId}#search`;
 
     let delivery = 0;
     const deliver = async (action, { installation, repository = "acme/widgets", pullUrl, ...pull }) => {
