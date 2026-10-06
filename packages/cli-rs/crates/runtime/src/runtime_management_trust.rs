@@ -2801,6 +2801,16 @@ pub async fn cmd_git_credential(operation: &str) -> error::Result<()> {
         return Ok(());
     };
 
+    if let Ok(cwd) = std::env::current_dir()
+        && git_credential::holds_retired_history(&request.repository(), &cwd)
+    {
+        eprintln!(
+            "xmatrix: this checkout still holds the private history of {}; clone it again before pushing",
+            request.repository()
+        );
+        return Ok(());
+    }
+
     let Some(token) = git_credential::request_repository_token(&request.repository()).await? else {
         return Ok(());
     };
