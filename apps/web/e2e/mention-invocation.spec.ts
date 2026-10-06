@@ -746,6 +746,20 @@ test("a confirmed stop sits on the command instead of another message", async ({
   await page.screenshot({ path: "test-results/mention-stop-confirmed-mobile.png" });
 });
 
+test("a stop's reason stays prose beside the command chip", async ({ page }) => {
+  await installInvocationFixture(page, [], "@claude:1:stop two agents took the same work");
+  await fixtureJson(page, "stop-receipts-reason", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
+    launches: [], stops: [stopReceipt("confirmed")],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const chip = page.locator(".app-mention-invocation");
+  await expect(chip).toContainText("Stopped");
+  await expect(chip).toContainText("@claude:1:stop");
+  await expect(chip).not.toContainText("two agents took the same work");
+  await expect(chip.locator("xpath=..")).toContainText("two agents took the same work");
+  await page.screenshot({ path: "test-results/mention-stop-reason.png" });
+});
+
 test("an accepted stop says Stopping until the Workstation confirms it", async ({ page }) => {
   await installInvocationFixture(page, [], "@claude:1:stop");
   await fixtureJson(page, "stop-receipts-accepted", "**/api/xmatrix/channels/channel-general/agent-launches/query", {

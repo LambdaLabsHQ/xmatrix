@@ -97,3 +97,11 @@ test("ordinary visible human inputs query execution evidence without waking or i
   assert.deepEqual(invocationSourceMessages(messages).map(message => message.id), ["human"]);
   assert.deepEqual(invocationSourceMessages(messages, ["progress"]), []);
 });
+
+test("an Agent's stop command queries its stop receipt", () => {
+  const messages = [
+    { id: "stop", body: "@grok:3:stop grok:2 continues this work", senderKind: "agent", sentAt: "2026-10-06" },
+    { id: "quote", body: "`@grok:3:stop`", senderKind: "agent", sentAt: "2026-10-06" },
+  ];
+  assert.deepEqual(invocationSourceMessages(messages).map(message => message.id), ["stop"]);
+});

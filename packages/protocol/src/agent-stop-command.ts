@@ -24,7 +24,9 @@ export function parseAgentStopInvocation(body: string): AgentStopInvocation | un
     if (!match || !isOperationalMentionStart(match.start, nonOperationalMentionRanges(body))) continue;
     const target = match.arguments.target!.replace(/^[@＠]/u, "");
     const reason = match.arguments.reason?.trim().slice(0, 500);
-    return { start: match.start, end: match.end, text: body.slice(match.start, match.end),
+    // The span is the command alone; a reason after it stays prose.
+    const end = match.start + body.slice(match.start, match.end - (match.arguments.reason?.length ?? 0)).trimEnd().length;
+    return { start: match.start, end, text: body.slice(match.start, end),
       target, all: rule !== "lifecycle.stop.v1" && target.toLowerCase() === "all",
       ...(reason ? { reason } : {}) };
   }
