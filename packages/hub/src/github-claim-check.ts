@@ -1,6 +1,7 @@
 import { plainRecord } from "@xmatrix/protocol";
 import { PostgresGovernanceRepository, PostgresPageRepository } from "@xmatrix/db";
-import { githubConnectionInstallationIds, publishGitHubCheckRun } from "./app-connectors";
+import { githubConnectionHasInstallation, githubConnectionInstallationIds, publishGitHubCheckRun,
+  type AppConnectorConnectionView } from "./app-connectors";
 import { authUserByGitHubId } from "./auth-authority";
 import { startPreReview } from "./github-pre-review";
 import { appOrigin } from "./deployment-origins";
@@ -55,6 +56,29 @@ function pages(env: Env): PostgresPageRepository {
   }));
 }
 
+function governance(env: Env): PostgresGovernanceRepository {
+  return new PostgresGovernanceRepository(createPostgresAuthorityDatabase(env, {
+    applicationName: "xmatrix-governance", statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
+  }));
+}
+
+/**
+ * The Space's configured GitHub connection, only when it covers the
+ * installation the webhook came from. GitHub signs which installation, and so
+ * which repositories, a delivery speaks for; a pull request from any other
+ * installation, or a delivery naming none, cannot touch the Space's claims or
+ * fire its owed Automations. Missing evidence fails closed.
+ */
+async function connectedGitHub(env: Env, spaceId: string, installationId: string):
+  Promise<AppConnectorConnectionView | null> {
+  if (!installationId) return null;
+  const space = await governance(env).read({ requestId: crypto.randomUUID(), spaceId }).catch(() => null);
+  if (!space) return null;
+  const connection = await findAppConnection(env, { spaceId, providerId: "github", actorUserId: space.ownerUserId });
+  return connection?.status === "configured" && githubConnectionHasInstallation(connection, installationId)
+    ? connection : null;
+}
+
 export async function checkPullRequestClaims(env: Env, payload: Record<string, unknown>): Promise<void> {
   const pull = record(payload.pull_request);
   const action = String(payload.action ?? "");
@@ -62,14 +86,17 @@ export async function checkPullRequestClaims(env: Env, payload: Record<string, u
   const references = pageReferences(typeof pull.body === "string" ? pull.body : "");
   if (!url || references.length === 0) return;
   const spaces = [...new Set(references.map((reference) => reference.spaceId))];
+  const installationId = String(record(payload.installation).id ?? "").trim();
+  const [owner, repo] = String(record(payload.repository).full_name ?? "").split("/");
+  if (!installationId || !owner || !repo) return;
 
   if (action === "closed") {
     if (pull.merged !== true) return;
     const authorId = record(pull.user).id;
     const author = typeof authorId === "number" || typeof authorId === "string"
       ? await authUserByGitHubId(env, String(authorId)) : null;
-    const installationId = String(record(payload.installation).id ?? "");
     for (const spaceId of spaces) {
+      if (!await connectedGitHub(env, spaceId, installationId)) continue;
       const { completed } = await pages(env).completePullRequestClaims({ requestId: crypto.randomUUID(), spaceId,
         pullRequestUrl: url });
       await askForWriteback(env, { pullRequestUrl: url, completed });
@@ -86,13 +113,15 @@ export async function checkPullRequestClaims(env: Env, payload: Record<string, u
     return;
   }
   if (!CHECKED_ACTIONS.has(action)) return;
-  const [owner, repo] = String(record(payload.repository).full_name ?? "").split("/");
   const headSha = String(record(pull.head).sha ?? "");
   const authorId = record(pull.user).id;
-  if (!owner || !repo || !headSha || (typeof authorId !== "number" && typeof authorId !== "string")) return;
+  if (!headSha || (typeof authorId !== "number" && typeof authorId !== "string")) return;
   const userId = await authUserByGitHubId(env, String(authorId));
 
   for (const spaceId of spaces) {
+    // Only a pull request from the Space's own installation may attach to its claims.
+    const connection = await connectedGitHub(env, spaceId, installationId);
+    if (!connection) continue;
     const results = [];
     for (const reference of references.filter((item) => item.spaceId === spaceId)) {
       const result = await pages(env).pullRequestClaim({ requestId: crypto.randomUUID(), spaceId,
@@ -101,8 +130,6 @@ export async function checkPullRequestClaims(env: Env, payload: Record<string, u
     }
     const first = results[0];
     if (!first) continue;
-    const connection = await findAppConnection(env, { spaceId, providerId: "github", actorUserId: first.spaceOwnerUserId });
-    if (connection?.status !== "configured") continue;
     const link = (reference: PageReference) => `${appOrigin(env)}/app/${encodeURIComponent(spaceId)}/pages?page=${
       encodeURIComponent(reference.pageId)}${reference.blockId ? `#${reference.blockId}` : ""}`;
     const held = results.find((result) => result.claim);
@@ -169,12 +196,10 @@ async function askForWriteback(env: Env, input: { pullRequestUrl: string;
  */
 async function promoteContributor(env: Env, input: { spaceId: string; userId: string; installationId: string;
   pullRequestUrl: string }): Promise<void> {
-  const governance = new PostgresGovernanceRepository(createPostgresAuthorityDatabase(env, {
-    applicationName: "xmatrix-governance", statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
-  }));
-  const role = await governance.roleOf({ requestId: crypto.randomUUID(), spaceId: input.spaceId, userId: input.userId });
+  const spaces = governance(env);
+  const role = await spaces.roleOf({ requestId: crypto.randomUUID(), spaceId: input.spaceId, userId: input.userId });
   if (role !== "participant") return;
-  const { ownerUserId } = await governance.read({ requestId: crypto.randomUUID(), spaceId: input.spaceId });
+  const { ownerUserId } = await spaces.read({ requestId: crypto.randomUUID(), spaceId: input.spaceId });
   const connection = await findAppConnection(env, { spaceId: input.spaceId, providerId: "github", actorUserId: ownerUserId });
   if (!connection || !githubConnectionInstallationIds(connection).includes(input.installationId)) return;
   await changeMembership(env, {
