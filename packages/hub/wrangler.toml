@@ -259,6 +259,11 @@ XMATRIX_RUNTIME_CELL_MODE = "dual"
 # authority and retire this flag after the first post-boundary release is
 # broadly available; never route old code to a second authority Worker.
 CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED = "true"
+# Transitional compatibility for CLI/daemon releases that request a GitHub
+# repository token without naming the Run it is for. Those daemons keep the
+# earlier channel-level check. Set to "false" (or remove) once the minimum
+# supported CLI sends runId/executionKey; the mint then fails closed for them.
+GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED = "true"
 # RELAY_R2_CAPABILITY_HMAC_SECRET is a dedicated Worker secret, configured with
 # `wrangler secret put`; it must never be added to this vars table.
 

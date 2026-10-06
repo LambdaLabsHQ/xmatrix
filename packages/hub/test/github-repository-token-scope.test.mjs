@@ -95,6 +95,105 @@ test("a non-GitHub connection cannot mint a repository token", async () => {
   );
 });
 
+test("the mint asks only for what Git needs, never workflows, Actions or secrets", async () => {
+  const github = stubGitHubInstallation({ contents: "write", metadata: "read" }, () => jsonResponse({}));
+  try {
+    await mintConfiguredRepositoryToken();
+    const mint = github.calls.find((call) => call.url.includes("/access_tokens"));
+    assert.deepEqual(mint.body?.permissions, { contents: "write", metadata: "read" });
+  } finally {
+    github.restore();
+  }
+});
+
+test("an installation without contents write still gets a read token", async () => {
+  const github = stubGitHubFetch((call) => {
+    if (call.url.endsWith("/installation")) return jsonResponse({ id: 777 });
+    if (call.url.includes("/access_tokens")) {
+      return call.body?.permissions?.contents === "write"
+        ? jsonResponse({ message: "The permissions requested are not granted to this installation." }, 422)
+        : jsonResponse({ token: "ghs_read", permissions: { contents: "read", metadata: "read" } });
+    }
+    return jsonResponse({}, 404);
+  });
+  try {
+    const grant = await mintConfiguredRepositoryToken();
+    assert.equal(grant.token, "ghs_read");
+    assert.ok(!grant.capabilities.includes("github.contents.write"));
+  } finally {
+    github.restore();
+  }
+});
+
+test("a repository of an unconnected installation gets the precise refusal, with no probing", async () => {
+  const github = stubGitHubFetch((call) => {
+    if (call.url.endsWith("/installation")) return jsonResponse({ id: 999 });
+    if (call.url.includes("/access_tokens")) return jsonResponse({ token: "ghs_wrong" });
+    return jsonResponse({ full_name: "OtherOrg/secrets" });
+  });
+  try {
+    await assert.rejects(
+      () => mintGitHubRepositoryToken(GITHUB_APP_ENV, connection(["777"]), "OtherOrg", "secrets"),
+      { message: "github_installation_not_linked_to_space" },
+    );
+    assert.ok(!github.calls.some((call) => call.url.includes("/access_tokens")),
+      "the Space's own installations must not be tried for a repository GitHub placed elsewhere");
+  } finally {
+    github.restore();
+  }
+});
+
+test("a repository the App is not installed on is named as such", async () => {
+  const github = stubGitHubFetch(() => jsonResponse({ message: "Not Found" }, 404));
+  try {
+    await assert.rejects(
+      () => mintConfiguredRepositoryToken(),
+      { message: "github_repository_not_installed" },
+    );
+    assert.ok(!github.calls.some((call) => call.url.includes("/access_tokens")));
+  } finally {
+    github.restore();
+  }
+});
+
+test("when the lookup is down, a same-named repository of another owner is not accepted", async () => {
+  const github = stubGitHubFetch((call) => {
+    if (call.url.endsWith("/installation")) return jsonResponse({ message: "unavailable" }, 502);
+    if (call.url.includes("/access_tokens")) {
+      // Installation 777 belongs to OtherOrg and also has a repository named xmatrix.
+      return jsonResponse({ token: "ghs_other", repositories: [{ full_name: "OtherOrg/xmatrix" }],
+        permissions: { contents: "write", metadata: "read" } });
+    }
+    // The public repository is readable with any token; that proves nothing.
+    return jsonResponse({ full_name: "LambdaLabsHQ/xmatrix" });
+  });
+  try {
+    await assert.rejects(() => mintConfiguredRepositoryToken(), { message: "github_installation_not_linked_to_space" });
+  } finally {
+    github.restore();
+  }
+});
+
+test("when the lookup is down, the installation that covers exactly owner/repo is used", async () => {
+  const github = stubGitHubFetch((call) => {
+    if (call.url.endsWith("/installation")) return jsonResponse({ message: "unavailable" }, 502);
+    if (call.url.includes("/app/installations/111/access_tokens")) return jsonResponse({}, 422);
+    if (call.url.includes("/app/installations/777/access_tokens")) {
+      return jsonResponse({ token: "ghs_right", permissions: { contents: "write", metadata: "read" } });
+    }
+    if (call.url.includes("/installation/repositories")) {
+      return jsonResponse({ repositories: [{ full_name: "lambdalabshq/XMatrix" }] });
+    }
+    return jsonResponse({}, 404);
+  });
+  try {
+    const grant = await mintGitHubRepositoryToken(GITHUB_APP_ENV, connection(["111", "777"]), "LambdaLabsHQ", "xmatrix");
+    assert.equal(grant.token, "ghs_right");
+  } finally {
+    github.restore();
+  }
+});
+
 function mintConfiguredRepositoryToken() {
   return mintGitHubRepositoryToken(GITHUB_APP_ENV, connection(["777"]), "LambdaLabsHQ", "xmatrix");
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
 type Proposal = {
   id: string; sourceSpaceId: string; targetSpaceId: string; channelId: string;
@@ -21,7 +22,7 @@ export function ChannelTransferQueue({ token, userId, spaceId, channelId, enable
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const query = useQuery({ queryKey: ["channel-transfers", userId, spaceId, channelId ?? ""],
-    enabled: Boolean(enabled && token && spaceId), refetchInterval: 15_000,
+    enabled: Boolean(enabled && token && spaceId), refetchInterval: () => refetchUnlessHumanPush(15_000),
     queryFn: async ({ signal }) => {
       const response = await fetch(WEB_PROXY_ROUTES.space_channel_transfers(spaceId) +
         (channelId ? `?channelId=${encodeURIComponent(channelId)}` : ""), {

@@ -18,6 +18,7 @@ import { POSTGRES_AUTHORITY_TIMEOUTS, postgresAuthorityShardId } from "./postgre
 import { wakeRegistrationChannels } from "./registration-authority-wake";
 import { projectRegistrationQuota } from "./registration-quota-presentation";
 import { relayChannelCatalogPublishCommittedChanges } from "./relay-channel-catalog-notification-delivery";
+import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import type { Env } from "./types";
 
 export interface SpacesEnv extends PostgresAuthorityFleetEnv {
@@ -219,11 +220,13 @@ export async function configureChannel(env: SpacesEnv,
   return { ...result, channel: configured.channel };
 }
 
-export function createChannelTransfer(env: SpacesEnv, input: {
+export async function createChannelTransfer(env: SpacesEnv, input: {
   proposalId: string; channelId: string; targetSpaceId: string; principal: Principal;
 }) {
   const { repository, requestId } = spaces(env);
-  return repository.createTransferProposal({ requestId, ...input });
+  const result = await repository.createTransferProposal({ requestId, ...input });
+  await notifyTransferQueues(env, result.proposal);
+  return result;
 }
 
 /** Both Spaces see a completed transfer's Channel move. */
@@ -238,7 +241,21 @@ export async function acknowledgeChannelTransfer(env: SpacesEnv, input: {
       typeof proposal.targetSpaceId === "string") {
     await publishCatalogChanges(env, {}, repository, requestId, [proposal.sourceSpaceId, proposal.targetSpaceId]);
   }
+  // The queue changes on the first acknowledgement, before the move completes.
+  await notifyTransferQueues(env, proposal);
   return result;
+}
+
+function notifyTransferQueues(env: SpacesEnv, proposal: unknown): Promise<void> {
+  if (!proposal || typeof proposal !== "object") return Promise.resolve();
+  const record = proposal as Record<string, unknown>;
+  const spaceIds = [record.sourceSpaceId, record.targetSpaceId].filter((spaceId): spaceId is string =>
+    typeof spaceId === "string" && spaceId.length > 0);
+  if (spaceIds.length === 0) return Promise.resolve();
+  return notifyWorkspaceResource(env, {
+    spaceIds, resource: "channel_transfers",
+    ...(typeof record.channelId === "string" ? { channelId: record.channelId } : {}),
+  });
 }
 
 export function listChannelTransfers(env: SpacesEnv, input: { spaceId: string; principal: Principal; channelId?: string }) {

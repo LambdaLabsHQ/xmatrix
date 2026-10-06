@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   parseHumanChannelCatalogChangedMessage,
+  parseHumanWorkspaceResourceChangedMessage,
   parseHumanTraceAccessServerMessage,
   parseTraceAccessGrant,
 } from "../dist/connections/human.js";
@@ -22,6 +23,28 @@ test("Human Channel catalog invalidations are exact positive Space watermarks", 
     { ...input, spaceId: "x".repeat(201) },
   ]) {
     assert.equal(parseHumanChannelCatalogChangedMessage(candidate), undefined);
+  }
+});
+
+test("workspace resource wake-ups name one list and an optional channel", () => {
+  const input = {
+    type: "workspace_resource_changed",
+    spaceId: "space-one",
+    resource: "automations",
+    revision: 8,
+  };
+  assert.deepEqual(parseHumanWorkspaceResourceChangedMessage(input), input);
+  assert.deepEqual(parseHumanWorkspaceResourceChangedMessage({
+    ...input, resource: "cross_space_reads", channelId: "channel-1",
+  }), { ...input, resource: "cross_space_reads", channelId: "channel-1" });
+  for (const candidate of [
+    { ...input, revision: 0 },
+    { ...input, resource: "pages" },
+    { ...input, extra: true },
+    { ...input, channelId: "" },
+    { ...input, spaceId: "" },
+  ]) {
+    assert.equal(parseHumanWorkspaceResourceChangedMessage(candidate), undefined);
   }
 });
 

@@ -20,9 +20,15 @@ const PUBLIC_CODES = new Set([
   "request_context_unavailable", "request_context_mismatch", "machine_offline",
   "machine_command_stale_lease", "machine_command_lease_required", "machine_command_not_leased",
 ]);
+// The authority already holds a fact under this command or message id. The
+// caller learns its id is taken; the Hub has not failed.
+const COMMITTED_IDENTITY_CONFLICT_CODES = new Set(["idempotency_conflict", "message_exists"]);
+
 /** Keeps safe classification across an authority rejection without copying its body. */
 export class RuntimeAuthorityOperationError extends Error {
   readonly failure: RuntimeOperationFailure;
+  /** A 409 saying the command or message id is already committed. */
+  readonly committedIdentityConflict: boolean;
   constructor(operation: string, status: number, body: unknown) {
     super(`PostgreSQL rejected ${operation} (${status})`);
     const value = body && typeof body === "object" ? body as Record<string, unknown> : {};
@@ -31,9 +37,12 @@ export class RuntimeAuthorityOperationError extends Error {
     this.failure = { code, diagnosticId: safeServerDiagnosticId(value.diagnosticId) ?? `diag_${crypto.randomUUID()}`,
       retryable: value.retryable === true && (status === 503 || status === 429),
       stage: "authority.request" };
+    this.committedIdentityConflict = status === 409 && typeof value.code === "string" &&
+      COMMITTED_IDENTITY_CONFLICT_CODES.has(value.code);
     // The originating authority owns its private details. Correlation here is
     // intentionally free of response bodies, SQL, credentials and payloads.
-    console.error("xMatrix runtime authority rejection", { ...this.failure, operation, status });
+    (this.committedIdentityConflict ? console.warn : console.error)(
+      "xMatrix runtime authority rejection", { ...this.failure, operation, status });
   }
 }
 

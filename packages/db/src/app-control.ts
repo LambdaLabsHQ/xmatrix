@@ -42,6 +42,40 @@ function array(value: unknown, field: string, fallback: string[] = []): string[]
   return Array.from(new Set(value.map((item) => String(item).trim()))).sort();
 }
 
+const METADATA_LIST_MAX_ITEMS = 32;
+
+/**
+ * Adds each `metadataAppend` value to its string-list field, keeping every
+ * other field and every value already listed. Runs under the connection's
+ * row lock, so concurrent appends (a second org's install) cannot drop each
+ * other; an already-listed value is a no-op.
+ */
+export function appendMetadataLists(metadata: Record<string, unknown>, append: unknown): Record<string, unknown> {
+  if (append === undefined) return metadata;
+  if (!append || typeof append !== "object" || Array.isArray(append)) {
+    throw new AppControlError("invalid_app_request", 400, "metadataAppend is invalid");
+  }
+  const merged = { ...metadata };
+  for (const [field, raw] of Object.entries(append as Record<string, unknown>)) {
+    const value = typeof raw === "string" ? raw.trim() : "";
+    if (!value || value.length > 300) {
+      throw new AppControlError("invalid_app_request", 400, "metadataAppend is invalid");
+    }
+    const existing = merged[field];
+    if (existing !== undefined && !Array.isArray(existing)) {
+      throw new AppControlError("invalid_app_request", 400, "metadataAppend field is not a list");
+    }
+    const list = ((existing as unknown[] | undefined) ?? []).filter((item): item is string =>
+      typeof item === "string");
+    if (list.includes(value)) continue;
+    if (list.length >= METADATA_LIST_MAX_ITEMS) {
+      throw new AppControlError("invalid_app_request", 400, "metadataAppend list is full");
+    }
+    merged[field] = [...list, value];
+  }
+  return merged;
+}
+
 function pageCursor(value: unknown, arity: number): string[] | null {
   if (typeof value !== "string" || !value) return null;
   try {
@@ -552,9 +586,9 @@ export class PostgresAppRepository {
           throw new AppControlError("invalid_app_request", 400, "Unsupported connector capability");
         }
         const channelIds: string[] = [];
-        const metadata = body.metadata === undefined
+        const metadata = appendMetadataLists(body.metadata === undefined
           ? (current?.metadata_json as Record<string, unknown> | undefined) ?? {}
-          : object(body.metadata, "metadata");
+          : object(body.metadata, "metadata"), body.metadataAppend);
         if (Object.keys(metadata).some((key) => !input.provider.metadataFields.includes(key))) {
           throw new AppControlError("invalid_app_request", 400,
             "Connector metadata contains an unsupported field");
