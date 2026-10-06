@@ -233,6 +233,20 @@ test("channel details keeps web back navigation above the material sheet", async
   await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
 });
 
+test("channel details planks keep their rounded corners on a phone", async ({ page }, testInfo) => {
+  await openGeneralChannel(page);
+  const { details } = await openChannelDetailsFrom(page, "More");
+  // The radius once lived only in the desktop media query, so the phone's
+  // sheet showed square wood cards.
+  const plank = details.locator(".app-detail-plank").first();
+  await expect(plank).toBeVisible();
+  await expect(plank).toHaveCSS("border-top-left-radius", "16px");
+  await expect(plank).toHaveCSS("border-bottom-right-radius", "16px");
+  const shot = testInfo.outputPath("mobile-channel-details-planks.png");
+  await page.screenshot({ path: shot, fullPage: false });
+  await testInfo.attach("mobile-channel-details-planks", { path: shot, contentType: "image/png" });
+});
+
 test("Android Back closes channel details before leaving the channel", async ({ page }) => {
   await installAndroidBackBridge(page);
   await openGeneralChannel(page);
