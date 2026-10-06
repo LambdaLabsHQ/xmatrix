@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { recordingAgentInstancePort } from "./support/agent-instance-port.mjs";
+import { capturingConsole } from "./support/capturing-console.mjs";
 import { usageLimitHandoffCommand } from "../src/runtime-transport/agent-usage-limit-handoff.ts";
 import { MessageAuthorityError } from "@xmatrix/db";
 import { messageCall } from "../src/runtime-transport/runtime-messages.ts";
@@ -93,20 +94,6 @@ test("a refused hold still hands the work off", async () => {
   await port.execute(session, limited);
   assert.equal(commands.at(-1).input.body, "@claude:3:handoff:@auto");
 });
-
-async function capturingConsole(callback) {
-  const logged = { error: [], warn: [] };
-  const previous = { error: console.error, warn: console.warn };
-  console.error = (...args) => { logged.error.push(args); };
-  console.warn = (...args) => { logged.warn.push(args); };
-  try {
-    await callback();
-  } finally {
-    console.error = previous.error;
-    console.warn = previous.warn;
-  }
-  return logged;
-}
 
 /** The real append failure path: the message authority's refusal, classified by messageCall. */
 function appendRefusedWith(code) {
