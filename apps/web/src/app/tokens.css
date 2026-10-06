@@ -369,6 +369,10 @@
   --app-light-chat-surface: oklch(1 0 0 / 0.18);
   --app-instance-card-radius: 1.5rem;
   --app-composer-radius: 1.5rem;
+  /* A message's avatar column: the avatar and the gap before its text. The
+     composer's caret starts where message text starts, so both read these. */
+  --app-message-avatar-size: 2.25rem;
+  --app-message-avatar-gap: 0.75rem;
   --app-field-radius: 0.25rem;
   --app-field-shell-radius: 0.375rem;
 
@@ -420,4 +424,10 @@
   --app-panel-ink: oklch(0.24 0.03 60);
   --app-panel-ink-muted: oklch(0.46 0.03 65);
   --app-panel-ink-faint: oklch(0.6 0.028 70);
+}
+
+@media (max-width: 767px) {
+  .xmatrix-app {
+    --app-message-avatar-size: 2.5rem;
+  }
 }

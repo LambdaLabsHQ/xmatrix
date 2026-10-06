@@ -5,6 +5,7 @@ import { relayRuntimeRouteDirectory } from "./relay-authority-locator";
 import {
   parseHumanChannelCatalogChangedMessage,
   parseHumanTraceAccessServerMessage,
+  parseHumanWorkspaceResourceChangedMessage,
 } from "@xmatrix/protocol/connections/human";
 import {
   type ChannelAttentionSummary,
@@ -24,6 +25,7 @@ import {
   type RelayRuntimeProductCallbackAdapter,
   type RelayRuntimeProductPortFactory,
 } from "./runtime-transport/relay-runtime-product-adapter";
+import type { HumanProjectionPublishResult } from "./connections/human/registry";
 import { MachineDaemonWakeSignals } from "./machine-daemon-wake-signals";
 import {
   isRelayRuntimeOwnerCell,
@@ -59,6 +61,8 @@ const MAX_EVENT_RECIPIENTS = 1_000;
 const TRACE_ACCESS_COMMITTED_EVENT_CHANNEL = "trace-access";
 /** Reserved id: catalog watermarks are Space-scoped and contain no Channel facts. */
 const CHANNEL_CATALOG_COMMITTED_EVENT_CHANNEL = "space-channel-catalog";
+/** Reserved id: workspace-list wake-ups carry no row facts. */
+const WORKSPACE_RESOURCE_COMMITTED_EVENT_CHANNEL = "workspace-resource";
 export const RELAY_RUNTIME_AGENT_TRACE_PATH = "/internal/product-trace/instance-events";
 export {
   RELAY_RUNTIME_CHANNEL_MESSAGE_PATH,
@@ -73,7 +77,7 @@ interface RelayRuntimeCommittedEvent {
 }
 
 function humanFanoutResponse(
-  result: ReturnType<RelayRuntimeProductCallbackAdapter["publishHumanChannelCatalogChanged"]>,
+  result: HumanProjectionPublishResult,
   label: string,
 ): Response {
       if (!result.accepted) {
@@ -686,6 +690,10 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     const claimedChannelCatalogChangedEvent = payload.event !== null &&
       typeof payload.event === "object" && !Array.isArray(payload.event) &&
       (payload.event as { type?: unknown }).type === "space_channel_catalog_changed";
+    const workspaceResourceChangedEvent = parseHumanWorkspaceResourceChangedMessage(payload.event);
+    const claimedWorkspaceResourceChangedEvent = payload.event !== null &&
+      typeof payload.event === "object" && !Array.isArray(payload.event) &&
+      (payload.event as { type?: unknown }).type === "workspace_resource_changed";
     const traceAccessEvent = parseHumanTraceAccessServerMessage(payload.event);
     const claimedTraceAccessEvent = payload.event !== null && typeof payload.event === "object" &&
       !Array.isArray(payload.event) &&
@@ -699,6 +707,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     }
     if (claimedChannelCatalogChangedEvent && !channelCatalogChangedEvent) {
       return Response.json({ error: "Invalid Channel catalog committed event" }, { status: 400 });
+    }
+    if (claimedWorkspaceResourceChangedEvent && !workspaceResourceChangedEvent) {
+      return Response.json({ error: "Invalid workspace resource committed event" }, { status: 400 });
     }
     const recipientPrincipalIds = this.boundedRecipientSet(payload.recipientPrincipalIds);
     if (recipientPrincipalIds === null) {
@@ -719,6 +730,22 @@ export class RelayRuntimeLive extends DurableObject<Env> {
         Array.from(recipientPrincipalIds),
       );
       return humanFanoutResponse(result, "Channel catalog");
+    }
+    if (workspaceResourceChangedEvent) {
+      const exactEnvelope = isExactObject(payload, [
+        "channelId", "changeSeq", "event", "recipientPrincipalIds",
+      ]);
+      if (!exactEnvelope || channelId !== WORKSPACE_RESOURCE_COMMITTED_EVENT_CHANNEL ||
+          payload.changeSeq !== workspaceResourceChangedEvent.revision ||
+          !recipientPrincipalIds || recipientPrincipalIds.size === 0) {
+        return Response.json({ error: "Invalid workspace resource committed event" }, { status: 400 });
+      }
+      if (!this.productAdapter) return runtimeTransportUnavailable("Human");
+      const result = this.productAdapter.publishHumanWorkspaceResourceChanged(
+        workspaceResourceChangedEvent,
+        Array.from(recipientPrincipalIds),
+      );
+      return humanFanoutResponse(result, "Workspace resource");
     }
     if (traceAccessEvent) {
       const expectedRecipients = new Set([

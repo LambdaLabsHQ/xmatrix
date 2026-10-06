@@ -825,3 +825,34 @@ integration("revoked Space administration cannot commit a previously started Dis
     assert.equal((await sql("SELECT count(*) FROM data.app_connector_credentials WHERE space_id=$1", [space])).rows[0].count, "0");
   });
 });
+
+const githubPolicy = { id: "github", name: "GitHub", authMode: "oauth", scopes: ["metadata:read", "issues:read"],
+  secretRefs: [], capabilities: [], metadataFields: ["repository", "installationId", "installationIds",
+    "commentWriteChannelId"] };
+
+integration("a GitHub install appends its installation and keeps every other installation and config", async () => {
+  await withDatabase(async ({ database, space }) => {
+    const apps = new PostgresAppRepository(database);
+    const upsert = (commandId, body) => apps.upsert({ commandId, spaceId: space, actorUserId: "owner",
+      provider: githubPolicy, body, at });
+    // An existing Space: a legacy single installation plus a default repository and write channel.
+    await upsert("configure", { status: "configured", authMode: "oauth", metadata: { installationId: "111",
+      repository: "org/repo", commentWriteChannelId: "chan-1" } });
+    const second = await upsert("setup-2", { status: "configured", metadataAppend: { installationIds: "222" } });
+    assert.deepEqual(second.connection.metadata, { installationId: "111", installationIds: ["222"],
+      repository: "org/repo", commentWriteChannelId: "chan-1" });
+    // Concurrent installs of two more orgs serialize on the row lock; neither drops the other.
+    await Promise.all([upsert("setup-3", { metadataAppend: { installationIds: "333" } }),
+      upsert("setup-4", { metadataAppend: { installationIds: "444" } })]);
+    // Repeating an installation's setup ("Manage access") leaves the metadata as it was.
+    const repeated = await upsert("setup-2-again", { status: "configured", metadataAppend: { installationIds: "222" } });
+    assert.deepEqual([...repeated.connection.metadata.installationIds].sort(), ["222", "333", "444"]);
+    assert.equal(repeated.connection.metadata.installationIds.filter((id) => id === "222").length, 1);
+    assert.equal(repeated.connection.metadata.installationId, "111");
+    assert.equal(repeated.connection.metadata.repository, "org/repo");
+    assert.equal(repeated.connection.metadata.commentWriteChannelId, "chan-1");
+    await assert.rejects(upsert("bad-field", { metadataAppend: { notAField: "1" } }), error => error.status === 400);
+    await assert.rejects(upsert("not-a-list", { metadataAppend: { repository: "x/y" } }), error => error.status === 400);
+  });
+});
+

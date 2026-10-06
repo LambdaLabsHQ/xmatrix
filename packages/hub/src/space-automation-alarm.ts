@@ -8,6 +8,7 @@ import {
 } from "./relay-authority-scheduled-message-delivery";
 import { dispatchScheduledOccurrence } from "./scheduled-occurrence-dispatch";
 import { machineDaemonCommand } from "./machines";
+import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import type { Env } from "./types";
 
 /**
@@ -20,7 +21,13 @@ export async function runSpaceAutomationAlarm(env: Env, spaceId: string, ports: 
   waitUntil(task: Promise<unknown>): void;
 }): Promise<{ processed: number }> {
   const schedule = new PostgresScheduleOccurrenceLifecycle(env, undefined, { spaceId });
-  await reapSpaceAutomationRuns(env, new Date(), schedule);
+  let reaped = false;
+  await reapSpaceAutomationRuns(env, new Date(), {
+    reapExpiredRuns: (now, callback) => schedule.reapExpiredRuns(now, async (row) => {
+      reaped = true;
+      await callback(row);
+    }),
+  });
   const runCleanup = new PostgresScheduledRunCleanup(env);
   const messageDelivery: ScheduledMessageDelivery = {
     dispatch: (occurrence, automation, payload, lifecycle) =>
@@ -39,6 +46,11 @@ export async function runSpaceAutomationAlarm(env: Env, spaceId: string, ports: 
     const occurrence = await schedule.claim(claimAt, claimAt.toISOString(), leaseOwner);
     if (!occurrence) break;
     await dispatchScheduledOccurrence({ schedule, runCleanup, messageDelivery }, occurrence, claimAt);
+  }
+  // An empty tick must not wake every connected client. Only a run that
+  // finished, failed, or was stopped changes the list they are watching.
+  if (processed > 0 || reaped) {
+    await notifyWorkspaceResource(env, { spaceId, resource: "automations" });
   }
   return { processed };
 }

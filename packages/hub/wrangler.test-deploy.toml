@@ -207,6 +207,7 @@ RELAY_AUTHORITY_OBSERVABILITY_ENABLED = "true"
 RELAY_AUTOMATION_EXECUTION_ENABLED = "false"
 RELAY_AUTOMATION_RUN_TIMEOUT_MS = "1800000"
 CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED = "true"
+GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED = "true"
 # One-time synthetic-principal rotation after the pre-fix archive path left the
 # original smoke principal fail-closed on projection entitlement drift.
 XMATRIX_MOCK_AUTH_USER_ID = "test-release-smoke-v2"

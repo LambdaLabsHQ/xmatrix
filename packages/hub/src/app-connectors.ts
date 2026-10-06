@@ -52,7 +52,23 @@ interface GitHubInstallationAuth {
   token: string;
   capabilities: string[];
   expiresAt?: string;
+  /** `owner/name` of each repository the token covers, when GitHub listed them. */
+  repositories?: string[];
 }
+
+/** GitHub App permission levels, as the access_tokens request names them. */
+type GitHubPermissionRequest = Record<string, "read" | "write">;
+
+/**
+ * What an Agent's Git work needs from its repository token: fetch and push
+ * (`contents`) plus the metadata every token carries. Pull requests, issues,
+ * Actions, workflows and secrets are deliberately absent: `gh` keeps using the
+ * machine owner's own login, and a pushed change to `.github/workflows` is
+ * refused rather than letting an Agent rewrite what CI runs with.
+ */
+const AGENT_GIT_TOKEN_PERMISSIONS: GitHubPermissionRequest = { contents: "write", metadata: "read" };
+/** The same request for an installation that was only given read access. */
+const AGENT_GIT_TOKEN_READ_PERMISSIONS: GitHubPermissionRequest = { contents: "read", metadata: "read" };
 
 interface GitHubIssueFetchResult {
   issue: GitHubIssueSnapshot;
@@ -433,7 +449,16 @@ export async function mintGitHubRepositoryToken(
   if (connection.providerId !== "github") {
     throw new Error("github_connection_required");
   }
-  const auth = await githubInstallationAuthForRepository(env, connection, owner, repo);
+  let auth: GitHubInstallationAuth;
+  try {
+    auth = await githubInstallationAuthForRepository(env, connection, owner, repo, AGENT_GIT_TOKEN_PERMISSIONS);
+  } catch (error) {
+    // GitHub answers 422 when a requested permission exceeds what the
+    // installation holds. An installation given read-only contents still
+    // serves fetches, so ask again for exactly that rather than failing.
+    if (!(error instanceof Error) || error.message !== "github_api_422") throw error;
+    auth = await githubInstallationAuthForRepository(env, connection, owner, repo, AGENT_GIT_TOKEN_READ_PERMISSIONS);
+  }
   return {
     token: auth.token,
     expiresAt: auth.expiresAt,
@@ -1683,41 +1708,76 @@ async function githubInstallationAuthForRepository(
   env: AppConnectorEnv,
   connection: AppConnectorConnectionView,
   owner: string,
-  repo: string
+  repo: string,
+  permissions?: GitHubPermissionRequest
 ): Promise<GitHubInstallationAuth> {
   const allowed = githubConnectionInstallationIds(connection);
   if (allowed.length === 0) {
     throw new Error("github_installation_missing");
   }
-  const allowedSet = new Set(allowed);
-  let lastError: unknown;
+  const scope = { repositories: [repo], ...(permissions ? { permissions } : {}) };
 
+  let resolvedId: string;
   try {
-    const resolvedId = await resolveGitHubRepositoryInstallationId(env, owner, repo);
-    if (allowedSet.has(resolvedId)) {
-      return await githubInstallationAuthForId(env, resolvedId, { repositories: [repo] });
-    }
-    lastError = new Error("github_installation_not_linked_to_space");
+    resolvedId = await resolveGitHubRepositoryInstallationId(env, owner, repo);
   } catch (error) {
-    lastError = error;
+    // A 404 is GitHub's answer, not an outage: the App is not installed on
+    // that repository, or the repository does not exist. Probing would only
+    // replace that answer with a less precise one.
+    if (error instanceof Error && error.message === "github_api_404") {
+      throw new Error("github_repository_not_installed");
+    }
+    return await githubInstallationAuthByProbe(env, allowed, owner, repo, scope, error);
   }
+  if (!allowed.includes(resolvedId)) {
+    // The lookup answered: the repository belongs to an installation this
+    // Space did not connect. That is the precise refusal, and no other
+    // installation may stand in for it.
+    throw new Error("github_installation_not_linked_to_space");
+  }
+  return await githubInstallationAuthForId(env, resolvedId, scope);
+}
 
-  // Fallback when the repo installation lookup is unavailable: probe retained ids.
+/**
+ * Only when the installation lookup itself is unavailable: try each of the
+ * Space's installations. `repositories` names a repository *within* an
+ * installation's account, so a same-named repository of another owner would
+ * mint too; a token is accepted only when it covers exactly `owner/repo`.
+ */
+async function githubInstallationAuthByProbe(
+  env: AppConnectorEnv,
+  allowed: string[],
+  owner: string,
+  repo: string,
+  scope: { repositories: string[]; permissions?: GitHubPermissionRequest },
+  lookupError: unknown
+): Promise<GitHubInstallationAuth> {
+  let lastError: unknown = lookupError;
   for (const installationId of allowed) {
     try {
-      const auth = await githubInstallationAuthForId(env, installationId, { repositories: [repo] });
-      await fetchGitHubJson(
-        env,
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
-        auth.token
-      );
-      return auth;
+      const auth = await githubInstallationAuthForId(env, installationId, scope);
+      const covered = auth.repositories ?? await githubTokenRepositories(env, auth.token);
+      if (covered.some((fullName) => fullName.toLowerCase() === `${owner}/${repo}`.toLowerCase())) return auth;
+      lastError = new Error("github_installation_not_linked_to_space");
     } catch (error) {
       lastError = error;
     }
   }
   if (lastError instanceof Error) throw lastError;
   throw new Error("github_installation_token_missing");
+}
+
+/** The repositories one installation token reaches; a scoped token has one. */
+async function githubTokenRepositories(env: AppConnectorEnv, token: string): Promise<string[]> {
+  const payload = githubObject(await fetchGitHubJson(env, "/installation/repositories?per_page=100", token));
+  return githubRepositoryFullNames(payload.repositories);
+}
+
+function githubRepositoryFullNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => githubString(githubObject(item).full_name))
+    .filter((name): name is string => !!name);
 }
 
 async function resolveGitHubRepositoryInstallationId(
@@ -1751,24 +1811,28 @@ async function resolveGitHubRepositoryInstallationId(
 async function githubInstallationAuthForId(
   env: AppConnectorEnv,
   installationId: string,
-  scope?: { repositories?: string[] }
+  scope?: { repositories?: string[]; permissions?: GitHubPermissionRequest }
 ): Promise<GitHubInstallationAuth> {
   const jwt = await configuredGitHubAppJwt(env);
   const repositories = scope?.repositories?.filter((name) => name.length > 0);
+  const request = {
+    ...(repositories && repositories.length > 0 ? { repositories } : {}),
+    ...(scope?.permissions ? { permissions: scope.permissions } : {}),
+  };
   const payload = await fetchGitHubJson(env, `/app/installations/${encodeURIComponent(installationId)}/access_tokens`, jwt, {
     method: "POST",
-    ...(repositories && repositories.length > 0
-      ? { body: JSON.stringify({ repositories }) }
-      : {}),
+    ...(Object.keys(request).length > 0 ? { body: JSON.stringify(request) } : {}),
   });
   const token = githubString(githubObject(payload).token);
   if (!token) {
     throw new Error("github_installation_token_missing");
   }
+  const listed = githubObject(payload).repositories;
   return {
     token,
     capabilities: githubInstallationCapabilities(payload),
     expiresAt: githubString(githubObject(payload).expires_at),
+    ...(Array.isArray(listed) ? { repositories: githubRepositoryFullNames(listed) } : {}),
   };
 }
 

@@ -45,3 +45,38 @@ test("one-line messages from the same sender stay one line apart", async ({ page
   expect(timeBox.height).toBeLessThanOrEqual(bodyBox!.height);
   expect(timeBox.x).toBeGreaterThanOrEqual(rowBox!.x);
 });
+
+/* Every gap inside one sender's run is the same, and a new sender opens with a
+   little more room (user 2026-10-06: the gap after the first message was wider
+   than the rest, then "两个人之间的消息间距就稍微要拉大一点"). */
+test("one sender's lines sit at one pitch and a new sender opens wider", async ({ page }) => {
+  const a = { ...E2E_USER_SENDER, identityId: "user:someone-else", userId: "someone-else" };
+  const b = { ...E2E_USER_SENDER, identityId: "user:other", userId: "other", label: "Other Person" };
+  const senders = [a, a, a, b, b];
+  await openGeneralChannelWithHistory(page, {
+    ...E2E_CHANNEL,
+    messageCount: senders.length,
+    lastMessageSequence: senders.length,
+    updatedAt: E2E_NOW,
+  }, senders.map((from, index) => ({
+    messageId: `m-${index + 1}`, channelId: E2E_CHANNEL.id, sequence: index + 1, body: `line ${index + 1}`, sentAt: E2E_NOW, from,
+  })));
+  await expect(page.locator(".app-message-row")).toHaveCount(senders.length);
+
+  // Blank between one row's text and the next row's first ink (avatar, header or text).
+  const gaps = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>(".app-message-row"));
+    const spans = rows.map((row) => {
+      const ink = [".app-message-author-avatar", ".app-message-meta", ".rich-message"]
+        .map((selector) => row.querySelector<HTMLElement>(selector))
+        .filter((element): element is HTMLElement => element !== null)
+        .map((element) => element.getBoundingClientRect());
+      return { top: Math.min(...ink.map((box) => box.top)), bottom: row.querySelector<HTMLElement>(".rich-message")!.getBoundingClientRect().bottom };
+    });
+    return spans.slice(1).map((span, index) => Math.round(span.top - spans[index].bottom));
+  });
+  const [first, second, newSender, sameAgain] = gaps;
+  expect(first).toBe(second);
+  expect(sameAgain).toBe(first);
+  expect(newSender).toBeGreaterThan(first + 4);
+});

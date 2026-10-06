@@ -8,6 +8,7 @@ import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { deterministicConversationId, launchConversationAgent, openConversation } from "./system-conversation";
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
+import { runtimeRepository } from "./runtime";
 import { getChannel } from "./spaces";
 import {
   channelExposureReader, githubContentAllowedInChannel, spaceMayBePublic, type ChannelExposureReader,
@@ -138,10 +139,13 @@ export class PreReviewError extends Error {
 
 /**
  * The review conversation's verdict, published as `xmatrix/pre-review` on the
- * pull request's current head with the Space's own installation.
+ * exact head commit the reviewing Run was launched to review, with the Space's
+ * own installation. A verdict never moves to a different commit: when the pull
+ * request's head has moved since the review started, nothing is published and
+ * the new head waits for its own review.
  */
 export async function publishPreReviewVerdict(env: Env, input: {
-  channelId: string; actorUserId: string; verdict: "pass" | "changes"; summary: string;
+  channelId: string; actorUserId: string; runId: string; verdict: "pass" | "changes"; summary: string;
 }): Promise<{ headSha: string }> {
   const principal = { kind: "user" as const, id: input.actorUserId };
   const channel = await getChannel(env, { channelId: input.channelId, principal }).catch(() => {
@@ -152,10 +156,16 @@ export async function publishPreReviewVerdict(env: Env, input: {
   if (!pull || !record.spaceId) {
     throw new PreReviewError("not_a_review_conversation", 409, "This conversation is not a pull request's review");
   }
+  const headSha = await reviewedHeadSha(env, input, pull.url);
   const connection = await findAppConnection(env, { spaceId: record.spaceId, providerId: "github",
     actorUserId: principal.id });
   if (!connection) throw new PreReviewError("github_connection_required", 409, "Connect GitHub for this Space");
-  const headSha = await readGitHubPullRequestHead(env, connection, pull, pull.number);
+  const currentSha = await readGitHubPullRequestHead(env, connection, pull, pull.number);
+  if (currentSha !== headSha) {
+    throw new PreReviewError("pre_review_head_moved", 409,
+      `The pull request's head moved from ${headSha} to ${currentSha} during this review; ` +
+      "the new head gets its own review");
+  }
   const link = `${appOrigin(env)}/app?channel=${encodeURIComponent(input.channelId)}`;
   await publishGitHubCheckRun(env, connection, pull, {
     name: PRE_REVIEW_CHECK_NAME, headSha, detailsUrl: link,
@@ -164,4 +174,19 @@ export async function publishPreReviewVerdict(env: Env, input: {
     summary: `${input.summary}\n\n[The review conversation](${link})`,
   });
   return { headSha };
+}
+
+/** The head commit this Run was launched to pre-review, as Hub recorded it at launch. */
+async function reviewedHeadSha(env: Env, input: { runId: string; actorUserId: string }, pullUrl: string): Promise<string> {
+  const result = await runtimeRepository(env).getRun({ requestId: crypto.randomUUID(), runId: input.runId,
+    actorUserId: input.actorUserId }).catch(() => undefined);
+  const run = result?.run as { metadata?: unknown } | undefined;
+  const metadata = run?.metadata && typeof run.metadata === "object" && !Array.isArray(run.metadata)
+    ? run.metadata as Record<string, unknown> : {};
+  if (metadata.routedAs !== "pull_request_pre_review" || metadata.pullRequestUrl !== pullUrl ||
+    typeof metadata.headSha !== "string" || !metadata.headSha) {
+    throw new PreReviewError("pre_review_run_required", 403,
+      "Only the Run launched to review this pull request records its verdict");
+  }
+  return metadata.headSha;
 }
