@@ -40,10 +40,11 @@ export function formatDecisionTag(field: string, value: string): string {
 }
 
 /**
- * Parameters a summon's two decisions filled, in the order a written summon uses.
+ * Parameters a summon's two decisions filled, in the order they were decided.
  *
- * Jev fills the work: repository, model, effort and harness. Routing fills the
- * Machine it bound, as `machine:`. Whether that machine is a laptop is its own
+ * Jev fills the work: harness first, then the model and effort that harness
+ * offers, then the repository. Routing then fills the Machine it bound, as
+ * `machine:`. The chip reveals them one by one in this order. Whether that machine is a laptop is its own
  * property, not a Jev choice and not a tag. Only a gap is filled. A field the
  * author already wrote stays their text, even when a decision disagrees — that
  * disagreement belongs in the decision record, not as a second copy of the same
@@ -59,15 +60,15 @@ export function jevFilledTags(mention: AutoLaunchMention, parameters: LaunchPara
     return tags;
   }
   const { selections } = parameters;
+  if (parameters.harness?.selected && written.harness === undefined) {
+    tags.push({ field: "harness", value: parameters.harness.selected });
+  }
+  if (written.model === undefined) tags.push({ field: "model", value: selections.model });
+  if (selections.effort && written.effort === undefined) tags.push({ field: "effort", value: selections.effort });
   if (selections.repo && written.repo === undefined && written.pwd === undefined) {
     tags.push({ field: "repo", value: selections.repo });
   }
   if (machine && written.machine === undefined) tags.push({ field: "machine", value: machine, source: "routing" });
-  if (written.model === undefined) tags.push({ field: "model", value: selections.model });
-  if (selections.effort && written.effort === undefined) tags.push({ field: "effort", value: selections.effort });
-  if (parameters.harness?.selected && written.harness === undefined) {
-    tags.push({ field: "harness", value: parameters.harness.selected });
-  }
   return tags;
 }
 

@@ -7306,14 +7306,13 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 
 /* A parameter Jev chose, drawn into the mention after the author's words.
    Same highlight as a written condition, in the ink of "Jev is reading".
-   It sweeps in once when the choice arrives, then stays lit. */
+   Each choice pops in on its own beat, in the order it was decided, then stays lit. */
 .xmatrix-app .app-summon-condition[data-jev="true"],
 .xmatrix-app .app-summon-condition[data-routing="true"] {
   background: color-mix(in oklab, oklch(0.62 0.16 285) 18%, transparent);
 }
 .xmatrix-app .app-summon-condition[data-jev-arriving="true"] {
   animation: jev-fill-arrive 680ms cubic-bezier(.2, .8, .2, 1) both;
-  animation-delay: calc(var(--jev-fill-index, 0) * 80ms);
 }
 @keyframes jev-fill-arrive {
   0% { opacity: 0; background: transparent; }

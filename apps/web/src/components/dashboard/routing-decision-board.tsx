@@ -15,14 +15,6 @@ function DecisionStage({ label, stage }: { label: string; stage: LaunchDecisionS
   </div>;
 }
 
-export function routingChoiceNote(decision: PresentedRoutingDecision | undefined): string | undefined {
-  const selected = decision?.rows.find(row => row.selected);
-  if (!selected) return undefined;
-  const name = selected.label || routingHarnessLabel(selected.harness);
-  const quota = routingQuotaText(selected);
-  return decision?.source === "jev" ? `Jev chose ${name}, ${quota}` : `Selected ${name}, ${quota}`;
-}
-
 /** The chosen environment as the selection step states it; the step's own
  *  label already says who chose. */
 export function routingSelectionNote(decision: PresentedRoutingDecision | undefined): string | undefined {
