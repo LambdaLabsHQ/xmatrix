@@ -36,6 +36,7 @@ bindings = [
   { name = "RELAY_SPACE_ROOT_AUTHORITY", class_name = "RelaySpaceRootAuthority" },
   { name = "RELAY_RUNTIME", class_name = "RelayRuntimeLive" },
   { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "RelayRuntimeRouteDirectory" },
+  { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "RelayRuntimeChannelFanout" },
   { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" }
 ]
 
@@ -116,3 +117,7 @@ new_sqlite_classes = ["RelayPageSession"]
 [[migrations]]
 tag = "secret-authority-retired-test"
 deleted_classes = ["RelaySecretAuthority"]
+
+[[migrations]]
+tag = "channel-fanout-test"
+new_sqlite_classes = ["RelayRuntimeChannelFanout"]

@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { recordingAgentInstancePort } from "./support/agent-instance-port.mjs";
+import { capturingConsole } from "./support/capturing-console.mjs";
 import { usageLimitHandoffCommand } from "../src/runtime-transport/agent-usage-limit-handoff.ts";
 import { MessageAuthorityError } from "@xmatrix/db";
 import { messageCall } from "../src/runtime-transport/runtime-messages.ts";
 import { RuntimeAuthorityOperationError } from "../src/runtime-transport/runtime-operation-failure.ts";
-import { capturingConsole } from "./support/capturing-console.mjs";
 
 /**
  * An Instance whose provider account is used up reports `usage_limited`; the

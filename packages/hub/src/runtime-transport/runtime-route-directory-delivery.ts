@@ -1,5 +1,6 @@
 import {
   relayRuntimeCellNamed,
+  relayRuntimeChannelFanout,
   relayRuntimeRouteDirectory,
   relayRuntimeSingleCell,
 } from "../relay-authority-locator";
@@ -12,6 +13,7 @@ import {
   RELAY_RUNTIME_SELECTED_CELL,
   relayRuntimeRoutingMode,
 } from "./runtime-cell-locator";
+import { RUNTIME_FANOUT_CELLS_PER_SCOPE } from "./runtime-channel-fanout-policy";
 import {
   isRuntimeRouteDirectoryCell,
   type RuntimeRouteDirectoryCell,
@@ -24,7 +26,20 @@ const RUNTIME_CHANNEL_OBSERVABLE_EVENT_PATH =
 const RUNTIME_CHANNEL_AGENT_PRESENCE_PATH =
   "https://relay-runtime/internal/product/channel-agent-presence";
 const RUNTIME_DIRECTORY_LOOKUP_PATH = "https://runtime-route-directory/internal/runtime-route-directory/lookup";
+const RUNTIME_FANOUT_DELIVER_PATH = "https://runtime-channel-fanout/internal/runtime-channel-fanout/deliver";
+const RUNTIME_FANOUT_MEMBERS_PATH = "https://runtime-channel-fanout/internal/runtime-channel-fanout/members";
+const RUNTIME_DELIVERY_URLS = [
+  RUNTIME_COMMITTED_EVENT_PATH,
+  RUNTIME_CHANNEL_MESSAGE_PATH,
+  RUNTIME_CHANNEL_OBSERVABLE_EVENT_PATH,
+  RUNTIME_CHANNEL_AGENT_PRESENCE_PATH,
+] as const;
 const MAX_DIRECTORY_ROUTES = 17;
+
+/** Fanout accepts only these Runtime delivery URLs, never a caller-chosen path. */
+export function isRuntimeDeliveryUrl(value: unknown): value is (typeof RUNTIME_DELIVERY_URLS)[number] {
+  return typeof value === "string" && (RUNTIME_DELIVERY_URLS as readonly string[]).includes(value);
+}
 
 interface RuntimeDirectoryRoute {
   cellName: RuntimeRouteDirectoryCell;
@@ -57,7 +72,11 @@ export type RuntimeLiveDeliverySelf = {
 export interface RuntimeRouteDirectoryDeliveryInput {
   env: Pick<
     Env,
-    "RELAY_RUNTIME" | "RELAY_RUNTIME_ROUTE_DIRECTORY" | "XMATRIX_RUNTIME_CELL_MODE"
+    | "RELAY_RUNTIME"
+    | "RELAY_RUNTIME_ROUTE_DIRECTORY"
+    | "RELAY_RUNTIME_CHANNEL_FANOUT"
+    | "XMATRIX_RUNTIME_CELL_MODE"
+    | "XMATRIX_RUNTIME_LOCATION_HINT"
   >;
   /** The Runtime scope being delivered, from typed authority state. */
   scopeId: string;
@@ -102,12 +121,26 @@ export async function publishRuntimeChannelAgentPresence(input: {
   body: string;
   exceptCell: string;
 }): Promise<void> {
+  const request = () => runtimeRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_PATH, input.body);
+  if (await scopeUsesChannelFanout(input.env, input.channelId)) {
+    await deliverThroughChannelFanout(input.env, input.channelId, request, input.exceptCell);
+    if (input.exceptCell !== RELAY_RUNTIME_SELECTED_CELL &&
+        relayRuntimeRoutingMode(input.env.XMATRIX_RUNTIME_CELL_MODE) === "dual") {
+      await deliverToRuntimeCells({
+        env: input.env,
+        cells: [RELAY_RUNTIME_SELECTED_CELL],
+        request,
+        label: "Agent presence",
+      });
+    }
+    return;
+  }
   const cells = await runtimeCellsExcept(input.env, input.channelId, input.exceptCell);
   if (cells.length === 0) return;
   await deliverToRuntimeCells({
     env: input.env,
     cells,
-    request: () => runtimeRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_PATH, input.body),
+    request,
     label: "Agent presence",
   });
 }
@@ -122,10 +155,10 @@ async function runtimeCellsExcept(
     return exceptCell === single ? [] : [single];
   }
   const directory = relayRuntimeRouteDirectory(env.RELAY_RUNTIME_ROUTE_DIRECTORY, channelId);
-  const routes = directory ? await lookupRoutes(directory, channelId).catch(() => undefined) : undefined;
+  const lookedUp = directory ? await lookupDirectory(directory, channelId).catch(() => undefined) : undefined;
   const targets = new Set<RuntimeRouteDirectoryCell>([
     single,
-    ...(routes ?? []).map((route) => route.cellName),
+    ...(lookedUp?.routes ?? []).map((route) => route.cellName),
   ]);
   targets.delete(exceptCell as RuntimeRouteDirectoryCell);
   return [...targets];
@@ -166,6 +199,23 @@ function runtimeRequest(url: string, body: string): Request {
     method: "POST",
     headers: { "content-type": "application/json" },
     body,
+  });
+}
+
+/** The channel fanout object calls this. It never fetches the publishing cell. */
+export function deliverRuntimeFanoutTargets(input: {
+  env: RuntimeRouteDirectoryDeliveryInput["env"];
+  cells: readonly RuntimeRouteDirectoryCell[];
+  url: string;
+  body: string;
+  label: string;
+}): Promise<Array<{ cellName: RuntimeRouteDirectoryCell; response: Response }>> {
+  if (!isRuntimeDeliveryUrl(input.url) || input.cells.length === 0) return Promise.resolve([]);
+  return deliverToRuntimeCells({
+    env: input.env,
+    cells: input.cells,
+    request: () => runtimeRequest(input.url, input.body),
+    label: input.label,
   });
 }
 
@@ -224,16 +274,37 @@ async function publishRuntimeRouted(
     return fetchRuntimeCell(input.env, RELAY_RUNTIME_SELECTED_CELL, request(), input.self);
   }
   const directory = relayRuntimeRouteDirectory(input.env.RELAY_RUNTIME_ROUTE_DIRECTORY, input.scopeId);
-  const routes = directory
-    ? await lookupRoutes(directory, input.scopeId).catch(() => undefined)
+  const lookedUp = directory
+    ? await lookupDirectory(directory, input.scopeId).catch(() => undefined)
     : undefined;
   // This projection cannot strand legacy sockets when absent or unavailable.
-  if (routes === undefined) {
+  if (lookedUp === undefined) {
     return fetchRuntimeCell(input.env, RELAY_RUNTIME_SELECTED_CELL, request(), input.self);
+  }
+  if (lookedUp.fanout) {
+    const [fanoutSettled, results] = await Promise.all([
+      deliverThroughChannelFanout(input.env, input.scopeId, request, input.self?.cellName),
+      deliverToRuntimeCells({
+        env: input.env,
+        cells: [RELAY_RUNTIME_SELECTED_CELL],
+        request,
+        label,
+        ...(input.self ? { self: input.self } : {}),
+      }),
+    ]);
+    void fanoutSettled;
+    const selected = results.find((result) => result.cellName === RELAY_RUNTIME_SELECTED_CELL);
+    if (!selected || !("response" in selected) || !selected.response) {
+      throw new RuntimeRouteDirectoryDeliveryError([{
+        cellName: RELAY_RUNTIME_SELECTED_CELL,
+        error: new Error("Runtime default cell did not settle"),
+      }]);
+    }
+    return selected.response;
   }
   const targets = new Set<RuntimeRouteDirectoryCell>([
     RELAY_RUNTIME_SELECTED_CELL,
-    ...routes.map((route) => route.cellName),
+    ...lookedUp.routes.map((route) => route.cellName),
   ]);
   const results = await deliverToRuntimeCells({
     env: input.env,
@@ -252,10 +323,52 @@ async function publishRuntimeRouted(
   return selected.response;
 }
 
-async function lookupRoutes(
+interface RuntimeDirectoryLookup {
+  routes: RuntimeDirectoryRoute[];
+  fanout: boolean;
+}
+
+async function scopeUsesChannelFanout(
+  env: RuntimeRouteDirectoryDeliveryInput["env"],
+  scopeId: string,
+): Promise<boolean> {
+  if (relayRuntimeRoutingMode(env.XMATRIX_RUNTIME_CELL_MODE) !== "dual") return false;
+  const directory = relayRuntimeRouteDirectory(env.RELAY_RUNTIME_ROUTE_DIRECTORY, scopeId);
+  const lookedUp = directory ? await lookupDirectory(directory, scopeId).catch(() => undefined) : undefined;
+  return lookedUp?.fanout === true;
+}
+
+async function deliverThroughChannelFanout(
+  env: RuntimeRouteDirectoryDeliveryInput["env"],
+  scopeId: string,
+  request: () => Request,
+  exceptCell: string | undefined,
+): Promise<void> {
+  const namespace = env.RELAY_RUNTIME_CHANNEL_FANOUT;
+  const fanout = namespace ? relayRuntimeChannelFanout(namespace, scopeId, env) : undefined;
+  if (!fanout) throw new Error("Runtime channel fanout is not configured");
+  const sample = request();
+  const response = await fanout.fetch(new Request(RUNTIME_FANOUT_DELIVER_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      url: sample.url,
+      body: await sample.text(),
+      ...(exceptCell && isRuntimeRouteDirectoryCell(exceptCell) ? { exceptCell } : {}),
+    }),
+  }));
+  if (!response.ok) {
+    throw new RuntimeRouteDirectoryDeliveryError([{
+      cellName: RELAY_RUNTIME_SELECTED_CELL,
+      error: new Error(`Channel fanout rejected delivery (${response.status})`),
+    }]);
+  }
+}
+
+async function lookupDirectory(
   directory: { fetch(request: Request): Promise<Response> },
   scopeId: string,
-): Promise<RuntimeDirectoryRoute[] | undefined> {
+): Promise<RuntimeDirectoryLookup | undefined> {
   const response = await directory.fetch(new Request(RUNTIME_DIRECTORY_LOOKUP_PATH, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -263,13 +376,39 @@ async function lookupRoutes(
   }));
   if (!response.ok) return undefined;
   const payload: unknown = await response.json().catch(() => undefined);
-  return parseLookupRoutes(payload);
+  return parseDirectoryLookup(payload);
 }
 
-function parseLookupRoutes(value: unknown): RuntimeDirectoryRoute[] | undefined {
+async function lookupFanoutMembers(
+  env: RuntimeRouteDirectoryDeliveryInput["env"],
+  scopeId: string,
+): Promise<RuntimeDirectoryRoute[] | undefined> {
+  const namespace = env.RELAY_RUNTIME_CHANNEL_FANOUT;
+  const fanout = namespace ? relayRuntimeChannelFanout(namespace, scopeId, env) : undefined;
+  if (!fanout) return undefined;
+  const response = await fanout.fetch(new Request(RUNTIME_FANOUT_MEMBERS_PATH, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }));
+  if (!response.ok) return undefined;
+  const payload: unknown = await response.json().catch(() => undefined);
+  return parseRouteList(payload && typeof payload === "object" && !Array.isArray(payload)
+    ? (payload as { routes?: unknown }).routes
+    : undefined, RUNTIME_FANOUT_CELLS_PER_SCOPE);
+}
+
+function parseDirectoryLookup(value: unknown): RuntimeDirectoryLookup | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const routes = (value as { routes?: unknown }).routes;
-  if (!Array.isArray(routes) || routes.length > MAX_DIRECTORY_ROUTES) return undefined;
+  const record = value as { routes?: unknown; fanout?: unknown };
+  const fanout = record.fanout === true;
+  const routes = parseRouteList(record.routes);
+  if (!routes) return fanout ? { routes: [], fanout: true } : undefined;
+  return { routes, fanout };
+}
+
+function parseRouteList(routes: unknown, maxRoutes = MAX_DIRECTORY_ROUTES): RuntimeDirectoryRoute[] | undefined {
+  if (!Array.isArray(routes) || routes.length > maxRoutes) return undefined;
   const unique = new Set<string>();
   const parsed: RuntimeDirectoryRoute[] = [];
   for (const item of routes) {
@@ -301,7 +440,10 @@ export async function runtimeCellsForChannel(
 ): Promise<{ fetch(request: Request): Promise<Response> }[]> {
   const single = relayRuntimeSingleCell(env);
   const directory = relayRuntimeRouteDirectory(env.RELAY_RUNTIME_ROUTE_DIRECTORY, channelId);
-  const routes = directory ? await lookupRoutes(directory, channelId).catch(() => undefined) : undefined;
+  const lookedUp = directory ? await lookupDirectory(directory, channelId).catch(() => undefined) : undefined;
+  const routes = lookedUp?.fanout
+    ? await lookupFanoutMembers(env, channelId).catch(() => undefined)
+    : lookedUp?.routes;
   return [
     single,
     ...(routes ?? [])

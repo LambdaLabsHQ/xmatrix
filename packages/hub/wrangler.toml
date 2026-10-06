@@ -47,6 +47,7 @@ bindings = [
   { name = "RELAY_SPACE_CAPACITY_AUTHORITY", class_name = "RelaySpaceCapacityAuthority" },
   { name = "RELAY_RUNTIME", class_name = "RelayRuntimeLive" },
   { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "RelayRuntimeRouteDirectory" },
+  { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "RelayRuntimeChannelFanout" },
   { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" }
 ]
 
@@ -325,3 +326,9 @@ new_sqlite_classes = ["RelayPageSession"]
 [[migrations]]
 tag = "v41"
 deleted_classes = ["RelaySecretAuthority"]
+
+# One object per channel. It holds that channel's runtime cells once the
+# direct directory list is full, and fans a delivery out to them.
+[[migrations]]
+tag = "v42"
+new_sqlite_classes = ["RelayRuntimeChannelFanout"]
