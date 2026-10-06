@@ -1,5 +1,12 @@
-import { utf8ByteLength } from "@xmatrix/protocol";
 import { DurableObject } from "cloudflare:workers";
+import { relayRuntimeChannelFanout } from "./relay-authority-locator";
+import { runtimeScopeUsesFanout } from "./runtime-transport/runtime-channel-fanout-policy";
+import {
+  hasOnlyKeys,
+  methodNotAllowed,
+  readJsonRecord,
+  runtimeRouteRecords,
+} from "./runtime-transport/runtime-route-json";
 import {
   runtimeRouteDirectoryEntryTtlMs,
   RUNTIME_ROUTE_DIRECTORY_MAX_SCOPE_IDS_PER_REQUEST,
@@ -10,8 +17,9 @@ import {
 import type { Env } from "./types";
 
 const MAX_REQUEST_BYTES = 16 * 1024;
-const MAX_CELLS_PER_SCOPE = 17;
 const MAX_OPPORTUNISTIC_EXPIRED_ROWS = 128;
+const FANOUT_REGISTER_PATH = "https://runtime-channel-fanout/internal/runtime-channel-fanout/register";
+const FANOUT_UNREGISTER_PATH = "https://runtime-channel-fanout/internal/runtime-channel-fanout/unregister";
 
 interface RouteDirectoryEntryRow extends Record<string, SqlStorageValue> {
   cell_name: string;
@@ -37,18 +45,24 @@ export class RelayRuntimeRouteDirectory extends DurableObject<Env> {
     `);
     this.ctx.storage.sql.exec(`CREATE INDEX IF NOT EXISTS runtime_route_directory_entries_expiry
       ON runtime_route_directory_entries (expires_at_ms)`);
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS runtime_route_directory_fanout (
+        scope_id TEXT PRIMARY KEY
+      )
+    `);
   }
 
   async fetch(request: Request): Promise<Response> {
-    if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
-    const body = await requestBody(request);
+    const rejected = methodNotAllowed(request);
+    if (rejected) return rejected;
+    const body = await readJsonRecord(request, MAX_REQUEST_BYTES);
     if (!body) return Response.json({ error: "Invalid route-directory request" }, { status: 400 });
     const now = Date.now();
     switch (new URL(request.url).pathname) {
       case "/internal/runtime-route-directory/register":
-        return this.register(body, now);
+        return await this.register(body, now);
       case "/internal/runtime-route-directory/unregister":
-        return this.unregister(body, now);
+        return await this.unregister(body, now);
       case "/internal/runtime-route-directory/lookup":
         return this.lookup(body, now);
       default:
@@ -56,19 +70,32 @@ export class RelayRuntimeRouteDirectory extends DurableObject<Env> {
     }
   }
 
-  private register(body: Record<string, unknown>, now: number): Response {
+  private async register(body: Record<string, unknown>, now: number): Promise<Response> {
     const registration = parseCellScopeRequest(body);
     if (!registration) return Response.json({ error: "Invalid route registration" }, { status: 400 });
     this.pruneExpiredRows(now);
     const expiresAtMs = now + runtimeRouteDirectoryEntryTtlMs(registration.cellName);
+    const fanoutScopes: string[] = [];
+    const directScopes: string[] = [];
     for (const scopeId of registration.scopeIds) {
       this.pruneScope(scopeId, now);
-      const active = this.activeCells(scopeId);
-      if (!active.includes(registration.cellName) && active.length >= MAX_CELLS_PER_SCOPE) {
-        return Response.json({ error: "Route scope capacity exceeded" }, { status: 503 });
+      const alreadyFanout = this.isFanout(scopeId);
+      const active = alreadyFanout ? [] : this.activeCells(scopeId);
+      if (runtimeScopeUsesFanout({
+        alreadyFanout,
+        activeDirectCells: active.length,
+        cellAlreadyDirect: active.includes(registration.cellName),
+      })) {
+        fanoutScopes.push(scopeId);
+      } else {
+        directScopes.push(scopeId);
       }
     }
-    for (const scopeId of registration.scopeIds) {
+    if (fanoutScopes.length > 0) {
+      const failure = await this.moveScopesToFanout(registration.cellName, fanoutScopes);
+      if (failure) return failure;
+    }
+    for (const scopeId of directScopes) {
       this.ctx.storage.sql.exec(
         `INSERT INTO runtime_route_directory_entries (scope_id, cell_name, expires_at_ms)
          VALUES (?, ?, ?)
@@ -78,14 +105,23 @@ export class RelayRuntimeRouteDirectory extends DurableObject<Env> {
         expiresAtMs,
       );
     }
-    return Response.json({ registered: registration.scopeIds.length, expiresAtMs });
+    return Response.json({
+      registered: directScopes.length,
+      fanout: fanoutScopes.length,
+      expiresAtMs,
+    });
   }
 
-  private unregister(body: Record<string, unknown>, now: number): Response {
+  private async unregister(body: Record<string, unknown>, now: number): Promise<Response> {
     const registration = parseCellScopeRequest(body);
     if (!registration) return Response.json({ error: "Invalid route unregister" }, { status: 400 });
     for (const scopeId of registration.scopeIds) {
       this.pruneScope(scopeId, now);
+      if (this.isFanout(scopeId)) {
+        const failure = await this.unregisterFanout(registration.cellName, scopeId);
+        if (failure) return failure;
+        continue;
+      }
       this.ctx.storage.sql.exec(
         "DELETE FROM runtime_route_directory_entries WHERE scope_id = ? AND cell_name = ?",
         scopeId,
@@ -99,13 +135,91 @@ export class RelayRuntimeRouteDirectory extends DurableObject<Env> {
     const scopeId = parseLookupRequest(body);
     if (!scopeId) return Response.json({ error: "Invalid route lookup" }, { status: 400 });
     this.pruneScope(scopeId, now);
+    if (this.isFanout(scopeId)) {
+      return Response.json({ cells: [], routes: [], fanout: true });
+    }
     const routes = this.activeRoutes(scopeId);
     return Response.json({
       // Retain the initial response field for diagnostics while new fanout
       // consumers use the expiry-fenced route records below.
       cells: routes.map((route) => route.cellName),
       routes,
+      fanout: false,
     });
+  }
+
+  /**
+   * The direct list stays short. Crossing it copies the current cells onto the
+   * channel fanout object, then lookups point publishers there. Without that
+   * binding the old capacity refusal still applies.
+   */
+  private async moveScopesToFanout(
+    cellName: RuntimeRouteDirectoryCell,
+    scopeIds: readonly string[],
+  ): Promise<Response | undefined> {
+    const namespace = this.env.RELAY_RUNTIME_CHANNEL_FANOUT;
+    if (!namespace) return Response.json({ error: "Route scope capacity exceeded" }, { status: 503 });
+    for (const scopeId of scopeIds) {
+      const already = this.isFanout(scopeId);
+      const cells = already
+        ? [cellName]
+        : [...new Set<RuntimeRouteDirectoryCell>([cellName, ...this.activeCells(scopeId)])];
+      const fanout = relayRuntimeChannelFanout(namespace, scopeId, this.env);
+      if (!fanout) return Response.json({ error: "Invalid route registration" }, { status: 400 });
+      for (const cell of cells) {
+        const response = await fanout.fetch(new Request(FANOUT_REGISTER_PATH, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cellName: cell }),
+        }));
+        if (!response.ok) return response;
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO runtime_route_directory_fanout (scope_id) VALUES (?)
+         ON CONFLICT(scope_id) DO NOTHING`,
+        scopeId,
+      );
+      if (!already) {
+        this.ctx.storage.sql.exec(
+          "DELETE FROM runtime_route_directory_entries WHERE scope_id = ?",
+          scopeId,
+        );
+      }
+    }
+    return undefined;
+  }
+
+  private async unregisterFanout(
+    cellName: RuntimeRouteDirectoryCell,
+    scopeId: string,
+  ): Promise<Response | undefined> {
+    const namespace = this.env.RELAY_RUNTIME_CHANNEL_FANOUT;
+    const fanout = namespace ? relayRuntimeChannelFanout(namespace, scopeId, this.env) : undefined;
+    if (!fanout) return Response.json({ error: "Route scope capacity exceeded" }, { status: 503 });
+    const response = await fanout.fetch(new Request(FANOUT_UNREGISTER_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cellName }),
+    }));
+    if (!response.ok) return response;
+    const payload: unknown = await response.json().catch(() => undefined);
+    const members = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as { members?: unknown }).members
+      : undefined;
+    if (members === 0) {
+      this.ctx.storage.sql.exec(
+        "DELETE FROM runtime_route_directory_fanout WHERE scope_id = ?",
+        scopeId,
+      );
+    }
+    return undefined;
+  }
+
+  private isFanout(scopeId: string): boolean {
+    return Array.from(this.ctx.storage.sql.exec<{ scope_id: string }>(
+      "SELECT scope_id FROM runtime_route_directory_fanout WHERE scope_id = ?",
+      scopeId,
+    )).length > 0;
   }
 
   private pruneScope(scopeId: string, now: number): void {
@@ -143,31 +257,12 @@ export class RelayRuntimeRouteDirectory extends DurableObject<Env> {
     cellName: RuntimeRouteDirectoryCell;
     expiresAtMs: number;
   }> {
-    const rows = Array.from(this.ctx.storage.sql.exec<RouteDirectoryEntryRow>(
+    return runtimeRouteRecords(this.ctx.storage.sql.exec<RouteDirectoryEntryRow>(
       `SELECT cell_name, expires_at_ms FROM runtime_route_directory_entries
        WHERE scope_id = ?
        ORDER BY cell_name`,
       scopeId,
     ));
-    return rows.flatMap((row) =>
-      isRuntimeRouteDirectoryCell(row.cell_name) &&
-      Number.isSafeInteger(row.expires_at_ms) && row.expires_at_ms > 0
-        ? [{ cellName: row.cell_name, expiresAtMs: row.expires_at_ms }]
-        : [],
-    );
-  }
-}
-
-async function requestBody(request: Request): Promise<Record<string, unknown> | undefined> {
-  const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) return undefined;
-  const text = await request.text();
-  if (utf8ByteLength(text) > MAX_REQUEST_BYTES) return undefined;
-  try {
-    const body: unknown = JSON.parse(text);
-    return isRecord(body) ? body : undefined;
-  } catch {
-    return undefined;
   }
 }
 
@@ -193,11 +288,4 @@ function parseLookupRequest(value: Record<string, unknown>): string | undefined 
   return value.scopeId;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
 
-function hasOnlyKeys(value: Record<string, unknown>, expected: string[]): boolean {
-  const keys = Object.keys(value);
-  return keys.length === expected.length && keys.every((key) => expected.includes(key));
-}

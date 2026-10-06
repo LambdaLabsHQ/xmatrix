@@ -222,6 +222,25 @@ pub(crate) fn domain_connection_url(hub_url: &str, path: &str) -> String {
     format!("{}://{host}{path}", if secure { "wss" } else { "ws" })
 }
 
+/// Hub routes `/ws/*?owner=<id>` onto `user-<id>` only for this charset.
+/// Any other id is left off, and the socket stays on the single cell.
+pub fn with_runtime_owner(url: String, owner_user_id: &str) -> String {
+    if !runtime_owner_id(owner_user_id) {
+        return url;
+    }
+    let joiner = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{joiner}owner={owner_user_id}")
+}
+
+fn runtime_owner_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 128
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'-')
+}
+
 /// Fail the initial ready waiter once; established connections handle the
 /// same failure through their domain-specific reconnect events instead.
 pub(crate) fn fail_initial_ready<T>(

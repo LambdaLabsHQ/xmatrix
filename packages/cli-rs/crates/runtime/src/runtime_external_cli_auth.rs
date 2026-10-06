@@ -60,8 +60,10 @@ async fn cmd_external_inner(
                     .into(),
             )
         })?;
-    let relay_url = agent_instance_connection::derive_connection_url(
-        &xmatrix_cli_core::human_connection::derive_connection_url(hub_url),
+    let owner_user_id = std::env::var("XMATRIX_OWNER_USER_ID").unwrap_or_default();
+    let relay_url = agent_instance_connection::derive_connection_url_for_owner(
+        hub_url,
+        &owner_user_id,
     );
 
     let agent_name_base = build_agent_name(tool);

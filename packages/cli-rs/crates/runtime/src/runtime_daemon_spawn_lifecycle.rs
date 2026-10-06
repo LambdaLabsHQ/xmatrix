@@ -2223,6 +2223,7 @@ async fn spawn_headless_agent(
         "XMATRIX_SPAWN_CWD",
         "XMATRIX_SPAWN_RUNTIME",
         "XMATRIX_TOKEN",
+        "XMATRIX_OWNER_USER_ID",
     ]
     .into_iter()
     .chain(RETIRED_ROLE_ENV)
@@ -2338,6 +2339,10 @@ async fn spawn_headless_agent(
     }
     command.envs(&local_env);
     command.env_remove("XMATRIX_TOKEN");
+    command.env(
+        "XMATRIX_OWNER_USER_ID",
+        &registration.key.owner_user_id,
+    );
     if let Some(grant) = auth_grant.as_ref() {
         command
             .env(DAEMON_AUTH_URL_ENV, &grant.url)
