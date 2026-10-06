@@ -28,6 +28,7 @@ import { ACTIVE_RUN_STATUS_SQL,
   machineMentionValue, machineTagSelects,
   type MachineResourceObservation,
   type RoutingModelOption,
+  type RoutingQuotaWindow,
   type HarnessParameter,
   harnessParameterObservation,
   launchHarnessParameters,
@@ -37,6 +38,7 @@ import { ACTIVE_RUN_STATUS_SQL,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
   type AgentRegistrationLaunch, utf8ByteLength, hasControlCharacter,
+  currentRoutingQuotaWindows,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -140,7 +142,8 @@ export interface RegistrationLaunchCandidate {
   observations?: {
     evaluatedAt: string; machineResources?: MachineResourceObservation;
     outstandingMachineAllocations: number; outstandingRegistrationAllocations: number;
-    quota: { remainingPercent: number; assumed: boolean; observedAt?: string; expiresAt?: string; source?: string };
+    quota: { remainingPercent: number; assumed: boolean; observedAt?: string; expiresAt?: string; source?: string;
+      windows?: RoutingQuotaWindow[] };
   };
   workspaceReferences: string[];
   workspaces: Array<{ reference: string; canonicalCwd?: string; repo?: string; description: string; machineId: string }>;
@@ -1075,7 +1078,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             WHERE a.owner_user_id=$1 AND a.machine_id=$2 AND a.state<>'released') AS machine_allocations,
           (SELECT count(*)::int FROM control.registration_execution_allocations a
             WHERE a.owner_user_id=$1 AND a.machine_id=$2 AND a.harness=$3 AND a.state<>'released') AS registration_allocations,
-          q.remaining,q.observed_at,q.expires_at,q.source
+          q.remaining,q.observed_at,q.expires_at,q.source,q.windows_json,q.account_json
           FROM control.agent_registration_environments e
           ${currentRegistrationQuotaJoin("q")}
           WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
@@ -1102,6 +1105,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const directories = workspaces.filter(row => workspaceReferences.includes(String(row.workspace_id)));
 
         const quota = registrationQuotaReading(fact);
+        const quotaWindows = currentRoutingQuotaWindows(fact?.windows_json, Date.now());
         const observation = observed.find(row => row.owner === candidate.key.ownerUserId &&
           row.machine === candidate.key.machineId && row.harness === candidate.key.harness);
         const modelCatalog = routingModelCatalogObservation(observation?.models, observation?.observed_at, Date.now())?.value;
@@ -1117,7 +1121,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(fact ? { observations: { evaluatedAt,
             machineResources,
             outstandingMachineAllocations: Number(fact.machine_allocations), outstandingRegistrationAllocations: Number(fact.registration_allocations),
-            quota: quota ? { ...quota, assumed: false, source: fact.source } : { remainingPercent: 100, assumed: true } } } : {}),
+            quota: quota ? { ...quota, assumed: false, source: fact.source,
+              ...(quotaWindows.length ? { windows: quotaWindows } : {}) }
+              : { remainingPercent: 100, assumed: true } } } : {}),
           supportsRequestedParameters: daemonCapable(daemon, "machine_routing_parameters_v1"),
           supportsRequestedEffort: daemonCapable(daemon, "machine_routing_effort_v1"), workspaces: [...workspaceReferences.flatMap(reference => {
             const repo = reference.startsWith("repo:") ? reference.slice(5) : undefined;
