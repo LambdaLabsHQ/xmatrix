@@ -1994,7 +1994,7 @@ export const MessageRow = memo(function MessageRow({
       onClick={handleRowClick}
       data-actions-open={actionsOpen || undefined}
       className={cn(
-        "app-message-row group relative flex items-start gap-3 px-5",
+        "app-message-row group relative flex items-start gap-(--app-message-avatar-gap) px-5",
         // Every message sits on the same paper: whose it is reads from the
         // header, not from a tinted row. An open action row is a state, not
         // an author, so it keeps its tone.
@@ -2004,7 +2004,7 @@ export const MessageRow = memo(function MessageRow({
     >
       {message.continuation ? (
         // Same sender, moments later, same tags: the header above still says who.
-        <div className="app-message-continuation-gutter mt-0.5 w-9 shrink-0 self-start text-right">
+        <div className="app-message-continuation-gutter mt-0.5 w-(--app-message-avatar-size) shrink-0 self-start text-right">
           <MessageTimestamp value={message.sentAt}
             className="invisible text-[10px] text-muted-foreground group-hover:visible" />
         </div>
