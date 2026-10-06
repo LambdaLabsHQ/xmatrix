@@ -1,4 +1,4 @@
-// Records console.error and console.warn for one async callback, then restores them.
+/** Capture console.error and console.warn while a test runs the failing path. */
 export async function capturingConsole(callback) {
   const logged = { error: [], warn: [] };
   const previous = { error: console.error, warn: console.warn };

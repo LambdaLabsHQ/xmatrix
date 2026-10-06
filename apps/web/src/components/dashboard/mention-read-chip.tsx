@@ -33,11 +33,11 @@ import {
 } from "./mention-read-state";
 import { cn } from "@/lib/utils";
 import { MentionInvocationChip, MentionInvocationRejectionChip, MentionContinuationChip, InvocationPopoverGroup,
-  MentionIntentDeclinedChip, MentionStopChip, MentionSummonPending } from "./mention-invocation-chip";
+  MentionIntentDeclinedChip, MentionLaunchHintChip, MentionStopChip, MentionSummonPending } from "./mention-invocation-chip";
 import { declinedIntent, readingIntentUntil } from "./summon-intent";
 import { handoffSuccessorLaunch, segmentMessageInteraction, type InteractionSegment } from "./mention-invocation-state";
 import { HandoffCard } from "./handoff-arrow";
-import { type AutoLaunchMention, isMentionAddressStart, isOperationalMentionStart, literalMentionSourceOffsets, nonOperationalMentionRanges, parsePresentedRoutingDecision, type NonOperationalMentionRange } from "@xmatrix/protocol";
+import { type AutoLaunchMention, isLaunchHintRejection, isMentionAddressStart, isOperationalMentionStart, literalMentionSourceOffsets, nonOperationalMentionRanges, parsePresentedRoutingDecision, type NonOperationalMentionRange } from "@xmatrix/protocol";
 import { jevFilledAnnouncement, jevFilledTags, launchMachineLabel, type JevFilledTag } from "./jev-filled-tags";
 import { JevFilledTagSpans } from "./jev-filled-tag-spans";
 import { PageReferenceRichText } from "./page-reference-chip";
@@ -92,6 +92,10 @@ function RecordedRejectionChip({ rejection, labelContent, announcement, scope }:
     const launchAnyway = scope?.onLaunchAnyway;
     return <MentionIntentDeclinedChip rejection={rejection} category={category} labelContent={labelContent}
       onLaunchAnyway={launchAnyway ? () => launchAnyway(rejection.sourceMention) : undefined} />;
+  }
+  // A hint (name the machine) is the card. A refusal that failed stays Failed.
+  if (isLaunchHintRejection(rejection.code)) {
+    return <MentionLaunchHintChip rejection={rejection} labelContent={labelContent} />;
   }
   return <MentionInvocationRejectionChip rejection={rejection} labelContent={labelContent} announcement={announcement} unavailable={scope?.launchStatusUnavailable} />;
 }

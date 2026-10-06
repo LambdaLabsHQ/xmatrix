@@ -1,7 +1,8 @@
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment } from "@xmatrix/protocol";
 import { parseMessageInteraction, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
-  parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE, REGISTRATION_PREPARATION_REJECTION_CODES } from "@xmatrix/protocol";
+  isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
+  REGISTRATION_PREPARATION_REJECTION_CODES } from "@xmatrix/protocol";
 import {
   dispatchProductAgentMentionsAfterAuthorityMessage,
   dispatchProductChannelAbout,
@@ -223,7 +224,10 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // A successful dispatch can contain terminal preparation refusals without
     // allocating any Run. Persisted diagnose evidence alone is not a receipt.
     // The system notice is source-bound and idempotent across message retries.
+    // A hint already lives on the mention's card: Jev's reading, or how to
+    // name the machine. A launch that failed still tells the Channel.
     for (const code of new Set((rejected ?? []).map(item => item.code))) {
+      if (isLaunchHintRejection(code)) continue;
       const reason = REGISTRATION_PREPARATION_REJECTION_CODES.includes(code)
         ? PREPARATION_REJECTION_MESSAGES[code] : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
       await notice({ ...input, sourceMessageId: input.messageId, replyToMessageId: input.messageId,

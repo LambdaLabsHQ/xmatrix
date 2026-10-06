@@ -1,4 +1,5 @@
-import { launchHarnessParameters, launchRefusalCode, validateHarnessParameterValues } from "@xmatrix/protocol";
+import { launchHarnessParameters, launchRefusalCode, validateHarnessParameterValues,
+  cursorQuotaBucketForModel, routingQuotaObservation } from "@xmatrix/protocol";
 import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser } from "@xmatrix/db";
 import { digestCanonicalCloneCborV1, canonicalRegistrationHarness, machineTagSelects, repoSummonReference, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS, SUMMON_INTENT_CATEGORIES, SUMMON_INTENT_INSTRUCTIONS, type AutoLaunchTags } from "@xmatrix/protocol";
 import { RoutingEvaluationFailed, RoutingEvidenceUnavailable, evaluateRoutingChoices, type RoutingEvaluator } from "./agent-routing-evaluation";
@@ -48,6 +49,29 @@ export function providerQuotaExhausted(candidate: RegistrationLaunchCandidate, n
   if (!quota || quota.assumed || quota.remainingPercent > 0) return false;
   const expires = quota.expiresAt ? Date.parse(quota.expiresAt) : NaN;
   return Number.isFinite(expires) && expires > now;
+}
+
+/** Cursor spends Auto or API by model family; other harnesses keep the single
+ * remainingPercent gate. Unknown / missing pool readings do not refuse. */
+export function providerQuotaExhaustedForModel(candidate: RegistrationLaunchCandidate,
+  model: string | undefined, now: number): boolean {
+  const quota = candidate.observations?.quota;
+  if (!quota || quota.assumed) return false;
+  const windows = quota.windows;
+  if (!windows?.length) return providerQuotaExhausted(candidate, now);
+  const labels = new Set(windows.map(window => (window.label ?? "").trim().toLowerCase()).filter(Boolean));
+  if (!(labels.has("auto") && labels.has("api"))) return providerQuotaExhausted(candidate, now);
+  if (!quota.observedAt) return false;
+  const bucket = cursorQuotaBucketForModel(model);
+  const observation = routingQuotaObservation({
+    quotaSource: "provider_api", quotaObservedAt: quota.observedAt,
+    quotaUsages: windows.map(window => ({
+      ...(window.label ? { label: window.label } : {}), percent: window.usedPercent,
+      ...(window.resetAt ? { resetAt: window.resetAt } : {}),
+    })),
+  }, now, { windowLabels: [bucket] });
+  if (!observation) return false;
+  return observation.value === 0 && Date.parse(observation.expiresAt) > now;
 }
 
 /**
@@ -219,9 +243,16 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     const workspace = workspaceOptions[Number(answers.workspace!.choice.slice("workspace_".length))]!;
     const workspaceReference = workspace.reference;
     // Of the environments that offer both choices, the one with the most room runs it.
+    // Cursor: after the model is known, only that model's Auto/API pool may refuse.
     const able = fitting.filter(candidate => pairs(candidate).some(option => pairKey(option) === pairKey(model)) &&
-      (workspaceReference === undefined || located(candidate).some(item => item.reference === workspaceReference)));
-    if (!able.length) throw new RegistrationAccessError("registration_selection_invalid", 409);
+      (workspaceReference === undefined || located(candidate).some(item => item.reference === workspaceReference)) &&
+      !providerQuotaExhaustedForModel(candidate, model.useRuntimeDefaultModel ? "default" : model.model, Date.now()));
+    if (!able.length) {
+      const offered = fitting.filter(candidate => pairs(candidate).some(option => pairKey(option) === pairKey(model)) &&
+        (workspaceReference === undefined || located(candidate).some(item => item.reference === workspaceReference)));
+      if (offered.length) throw new RegistrationAccessError("registration_quota_exhausted", 409);
+      throw new RegistrationAccessError("registration_selection_invalid", 409);
+    }
     const candidate = leastLoadedEnvironment(able);
     await told;
     return { key: candidate.key, model: model.model,

@@ -7,6 +7,7 @@ import { usageLimitHandoffCommand } from "../src/runtime-transport/agent-usage-l
 import { MessageAuthorityError } from "@xmatrix/db";
 import { messageCall } from "../src/runtime-transport/runtime-messages.ts";
 import { RuntimeAuthorityOperationError } from "../src/runtime-transport/runtime-operation-failure.ts";
+import { capturingConsole } from "./support/capturing-console.mjs";
 
 /**
  * An Instance whose provider account is used up reports `usage_limited`; the
