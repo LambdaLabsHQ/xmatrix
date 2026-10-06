@@ -228,7 +228,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web web-browser","shard":"performance","primary":true},{"name":"web (browser 1/3)","partitions":"web-browser","shard":"1/3","primary":false},{"name":"web (browser 2/3)","partitions":"web-browser","shard":"2/3","primary":false},{"name":"web (browser 3/3)","partitions":"web-browser","shard":"3/3","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
+        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web web-browser","shard":"performance","primary":true},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4","primary":false},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
     # Long tests must not occupy production upload/deploy runners.
     runs-on: &linux_runner ${{ fromJSON(inputs.linux_runner || '"ubuntu-24.04"') }}
     env:
