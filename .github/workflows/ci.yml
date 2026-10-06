@@ -209,8 +209,8 @@ jobs:
       - id: ledger
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup node-checks
-      # The repository-wide duplicate scan joins the Node checks' parallel
-      # lanes instead of taking a hosted job of its own.
+      # The repository-wide duplicate scan follows the Node checks in this job
+      # instead of taking a hosted job of its own.
       - name: Run shared Node checks
         if: steps.ledger.outputs.hit != 'true'
         run: node scripts/ci.mjs node-checks duplicates

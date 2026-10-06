@@ -399,9 +399,8 @@ const partitions = {
       label: "Check duplicated code",
       command: pnpm,
       args: ["run", "check:duplicates"],
-      // Runs beside the Node check lanes when CI requests both partitions.
-      parallelGroup: nodeTestParallelGroup,
-      parallelLane: "duplicates-check",
+      // Runs after, not beside, the Node check lanes when CI requests both:
+      // on a 4-CPU hosted VM the scan starves their process-tree timing tests.
     },
   ],
   // The Windows required gate runs the same Cargo suite. Platform-independent
