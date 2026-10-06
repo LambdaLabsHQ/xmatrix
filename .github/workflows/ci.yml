@@ -159,7 +159,6 @@ jobs:
           DESKTOP: ${{ steps.filter.outputs.desktop }}
           ANDROID: ${{ steps.filter.outputs.android }}
           CLI: ${{ steps.filter.outputs.cli }}
-          DUPLICATES: ${{ steps.filter.outputs.duplicates }}
         shell: bash
         run: |
           set -euo pipefail
@@ -170,7 +169,6 @@ jobs:
           if selected "$DESKTOP"; then jobs+=(desktop); fi
           if selected "$ANDROID"; then jobs+=(android); fi
           if selected "$CLI"; then jobs+=(rust-cli rust-cli-windows); fi
-          if selected "$DUPLICATES"; then jobs+=(duplicates); fi
           if [ "${#jobs[@]}" -eq 0 ]; then
             echo "reused= " >> "$GITHUB_OUTPUT"
           else
@@ -211,9 +209,11 @@ jobs:
       - id: ledger
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup node-checks
+      # The repository-wide duplicate scan joins the Node checks' parallel
+      # lanes instead of taking a hosted job of its own.
       - name: Run shared Node checks
         if: steps.ledger.outputs.hit != 'true'
-        run: node scripts/ci.mjs node-checks
+        run: node scripts/ci.mjs node-checks duplicates
 
   web:
     needs: changes
@@ -221,13 +221,14 @@ jobs:
     # surface on the final exact SHA instead of trusting only the last tiny diff.
     if: needs.changes.outputs.web == 'true' && !contains(needs.changes.outputs.reused, ' web ')
     name: ${{ matrix.name }}
-    # Hosted runners split unit tests and the build from the browser projects,
-    # which run as Playwright shards; each shard builds its own production tree
-    # from the restored Next.js cache. Together they are `web web-browser`.
+    # Hosted runners spread the browser projects over Playwright shards; each
+    # shard builds its own production tree from the restored Next.js cache,
+    # and the primary one also runs the unit tests, lint and type check in that
+    # same build. Together they are `web web-browser`.
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web","partitions":"web","shard":""},{"name":"web (browser 1/4)","partitions":"web-browser","shard":"1/4"},{"name":"web (browser 2/4)","partitions":"web-browser","shard":"2/4"},{"name":"web (browser 3/4)","partitions":"web-browser","shard":"3/4"},{"name":"web (browser 4/4)","partitions":"web-browser","shard":"4/4"}]' || '[{"name":"web","partitions":"web web-browser","shard":""}]') }}
+        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"web (1/4)","partitions":"web web-browser","shard":"1/4","primary":true},{"name":"web (2/4)","partitions":"web-browser","shard":"2/4","primary":false},{"name":"web (3/4)","partitions":"web-browser","shard":"3/4","primary":false},{"name":"web (4/4)","partitions":"web-browser","shard":"4/4","primary":false}]' || '[{"name":"web","partitions":"web web-browser","shard":"","primary":true}]') }}
     # Long tests must not occupy production upload/deploy runners.
     runs-on: &linux_runner ${{ fromJSON(inputs.linux_runner || '"ubuntu-24.04"') }}
     env:
@@ -261,8 +262,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/xmatrix/turbo
-          key: turbo-${{ runner.os }}-${{ matrix.partitions }}-${{ github.sha }}
-          restore-keys: turbo-${{ runner.os }}-${{ matrix.partitions }}-
+          key: turbo-${{ runner.os }}-${{ matrix.primary && 'web' || 'web-browser' }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-${{ matrix.primary && 'web' || 'web-browser' }}-
       - name: Restore Playwright browsers and Linux libraries
         if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.shard != ''
         uses: actions/cache@v6
@@ -278,17 +279,17 @@ jobs:
         run: node scripts/ci.mjs ${{ matrix.partitions }}
       # One writer per run; main refreshes it, and a branch seeds a cold cache.
       - name: Save the Next.js build cache
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.shard == '' && success() && (github.ref == 'refs/heads/main' || steps.next-cache.outputs.cache-matched-key == '')
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.primary && success() && (github.ref == 'refs/heads/main' || steps.next-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/xmatrix/next-cache/hosted
           key: next-cache-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
       - name: Save the Turbo cache
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && (matrix.shard == '' || startsWith(matrix.shard, '1/')) && success() && (github.ref == 'refs/heads/main' || steps.turbo-cache.outputs.cache-matched-key == '')
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && (matrix.primary || startsWith(matrix.shard, '2/')) && success() && (github.ref == 'refs/heads/main' || steps.turbo-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/xmatrix/turbo
-          key: turbo-${{ runner.os }}-${{ matrix.partitions }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-${{ matrix.primary && 'web' || 'web-browser' }}-${{ github.sha }}
 
   hub:
     # The complete Hub suite. Every push runs this exact-SHA deploy gate, so
@@ -305,7 +306,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"hub (static)","partition":"hub-static","shard":""},{"name":"hub (1/6)","partition":"hub-files","shard":"1/6"},{"name":"hub (2/6)","partition":"hub-files","shard":"2/6"},{"name":"hub (3/6)","partition":"hub-files","shard":"3/6"},{"name":"hub (4/6)","partition":"hub-files","shard":"4/6"},{"name":"hub (5/6)","partition":"hub-files","shard":"5/6"},{"name":"hub (6/6)","partition":"hub-files","shard":"6/6"}]' || '[{"name":"hub","partition":"hub","shard":""}]') }}
+        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"hub (static)","partition":"hub-static","shard":""},{"name":"hub (1/3)","partition":"hub-files","shard":"1/3"},{"name":"hub (2/3)","partition":"hub-files","shard":"2/3"},{"name":"hub (3/3)","partition":"hub-files","shard":"3/3"}]' || '[{"name":"hub","partition":"hub","shard":""}]') }}
     runs-on: *linux_runner
     permissions:
       contents: read
@@ -387,12 +388,9 @@ jobs:
   rust-cli:
     needs: changes
     if: needs.changes.outputs.cli == 'true' && !contains(needs.changes.outputs.reused, ' rust-cli ')
-    # Hosted runners run Clippy and the tests as parallel jobs.
-    name: ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"rust-cli (clippy)","partition":"rust-clippy"},{"name":"rust-cli (test)","partition":"rust-cli-test"}]' || '[{"name":"rust-cli","partition":"rust-cli"}]') }}
+    # Clippy and the tests share one job and one compile cache: the native
+    # Windows job is the longer Rust gate, so a second Linux job would only
+    # take a hosted slot.
     runs-on: *linux_runner
     steps:
       # Default clean checkout. Cross-job compile reuse is kache (RUSTC_WRAPPER),
@@ -408,10 +406,10 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/.cache/kache
-          key: kache-${{ runner.os }}-${{ matrix.partition }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
+          key: kache-${{ runner.os }}-rust-cli-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
-            kache-${{ runner.os }}-${{ matrix.partition }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-
-            kache-${{ runner.os }}-${{ matrix.partition }}-
+            kache-${{ runner.os }}-rust-cli-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-
+            kache-${{ runner.os }}-rust-cli-
       - uses: ./.github/actions/setup-rust-kache
       # Node only for scripts/ci.mjs; cargo tests do not need a pnpm install.
       - uses: ./.github/actions/setup-pnpm-node
@@ -422,31 +420,13 @@ jobs:
         run: node scripts/ci-ledger.mjs lookup rust-cli
       - name: Run Rust CLI tests
         if: steps.ledger.outputs.hit != 'true'
-        run: node scripts/ci.mjs ${{ matrix.partition }}
+        run: node scripts/ci.mjs rust-cli
       - name: Save the kache store
         if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || steps.kache-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v6
         with:
           path: ~/.cache/kache
-          key: kache-${{ runner.os }}-${{ matrix.partition }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
-
-  duplicates:
-    needs: changes
-    if: needs.changes.outputs.duplicates == 'true' && !contains(needs.changes.outputs.reused, ' duplicates ')
-    # The uncapped repository scan is a full-source workload. Run it alongside
-    # product checks instead of serializing it behind the short-job pool.
-    runs-on: *linux_runner
-    steps:
-      - *checkout_selected_ref
-      - *disable_sparse_checkout
-      - uses: ./.github/actions/clear-linux-proxy
-      - uses: ./.github/actions/setup-pnpm-node
-      - id: ledger
-        name: Reuse a passing result for identical content
-        run: node scripts/ci-ledger.mjs lookup duplicates
-      - name: Check duplicated code
-        if: steps.ledger.outputs.hit != 'true'
-        run: node scripts/ci.mjs duplicates
+          key: kache-${{ runner.os }}-rust-cli-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
 
   rust-cli-windows:
     needs: changes
@@ -542,7 +522,6 @@ jobs:
       - desktop
       - android
       - rust-cli
-      - duplicates
       - rust-cli-windows
     if: always()
     runs-on: *offload_runner
@@ -576,6 +555,6 @@ jobs:
           RUST_CLI_RESULT: ${{ needs.rust-cli.result }}
           RUST_CLI_WINDOWS_RESULT: ${{ needs.rust-cli-windows.result }}
           DUPLICATES_CHANGED: ${{ needs.changes.outputs.duplicates }}
-          DUPLICATES_RESULT: ${{ needs.duplicates.result }}
+          DUPLICATES_RESULT: ${{ needs.node-checks.result }}
           REUSED: ${{ needs.changes.outputs.reused }}
         run: bash .github/scripts/check-ci-partitions.sh

@@ -33,8 +33,8 @@ export const HUB_SUITE_LEDGER_JOB = "hub-suite";
 
 /**
  * Pure: the CI job a job result belongs to. A matrix entry is named
- * `<job> (<entry>)` (`hub (3/6)`, `web (browser 1/4)`), a caller of the
- * reusable workflow prefixes its own job (`validate / hub (3/6)`), and the
+ * `<job> (<entry>)` (`hub (2/3)`, `web (1/4)`), a caller of the
+ * reusable workflow prefixes its own job (`validate / hub (2/3)`), and the
  * Hub suite covers both retired two-job names.
  */
 export function ledgerJobOf(name) {
@@ -59,9 +59,12 @@ export function passedLedgerJobs(jobs) {
   return [...results].filter(([, passed]) => passed).map(([name]) => name);
 }
 
-/** The CI jobs whose success the ledger records and every lookup names. */
+/**
+ * The CI jobs whose success the ledger records and every lookup names. The
+ * `node-checks` job also runs the duplicate scan.
+ */
 export const LEDGER_JOBS = new Set([
-  "node-checks", "web", HUB_SUITE_LEDGER_JOB, "desktop", "android", "rust-cli", "rust-cli-windows", "duplicates",
+  "node-checks", "web", HUB_SUITE_LEDGER_JOB, "desktop", "android", "rust-cli", "rust-cli-windows",
 ]);
 const JOB_NAME = /^[a-z0-9][a-z0-9-]*$/u;
 

@@ -175,6 +175,12 @@ test("a job split over a matrix is recorded only when every entry passed", () =>
   assert.deepEqual(passedLedgerJobs([job("rust-cli (clippy)"), job("rust-cli (test)", "skipped")]), []);
   assert.equal(ledgerJobOf("rust-cli-windows"), "rust-cli-windows");
   assert.equal(ledgerJobOf("hub (static)"), HUB_SUITE_LEDGER_JOB);
+  // The current hosted layout: the primary web shard also runs the unit tests.
+  assert.deepEqual(
+    passedLedgerJobs([1, 2, 3, 4].map((shard) => job(`web (${shard}/4)`))),
+    ["web"],
+  );
+  assert.deepEqual(passedLedgerJobs([job("web (1/4)"), job("web (3/4)", "failure")]), []);
   // The public snapshot calls CI as its `validate` job.
   assert.equal(ledgerJobOf("validate / web (browser 1/4)"), "web");
   assert.equal(ledgerJobOf("validate / hub (3/6)"), HUB_SUITE_LEDGER_JOB);

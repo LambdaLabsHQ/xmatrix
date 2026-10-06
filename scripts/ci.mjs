@@ -394,14 +394,14 @@ const partitions = {
     },
   ],
   "rust-cli": [rustClippy, rustCliTest],
-  // Hosted CI runs the two halves of `rust-cli` as parallel jobs.
-  "rust-clippy": [rustClippy],
-  "rust-cli-test": [rustCliTest],
   duplicates: [
     {
       label: "Check duplicated code",
       command: pnpm,
       args: ["run", "check:duplicates"],
+      // Runs beside the Node check lanes when CI requests both partitions.
+      parallelGroup: nodeTestParallelGroup,
+      parallelLane: "duplicates-check",
     },
   ],
   // The Windows required gate runs the same Cargo suite. Platform-independent
