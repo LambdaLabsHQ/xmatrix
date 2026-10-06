@@ -35,6 +35,7 @@ import { discussionDraft, discussionTitle } from "@/components/dashboard/selecti
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
+import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 
 // The native shell also imports this module for its list screens. The editor
@@ -653,7 +654,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
   // The page's Automations, drawn as chips where the text references them (pages-live-document.md §6).
   const automations = useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-automations", [spaceId, pageId, headRevision]),
-    enabled: Boolean(spaceId && pageId), refetchInterval: 30_000,
+    enabled: Boolean(spaceId && pageId), refetchInterval: () => refetchUnlessHumanPush(30_000),
     queryFn: ({ signal }) => pageApi.automations(spaceId!, pageId!, token, signal).then((result) => result.automations),
   });
   const automationsById = useMemo(() => new Map((automations.data ?? []).map((item) => [item.id, item])),

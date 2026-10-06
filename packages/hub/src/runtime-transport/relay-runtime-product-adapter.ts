@@ -21,6 +21,7 @@ import { MachineDaemonRuntimeTransport, sameRouteIdentity, type MachineDaemonSoc
 import type {
   HumanChannelCatalogChangedMessage,
   HumanTraceAccessServerMessage,
+  HumanWorkspaceResourceChangedMessage,
 } from "@xmatrix/protocol/connections/human";
 import type { HumanProjectionPublishResult } from "../connections/human/registry";
 import type { AgentHostTraceReadRequest, AgentHostTraceReadResult } from "../agent-host-trace";
@@ -270,6 +271,13 @@ export class RelayRuntimeProductCallbackAdapter {
     recipientUserIds: readonly string[],
   ): HumanProjectionPublishResult {
     return this.human.publishChannelCatalogChanged(message, recipientUserIds);
+  }
+
+  publishHumanWorkspaceResourceChanged(
+    message: HumanWorkspaceResourceChangedMessage,
+    recipientUserIds: readonly string[],
+  ): HumanProjectionPublishResult {
+    return this.human.publishWorkspaceResourceChanged(message, recipientUserIds);
   }
 
   requestAgentTraceHistory(

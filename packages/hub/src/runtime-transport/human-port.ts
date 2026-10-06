@@ -4,6 +4,7 @@ import type {
   HumanConnectMessage,
   HumanServerMessage,
   HumanTraceAccessServerMessage,
+  HumanWorkspaceResourceChangedMessage,
 } from "@xmatrix/protocol/connections/human";
 import { HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
 import {
@@ -23,7 +24,7 @@ import {
   type HumanConnectionPort,
 } from "../connections/human/controller";
 import type { HumanProjectionPublishResult, HumanProjectionSender, HumanProjectionSession } from "../connections/human/registry";
-import { publishHumanChannelCatalogChangedToSessions, publishHumanTraceAccessToSessions } from "../connections/human/registry";
+import { publishHumanChannelCatalogChangedToSessions, publishHumanTraceAccessToSessions, publishHumanWorkspaceResourceChangedToSessions } from "../connections/human/registry";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
 import { HumanPresenceDigests } from "./human-presence-digest";
 import { RuntimeClientOperationError } from "./runtime-operation-failure";
@@ -210,6 +211,14 @@ export class HumanRuntimeTransport {
     recipientUserIds: readonly string[],
   ): HumanProjectionPublishResult {
     return publishHumanChannelCatalogChangedToSessions(
+      { message, recipientUserIds }, this.projectionSessions(), this.projectionSender,
+    );
+  }
+  publishWorkspaceResourceChanged(
+    message: HumanWorkspaceResourceChangedMessage,
+    recipientUserIds: readonly string[],
+  ): HumanProjectionPublishResult {
+    return publishHumanWorkspaceResourceChangedToSessions(
       { message, recipientUserIds }, this.projectionSessions(), this.projectionSender,
     );
   }

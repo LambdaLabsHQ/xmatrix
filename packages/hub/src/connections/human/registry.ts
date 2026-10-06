@@ -1,5 +1,5 @@
 import { utf8ByteLength } from "@xmatrix/protocol";
-import { parseHumanChannelCatalogChangedMessage, parseHumanTraceAccessServerMessage, type HumanTraceAccessServerMessage, type HumanServerMessage } from "@xmatrix/protocol/connections/human";
+import { parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage, parseHumanTraceAccessServerMessage, type HumanTraceAccessServerMessage, type HumanServerMessage } from "@xmatrix/protocol/connections/human";
 
 export const MAX_HUMAN_PROJECTION_RECIPIENT_USERS = 100_000;
 export const MAX_HUMAN_PROJECTION_LIVE_DELIVERIES = 10_000;
@@ -104,6 +104,9 @@ export function publishHumanTraceAccessToSessions(
 
 /** Metadata-only catalog wake-up for exactly the named Space members. */
 export const publishHumanChannelCatalogChangedToSessions = recipientMessagePublisher(parseHumanChannelCatalogChangedMessage);
+
+/** Metadata-only workspace-list wake-up for exactly the named principals. */
+export const publishHumanWorkspaceResourceChangedToSessions = recipientMessagePublisher(parseHumanWorkspaceResourceChangedMessage);
 
 function recipientMessagePublisher(parse: (value: unknown) => HumanServerMessage | null | undefined) {
   return (input: { message: unknown; recipientUserIds: readonly string[] },
