@@ -713,13 +713,18 @@ const stopReceipt = (phase: "accepted" | "confirmed") => ({
   phase, requestedAt: E2E_NOW, ...(phase === "confirmed" ? { confirmedAt: E2E_NOW } : {}),
 });
 
-test("a confirmed stop sits on the command instead of another message", async ({ page }) => {
-  await installInvocationFixture(page, [], "@claude:1:stop");
-  await fixtureJson(page, "stop-receipts", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
-    launches: [], stops: [stopReceipt("confirmed")],
+/** One stop command on the channel, with the receipt query this test names. */
+async function openStopChip(page: Page, body: string, stops: unknown[], fixtureName: string) {
+  await installInvocationFixture(page, [], body);
+  await fixtureJson(page, fixtureName, "**/api/xmatrix/channels/channel-general/agent-launches/query", {
+    launches: [], stops,
   });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  const chip = page.locator(".app-mention-invocation");
+  return page.locator(".app-mention-invocation");
+}
+
+test("a confirmed stop sits on the command instead of another message", async ({ page }) => {
+  const chip = await openStopChip(page, "@claude:1:stop", [stopReceipt("confirmed")], "stop-receipts");
   await expect(chip).toHaveCount(1);
   await expect(chip).toContainText("@claude:1:stop");
   await expect(chip).toContainText("Stopped");
@@ -747,12 +752,7 @@ test("a confirmed stop sits on the command instead of another message", async ({
 });
 
 test("a stop's reason stays prose beside the command chip", async ({ page }) => {
-  await installInvocationFixture(page, [], "@claude:1:stop two agents took the same work");
-  await fixtureJson(page, "stop-receipts-reason", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
-    launches: [], stops: [stopReceipt("confirmed")],
-  });
-  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  const chip = page.locator(".app-mention-invocation");
+  const chip = await openStopChip(page, "@claude:1:stop two agents took the same work", [stopReceipt("confirmed")], "stop-receipts-reason");
   await expect(chip).toContainText("Stopped");
   await expect(chip).toContainText("@claude:1:stop");
   await expect(chip).not.toContainText("two agents took the same work");
@@ -761,12 +761,7 @@ test("a stop's reason stays prose beside the command chip", async ({ page }) => 
 });
 
 test("an accepted stop says Stopping until the Workstation confirms it", async ({ page }) => {
-  await installInvocationFixture(page, [], "@claude:1:stop");
-  await fixtureJson(page, "stop-receipts-accepted", "**/api/xmatrix/channels/channel-general/agent-launches/query", {
-    launches: [], stops: [stopReceipt("accepted")],
-  });
-  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  const chip = page.locator(".app-mention-invocation");
+  const chip = await openStopChip(page, "@claude:1:stop", [stopReceipt("accepted")], "stop-receipts-accepted");
   await expect(chip).toContainText("Stopping");
   await expect(chip.locator(".app-invocation-spinner")).toBeVisible();
   await expect(page.getByText("Jev is reading")).toHaveCount(0);
