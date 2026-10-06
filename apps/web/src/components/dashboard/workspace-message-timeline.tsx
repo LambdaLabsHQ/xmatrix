@@ -211,6 +211,7 @@ import {
   formatMessageDateTime,
   formatMessageTimestamp,
 } from "@/components/dashboard/channel-history";
+import { formatInstant } from "@/components/dashboard/time-display";
 
 
 
@@ -1246,7 +1247,7 @@ function MessageSkeletonRows() {
 
 
 
-export function MessageTimestamp({ value, className }: { value: string; className?: string }) {
+export function MessageTimestamp({ value, className, clockOnly = false }: { value: string; className?: string; clockOnly?: boolean }) {
   const fullDateTime = formatMessageDateTime(value);
   return (
     <time
@@ -1254,7 +1255,9 @@ export function MessageTimestamp({ value, className }: { value: string; classNam
       title={fullDateTime}
       className={cn("app-message-timestamp shrink-0 tabular-nums", className)}
     >
-      {formatMessageTimestamp(value)}
+      {clockOnly
+        ? formatInstant(value, undefined, { hour: "numeric", minute: "2-digit" })
+        : formatMessageTimestamp(value)}
     </time>
   );
 }
@@ -2003,10 +2006,12 @@ export const MessageRow = memo(function MessageRow({
       )}
     >
       {message.continuation ? (
-        // Same sender, moments later, same tags: the header above still says who.
-        <div className="app-message-continuation-gutter mt-0.5 w-(--app-message-avatar-size) shrink-0 self-start text-right">
-          <MessageTimestamp value={message.sentAt}
-            className="invisible text-[10px] text-muted-foreground group-hover:visible" />
+        // Same sender, moments later, same tags: the header above still says who
+        // and which day. The hover time is one line that may spill left into
+        // the row's padding, so it never makes the row taller than its text.
+        <div className="app-message-continuation-gutter mt-0.5 flex w-(--app-message-avatar-size) shrink-0 justify-end self-start">
+          <MessageTimestamp value={message.sentAt} clockOnly
+            className="invisible whitespace-nowrap text-[10px] leading-5 text-muted-foreground group-hover:visible" />
         </div>
       ) : (
       <div
