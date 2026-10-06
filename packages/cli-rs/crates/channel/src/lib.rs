@@ -2339,9 +2339,17 @@ async fn cmd_channel_chat(
     let limit = limit.clamp(1, 500);
     let mut seen = HashSet::new();
     let mut last_sequence = 0u64;
-    let mut human =
-        HumanConnectionClient::connect(hub_url, token.to_string(), "xmatrix-cli-chat".to_string())
-            .await?;
+    let owner_user_id = config::load_session_for_hub(hub_url)
+        .await
+        .map(|session| session.user.id)
+        .unwrap_or_default();
+    let mut human = HumanConnectionClient::connect_with_owner(
+        hub_url,
+        token.to_string(),
+        "xmatrix-cli-chat".to_string(),
+        &owner_user_id,
+    )
+    .await?;
     human.focus_channel(Some(channel_id.to_string()))?;
 
     let initial = fetch_channel_chat_history(hub_url, token, channel_id, limit, None).await?;

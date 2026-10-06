@@ -23,6 +23,10 @@ pub fn derive_connection_url(hub_url: &str) -> String {
     domain_connection_url(hub_url, "/ws/humans")
 }
 
+pub fn derive_connection_url_for_owner(hub_url: &str, owner_user_id: &str) -> String {
+    crate::websocket::with_runtime_owner(derive_connection_url(hub_url), owner_user_id)
+}
+
 use crate::websocket::domain_connection_url;
 
 /// Human-connection lifecycle and application events.
@@ -67,11 +71,22 @@ pub struct HumanConnectionClient {
 
 impl HumanConnectionClient {
     pub async fn connect(hub_url: &str, token: String, client: String) -> Result<Self> {
+        Self::connect_with_owner(hub_url, token, client, "").await
+    }
+
+    /// `owner_user_id` is a routing hint. An id the Hub would reject is omitted.
+    pub async fn connect_with_owner(
+        hub_url: &str,
+        token: String,
+        client: String,
+        owner_user_id: &str,
+    ) -> Result<Self> {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (ready_tx, ready_rx) = oneshot::channel();
         let task = tokio::spawn(run_human_connection(
             hub_url.to_string(),
+            owner_user_id.to_string(),
             token,
             client,
             command_rx,
@@ -137,6 +152,7 @@ async fn handle_human_connection_failure(
 
 async fn run_human_connection(
     hub_url: String,
+    owner_user_id: String,
     mut token: String,
     client: String,
     mut command_rx: mpsc::UnboundedReceiver<HumanConnectionCommand>,
@@ -147,7 +163,7 @@ async fn run_human_connection(
     let mut focused_channel_id: Option<String> = None;
     let mut connected_once = false;
     let mut backoff = RECONNECT_BASE;
-    let connection_url = derive_connection_url(&hub_url);
+    let connection_url = derive_connection_url_for_owner(&hub_url, &owner_user_id);
 
     loop {
         let Ok(stream) = crate::websocket::connect_with_reconnect(
@@ -473,6 +489,17 @@ mod tests {
     fn human_connection_url_discards_other_domain_paths() {
         assert_eq!(
             derive_connection_url("wss://hub.example.com/ws/machine-daemons?stale=1"),
+            "wss://hub.example.com/ws/humans"
+        );
+        assert_eq!(
+            derive_connection_url_for_owner(
+                "wss://hub.example.com/ws/machine-daemons?stale=1",
+                "user_1",
+            ),
+            "wss://hub.example.com/ws/humans?owner=user_1"
+        );
+        assert_eq!(
+            derive_connection_url_for_owner("https://hub.example.com", "not a user"),
             "wss://hub.example.com/ws/humans"
         );
     }

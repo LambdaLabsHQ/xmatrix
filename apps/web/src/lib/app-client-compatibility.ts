@@ -88,11 +88,16 @@ export function requireAcceptedAppCompatibilityIdentity(): ClientCompatibilityId
   return identity;
 }
 
-export function admittedHumanSocketUrl(hubUrl: string): string {
-  return withClientCompatibilityQuery(
+/** Same charset the Hub accepts before it routes a socket to `user-<id>`. */
+const RUNTIME_OWNER_ID = /^[A-Za-z0-9_-]{1,128}$/u;
+
+export function admittedHumanSocketUrl(hubUrl: string, ownerUserId: string): string {
+  const url = new URL(withClientCompatibilityQuery(
     deriveHumanConnectionUrl(hubUrl),
     requireAcceptedAppCompatibilityIdentity(),
-  );
+  ));
+  if (RUNTIME_OWNER_ID.test(ownerUserId)) url.searchParams.set("owner", ownerUserId);
+  return url.toString();
 }
 
 export async function humanSocketRequiresUpgrade(
