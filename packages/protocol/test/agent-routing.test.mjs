@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseAgentRoutingDeclaration, parsePresentedRoutingDecision, routingDecisionCopy, routingQuotaObservation,
-  ROUTING_QUOTA_MAX_AGE_MS, machineResourceObservation, hostObservedRequirements, routingModelCatalogObservation } from '../dist/agent-routing.js';
+  cursorQuotaBucketForModel, ROUTING_QUOTA_MAX_AGE_MS, machineResourceObservation, hostObservedRequirements, routingModelCatalogObservation } from '../dist/agent-routing.js';
 
 const now = Date.parse('2026-09-19T20:00:00Z');
 const routingDeclaration = { schemaVersion: 1, enabled: true, models: ['model-a'], description: '',
@@ -78,19 +78,23 @@ test('a reset short window cannot erase an exhausted weekly window', () => {
   assert.equal(routingQuotaObservation(usage, now).expiresAt, usage.quotaUsages[1].resetAt);
 });
 
-test('Cursor API bucket exhaustion does not zero routing headroom while 1mo/Auto remain', () => {
-  // Cursor GetCurrentPeriodUsage returns total/Auto/API together. Agents shows
-  // each window; routing used to Math.min them and refuse launches at API 100%
-  // even when Monthly still had ~74% left.
+test('Cursor API bucket exhaustion does not zero routing headroom while Auto remains', () => {
+  // Cursor GetCurrentPeriodUsage returns 1mo/Auto/API. Auto/Composer spend Auto;
+  // third-party models spend API. Without a model, headroom is the better pool.
   const observedAt = '2026-09-19T19:55:00Z';
   const usage = { quotaSource: 'provider_api', quotaObservedAt: observedAt, quotaUsages: [
     { label: '1mo', percent: 26, resetAt: '2026-10-13T09:32:23Z' },
-    { label: 'Auto', percent: 25, resetAt: '2026-10-13T09:32:23Z' },
+    { label: 'Auto', percent: 26, resetAt: '2026-10-13T09:32:23Z' },
     { label: 'API', percent: 100, resetAt: '2026-10-13T09:32:23Z' },
   ] };
   const quota = routingQuotaObservation(usage, now);
   assert.equal(quota.value, 74);
   assert.equal(quota.expiresAt, new Date(Date.parse(observedAt) + ROUTING_QUOTA_MAX_AGE_MS).toISOString());
+  assert.equal(routingQuotaObservation(usage, now, { windowLabels: ['Auto'] }).value, 74);
+  assert.equal(routingQuotaObservation(usage, now, { windowLabels: ['API'] }).value, 0);
+  assert.equal(cursorQuotaBucketForModel('default'), 'Auto');
+  assert.equal(cursorQuotaBucketForModel('composer-2.5'), 'Auto');
+  assert.equal(cursorQuotaBucketForModel('claude-4-sonnet'), 'API');
 });
 
 test('exhaustion without a reset expires, implausibly distant resets are bounded, and fresh recovery replaces it', () => {

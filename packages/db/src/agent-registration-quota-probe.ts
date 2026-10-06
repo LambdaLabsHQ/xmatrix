@@ -27,9 +27,9 @@ export function currentRegistrationQuotaJoin(alias: string): string {
  * row is missing or its share is not between 0 and 100.
  *
  * When `windows_json` is present, headroom is recomputed with
- * `routingQuotaObservation` so a stored `remaining` that was collapsed by a
- * Cursor API bucket at 100% cannot keep refusing launches after that rule
- * changed; Agents still shows every stored window. */
+ * `routingQuotaObservation` (Cursor Auto/API: better pool without a model) so a
+ * stored `remaining` collapsed by Math.min across pools cannot keep refusing
+ * Auto launches; Agents still shows every stored window. */
 export function registrationQuotaReading(row: {
   remaining?: unknown; observed_at?: unknown; expires_at?: unknown;
   windows_json?: unknown; account_json?: unknown;

@@ -434,6 +434,11 @@ export function parseAgentRoutingRequirements(value: unknown): AgentRoutingRequi
  * it refuses has no headroom whatever the windows say, and one it still serves
  * past a used-up window (credits) keeps the least headroom that is still some,
  * so it stays eligible but ranks after every account with window headroom.
+ *
+ * Cursor reports separate Auto and API pools (plus a 1mo total). Auto/Composer/
+ * Grok draw from Auto; third-party models draw from API. Without a selected
+ * model, headroom is the better of those two pools — not Math.min across them.
+ * With a model, only that model's pool counts.
  */
 export const ROUTING_QUOTA_MAX_AGE_MS = 15 * 60_000;
 const ROUTING_EXHAUSTED_MAX_AGE_MS = 31 * 24 * 60 * 60_000;
@@ -451,7 +456,30 @@ export function routingQuotaResetTime(value: unknown): number {
   return typeof value === "string" ? Date.parse(value) : NaN;
 }
 
-export function routingQuotaObservation(usage: unknown, now: number): RoutingObservation<number> | undefined {
+/** Which Cursor usage pool a model spends: Auto (Cursor Models / Composer /
+ * Grok / `default`) or API (third-party Claude/GPT/Gemini, …). */
+export function cursorQuotaBucketForModel(model: string | undefined): "Auto" | "API" {
+  const id = (model ?? "").trim().toLowerCase();
+  if (!id || id === "default" || id === "auto" || id.startsWith("default[")
+      || id.startsWith("composer") || id.startsWith("grok")) {
+    return "Auto";
+  }
+  return "API";
+}
+
+export type RoutingQuotaObservationOptions = {
+  /** Only these window labels count (matched case-insensitively). */
+  windowLabels?: readonly string[];
+};
+
+function quotaWindowLabel(window: Record<string, unknown>): string {
+  const raw = typeof window.label === "string" ? window.label
+    : typeof window.window === "string" ? window.window : "";
+  return raw.trim();
+}
+
+export function routingQuotaObservation(usage: unknown, now: number,
+  options?: RoutingQuotaObservationOptions): RoutingObservation<number> | undefined {
   if (!usage || typeof usage !== "object" || Array.isArray(usage) || !Number.isFinite(now)) return undefined;
   const row = usage as Record<string, unknown>;
   // Runtime usage marks provider reads as `provider_api`; local session estimates never qualify.
@@ -460,20 +488,33 @@ export function routingQuotaObservation(usage: unknown, now: number): RoutingObs
   if (!Number.isFinite(observed) || observed > now) return undefined;
   const windows = Array.isArray(row.quotaUsages) ? row.quotaUsages : [];
   const allowed = parseLlmQuotaAccount(row.quotaAccount)?.allowed;
-  const readings: Array<{ remaining: number; expires: number }> = [];
+  const prefer = new Set((options?.windowLabels ?? []).map(label => label.trim().toLowerCase()).filter(Boolean));
+  const labeled: Array<{ label: string; percent: number; resetAt: unknown }> = [];
   for (const value of windows) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const window = value as Record<string, unknown>;
-    // Cursor's API bucket is a separate on-demand spend meter. It is shown in
-    // the Agents UI, but a full API bucket must not collapse routing headroom
-    // to 0% while the plan (1mo) / Auto windows still have share left.
-    const label = typeof window.label === "string" ? window.label.trim().toLowerCase()
-      : typeof window.window === "string" ? window.window.trim().toLowerCase() : "";
-    if (label === "api") continue;
     // percent is the provider's 0..100 usage; remaining is not an inferred balance.
     if (typeof window.percent !== "number" || !Number.isFinite(window.percent) ||
         window.percent < 0 || window.percent > 100) continue;
-    const reset = routingQuotaResetTime(window.resetAt ?? window.reset_at);
+    labeled.push({ label: quotaWindowLabel(window), percent: window.percent,
+      resetAt: window.resetAt ?? window.reset_at });
+  }
+  const names = new Set(labeled.map(window => window.label.toLowerCase()).filter(Boolean));
+  const cursorPools = names.has("auto") && names.has("api");
+  const selected = prefer.size
+    ? labeled.filter(window => prefer.has(window.label.toLowerCase()))
+    : cursorPools
+      // Cursor's Auto and API pools are alternatives by model family; a full API
+      // pool must not refuse Auto/Composer, and vice versa. The 1mo total is not
+      // a third gate here — Agents still shows it.
+      ? labeled.filter(window => {
+        const label = window.label.toLowerCase();
+        return label === "auto" || label === "api";
+      })
+      : labeled;
+  const readings: Array<{ remaining: number; expires: number }> = [];
+  for (const window of selected) {
+    const reset = routingQuotaResetTime(window.resetAt);
     if (Number.isFinite(reset) && reset <= now) continue;
     const hasReset = Number.isFinite(reset) && reset > observed;
     const maxAge = window.percent === 100 && hasReset && allowed !== true
@@ -482,10 +523,19 @@ export function routingQuotaObservation(usage: unknown, now: number): RoutingObs
     if (expires > now) readings.push({ remaining: 100 - window.percent, expires });
   }
   if (!readings.length) return undefined;
+  // Cursor dual pools without a model: the better pool is the headroom, and its
+  // own expiry — a full API pool must not pin the Auto reading until the API reset.
+  // With a preferred label (or any other provider): the tightest selected window;
+  // an exhausted window holds until its reset.
+  const cursorBest = cursorPools && !prefer.size;
+  const windowRemaining = cursorBest
+    ? Math.max(...readings.map(reading => reading.remaining))
+    : Math.min(...readings.map(reading => reading.remaining));
   const exhausted = readings.filter(reading => reading.remaining === 0);
-  const expires = exhausted.length && allowed !== true ? Math.max(...exhausted.map(reading => reading.expires))
-    : Math.min(...readings.map(reading => reading.expires));
-  const windowRemaining = Math.min(...readings.map(reading => reading.remaining));
+  const expires = cursorBest
+    ? Math.min(...readings.filter(reading => reading.remaining === windowRemaining).map(reading => reading.expires))
+    : exhausted.length && allowed !== true ? Math.max(...exhausted.map(reading => reading.expires))
+      : Math.min(...readings.map(reading => reading.expires));
   const value = allowed === false ? 0
     : allowed === true ? Math.max(windowRemaining, ROUTING_SERVED_PAST_LIMIT_REMAINING) : windowRemaining;
   return { value, observedAt: new Date(observed).toISOString(),
