@@ -179,6 +179,10 @@ pub struct HarnessLogin {
     pub url_regex: String,
     #[serde(default)]
     pub code_regex: Option<String>,
+    /// Output after a pasted code that means the harness refused it and
+    /// waits for another one.
+    #[serde(default)]
+    pub rejected_regex: Option<String>,
     #[serde(default)]
     pub status: Option<LoginStatus>,
 }

@@ -33,6 +33,7 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
+import { HarnessSignInSection } from "./harness-sign-in";
 import { IdentityAvatar } from "./identity-avatar";
 import { MachineGlyph } from "./machine-glyph";
 import { MeterReadingList } from "./machine-load-panel";
@@ -288,6 +289,7 @@ export function MyAgentsView({
             )}
           </ToolDetailSection>
         )}
+        {token && <HarnessSignInSection registration={registration} token={token} userId={currentUserId} />}
         <ToolDetailSection title="Where it runs">
           <ToolFacts>
             <ToolFact label="Runtime">{harness}</ToolFact>

@@ -34,6 +34,8 @@ pub(crate) struct InventoryItem {
     pub(crate) latest_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) auto_update: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) login: Option<&'static str>,
 }
 
 /// A harness process the daemon starts itself: closed stdin, piped output, the
@@ -184,6 +186,9 @@ pub(crate) async fn probe(preset: &AgentPreset, policy: &HarnessPolicy) -> Inven
     } else {
         "unknown"
     });
+    if item.installed {
+        item.login = crate::runtime_daemon_harness_login::inventory_state(preset).await;
+    }
     item
 }
 
@@ -201,6 +206,7 @@ async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
         version: None,
         latest_version: None,
         auto_update: None,
+        login: None,
         probe_status: if path.is_some() {
             "unsupported"
         } else {

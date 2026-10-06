@@ -42,6 +42,8 @@ export interface HarnessLogin {
   start: HarnessCommand & { env?: Record<string, string> };
   urlRegex: string;
   codeRegex?: string;
+  /** Output after a pasted code meaning the harness refused it and waits for another. */
+  rejectedRegex?: string;
   /** Exit status 0 means signed in, unless `signedInRegex` must also match its output. */
   status?: HarnessCommand & { signedInRegex?: string };
   notes?: string;

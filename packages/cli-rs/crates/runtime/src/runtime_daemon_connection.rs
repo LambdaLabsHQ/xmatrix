@@ -468,6 +468,7 @@ async fn execute_leased_harness_action(
         request_id,
         preset_id,
         action,
+        code,
         relay_lease,
     } = command
     else {
@@ -502,6 +503,15 @@ async fn execute_leased_harness_action(
     };
     // Re-reading inventory or a registry changes nothing a redelivery could repeat.
     let result = if matches!(
+        action,
+        machine_daemon_connection::HarnessAction::LoginStart
+            | machine_daemon_connection::HarnessAction::LoginFinish
+            | machine_daemon_connection::HarnessAction::LoginCancel
+    ) {
+        // A sign-in installs nothing; a redelivery at worst restarts it, and
+        // the code it carries is only ever handed to the sign-in it names.
+        crate::runtime_daemon_harness_login::execute(&preset_id, action, code.as_deref()).await
+    } else if matches!(
         action,
         machine_daemon_connection::HarnessAction::Refresh
             | machine_daemon_connection::HarnessAction::Release
