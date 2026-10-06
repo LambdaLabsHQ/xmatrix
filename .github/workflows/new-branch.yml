@@ -1,0 +1,41 @@
+name: New branch
+
+# Branches on this repository are created here, never by a push. A checkout
+# made before the repository was published still holds the private history, and
+# one push of an old branch would publish all of it. The repository ruleset lets
+# only this workflow create a branch, at the current main, and lets a branch
+# move only by fast-forward, so nothing that does not descend from the public
+# main can land:
+#
+#   gh workflow run new-branch.yml -f name=fix/my-change
+#   git fetch origin fix/my-change && git switch fix/my-change
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: Branch to create at the current main
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Create the branch at main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ inputs.name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$NAME" = main ] || ! git check-ref-format --branch "$NAME" >/dev/null; then
+            echo "::error::not a branch name this workflow creates: $NAME"
+            exit 1
+          fi
+          sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          gh api -X POST "repos/$REPO/git/refs" -f "ref=refs/heads/$NAME" -f "sha=$sha" >/dev/null
+          echo "created $NAME at $sha" >> "$GITHUB_STEP_SUMMARY"
