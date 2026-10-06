@@ -8,7 +8,11 @@ import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { deterministicConversationId, launchConversationAgent, openConversation } from "./system-conversation";
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
+import { runtimeRepository } from "./runtime";
 import { getChannel } from "./spaces";
+import {
+  channelExposureReader, githubContentAllowedInChannel, spaceMayBePublic, type ChannelExposureReader,
+} from "./github-channel-exposure";
 
 /**
  * Pre-review (docs/design/pages-and-conversations.md §5.6): a claimed pull
@@ -83,6 +87,19 @@ function pages(env: Env): PostgresPageRepository {
   }));
 }
 
+/**
+ * The review conversation's mode. Its prompt carries the pull request's diff,
+ * so a private repository's review is closed wherever the Space's open
+ * conversations may be read by participants (or that cannot be established).
+ */
+export async function preReviewConversationMode(reader: ChannelExposureReader, input: {
+  spaceId: string; restricted: boolean; repositoryPublic: boolean;
+}): Promise<"open" | "closed"> {
+  if (input.restricted) return "closed";
+  if (input.repositoryPublic) return "open";
+  return await spaceMayBePublic(reader, input.spaceId) ? "closed" : "open";
+}
+
 /** Opens the pull request's review conversation on its block and launches the pre-review there. */
 export async function startPreReview(env: Env, input: {
   spaceId: string; spaceOwnerUserId: string; connection: AppConnectorConnectionView; pull: PullRequestRef;
@@ -92,12 +109,19 @@ export async function startPreReview(env: Env, input: {
   const principal = { kind: "user" as const, id: input.spaceOwnerUserId };
   const review = await readGitHubPullRequestForReview(env, input.connection, pull, pull.number);
   if (review.draft) return;
+  const exposure = channelExposureReader(env);
+  const mode = await preReviewConversationMode(exposure, { spaceId, restricted: input.restricted,
+    repositoryPublic: review.repositoryPublic });
   // One review conversation per pull request in a Space.
   const channelId = await deterministicConversationId("pre-review", spaceId, pull.url);
   await openConversation(env, { spaceId, channelId, userId: input.spaceOwnerUserId,
-    name: `Review ${pull.owner}/${pull.repo}#${pull.number}`, mode: input.restricted ? "closed" : "open",
+    name: `Review ${pull.owner}/${pull.repo}#${pull.number}`, mode,
     metadata: { createdBy: "github", pullRequest: { url: pull.url, repository: `${pull.owner}/${pull.repo}`,
       number: pull.number, pageId: input.pageId, blockId: input.blockId } } });
+  /* An earlier review may have opened the conversation open; the diff goes
+     only where this repository's content may be read. */
+  if (!await githubContentAllowedInChannel(exposure, { repositoryPublic: review.repositoryPublic, channelId,
+    userId: input.spaceOwnerUserId })) return;
   await pages(env).link({ requestId: crypto.randomUUID(), spaceId, principal, conversationId: channelId,
     pageId: input.pageId, blockId: input.blockId, source: "reference" });
   await launchConversationAgent(env, input.spaceOwnerUserId, {
@@ -115,10 +139,13 @@ export class PreReviewError extends Error {
 
 /**
  * The review conversation's verdict, published as `xmatrix/pre-review` on the
- * pull request's current head with the Space's own installation.
+ * exact head commit the reviewing Run was launched to review, with the Space's
+ * own installation. A verdict never moves to a different commit: when the pull
+ * request's head has moved since the review started, nothing is published and
+ * the new head waits for its own review.
  */
 export async function publishPreReviewVerdict(env: Env, input: {
-  channelId: string; actorUserId: string; verdict: "pass" | "changes"; summary: string;
+  channelId: string; actorUserId: string; runId: string; verdict: "pass" | "changes"; summary: string;
 }): Promise<{ headSha: string }> {
   const principal = { kind: "user" as const, id: input.actorUserId };
   const channel = await getChannel(env, { channelId: input.channelId, principal }).catch(() => {
@@ -129,10 +156,16 @@ export async function publishPreReviewVerdict(env: Env, input: {
   if (!pull || !record.spaceId) {
     throw new PreReviewError("not_a_review_conversation", 409, "This conversation is not a pull request's review");
   }
+  const headSha = await reviewedHeadSha(env, input, pull.url);
   const connection = await findAppConnection(env, { spaceId: record.spaceId, providerId: "github",
     actorUserId: principal.id });
   if (!connection) throw new PreReviewError("github_connection_required", 409, "Connect GitHub for this Space");
-  const headSha = await readGitHubPullRequestHead(env, connection, pull, pull.number);
+  const currentSha = await readGitHubPullRequestHead(env, connection, pull, pull.number);
+  if (currentSha !== headSha) {
+    throw new PreReviewError("pre_review_head_moved", 409,
+      `The pull request's head moved from ${headSha} to ${currentSha} during this review; ` +
+      "the new head gets its own review");
+  }
   const link = `${appOrigin(env)}/app?channel=${encodeURIComponent(input.channelId)}`;
   await publishGitHubCheckRun(env, connection, pull, {
     name: PRE_REVIEW_CHECK_NAME, headSha, detailsUrl: link,
@@ -141,4 +174,19 @@ export async function publishPreReviewVerdict(env: Env, input: {
     summary: `${input.summary}\n\n[The review conversation](${link})`,
   });
   return { headSha };
+}
+
+/** The head commit this Run was launched to pre-review, as Hub recorded it at launch. */
+async function reviewedHeadSha(env: Env, input: { runId: string; actorUserId: string }, pullUrl: string): Promise<string> {
+  const result = await runtimeRepository(env).getRun({ requestId: crypto.randomUUID(), runId: input.runId,
+    actorUserId: input.actorUserId }).catch(() => undefined);
+  const run = result?.run as { metadata?: unknown } | undefined;
+  const metadata = run?.metadata && typeof run.metadata === "object" && !Array.isArray(run.metadata)
+    ? run.metadata as Record<string, unknown> : {};
+  if (metadata.routedAs !== "pull_request_pre_review" || metadata.pullRequestUrl !== pullUrl ||
+    typeof metadata.headSha !== "string" || !metadata.headSha) {
+    throw new PreReviewError("pre_review_run_required", 403,
+      "Only the Run launched to review this pull request records its verdict");
+  }
+  return metadata.headSha;
 }

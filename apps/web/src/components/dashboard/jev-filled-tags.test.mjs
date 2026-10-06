@@ -25,16 +25,16 @@ function mention(tags, error) {
   return { start: 0, end: 0, text: "", tags, conditions: [], ...(error ? { error } : {}) };
 }
 
-test("Jev's choices fill only the fields the author left blank", () => {
+test("Jev's choices fill only the fields the author left blank, in the order Jev made them", () => {
   const tags = jevFilledTags(mention({}), evidence());
   assert.deepEqual(tags, [
-    { field: "repo", value: "LambdaLabsHQ/xmatrix" },
+    { field: "harness", value: "grok" },
     { field: "model", value: "grok-4" },
     { field: "effort", value: "high" },
-    { field: "harness", value: "grok" },
+    { field: "repo", value: "LambdaLabsHQ/xmatrix" },
   ]);
   assert.equal(jevFilledAnnouncement(tags),
-    "Jev filled repo:LambdaLabsHQ/xmatrix, model:grok-4, effort:high, harness:grok");
+    "Jev filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix");
 });
 
 test("a field the author wrote is not drawn again, even when Jev disagrees", () => {
@@ -48,12 +48,13 @@ test("an older placement choice is not a tag", () => {
 
 test("routing's Machine is a machine tag, and a Machine the author named is not drawn again", () => {
   const tags = jevFilledTags(mention({}), evidence(), "Workstation");
-  assert.deepEqual(tags.map(tag => tag.field), ["repo", "machine", "model", "effort", "harness"]);
+  // Routing binds the Machine after Jev has chosen, so its tag comes last.
+  assert.deepEqual(tags.map(tag => tag.field), ["harness", "model", "effort", "repo", "machine"]);
   assert.deepEqual(tags.find(tag => tag.field === "machine"), { field: "machine", value: "Workstation", source: "routing" });
   assert.equal(jevFilledAnnouncement(tags),
-    "Jev filled repo:LambdaLabsHQ/xmatrix, model:grok-4, effort:high, harness:grok. Routing filled machine:Workstation");
+    "Jev filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix. Routing filled machine:Workstation");
   assert.deepEqual(jevFilledTags(mention({ machine: "Laptop" }), evidence(), "Workstation").map(tag => tag.field),
-    ["repo", "model", "effort", "harness"]);
+    ["harness", "model", "effort", "repo"]);
 });
 
 test("a Machine tag uses the owner's name or the recorded binding, never a hostname", () => {
@@ -84,19 +85,19 @@ test("a directory Jev chose is never named", () => {
 
 test("@auto shows the harness Jev picked; a named successor does not repeat it", () => {
   assert.deepEqual(jevFilledTagsForHandoff("auto", evidence()).map(tag => tag.field),
-    ["repo", "model", "effort", "harness"]);
+    ["harness", "model", "effort", "repo"]);
   assert.deepEqual(jevFilledTagsForHandoff("  Grok ", evidence()).map(tag => tag.field),
-    ["repo", "model", "effort"]);
+    ["model", "effort", "repo"]);
   assert.deepEqual(jevFilledTagsForHandoff("auto", undefined), []);
   const decision = { rows: [{ selected: true, machineId: "machine:abc", machineLabel: "星豆号" }], machine: { id: "machine:abc", name: "Workstation" } };
   assert.equal(launchMachineLabel(decision), "星豆号");
   assert.equal(launchMachineLabel({ rows: [], machine: { id: "machine:abc", name: "Workstation" } }), "Workstation");
   assert.equal(launchMachineLabel(decision, "Laptop"), undefined);
   const picked = jevFilledTagsForHandoff("auto", evidence(), launchMachineLabel(decision));
-  assert.deepEqual(picked.map(tag => tag.field), ["repo", "machine", "model", "effort", "harness"]);
+  assert.deepEqual(picked.map(tag => tag.field), ["harness", "model", "effort", "repo", "machine"]);
   assert.deepEqual(picked.find(tag => tag.field === "machine"), { field: "machine", value: "星豆号", source: "routing" });
   assert.deepEqual(jevFilledTagsForHandoff("Grok", evidence(), "Workstation").map(tag => tag.field),
-    ["repo", "machine", "model", "effort"]);
+    ["model", "effort", "repo", "machine"]);
 });
 
 test("a broken summon and a missing decision add nothing", () => {

@@ -31,10 +31,11 @@ function githubConfiguration() {
 
 // Pre-review end to end: a claimed pull request gets a review conversation on
 // its block, an Agent of the Space owner's is launched there with the change,
-// and its verdict becomes the xmatrix/pre-review check on the current head.
+// and its verdict becomes the xmatrix/pre-review check on the head it reviewed.
 test("a claimed pull request is pre-reviewed by an Agent in its own conversation on the block", async () => {
   const userId = `pre-review-${randomUUID()}`;
-  await withGitHubUserScenario({ id: userId, email: "pre-review@example.com", name: "Pre Review" }, githubConfiguration(), secret,
+  const configuration = githubConfiguration();
+  await withGitHubUserScenario({ id: userId, email: "pre-review@example.com", name: "Pre Review" }, configuration, secret,
     async ({ worker, github, auth }) => {
   let daemon;
   try {
@@ -78,13 +79,27 @@ test("a claimed pull request is pre-reviewed by an Agent in its own conversation
       "the review conversation is on the block");
 
     const runToken = await admitRegisteredSpawn(worker, daemon, command);
-    const verdict = await worker.fetch(`/api/channels/${encodeURIComponent(command.channelId)}/pre-review`, {
+    const postVerdict = () => worker.fetch(`/api/channels/${encodeURIComponent(command.channelId)}/pre-review`, {
       method: "POST", headers: { Authorization: `Bearer ${runToken}`, "content-type": "application/json" },
       body: JSON.stringify({ verdict: "pass", summary: "In scope, tested, no duplicate." }) });
+
+    // A push lands while the Agent reviews head-2: its verdict is not moved
+    // onto the unreviewed head-3, and nothing is published.
+    const pullRoute = "/repos/acme/widgets/pulls/7";
+    const reviewed = configuration.routes[pullRoute];
+    configuration.routes[pullRoute] = { ...reviewed, head: { sha: "head-3" } };
+    const moved = await postVerdict();
+    assert.equal(moved.status, 409, await moved.clone().text());
+    assert.equal((await moved.json()).code, "pre_review_head_moved");
+    assert.equal(github.checkRuns.some((run) => run.name === "xmatrix/pre-review"), false,
+      "no verdict is published on a head the Agent did not review");
+    configuration.routes[pullRoute] = reviewed;
+
+    const verdict = await postVerdict();
     assert.equal(verdict.status, 200, await verdict.clone().text());
     const published = github.checkRuns.find((run) => run.name === "xmatrix/pre-review");
     assert.equal(published.conclusion, "success");
-    assert.equal(published.head_sha, "head-2", "the verdict lands on the pull request's current head");
+    assert.equal(published.head_sha, "head-2", "the verdict lands on the head commit that was reviewed");
     assert.match(published.output.summary, /In scope, tested, no duplicate\./u);
 
     const human = await worker.fetch(`/api/channels/${encodeURIComponent(command.channelId)}/pre-review`, {

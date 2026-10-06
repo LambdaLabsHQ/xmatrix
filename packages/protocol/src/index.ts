@@ -164,13 +164,14 @@ export {
   DECISION_ANSWER_ISSUES, launchRefusalCode, parameterFailureCodeFromDecisionRecord, parseDecisionAnswerFailure,
   PREPARATION_REJECTION_MESSAGES, preparationFailureSummary, preparationRejectionMessage,
   REGISTRATION_PREPARATION_REJECTION_CODES, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS,
+  isLaunchHintRejection, LAUNCH_HINT_REJECTION_CODES,
   SUMMON_INTENT_CATEGORIES, SUMMON_INTENT_INSTRUCTIONS, SUMMON_INTENT_REJECTION_CODES,
 } from "./invocation-failure.js";
 export type {
   DecisionAnswerFailure, DecisionAnswerIssue, LaunchMachineBlock, SummonIntentCategory,
 } from "./invocation-failure.js";
 export {
-  boundedRoutingLabel, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingQuotaObservation, routingQuotaResetTime, routingQuotaText, visibleRoutingChoiceRows,
+  boundedRoutingLabel, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, cursorQuotaBucketForModel, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingQuotaObservation, routingQuotaResetTime, routingQuotaText, visibleRoutingChoiceRows,
 } from "./agent-routing.js";
 export type {
   AgentRoutingDeclaration, AgentRoutingExclusion, AgentRoutingRequirements,
