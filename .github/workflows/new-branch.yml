@@ -3,8 +3,9 @@ name: New branch
 # Branches on this repository are created here, never by a push. A checkout
 # made before the repository was published still holds the private history, and
 # one push of an old branch would publish all of it. The repository ruleset lets
-# only this workflow create a branch, at the current main, and lets a branch
-# move only by fast-forward, so nothing that does not descend from the public
+# only the xmatrix-branch-creator App, which this workflow acts as, create a
+# branch, and this workflow creates it at the current main. A branch then
+# moves only by fast-forward, so nothing that does not descend from the public
 # main can land:
 #
 #   gh workflow run new-branch.yml -f name=fix/my-change
@@ -18,16 +19,21 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   create:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.XMATRIX_BRANCH_CREATOR_APP_ID }}
+          private-key: ${{ secrets.XMATRIX_BRANCH_CREATOR_PRIVATE_KEY }}
       - name: Create the branch at main
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           NAME: ${{ inputs.name }}
           REPO: ${{ github.repository }}
         run: |
