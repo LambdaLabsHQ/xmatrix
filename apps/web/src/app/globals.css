@@ -1370,21 +1370,21 @@
        specific mobile override prevents the 2.5rem face from flex-shrinking
        horizontally inside that smaller root. */
     .xmatrix-app .app-message-timeline .message-author-avatar {
-      width: 2.5rem !important;
-      min-width: 2.5rem !important;
-      max-width: 2.5rem !important;
-      height: 2.5rem !important;
-      min-height: 2.5rem !important;
-      max-height: 2.5rem !important;
+      width: var(--app-message-avatar-size) !important;
+      min-width: var(--app-message-avatar-size) !important;
+      max-width: var(--app-message-avatar-size) !important;
+      height: var(--app-message-avatar-size) !important;
+      min-height: var(--app-message-avatar-size) !important;
+      max-height: var(--app-message-avatar-size) !important;
     }
 
     .xmatrix-app .app-message-timeline .message-author-avatar.identity-avatar {
-      flex-basis: 2.5rem !important;
+      flex-basis: var(--app-message-avatar-size) !important;
     }
 
     .xmatrix-app .app-message-timeline .identity-avatar-face {
-      width: 2.5rem;
-      height: 2.5rem;
+      width: var(--app-message-avatar-size);
+      height: var(--app-message-avatar-size);
     }
 
     /* The thread summary is a fixed 32px chip, so the author-avatar sizing
@@ -2138,19 +2138,19 @@
 }
 
 .xmatrix-app .message-author-avatar {
-  width: 2.25rem !important;
-  min-width: 2.25rem !important;
-  max-width: 2.25rem !important;
-  height: 2.25rem !important;
-  min-height: 2.25rem !important;
-  max-height: 2.25rem !important;
+  width: var(--app-message-avatar-size) !important;
+  min-width: var(--app-message-avatar-size) !important;
+  max-width: var(--app-message-avatar-size) !important;
+  height: var(--app-message-avatar-size) !important;
+  min-height: var(--app-message-avatar-size) !important;
+  max-height: var(--app-message-avatar-size) !important;
   align-self: flex-start !important;
   overflow: visible !important;
 }
 
 .xmatrix-app .message-author-avatar.identity-avatar {
   display: inline-flex !important;
-  flex: 0 0 2.25rem !important;
+  flex: 0 0 var(--app-message-avatar-size) !important;
   padding: 0 !important;
 }
 
@@ -6326,8 +6326,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-shell {
   align-items: flex-end !important;
   gap: 0.75rem !important;
   width: 100% !important;
-  max-width: 60rem !important;
-  margin-inline: auto !important;
 }
 
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-box:not(.app-agent-work-card) {
@@ -6351,6 +6349,15 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-box:not(.app-agent-w
   max-height: min(9rem, 34dvh) !important;
   padding: 0.55rem 0.125rem !important;
   line-height: 1.38 !important;
+}
+
+/* The capsule spans the message column and its caret starts where message
+   text starts: the row's padding, the 2.25rem attach button and the row's gap
+   take up the avatar column, and the textarea's inset makes up the rest. */
+@media (min-width: 768px) {
+  html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-box:not(.app-agent-work-card) .composer-input-row:has(> .composer-attach) .composer-textarea {
+    padding-left: calc(var(--app-message-avatar-size) + var(--app-message-avatar-gap) - 0.35rem - 2.25rem - 0.25rem) !important;
+  }
 }
 
 html[data-app-theme] .xmatrix-app.xmatrix-app .composer-inline-actions {

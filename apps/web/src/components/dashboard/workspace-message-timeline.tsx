@@ -1997,11 +1997,14 @@ export const MessageRow = memo(function MessageRow({
       onClick={handleRowClick}
       data-actions-open={actionsOpen || undefined}
       className={cn(
-        "app-message-row group relative flex items-start gap-3 px-5",
+        "app-message-row group relative flex items-start gap-(--app-message-avatar-gap) px-5",
         // Every message sits on the same paper: whose it is reads from the
         // header, not from a tinted row. An open action row is a state, not
         // an author, so it keeps its tone.
-        message.continuation ? "py-0.5" : "py-1.5",
+        // Only a header row opens with extra room, which sets one sender's
+        // run apart from the last; every row closes alike, so the lines of a
+        // run sit at one even pitch.
+        message.continuation ? "py-0.5" : "pt-3 pb-0.5",
         actionsOpen && "bg-muted"
       )}
     >
@@ -2009,7 +2012,7 @@ export const MessageRow = memo(function MessageRow({
         // Same sender, moments later, same tags: the header above still says who.
         // The hidden time is one body line tall and never wraps: wrapped, it
         // stood two lines high and spread one-line messages apart (user 2026-10-06).
-        <div className="app-message-continuation-gutter mt-0.5 flex h-5 w-9 shrink-0 items-center justify-end self-start">
+        <div className="app-message-continuation-gutter mt-0.5 flex h-5 w-(--app-message-avatar-size) shrink-0 items-center justify-end self-start">
           <MessageTimestamp value={message.sentAt} clock
             className="invisible whitespace-nowrap text-[10px] text-muted-foreground group-hover:visible" />
         </div>
