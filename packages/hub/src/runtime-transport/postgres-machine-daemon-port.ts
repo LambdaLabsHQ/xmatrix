@@ -827,10 +827,11 @@ function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
   if (type === "machine_harness_action") {
     const action = parseHarnessActionRequest(payload);
     if (action.requestId !== requestId || Object.keys(payload).some(key =>
-        !["type", "requestId", "presetId", "action", "relayLease"].includes(key))) {
+        !["type", "requestId", "presetId", "action", "code", "relayLease"].includes(key))) {
       throw new Error("PostgreSQL returned an invalid harness action command");
     }
-    return { type, requestId, presetId: action.presetId, action: action.action };
+    return { type, requestId, presetId: action.presetId, action: action.action,
+      ...(action.code === undefined ? {} : { code: action.code }) };
   }
   if (type === "machine_quota_probe") {
     const probe = parseRoutingQuotaProbeRequest(payload.probe);

@@ -56,8 +56,9 @@ capture time, rather than treating an offline machine's inventory as live.
 
 ## Harness actions
 
-`HARNESS_ACTIONS` are `install`, `update`, `auto_update_on`, `auto_update_off`
-and `refresh`. `harnessActionAvailable` says whether a preset has an official
+`HARNESS_ACTIONS` are `install`, `update`, `uninstall`, `auto_update_on`,
+`auto_update_off`, `refresh`, `release`, and the sign-in actions `login_start`,
+`login_finish` and `login_cancel` (see [Remote sign-in](#remote-sign-in)). `harnessActionAvailable` says whether a preset has an official
 recipe or control for one; anything else is refused when issued.
 
 - **Who.** Only the Machine's owner, signed in as a Human, issues an action:
@@ -68,7 +69,7 @@ recipe or control for one; anything else is refused when issued.
 - **Command.** Machine control (PostgreSQL in production) stores a
   `harness_action` command only for an online daemon advertising
   `machine_harness_action_v1`. The payload is exactly `{ type, requestId,
-  presetId, action }`. A command no daemon claims within ten minutes expires and
+  presetId, action }`, plus `code` on `login_finish`. A command no daemon claims within ten minutes expires and
   never runs later. Only capable connections claim it.
 - **Result.** `machine_harness_action_result` must answer the issued preset and
   action. It carries a status (`succeeded`, `failed`, `unsupported`), an exit
@@ -162,6 +163,44 @@ reports the inventory when it starts, after automatic updates and on `refresh`;
 Locally, `xmatrix harness list --local` reads the inventory and
 `xmatrix harness apply` runs the official recipe on this machine, from a
 human terminal or an Agent Run alike.
+
+## Remote sign-in
+
+A preset with `management.login` has an official sign-in the daemon can run
+without a terminal, so its owner can sign the harness in from the Agents page
+instead of opening a shell on that Machine. The owner of a registration sees a
+Sign-in section with the harness's state on that Machine and a Sign in button.
+
+- **Recipe.** `login.flow` is `device_code` (the harness prints a URL and, if it
+  is not already in the URL, a one-time code; it finishes on its own once the
+  owner approves) or `url_paste_code` (the sign-in page shows a code the
+  harness reads on stdin). `start` is the harness's own sign-in argv; `urlRegex`
+  and `codeRegex` capture group 1 from its output after ANSI and control
+  characters are removed; `rejectedRegex` marks a refused pasted code; `status`
+  is a read-only check (exit 0, and `signedInRegex` if set, means signed in).
+- **Actions.** `login_start`, `login_finish` and `login_cancel` are harness
+  actions on the same command path. Only `login_finish` may carry `code`, one
+  printable line of at most 2,048 characters; machine control drops it from the
+  stored command once the daemon answers. They are issued and leased only to
+  daemons advertising `machine_harness_login_v1`.
+- **On the daemon.** `login_start` replaces any sign-in waiting for that preset,
+  runs `start` with piped stdin from the home directory and answers within 45
+  seconds with `login: { state: "awaiting_user", flow, verificationUri,
+  userCode? }`; only `https://` URLs are offered. The process stays waiting for
+  at most 15 minutes. `login_finish` writes the pasted code (paste flows) and
+  waits for the process: a refused code answers `failed` with the same prompt so
+  the owner can paste again; otherwise the status check decides `signed_in` or
+  `failed`. `login_cancel` ends the process tree. Sign-in never takes the
+  preset's install/update lock and its argv only ever comes from the compiled
+  registry.
+- **State.** Installed presets with a status command report `login`
+  (`signed_in`, `signed_out`, `unknown`) on their inventory item; each sign-in
+  action re-probes the preset.
+
+Presets with a sign-in today: codex, claude, copilot, cursor, grok, hermes,
+kimi, kiro, opencode and zcode. gemini, goose and openclaw sign in only inside an
+interactive terminal; pi, vibe, junie and qwen have no official headless sign-in
+(API keys or their TUI).
 
 See [Machines and CLI management](harness-management-cli.md) for user commands and confirmation behavior.
 

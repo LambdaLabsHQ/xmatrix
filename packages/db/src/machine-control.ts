@@ -2,7 +2,7 @@ import { storeScopedCommandReplay } from "./command-replay.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import type { QueryResultRow } from "pg";
 import {
-  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
+  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   stableMachineDaemonId,
   sha256Hex } from "@xmatrix/protocol";
@@ -917,9 +917,9 @@ export class PostgresMachineControlRepository {
     }
     if (commandType === "harness_action") {
       try {
-        const action = issuedHarnessAction(payload);
+        const action = parseHarnessActionRequest(payload);
         if (payload.type !== "machine_harness_action" || action.requestId !== controlId ||
-            Object.keys(payload).some(key => !["type", "requestId", "presetId", "action"].includes(key)) ||
+            Object.keys(payload).some(key => !["type", "requestId", "presetId", "action", "code"].includes(key)) ||
             !harnessActionAvailable(agentPresetById(action.presetId)?.management, action.action)) {
           throw new Error("Invalid harness action envelope");
         }
@@ -942,6 +942,14 @@ export class PostgresMachineControlRepository {
         values: [ownerUserId, machineId, MACHINE_HARNESS_UNINSTALL_CAPABILITY], maxRows: 1 });
         if (!capable[0]) throw new MachineControlError("harness_action_unavailable", 409,
           "Update this machine's daemon before uninstalling harnesses");
+      }
+      if (HARNESS_LOGIN_ACTIONS.includes(payload.action as never)) {
+        const capable = await tx.query({ name: "machine_harness_login_v1", text: `SELECT 1
+          FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
+            AND status='online' AND capabilities_json ? $3 FOR SHARE`,
+        values: [ownerUserId, machineId, MACHINE_HARNESS_LOGIN_CAPABILITY], maxRows: 1 });
+        if (!capable[0]) throw new MachineControlError("harness_action_unavailable", 409,
+          "Update this machine's daemon before signing in to harnesses from here");
       }
       if (payload.action === "release") {
         const capable = await tx.query({ name: "machine_harness_release_v1", text: `SELECT 1
@@ -1106,7 +1114,7 @@ export class PostgresMachineControlRepository {
       "invalid_machine_command", 400, "Machine claim includes an unknown command type");
     const leaseMs = Math.min(integer(input.leaseMs ?? 30_000, "leaseMs", 1), 60_000);
     const leaseOwner = `machine-daemon:${String(current.owner_user_id)}:${String(current.machine_id)}:epoch:${connectionEpoch}`;
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v6", text: `SELECT
+    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v7", text: `SELECT
       command.command_id,command.command_type,
       CASE WHEN command.command_type='spawn' AND launch.launch_id IS NOT NULL
         THEN command.payload_json || jsonb_build_object(
@@ -1129,9 +1137,10 @@ export class PostgresMachineControlRepository {
         AND (command.command_type<>'harness_action' OR ($6::boolean AND
           (command.payload_json->>'presetId'<>'cursor' OR command.payload_json->>'action'<>'update' OR $7::boolean) AND
           (command.payload_json->>'action'<>'uninstall' OR $8::boolean) AND
-          (command.payload_json->>'action'<>'release' OR $9::boolean)))
+          (command.payload_json->>'action'<>'release' OR $9::boolean) AND
+          (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean)))
       ORDER BY command.created_at,command.command_id LIMIT 5
-      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY)],
+      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY)],
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {
@@ -1284,6 +1293,11 @@ export class PostgresMachineControlRepository {
     if (exact.command.command_type === "harness_action" && status === "completed") {
       await recordHarnessActionInventory(tx, { ownerUserId, machineId, hostId,
         result: parseHarnessActionResult(payload.result, issuedHarnessAction(issued)), at });
+    }
+    if (exact.command.command_type === "harness_action" && issued.code !== undefined) {
+      // A pasted sign-in code is spent once the daemon answered; do not keep it.
+      await tx.query({ name: "machine_harness_login_code_drop_v1", text: `UPDATE data.machine_daemon_commands
+        SET payload_json=payload_json-'code' WHERE command_id=$1`, values: [exact.controlId], maxRows: 0 });
     }
     return { reused: false, ...completionFacts(String(exact.command.command_type), issued, payload) };
   }

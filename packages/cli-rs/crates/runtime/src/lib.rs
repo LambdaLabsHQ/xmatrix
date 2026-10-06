@@ -39,6 +39,7 @@ use runtime_goal_inbox::{
 mod runtime_daemon_harness_action;
 pub use runtime_daemon_harness_action::{apply_local, local_inventory};
 mod runtime_daemon_harness_inventory;
+mod runtime_daemon_harness_login;
 mod runtime_daemon_harness_policy;
 mod runtime_daemon_host;
 mod runtime_daemon_idle_sleep;
