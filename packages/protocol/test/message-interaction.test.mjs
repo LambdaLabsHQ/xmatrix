@@ -105,6 +105,10 @@ test("a stop invocation is the command span the chip hangs on", () => {
   assert.equal(all.text, "/kill all");
   assert.equal(all.all, true);
   assert.equal(parseAgentStopCommand("/kill all").all, true);
+  const reasoned = parseAgentStopInvocation("@grok:3:stop grok:2 继续，停掉 grok:3。");
+  assert.deepEqual([reasoned.start, reasoned.end, reasoned.text, reasoned.reason],
+    [0, "@grok:3:stop".length, "@grok:3:stop", "grok:2 继续，停掉 grok:3。"]);
+  assert.equal(parseAgentStopInvocation("/stop all  done for today\n").text, "/stop all");
   assert.equal(parseAgentStopInvocation("`@claude:1:stop`"), undefined);
   assert.equal(parseAgentStopInvocation("please @claude:1:stop"), undefined);
 });

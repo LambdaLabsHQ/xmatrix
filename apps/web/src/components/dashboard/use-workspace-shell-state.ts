@@ -1408,7 +1408,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       const hubUrl = normalizeHubUrl(
         process.env.NEXT_PUBLIC_XMATRIX_HUB_URL || DEFAULT_HUB_URL
       );
-      return admittedHumanSocketUrl(hubUrl);
+      return admittedHumanSocketUrl(hubUrl, userId);
     }
 
     function scheduleReconnect() {

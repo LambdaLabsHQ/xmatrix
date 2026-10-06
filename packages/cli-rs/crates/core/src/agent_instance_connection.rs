@@ -334,6 +334,10 @@ pub fn derive_connection_url(hub_url: &str) -> String {
     )
 }
 
+pub fn derive_connection_url_for_owner(hub_url: &str, owner_user_id: &str) -> String {
+    crate::websocket::with_runtime_owner(derive_connection_url(hub_url), owner_user_id)
+}
+
 /// Events emitted to the caller, including lifecycle events for reconnection.
 #[derive(Debug, Clone)]
 pub enum AgentInstanceConnectionEvent {
@@ -2990,6 +2994,17 @@ pub(crate) mod tests {
     fn agent_connection_url_discards_machine_paths() {
         assert_eq!(
             super::derive_connection_url("wss://hub.example.com/ws/machine-daemons?stale=1"),
+            "wss://hub.example.com/ws/agent-instances"
+        );
+        assert_eq!(
+            super::derive_connection_url_for_owner(
+                "wss://hub.example.com/ws/machine-daemons?stale=1",
+                "user_1",
+            ),
+            "wss://hub.example.com/ws/agent-instances?owner=user_1"
+        );
+        assert_eq!(
+            super::derive_connection_url_for_owner("https://hub.example.com", "not a user"),
             "wss://hub.example.com/ws/agent-instances"
         );
         assert_eq!(

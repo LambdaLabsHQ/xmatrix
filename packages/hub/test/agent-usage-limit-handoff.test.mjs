@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { recordingAgentInstancePort } from "./support/agent-instance-port.mjs";
+import { capturingConsole } from "./support/capturing-console.mjs";
 import { usageLimitHandoffCommand } from "../src/runtime-transport/agent-usage-limit-handoff.ts";
+import { MessageAuthorityError } from "@xmatrix/db";
+import { messageCall } from "../src/runtime-transport/runtime-messages.ts";
 import { RuntimeAuthorityOperationError } from "../src/runtime-transport/runtime-operation-failure.ts";
 
 /**
@@ -90,6 +93,39 @@ test("a refused hold still hands the work off", async () => {
   });
   await port.execute(session, limited);
   assert.equal(commands.at(-1).input.body, "@claude:3:handoff:@auto");
+});
+
+/** The real append failure path: the message authority's refusal, classified by messageCall. */
+function appendRefusedWith(code) {
+  const { session } = harness();
+  const { commands, port } = recordingAgentInstancePort({
+    respond: (family) => family === "append-message"
+      ? messageCall("append-message", async () => { throw new MessageAuthorityError(code, 409, "refused"); })
+      : { sequence: 7 },
+  });
+  return { commands, port, session };
+}
+
+test("a turn-failure notice whose id is already committed is not an error (XMATRIX-HUB-66, XMATRIX-HUB-67)", async () => {
+  for (const code of ["idempotency_conflict", "message_exists"]) {
+    const { commands, port, session } = appendRefusedWith(code);
+    const logged = await capturingConsole(() => port.execute(session, limited));
+    assert.deepEqual(logged.error, [], code);
+    assert.equal(logged.warn.length, 1, code);
+    assert.equal(logged.warn[0][0], "xMatrix runtime authority rejection");
+    assert.equal(logged.warn[0][1].status, 409);
+    // The committed notice already started its own hold and handoff.
+    assert.deepEqual(commands.map(command => command.family), ["append-message"], code);
+  }
+});
+
+test("any other refused turn-failure notice is still reported as an error", async () => {
+  const { commands, port, session } = appendRefusedWith("message_sender_unavailable");
+  const logged = await capturingConsole(() => port.execute(session, limited));
+  assert.deepEqual(logged.error.map(([message]) => message),
+    ["xMatrix runtime authority rejection", "Agent turn-failure notice could not be committed"]);
+  assert.deepEqual(logged.warn, []);
+  assert.deepEqual(commands.map(command => command.family), ["append-message"]);
 });
 
 test("only an addressable Instance gets a handoff", () => {

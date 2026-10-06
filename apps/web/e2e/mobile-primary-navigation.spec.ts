@@ -121,8 +121,8 @@ test("tapping Channels once opens the mobile channel list", async ({ page }) => 
   await openMoreChildWorkspace(page);
 
   const primaryNav = page.getByRole("navigation", { name: "Primary" });
-  // Pages, Channels, Agents and More, the order of the desktop rail and the iOS tab bar.
-  await expect(primaryNav.getByRole("button")).toHaveText(["Pages", "Channels", "Agents", "More"]);
+  // Pages, Channels, Status and More; Agents lives behind More with Machines and Schedules.
+  await expect(primaryNav.getByRole("button")).toHaveText(["Pages", "Channels", "Status", "More"]);
   await expect(primaryNav.getByRole("button", { name: "Follow-ups", exact: true })).toHaveCount(0);
   // Direct messages live on the Channels page.
   await expect(primaryNav.getByRole("button", { name: "Direct", exact: true })).toHaveCount(0);

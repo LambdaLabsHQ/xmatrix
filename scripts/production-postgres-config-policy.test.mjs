@@ -39,6 +39,7 @@ bindings = [
   { name = "RELAY_SPACE_CAPACITY_AUTHORITY", class_name = "A" },
   { name = "RELAY_RUNTIME", class_name = "A" },
   { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "A" },
+  { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "A" },
   { name = "DEVICE_AUTH", class_name = "A" }
 ]
 [[hyperdrive]]

@@ -25,7 +25,13 @@ export function base64UrlEncodeValue(value: string | ArrayBuffer | Uint8Array): 
 
 /** Raw base64 decoding; callers retain their format, size, and canonicality checks. */
 export function base64DecodeBytes(value: string) {
-  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+  // An indexed loop: `Uint8Array.from(string, mapFn)` iterates and calls back
+  // per character, which made decoding a stored ~100 KiB message record the
+  // largest CPU cost of appending it.
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
 }
 
 export function base64UrlDecodeBytes(value: string): Uint8Array {

@@ -173,6 +173,10 @@ pub fn derive_connection_url(hub_url: &str) -> String {
     crate::websocket::domain_connection_url(hub_url, "/ws/machine-daemons")
 }
 
+pub fn derive_connection_url_for_owner(hub_url: &str, owner_user_id: &str) -> String {
+    crate::websocket::with_runtime_owner(derive_connection_url(hub_url), owner_user_id)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedMachineDaemon {
@@ -3022,6 +3026,17 @@ mod tests {
     fn machine_connection_url_discards_agent_paths() {
         assert_eq!(
             derive_connection_url("wss://hub.example.com/ws/agent-instances?stale=1"),
+            "wss://hub.example.com/ws/machine-daemons"
+        );
+        assert_eq!(
+            derive_connection_url_for_owner(
+                "wss://hub.example.com/ws/agent-instances?stale=1",
+                "user_1",
+            ),
+            "wss://hub.example.com/ws/machine-daemons?owner=user_1"
+        );
+        assert_eq!(
+            derive_connection_url_for_owner("https://hub.example.com", "not a user"),
             "wss://hub.example.com/ws/machine-daemons"
         );
     }

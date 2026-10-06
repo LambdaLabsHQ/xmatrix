@@ -40,6 +40,7 @@ import {
   MoreView,
 } from "./workspace-fleet-views";
 import { MyAgentsView } from "./my-agents-view";
+import { StatusView } from "./status-view";
 import { MachineHarnessPanel } from "./machine-harness-panel";
 
 import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
@@ -1706,6 +1707,8 @@ export function ChannelDetails({
                     const instance = item.instance;
                     const owner = space?.members.find(member => member.userId === registration?.ownerUserId);
                     const ownerLabel = owner?.name || owner?.email || registration?.ownerUserId;
+                    const machineId = instance.machineId ?? registration?.machineId;
+                    const machineTarget = machineId ? { machineId, ownerUserId: registration?.ownerUserId } : undefined;
                     const machineLabel = registrationMachineName(machineCatalog.data?.registrations ?? [],
                       instance.machineId ?? registration?.machineId, registration?.ownerUserId) || "Unnamed machine";
                     const machineBusy = registrationMachineBusy(machineCatalog.data?.registrations ?? [],
@@ -1763,6 +1766,7 @@ export function ChannelDetails({
                                 owner={ownerLabel}
                                 machine={machineLabel}
                                 machineBusy={machineBusy}
+                                machineTarget={machineTarget}
                                 workspace={workspaceTag}
                                 wrap
                               />
@@ -2412,7 +2416,7 @@ export function ToolSurface({
   onOpenAgentCreate: () => void;
   onOpenLocalManagedAgentEdit: () => void;
   onDeleteAgent: (agent: LocalManagedAgent) => void;
-  onChangeView: (view: AppView) => void;
+  onChangeView: (view: AppView, item?: string) => void;
   /** Opens the GitHub issue form for a report. */
   onReportIssue?: () => void;
 } & SpaceMemberActions) {
@@ -2504,6 +2508,24 @@ export function ToolSurface({
         onSelectSpace={onSelectSpace}
         onDismissManagementSetup={onDismissManagementSetup}
       />
+    );
+  }
+  // Status: the Space at work, opening into Agents, Machines and Schedules.
+  if (view === "status") {
+    return (
+      <ToolPaper label="Status">
+        <StatusView
+          spaceId={currentSpace?.id ?? null}
+          token={token}
+          machines={currentSpaceMachines}
+          automations={currentSpaceAutomations}
+          onOpenAgents={() => onChangeView("agents")}
+          onOpenMachine={(machineId) => onChangeView("machines", machineId)}
+          onOpenMachines={() => onChangeView("machines")}
+          onOpenSchedule={(automationId) => onChangeView("automation", automationId)}
+          onOpenSchedules={() => onChangeView("automation")}
+        />
+      </ToolPaper>
     );
   }
   // Agents: the Space's registered agents, each opened beside the list.

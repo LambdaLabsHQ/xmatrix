@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { MessageReferenceCatalogProvider, type MessageReferenceCatalog } from "./message-reference-catalog";
+import { MachineLinkProvider, type MachineLinks } from "./machine-link";
+import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { useAndroidBackHandler } from "./use-android-back";
 import { Loader2, Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
@@ -85,13 +87,13 @@ import { searchWorkspacePages } from "./workspace-message-search";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
 
 /**
- * The dock tab that owns a view. Pages, Channels and Agents own themselves;
+ * The dock tab that owns a view. Pages, Channels and Status own themselves;
  * every other tool view lives behind More. A phone keeps one mounted pane per
  * dock tab, chosen with this, so the panes stay orthogonal to one another
  * instead of sharing a single screen and swapping their contents.
  */
 function dockTabOf(view: AppView): AppView {
-  return view === "pages" || view === "messages" || view === "agents" ? view : "more";
+  return view === "pages" || view === "messages" || view === "status" ? view : "more";
 }
 
 export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
@@ -537,6 +539,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     channels,
     onOpenChannel: (channelId) => navigateToChannelRef.current(channelId),
   }), [channels]);
+  const changeAppViewRef = useRef(changeAppView);
+  changeAppViewRef.current = changeAppView;
+  // The Machines the Machines view lists for this Space, scoped the same way, so
+  // a Machine tag only links where that view has the Machine's page.
+  const machineLinks = useMemo<MachineLinks>(() => ({
+    machines: machinesInSpace(machines, spaceChannelIdSet(channels, currentSpaceId), { ownerUserId: user?.id })
+      .flatMap((machine) => machine.machineId
+        ? [{ machineId: machine.machineId, ownerUserId: machine.daemon?.userId }] : []),
+    onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
+  }), [channels, currentSpaceId, machines, user?.id]);
   const openedPage = phonePageOpen ? pageTree.data?.find((page) => page.pageId === selectedPageId) ?? null : null;
   // A conversation, a new one and an open page are pushed screens: their back bar replaces the dock.
   const nativeMobileTabVisible = !loading && Boolean(user) &&
@@ -1058,7 +1070,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       layout={isMobileViewport ? "phone" : "desktop"} />
   );
 
-  // One tool surface per dock tab that needs one: Agents has its own, and the
+  // One tool surface per dock tab that needs one: Status has its own, and the
   // More tab holds the current tool view. Building it from a function keeps
   // the prop list in one place while letting each pane mount independently.
   const renderToolSurface = (surfaceView: Exclude<AppView, "messages">) => (
@@ -1151,7 +1163,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     />
   );
   const toolSurface = renderToolSurface(view === "messages" || view === "pages" ? "more" : view);
-  const agentsSurface = dockTabMounted("agents") ? renderToolSurface("agents") : null;
+  const statusSurface = dockTabMounted("status") ? renderToolSurface("status") : null;
   const moreSurface = dockTabMounted("more")
     ? renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
     : null;
@@ -1161,6 +1173,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
     <MessageReferenceCatalogProvider catalog={messageReferenceCatalog}>
+    <MachineLinkProvider links={machineLinks}>
       {/* One live root subscription per loaded Space. Renders nothing. */}
       {channelCatalogPaging.roots}
       {children}
@@ -1404,7 +1417,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
                     style={{ "--app-mobile-dock-slot": mobileDockSlot } as CSSProperties}
                   >
                     {/* One pane per dock tab, in DOCK_TAB_VIEWS order: Pages,
-                        Channels, Agents, More. Each is independent; nothing is
+                        Channels, Status, More. Each is independent; nothing is
                         swapped in place, so a tab's screen never rebuilds. */}
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 0}>
                       {pagesDockPane}
@@ -1413,7 +1426,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
                       {mobileChannelListPane}
                     </div>
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 2}>
-                      {agentsSurface}
+                      {statusSurface}
                     </div>
                     <div className="app-mobile-dock-page" inert={mobileDockSlot !== 3}>
                       {moreSurface}
@@ -1478,6 +1491,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onConfirm={() => void confirmStopAgentInstance()}
       />
     </div>
+    </MachineLinkProvider>
     </MessageReferenceCatalogProvider>
     </AttachmentDropZoneProvider>
   );

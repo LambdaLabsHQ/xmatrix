@@ -9,6 +9,7 @@ import {
   type ChannelAppMention,
   type LaunchTargetRepo,
 } from "@xmatrix/protocol";
+import { githubRepositoryIsPublic } from "./github-subscription-domain";
 import type { Env } from "./types";
 import { base64UrlEncodeValue } from "./relay-v2-primitives";
 
@@ -575,6 +576,8 @@ export interface GitHubPullRequestForReview {
   body: string;
   draft: boolean;
   headSha: string;
+  /** Whether GitHub states the base repository is public; unstated counts as private. */
+  repositoryPublic: boolean;
   author: string;
   files: Array<{ filename: string; status: string; additions: number; deletions: number; patch: string }>;
   checks: Array<{ name: string; status: string; conclusion: string | null }>;
@@ -610,6 +613,7 @@ export async function readGitHubPullRequestForReview(
     body: githubString(pull.body) || "",
     draft: githubBoolean(pull.draft) === true,
     headSha,
+    repositoryPublic: githubRepositoryIsPublic(githubObject(pull.base).repo),
     author: githubString(githubObject(pull.user).login) || "",
     files: (Array.isArray(files) ? files : []).map((value) => {
       const file = githubObject(value);

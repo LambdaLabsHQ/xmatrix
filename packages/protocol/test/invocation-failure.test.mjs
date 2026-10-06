@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { launchRefusalCode, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
+import { isLaunchHintRejection, launchRefusalCode, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
   preparationRejectionMessage, parseDecisionAnswerFailure,
   REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
 
@@ -14,6 +14,20 @@ test("every registered summon rejection has a public, bounded explanation", () =
   // An offline machine is told apart from a missing registration or Workspace.
   assert.match(preparationFailureSummary("registration_daemon_offline"), /machine is offline.*when it reconnects\.$/);
   assert.doesNotMatch(preparationRejectionMessage("registration_daemon_offline"), /workspace|registered environment/i);
+});
+
+test("only readings and machine-naming prompts are launch hints; failures are not", () => {
+  for (const code of ["summon_intent_reference", "summon_intent_explanation", "summon_intent_example",
+    "registration_machine_not_auto_assigned", "registration_machine_ambiguous"]) {
+    assert.equal(isLaunchHintRejection(code), true, code);
+  }
+  for (const code of ["registration_quota_exhausted", "registration_daemon_offline", "registration_launch_rejected",
+    "registration_machine_unavailable", "unknown"]) {
+    assert.equal(isLaunchHintRejection(code), false, code);
+  }
+  // Every machine hint has a public explanation the card can show.
+  assert.match(preparationFailureSummary("registration_machine_not_auto_assigned"), /machine:<name>/);
+  assert.match(preparationFailureSummary("registration_machine_ambiguous"), /More than one person's machine/);
 });
 
 test("a named offline machine is not reported as a missing registration", () => {

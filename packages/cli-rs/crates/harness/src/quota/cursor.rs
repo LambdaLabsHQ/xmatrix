@@ -10,6 +10,8 @@
 //! Cursor reports a billing-cycle meter (`totalPercentUsed`) plus Auto and API
 //! bucket percentages. The CLI has no machine-readable `usage` subcommand, so
 //! this reader calls the same Connect RPC the dashboard and `/usage` use.
+//! Agents shows all three windows. Hub routing picks Auto vs API by the
+//! selected model (Auto/Composer/Grok → Auto; third-party → API).
 //!
 //! Generic ACP otherwise has no account quota source for Cursor; without this
 //! hook the Agents page and `xmatrix list` show `-`.

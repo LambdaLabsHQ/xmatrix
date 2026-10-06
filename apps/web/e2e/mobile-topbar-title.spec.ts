@@ -3,7 +3,7 @@ import { E2E_CHANNEL, E2E_SPACE, installWorkspaceStubs, openWorkspaceWithStubs }
 import { fixtureJson } from "./in-page-api-fixtures";
 
 /* The mobile wood topbar is the workspace identity bar. On a dock tab's own
-   screen (Pages, Channels, Agents, More) it names only the Space, because the
+   screen (Pages, Channels, Status, More) it names only the Space, because the
    dock right below already says which tab this is; that tab's + sits just above the dock.
    A screen pushed from More still needs the bar as its title: the in-pane
    heading of a paper destination is display:none under md, so dropping the
@@ -22,7 +22,7 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
 
   const bar = topbar(page);
   const dock = page.getByRole("navigation", { name: "Primary" });
-  for (const [tab, create] of [["Channels", "New conversation"], ["Pages", "New page"], ["Agents", "New agent"],
+  for (const [tab, create] of [["Channels", "New conversation"], ["Pages", "New page"], ["Status", null],
     ["More", null]] as const) {
     await dock.getByRole("button", { name: tab }).tap();
     await expect(bar).toContainText(E2E_SPACE.name);

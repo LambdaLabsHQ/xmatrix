@@ -1991,7 +1991,6 @@ async fn cmd_daemon_connected(
     let daemon_session = resolve_daemon_session_state(hub_url, token_override.as_deref()).await?;
     let token =
         current_daemon_access_token(token_override.as_deref(), daemon_session.as_ref()).await?;
-    let relay_url = machine_daemon_connection::derive_connection_url(hub_url);
     // A Machine id is per owner: the daemon's session names the owner.
     let owner_user_id = match daemon_session.as_ref() {
         Some(state) => state.read().await.session.user.id.clone(),
@@ -2004,6 +2003,8 @@ async fn cmd_daemon_connected(
                 )
             })?,
     };
+    let relay_url =
+        machine_daemon_connection::derive_connection_url_for_owner(hub_url, &owner_user_id);
     let machine_identity = config::machine_identity_for_owner(&owner_user_id).await?;
     let machine_id = machine_identity.machine_id.clone();
     let host_id = observed_hostname();

@@ -89,6 +89,7 @@ import {
   CircleHelp,
   Clock,
   Cpu,
+  Gauge,
   HardDrive,
   Hash,
   MessagesSquare,
@@ -222,6 +223,7 @@ export function WorkspaceRail({
           label="Channels"
           onClick={() => onChangeView("messages")}
         />
+        <RailButton active={activeView === "status"} icon={Gauge} label="Status" onClick={() => onChangeView("status")} />
         <RailButton active={activeView === "machines" || activeView === "local"} icon={HardDrive} label="Machines" onClick={() => onChangeView("machines")} />
         <RailButton active={activeView === "automation"} icon={Clock} label="Schedules" onClick={() => onChangeView("automation")} />
         <RailButton active={activeView === "agents"} icon={Cpu} label="Agents" onClick={() => onChangeView("agents")} />
@@ -337,7 +339,7 @@ export function MobileTabDock({
   const items: Array<{ view: AppView; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { view: "pages", label: "Pages", icon: BookOpen },
     { view: "messages", label: "Channels", icon: MessagesSquare },
-    { view: "agents", label: "Agents", icon: Cpu },
+    { view: "status", label: "Status", icon: Gauge },
     { view: "more", label: "More", icon: MoreHorizontal },
   ];
 
