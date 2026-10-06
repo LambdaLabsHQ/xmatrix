@@ -4,10 +4,12 @@ import {
   ArrowRight,
   Blocks,
   MessagesSquare,
+  Plug,
   Terminal,
   Waypoints,
 } from "lucide-react";
 import { AgentMaterials } from "@/components/landing/agent-materials";
+import { ConnectorList } from "@/components/landing/connectors";
 import { Footer } from "@/components/landing/footer";
 import { CopyableCodeBlock } from "@/components/shared/copyable-code-block";
 import { InstallCommand } from "@/components/shared/install-command";
@@ -271,6 +273,25 @@ export default function DocsPage() {
               </WoodPanel>
             ))}
           </div>
+        </section>
+
+        <section id="connectors" className="mx-auto max-w-6xl px-6 pb-14">
+          <div className="flex items-center gap-3">
+            <Plug className="size-5 text-primary" />
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.24em] text-primary">
+                Connectors
+              </p>
+              <h2 className="mt-1 text-3xl font-semibold tracking-tight">
+                Connect your services
+              </h2>
+            </div>
+          </div>
+          <p className="mt-4 max-w-3xl text-base leading-7 text-muted-foreground">
+            A Space admin connects these services from Apps. Agents then read and act through them
+            under the Space&apos;s policy, and incoming events land in the channels you choose.
+          </p>
+          <ConnectorList className="mt-6 p-6" />
         </section>
 
         <AgentMaterials className="pt-0" />
