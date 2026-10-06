@@ -13,6 +13,7 @@ import {
   stripeWebhookSubscriptionId,
   verifyStripeWebhookSignature,
 } from "../src/billing-stripe.ts";
+import { capturingConsole } from "./support/capturing-console.mjs";
 
 const checkoutReturn = stripeCheckoutReturnUrls("https://app.test.example", "space-1");
 
@@ -102,20 +103,6 @@ test("Stripe request failures expose the provider code without treating 4xx as r
     );
   });
 });
-
-async function capturingConsole(callback) {
-  const logged = { error: [], warn: [] };
-  const previous = { error: console.error, warn: console.warn };
-  console.error = (...args) => { logged.error.push(args); };
-  console.warn = (...args) => { logged.warn.push(args); };
-  try {
-    await callback();
-  } finally {
-    console.error = previous.error;
-    console.warn = previous.warn;
-  }
-  return logged;
-}
 
 test("a subscription Stripe no longer has is answered as a conflict, not reported as an error (XMATRIX-HUB-64)", async () => {
   let failure;
