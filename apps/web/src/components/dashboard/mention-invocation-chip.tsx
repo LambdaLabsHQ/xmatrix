@@ -13,9 +13,9 @@ import { summonView, invocationChipStatus, invocationVendorIcon, operationFailur
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 import { avatarImageSrc } from "./identity-avatar";
 import { formatZonedDateTime } from "./time-display";
-import { SummonDecisionRecords } from "./summon-decision-records";
+import { JevDecisionFiles, JevDecisionSection, useJevDecisions } from "./summon-decision-records";
 import { MentionReplyRecovery } from "./mention-reply-recovery";
-import { parsePresentedRoutingDecision, RoutingDecisionBoard, routingChoiceNote, routingSelectionNote } from "./routing-decision-board";
+import { parsePresentedRoutingDecision, RoutingDecisionBoard, routingSelectionNote } from "./routing-decision-board";
 import { HandoffArrowLabel } from "./handoff-arrow";
 import { useAppPortalContainer } from "./app-portal-container";
 
@@ -91,14 +91,13 @@ export function MentionInvocationChip({ label, labelContent, announcement, image
     invocationId={launch.launchId} errorCode={activity?.errorCode || launch.errorCode}
     diagnosticId={activity?.diagnosticId}
     onRetry={launch.state === "failed" && launch.retryable && onRetry && !unavailable ? () => onRetry(launch) : undefined}
-    statusNote={view.terminal ? undefined : routingChoiceNote(decision)}
     context={<>
       {shared && <p className="app-invocation-description">This mention shares the first invocation of this agent and lifecycle in this message.</p>}
       {execution && !unavailable && <MentionReplyRecovery key={execution.id} execution={execution} />}
     </>}
+    jev={{ channelId: launch.channelId, messageId: launch.sourceMessageId, sourceMention: launch.sourceMention || `@${label}` }}
     details={<>
       {decision && <RoutingDecisionBoard decision={decision} evidenceOnly />}
-      <SummonDecisionRecords key={`${launch.channelId}:${launch.sourceMessageId}`} channelId={launch.channelId} messageId={launch.sourceMessageId} />
       <InvocationRuntimeDetails activity={view.terminal ? undefined : activity} view={view} unavailable={unavailable} />
       {launch.attempt > 0 && <p className="app-invocation-description">Command delivery retries: {launch.attempt}</p>}
     </>} />;
@@ -119,8 +118,8 @@ export function MentionInvocationRejectionChip({ rejection, unavailable, labelCo
     subtitle={rejection.code === "registration_daemon_offline" ? "This machine is offline"
       : rejection.code.startsWith("routing_") ? "Rejected before launch allocation" : "No new process was started"}
     invocationId={rejection.invocationId} errorCode={rejection.code}
-    lead={<SummonDecisionRecords key={`${rejection.channelId}:${rejection.sourceMessageId}`} channelId={rejection.channelId}
-      messageId={rejection.sourceMessageId} invocationId={decisionInvocationId} rejectedAt={rejection.rejectedAt} />}
+    jev={{ channelId: rejection.channelId, messageId: rejection.sourceMessageId, sourceMention: rejection.sourceMention,
+      invocationId: decisionInvocationId, rejectedAt: rejection.rejectedAt }}
     context={<>
       {decision && <RoutingDecisionBoard decision={decision} compact />}
     </>}
@@ -305,14 +304,16 @@ export function MentionSummonPending({ labelContent, reading, fillKey }: { label
 }
 
 function InvocationChip({ label, labelContent, announcement, name, instanceOrdinal, destinationName, imageSrc, sourceAddress, subtitle, invocationId, errorCode,
-  diagnosticId, view, lead, statusNote, context, details, onRetry, variant }: {
+  diagnosticId, view, lead, context, details, onRetry, variant, jev }: {
   /** A handoff draws both Agents in its label, so it has no leading avatar. */
   variant?: "handoff";
   label: string; labelContent?: ReactNode; announcement?: string; name: string; instanceOrdinal?: string; destinationName?: string; imageSrc?: string | null; sourceAddress: string; subtitle: string;
   invocationId?: string; errorCode?: string; diagnosticId?: string; view: InvocationView;
-  lead?: ReactNode; statusNote?: string; context?: ReactNode;
+  lead?: ReactNode; context?: ReactNode;
   /** Evidence behind the answer, folded away with the address and diagnostic IDs. */
   details?: ReactNode; onRetry?: () => Promise<void>;
+  /** The message whose retained Jev decisions lead the timeline. */
+  jev?: JevSource;
 }) {
   const group = useContext(InvocationPopoverContext);
   const popoverId = useId();
@@ -371,10 +372,6 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
         {liveStage
           ? <span className="app-mention-invocation-step" data-state={liveStage.state}>{statusText}</span>
           : <span>{view.label}</span>}
-        {statusNote && <>
-          <span aria-hidden="true">·</span>
-          <span className="app-mention-invocation-step" data-state="current">{statusNote}</span>
-        </>}
       </span>}
     </Popover.Trigger>
     <Popover.Portal container={portal.container}>
@@ -388,20 +385,47 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
           {view.detail && <Popover.Description className="app-invocation-description">{view.detail}</Popover.Description>}
           {onRetry && <button type="button" className="app-invocation-retry" disabled={retrying} onClick={() => void retry()}>{retrying ? "Requesting retry…" : "Retry startup"}</button>}
           {actionError && <p role="alert" className="app-invocation-action-error">{actionError}</p>}
-          {lead}
-          {view.steps.length > 0 && <InvocationSteps steps={view.steps} label="Invocation progress" />}
-          {context}
-          <details className="app-invocation-request"><summary>Details</summary>
-            {details}
-            <p className="app-invocation-description">Invocation address</p><code>{sourceAddress}</code>
-            {errorCode && <p className="app-invocation-code">{errorCode}</p>}
-            {diagnosticId && <p className="app-invocation-code">{diagnosticId}</p>}
-            {invocationId && <p className="app-invocation-code">Invocation {invocationId.slice(-12)}</p>}
-          </details>
+          <InvocationPanelBody jev={jev} view={view} lead={lead} context={context} details={details}
+            sourceAddress={sourceAddress} errorCode={errorCode} diagnosticId={diagnosticId} invocationId={invocationId} />
         </Popover.Popup>
       </Popover.Positioner>
     </Popover.Portal>
   </Popover.Root>;
+}
+
+type JevSource = { channelId: string; messageId: string; sourceMention?: string; invocationId?: string; rejectedAt?: string };
+
+/** Mounted only while the panel is open, so Jev's records are read on demand.
+ *  The timeline runs in the order things happened: what Jev read and each
+ *  answer it gave, then the machine and the process. */
+function InvocationPanelBody({ jev, view, lead, context, details, sourceAddress, errorCode, diagnosticId, invocationId }: {
+  jev?: JevSource; view: InvocationView; lead?: ReactNode; context?: ReactNode; details?: ReactNode;
+  sourceAddress: string; errorCode?: string; diagnosticId?: string; invocationId?: string;
+}) {
+  const state = useJevDecisions({ channelId: jev?.channelId ?? "", messageId: jev?.messageId ?? "",
+    sourceMention: jev?.sourceMention, invocationId: jev?.invocationId, rejectedAt: jev?.rejectedAt, enabled: !!jev });
+  const decided = state.decisions.length > 0;
+  // Jev's own rows above say how the request was read and what was chosen; the
+  // startup then begins with what was measured, not judged: the machine.
+  const steps = decided ? view.steps.filter(step => step.label !== "Read as a request")
+    .map(step => step.label === "Jev selected an environment" || step.label === "Environment selected" ? { ...step, label: "Machine selected" } : step) : view.steps;
+  return <>
+    {jev?.invocationId && (state.cause ? <p role="status" className="app-invocation-description">Cause: {state.cause}</p>
+      : !state.loaded && state.busy ? <p className="app-invocation-description">Checking failure reason…</p>
+        : state.loaded && !state.cursor ? <p className="app-invocation-description">Detailed failure reason was not retained.</p> : null)}
+    {lead}
+    {decided && <JevDecisionSection decisions={state.decisions} />}
+    {steps.length > 0 && <InvocationSteps steps={steps} label="Invocation progress" />}
+    {context}
+    <details className="app-invocation-request"><summary>Details</summary>
+      {details}
+      {jev && <JevDecisionFiles state={state} />}
+      <p className="app-invocation-description">Invocation address</p><code>{sourceAddress}</code>
+      {errorCode && <p className="app-invocation-code">{errorCode}</p>}
+      {diagnosticId && <p className="app-invocation-code">{diagnosticId}</p>}
+      {invocationId && <p className="app-invocation-code">Invocation {invocationId.slice(-12)}</p>}
+    </details>
+  </>;
 }
 
 function InvocationSteps({ steps, label }: { steps: InvocationStep[]; label: string }) {
