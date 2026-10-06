@@ -156,7 +156,9 @@ false; the Machine page switch or `xmatrix machine auto-assign off`). Its
 environments are removed before Jev reads anything unless the launch names the
 Machine: a `machine:` condition, a `pwd:` registered on it, or a summon addressed to
 one of its registrations. When nothing else remains the launch is refused with
-`registration_machine_not_auto_assigned`. Running Instances there are unaffected.
+`registration_machine_not_auto_assigned`. That refusal, and a machine name that
+matches more than one person (`registration_machine_ambiguous`), is a hint on
+the mention's card: the Channel is not told. Running Instances there are unaffected.
 
 Which environment runs the work is measured, not judged
 (`leastLoadedEnvironment`). Among the chosen harness's environments that offer the
