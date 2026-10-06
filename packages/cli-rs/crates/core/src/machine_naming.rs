@@ -113,6 +113,9 @@ mod tests {
         name: Option<&str>,
     ) -> (String, tokio::task::JoinHandle<()>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // The client needs a process crypto provider; a test running in its
+        // own process cannot rely on another test having installed it.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let hub = format!("http://{}", listener.local_addr().unwrap());
         let body = serde_json::json!({ "machineId": machine_id, "name": name }).to_string();
