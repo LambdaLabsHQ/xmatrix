@@ -15,10 +15,12 @@ export interface LaunchParameterEvidence {
   /** How the launch mention was read as a request: Jev's answer, or the author's `launch:force`. */
   intent?: { source: "jev"; selected: "summon"; probabilities: Record<string, number> } | { source: "author" };
   /** `repo` names the chosen repository; a directory is never named. */
-  selections: { model: string; effort?: string; workspaceKind: "repo" | "local-path" | "managed"; repo?: string };
+  selections: { model?: string; effort?: string; workspaceKind: "repo" | "local-path" | "managed"; repo?: string };
   /** `placement` is a `registration-parameters-v7` choice about the work.
    * `registration-parameters-v8` does not ask it: a laptop is the machine's own
-   * reported form, not a Jev option. Older records may still carry the choice. */
+   * reported form, not a Jev option. Older records may still carry the choice.
+   * `registration-parameters-v9` omits modelEffort and selections.model when
+   * no models are declared, leaving the runtime's defaults untouched. */
   choices: Array<{ key: "modelEffort" | "workspace" | "placement";
     selected: string; probabilities: Record<string, number> }>;
 }
@@ -46,7 +48,7 @@ function stage(value: unknown, handle: RegExp): LaunchDecisionStage | undefined 
   return parsed ? { inputDigest: inputDigest as string, selected: selected as string, probabilities: parsed } : null;
 }
 
-/** Both decisions must be present and internally consistent to be displayed. */
+/** Every recorded decision must be present and internally consistent to be displayed. */
 export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvidence | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const row = value as Record<string, unknown>;
@@ -55,9 +57,11 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
   if (!text(row.rubricVersion, 80) || !text(row.evaluatedAt, 40) || !Number.isFinite(Date.parse(row.evaluatedAt)) ||
       !text(row.inputDigest, 128) || !/^[a-f0-9]{64}$/u.test(row.inputDigest) ||
       !row.selections || typeof row.selections !== "object" || Array.isArray(row.selections) ||
-      !Array.isArray(row.choices) || row.choices.length < 2 || row.choices.length > 3) return undefined;
+      !Array.isArray(row.choices) || row.choices.length < 1 || row.choices.length > 3) return undefined;
   const selected = row.selections as Record<string, unknown>;
-  if (!text(selected.model, 160) || selected.effort !== undefined && !text(selected.effort, 80) ||
+  const skipsModel = row.rubricVersion === "registration-parameters-v9" && selected.model === undefined;
+  if ((!skipsModel && !text(selected.model, 160)) || skipsModel && selected.effort !== undefined ||
+      selected.effort !== undefined && !text(selected.effort, 80) ||
       !["repo", "local-path", "managed"].includes(String(selected.workspaceKind)) ||
       selected.repo !== undefined && (selected.workspaceKind !== "repo" || !text(selected.repo, 300))) return undefined;
   const choices: LaunchParameterEvidence["choices"] = [];
@@ -70,7 +74,7 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
     if (!parsed) return undefined;
     choices.push({ key: key as LaunchParameterEvidence["choices"][number]["key"], selected: choice as string, probabilities: parsed });
   }
-  if (!choices.some(item => item.key === "modelEffort") || !choices.some(item => item.key === "workspace")) return undefined;
+  if (choices.some(item => item.key === "modelEffort") === skipsModel || !choices.some(item => item.key === "workspace")) return undefined;
   const harness = stage(row.harness, /^[a-z0-9][a-z0-9._-]{0,63}$/u);
   const environment = stage(row.environment, /^candidate_\d{1,3}$/u);
   if (harness === null || environment === null) return undefined;
@@ -88,7 +92,7 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
   }
   return { rubricVersion: row.rubricVersion, evaluatedAt: row.evaluatedAt, inputDigest: row.inputDigest,
     ...(harness ? { harness } : {}), ...(environment ? { environment } : {}), ...(intent ? { intent } : {}),
-    selections: { model: selected.model, ...(selected.effort ? { effort: selected.effort as string } : {}),
+    selections: { ...(!skipsModel ? { model: selected.model as string } : {}), ...(selected.effort ? { effort: selected.effort as string } : {}),
       workspaceKind: selected.workspaceKind as "repo" | "local-path" | "managed",
       ...(selected.repo ? { repo: selected.repo as string } : {}) }, choices };
 }

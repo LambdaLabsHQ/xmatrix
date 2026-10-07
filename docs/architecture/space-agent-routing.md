@@ -118,13 +118,15 @@ offers the real model/effort domain of the chosen harness's environments, includ
 owner-declared versus observed provenance and observation time. Model names and harness names are unrelated values: no code
 compares, filters, aliases or derives one from the other, and no `models` list
 carries a harness name. An empty declared model list allows no model override,
-so its only option is the runtime default; a non-empty list is the complete set
-of allowed models, compared literally. Missing or expired catalogs supply one explicit harness-default
-option with no model or effort override. This is not a model identifier: the
-runtime reports the actual model after startup. An explicit `model:` or
-`effort:` tag still requires a matching declared or observed option. Jev sees
-this default-only state in the parameter choice, and the environment that runs
-the work offers the model/effort and location Jev chose.
+so Jev skips model/effort selection and the launch leaves the runtime defaults
+untouched. No synthetic default option or model tag is emitted. A non-empty
+list is the complete set of allowed models, compared literally; without a
+matching observed catalog entry, the declared models themselves are offered.
+An explicit `model:` or `effort:` tag still requires a matching allowed option.
+The runtime reports the actual model after startup. The environment that runs
+the work offers the model/effort (when chosen) and location Jev chose. When
+environments of one harness mix empty and non-empty model lists, only declared
+models enter the model decision; the selected environment must offer that model.
 
 Runtime model reports must persist both the sanitized `models` catalog and its
 Hub-stamped `modelsObservedAt` on the Instance row. The routing reader consumes
