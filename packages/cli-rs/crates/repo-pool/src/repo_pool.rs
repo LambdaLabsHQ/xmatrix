@@ -8,4 +8,5 @@
 include!("repo_pool_manifest.rs");
 include!("repo_pool_reclaim.rs");
 include!("repo_pool_rehydrate.rs");
+include!("repo_pool_handoff.rs");
 include!("repo_pool_tests.rs");

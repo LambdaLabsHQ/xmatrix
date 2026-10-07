@@ -3606,4 +3606,6 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
 
         cleanup_test_dirs(&[&base, &remote, &pools]);
     }
+
+    include!("repo_pool_handoff_tests.rs");
 }
