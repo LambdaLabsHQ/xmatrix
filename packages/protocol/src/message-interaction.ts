@@ -9,7 +9,7 @@ import { parseAgentStopCommand, type AgentStopCommand } from "./agent-stop-comma
 import { mentionAddressTokens, scanMentionAddresses } from "./mention-address.js";
 import { filterOperationalMentions } from "./operational-mention-context.js";
 import { MESSAGE_INTERACTION_LIMITS } from "./message-interaction-grammar.js";
-export type InteractionTargetKind = "human" | "broadcast" | "agent" | "instance" | "router" | "management" | "connector" | "service";
+export type InteractionTargetKind = "human" | "broadcast" | "agent" | "instance" | "router" | "connector" | "service";
 export type InteractionExecutionContract = "attention.v1" | "registration-launch.v1" | "runtime-control.v1" |
   "runtime-lifecycle.v1" | "connector-command.v1";
 export type InteractionPresentationRef = "mention.v1" | "launch.v1" | "handoff.v1" | "reborn.v1" |

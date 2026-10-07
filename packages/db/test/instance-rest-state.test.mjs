@@ -12,7 +12,7 @@ test("only a conversation Run with a harness session can rest", () => {
   assert.equal(resumableChannelRun(resumable), true);
   for (const metadata of [
     { ...resumable, resumeSessionKey: undefined },
-    { ...resumable, routedAs: "management_assistant_mention" },
+    { ...resumable, routedAs: "management_channel_about" },
     { ...resumable, channelDeliveryEnabled: false },
     { ...resumable, automationId: "automation-1" },
     { ...resumable, instanceDeletion: { state: "pending" } },

@@ -210,7 +210,6 @@ export function AppWindowPreview() {
             onCopyChannelLink={async () => undefined}
             onSelectSpace={noop}
             onSelect={noop}
-            onOpenManagementSetup={noop}
             catalogPaging={catalog}
             fallbackChannels={channels}
           />

@@ -12,16 +12,11 @@ export function agentInstanceStopBody(
   instance: { label?: string; channelInstanceId?: string },
   fallbackName?: string,
 ): string | null {
-  if (isXMatrixDelegateInstanceLabel(instance.label)) return "@xMatrix:stop";
   const ordinal = instance.channelInstanceId?.trim();
   if (!ordinal || !/^[1-9]\d*$/.test(ordinal)) return null;
   const name = channelStopMentionName(agent?.name, fallbackName, instance.label, ordinal);
   if (!name) return null;
   return `@${name}:${ordinal}:stop`;
-}
-
-function isXMatrixDelegateInstanceLabel(label?: string): boolean {
-  return /^xmatrix(?::[1-9]\d*)?$/iu.test(label?.trim() || "");
 }
 
 function channelStopMentionName(

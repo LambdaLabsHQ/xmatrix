@@ -12,7 +12,6 @@ import type {
 } from "./authority-foundation.js";
 import type {
   ChannelMode,
-  SpaceManagementAgentConfig,
   SpaceRole,
 } from "./authority-management.js";
 import type {
@@ -43,7 +42,6 @@ export interface SerializedSpace {
   /** Present only when the viewer may administer this Space. */
   pendingJoinRequestCount?: number;
   memberPermissions?: SpaceMemberPermissions;
-  managementAgent?: SpaceManagementAgentConfig;
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -851,7 +849,6 @@ export type ObservabilityEventType =
   | "space_claim_renewed"
   | "space_claim_released"
   | "space_claim_expired"
-  | "space_management_action_executed"
   | "workspace_updated"
   | "automation_created"
   | "automation_updated"
@@ -872,7 +869,6 @@ export type ObservabilityEventType =
   | "connector_github_release"
   | "connector_credential_failed"
   | "connector_action_finished"
-  | "management_fuse_updated"
   | "security_policy_updated"
   | "agent_goal_updated"
   | "agent_tool_failed"

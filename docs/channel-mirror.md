@@ -27,11 +27,10 @@ cause Worker requests, CPU work, database reads or local file rewrites. Existing
 snapshots, not current page state. Older daemons keep working with the existing
 Machine Daemon endpoint until they update; deploying Hub alone does not stop them.
 
-## Management Runs read on demand
+## Channel About sessions read on demand
 
-A management Run (an `@xMatrix` wake or a Channel About session) is an ordinary
-Run in a synthetic workspace. Like any Run, it reads what it needs when it needs
-it: `xmatrix channel history` and `xmatrix page`. No Space
-mirror is materialized at launch or kept in sync, and the Hub serves no
-whole-Space overlay. Released daemons honour this because every management launch
+A Channel About session is an ordinary Run in a synthetic workspace. Like any
+Run, it reads what it needs when it needs it: `xmatrix channel history`. No
+Space mirror is materialized at launch or kept in sync, and the Hub serves no
+whole-Space overlay. Released daemons honour this because every About launch
 says `managementProjectionKind: "channel"` (read on demand).

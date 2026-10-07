@@ -61,8 +61,8 @@ export interface AgentRunPrincipal {
   channelId: string;
   machineId: string;
   hostId: string;
+  /** A Channel About session's Space; no other Run carries it. */
   managementSpaceId?: string;
-  managementConfigGeneration?: number;
   runKind?: "channel-instance" | "channel-about-session";
   channelWriteAllowed?: boolean;
   permissions: AgentRunPermission[];
@@ -180,8 +180,6 @@ async function verifyAgentRunToken(token: string, env: Env): Promise<AuthUser | 
       machineId: stringValue(value.machineId) || "",
       hostId: stringValue(value.hostId) || "",
       managementSpaceId: stringValue(value.managementSpaceId),
-      managementConfigGeneration: Number.isSafeInteger(Number(value.managementConfigGeneration))
-        ? Number(value.managementConfigGeneration) : undefined,
       runKind: value.runKind === "channel-about-session"
         ? "channel-about-session"
         : "channel-instance",

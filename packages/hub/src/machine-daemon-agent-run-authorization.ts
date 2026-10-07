@@ -6,7 +6,6 @@ import { agentRunTokenContextMismatch } from "./live-run-admission";
 import { authorizeRegistrationExecution, type ConfirmedMachineLease } from "./registration-execution-admission";
 import { controlErrorResponse } from "./postgres-authority-http";
 import { runtimeRepository } from "./runtime";
-import { getSpaceManagementConfig } from "./spaces";
 
 export interface MachineDaemonAgentRunAuthorizationInput {
   runId?: string;
@@ -51,26 +50,13 @@ export async function authorizeMachineDaemonAgentRun(
     return Response.json({ error: "Agent run Instance does not match the Launch" }, { status: 403 });
   }
 
-  if (
-    metadata?.routedAs === "management_assistant_mention" ||
-    metadata?.routedAs === "management_channel_about"
-  ) {
-    const managementSpaceId = typeof metadata.managementSpaceId === "string"
-      ? metadata.managementSpaceId.trim() : "";
-    const managementGeneration = Number(metadata.managementConfigGeneration);
-    if (!managementSpaceId || !Number.isSafeInteger(managementGeneration)) {
-      return Response.json({ error: "Management activation generation is invalid" }, { status: 403 });
-    }
-    const management = await getSpaceManagementConfig(env, { spaceId: managementSpaceId,
-      principal: { kind: "user", id: principal.ownerUserId } }).catch(controlErrorResponse);
-    if (management instanceof Response) return management;
-    const managementAgent = management.managementAgent as Record<string, unknown> | undefined;
-    if (management.version !== managementGeneration || managementAgent?.enabled !== true) {
-      return Response.json(
-        { error: "Management activation no longer matches the configured generation" },
-        { status: 403 },
-      );
-    }
+  // The retired management delegate; a Run started before it was retired never runs again.
+  if (metadata?.routedAs === "management_assistant_mention") {
+    return Response.json({ error: "The xMatrix management agent is retired" }, { status: 403 });
+  }
+  if (metadata?.routedAs === "management_channel_about" &&
+      !(typeof metadata.managementSpaceId === "string" && metadata.managementSpaceId.trim())) {
+    return Response.json({ error: "Channel About session has no Space" }, { status: 403 });
   }
   const targetMachineId = typeof metadata?.machineId === "string" ? metadata.machineId.trim() : "";
   const targetHostId = typeof metadata?.hostId === "string" ? metadata.hostId.trim() : "";
@@ -108,8 +94,6 @@ export async function authorizeMachineDaemonAgentRun(
     permissions: channelAboutSession ? [] : defaultAgentRunPermissions(),
     ...(typeof metadata?.managementSpaceId === "string" && metadata.managementSpaceId.trim()
       ? { managementSpaceId: metadata.managementSpaceId.trim() } : {}),
-    ...(Number.isSafeInteger(Number(metadata?.managementConfigGeneration))
-      ? { managementConfigGeneration: Number(metadata?.managementConfigGeneration) } : {}),
   };
   const token = await signAgentRunToken(
     env,

@@ -118,25 +118,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="management-agent" title="7. Management Agent authority">
-        <p>
-          A Space may operate without a Management Agent. When an Owner or Admin designates one, the
-          designation gives that Agent full Space role access to all current and future Channels,
-          including closed, private, or restricted Channels, and their messages, threads, attachments,
-          tasks, Follow-ups, plans, and organization memory. It does not need a separate per-Channel
-          join. The Owner or Admin can cancel or replace the designation, and any retained ordinary
-          Agent permission remains a separate grant.
-        </p>
-        <p>
-          The designation alone does not authorize access to another Space, raw local workspace or
-          terminal data, Saved Secret plaintext, or Instance Trace. Trace requires its own owner grant.
-          A Management Agent may autonomously perform ordinary, visible, and auditable management work,
-          including reading and summarizing the Space, maintaining tasks and plans, updating Channel
-          topics or summaries, and dispatching authorized Profiles or routine controls.
-        </p>
-      </LegalSection>
-
-      <LegalSection id="high-risk-actions" title="8. High-risk actions and local sandbox limits">
+      <LegalSection id="high-risk-actions" title="7. High-risk actions and local sandbox limits">
         <p>
           The following require a separate one-shot human approval or an Owner/Admin policy that
           expressly authorizes the bounded action: reading or injecting secret values; privileged host
@@ -155,7 +137,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="ai-output" title="9. AI output and human review">
+      <LegalSection id="ai-output" title="8. AI output and human review">
         <p>
           To the extent permitted by law and any rights MadeByRobot holds, MadeByRobot does not claim
           ownership of output generated for Customer through the Services, and assigns those rights to
@@ -172,7 +154,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="acceptable-use" title="10. Acceptable use and regulated data">
+      <LegalSection id="acceptable-use" title="9. Acceptable use and regulated data">
         <p>You may not direct, authorize, or allow an Authorized User or Agent to:</p>
         <LegalList>
           <li>violate law or another person&apos;s rights, privacy, safety, or intellectual property;</li>
@@ -207,7 +189,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="third-parties" title="11. Third-party services and model providers">
+      <LegalSection id="third-parties" title="10. Third-party services and model providers">
         <p>
           A Customer-selected model, repository, connector, Agent, runtime, or other third-party service
           is governed by the Customer&apos;s account and the third party&apos;s terms, privacy, retention,
@@ -227,7 +209,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="billing" title="12. Fees, subscriptions, renewal, cancellation, taxes, and refunds">
+      <LegalSection id="billing" title="11. Fees, subscriptions, renewal, cancellation, taxes, and refunds">
         <p>
           <strong className="text-foreground">What we charge for.</strong> xMatrix Pro is a Space
           subscription billed per human seat. Owner, Admin, and Member roles consume seats; Viewer and
@@ -290,7 +272,7 @@ export function TermsOfServiceContent() {
         <p>
           <strong className="text-foreground">Refunds and disputes.</strong> Fees are
           non-refundable and non-creditable except where law, a published refund policy, an order form, or
-          a written agreement requires otherwise, where we discontinue a paid Service under Section 15, or
+          a written agreement requires otherwise, where we discontinue a paid Service under Section 14, or
           where a charge was duplicated or made in error; report an erroneous charge to us within 30 days
           of the charge. An approved refund is returned to the original payment method, and a refunded
           period ends the paid features for that period. Please contact us before disputing a charge with
@@ -308,7 +290,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="confidentiality" title="13. Confidentiality for business use">
+      <LegalSection id="confidentiality" title="12. Confidentiality for business use">
         <p>
           Each party may receive non-public information that reasonably should be treated as confidential.
           The receiving party will use it only to perform or exercise rights under the agreement, protect
@@ -325,7 +307,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="feedback" title="14. Feedback">
+      <LegalSection id="feedback" title="13. Feedback">
         <p>
           If you voluntarily give MadeByRobot suggestions or feedback about the Services (“Feedback”),
           you grant us a perpetual, irrevocable, worldwide, royalty-free right to use that Feedback
@@ -334,7 +316,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="service-changes" title="15. Beta features and changes to the Services">
+      <LegalSection id="service-changes" title="14. Beta features and changes to the Services">
         <p>
           We may add, change, suspend, or discontinue features. Beta, preview, or experimental features
           may be incomplete, change without notice, and receive less support. We do not promise that
@@ -349,9 +331,9 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="suspension" title="16. Suspension, termination, and data retrieval">
+      <LegalSection id="suspension" title="15. Suspension, termination, and data retrieval">
         <p>
-          Customer may stop using a free Service or cancel a paid subscription under Section 12. Either
+          Customer may stop using a free Service or cancel a paid subscription under Section 11. Either
           party may terminate for the other party&apos;s material breach if that breach is not cured within
           30 days after written notice. Insolvency or similar statutory termination rights apply as
           provided by law.
@@ -374,7 +356,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="copyright" title="17. Copyright and intellectual-property reports">
+      <LegalSection id="copyright" title="16. Copyright and intellectual-property reports">
         <p>
           Please send a good-faith report of material you believe infringes intellectual property to{" "}
           <LegalContactLink subject="xMatrix copyright report" /> with the work, material and location,
@@ -390,7 +372,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="disclaimers" title="18. Disclaimers">
+      <LegalSection id="disclaimers" title="17. Disclaimers">
         <p>
           TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE SERVICES, BETA FEATURES, AND AI OUTPUT ARE PROVIDED
           “AS IS” AND “AS AVAILABLE.” MADEBYROBOT DISCLAIMS EXPRESS, IMPLIED, AND STATUTORY WARRANTIES,
@@ -406,7 +388,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="liability" title="19. Limitation of liability">
+      <LegalSection id="liability" title="18. Limitation of liability">
         <p>
           TO THE MAXIMUM EXTENT PERMITTED BY LAW, NEITHER PARTY WILL BE LIABLE FOR INDIRECT, INCIDENTAL,
           SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS, REVENUE, GOODWILL,
@@ -421,14 +403,14 @@ export function TermsOfServiceContent() {
         <p>
           The exclusions and cap do not apply to a party&apos;s fraud, willful misconduct, or gross
           negligence; death or personal injury caused by negligence where liability cannot be limited;
-          Customer&apos;s overdue Service fees; indemnification obligations in Section 20; or another
+          Customer&apos;s overdue Service fees; indemnification obligations in Section 19; or another
           liability that law does not permit the parties to limit. Privacy, security, confidentiality,
           and intellectual-property claims do not receive an automatic separate or unlimited cap under
           these public Terms; a signed enterprise agreement or DPA may provide a different allocation.
         </p>
       </LegalSection>
 
-      <LegalSection id="indemnity" title="20. Mutual third-party indemnities for Business Customers">
+      <LegalSection id="indemnity" title="19. Mutual third-party indemnities for Business Customers">
         <p>
           This Section applies only when Customer uses the Services for business or professional purposes,
           not as a consumer. MadeByRobot will defend Customer against a third-party claim that Customer&apos;s
@@ -450,12 +432,12 @@ export function TermsOfServiceContent() {
           cooperation at the indemnifying party&apos;s expense. The indemnifying party controls defense and
           settlement, but may not admit fault, impose a non-monetary obligation, or fail to provide a
           complete release for the indemnified party without written consent not unreasonably withheld.
-          The base cap in Section 19 does not apply to these indemnification obligations, and the indirect
+          The base cap in Section 18 does not apply to these indemnification obligations, and the indirect
           damages exclusion does not prevent recovery of amounts payable to the third party under them.
         </p>
       </LegalSection>
 
-      <LegalSection id="export" title="21. Export controls and sanctions">
+      <LegalSection id="export" title="20. Export controls and sanctions">
         <p>
           You may not access, use, export, re-export, transfer, or make the Services or related technology
           available in violation of United States or other applicable export-control, economic-sanctions,
@@ -471,7 +453,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="disputes" title="22. Governing law and disputes">
+      <LegalSection id="disputes" title="21. Governing law and disputes">
         <p>
           These Terms are governed by Delaware law, without regard to conflict-of-law rules. For a
           Business Customer and where law permits, the state and federal courts located in Delaware have
@@ -486,7 +468,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="updates" title="23. Updates, notice, and acceptance records">
+      <LegalSection id="updates" title="22. Updates, notice, and acceptance records">
         <p>
           We may update these Terms as the Services, law, or our business changes. We will publish a new
           version and effective date and preserve accessible version history. If a change materially
@@ -503,7 +485,7 @@ export function TermsOfServiceContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="general" title="24. General terms and language">
+      <LegalSection id="general" title="23. General terms and language">
         <p>
           These Terms, the Privacy Policy, and documents incorporated by reference are the entire
           agreement about the Services unless the Customer has a separate written agreement with us. A
@@ -516,12 +498,12 @@ export function TermsOfServiceContent() {
         <p>
           English is the controlling version. A translation is for convenience unless applicable law
           requires the local-language version or another rule to control. Notices to MadeByRobot must be
-          sent to the contact in Section 25; we may send notices to the account email or through the
+          sent to the contact in Section 24; we may send notices to the account email or through the
           Services.
         </p>
       </LegalSection>
 
-      <LegalSection id="contact" title="25. Contact us">
+      <LegalSection id="contact" title="24. Contact us">
         <p>
           Questions or legal notices about these Terms may be sent to {LEGAL_ENTITY} at{" "}
           <LegalContactLink subject="xMatrix Terms of Service" />.

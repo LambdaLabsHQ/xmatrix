@@ -40,12 +40,6 @@ export function agentInteractionTarget(id: string, alias: string): InteractionTa
     aliases: [alias], operations: AGENT_OPERATIONS };
 }
 
-/** The Space's management service, launched through Jev. */
-export function managementInteractionTarget(alias = "xMatrix"): InteractionTargetDescriptor {
-  return { schemaVersion: 1, descriptorRevision: "1", targetId: "management:xmatrix", kind: "management",
-    aliases: [alias], operations: [LAUNCH] };
-}
-
 /** An installed connector and the actions its manifest declares. */
 export function connectorInteractionTarget(id: string, actionIds: readonly string[]): InteractionTargetDescriptor {
   const ids = [...new Set(actionIds.map(action => action.trim().toLowerCase()))]

@@ -12,6 +12,5 @@ export * from "./workspace-shell-formatters";
 export * from "./workspace-shell-helpers-extra";
 export * from "./workspace-shell-helpers";
 export * from "./workspace-shell-navigation";
-export * from "./workspace-space-snapshot";
 export * from "./mobile-channel-history-navigation";
 export * from "./workspace-shell-recovered";

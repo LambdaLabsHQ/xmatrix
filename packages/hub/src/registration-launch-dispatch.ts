@@ -9,7 +9,7 @@ import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
   PostgresFirstMessageLaunchChoiceRepository,
-  type RegistrationManagementLaunch, type RegistrationLaunchCoalesce, type RegistrationAboutSession,
+  type RegistrationAboutSession,
   type ChannelAboutSessionStopTarget,
 } from "@xmatrix/db";
 import { dispatchPreparedAgentLaunchWake } from "./product-agent-mention-authority-adapter";
@@ -61,7 +61,7 @@ interface RegistrationInputLaunch {
   runId: string; instanceId: string; launchId: string; agentName: string; hostId: string; reused: boolean;
   /** Channel About sessions that finished their turn and still run; the caller stops them. */
   retiredAboutSessions?: ChannelAboutSessionStopTarget[];
-  /** An existing delegate already serves the Channel; nothing was launched. */
+  /** An About session already serves the Channel; nothing was launched. */
   coalesced?: boolean;
 }
 
@@ -70,8 +70,8 @@ interface RegistrationInputRequest {
   /** Exclude the stable registration bound to this predecessor Instance. */
   excludeSourceInstanceId?: string;
   commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
-  runId?: string; instanceId?: string; management?: RegistrationManagementLaunch;
-  coalesce?: RegistrationLaunchCoalesce; initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
+  runId?: string; instanceId?: string;
+  initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
   aboutSession?: RegistrationAboutSession;
   /** Capabilities the work needs; those a daemon can prove gate where it runs. */
   requiredCapabilities?: readonly string[];

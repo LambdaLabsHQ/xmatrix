@@ -526,18 +526,18 @@ export function agentRunHttpRouteAllowed(
   // Saves a credential the Run already holds into its Space: the route proves
   // the live Run and refuses an alias the Space already has.
   if (request.method === "POST" && path === HUB_ROUTES.secrets &&
-      !principal.managementSpaceId && principal.channelWriteAllowed !== false) return true;
+      principal.channelWriteAllowed !== false) return true;
   // Its Space's secrets the Run may read now: every `auto` one, and each
   // `ask` one a Space admin approved for it.
   if (request.method === "POST" && path === HUB_ROUTES.run_secrets &&
-      !principal.managementSpaceId && principal.channelWriteAllowed !== false) return true;
+      principal.channelWriteAllowed !== false) return true;
   // Ask a Space admin, on a card in its Channel, for a secret it may not read yet.
   if (request.method === "POST" && path === HUB_ROUTES.secret_requests &&
-      !principal.managementSpaceId && principal.channelWriteAllowed !== false) return true;
+      principal.channelWriteAllowed !== false) return true;
   // Connector actions as MCP tools: each call runs in the Run's own Channel
   // under that Channel's action policy (docs/design/connector-platform.md §3.5).
   if (request.method === "POST" && path === HUB_ROUTES.connectors_mcp &&
-      !principal.managementSpaceId && principal.channelWriteAllowed !== false) return true;
+      principal.channelWriteAllowed !== false) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   // Channel memory authorizes the exact Run in the repository: read where both
@@ -602,24 +602,6 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/history$/.test(path)) {
     return true;
   }
-  if (
-    request.method === "GET" &&
-    /^\/api\/spaces\/[^/]+\/management-agent$/.test(path)
-  ) {
-    return true;
-  }
-  if (
-    request.method === "GET" &&
-    /^\/api\/spaces\/[^/]+\/management\/channels(\/[^/]+)?$/.test(path)
-  ) {
-    return true;
-  }
-  if (
-    request.method === "PATCH" &&
-    /^\/api\/spaces\/[^/]+\/management\/channels\/[^/]+\/visibility$/.test(path)
-  ) {
-    return true;
-  }
   const canWriteAttachments = principal.permissions.includes(
     AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE,
   );
@@ -657,31 +639,9 @@ export function agentRunHttpRouteAllowed(
   ) return true;
   if (request.method !== "POST") return false;
   return (
-    /^\/api\/spaces\/[^/]+\/management\/operations$/.test(path) ||
     (principal.channelWriteAllowed && /^\/api\/channels\/[^/]+\/messages$/.test(path)) ||
     path === RELAY_V2_MESSAGE_ATTACHMENT_PRODUCT_MEDIA_PATH
   );
-}
-
-/**
- * The acting Agent Run, when it is this Space's management Run; any other
- * caller is refused. With `humanAllowed`, a human session passes too (and the
- * result is undefined), while an Agent Run must still manage this Space.
- */
-export function requireSpaceManagementRun(user: AuthUser, spaceId: string): AgentRunPrincipal;
-export function requireSpaceManagementRun(
-  user: AuthUser,
-  spaceId: string,
-  options: { humanAllowed: true },
-): AgentRunPrincipal | undefined;
-export function requireSpaceManagementRun(
-  user: AuthUser,
-  spaceId: string,
-  options: { humanAllowed?: boolean } = {},
-): AgentRunPrincipal | undefined {
-  const principal = user.agentRun;
-  if (principal ? principal.managementSpaceId === spaceId : options.humanAllowed) return principal;
-  throw new PermissionFailure("A matching xMatrix management run is required");
 }
 
 export function requireHumanAuth(user: AuthUser): AuthUser {
@@ -754,7 +714,6 @@ export function automationAgentContext(principal: AgentRunPrincipal): Record<str
     channelId: principal.channelId,
     machineId: principal.machineId,
     hostId: principal.hostId,
-    ...(principal.managementSpaceId ? { managementSpaceId: principal.managementSpaceId } : {}),
   };
 }
 

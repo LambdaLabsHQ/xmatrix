@@ -21,7 +21,7 @@ import {
   type ChannelCapabilityFailure,
   type ChannelPrincipal,
 } from "./channel-capability-policy.js";
-import { PostgresEntitySpaceDirectory, type EntitySpaceRouteKind } from "./entity-directory.js";
+import { PostgresEntitySpaceDirectory } from "./entity-directory.js";
 import { PostgresUserSpaceMembershipDirectory } from "./membership-directory.js";
 import {
   PostgresChannelSpaceDirectory,
@@ -140,9 +140,6 @@ type AgentAuthority = {
   ownerUserId: string;
   channelId: string;
   spaceId: string;
-  management: boolean;
-  managementSpaceId?: string;
-  configVersion?: number;
 };
 
 function validateAutomationPayload(payload: Record<string, unknown>, channelId: string,
@@ -199,19 +196,16 @@ async function agentAuthority(tx: DatabaseTransaction, input: Record<string, unk
     "forbidden", 403, "Automation Agent owner mismatch");
   const runId = text(context.runId, "automationAgent.runId", 300);
   const channelId = text(context.channelId, "automationAgent.channelId", 300);
-  const managementSpaceId = typeof context.managementSpaceId === "string" && context.managementSpaceId
-    ? context.managementSpaceId : null;
   // The Agent is the Instance of a registered Run in the Channel's Space.
-  const rows = await tx.query<QueryResultRow>({ name: "automation_agent_authority_v3", text: `SELECT
-    r.channel_id,c.space_id,r.metadata_json,i.instance_id,cfg.version AS config_version,cfg.config_json
+  const rows = await tx.query<QueryResultRow>({ name: "automation_agent_authority_v4", text: `SELECT
+    r.channel_id,c.space_id,r.metadata_json,i.instance_id
     FROM data.runs r JOIN data.channels c ON c.channel_id=r.channel_id
     JOIN data.run_agent_registrations b ON b.run_id=r.run_id
       AND b.space_id=c.space_id AND b.owner_user_id=r.owner_user_id
     JOIN data.instances i ON i.run_id=r.run_id
-    LEFT JOIN data.space_management_configs cfg ON cfg.space_id=$5
     WHERE r.run_id=$1 AND i.instance_id=$2 AND r.owner_user_id=$3
       AND r.channel_id=$4 AND r.status IN ('starting','running') LIMIT 1`,
-  values: [runId, principalId, ownerUserId, channelId, managementSpaceId], maxRows: 1 });
+  values: [runId, principalId, ownerUserId, channelId], maxRows: 1 });
   text(context.executionKey, "automationAgent.executionKey", 300);
   text(context.machineId, "automationAgent.machineId", 300);
   const row = rows[0];
@@ -221,38 +215,19 @@ async function agentAuthority(tx: DatabaseTransaction, input: Record<string, unk
       context.instanceId !== undefined && row.instance_id !== context.instanceId) {
     throw new AutomationControlError("forbidden", 403, "Automation Agent Run is no longer live");
   }
-  let management = false;
-  if (managementSpaceId) {
-    const config = json(row.config_json);
-    // The Run's own management generation is the authority; no Profile is configured.
-    management = row.space_id === managementSpaceId && metadata.managementSpaceId === managementSpaceId &&
-      Number(metadata.managementConfigGeneration) === Number(row.config_version) &&
-      config.enabled === true && config.sideEffectsEnabled === true;
-    if (!management) throw new AutomationControlError(
-      "forbidden", 403, "Automation Management Agent authority is no longer enabled");
-  }
-  return { principalId, ownerUserId, channelId, spaceId: String(row.space_id), management,
-    ...(managementSpaceId ? { managementSpaceId, configVersion: Number(row.config_version) } : {}) };
+  return { principalId, ownerUserId, channelId, spaceId: String(row.space_id) };
 }
 
-/** `pause`: the mutation only pauses the Automation. The management Agent may
- * pause any Automation in its Space, a person's included, as a person could;
- * pausing is reversible and audited. */
+/** An Agent changes only its own Automations, in its birth Channel. */
 async function authorizeAgentAutomation(tx: DatabaseTransaction, authority: AgentAuthority,
-  automation: QueryResultRow, pause = false): Promise<boolean> {
+  automation: QueryResultRow): Promise<void> {
   const owner = automationOwner(automation);
-  const assigned = await automationChannel(tx, String(automation.channel_id), authority.management
-    ? { kind: "user", id: authority.ownerUserId }
-    : { kind: "agent", id: authority.principalId }, "automation_history_read");
-  const sameAgent = owner.kind === "agent" && owner.id === authority.principalId;
-  if (sameAgent && (automation.channel_id === authority.channelId ||
-      authority.management && assigned.space_id === authority.managementSpaceId)) {
-    return authority.management && automation.channel_id !== authority.channelId;
-  }
-  if ((owner.kind === "agent" || pause) && authority.management &&
-      assigned.space_id === authority.managementSpaceId) return true;
+  await automationChannel(tx, String(automation.channel_id),
+    { kind: "agent", id: authority.principalId }, "automation_history_read");
+  if (owner.kind === "agent" && owner.id === authority.principalId &&
+      automation.channel_id === authority.channelId) return;
   throw new AutomationControlError("forbidden", 403,
-    owner.kind === "user" ? "A person's Automation is changed by people; the management Agent may pause it"
+    owner.kind === "user" ? "A person's Automation is changed by people"
       : "Agent cannot manage this Automation");
 }
 
@@ -262,6 +237,8 @@ function authorityRoot(row: QueryResultRow): string {
   return typeof root === "string" && root ? root : String(row.owner_user_id);
 }
 
+/** `reasonRequired` is always false: no Automation change needs a stated
+ * reason. It stays on the wire for CLIs that still require the field. */
 function capabilities(row: QueryResultRow) {
   if (row.page_id) {
     // A page's Automation is managed through its page, by whoever can edit it;
@@ -274,12 +251,8 @@ function capabilities(row: QueryResultRow) {
   if (row.agent_principal_id) {
     const owner = automationOwner(row);
     const own = owner.kind === "agent" && owner.id === row.agent_principal_id;
-    const management = row.agent_management === true;
-    const direct = own || management && owner.kind === "agent";
-    return { update: direct, pause: (direct || management) && row.enabled === true,
-      requestPause: false,
-      resume: direct && row.enabled !== true, delete: direct,
-      reasonRequired: management && !own };
+    return { update: own, pause: own && row.enabled === true, requestPause: false,
+      resume: own && row.enabled !== true, delete: own, reasonRequired: false };
   }
   const canManage = row.can_manage === true;
   const enabled = row.enabled === true;
@@ -337,8 +310,7 @@ function automationFromRow(row: QueryResultRow): Record<string, unknown> {
     text: message.body, ...(message.appMentions ? { appMentions: message.appMentions } : {}),
   };
   const taskCapabilities = capabilities(row);
-  const canManage = Object.entries(taskCapabilities).some(([key, value]) =>
-    key !== "reasonRequired" && value === true);
+  const canManage = Object.values(taskCapabilities).some((value) => value === true);
   const latest = row.execution_status ? {
     status: String(row.execution_status), attempts: Number(row.execution_attempts) || 0,
     scheduledFor: iso(row.execution_scheduled_for), nextAttemptAt: iso(row.execution_next_attempt_at),
@@ -488,7 +460,7 @@ export class PostgresAutomationRepository {
   }
 
   private async opaquePlacement(
-    requestId: string, kind: EntitySpaceRouteKind, entityId: string,
+    requestId: string, kind: "automation", entityId: string,
   ): Promise<SpacePlacement> {
     const route = await this.entityDirectory.resolve(
       { requestId, operation: `automation.${kind}.locate` }, kind, entityId,
@@ -498,17 +470,14 @@ export class PostgresAutomationRepository {
       const rows = await this.database.transaction(
         { requestId, operation: `automation.${kind}.locate-legacy` },
         (tx) => tx.query<QueryResultRow>({ name: "automation_entity_space_legacy_v1",
-          text: kind === "automation"
-            ? `SELECT channel.space_id FROM data.automations automation
+          text: `SELECT channel.space_id FROM data.automations automation
                  JOIN data.channels channel ON channel.channel_id=automation.channel_id
-                 WHERE automation.automation_id=$1 LIMIT 1`
-            : "SELECT space_id FROM data.management_actions WHERE action_id=$1 LIMIT 1",
+                 WHERE automation.automation_id=$1 LIMIT 1`,
           values: [entityId], maxRows: 1 }),
       );
       spaceId = rows[0] ? String(rows[0].space_id) : null;
     }
-    if (!spaceId) throw new AutomationControlError("not_found", 404,
-      kind === "automation" ? "Automation not found" : "management action not found");
+    if (!spaceId) throw new AutomationControlError("not_found", 404, "Automation not found");
     return this.placement(requestId, `automation.${kind}.placement`, spaceId);
   }
 
@@ -540,7 +509,7 @@ export class PostgresAutomationRepository {
   }
 
   private async publishEntityRoute(
-    requestId: string, placement: SpacePlacement, kind: "automation" | "management-action",
+    requestId: string, placement: SpacePlacement, kind: "automation",
     entityId: string, entityVersion: number, state: "active" | "deleted" = "active",
   ): Promise<void> {
     const rows = await this.database.transaction({ requestId,
@@ -628,9 +597,8 @@ export class PostgresAutomationRepository {
         kind === "automation_remove" ? "automation_terminalize" : "automation_new_work";
       const channelId = kind === "automation_put"
         ? text(input.channelId, "channelId", 300) : String(current!.channel_id);
-      const channelPrincipal: ChannelPrincipal = agent?.management && channelId !== agent.channelId
-        ? { kind: "user", id: agent.ownerUserId }
-        : { kind: principal.kind as "user" | "agent", id: String(principal.id) };
+      const channelPrincipal: ChannelPrincipal =
+        { kind: principal.kind as "user" | "agent", id: String(principal.id) };
       const channelRow = pageId
         ? await pageAutomationChannel(tx, channelId, pageId, actorUserId)
         : await automationChannel(tx, channelId, channelPrincipal, capability);
@@ -640,25 +608,18 @@ export class PostgresAutomationRepository {
       const currentVersion = Number(current?.version ?? 0);
       if (currentVersion !== expectedVersion) throw new AutomationControlError(
         "conflict", 409, current ? "Automation version changed" : "Automation does not exist");
-      const auditedAgentMutation = current
-        ? agent ? await authorizeAgentAutomation(tx, agent, current,
-          input.automationAction === "pause" && input.enabled === false)
-          : pageId ? false : (await requireManager(tx, current, actorUserId, capability), false)
-        : false;
+      if (current) {
+        if (agent) await authorizeAgentAutomation(tx, agent, current);
+        else if (!pageId) await requireManager(tx, current, actorUserId, capability);
+      }
       const next = currentVersion + 1;
       if (kind === "automation_put") {
         const storedOwner = current ? automationOwner(current) : undefined;
-        // Past authorization, an Agent's mutation of a person's Automation is a
-        // pause: its definition, conversation and schedule stay the person's.
-        const pausesPersonAutomation = Boolean(agent && storedOwner?.kind === "user");
-        if (pausesPersonAutomation && channelRow.channel_id !== current!.channel_id) {
-          throw new AutomationControlError("forbidden", 403, "Pausing an Automation does not move it");
-        }
-        const payload = pausesPersonAutomation ? json(current!.payload_json) : object(input.payload, "payload");
-        if (!pausesPersonAutomation) validateAutomationPayload(payload, String(channelRow.channel_id),
+        const payload = object(input.payload, "payload");
+        validateAutomationPayload(payload, String(channelRow.channel_id),
           current ? authorityRoot(current) : actorUserId,
           storedOwner?.kind === "agent" ? storedOwner.id : agent?.principalId);
-        const nextRunAt = pausesPersonAutomation ? iso(current!.next_run_at) : timestamp(input.nextRunAt, "nextRunAt");
+        const nextRunAt = timestamp(input.nextRunAt, "nextRunAt");
         if (typeof input.enabled !== "boolean") throw new AutomationControlError(
           "invalid_automation_request", 400, "enabled is invalid");
         // Only a page's Automation has triggers; the page routes resolve them.
@@ -721,8 +682,6 @@ export class PostgresAutomationRepository {
             WHERE automation_id=$7 AND version=$8`, values: [channelRow.channel_id, nextRunAt, input.enabled, next,
             JSON.stringify(payload), at, automationId, currentVersion], maxRows: 0 });
         }
-        if (auditedAgentMutation) await this.insertManagementAudit(
-          tx, input, current!, next, String(channelRow.space_id), at);
       } else {
         const currentPayload = json(current!.payload_json);
         const currentLineage = json(json(currentPayload.input).lineage);
@@ -748,8 +707,6 @@ export class PostgresAutomationRepository {
           values: [lineageAutomationIds], maxRows: 128 });
         if (removed.length !== lineageAutomationIds.length) throw new AutomationControlError(
           "conflict", 409, "evaluator lineage changed during revocation");
-        if (auditedAgentMutation) await this.insertManagementAudit(
-          tx, input, current!, next, String(channelRow.space_id), at);
       }
       const value = { commandId, kind, entityId: automationId, channelId,
         entityVersion: next, reused: false,
@@ -761,10 +718,6 @@ export class PostgresAutomationRepository {
       Number(value.entityVersion), kind === "automation_remove" ? "deleted" : "active");
     if (replacedId && replacedVersion > 0) await this.publishEntityRoute(commandId, placement,
       "automation", replacedId, replacedVersion, "deleted");
-    const audit = input.managementAudit && typeof input.managementAudit === "object"
-      ? input.managementAudit as Record<string, unknown> : null;
-    if (audit?.actionId) await this.publishEntityRoute(commandId, placement, "management-action",
-      text(audit.actionId, "managementAudit.actionId", 300), 1);
     return value;
   }
 
@@ -802,25 +755,6 @@ export class PostgresAutomationRepository {
     return replaced;
   }
 
-  private async insertManagementAudit(tx: DatabaseTransaction, input: Record<string, unknown>,
-    current: QueryResultRow, nextVersion: number, spaceId: string, at: string) {
-    const audit = object(input.managementAudit, "managementAudit");
-    const actionId = text(audit.actionId, "managementAudit.actionId", 300);
-    const evidence = { envelope: object(audit.evidence, "managementAudit.evidence"),
-      actor: { principal: input.principal,
-        runId: object(input.automationAgent, "automationAgent").runId },
-      automationGovernance: { automationId: input.automationId, channelId: current.channel_id,
-        beforeVersion: Number(current.version), afterVersion: nextVersion,
-        reason: text(audit.reason, "managementAudit.reason", 8_192),
-        payloadHash: text(audit.payloadHash, "managementAudit.payloadHash", 300),
-        idempotencyKey: text(audit.idempotencyKey, "managementAudit.idempotencyKey", 300) } };
-    await tx.query({ name: "automation_management_audit_v1", text: `INSERT INTO
-      data.management_actions (action_id,space_id,action_type,status,version,evidence_json,created_at,updated_at)
-      VALUES ($1,$2,$3,'verified',1,$4::jsonb,$5,$5)`, values: [actionId, spaceId,
-      text(audit.actionType, "managementAudit.actionType", 100),
-      JSON.stringify(evidence), at], maxRows: 0 });
-  }
-
   async list(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const requestId = text(input.requestId, "requestId", 200);
     const principal = object(input.principal, "principal");
@@ -848,17 +782,14 @@ export class PostgresAutomationRepository {
         const authority = await agentAuthority(tx, input,
           text(object(input.automationAgent, "automationAgent").ownerUserId,
             "automationAgent.ownerUserId", 300), text(principal.id, "principal.id", 300));
-        if (authority.management ? spaceId !== authority.managementSpaceId || channelId !== null
-          : channelId !== authority.channelId || spaceId !== null) throw new AutomationControlError(
-          "forbidden", 403, authority.management
-            ? "Management Agent Automation reads require its exact Space"
-            : "Agent Automation reads are limited to its birth Channel");
-        if (!authority.management && !(await agentReadsBirthChannel(tx, authority))) {
+        if (channelId !== authority.channelId || spaceId !== null) throw new AutomationControlError(
+          "forbidden", 403, "Agent Automation reads are limited to its birth Channel");
+        if (!(await agentReadsBirthChannel(tx, authority))) {
           throw new AutomationControlError("forbidden", 403, "Agent cannot read this Channel");
         }
-        const rows = await tx.query<QueryResultRow>({ name: "automation_agent_list_v4", text: `SELECT
+        const rows = await tx.query<QueryResultRow>({ name: "automation_agent_list_v5", text: `SELECT
           t.*,r.status AS last_run_status,r.metadata_json->'executionCancellation' AS execution_cancellation,r.finished_at AS last_run_finished_at,false AS can_manage,
-          $1::text AS agent_principal_id,$2::boolean AS agent_management,
+          $1::text AS agent_principal_id,
           o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
           o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
           o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
@@ -867,13 +798,11 @@ export class PostgresAutomationRepository {
           LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
           LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
             ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
-          WHERE ($2::boolean=true AND c.space_id=$3 OR $2::boolean=false AND t.channel_id=$4)
+          WHERE t.channel_id=$2
             AND ${channelCapabilityPredicate({ capability: "automation_history_read", channelAlias: "c",
-              principalKindSql: "$7", principalIdSql: "$8" })}
-            AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$5 ORDER BY t.automation_id LIMIT $6`, values: [authority.principalId,
-          authority.management, authority.managementSpaceId ?? null, authority.channelId,
-          cursor, limit + 1, authority.management ? "user" : "agent",
-          authority.management ? authority.ownerUserId : authority.principalId], maxRows: limit + 1 });
+              principalKindSql: "'agent'", principalIdSql: "$1" })}
+            AND ${MESSAGE_AUTOMATION_SQL} AND t.automation_id>$3 ORDER BY t.automation_id LIMIT $4`,
+        values: [authority.principalId, authority.channelId, cursor, limit + 1], maxRows: limit + 1 });
         const page = rows.slice(0, limit);
         return { tasks: page.map(automationFromRow), cursor: rows.length > limit
           ? String(page.at(-1)?.automation_id ?? "") : null,
@@ -991,9 +920,9 @@ export class PostgresAutomationRepository {
         const authority = await agentAuthority(tx, input,
           text(context.ownerUserId, "automationAgent.ownerUserId", 300),
           text(principal.id, "principal.id", 300));
-        const rows = await tx.query<QueryResultRow>({ name: "automation_agent_get_v4", text: `SELECT
+        const rows = await tx.query<QueryResultRow>({ name: "automation_agent_get_v5", text: `SELECT
           t.*,r.status AS last_run_status,r.metadata_json->'executionCancellation' AS execution_cancellation,r.finished_at AS last_run_finished_at,false AS can_manage,
-          $1::text AS agent_principal_id,$2::boolean AS agent_management,
+          $1::text AS agent_principal_id,
           o.status AS execution_status,o.attempts AS execution_attempts,o.scheduled_for AS execution_scheduled_for,
           o.next_attempt_at AS execution_next_attempt_at,o.updated_at AS execution_updated_at,
           o.finished_at AS execution_finished_at,o.error_code AS execution_error_code,
@@ -1002,14 +931,10 @@ export class PostgresAutomationRepository {
           LEFT JOIN data.runs r ON r.run_id=t.last_run_id AND r.owner_user_id=t.owner_user_id
           LEFT JOIN LATERAL (SELECT * FROM data.automation_occurrences x WHERE x.automation_id=t.automation_id
             ORDER BY x.scheduled_for DESC,x.occurrence_id DESC LIMIT 1) o ON true
-          WHERE t.automation_id=$3 AND (($2::boolean=true AND c.space_id=$4) OR
-            ($2::boolean=false AND t.channel_id=$5 AND ${agentBirthBindingSql("t.channel_id", "$1")}))
+          WHERE t.automation_id=$2 AND t.channel_id=$3 AND ${agentBirthBindingSql("t.channel_id", "$1")}
             AND ${channelCapabilityPredicate({ capability: "automation_history_read", channelAlias: "c",
-              principalKindSql: "$6", principalIdSql: "$7" })} AND ${MESSAGE_AUTOMATION_SQL} LIMIT 1`,
-        values: [authority.principalId, authority.management, automationId,
-          authority.managementSpaceId ?? null, authority.channelId,
-          authority.management ? "user" : "agent",
-          authority.management ? authority.ownerUserId : authority.principalId], maxRows: 1 });
+              principalKindSql: "'agent'", principalIdSql: "$1" })} AND ${MESSAGE_AUTOMATION_SQL} LIMIT 1`,
+        values: [authority.principalId, automationId, authority.channelId], maxRows: 1 });
         if (!rows[0]) throw new AutomationControlError("automation_not_found", 404, "Automation not found");
         return { task: automationFromRow(rows[0]) };
       }

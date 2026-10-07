@@ -331,14 +331,6 @@ export function sendStopResult(daemon, command, result) {
   daemon.ws.send(JSON.stringify(stopResultFor(command, result)));
 }
 
-/** Turn on a Space's Management Agent with side effects, as its admin does. */
-export function enableManagementAgent(worker, spaceId, token = MOCK_TOKEN) {
-  return worker.fetch(`/api/spaces/${encodeURIComponent(spaceId)}/management-agent`, {
-    method: "PATCH", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ enabled: true, sideEffectsEnabled: true }),
-  });
-}
-
 /**
  * The owner's Codex harness registered in a Space on a fresh machine whose
  * daemon is connected, with a directory of its own.

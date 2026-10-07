@@ -58,7 +58,7 @@ use agent_presentation::{
 };
 use cli::{
     AttachmentCommand, Cli, CliEnvironmentArg, Commands, DaemonCommand, EnvironmentCommand,
-    ManagementCommand, MigrateCommand, MigrationHistoryMode, ProfileCommand, RequestCommand,
+    MigrateCommand, MigrationHistoryMode, ProfileCommand, RequestCommand,
     SecretCommand, SetupCommand,
 };
 use config::CliSession;
@@ -849,10 +849,6 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         Some(Commands::Page { command }) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
             cmd_page(&hub_url, &token, command).await
-        }
-        Some(Commands::Management { command }) => {
-            let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
-            cmd_management(&hub_url, &token, *command).await
         }
         Some(Commands::Automation { command }) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
@@ -1873,140 +1869,6 @@ async fn cmd_attachment(command: AttachmentCommand) -> error::Result<()> {
             Ok(())
         }
     }
-}
-
-async fn cmd_management(
-    hub_url: &str,
-    token: &str,
-    mut command: ManagementCommand,
-) -> error::Result<()> {
-    let space = command.space_mut();
-    *space = xmatrix_cli_core::space_ref::resolve_space_ref(hub_url, token, space).await?;
-    match command {
-        ManagementCommand::Channels {
-            space,
-            query,
-            limit,
-            json,
-        } => cmd_management_channels(hub_url, token, &space, &query, limit, json).await,
-        ManagementCommand::Channel {
-            space,
-            channel,
-            message_limit,
-            json,
-        } => cmd_management_channel(hub_url, token, &space, &channel, message_limit, json).await,
-    }
-}
-
-async fn cmd_management_channels(
-    hub_url: &str,
-    token: &str,
-    space_id: &str,
-    query: &str,
-    limit: u32,
-    json_output: bool,
-) -> error::Result<()> {
-    let response: Value = http::request_json(
-        &with_route(
-            hub_url,
-            &protocol::space_management_channels_route(space_id, query, limit.clamp(1, 200)),
-        ),
-        "GET",
-        Some(token),
-        None,
-    )
-    .await?;
-    if json_output {
-        println!("{}", serde_json::to_string_pretty(&response)?);
-        return Ok(());
-    }
-    let matches = response["matches"].as_array().cloned().unwrap_or_default();
-    println!(
-        "Management channel search in {}: {} matches{}",
-        space_id,
-        matches.len(),
-        if response["truncated"].as_bool() == Some(true) {
-            " (truncated)"
-        } else {
-            ""
-        }
-    );
-    for item in matches {
-        let channel = &item["detail"]["channel"];
-        println!(
-            "- {} ({}) fields={}",
-            channel["name"].as_str().unwrap_or("unnamed"),
-            channel["id"].as_str().unwrap_or("unknown"),
-            item["matchedFields"]
-                .as_array()
-                .map(|fields| fields
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(","))
-                .unwrap_or_default()
-        );
-    }
-    Ok(())
-}
-
-async fn cmd_management_channel(
-    hub_url: &str,
-    token: &str,
-    space_id: &str,
-    channel_id: &str,
-    message_limit: u32,
-    json_output: bool,
-) -> error::Result<()> {
-    let response: Value = http::request_json(
-        &with_route(
-            hub_url,
-            &protocol::space_management_channel_route(
-                space_id,
-                channel_id,
-                message_limit.clamp(1, 100),
-            ),
-        ),
-        "GET",
-        Some(token),
-        None,
-    )
-    .await?;
-    if json_output {
-        println!("{}", serde_json::to_string_pretty(&response)?);
-        return Ok(());
-    }
-    let detail = &response["detail"];
-    let channel = &detail["channel"];
-    println!(
-        "{} ({}) mode={} archived={} frozen={} runs={} loops={} claims={} bindings={} failures={}",
-        channel["name"].as_str().unwrap_or("unnamed"),
-        channel["id"].as_str().unwrap_or(channel_id),
-        channel["mode"].as_str().unwrap_or("unknown"),
-        detail["archived"].as_bool().unwrap_or(false),
-        detail["frozen"].as_bool().unwrap_or(false),
-        detail["liveRunIds"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-        detail["openLoops"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-        detail["claims"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-        detail["bindings"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-        detail["recentFailures"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-    );
-    Ok(())
 }
 
 async fn ensure_setup_machine_name(hub_url: &str, name: Option<&str>) -> error::Result<()> {
