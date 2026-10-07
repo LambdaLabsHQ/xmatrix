@@ -3717,6 +3717,8 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block {
    planks. Its former separate sheets used a different blend and grain origin. */
 html[data-app-theme="wood"] .xmatrix-app .app-rail.app-rail {
   @apply app-wood-panel-recipe;
+  /* The wood meets the paper directly, without a bevel or cast shadow. */
+  box-shadow: none !important;
 }
 
 html[data-app-theme="wood"] .xmatrix-app .app-rail.app-rail::before,
@@ -7351,7 +7353,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    The rail is the one heavy object on screen: a narrow wood plank lit from
    the top-left. Everything it navigates — the conversation list, the
    conversation and its details — is one paper panel next to it: one
-   element, one paper, one shadow, lit from straight above. Inside it nothing casts a shadow;
+   element, one paper, lit from straight above. Inside it nothing casts a shadow;
    the conversation list reads a shade darker than the conversation, and the
    row under the pointer or selected lifts to the conversation's own paper. The details' small panels are wood — small planks on the paper, the
    same material as the rail at a size where grain reads as an accent. */
@@ -7367,9 +7369,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
     min-width: 0;
     overflow: hidden;
     background: var(--app-panel-paper, oklch(0.97 0.012 85));
-    /* The paper runs to the window's edges; only its seam with the rail
-       is drawn. */
-    box-shadow: inset 1px 0 0 oklch(0.35 0.07 60 / 0.16);
+    box-shadow: none;
   }
 
   /* The panes are regions of the panel, not surfaces on it. */
