@@ -64,7 +64,11 @@ export function StatusView({
 
   const registrations: Array<AgentRegistrationSummary & { harness: string }> = (catalog.data?.capabilities ?? [])
     .flatMap((group) => group.locations.filter(registrationListed).map((registration) => ({ ...registration, harness: group.harness })));
-  const workingOf = (registration: AgentRegistrationSummary) => registration.live?.running.length ?? 0;
+  // Working is an Instance in a turn on a machine that is up. A live process
+  // waiting for its next message runs but does not work, and an offline
+  // machine's Instances are unknown, not working.
+  const workingOf = (registration: AgentRegistrationSummary) => registration.live?.machine.online
+    ? registration.live.running.filter((instance) => instance.working).length : 0;
 
   const runtimes = (catalog.data?.capabilities ?? []).map((group) => {
     const locations = group.locations.filter(registrationListed);
@@ -97,7 +101,8 @@ export function StatusView({
 
   const machineRows = machines.map((machine) => {
     const counts = runtimesOn(machine);
-    const working = counts.reduce((sum, count) => sum + count.working, 0) || machine.activeRuns || 0;
+    // Active Runs count idle processes too; read them only until the catalog says who works.
+    const working = catalog.data ? counts.reduce((sum, count) => sum + count.working, 0) : machine.activeRuns || 0;
     return { machine, counts, working, online: machine.status === "online" };
   }).sort((left, right) => Number(right.online) - Number(left.online) || right.working - left.working
     || left.machine.name.localeCompare(right.machine.name));
