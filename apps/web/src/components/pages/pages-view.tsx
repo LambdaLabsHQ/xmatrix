@@ -1029,11 +1029,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       <PageScrollMarks marks={scrollMarks} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
-        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
+        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
           : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
           <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
             {phone ? (
-              <div className="flex items-center justify-end gap-1 py-2" data-testid="page-controls">{controls}</div>
+              <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>
             ) : (
               <header className="app-band-header mb-4 flex flex-wrap items-center gap-1.5" data-testid="page-controls">
                 {page && !documentOpensWithTitle(page.title, blocks, document.data?.body) ? (canEdit ? (
