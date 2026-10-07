@@ -147,13 +147,14 @@ export function createProductAgentInterventionAuthorityPort(input: {
   }
 
   return {
-    async listKillTargets(channelId) {
+    async listKillTargets(channelId, handoffSource) {
       // Stopping every Agent in a busy Channel must see every Agent in it.
       const listed: unknown[] = [];
       let cursor: string | null = null;
       do {
         const page = await runtime().listChannelAgentKillTargets({ requestId: crypto.randomUUID(),
-          channelId, actorUserId: input.actorUserId, cursor, limit: 200 });
+          channelId, actorUserId: input.actorUserId, cursor, limit: 200,
+          ...(handoffSource ? { handoffSource } : {}) });
         listed.push(...page.targets);
         cursor = typeof page.cursor === "string" ? page.cursor : null;
       } while (cursor);
@@ -258,6 +259,10 @@ export function createProductAgentInterventionAuthorityPort(input: {
     },
 
     async issueHandoffStop(target, controlId, reason, channelId, handoffExport, timeoutMs) {
+      // An exited source may still be sleeping/interrupted. Retire its rest
+      // before the successor can reply and wake it; its checkout stays retained.
+      await runtime().stopRestingInstances({ requestId: stableCommandId("handoff-rest-stop", controlId),
+        channelId, actorUserId: input.actorUserId, handoffSource: { instanceId: target.instanceId, runId: target.runId } });
       await issueDaemonStop(target, controlId, reason, channelId, handoffExport);
       const result = await awaitDaemonStopResult(target, controlId, timeoutMs);
       if (!result) return { stopped: false };

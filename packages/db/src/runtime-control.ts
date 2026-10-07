@@ -1447,7 +1447,8 @@ export class PostgresRuntimeRepository {
   }
 
   async listChannelAgentKillTargets(input: { requestId: string; channelId: string;
-    actorUserId: string; cursor?: string | null; limit?: number }) {
+    actorUserId: string; cursor?: string | null; limit?: number;
+    handoffSource?: { instanceId: string; runId: string } }) {
     const requestId = text(input.requestId, "requestId", 200);
     const channelId = text(input.channelId, "channelId", 300);
     const actorUserId = text(input.actorUserId, "actorUserId", 300);
@@ -1455,12 +1456,14 @@ export class PostgresRuntimeRepository {
     if (limit > 200) throw new RuntimeControlError(
       "invalid_runtime_request", 400, "limit is invalid");
     const cursor = runtimeInstanceCursor(input.cursor);
+    const handoffInstanceId = input.handoffSource ? text(input.handoffSource.instanceId, "instanceId", 300) : null;
+    const handoffRunId = input.handoffSource ? text(input.handoffSource.runId, "runId", 300) : null;
     const placement = await this.channelPlacement(requestId, channelId,
       "runtime.kill-targets.locate", "runtime.kill-targets.placement");
     return this.spaces.transaction(requestId, "runtime.kill-targets", placement, async (tx) => {
       await runtimeChannelCapability(tx, channelId, actorUserId, "runtime_terminalize");
       // A registered Run is identified by its Space registration and its Instance.
-      const rows = await tx.query<QueryResultRow>({ name: "runtime_kill_targets_v5", text: `SELECT * FROM (
+      const rows = await tx.query<QueryResultRow>({ name: "runtime_kill_targets_v6", text: `SELECT * FROM (
           SELECT i.instance_id,i.run_id,i.channel_instance_id,r.owner_user_id,
             r.metadata_json,b.owner_user_id AS machine_owner_user_id,sr.display_name AS agent_name,
             r.status AS run_status,i.status AS instance_status
@@ -1470,13 +1473,14 @@ export class PostgresRuntimeRepository {
           JOIN data.space_agent_registrations sr ON sr.space_id=b.space_id AND sr.owner_user_id=b.owner_user_id
             AND sr.machine_id=b.machine_id AND sr.harness=b.harness
           WHERE i.channel_id=$1) target
-        WHERE target.run_status IN (${ACTIVE_RUN_STATUS_SQL})
+        WHERE (($6::text IS NOT NULL AND target.instance_id=$6 AND target.run_id=$7::text)
+          OR ($6::text IS NULL AND target.run_status IN (${ACTIVE_RUN_STATUS_SQL})
           AND (target.instance_status<>'offline' OR target.run_status IN ('starting','running')
-            OR target.metadata_json ? 'stopRequest')
+            OR target.metadata_json ? 'stopRequest')))
           AND COALESCE(target.metadata_json->>'routedAs','')<>'management_channel_about'
           AND ($3::bigint IS NULL OR (target.channel_instance_id,target.instance_id)>($3::bigint,$4::text))
         ORDER BY target.channel_instance_id,target.instance_id LIMIT $5`, values: [channelId, placement.spaceId,
-        cursor?.[0] ?? null, cursor?.[1] ?? null, limit + 1], maxRows: limit + 1 });
+        cursor?.[0] ?? null, cursor?.[1] ?? null, limit + 1, handoffInstanceId, handoffRunId], maxRows: limit + 1 });
       const page = rows.slice(0, limit);
       return {
         targets: page.map((row) => {
@@ -1518,18 +1522,35 @@ export class PostgresRuntimeRepository {
    * caller stops through the daemon instead.
    */
   async stopRestingInstances(input: { requestId: string; channelId: string; actorUserId: string;
-    mention?: string; exclude?: readonly string[] }) {
+    mention?: string; exclude?: readonly string[]; handoffSource?: { instanceId: string; runId: string } }) {
     const requestId = text(input.requestId, "requestId", 200);
     const channelId = text(input.channelId, "channelId", 300);
     const actorUserId = text(input.actorUserId, "actorUserId", 300);
     const mention = input.mention === undefined ? null : text(input.mention, "mention", 300).toLowerCase();
     const exclude = [...new Set(input.exclude ?? [])].map((value) => text(value, "exclude", 300));
+    const handoffInstanceId = input.handoffSource ? text(input.handoffSource.instanceId, "instanceId", 300) : null;
+    const handoffRunId = input.handoffSource ? text(input.handoffSource.runId, "runId", 300) : null;
     if (exclude.length > 1_000) throw new RuntimeControlError("invalid_runtime_request", 400, "exclude is invalid");
     const placement = await this.channelPlacement(requestId, channelId,
       "runtime.resting-stop.locate", "runtime.resting-stop.placement");
     return this.spaces.transaction(requestId, "runtime.resting-stop", placement, async (tx) => {
       await runtimeChannelCapability(tx, channelId, actorUserId, "runtime_terminalize");
-      const rows = await tx.query<QueryResultRow>({ name: "runtime_resting_stop_v1", text: `WITH target AS (
+      if (handoffInstanceId) {
+        // Serialize with continuation preparation: a wake already in progress
+        // cannot be left behind when this handoff starts somewhere else.
+        await tx.query({ name: "runtime_handoff_rest_stop_lock_v1",
+          text: "SELECT pg_advisory_xact_lock(hashtextextended('runtime-instance:'||$1,0))",
+          values: [channelId], maxRows: 1 });
+        const source = await tx.query({ name: "runtime_handoff_rest_stop_source_v1", text: `SELECT instance_id
+          FROM data.instances WHERE instance_id=$1 AND run_id=$2 AND channel_id=$3 FOR UPDATE`,
+          values: [handoffInstanceId, handoffRunId, channelId], maxRows: 1 });
+        if (!source.length) throw new RuntimeControlError("reborn_source_changed", 409, "Handoff source was replaced");
+        const pending = await tx.query({ name: "runtime_handoff_rest_stop_pending_v1", text: `SELECT intent_id
+          FROM data.agent_reborn_intents WHERE source_instance_id=$1 AND channel_id=$2
+            AND state IN ('waiting','prepared') LIMIT 1`, values: [handoffInstanceId, channelId], maxRows: 1 });
+        if (pending.length) throw new RuntimeControlError("reborn_pending", 409, "Handoff source is already continuing");
+      }
+      const rows = await tx.query<QueryResultRow>({ name: "runtime_resting_stop_v2", text: `WITH target AS (
           SELECT i.instance_id,i.channel_instance_id,sr.display_name AS agent_name
           FROM data.instances i
           JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
@@ -1539,11 +1560,12 @@ export class PostgresRuntimeRepository {
           WHERE i.channel_id=$1 AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted','wake_failed')
             AND NOT (i.instance_id=ANY($4::text[]))
             AND ($3::text IS NULL OR lower(sr.display_name||':'||i.channel_instance_id::text)=$3)
+            AND ($6::text IS NULL OR (i.instance_id=$6 AND i.run_id=$7::text))
           ORDER BY i.channel_instance_id,i.instance_id LIMIT 1000 FOR UPDATE OF i)
         UPDATE data.instances i SET rest_state='stopped',version=i.version+1,updated_at=GREATEST(i.updated_at,$5)
         FROM target WHERE i.instance_id=target.instance_id
         RETURNING i.instance_id,target.channel_instance_id,target.agent_name`,
-      values: [channelId, placement.spaceId, mention, exclude, new Date().toISOString()], maxRows: 1_000 });
+      values: [channelId, placement.spaceId, mention, exclude, new Date().toISOString(), handoffInstanceId, handoffRunId], maxRows: 1_000 });
       return { stopped: rows.map((row) => ({ instanceId: String(row.instance_id),
         mentionTarget: `${String(row.agent_name)}:${Number(row.channel_instance_id)}` })) };
     });
