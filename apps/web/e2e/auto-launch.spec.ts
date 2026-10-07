@@ -7,7 +7,9 @@ test.beforeEach(async ({ page }) => {
     registrations: [{ key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness: "codex" },
       displayName: "codex", machineName: "My Mac", models: ["test-model"],
       modelCatalog: [{ model: "test-model", efforts: [{ value: "high" }] }] }],
-    launchTargets: { repos: [{ value: "owner/xmatrix" }], workspaces: [] },
+    launchTargets: { repos: [{ value: "owner/xmatrix" }], workspaces: [
+      { canonicalCwd: "/work/xmatrix", ownerUserId: "e2e-user", machineId: "mac-id", hostName: "My Mac" }
+    ] },
   });
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
 });
@@ -253,4 +255,22 @@ test("typing a summon and a space opens tag choices without changing Enter submi
   await input.press("Enter");
   await expect.poll(async () => (await fixtureRequestBodies(page, "source")).length).toBe(1);
   expect((await fixtureRequestBodies(page, "source"))[0].body).toBe("@auto ");
+});
+
+
+test("machine values stay visible while typing the colon and value", async ({ page }) => {
+  const input = page.locator("textarea.composer-textarea").first();
+  const machine = page.getByRole("option").filter({ hasText: "machine:My Mac" });
+  await input.fill("@codex machine");
+  await expect(machine).toBeVisible();
+  await input.pressSequentially(":");
+  await expect(machine).toBeVisible();
+  await expect(page.getByRole("option").filter({ hasText: "pwd:" })).toHaveCount(0);
+  await input.pressSequentially("My");
+  await expect(machine).toBeVisible();
+  await input.press("Tab");
+  await expect(input).toHaveValue('@codex machine:"My Mac" ');
+  await input.pressSequentially("model:tes");
+  await input.press("Tab");
+  await expect(input).toHaveValue('@codex machine:"My Mac" model:test-model ');
 });

@@ -76,6 +76,10 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await chips.nth(0).hover();
   const detail = page.getByRole("dialog");
   await expect(detail).toContainText("Workstation");
+  await expect(detail).toHaveAttribute("data-material", "liquid-glass-card");
+  await page.clock.runFor(100);
+  await expect(detail).toHaveCSS("backdrop-filter", /blur\(.+url\(.+xm-lens-.+saturate\(/);
+  await expect(detail.locator("[data-material^=liquid-glass]")).toHaveCount(0);
   await expect(detail).toContainText("Connection attempt 7.");
   const startup = detail.getByRole("list", { name: "Invocation progress" });
   await expect(startup.locator("li[data-state=current]")).toHaveText(/^Connecting$/);

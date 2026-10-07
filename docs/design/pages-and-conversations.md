@@ -79,7 +79,10 @@ The production x-matrix Space on 2026-09-26:
    has to close, file, archive or distill them. An idle conversation sinks.
 4. **Structure is deliberate.** Humans and Agents add, move and remove pages
    on purpose, within the owner's page access. A conversation never creates
-   structure as a side effect.
+   structure as a side effect. The Web page header offers Delete to editors,
+   with a confirmation explaining permanent history deletion and automation
+   shutdown. Child pages must be moved or deleted first; linked conversations
+   remain. The server rechecks access and children when deleting.
 5. **Every piece of knowledge has exactly one home.** Knowledge that changes
    with code lives in that code's repository. Knowledge about the organization
    around the code lives in pages (§3.5).

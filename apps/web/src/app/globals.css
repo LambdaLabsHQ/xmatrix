@@ -6483,7 +6483,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .composer-input-row {
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-box:not(.app-agent-work-card) .composer-textarea {
   min-height: 2.5rem !important;
   max-height: min(9rem, 34dvh) !important;
-  padding: 0.55rem 0.125rem !important;
+  /* 0.05rem more on top than below: measured on macOS, this puts the middle
+     of the lowercase letters on the attach and send buttons' middles. */
+  padding: 0.6rem 0.125rem 0.5rem !important;
   line-height: 1.38 !important;
 }
 
@@ -7174,7 +7176,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-invocation-spinner { animation: invocation-spin 1.4s linear infinite; }
 @keyframes invocation-spin { to { transform: rotate(360deg); } }
 .app-invocation-positioner { z-index: 80; }
-.app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; @apply app-reference-popup-recipe; }
+.app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; color: var(--foreground); font-size: 13px; line-height: 1.5; }
 .app-invocation-heading { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
 .app-invocation-heading > div { min-width: 0; }
 .app-invocation-title { margin: 0; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
@@ -7422,12 +7424,19 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-composer-hint[data-rotating="true"] { display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
 .app-composer-hint-trigger {
   --hint-ink: var(--primary);
-  margin-right: 0.1em; padding: 0 0.28em; border-radius: 0.3em; font-weight: 600;
+  position: relative; isolation: isolate;
+  margin-right: 0.1em; padding: 0 0.28em; font-weight: 600;
   color: color-mix(in oklab, var(--hint-ink) 75%, var(--muted-foreground));
+}
+/* A fill on the font's box centers on the caps, 0.09em above the middle of
+   the lowercase letters beside it; it is drawn lowered by that much so chip
+   and words share one middle line. */
+.app-composer-hint-trigger::before {
+  content: ""; position: absolute; z-index: -1; inset: 0.09em 0 -0.09em; border-radius: 0.3em;
   background: color-mix(in oklab, var(--hint-ink) 9%, transparent);
 }
-.app-composer-hint[data-summon="true"] .app-composer-hint-trigger {
-  --hint-ink: oklch(0.62 0.16 285);
+.app-composer-hint[data-summon="true"] .app-composer-hint-trigger { --hint-ink: oklch(0.62 0.16 285); }
+.app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before {
   background:
     linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%) 0 0 / 240% 100% no-repeat,
     color-mix(in oklab, var(--hint-ink) 11%, transparent);
@@ -7437,7 +7446,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 @keyframes composer-hint-summon { from { background-position: 120% 0, 0 0; } to { background-position: -120% 0, 0 0; } }
 @media (prefers-reduced-motion: reduce) {
   .app-composer-hint[data-rotating="true"],
-  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger { animation: none; }
+  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before { animation: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3341,16 +3341,42 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
     #[test]
     fn a_refused_space_credential_is_a_repository_access_failure() {
         for error in [GitRunError::Auth, GitRunError::NotFound] {
-            let refused = required_fetch_error(error, true);
+            let refused = required_fetch_error(error.into(), true);
             assert_eq!(refused.code, PoolErrorCode::FetchRequiredFailed);
             assert!(
                 refused.to_string().starts_with("fetch_required_failed: repository_access_unavailable: "),
                 "{refused}"
             );
             // The host's own login refusing is not the Space connection's answer.
-            assert!(!required_fetch_error(error, false).to_string().contains("repository_access_unavailable"));
+            assert!(!required_fetch_error(error.into(), false).to_string().contains("repository_access_unavailable"));
         }
-        assert!(!required_fetch_error(GitRunError::Network, true).to_string().contains("repository_access_unavailable"));
+        assert!(!required_fetch_error(GitRunError::Network.into(), true).to_string().contains("repository_access_unavailable"));
+    }
+
+    #[tokio::test]
+    async fn rejected_fetch_preserves_git_stderr() {
+        if !git_available() { return; }
+        let (base, remote) = setup_base_with_local_fetch("https://github.com/acme/rejected-fetch");
+        // The tracking ref has a local-only descendant; fetching the remote
+        // branch back to its ancestor must fail without any forced ref update.
+        run_git(&base, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-qm", "local-only"]);
+        run_git(&base, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        let error = required_origin_fetch(&base).await.unwrap_err();
+        assert_eq!(error.code, PoolErrorCode::FetchRequiredFailed);
+        assert!(error.message.contains("[rejected]"), "{error}");
+        assert!(error.message.contains("non-fast-forward"), "{error}");
+        assert!(!error.message.contains("git command failed"), "{error}");
+        cleanup_test_dirs(&[&base, &remote]);
+    }
+
+    #[test]
+    fn stderr_redacts_every_secret_without_losing_later_failure_lines() {
+        let raw = "From https://u:first@github.com/a/b?token=second\nremote: https://u:third@github.com/c/d\nfatal: password=fourth token=fifth ghp_sixth\n ! [rejected] main -> origin/main (non-fast-forward)";
+        let error = required_fetch_error(GitCommandError::new(GitRunError::Failed, raw), false);
+        for secret in ["first", "second", "third", "fourth", "fifth", "ghp_sixth"] {
+            assert!(!error.message.contains(secret), "{error}");
+        }
+        assert!(error.message.contains("non-fast-forward"), "{error}");
     }
 
     #[tokio::test]
@@ -3393,10 +3419,8 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
             .await
             .expect_err("worktree add into an occupied path must fail");
         assert_eq!(err.code, PoolErrorCode::WorktreeCreateFailed);
-        assert_eq!(
-            err.message, "git worktree add failed (path already registered or in use)",
-            "the git failure classification must survive into the pool error"
-        );
+        assert!(err.message.contains("already exists"), "{err}");
+        assert!(err.message.contains("fatal:"), "{err}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

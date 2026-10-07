@@ -33,9 +33,11 @@ guard. This requires the updated CLI; stale retained authority is refused.
 Stop issuance failures refuse the handoff; a durable stop may still
 await its daemon report. See [instance handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine).
 
+Machine startup failures preserve bounded, credential-redacted originating causes in
+Channel notices and invocation details; Git retry classification does not replace stderr.
 Machine startup failures remain visible as idempotent Channel notices even if
-the Launch has already failed its Run. Public invocation details classify known
-repository preparation errors with actionable copy; subsequent stop cleanup
+the Launch has already failed its Run. Public invocation details retain the originating
+repository preparation error; subsequent stop cleanup
 preserves the failed-startup outcome. See [invocation status](../design/mention-invocation/README.md).
 
 Teams native integration uses a company home-tenant Bot, Human admin confirmation and primary PostgreSQL room grants, alongside explicit outbound-only manual webhooks. Its supported scope, canonical release configuration and evidence requirements are documented in [Teams native contract](../connectors/teams-native.md). Company identity and native acceptance remain external prerequisites.

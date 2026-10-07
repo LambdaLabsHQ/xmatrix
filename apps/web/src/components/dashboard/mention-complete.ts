@@ -54,6 +54,7 @@ export type MentionAppConnector = {
 
 export type MentionCandidate = {
   launchTags?: import("@xmatrix/protocol").AutoLaunchTags;
+  launchField?: import("@xmatrix/protocol").AutoLaunchField;
   invocationTarget?: AgentInvocationTarget;
   id: string;
   name: string;

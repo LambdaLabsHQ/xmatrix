@@ -6,7 +6,7 @@ import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 
 import { expect, test } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
+import { fixtureJson, fixtureRequestBodies, fixtureRequestRecords } from "./in-page-api-fixtures";
 import { editPageMarkdown, pageDocument, pageMarkdown } from "./page-document-fixture";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, installWorkspaceStubs } from "./workspace-fixtures";
 
@@ -1108,4 +1108,36 @@ test("the insert menu embeds a pasted GitHub file link, and a refusal names what
     .toContain("[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md?ref=main)");
   await expect(editor.getByTestId("page-github-file")).toContainText("Connect GitHub for this Space to show this file.");
   await browser.screenshot({ path: test.info().outputPath("pages-github-file-refused.png") });
+});
+
+
+test("page deletion requires confirmation, reports refusal, and can retry", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-delete", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u,
+    { error: "Move or remove its child pages first" }, { method: "DELETE", status: 409 });
+  await openLivePage(browser);
+  await browser.getByRole("button", { name: "Delete page", exact: true }).click();
+  const dialog = browser.getByRole("dialog", { name: "Delete this page?" });
+  await expect(dialog).toContainText("version history");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await fixtureRequestRecords(browser, "page-delete")).toHaveLength(0);
+  await browser.getByRole("button", { name: "Delete page", exact: true }).click();
+  await dialog.getByRole("button", { name: "Delete page" }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await fixtureJson(browser, "page-delete", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u,
+    { removed: true }, { method: "DELETE" });
+  await fixtureJson(browser, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, { pages: [] });
+  await dialog.getByRole("button", { name: "Delete page" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(browser).not.toHaveURL(/page=p-relay/u);
+  await expect(browser.getByTestId("page-editor")).toHaveCount(0);
+});
+
+test("a page with children cannot be deleted from the confirmation", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V"), page("p-child", "p-relay", "Child", "V")]);
+  await openLivePage(browser);
+  await browser.getByRole("button", { name: "Delete page", exact: true }).click();
+  const dialog = browser.getByRole("dialog", { name: "Delete this page?" });
+  await expect(dialog).toContainText("child pages first");
+  await expect(dialog.getByRole("button", { name: "Delete page" })).toBeDisabled();
 });
