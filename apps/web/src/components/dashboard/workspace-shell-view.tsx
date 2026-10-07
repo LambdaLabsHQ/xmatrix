@@ -749,6 +749,30 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     );
   }
 
+  const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && installedFleet.ready &&
+    installedFleet.candidates.length > 0;
+  const spaceAgentSetupSurface = (
+        <div className={cn("min-h-0 flex-1 overflow-y-auto",
+          showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
+          <SpaceAgentSetupCard
+            state={spaceAgentSetup}
+            hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
+            busy={bringingLocal ? "enabling" : localActionBusy}
+            error={installedFleet.error ?? localActionError}
+            fleet={installedFleet}
+            onManageMachines={() => changeAppView("machines")}
+            onBringAll={() => installedFleet.candidates.length > 0 ? void installedFleet.enableAll() :
+              void enableLocalHarnesses(agentPresetDiscoveries.filter((candidate) => candidate.runtimeAvailable).map((candidate) => candidate.presetId))}
+            onStartDaemon={() => void startDesktopDaemon()}
+            onRefresh={() => void refreshAgentPresetDiscoveries()}
+            // Re-reads the registrations, not the local runtime discovery:
+            // the failure this retries is the registration read.
+            onRetryAgents={() => void registrationCatalog.refetch()}
+            onBindAgent={(candidate) => void enableLocalHarnesses([candidate.presetId])}
+          />
+        </div>
+  );
+
   const mobileChannelListPane = (
     /* The outer slab clips the fixed edge lighting. The texture lives
        on the full-height content wrapper inside the scroll viewport,
@@ -758,7 +782,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
        is — otherwise "the channel list" and "Follow-ups" are the same
        selector now that both stay mounted. */
     <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-      <MobileChannelChatList
+      {showMobileHarnessSetup ? spaceAgentSetupSurface : <MobileChannelChatList
             currentSpaceId={currentSpaceId}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
@@ -773,7 +797,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             onCopyChannelLink={(channel) => copyChannelLink(channel)}
             pendingChannelId={pendingChannelNavigationId}
             onSelect={(channelId, messageId) => requestChannelNavigation(channelId, messageId)}
-          />
+          />}
     </div>
   );
   const pendingCrossSpaceReads = canUseSelectedChannel ? pendingCrossSpaceReadRequests : [];
@@ -855,27 +879,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <ConversationPageCards spaceId={selectedChannel.spaceId} conversationId={selectedChannel.id} token={token}
           onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
-      {showSpaceAgentSetup && (
-        <div className={cn("min-h-0 flex-1 overflow-y-auto",
-          showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
-          <SpaceAgentSetupCard
-            state={spaceAgentSetup}
-            hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
-            busy={bringingLocal ? "enabling" : localActionBusy}
-            error={installedFleet.error ?? localActionError}
-            fleet={installedFleet}
-            onManageMachines={() => changeAppView("machines")}
-            onBringAll={() => installedFleet.candidates.length > 0 ? void installedFleet.enableAll() :
-              void enableLocalHarnesses(agentPresetDiscoveries.filter((candidate) => candidate.runtimeAvailable).map((candidate) => candidate.presetId))}
-            onStartDaemon={() => void startDesktopDaemon()}
-            onRefresh={() => void refreshAgentPresetDiscoveries()}
-            // Re-reads the registrations, not the local runtime discovery:
-            // the failure this retries is the registration read.
-            onRetryAgents={() => void registrationCatalog.refetch()}
-            onBindAgent={(candidate) => void enableLocalHarnesses([candidate.presetId])}
-          />
-        </div>
-      )}
+      {showSpaceAgentSetup && !showMobileHarnessSetup && spaceAgentSetupSurface}
       {showSpaceFirstTask && (
         <div className="app-space-setup-canvas min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard

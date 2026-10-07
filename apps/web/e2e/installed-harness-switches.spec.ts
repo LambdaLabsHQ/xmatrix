@@ -15,7 +15,7 @@ const catalog = (harnesses: string[]) => ({ registrations: harnesses.map(registr
 const CATALOG = /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?[^#]*)?$/u;
 const COMMANDS = "**/api/xmatrix/spaces/*/agent-registrations/commands";
 
-for (const [name, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2E_MOBILE_CONTEXT]] as const) {
+function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT | typeof E2E_MOBILE_CONTEXT) {
   test.describe(name, () => {
     test.use(context);
     test("Agents offers installed harnesses from a remote machine without registering them", async ({ page }) => {
@@ -39,7 +39,7 @@ for (const [name, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2E_
 
     test("Bring them in enables every installed pair in this Space", async ({ page }) => {
       await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], machineDaemons: [machine] });
-      // Direct chat entry exposes onboarding on both viewport sizes.
+      // The empty conversation screen offers installed harnesses on both viewport sizes.
       await page.goto("/app/personal-sspaceperso/chat");
       const bring = page.getByRole("button", { name: "Bring them in", exact: true });
       await expect(bring).toBeVisible();
@@ -56,6 +56,9 @@ for (const [name, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2E_
     });
   });
 }
+
+installedHarnessTests("desktop", E2E_DESKTOP_CONTEXT);
+installedHarnessTests("mobile", E2E_MOBILE_CONTEXT);
 
 test.use(E2E_DESKTOP_CONTEXT);
 test("a refused owner switch stays off and reports the server failure", async ({ page }) => {
