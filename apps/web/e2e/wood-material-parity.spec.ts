@@ -50,7 +50,7 @@ for (const view of ['profile', 'activity', 'more']) {
   });
 }
 
-test('mobile channel details puts its planks on paper under a wood bar', async ({ page }) => {
+test('mobile channel details puts its navigation and content planks on paper', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, summary: 'Planks on paper.' }, []);
   await page.getByRole('button', { name: 'More', exact: true }).tap();
