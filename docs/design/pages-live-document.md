@@ -523,6 +523,13 @@ A phone shows the same things on the page itself: avatars and the
 conversation count in the header, headings and bubbles in the text,
 and Share and History in the page's top bar.
 
+Creating a page uses one in-app title dialog for the desktop list and
+Ctrl/⌘+N shortcut, the phone's existing FAB, the empty list, and a parent row's
+sub-page +. It works in native WebViews without browser prompt support.
+Blank titles cannot be submitted; pending creation disables further submission
+and dismissal. A failed request keeps the title and shows the error for retry.
+Success refreshes the tree and opens the new page under the chosen parent.
+
 ## 8. Build order
 
 Shipped:

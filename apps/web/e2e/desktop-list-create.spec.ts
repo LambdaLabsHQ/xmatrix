@@ -73,10 +73,16 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
 
-  const prompts: string[] = [];
-  page.on("dialog", (dialog) => { prompts.push(dialog.message()); void dialog.dismiss(); });
   await page.keyboard.press("Control+n");
-  await expect.poll(() => prompts).toEqual(["Title of the new page"]);
+  const dialog = page.getByRole("dialog", { name: "New page", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Title", { exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await create.click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
   await expect(page.getByTestId("new-conversation")).toBeHidden();
 });
 
@@ -109,8 +115,9 @@ test("a page row makes a page under it from its own +, shown while the row is ho
   await row.hover();
   await expect(create).toHaveCSS("opacity", "1");
 
-  const prompts: string[] = [];
-  page.on("dialog", (dialog) => { prompts.push(dialog.message()); void dialog.dismiss(); });
   await create.click();
-  await expect.poll(() => prompts).toEqual(["Title of the new sub-page"]);
+  const dialog = page.getByRole("dialog", { name: "New sub-page", exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
 });
