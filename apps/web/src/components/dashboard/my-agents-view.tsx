@@ -52,7 +52,7 @@ import {
   type MyAgentAction,
 } from "./my-agents-registrations";
 import { spaceMemberCanCreate } from "./space-member-permissions";
-import { AgentAddCommand } from "./space-agent-setup-card";
+import { ConnectMachine } from "./space-agent-setup-card";
 import { ADD_AGENT_ITEM } from "./my-agents-items";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
@@ -324,7 +324,7 @@ export function MyAgentsView({
         <a href="/download" className={actionClass({ variant: "primary", size: "sm" })}>
           <Download className="size-4" /> Download xMatrix
         </a>
-        <AgentAddCommand spaceId={spaceId} centered />
+        <ConnectMachine spaceId={spaceId} token={token} userId={currentUserId} centered />
       </ToolDetailEmpty>
     );
   } else if (catalog.data && rows.length === 0) {

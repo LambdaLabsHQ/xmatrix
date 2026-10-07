@@ -840,6 +840,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           <SpaceAgentSetupCard
             state={spaceAgentSetup}
             spaceId={currentSpaceId ?? null}
+            token={token ?? undefined}
+            userId={user?.id}
             hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
             busy={localActionBusy}
             error={localActionError}

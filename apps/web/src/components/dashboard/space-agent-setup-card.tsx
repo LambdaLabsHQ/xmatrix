@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
 import { Check, CloudOff, Copy, Download, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
@@ -10,6 +11,12 @@ import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { IdentityAvatar } from "./identity-avatar";
+import { useNow } from "./agent-work-intent";
+import {
+  connectStep, defaultInstallPlatform, listNames, setupInstallCommand,
+  type ConnectStep, type InstallPlatform,
+} from "./connect-machine";
+import { useSetupIntent } from "./use-setup-intent";
 import type {
   SpaceAgentSetupCandidate,
   SpaceAgentSetupState,
@@ -35,6 +42,8 @@ export function agentAddCommand(spaceId: string | null | undefined): string {
 export function SpaceAgentSetupCard({
   state,
   spaceId,
+  token,
+  userId,
   hostLabel,
   busy,
   error,
@@ -45,6 +54,8 @@ export function SpaceAgentSetupCard({
 }: {
   state: SpaceAgentSetupState;
   spaceId: string | null;
+  token: string | undefined;
+  userId: string | undefined;
   hostLabel: string;
   busy: string | null;
   error: string | null;
@@ -58,7 +69,7 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
-        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} />}
+        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
@@ -238,7 +249,9 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
 /* Web and mobile: agents are not in this tab, so the one thing to learn here
    is where they are. The desktop app finds the ones already installed; a
    machine with the CLI adds one with a single command. */
-export function BringAgentsInPanel({ spaceId }: { spaceId: string | null }) {
+export function BringAgentsInPanel({ spaceId, token, userId }: {
+  spaceId: string | null; token: string | undefined; userId: string | undefined;
+}) {
   return (
     <>
       <SetupCardHeader
@@ -250,28 +263,105 @@ export function BringAgentsInPanel({ spaceId }: { spaceId: string | null }) {
         <Download className="size-4" />
         Download xMatrix
       </a>
-      <AgentAddCommand spaceId={spaceId} />
+      <ConnectMachine spaceId={spaceId} token={token} userId={userId} />
       <RemoteMachineHint />
     </>
   );
 }
 
-/* For a machine that already has the CLI: one line, with this Space's id. */
-export function AgentAddCommand({ spaceId, centered = false }: { spaceId: string | null; centered?: boolean }) {
-  const command = agentAddCommand(spaceId);
-  const { copied, copy } = useCopyToClipboard(command);
+/* One command for the machine, then what happened to it, as it happens: the
+   terminal asking to be approved, the machine coming online, the agents it
+   has, and one click to bring them into this Space. */
+export function ConnectMachine({ spaceId, token, userId, centered = false }: {
+  spaceId: string | null; token: string | undefined; userId: string | undefined; centered?: boolean;
+}) {
+  const intent = useSetupIntent(spaceId, token, userId);
+  const [platform, setPlatform] = useState<InstallPlatform>(() =>
+    typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent));
+  const now = useNow(1_000);
+  const command = intent.intentId ? setupInstallCommand(intent.intentId, platform) : null;
+  const { copied, copy } = useCopyToClipboard(command ?? "");
+  const step = intent.status ? connectStep(intent.status, now - intent.shownAt) : null;
   return (
-    <div className="mt-4">
-      <p className="text-sm text-muted-foreground">Already have the xMatrix CLI on that machine? Run:</p>
+    <div className="mt-4" data-testid="connect-machine">
+      <p className="text-sm text-muted-foreground">Or run this on the computer your agents use:</p>
       <div className={cn("mt-2 flex min-w-0 flex-wrap items-center gap-2", centered && "justify-center")}>
-        <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono text-xs [overflow-wrap:anywhere]">{command}</code>
-        <button type="button" onClick={() => void copy()} className={actionClass({ variant: "secondary", size: "sm" })}>
+        <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono text-xs [overflow-wrap:anywhere]">
+          {command ?? "Preparing a command…"}
+        </code>
+        <button type="button" disabled={!command} onClick={() => void copy()}
+          className={actionClass({ variant: "secondary", size: "sm" })}>
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
+      <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
+        className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:underline">
+        {platform === "windows" ? "On macOS or Linux?" : "On Windows?"}
+      </button>
+      {step && <ConnectStepLine step={step} busy={intent.busy} centered={centered}
+        onApprove={(code) => void intent.approve(code)} onDecline={() => void intent.decline()}
+        onBringIn={(ids) => void intent.bringIn(ids)} />}
+      {intent.error && <p role="alert" className="mt-2 text-sm text-destructive">{intent.error}</p>}
     </div>
   );
+}
+
+function ConnectStepLine({ step, busy, centered, onApprove, onDecline, onBringIn }: {
+  step: ConnectStep; busy: boolean; centered: boolean;
+  onApprove: (userCode: string) => void; onDecline: () => void; onBringIn: (harnessIds: string[]) => void;
+}) {
+  const row = cn("mt-3 flex min-w-0 flex-wrap items-center gap-2 text-sm", centered && "justify-center");
+  const waiting = <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />;
+  const done = <Check className="size-4 shrink-0 text-primary" />;
+  switch (step.kind) {
+    case "waiting":
+      return (
+        <div role="status" className="mt-3 text-sm text-muted-foreground">
+          <p className={row.replace("mt-3 ", "")}>{waiting} Waiting for the command…</p>
+          {step.hint === "check-terminal" && <p className="mt-1">Nothing yet? The terminal says what went wrong.</p>}
+          {step.hint === "try-desktop" && <p className="mt-1">Still nothing? The desktop app connects without a terminal.</p>}
+        </div>
+      );
+    case "approval":
+      return (
+        <div role="status" className={row}>
+          <span><strong>{step.hostname}</strong> wants to connect with code{" "}
+            <code className="font-mono font-semibold">{step.userCode}</code>.
+            Approve it only if the terminal shows the same code.</span>
+          <button type="button" disabled={busy} onClick={() => onApprove(step.userCode)}
+            className={actionClass({ variant: "primary", size: "sm" })}>Approve</button>
+          <button type="button" disabled={busy} onClick={onDecline}
+            className={actionClass({ variant: "quiet", size: "sm" })}>Not mine</button>
+        </div>
+      );
+    case "connecting":
+      return <p role="status" className={row}>{waiting} {step.hostname} is signing in…</p>;
+    case "looking":
+      return <p role="status" className={row}>{done} {step.machineName} is connected. Looking for agents…</p>;
+    case "found":
+      return (
+        <div role="status" className={row}>
+          {done}
+          <span>{step.machineName} is connected. Found {listNames(step.harnesses.map((harness) => harness.name))}.</span>
+          <button type="button" disabled={busy} onClick={() => onBringIn(step.harnesses.map((harness) => harness.id))}
+            className={actionClass({ variant: "primary", size: "sm" })}>
+            {step.harnesses.length === 1 ? "Bring it in" : "Bring them in"}
+          </button>
+        </div>
+      );
+    case "none-installed":
+      return (
+        <div role="status" className="mt-3 text-sm">
+          <p className={row.replace("mt-3 ", "")}>{done} {step.machineName} is connected, but no agent is installed there yet.</p>
+          <p className="mt-1 text-muted-foreground">
+            Install one there, for example <code className="font-mono text-xs">{RUNTIME_INSTALL_COMMANDS[0]!.command}</code>
+          </p>
+        </div>
+      );
+    case "done":
+      return <p role="status" className={row}>{done} Your agents on {step.machineName} are in this Space.</p>;
+  }
 }
 
 /* The remote path from the landing page: a machine with no GUI (a server, a
