@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Hono } from "hono";
+import { createObservabilityMemoryApp } from "./support/observability-memory-routes.mjs";
 
-import { HUB_ROUTES } from "../../protocol/src/authority-foundation.ts";
-import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
-
-const load = await compileCommonJsSourceModule(new URL("../src/index-routes-observability-memory.ts", import.meta.url));
 const env = { RELAY_POSTGRES: { connectionString: "postgres://test" }, RELAY_POSTGRES_SHARD_ID: "shard-test" };
 
 function fixture(cellAnswers) {
@@ -16,9 +12,7 @@ function fixture(cellAnswers) {
     }
   }
   const imports = {
-    "@xmatrix/protocol": { HUB_ROUTES, utf8ByteLength: (value) => new TextEncoder().encode(value).byteLength },
     "@xmatrix/db": { PostgresTraceAccessRepository },
-    "./postgres-authority-http": { postgresAuthorityDatabase: () => ({}) },
     "./relay-runtime": { RELAY_RUNTIME_AGENT_TRACE_PATH: "/internal/product-trace/instance-events" },
     "./relay-authority-locator": {
       relayRuntimeCellsForOwners: (_env, owners) => ["cell-0", ...owners.map((owner) => `user-${owner}`)]
@@ -31,8 +25,7 @@ function fixture(cellAnswers) {
       requestErrorResponse: (context, error) => context.json({ error: error.message }, 500),
     },
   };
-  const app = new Hono();
-  load((name) => imports[name] ?? {}).registerObservabilityMemoryRoutes(app);
+  const app = createObservabilityMemoryApp(imports);
   return { app, asked };
 }
 
