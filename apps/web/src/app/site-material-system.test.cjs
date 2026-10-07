@@ -85,8 +85,7 @@ test("navbar keeps the 3D logo off a centered sticky wood bar", () => {
   assert.match(navbarSource, /site-navbar-brand/);
   assert.match(navbarSource, /--navbar-wood-reveal/);
   assert.match(navbarSource, /className="site-navbar fixed top-0/);
-  assert.match(siteCss, /--site-navbar-brand-slot:/);
-  assert.match(siteCss, /\.site-navbar-bar \{[\s\S]*margin-inline:\s*auto/);
+  assert.match(siteCss, /\.site-navbar-layout \{[\s\S]*?justify-content:\s*center/);
   assert.match(siteCss, /\.site-navbar \.site-navbar-inner \{[\s\S]*opacity:\s*var\(--navbar-wood-reveal\)/);
   assert.match(siteCss, /\.site-navbar \{[\s\S]*background:\s*transparent/);
   assert.doesNotMatch(siteCss, /\.site-navbar::before/);
