@@ -3305,6 +3305,7 @@ export function AgentWorkAvatar({
   const touchHandledRef = useRef(false);
   const suppressNextClickRef = useRef(false);
   const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
+  const actionPopupRef = useRef<HTMLDivElement | null>(null);
   const actionToolbarRef = useRef<HTMLDivElement | null>(null);
   const hoverStackRef = useRef<HTMLDivElement | null>(null);
   // Which part of the item the pointer is on picks the card above it: the
@@ -3380,12 +3381,16 @@ export function AgentWorkAvatar({
 
   const positionActionToolbar = useCallback(() => {
     const avatar = avatarButtonRef.current;
-    if (!avatar) return;
+    const popup = actionPopupRef.current;
+    const stack = hoverStackRef.current;
+    if (!avatar || !popup || !stack) return;
     const anchor = (hoverPart === "intent"
       ? avatar.closest(".app-agent-work-item")?.querySelector(".app-agent-work-intent") : null) ?? avatar;
     const viewportPosition = centeredToolbarPosition(anchor,
-      hoverStackRef.current?.getBoundingClientRect().width || (canReborn ? 220 : 140));
-    const containingBlockRect = fixedContainingBlockRect(avatar);
+      stack.getBoundingClientRect().width || (canReborn ? 220 : 140));
+    // The cards sit outside the glass island. Its backdrop filter contains
+    // the avatar, but does not contain this sibling popup.
+    const containingBlockRect = fixedContainingBlockRect(popup);
     const nextPosition = {
       left: viewportPosition.left - (containingBlockRect?.left ?? 0),
       top: viewportPosition.top - (containingBlockRect?.top ?? 0),
@@ -3559,7 +3564,7 @@ export function AgentWorkAvatar({
       ) : avatarButton}
       {hoverCards ? (
         // Every card the item shows sits above it in one column, in one chrome.
-        <div className="app-agent-work-actions" style={actionToolbarPosition}>
+        <div ref={actionPopupRef} className="app-agent-work-actions" style={actionToolbarPosition}>
           <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
         </div>
       ) : null}
