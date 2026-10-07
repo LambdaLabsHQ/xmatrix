@@ -163,9 +163,21 @@ jobs:
               core.setFailed("Production request does not authorize this exact main revision");
               return;
             }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              ...context.repo, run_id: requestRun.id, per_page: 100,
-            });
+            // The request dispatches this run as its last step, so GitHub can
+            // still report its dispatcher's steps as pending for a few seconds.
+            // Re-read for a bounded minute; the evidence required is unchanged.
+            const markerName = `Record successful ${scope} production authorization`;
+            let jobs = [];
+            let marker;
+            for (let attempt = 0; attempt < 12; attempt += 1) {
+              if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
+              jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                ...context.repo, run_id: requestRun.id, per_page: 100,
+              });
+              const dispatcher = jobs.find((job) => job.name === "authorize-and-dispatch");
+              marker = dispatcher?.steps?.find((step) => step.name === markerName);
+              if (marker?.conclusion || dispatcher?.status === "completed") break;
+            }
             // The request's `gates` job passes only when every gate its scope
             // selects passed (ci.yml's aggregate and the iOS gate).
             for (const name of ["plan", "gates"]) {
@@ -174,10 +186,6 @@ jobs:
                 return;
               }
             }
-            const dispatcher = jobs.find((job) => job.name === "authorize-and-dispatch");
-            const marker = dispatcher?.steps?.find((step) =>
-              step.name === `Record successful ${scope} production authorization`
-            );
             if (marker?.conclusion !== "success") {
               core.setFailed("Production request is missing its successful scope authorization marker");
             }
