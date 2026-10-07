@@ -88,6 +88,43 @@ fn apply_spawn_initial_prompt(
     local_env
 }
 
+/// Applies the registration's working mode. Hub launch data is authoritative,
+/// so a value inherited from a local profile never reaches the Run; a mode
+/// this CLI does not know fails the launch instead of silently becoming
+/// another one.
+fn apply_spawn_working_mode(
+    mut local_env: BTreeMap<String, String>,
+    working_mode: Option<&str>,
+) -> error::Result<BTreeMap<String, String>> {
+    use xmatrix_cli_core::bootstrap::WorkingMode;
+    local_env.remove(WorkingMode::ENV);
+    if let Some(working_mode) = working_mode {
+        WorkingMode::parse(working_mode).map_err(CliError::Launch)?;
+        local_env.insert(WorkingMode::ENV.to_string(), working_mode.trim().to_string());
+    }
+    Ok(local_env)
+}
+
+/// Names the Space's rules page for the Run, replacing any value a local
+/// profile left behind. The id goes into the launch prompt and a shell
+/// command there, so anything but an opaque id fails the launch.
+fn apply_spawn_space_rules(
+    mut local_env: BTreeMap<String, String>,
+    page_id: Option<&str>,
+) -> error::Result<BTreeMap<String, String>> {
+    use xmatrix_cli_core::bootstrap::SPACE_RULES_PAGE_ENV;
+    local_env.remove(SPACE_RULES_PAGE_ENV);
+    if let Some(page_id) = page_id {
+        if !xmatrix_cli_core::bootstrap::is_opaque_page_id(page_id) {
+            return Err(CliError::Launch(format!(
+                "the Space rules page id `{page_id}` is not an opaque page id"
+            )));
+        }
+        local_env.insert(SPACE_RULES_PAGE_ENV.to_string(), page_id.to_string());
+    }
+    Ok(local_env)
+}
+
 fn write_initial_message_attachments_file(
     attachments: Option<&[protocol::ChannelAttachment]>,
 ) -> error::Result<Option<PathBuf>> {

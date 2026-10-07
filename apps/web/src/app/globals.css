@@ -1640,16 +1640,16 @@
   }
 
   :root:not(.dark) .xmatrix-app .app-agent-work-dock,
-  :root:not(.dark) .xmatrix-app .app-agent-work-dock *:not(.app-agent-work-card-shadow):not(.app-agent-work-card):not(.app-agent-work-island):not(.app-agent-work-action-menu):not(.app-agent-work-action-menu *):not(.app-channel-approvals):not(.app-channel-approvals *):not(.identity-avatar-status):not(.app-presence-status-dot),
-  :root:not(.dark) .xmatrix-app .app-agent-work-dock *:not(.app-agent-work-card-shadow):not(.app-agent-work-card):not(.app-agent-work-island):not(.app-agent-work-action-menu):not(.app-agent-work-action-menu *):not(.app-channel-approvals):not(.app-channel-approvals *):not(.identity-avatar-status):not(.app-presence-status-dot)::before,
-  :root:not(.dark) .xmatrix-app .app-agent-work-dock *:not(.app-agent-work-card-shadow):not(.app-agent-work-card):not(.app-agent-work-island):not(.app-agent-work-action-menu):not(.app-agent-work-action-menu *):not(.app-channel-approvals):not(.app-channel-approvals *):not(.identity-avatar-status):not(.app-presence-status-dot)::after {
+  :root:not(.dark) .xmatrix-app .app-agent-work-dock *:not(.app-agent-work-card-shadow):not(.app-agent-work-card):not(.app-agent-work-island):not(.app-agent-work-morph):not(.app-agent-work-action-menu):not(.app-agent-work-action-menu *):not(.app-channel-approvals):not(.app-channel-approvals *):not(.identity-avatar-status):not(.app-presence-status-dot),
+  :root:not(.dark) .xmatrix-app .app-agent-work-dock *:not(.app-agent-work-card-shadow):not(.app-agent-work-card):not(.app-agent-work-island):not(.app-agent-work-morph):not(.app-agent-work-action-menu):not(.app-agent-work-action-menu *):not(.app-channel-approvals):not(.app-channel-approvals *):not(.identity-avatar-status):not(.app-presence-status-dot)::before,
+  :root:not(.dark) .xmatrix-app .app-agent-work-dock *:not(.app-agent-work-card-shadow):not(.app-agent-work-card):not(.app-agent-work-island):not(.app-agent-work-morph):not(.app-agent-work-action-menu):not(.app-agent-work-action-menu *):not(.app-channel-approvals):not(.app-channel-approvals *):not(.identity-avatar-status):not(.app-presence-status-dot)::after {
     filter: none;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     box-shadow: none !important;
   }
 
-  :root:not(.dark) .xmatrix-app .app-agent-work-action-menu {
+  :root:not(.dark) .xmatrix-app .app-agent-work-action-menu:not(.app-agent-work-morph *) {
     box-shadow: 0 8px 22px oklch(0 0 0 / 0.16) !important;
   }
 
@@ -2687,6 +2687,19 @@
   overflow: hidden;
 }
 
+/* While the box grows into the completion panel (composer-input.tsx), its
+   content rides the bottom edge: the box clips the panel's top as it grows,
+   never the input row. */
+.xmatrix-app .app-composer-box.app-composer-box-morphing {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.xmatrix-app .app-composer-box.app-composer-box-morphing > * {
+  flex: none;
+}
+
 .app-mention-suggestions,
 .xmatrix-app .app-mention-suggestions {
   position: relative !important;
@@ -3367,6 +3380,143 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   transform: translateY(-100%);
 }
 
+/* In the dock the capsule itself grows up into the panel, as the composer
+   grows into its completions: the layer's bottom edge is the capsule's, and
+   the one glass starts at the capsule's own box (the vars come from
+   morphPanelPosition) and grows to the panel's on the space switcher's curve.
+   The box itself grows, not a clip over it, so the rim and shadow follow its
+   edge every frame. The content keeps its final layout, pinned to the bottom
+   left, and is revealed as the glass grows. Its bottom row is a seat the
+   island shows through: while the panel is out the island drops its own
+   glass and rides above it, so there is one surface. */
+.xmatrix-app .app-agent-work-item > .app-agent-work-actions {
+  padding-bottom: 0;
+  transform: translateY(-100%);
+  /* Never part-transparent: under opacity the glass loses its backdrop and
+     greys out. It shows at once and hides once it has folded back. */
+  transition: opacity 0s linear 240ms;
+}
+
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions {
+  transform: translateY(-100%);
+  transition: opacity 0s;
+  /* Only the cards take the pointer. The glass around them, and the seat
+     row beside the island, lie over the neighbouring items, which have to
+     stay tappable while this panel is out. */
+  pointer-events: none;
+}
+
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions .app-agent-work-hover-stack {
+  pointer-events: auto;
+}
+
+.xmatrix-app .app-agent-work-morph.app-agent-work-morph.app-liquid-glass-surface {
+  /* The content sits on the bottom edge, so a glass smaller than it cuts
+     off the top and the right, never the island's row. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  width: var(--app-agent-work-capsule-w, 0px);
+  height: var(--app-agent-work-capsule-h, 0px);
+  margin-left: var(--app-agent-work-capsule-x, 0px);
+  border-radius: calc(var(--app-agent-work-capsule-h, 2.75rem) / 2) !important;
+  transition:
+    width 240ms cubic-bezier(0.4, 0, 0.2, 1),
+    height 240ms cubic-bezier(0.4, 0, 0.2, 1),
+    margin-left 240ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions > .app-agent-work-morph.app-agent-work-morph {
+  width: var(--app-agent-work-panel-w, max-content);
+  height: var(--app-agent-work-panel-h, auto);
+  margin-left: 0;
+  transition:
+    width 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    margin-left 360ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.xmatrix-app .app-agent-work-morph > .app-agent-work-morph-content {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: var(--app-agent-work-capsule-w, 0px);
+}
+
+.xmatrix-app .app-agent-work-morph-content > .app-agent-work-hover-stack {
+  align-items: stretch;
+  padding: 0.375rem 0.375rem 0;
+}
+
+.xmatrix-app .app-agent-work-morph-content > .app-agent-work-morph-seat {
+  display: block;
+  flex: none;
+  height: var(--app-agent-work-capsule-h, 2.75rem);
+}
+
+/* A bare disc stretches right: the face is the leading seat and its controls
+   sit beside it, centred on the same line. */
+.xmatrix-app .app-agent-work-morph[data-shape="row"] > .app-agent-work-morph-content {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape="row"] .app-agent-work-hover-stack {
+  padding: 0 0.375rem 0 0;
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape="row"] .app-agent-work-morph-seat {
+  align-self: flex-end;
+  width: var(--app-agent-work-capsule-w, 2.75rem);
+}
+
+/* Inside the panel a card is a section of the one glass, not a glass of its own. */
+.xmatrix-app .app-agent-work-morph .app-agent-work-action-menu.app-agent-work-action-menu.app-agent-work-action-menu {
+  width: auto;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.xmatrix-app .app-agent-work-morph .app-agent-work-action-menu.app-agent-work-action-menu.app-agent-work-action-menu::before {
+  content: none !important;
+}
+
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > :is(.app-agent-work-island, .app-agent-work-avatar) {
+  position: relative;
+  z-index: 21;
+}
+
+/* A bare disc is its own capsule: it stays put and lends its glass to the panel too. */
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-avatar {
+  transform: none;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Repeated classes outrank the shared glass fill rule (html[data-app-theme] … :is(.app-liquid-glass-fill, …)). */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill::before,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill::after {
+  opacity: 0 !important;
+}
+
 /* Message-history offline Reborn uses the same popup chrome as agent work cards,
    but opens only after the 300ms hover delay (class toggled in React). */
 .xmatrix-app .app-message-author-avatar.app-message-author-reborn-open > .app-message-author-reborn-actions {
@@ -3435,6 +3585,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 @media (prefers-reduced-motion: reduce) {
   .xmatrix-app .app-agent-work-avatar,
   .xmatrix-app .app-agent-work-actions,
+  .xmatrix-app .app-agent-work-morph,
   .xmatrix-app .app-agent-work-action {
     transition: none !important;
   }
@@ -6340,7 +6491,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .composer-input-row {
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-box:not(.app-agent-work-card) .composer-textarea {
   min-height: 2.5rem !important;
   max-height: min(9rem, 34dvh) !important;
-  padding: 0.55rem 0.125rem !important;
+  /* 0.05rem more on top than below: measured on macOS, this puts the middle
+     of the lowercase letters on the attach and send buttons' middles. */
+  padding: 0.6rem 0.125rem 0.5rem !important;
   line-height: 1.38 !important;
 }
 
@@ -7031,7 +7184,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-invocation-spinner { animation: invocation-spin 1.4s linear infinite; }
 @keyframes invocation-spin { to { transform: rotate(360deg); } }
 .app-invocation-positioner { z-index: 80; }
-.app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; @apply app-reference-popup-recipe; }
+.app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; color: var(--foreground); font-size: 13px; line-height: 1.5; }
 .app-invocation-heading { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
 .app-invocation-heading > div { min-width: 0; }
 .app-invocation-title { margin: 0; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
@@ -7279,12 +7432,19 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-composer-hint[data-rotating="true"] { display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
 .app-composer-hint-trigger {
   --hint-ink: var(--primary);
-  margin-right: 0.1em; padding: 0 0.28em; border-radius: 0.3em; font-weight: 600;
+  position: relative; isolation: isolate;
+  margin-right: 0.1em; padding: 0 0.28em; font-weight: 600;
   color: color-mix(in oklab, var(--hint-ink) 75%, var(--muted-foreground));
+}
+/* A fill on the font's box centers on the caps, 0.09em above the middle of
+   the lowercase letters beside it; it is drawn lowered by that much so chip
+   and words share one middle line. */
+.app-composer-hint-trigger::before {
+  content: ""; position: absolute; z-index: -1; inset: 0.09em 0 -0.09em; border-radius: 0.3em;
   background: color-mix(in oklab, var(--hint-ink) 9%, transparent);
 }
-.app-composer-hint[data-summon="true"] .app-composer-hint-trigger {
-  --hint-ink: oklch(0.62 0.16 285);
+.app-composer-hint[data-summon="true"] .app-composer-hint-trigger { --hint-ink: oklch(0.62 0.16 285); }
+.app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before {
   background:
     linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%) 0 0 / 240% 100% no-repeat,
     color-mix(in oklab, var(--hint-ink) 11%, transparent);
@@ -7294,7 +7454,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 @keyframes composer-hint-summon { from { background-position: 120% 0, 0 0; } to { background-position: -120% 0, 0 0; } }
 @media (prefers-reduced-motion: reduce) {
   .app-composer-hint[data-rotating="true"],
-  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger { animation: none; }
+  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before { animation: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

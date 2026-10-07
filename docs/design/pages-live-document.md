@@ -553,7 +553,7 @@ There is no side panel. What its tabs held is shown where it acts:
 | Attached: connectors | A conversation linked to its section, a card like any other; *Attach* on the heading adds one |
 | History | A mode of the page: the margin lists revisions, and the document shows the chosen one's changes colored by author, with restore |
 | Settings: publishing, suggestion mode | The Share dialog from the header |
-| Settings: project governance | Open participation on the Space in Team; the governance page in Share (only owners and admins edit this page), both for Space owners and admins |
+| Settings: project governance | Open participation on the Space in Team; the governance page in Share ("Space rules": only owners and admins edit it, every Agent follows it), both for Space owners and admins |
 | The move to pages | A notice on the page while an Agent's draft waits for an owner or admin |
 
 A phone shows the same things on the page itself: avatars and the

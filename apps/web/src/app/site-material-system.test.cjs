@@ -36,6 +36,18 @@ test("hero image can extend under the fixed public navbar", () => {
   assert.match(heroSource, /md:absolute md:inset-0/);
 });
 
+test("Get started renders the product live instead of a screenshot", () => {
+  const quickStartSource = source("../components/landing/quick-start.tsx");
+  assert.match(quickStartSource, /<AppWindow \/>/);
+  assert.match(source("../components/landing/app-window-preview.tsx"), /MessageTimeline[\s\S]*ChannelSidebar|ChannelSidebar[\s\S]*MessageTimeline/);
+  assert.doesNotMatch(quickStartSource, /next\/image|\.png|\.webp/);
+  assert.match(source("page.tsx"), /<Hero \/>\s*<QuickStart \/>/);
+});
+
+test("public site labels carry no decorative eyebrow bar", () => {
+  assert.doesNotMatch(siteCss, /\.x-eyebrow::before/);
+});
+
 test("public actions use shared materials and the Hero has one wood CTA", () => {
   assert.match(layoutSource, /LiquidGlassFilter/);
   assert.match(navbarSource, /WoodPanel/);
@@ -85,8 +97,7 @@ test("navbar keeps the 3D logo off a centered sticky wood bar", () => {
   assert.match(navbarSource, /site-navbar-brand/);
   assert.match(navbarSource, /--navbar-wood-reveal/);
   assert.match(navbarSource, /className="site-navbar fixed top-0/);
-  assert.match(siteCss, /--site-navbar-brand-slot:/);
-  assert.match(siteCss, /\.site-navbar-bar \{[\s\S]*margin-inline:\s*auto/);
+  assert.match(siteCss, /\.site-navbar-layout \{[\s\S]*?justify-content:\s*center/);
   assert.match(siteCss, /\.site-navbar \.site-navbar-inner \{[\s\S]*opacity:\s*var\(--navbar-wood-reveal\)/);
   assert.match(siteCss, /\.site-navbar \{[\s\S]*background:\s*transparent/);
   assert.doesNotMatch(siteCss, /\.site-navbar::before/);
