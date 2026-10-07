@@ -88,7 +88,7 @@ import {
   CircleArrowUp,
   CircleHelp,
   Clock,
-  Cpu,
+  Bot,
   Gauge,
   HardDrive,
   Hash,
@@ -226,7 +226,7 @@ export function WorkspaceRail({
         <RailButton active={activeView === "status"} icon={Gauge} label="Status" onClick={() => onChangeView("status")} />
         <RailButton active={activeView === "machines" || activeView === "local"} icon={HardDrive} label="Machines" onClick={() => onChangeView("machines")} />
         <RailButton active={activeView === "automation"} icon={Clock} label="Schedules" onClick={() => onChangeView("automation")} />
-        <RailButton active={activeView === "agents"} icon={Cpu} label="Agents" onClick={() => onChangeView("agents")} />
+        <RailButton active={activeView === "agents"} icon={Bot} label="Agents" onClick={() => onChangeView("agents")} />
         <RailButton active={activeView === "apps"} icon={PlugZap} label="App" onClick={() => onChangeView("apps")} />
         <RailButton
           active={activeView === "team"}

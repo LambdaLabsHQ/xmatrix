@@ -2,6 +2,7 @@
 import type { ComponentType } from "react";
 import {
   Bell,
+  Bot,
   Cpu,
   Database,
   Hash,
@@ -186,8 +187,8 @@ export const COUNT_CHIP_MATERIAL_CLASS =
   "app-shared-chip rounded-full app-material-liquid-pill app-liquid-glass-surface app-liquid-glass-fill";
 
 export const EVENT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  agent_connected: Cpu,
-  agent_disconnected: Cpu,
+  agent_connected: Bot,
+  agent_disconnected: Bot,
   channel_mention: Bell,
   channel_attention_updated: Bell,
   msg_routed: MessageSquare,

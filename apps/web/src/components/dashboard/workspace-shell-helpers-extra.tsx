@@ -101,7 +101,7 @@ import { registrationTupleId } from "./use-registration-command";
 
 import {
   Building,
-  Cpu,
+  Bot,
   FileText,
   Hash,
   HardDrive,
@@ -152,20 +152,6 @@ export function insertMentionIntoDraft(
   const afterCursor = draft.slice(boundedCursor);
   const prefix = beforeCursor && !/\s$/.test(beforeCursor) ? " " : "";
   const insert = `${prefix}@${target} `;
-  return {
-    value: `${beforeCursor}${insert}${afterCursor}`,
-    cursor: beforeCursor.length + insert.length,
-  };
-}
-
-export function insertMentionTriggerIntoDraft(
-  draft: string,
-  cursor: number
-): { value: string; cursor: number } {
-  const boundedCursor = Math.min(Math.max(cursor, 0), draft.length);
-  const beforeCursor = draft.slice(0, boundedCursor);
-  const afterCursor = draft.slice(boundedCursor);
-  const insert = `${beforeCursor && !/\s$/.test(beforeCursor) ? " " : ""}@`;
   return {
     value: `${beforeCursor}${insert}${afterCursor}`,
     cursor: beforeCursor.length + insert.length,
@@ -755,7 +741,7 @@ export function searchResultIcon(kind: WorkspaceSearchResult["kind"]): React.Com
   if (kind === "page") return FileText;
   if (kind === "member") return UserRound;
   if (kind === "message") return MessageSquare;
-  if (kind === "agent") return Cpu;
+  if (kind === "agent") return Bot;
   if (kind === "space") return Building;
   if (kind === "machine") return HardDrive;
   return Radio;

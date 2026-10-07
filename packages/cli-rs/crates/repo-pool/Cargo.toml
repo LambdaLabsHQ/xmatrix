@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+regex = { workspace = true }
 colored = { workspace = true }
 dirs = { workspace = true }
 fs2 = { workspace = true }

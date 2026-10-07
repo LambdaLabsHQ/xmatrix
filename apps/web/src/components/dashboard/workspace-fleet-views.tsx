@@ -96,7 +96,7 @@ import {
   Shield,
   Siren,
   Terminal,
-  Cpu,
+  Bot,
   Trash2,
   PowerOff,
   Unplug,
@@ -222,7 +222,7 @@ export function MoreView({
     {
       label: "Operations",
       items: [
-        viewItem("agents", "Agents", "Registered agents and where they run", Cpu),
+        viewItem("agents", "Agents", "Registered agents and where they run", Bot),
         viewItem("machines", "Machines", "Registered machines and daemons", Terminal),
         viewItem("automation", "Schedules", "Scheduled channel activity", Clock),
       ],

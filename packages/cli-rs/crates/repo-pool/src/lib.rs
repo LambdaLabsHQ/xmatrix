@@ -2,6 +2,7 @@
 //! abandon transitions, and the per-run worktrees it hands out.
 #![deny(warnings)]
 
+mod failure_detail;
 pub mod repo_pool;
 pub mod run_worktree;
 
