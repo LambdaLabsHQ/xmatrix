@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 
 export function Hero() {
   return (
@@ -32,14 +32,14 @@ export function Hero() {
           </p>
 
           <div className="mt-9 flex w-full max-w-full sm:w-auto">
-            <LiquidGlassPill
+            <WoodPanel
               as={Link}
               href="/login"
-              className="inline-flex h-12 w-full items-center justify-center px-7 text-sm font-semibold text-[#27251f] sm:w-auto"
+              className="site-wood-pill inline-flex h-12 w-full items-center justify-center px-7 text-sm sm:w-auto"
             >
               Start Free
               <ArrowRight className="ml-2 size-5" />
-            </LiquidGlassPill>
+            </WoodPanel>
           </div>
         </div>
       </div>

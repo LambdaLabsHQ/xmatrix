@@ -110,6 +110,11 @@ html:has(.site-page) {
   font-weight: 700 !important;
 }
 
+/* A WoodPanel used as a call-to-action button: the same plank, pill-shaped. */
+.site-page .app-material-wood-panel.site-wood-pill {
+  border-radius: 999px;
+}
+
 .site-page .app-material-liquid-card,
 .site-page .app-material-liquid-pill,
 .site-nav-sheet .app-material-liquid-pill {
