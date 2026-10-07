@@ -79,6 +79,10 @@ outline styling so the backdrop filter never stacks.
 
 ## Semantic material components
 
+Public navigation reveals a glass surface behind the logo as the page scrolls
+on desktop, tablet, and phone. It shares the wood navigation bar's reveal value,
+stays transparent at the top, and keeps the logo outside the wood bar.
+
 The mobile Channel details overlay puts its pinned navigation header and content
 sections on the same `WoodPanel` cards: 16px corners and side gutters, with a
 16px paper gap below the header. The header sits below the top safe area and

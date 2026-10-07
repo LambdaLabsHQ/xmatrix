@@ -188,7 +188,10 @@ html:has(.site-page) {
 }
 
 .site-navbar-brand-glass {
-  display: none;
+  position: absolute;
+  inset: -0.625rem -0.75rem;
+  pointer-events: none;
+  opacity: var(--navbar-wood-reveal);
 }
 
 .site-navbar-bar {
@@ -303,8 +306,6 @@ html:has(.site-page) {
     gap: 0.75rem;
   }
 
-  /* Below lg the logo floats over the page as it scrolls under, so it gets
-     the same glass the page's pills use, revealed with the wood button. */
   .site-navbar-brand {
     position: relative;
     transform: none;
@@ -315,11 +316,7 @@ html:has(.site-page) {
   }
 
   .site-navbar-brand-glass {
-    display: block;
-    position: absolute;
     inset: 0;
-    pointer-events: none;
-    opacity: var(--navbar-wood-reveal);
   }
 
   .site-navbar-brand-glass > * {
