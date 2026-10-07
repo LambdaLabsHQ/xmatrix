@@ -191,6 +191,31 @@ export async function installPageTreeStubs(page: Page, titles: string[]) {
 }
 
 /**
+ * A Space's own resources, answered as an empty Space on a Hub without plans
+ * does. A Space-list stub (`**\/api/xmatrix/spaces**`) or the `{}` catch-all
+ * also matches these paths, and its body is not the shape their readers
+ * expect, so register this after either. A spec that needs pages, links or
+ * billing registers its own after this.
+ */
+export async function fixtureSpaceResources(page: Page) {
+  await fixtureJson(page, "space-billing", /\/api\/xmatrix\/spaces\/[^/]+\/billing$/u, { error: "not found" },
+    { status: 404 });
+  await fixtureJson(page, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, { pages: [] });
+  await fixtureJson(page, "page-document", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/?]+(?:\?.*)?$/u,
+    { error: "not found" }, { status: 404, method: "GET" });
+  await fixtureJson(page, "page-recent-changes", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/recent-changes(?:\?.*)?$/u,
+    { changes: [] });
+  await fixtureJson(page, "page-automations", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/automations$/u,
+    { automations: [] }, { method: "GET" });
+  await fixtureJson(page, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links(?:\?.*)?$/u, { links: [] },
+    { method: "GET" });
+  await fixtureJson(page, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, { pages: [] });
+  await fixtureJson(page, "page-migration", /\/api\/xmatrix\/spaces\/[^/]+\/page-migration$/u,
+    { state: "none", version: 0, drafter: null, draft: { pages: [] }, sources: [], report: null }, { method: "GET" });
+  await fixtureJson(page, "channel-transfers", /\/api\/xmatrix\/spaces\/[^/]+\/channel-transfers(?:\?.*)?$/, { proposals: [] });
+}
+
+/**
  * The workspace fixture set without any navigation, for callers that open a
  * specific route themselves. Rules are registered in the same order the old
  * `page.route` stack used, and the in-page layer keeps the same
@@ -235,9 +260,7 @@ export async function installWorkspaceStubs(
   await fixtureJson(page, "spaces", "**/api/xmatrix/spaces**", {
     spaces: fixtures.spaces ?? [],
   });
-  // A Space's billing is not the Space list: answer as a Hub without plans does.
-  await fixtureJson(page, "space-billing", /\/api\/xmatrix\/spaces\/[^/]+\/billing$/, { error: "not found" },
-    { status: 404 });
+  await fixtureSpaceResources(page);
   const registrations = (fixtures.registrations ?? []).map((registration) => ({
     displayName: registration.key.harness, ownerName: "Owner", machineName: registration.key.machineId,
     version: 1, state: "enabled", models: [], routingReady: true, canManageOwnerGrant: false,
@@ -267,7 +290,6 @@ export async function installWorkspaceStubs(
       >,
     },
   });
-  await fixtureJson(page, "channel-transfers", /\/api\/xmatrix\/spaces\/[^/]+\/channel-transfers(?:\?.*)?$/, { proposals: [] });
 
   await fixtureRule(page, {
     id: "channel-view-preference",
