@@ -158,6 +158,8 @@ export const GLOBAL_DATA_TABLES = Object.freeze([
   "machine_daemon_commands",
   "machine_daemon_control_audit",
   "machine_daemons",
+  "machine_resource_hourly",
+  "machine_resource_samples",
   "machine_run_routes",
   "machine_run_terminal_reports",
   "machines",

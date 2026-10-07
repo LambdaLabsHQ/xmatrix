@@ -486,6 +486,26 @@ export class PostgresMachineControlRepository {
               OR metadata_json->'machineResources'->>'observedAt' < $4)`,
           values: [daemonId, connectionEpoch, JSON.stringify({ ...resources, connectionEpoch }),
             resources.observedAt], maxRows: 0 });
+        // History keeps one sample per Machine per minute: the latest one the live
+        // connection reported in that minute.
+        if (resources) await tx.query({ name: "machine_resource_history_sample_v1", text: `INSERT INTO
+          data.machine_resource_samples (owner_user_id,machine_id,observed_at,cpu_usage_percent,
+            load_average_1m,memory_total_bytes,memory_available_bytes,swap_total_bytes,swap_free_bytes,
+            disk_total_bytes,disk_available_bytes)
+          SELECT $1,$2,date_trunc('minute',$4::timestamptz),$5,$6,$7,$8,$9,$10,$11,$12
+          WHERE EXISTS (SELECT 1 FROM data.machine_daemons WHERE daemon_id=$3 AND status='online'
+            AND connection_epoch=$13)
+          ON CONFLICT (owner_user_id,machine_id,observed_at) DO UPDATE SET
+            cpu_usage_percent=EXCLUDED.cpu_usage_percent, load_average_1m=EXCLUDED.load_average_1m,
+            memory_total_bytes=EXCLUDED.memory_total_bytes,
+            memory_available_bytes=EXCLUDED.memory_available_bytes,
+            swap_total_bytes=EXCLUDED.swap_total_bytes, swap_free_bytes=EXCLUDED.swap_free_bytes,
+            disk_total_bytes=EXCLUDED.disk_total_bytes, disk_available_bytes=EXCLUDED.disk_available_bytes`,
+          values: [ownerUserId, machineId, daemonId, resources.observedAt, resources.cpuUsagePercent ?? null,
+            resources.loadAverage?.[0] ?? null, resources.memoryTotalBytes ?? null,
+            resources.memoryAvailableBytes ?? null, resources.swapTotalBytes ?? null,
+            resources.swapFreeBytes ?? null, resources.diskTotalBytes ?? null,
+            resources.diskAvailableBytes ?? null, connectionEpoch], maxRows: 0 });
 
         // A harness inventory is an observation of the connection that sent it.
         // An invalid one is dropped rather than failing the Run snapshot it rides on.

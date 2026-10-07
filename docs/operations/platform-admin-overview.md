@@ -145,7 +145,7 @@ failing the read.
 - User detail: `packages/hub/src/postgres-admin-user-detail.ts`,
   `authDirectoryAdminUser` in `packages/hub/src/auth-authority.ts`
 - Audit: `packages/hub/src/admin-audit.ts`,
-  `packages/db/migrations/0165_expand_admin_audit_events.sql`
+  `packages/db/migrations/0166_expand_admin_audit_events.sql`
 - App views: `apps/web/src/components/dashboard/workspace-platform-admin-tabs.tsx`
   and the `platform-admin-*` and `admin-table` modules beside it
 - Tests: `packages/hub/test/platform-admin-overview.e2e.mjs`,

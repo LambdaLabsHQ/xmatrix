@@ -7,11 +7,18 @@ import { useEffect, useState } from "react";
  * the composer instead of asking an open question.
  */
 export const COMPOSER_HINTS = [
-  "@ to mention",
+  "@ to summon an agent",
   "/ for commands",
   "[[ for pages",
   "# for channels",
 ] as const;
+
+/** A rotating hint split into the trigger it teaches and the words after it; null for any other placeholder. */
+export function composerHintParts(hint: string): { trigger: string; rest: string } | null {
+  if (!(COMPOSER_HINTS as readonly string[]).includes(hint)) return null;
+  const space = hint.indexOf(" ");
+  return { trigger: hint.slice(0, space), rest: hint.slice(space) };
+}
 
 export const COMPOSER_HINT_INTERVAL_MS = 4000;
 

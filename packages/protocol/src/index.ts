@@ -185,6 +185,10 @@ export type {
   MachineResourceObservation, PresentedRoutingDecision, RoutingBoundMachine, RoutingChoiceRow, RoutingDecisionSource,
   RoutingModelOption, RoutingObservation,
 } from "./agent-routing.js";
+export { MACHINE_RESOURCE_HISTORY_RANGES } from "./machine-resource-history.js";
+export type {
+  MachineResourceHistory, MachineResourceHistoryPoint, MachineResourceHistoryRange,
+} from "./machine-resource-history.js";
 export {
   parseLaunchParameterEvidence,
 } from "./launch-parameter-evidence.js";
