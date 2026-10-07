@@ -28,8 +28,8 @@ test("incident reads have an independent current read/deny policy and do not gra
     senderKind: "agent" }), undefined);
   assert.match(actionRefusal({ providerId: "pagerduty", actionId: "read_incident", effect: "read", mode: "deny",
     senderKind: "agent" }), /denied/);
-  assert.match(actionRefusal({ providerId: "pagerduty", actionId: "resolve", effect: "write", mode: null,
-    senderKind: "agent" }), /policy/);
+  assert.equal(actionRefusal({ providerId: "pagerduty", actionId: "resolve", effect: "write", mode: null,
+    senderKind: "agent" }), undefined);
   assert.deepEqual(PAGERDUTY_ACTIONS.note.requires, ["apiKey|oauthToken"]);
 });
 

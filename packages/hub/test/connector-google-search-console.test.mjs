@@ -92,12 +92,12 @@ test("page actions refuse pages outside the named property before any provider c
   }
 });
 
-test("manifest exposes reads by default and keeps sitemap submission behind channel policy", () => {
+test("manifest exposes reads and the sitemap write", () => {
   const manifest = getAppConnectorProvider("googlesearchconsole");
   assert.equal(manifest.status, "available");
   assert.deepEqual(manifest.oauth.scopes, [scope]);
-  const effects = Object.fromEntries(manifest.actions.map(action => [action.id, [action.effect, action.defaultPolicy]]));
-  assert.deepEqual(effects.submit_sitemap, ["write", undefined]);
+  const effects = Object.fromEntries(manifest.actions.map(action => [action.id, [action.effect]]));
+  assert.deepEqual(effects.submit_sitemap, ["write"]);
   for (const id of ["list_sites", "query", "list_sitemaps", "inspect_url"]) assert.equal(effects[id][0], "read");
   for (const [id, action] of Object.entries(ACTIONS)) assert.equal(action.effect, effects[id][0], id);
 });

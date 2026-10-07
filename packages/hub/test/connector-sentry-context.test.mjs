@@ -32,8 +32,8 @@ test("Sentry issue reads use the current read/deny policy independently of resol
     senderKind: "agent" }), undefined);
   assert.match(actionRefusal({ providerId: "sentry", actionId: "read_issue", effect: "read", mode: "deny",
     senderKind: "agent" }), /denied/);
-  assert.match(actionRefusal({ providerId: "sentry", actionId: "resolve", effect: "write", mode: null,
-    senderKind: "agent" }), /policy/);
+  assert.equal(actionRefusal({ providerId: "sentry", actionId: "resolve", effect: "write", mode: null,
+    senderKind: "agent" }), undefined);
 });
 
 test("only one bounded explicit Sentry issue is accepted", () => {

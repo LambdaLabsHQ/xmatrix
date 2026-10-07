@@ -75,17 +75,13 @@ test("rerun_failed_jobs uses a repository-scoped token and the failed-jobs endpo
   }
 });
 
-test("Actions writes are off by default per Channel and fail closed on a missing live installation permission", async () => {
+test("GitHub writes run by default and Actions writes fail closed on a missing live installation permission", async () => {
   const github = githubProviderManifest();
   for (const id of ["rerun_failed_jobs", "dispatch_workflow", "comment", "create_issue", "close_issue", "reopen_issue", "review"]) {
     const action = github.actions.find((candidate) => candidate.id === id);
     assert.equal(action.effect, "write", id);
-    assert.equal(action.defaultPolicy, "deny", `${id} runs only where a Channel allows it`);
+    assert.equal("defaultPolicy" in action, false, `${id} runs without a Channel opt-in`);
   }
-  const { actionRefusal } = await import("../src/connectors/connector-commands.ts");
-  const gate = { providerId: "github", actionId: "rerun_failed_jobs", effect: "write", defaultPolicy: "deny" };
-  assert.match(actionRefusal({ ...gate, mode: null, senderKind: "user" }), /@github:policy:rerun_failed_jobs allow/u);
-  assert.equal(actionRefusal({ ...gate, mode: "allow", senderKind: "user" }), undefined);
 
   const stub = stubGitHub({ metadata: "read", actions: "read" });
   try {
