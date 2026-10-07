@@ -275,6 +275,21 @@ fn spawn_working_mode_comes_only_from_the_launch() {
 }
 
 #[test]
+fn spawn_space_rules_page_comes_only_from_the_launch() {
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("XMATRIX_SPACE_RULES_PAGE_ID".to_string(), "stale".to_string());
+    let cleared = super::apply_spawn_space_rules(env.clone(), None).unwrap();
+    assert!(!cleared.contains_key("XMATRIX_SPACE_RULES_PAGE_ID"));
+
+    let env = super::apply_spawn_space_rules(env, Some("page-1")).unwrap();
+    assert_eq!(
+        env.get("XMATRIX_SPACE_RULES_PAGE_ID").map(String::as_str),
+        Some("page-1")
+    );
+    assert!(super::apply_spawn_space_rules(env, Some("page-1; rm -rf ~")).is_err());
+}
+
+#[test]
 fn spawn_env_scrubs_retired_role_values_from_older_state() {
     // A Run resumed from state an older daemon wrote may still carry the
     // retired Role reminder, skills, App requirements, or Role avatar.

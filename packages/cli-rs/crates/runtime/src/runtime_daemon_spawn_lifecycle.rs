@@ -746,6 +746,7 @@ async fn handle_daemon_spawn_request(
             identity_id: intent.identity_id.as_deref(),
             role_initial_prompt: intent.role_initial_prompt.as_deref(),
             working_mode: intent.working_mode.as_deref(),
+            space_rules_page_id: intent.space_rules_page_id.as_deref(),
             resume: intent.resume,
             resume_instance_id: intent.resume_instance_id.as_deref(),
             resume_session_key: intent.resume_session_key.as_deref(),
@@ -2016,6 +2017,7 @@ struct HeadlessAgentSpawn<'a> {
     identity_id: Option<&'a str>,
     role_initial_prompt: Option<&'a str>,
     working_mode: Option<&'a str>,
+    space_rules_page_id: Option<&'a str>,
     resume: bool,
     resume_instance_id: Option<&'a str>,
     resume_session_key: Option<&'a str>,
@@ -2061,6 +2063,7 @@ async fn spawn_headless_agent(
         identity_id,
         role_initial_prompt,
         working_mode,
+        space_rules_page_id,
         resume,
         resume_instance_id,
         resume_session_key,
@@ -2094,9 +2097,12 @@ async fn spawn_headless_agent(
     );
     let runtime_args = auto_update.runtime_args;
     let mut local_env = apply_authoritative_agent_execution_env(
-        apply_spawn_working_mode(
-            apply_spawn_initial_prompt(BTreeMap::new(), role_initial_prompt),
-            working_mode,
+        apply_spawn_space_rules(
+            apply_spawn_working_mode(
+                apply_spawn_initial_prompt(BTreeMap::new(), role_initial_prompt),
+                working_mode,
+            )?,
+            space_rules_page_id,
         )?,
         agent_backend,
         agent_preset_id,

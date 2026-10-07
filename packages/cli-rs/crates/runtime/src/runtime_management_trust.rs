@@ -336,6 +336,8 @@ struct DaemonSpawnRequest {
     role_initial_prompt: Option<String>,
     /// The registration's working mode (see `MachineSpawnAgent`).
     working_mode: Option<String>,
+    /// The Space's rules page (see `MachineSpawnAgent`).
+    space_rules_page_id: Option<String>,
     resume: bool,
     resume_instance_id: Option<String>,
     resume_session_key: Option<String>,
@@ -386,6 +388,7 @@ impl DaemonSpawnRequest {
             identity_id,
             role_initial_prompt,
             working_mode,
+            space_rules_page_id,
             resume,
             resume_instance_id,
             resume_session_key,
@@ -432,6 +435,7 @@ impl DaemonSpawnRequest {
             identity_id,
             role_initial_prompt,
             working_mode,
+            space_rules_page_id,
             resume: resume.unwrap_or(false),
             resume_instance_id,
             resume_session_key,
