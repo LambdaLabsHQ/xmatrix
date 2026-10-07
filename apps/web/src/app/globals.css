@@ -7031,7 +7031,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-invocation-spinner { animation: invocation-spin 1.4s linear infinite; }
 @keyframes invocation-spin { to { transform: rotate(360deg); } }
 .app-invocation-positioner { z-index: 80; }
-.app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; @apply app-reference-popup-recipe; }
+.app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; color: var(--foreground); font-size: 13px; line-height: 1.5; }
 .app-invocation-heading { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
 .app-invocation-heading > div { min-width: 0; }
 .app-invocation-title { margin: 0; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
