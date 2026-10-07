@@ -124,6 +124,14 @@ test.describe("a phone's list rows", () => {
     const line = await contentLine(page);
 
     const phone = await measure(conversation);
+    const paper = await conversation.evaluate((element) => {
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = "var(--app-panel-paper)";
+      element.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
     expect(phone.height).toBe(56);
     expect(phone.title).toEqual(["16px", "620", "22px"]);
     expect(phone.meta).toEqual(["13px", "450", "18px"]);
@@ -165,9 +173,12 @@ test.describe("a phone's list rows", () => {
     expect((await edges(heading.locator(":scope > *").first())).left).toBeCloseTo(line.start, 0);
     expect((await edges(heading.locator(":scope > span").last(), { text: true })).right).toBeCloseTo(line.end, 0);
 
-    // The same row a desktop draws, on the same tone.
+    // The same row a desktop draws. A phone never shows its list beside a
+    // conversation, so the list is the conversation's paper, not the column's tone.
     const desktop = await desktopConversationRow(page);
-    expect(phone).toEqual({ ...desktop, inset: phone.inset });
+    expect(phone).toEqual({ ...desktop, inset: phone.inset, listTone: phone.listTone });
+    expect(phone.listTone).toBe(paper);
+    expect(desktop.listTone).not.toBe(paper);
     // The measured title begins after the # and its gap. Only the row's
     // padding changes: 20px on desktop, the shared content line on phone.
     expect(phone.inset).toBe(Math.round(desktop.inset + line.start - 20));
