@@ -70,7 +70,7 @@ const ACTION_LABELS: Record<AdminAuditEvent["action"], string> = {
 };
 
 const AUDIT_COLUMNS: AdminColumn<AdminAuditEvent>[] = [
-  { key: "at", label: "When", numeric: true, value: (event) => adminTime(event.createdAt),
+  { key: "at", label: "When", value: (event) => adminTime(event.createdAt),
     render: (event) => <span className="whitespace-nowrap text-xs" title={event.createdAt}>{age(event.createdAt)}</span> },
   { key: "actor", label: "Operator", value: (event) => event.actorEmail || event.actorUserId,
     render: (event) => <span className="block truncate">{event.actorEmail || event.actorUserId}</span> },
@@ -85,10 +85,6 @@ const AUDIT_COLUMNS: AdminColumn<AdminAuditEvent>[] = [
 export function PlatformAdminAudit({ token }: { token?: string }) {
   return (
     <AdminQueryView query={useAdminAudit(token)}
-      lead={<p className="w-full text-sm text-muted-foreground">
-        Every operator read and action on this surface, newest first. Operators see metadata only — never
-        message or page text, secrets, attachments, or prompts.
-      </p>}
       emptyTitle="Nothing recorded yet" emptyBody="Operator reads are recorded here as they happen.">
       {(events) => (
         <AdminTable

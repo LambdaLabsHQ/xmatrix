@@ -27,7 +27,7 @@ export function PlatformAdminTabs({ token }: { token?: string }) {
         description: "Members, Channels, Agents, and message volume per Space.",
         content: <PlatformAdminSpaces token={token} /> },
       { key: "audit", wide: true, label: "Audit", icon: ScrollText, summary: "What operators read and did",
-        description: "The trail every operator read and action leaves.",
+        description: "Every operator read and action, newest first. Operators see metadata only — never message or page text, secrets, attachments, or prompts.",
         content: <PlatformAdminAudit token={token} /> },
     ]} />
   );

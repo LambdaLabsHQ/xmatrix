@@ -80,7 +80,7 @@ const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
   { key: "machines", label: "Machines", numeric: true, value: (user) => user.machines, render: (user) => formatAdminCount(user.machines) },
   { key: "messages", label: "Messages", numeric: true, value: (user) => user.messages, render: (user) => formatAdminCount(user.messages) },
   {
-    key: "lastMessage", label: "Last message", numeric: true, value: (user) => adminTime(user.lastMessageAt),
+    key: "lastMessage", label: "Last message", hidden: true, numeric: true, value: (user) => adminTime(user.lastMessageAt),
     render: (user) => <TimeCell value={user.lastMessageAt} />,
   },
 ];
