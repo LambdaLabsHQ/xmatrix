@@ -71,10 +71,6 @@ export interface AgentRegistrationRunningInstance {
   channelInstanceId: string;
   /** When its current Run started. */
   since: string;
-  /** Whether it is in a turn now (Instance status `busy`). A live process
-   * waiting for its next message is running but not working. Absent from a
-   * Hub that does not report it. */
-  working?: boolean;
 }
 
 export interface AgentCapabilitySummary {

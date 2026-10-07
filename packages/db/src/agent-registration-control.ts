@@ -32,8 +32,7 @@ function runningInstances(value: unknown): AgentRegistrationRunningInstance[] {
     const since = isoTime(row.since);
     return typeof row.instanceId === "string" && typeof row.channelId === "string" &&
       typeof row.channelInstanceId === "string" && since
-      ? [{ instanceId: row.instanceId, channelId: row.channelId, channelInstanceId: row.channelInstanceId, since,
-        working: row.working === true }]
+      ? [{ instanceId: row.instanceId, channelId: row.channelId, channelInstanceId: row.channelInstanceId, since }]
       : [];
   });
 }
@@ -297,7 +296,7 @@ export class PostgresAgentRegistrationRepository {
       // Running Instances come from the owner's live Runs on that machine (a
       // partial index keeps this to what is running now), bound to this
       // registration in this Space, in Channels the reader may read.
-      const rows = await tx.query({ name: "registration_catalog_page_v6", text: `SELECT
+      const rows = await tx.query({ name: "registration_catalog_page_v5", text: `SELECT
         r.owner_user_id,r.machine_id,r.harness,r.display_name,r.configuration_json,r.version,
         m.user_id AS current_owner,m.display_name AS owner_name,a.grant_state,a.policy_state,a.grant_limits,a.policy_limits, catalog.models AS catalog_models,catalog.observed_at AS catalog_observed_at,
         parameter_catalog.parameters AS catalog_parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,
@@ -327,9 +326,9 @@ export class PostgresAgentRegistrationRepository {
               ELSE FALSE END
           ORDER BY (i.presentation_json->>'parametersObservedAt')::timestamptz DESC,i.instance_id LIMIT 1) parameter_catalog ON TRUE
         LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('instanceId',live.instance_id,'channelId',live.channel_id,
-            'channelInstanceId',live.channel_instance_id::text,'since',live.created_at,'working',live.status='busy')
+            'channelInstanceId',live.channel_instance_id::text,'since',live.created_at)
             ORDER BY live.created_at,live.instance_id) AS instances
-          FROM (SELECT i.instance_id,i.channel_id,i.channel_instance_id,i.status,run.created_at
+          FROM (SELECT i.instance_id,i.channel_id,i.channel_instance_id,run.created_at
             FROM data.runs run
             JOIN data.run_agent_registrations binding ON binding.run_id=run.run_id
             JOIN data.instances i ON i.run_id=run.run_id

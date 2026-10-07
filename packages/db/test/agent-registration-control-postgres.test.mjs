@@ -162,17 +162,15 @@ integration("composite registration commands preserve identity, configuration an
       [run, space, `${run}-allocation`]);
     }
     await client.query(`INSERT INTO ${schema}.instances (instance_id,run_id,channel_id,channel_instance_id,status) VALUES
-      ('open-instance','open-run','open-channel',2,'busy'),('closed-instance','closed-run','closed-channel',1,'offline'),
+      ('open-instance','open-run','open-channel',2,'online'),('closed-instance','closed-run','closed-channel',1,'offline'),
       ('done-instance','done-run','open-channel',1,'offline'),('elsewhere-instance','elsewhere-run','other-space',1,'online')`);
     const ownerLive = await codexLive("owner");
     assert.equal(ownerLive.machine.online, true);
     assert.ok(Date.parse(ownerLive.machine.lastSeenAt));
     assert.deepEqual(ownerLive.running, [
-      { instanceId: "open-instance", channelId: "open-channel", channelInstanceId: "2", since: "2026-09-28T10:00:00.000Z",
-        working: true },
-      { instanceId: "closed-instance", channelId: "closed-channel", channelInstanceId: "1", since: "2026-09-28T11:00:00.000Z",
-        working: false },
-    ], "a finished Run and another Space's work are not this Space's running Instances; only a busy one is working");
+      { instanceId: "open-instance", channelId: "open-channel", channelInstanceId: "2", since: "2026-09-28T10:00:00.000Z" },
+      { instanceId: "closed-instance", channelId: "closed-channel", channelInstanceId: "1", since: "2026-09-28T11:00:00.000Z" },
+    ], "a finished Run and another Space's work are not this Space's running Instances");
     assert.deepEqual((await codexLive("admin")).running.map(row => row.instanceId), ["open-instance", "closed-instance"]);
     assert.deepEqual((await codexLive("member")).running.map(row => row.instanceId), ["open-instance"],
       "a closed Channel the reader may not read is not named");

@@ -2519,6 +2519,8 @@ export function ToolSurface({
           spaceId={currentSpace?.id ?? null}
           token={token}
           machines={currentSpaceMachines}
+          channels={currentSpaceChannels}
+          events={currentSpaceEvents}
           automations={currentSpaceAutomations}
           onOpenAgents={() => onChangeView("agents")}
           onOpenMachine={(machineId) => onChangeView("machines", machineId)}
