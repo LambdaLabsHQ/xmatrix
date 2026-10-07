@@ -754,6 +754,7 @@ export function MachinesView({
   loading,
   error,
   token,
+  spaceId,
   thisMachine,
   defaultItem,
 }: {
@@ -761,6 +762,8 @@ export function MachinesView({
   loading: boolean;
   error: string | null;
   token?: string | null;
+  /** The Space being viewed: an owner turns each installed harness on or off for it. */
+  spaceId?: string;
   /** The desktop app's own machine: its row's state and its page. */
   thisMachine?: {
     machineId?: string;
@@ -1041,7 +1044,7 @@ export function MachinesView({
               <MachineLoadPanel machine={machine} now={now} token={token} />
             </ToolDetailSection>
             <ToolDetailSection title="Harnesses">
-              <MachineHarnessPanel key={machine.id} daemon={machine.daemon} token={token} />
+              <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId} />
             </ToolDetailSection>
             <ToolDetailSection title={`Directories · ${machine.workspaces.length}`}>
               {machine.workspaces.length === 0 ? (

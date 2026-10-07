@@ -766,7 +766,7 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(row("research-agent")).toContainText("Research Owner");
   await expect(row("research-agent")).toHaveAttribute("data-state", "offline");
   await expect(page.locator(".app-topbar")).toContainText(E2E_SPACE.name);
-  await expect(page.locator(".app-mobile-create-fab")).toHaveAccessibleName("New agent");
+  await expect(page.locator(".app-mobile-create-fab")).toHaveAccessibleName("Manage machines");
 
   /* Roles are retired: the list holds only the Space's agents. */
   await expect(page.getByRole("region", { name: "Roles" })).toHaveCount(0);
