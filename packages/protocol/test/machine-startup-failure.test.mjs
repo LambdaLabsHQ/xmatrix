@@ -50,11 +50,11 @@ test("all credentials are removed without losing subsequent diagnostic lines", (
     "Authorization: Bearer AUTH_ONE", "Cookie: session=COOKIE_ONE",
     "token=TOKEN_ONE password=PASSWORD_ONE token=TOKEN_TWO api_key=API_ONE",
     "ghp_GITHUB_ONE github_pat_GITHUB_TWO sk-OPENAI_ONE",
-    "fatal: /home/private/LOCAL_ONE C:\\private\\LOCAL_TWO",
+    "fatal: /home/private/LOCAL_ONE C:\\private\\LOCAL_TWO C:/private/LOCAL_THREE file:///home/private/LOCAL_FOUR",
     rejected,
   ].join("\n");
   const failure = publicMachineStartupFailure(raw);
-  assert.doesNotMatch(failure.summary, /URL_ONE|URL_TWO|QUERY_ONE|FRAGMENT_ONE|AUTH_ONE|COOKIE_ONE|TOKEN_ONE|TOKEN_TWO|PASSWORD_ONE|API_ONE|GITHUB_ONE|GITHUB_TWO|OPENAI_ONE|LOCAL_ONE|LOCAL_TWO/u);
+  assert.doesNotMatch(failure.summary, /URL_ONE|URL_TWO|QUERY_ONE|FRAGMENT_ONE|AUTH_ONE|COOKIE_ONE|TOKEN_ONE|TOKEN_TWO|PASSWORD_ONE|API_ONE|GITHUB_ONE|GITHUB_TWO|OPENAI_ONE|LOCAL_ONE|LOCAL_TWO|LOCAL_THREE|LOCAL_FOUR/u);
   assert.ok(failure.summary.endsWith(rejected));
   assert.equal(publicMachineStartupFailure(failure.summary).summary, failure.summary);
 });

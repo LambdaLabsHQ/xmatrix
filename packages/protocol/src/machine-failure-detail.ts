@@ -9,7 +9,7 @@ export function sanitizeMachineFailureDetail(raw: string): string {
     .replace(/\b(?:bearer|basic)\s+[a-z0-9+/_.=~-]+/giu, "[REDACTED]")
     .replace(/((?:[a-z_]*token|password|passwd|secret|api[_-]?key)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s&;'")]+)/giu, "$1[REDACTED]")
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/gu, "[REDACTED]")
-    .replace(/(^|[\s('"])(?:\/(?!\/)|[A-Za-z]:\\|\\\\)[^\s'")]+/gu, "$1[local path]")
+    .replace(/(^|[\s('"])(?:file:\/\/|\/|[A-Za-z]:[\\/]|\\\\)[^\s'")]+/gu, "$1[local path]")
     .replace(/\r\n?/gu, "\n");
   const clean = Array.from(text).filter((c) => c === "\n" || c === "\t" || (c.codePointAt(0)! >= 0x20 && c !== "\x7f"));
   return clean.length > 2_000 ? `${clean.slice(0, 2_000).join("").trim()}...` : clean.join("").trim();
