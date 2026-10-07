@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  mergeWorkspaceSearchResults,
-  normalizeChannelSearchText,
-} from "./workspace-shell-search-model";
+import { normalizeChannelSearchText } from "./workspace-shell-search-model";
 import type { LiquidGlassMaterial } from "@/components/ui/liquid-glass-material";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import type { CreateAction } from "./list-create";
@@ -15,27 +12,16 @@ import {
 
 import {
   COUNT_CHIP_MATERIAL_CLASS,
-  EMPTY_CHANNEL_HISTORY,
 } from "./workspace-shell-constants";
 
 
 import {
   ChannelCreateMode,
-  WorkspaceMessageSearch,
-  WorkspaceMessageSearchState,
   copyTextToClipboard,
 } from "./workspace-shell-helpers";
 
 import {
-  buildWorkspaceSearchResults,
-  channelQuickOpenPath,
-  channelSwitcherSubtitle,
-  filterChannelsForQuickOpen,
   formatUnreadCount,
-  isThreadChannel,
-  scrollActiveCommandResultIntoView,
-  searchResultIcon,
-  workspaceMessageSearchStatus,
 } from "./workspace-shell-helpers-extra";
 
 import {
@@ -54,7 +40,6 @@ import {
   memberPresence,
   memberPresenceSummary,
   presenceAvatarUrl,
-  shortId,
   spaceRoleFor,
   visibleHumanChannelMembers,
 } from "./workspace-shell-recovered";
@@ -64,7 +49,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -96,7 +80,6 @@ import {
   Lock,
   Loader2,
   LogOut,
-  MessageSquare,
   MessageSquareText,
   MoreHorizontal,
   MoveRight,
@@ -138,28 +121,21 @@ import {
   type DesktopUpdateStatus,
 } from "@/lib/desktop/bridge";
 
-import type { MessageSearchHit, MessageSearchPage, PageSearchHit, PageSummary } from "@xmatrix/protocol";
-
 import { cn } from "@/lib/utils";
 import { GlassSelect } from "@/components/ui/glass-select";
 
 import type {
-  ChannelMessage,
   ChannelMemberPresence,
   ObservabilityEvent,
-  SerializedAgent,
   SerializedAgentInstance,
   HumanProfile,
   SerializedChannel,
-  SerializedMachineDaemon,
   SerializedSpace,
-  SerializedWorkspace,
 } from "@xmatrix/protocol";
 
 // Semantic module extracted from workspace-app-shell (AST-safe)
 
 export type { WorkspaceSearchResult } from "./workspace-shell-search-model";
-import type { WorkspaceSearchResult } from "./workspace-shell-search-model";
 
 export function WorkspaceRail({
   activeView,
@@ -215,7 +191,7 @@ export function WorkspaceRail({
         />
       </button>
       <div className="mt-5 flex flex-1 flex-col items-center gap-2">
-        <RailButton icon={Search} label="Search (⌘K)" onClick={onOpenSearch} />
+        <RailButton active={activeView === "search"} icon={Search} label="Search (⌘F)" onClick={onOpenSearch} />
         <RailButton active={activeView === "pages"} icon={BookOpen} label="Pages" onClick={() => onChangeView("pages")} />
         <RailButton
           active={conversations}
@@ -451,341 +427,6 @@ export function RailButton({
   );
 }
 
-export function ChannelQuickOpenDialog({
-  open,
-  channels,
-  spaces,
-  currentSpaceId,
-  selectedChannelId,
-  catalogPaging,
-  onSelect,
-  onCancel,
-}: {
-  open: boolean;
-  channels: SerializedChannel[];
-  spaces: SerializedSpace[];
-  currentSpaceId: string | null;
-  selectedChannelId: string | null;
-  catalogPaging: SpaceChannelCatalog;
-  onSelect: (channelId: string) => void;
-  onCancel: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const resultRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const results = useMemo(
-    () => filterChannelsForQuickOpen(channels, spaces, query, currentSpaceId).slice(0, 40),
-    [channels, currentSpaceId, query, spaces]
-  );
-
-  useCommandSearchReset(open, query, inputRef, setQuery, setActiveIndex);
-
-  useCatalogSearch(open, query, catalogPaging);
-
-  useLayoutEffect(() => {
-    scrollActiveCommandResultIntoView(resultRefs.current[activeIndex]);
-  }, [activeIndex, results.length]);
-
-  return (
-    <CommandDialogShell
-      open={open}
-      title="Go to channel or thread"
-      icon={Hash}
-      query={query}
-      inputRef={inputRef}
-      placeholder="Type a channel or thread name"
-      emptyLabel="No matching channels or threads"
-      activeIndex={activeIndex}
-      resultCount={results.length}
-      onQueryChange={setQuery}
-      onActiveIndexChange={setActiveIndex}
-      onCancel={onCancel}
-      onSubmit={() => {
-        const channel = results[activeIndex] || results[0];
-        if (channel) onSelect(channel.id);
-      }}
-    >
-      {results.map((channel, index) => (
-        <CommandResultButton
-          key={channel.id}
-          refCallback={(node) => {
-            resultRefs.current[index] = node;
-          }}
-          active={index === activeIndex}
-          icon={isThreadChannel(channel) ? MessageSquare : Hash}
-          title={<CommandResultChannelPath path={channelQuickOpenPath(channel, channels)} />}
-          subtitle={channelSwitcherSubtitle(channel)}
-          badge={channel.id === selectedChannelId ? "current" : undefined}
-          onMouseEnter={() => setActiveIndex(index)}
-          onSelect={() => onSelect(channel.id)}
-        />
-      ))}
-    </CommandDialogShell>
-  );
-}
-
-/** Results the workspace search dialog lists at most. */
-const WORKSPACE_SEARCH_RESULT_LIMIT = 80;
-
-export function WorkspaceSearchDialog({
-  open,
-  channels,
-  spaces,
-  agents,
-  projects,
-  machineDaemons,
-  events,
-  messages,
-  pages = [],
-  searchMessages,
-  searchPages,
-  historyRevision,
-  catalogPaging,
-  onSelectChannel,
-  onSelectMessage,
-  onSelectPage,
-  onSelectMember,
-  onCancel,
-}: {
-  open: boolean;
-  channels: SerializedChannel[];
-  spaces: SerializedSpace[];
-  agents: SerializedAgent[];
-  projects: SerializedWorkspace[];
-  machineDaemons: SerializedMachineDaemon[];
-  events: ObservabilityEvent[];
-  messages: ChannelMessage[];
-  pages?: readonly PageSummary[];
-  searchMessages?: WorkspaceMessageSearch;
-  /** Current text of every page this reader may open. */
-  searchPages?: (query: string) => Promise<{ results: PageSearchHit[] }>;
-  historyRevision: number;
-  /** Follow-ups are online-only, so searching them is an authority read. */
-  catalogPaging: SpaceChannelCatalog;
-  onSelectChannel: (channelId: string) => void;
-  onSelectMessage: (channelId: string, messageId: string) => void;
-  onSelectPage: (pageId: string, blockId?: string) => void;
-  onSelectMember: (userId: string, spaceId?: string) => void;
-  onCancel: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [messageSearchState, setMessageSearchState] = useState<WorkspaceMessageSearchState>({ kind: "idle" });
-  const [pageSearch, setPageSearch] = useState<{ query: string; hits: PageSearchHit[] }>({ query: "", hits: [] });
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const resultRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  useCatalogSearch(open, query, catalogPaging);
-  const messageSearchCurrent = messageSearchState.kind !== "idle" &&
-    messageSearchState.reader === searchMessages &&
-    messageSearchState.historyRevision === historyRevision;
-  const messagePage = messageSearchCurrent && messageSearchState.kind === "ready" &&
-    messageSearchState.query === query
-    ? messageSearchState.page
-    : undefined;
-  // Only a page that scanned every readable message is exhaustive. Partial,
-  // stale, loading, and unavailable pages still contribute hits when present —
-  // suppressing them made search look channel-name-only while the index syncs.
-  const provenMessagePage = messagePage?.execution === "proven"
-    ? messagePage
-    : undefined;
-  const needsLegacyMessageFallback = !searchMessages ||
-    !provenMessagePage ||
-    (messageSearchCurrent &&
-      (messageSearchState.kind === "unavailable" || messageSearchState.kind === "loading"));
-  const legacyResults = useMemo(
-    () => open
-      ? buildWorkspaceSearchResults({
-          query,
-          channels,
-          spaces,
-          agents,
-          projects,
-          machineDaemons,
-          events,
-          messages: needsLegacyMessageFallback ? messages : EMPTY_CHANNEL_HISTORY,
-          pages,
-        })
-      : [],
-    [
-      agents,
-      channels,
-      events,
-      machineDaemons,
-      messages,
-      needsLegacyMessageFallback,
-      open,
-      pages,
-      projects,
-      query,
-      spaces,
-    ]
-  );
-  const pageResults = useMemo(
-    () => workspaceSearchResultsFromPageSearch(pageSearch.query === query.trim() ? pageSearch.hits : []),
-    [pageSearch, query]
-  );
-  const messageResults = useMemo(
-    () => messagePage
-      ? workspaceSearchResultsFromMessageSearch(messagePage.results, channels)
-      : [],
-    [channels, messagePage]
-  );
-  const results = useMemo(
-    () => mergeWorkspaceSearchResults(
-      [pageResults, messageResults, legacyResults], WORKSPACE_SEARCH_RESULT_LIMIT,
-    ),
-    [legacyResults, messageResults, pageResults]
-  );
-
-  useCommandSearchReset(open, query, inputRef, setQuery, setActiveIndex);
-
-  useEffect(() => {
-    const trimmedQuery = query.trim();
-    if (!open || !trimmedQuery || !searchMessages) {
-      setMessageSearchState({ kind: "idle" });
-      return undefined;
-    }
-
-    let cancelled = false;
-    const reader = searchMessages;
-    setMessageSearchState({ kind: "loading", query, historyRevision, reader });
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        let resumeToken: string | undefined;
-        let lastPage: MessageSearchPage | undefined;
-        const seenTokens = new Set<string>();
-        try {
-          // Keep reading until every readable message is proven, or the dialog
-          // already has a full page of hits. A repeated cursor means the scan
-          // cannot move, so it stops instead of asking forever.
-          for (let attempt = 0; attempt < 500 && !cancelled; attempt += 1) {
-            const page = await reader(trimmedQuery, resumeToken);
-            if (cancelled) return;
-            lastPage = { ...page, results: [...(lastPage?.results ?? []), ...page.results] };
-            const nextToken = page.resumeToken;
-            const progressed = nextToken !== undefined && !seenTokens.has(nextToken);
-            const scanning = page.execution !== "proven" && progressed
-              && lastPage.results.length < WORKSPACE_SEARCH_RESULT_LIMIT;
-            setMessageSearchState({
-              kind: "ready", query, page: lastPage, historyRevision, reader,
-              scanning, incomplete: !scanning && page.execution !== "proven"
-                && lastPage.results.length < WORKSPACE_SEARCH_RESULT_LIMIT,
-            });
-            if (!scanning || nextToken === undefined) return;
-            seenTokens.add(nextToken);
-            resumeToken = nextToken;
-          }
-          if (!cancelled && lastPage && lastPage.execution !== "proven") {
-            setMessageSearchState({
-              kind: "ready", query, page: lastPage, historyRevision, reader,
-              scanning: false, incomplete: lastPage.results.length < WORKSPACE_SEARCH_RESULT_LIMIT,
-            });
-          }
-        } catch {
-          if (!cancelled && !lastPage) {
-            setMessageSearchState({ kind: "unavailable", query, historyRevision, reader });
-          }
-        }
-      })();
-    }, 60);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [open, historyRevision, query, searchMessages]);
-
-  useEffect(() => {
-    const trimmedQuery = query.trim();
-    if (!open || !trimmedQuery || !searchPages) {
-      setPageSearch({ query: "", hits: [] });
-      return undefined;
-    }
-    let cancelled = false;
-    const reader = searchPages;
-    const timer = window.setTimeout(() => {
-      void reader(trimmedQuery).then((page) => {
-        if (!cancelled) setPageSearch({ query: trimmedQuery, hits: page.results });
-      }, () => {
-        if (!cancelled) setPageSearch({ query: trimmedQuery, hits: [] });
-      });
-    }, 60);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [open, query, searchPages]);
-
-  useLayoutEffect(() => {
-    scrollActiveCommandResultIntoView(resultRefs.current[activeIndex]);
-  }, [activeIndex, results.length]);
-
-  function selectResult(result: WorkspaceSearchResult) {
-    if (result.kind === "page" && result.pageId) {
-      onSelectPage(result.pageId, result.blockId);
-      return;
-    }
-    if (result.kind === "message" && result.channelId && result.messageId) {
-      onSelectMessage(result.channelId, result.messageId);
-      return;
-    }
-    if (result.kind === "member" && result.userId) {
-      onSelectMember(result.userId, result.spaceId);
-      return;
-    }
-    if (result.channelId) onSelectChannel(result.channelId);
-  }
-
-  const messageSearchStatus = workspaceMessageSearchStatus(
-    messageSearchCurrent ? messageSearchState : { kind: "idle" },
-    query,
-  );
-
-  return (
-    <CommandDialogShell
-      open={open}
-      title="Search workspace"
-      icon={Search}
-      query={query}
-      inputRef={inputRef}
-      placeholder="Search channels, pages, messages, members, agents, machines"
-      emptyLabel={messageSearchStatus || (query.trim() ? "No matching content" : "Start typing to search")}
-      inputInTopbar
-      activeIndex={activeIndex}
-      resultCount={results.length}
-      onQueryChange={setQuery}
-      onActiveIndexChange={setActiveIndex}
-      onCancel={onCancel}
-      onSubmit={() => {
-        const result = results[activeIndex] || results[0];
-        if (result) selectResult(result);
-      }}
-    >
-      {results.map((result, index) => (
-        <CommandResultButton
-          key={result.id}
-          refCallback={(node) => {
-            resultRefs.current[index] = node;
-          }}
-          active={index === activeIndex}
-          icon={searchResultIcon(result.kind)}
-          title={result.title}
-          subtitle={result.subtitle}
-          badge={result.kind}
-          onMouseEnter={() => setActiveIndex(index)}
-          onSelect={() => selectResult(result)}
-        />
-      ))}
-      {messageSearchStatus && results.length > 0 ? (
-        <div className="px-3 py-2 text-xs text-muted-foreground" role="status">
-          {messageSearchStatus}
-        </div>
-      ) : null}
-    </CommandDialogShell>
-  );
-}
-
 export function CommandDialogShell({
   open,
   title,
@@ -798,6 +439,8 @@ export function CommandDialogShell({
   activeIndex,
   resultCount,
   children,
+  chips,
+  onRemoveLastChip,
   onQueryChange,
   onActiveIndexChange,
   onCancel,
@@ -814,6 +457,10 @@ export function CommandDialogShell({
   activeIndex: number;
   resultCount: number;
   children: React.ReactNode;
+  /** Filters already applied, drawn in the field ahead of the text. */
+  chips?: React.ReactNode;
+  /** Backspace in an empty field takes the last filter off. */
+  onRemoveLastChip?: () => void;
   onQueryChange: (query: string) => void;
   onActiveIndexChange: (index: number) => void;
   onCancel: () => void;
@@ -850,6 +497,7 @@ export function CommandDialogShell({
   const renderInputControl = (surface: "default" | "mobile" | "desktop") => (
     <div className="app-command-input-pill flex items-center gap-2.5">
       <Icon className="size-4 shrink-0 text-muted-foreground" />
+      {chips}
       <Input
         ref={surface === "desktop" ? desktopInputRef : surface === "mobile" ? mobileInputRef : defaultInputRef}
         type="text"
@@ -868,6 +516,9 @@ export function CommandDialogShell({
           } else if (event.key === "Escape") {
             event.preventDefault();
             onCancel();
+          } else if (event.key === "Backspace" && !query && onRemoveLastChip) {
+            event.preventDefault();
+            onRemoveLastChip();
           }
         }}
         data-workspace-search-input={inputInTopbar ? surface : undefined}
@@ -921,38 +572,6 @@ export function CommandDialogShell({
         )}
     </div>,
     document.body
-  );
-}
-
-/**
- * The path chain that titles a quick switcher row: every ancestor of the
- * channel, root first, the channel itself last.
- */
-export function CommandResultChannelPath({ path }: { path: SerializedChannel[] }) {
-  return (
-    <span className="flex min-w-0 items-center gap-1">
-      {path.map((crumb, index) => (
-        // Ancestors give up their width first, so the channel you are actually
-        // picking is the last part of the path to lose characters.
-        <span
-          key={crumb.id}
-          className={cn(
-            "flex min-w-0 items-center gap-1",
-            index === path.length - 1 ? "shrink" : "max-w-32 shrink-[4]"
-          )}
-        >
-          {index > 0 && <ChevronRight className="size-3 shrink-0 text-muted-foreground/60" />}
-          <span
-            className={cn(
-              "min-w-0 truncate",
-              index === path.length - 1 ? "text-foreground" : "font-medium text-muted-foreground"
-            )}
-          >
-            {channelTitle(crumb)}
-          </span>
-        </span>
-      ))}
-    </span>
   );
 }
 
@@ -1205,7 +824,7 @@ export function TopWorkspaceBar({
         )}
       </div>
       {onOpenSearch && !showBack && (
-        // Desktop search is a rail button; this icon is the phone's, and the
+        // Desktop search is the rail button and ⌘F; this icon is the phone's, and the
         // topbar is hidden on desktop. Channel detail bars keep Share / More
         // only — no search.
         <button
@@ -2059,39 +1678,6 @@ export function channelHasWorkInHand(channel: SerializedChannel, events: Observa
   return channelWorkInHandInstanceIds(channel, events).length > 0;
 }
 
-export { channelQuickOpenScore } from "./workspace-shell-search-model";
-
-export function workspaceSearchResultsFromPageSearch(
-  hits: readonly PageSearchHit[],
-): WorkspaceSearchResult[] {
-  return hits.map((hit) => ({
-    id: `page:${hit.pageId}`,
-    kind: "page" as const,
-    title: hit.field === "body" ? (hit.snippet.trim() || hit.title) : hit.title,
-    subtitle: hit.blockTitle ? `${hit.title} · ${hit.blockTitle}` : "Page",
-    pageId: hit.pageId,
-    ...(hit.blockId ? { blockId: hit.blockId } : {}),
-  }));
-}
-
-export function workspaceSearchResultsFromMessageSearch(
-  hits: readonly MessageSearchHit[],
-  channels: readonly SerializedChannel[],
-): WorkspaceSearchResult[] {
-  const channelById = new Map(channels.map((channel) => [channel.id, channel]));
-  return hits.map((hit) => {
-    const channel = channelById.get(hit.channelId);
-    return {
-      id: `message:${hit.entityId}`,
-      kind: "message",
-      title: hit.snippet.trim() || "Attachment",
-      subtitle: channel ? `#${channelTitle(channel)}` : shortId(hit.channelId),
-      channelId: hit.channelId,
-      messageId: hit.messageId,
-    };
-  });
-}
-
 export function SpaceAvatar({ space }: { space: SerializedSpace }) {
   return (
     <span
@@ -2122,20 +1708,11 @@ export function spaceDisambiguatorId(id: string): string {
 export type { ChannelAgentAvatarItem } from "./workspace-shell-message-model";
 import type { ChannelAgentAvatarItem } from "./workspace-shell-message-model";
 
-function useCatalogSearch(open: boolean, query: string, catalogPaging: SpaceChannelCatalog) {
+export function useCatalogSearch(open: boolean, query: string, catalogPaging: SpaceChannelCatalog) {
   useEffect(() => {
     const normalized = normalizeChannelSearchText(query);
     if (!open || !normalized) return;
     const timer = window.setTimeout(() => { void catalogPaging.load({ view: "search", query: normalized }); }, 150);
     return () => window.clearTimeout(timer);
   }, [catalogPaging, open, query]);
-}
-
-function useCommandSearchReset(open: boolean, query: string, inputRef: MutableRefObject<HTMLInputElement | null>,
-  setQuery: (query: string) => void, setActiveIndex: (index: number) => void) {
-  useEffect(() => {
-    if (!open) { setQuery(""); setActiveIndex(0); return; }
-    window.requestAnimationFrame(() => inputRef.current?.focus());
-  }, [open, inputRef, setQuery, setActiveIndex]);
-  useEffect(() => { setActiveIndex(0); }, [query, setActiveIndex]);
 }

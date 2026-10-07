@@ -32,7 +32,6 @@ import { listenForForegroundRefresh } from "./foreground-refresh";
 import {
   channelLastMessagePreviewFromEntry,
 } from "./workspace-shell-formatters";
-import { assembleWorkspaceSearchMessages } from "./workspace-shell-search-model";
 import { useMessageJump } from "./use-message-jump";
 import {
   useCallback,
@@ -715,9 +714,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const isMobileViewport = useIsMobileViewport();
 
   const {
-    channelQuickOpen,
-    setChannelQuickOpen,
     workspaceSearchOpen,
+    workspaceSearchHere,
     setWorkspaceSearchOpen,
     openWorkspaceSearch,
   } = useShellDialogs(isMobileViewport);
@@ -2718,7 +2716,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     // A list destination's address names its open item the same way.
     const canonicalPath = view === "pages"
       ? pagesViewPath(viewPath, selectedPageId, routeInfo.conversationKey)
-      : view === "admin" ? adminViewPath(viewPath, currentBrowserLocation())
+      : view === "admin" || view === "search" ? adminViewPath(viewPath, currentBrowserLocation())
       : SPLIT_TOOL_VIEWS.includes(view) ? toolItemPath(viewPath, toolItemSelection(currentBrowserLocation())) : viewPath;
     if (currentBrowserLocation() !== canonicalPath) {
       replaceBrowserPath(canonicalPath);
@@ -2766,34 +2764,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     void removeRetiredBrowserReplica();
   }, []);
 
-  // Only assemble the search corpus while the dialog is open. Closed search must
-  // not flatMap every channel history cache entry on unrelated shell re-renders.
-  const workspaceSearchMessages = useMemo(() => {
-    // Mobile channel-list has no selected channel; still scan cached tails so
-    // message search is not empty while the Hub search is unavailable.
-    const assembled = assembleWorkspaceSearchMessages({
-      open: workspaceSearchOpen,
-      channelIds: channels.map((channel) => channel.id),
-      authorizedHistory: renderableHistory,
-      historyAuthorized: historyRenderAuthorized,
-      historyCache: historyCacheRef.current,
-    });
-    return assembled.length > 0 ? assembled : EMPTY_CHANNEL_HISTORY;
-    // historyCacheRevision versions the mutable historyCacheRef this reads.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    channels,
-    historyCacheRevision,
-    historyRenderAuthorized,
-    renderableHistory,
-    workspaceSearchOpen,
-  ]);
-
   // Message search runs on the Hub over every Channel the reader may read.
   const messageSearch = useMemo<WorkspaceMessageSearch | undefined>(() => {
     if (!token || !currentSpaceId) return undefined;
-    return (query, resumeToken) => searchWorkspaceMessages({
-      token, spaceId: currentSpaceId, query, resumeToken,
+    return (query, resumeToken, filters) => searchWorkspaceMessages({
+      token, spaceId: currentSpaceId, query, resumeToken, ...filters,
     });
   }, [currentSpaceId, token]);
 
@@ -2815,6 +2790,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     token,
     authenticatedUserId,
     mobileListFixture,
+    browserPath,
     setBrowserPath,
     routeInfo,
     desktopBridge,
@@ -3003,9 +2979,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setMovingChannelId,
     channelMoveError,
     setChannelMoveError,
-    channelQuickOpen,
-    setChannelQuickOpen,
     workspaceSearchOpen,
+    workspaceSearchHere,
     setWorkspaceSearchOpen,
     isMobileViewport,
     renamingSpaceId,
@@ -3044,7 +3019,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     canUseSelectedChannel,
     agentStatusEvents,
     logoutAndClearDeviceData,
-    workspaceSearchMessages,
     messageSearch,
     persistComposerDraftSnapshot,
   };

@@ -37,7 +37,6 @@ import {
   ChannelDetails,
   ChannelHeader,
   ChannelMoveDialog,
-  ChannelQuickOpenDialog,
   ChannelSidebar,
   Composer,
   DesktopUpdateRailButton,
@@ -50,7 +49,6 @@ import {
   MobileChannelSummaryPlaque,
   TopWorkspaceBar,
   WorkspaceRail,
-  WorkspaceSearchDialog,
   channelHasAgentMembers,
   latestChannelConnectorStateMessageId,
   replaceChannel,
@@ -87,6 +85,10 @@ import { DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, 
 import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
 import { usePageCreation } from "@/components/pages/page-creation";
 import { searchWorkspacePages } from "./workspace-message-search";
+import { channelTitle } from "@/components/dashboard/channel-links";
+import { WorkspaceSearchDialog, WorkspaceSearchView } from "./workspace-search";
+import { searchRequestFromParams, searchRequestParams, type SearchFilters } from "./workspace-search-model";
+import { parseAppLocation } from "./workspace-shell-navigation";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
 
 /**
@@ -107,6 +109,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     loading,
     token,
     routeInfo,
+    browserPath,
     desktopBridge,
     desktopUpdateBridgeAvailable,
     channelsRef,
@@ -202,9 +205,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     movingChannelId,
     channelMoveError,
     setChannelMoveError,
-    channelQuickOpen,
-    setChannelQuickOpen,
     workspaceSearchOpen,
+    workspaceSearchHere,
     setWorkspaceSearchOpen,
     isMobileViewport,
     renamingSpaceId,
@@ -226,7 +228,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     humanMemberId,
     canUseSelectedChannel,
     logoutAndClearDeviceData,
-    workspaceSearchMessages,
     messageSearch,
     persistComposerDraftSnapshot,
     handleTimelineScrollPositionChange,
@@ -277,6 +278,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
+    openSearchResults,
     openSchedule,
     clearScheduleFocus,
     openAppsForSpace,
@@ -544,6 +546,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     if (!token || !currentSpaceId) return undefined;
     return (query: string) => searchWorkspacePages({ token, spaceId: currentSpaceId, query });
   }, [currentSpaceId, token]);
+  const searchRequest = useMemo(() => searchRequestFromParams(parseAppLocation(browserPath).searchParams), [browserPath]);
+  // ⌘F searches where the reader is: inside a conversation, only that conversation.
+  const searchHereFilters = useMemo<SearchFilters>(() => workspaceSearchHere && view === "messages" && selectedChannel
+    ? { channel: { id: selectedChannel.id, label: channelTitle(selectedChannel) } }
+    : {}, [selectedChannel, view, workspaceSearchHere]);
   const pageCreation = usePageCreation(currentSpaceId, token ?? "", openPage);
   // A `page:<id>#<section>` chip opens the page at that section; a new seq scrolls there again.
   const [pageSectionRequest, setPageSectionRequest] =
@@ -1171,10 +1178,27 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onDeleteAgent={(agent) => void deleteAgent(agent)}
     />
   );
-  const toolSurface = renderToolSurface(view === "messages" || view === "pages" ? "more" : view);
+  const searchSurface = view === "search" ? (
+    <WorkspaceSearchView
+      request={searchRequest}
+      spaceName={currentSpace?.name ?? "this Space"}
+      channels={channels}
+      pages={pageTree.data ?? []}
+      searchMessages={messageSearch}
+      searchPages={searchPages}
+      onChangeRequest={(request) => openSearchResults(searchRequestParams(request).toString())}
+      onEditSearch={openWorkspaceSearch}
+      onSelectChannel={(channelId) => navigateToChannel(channelId)}
+      onSelectMessage={(channelId, messageId) => navigateToChannel(channelId, messageId)}
+      onSelectPage={(pageId, blockId) => openPageAt(pageId, blockId)}
+    />
+  ) : null;
+  const toolSurface = view === "search" ? searchSurface
+    : renderToolSurface(view === "messages" || view === "pages" ? "more" : view as Exclude<AppView, "messages" | "search">);
   const statusSurface = dockTabMounted("status") ? renderToolSurface("status") : null;
   const moreSurface = dockTabMounted("more")
-    ? renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
+    ? view === "search" ? searchSurface
+      : renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
     : null;
 
   return (
@@ -1186,18 +1210,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       {/* One live root subscription per loaded Space. Renders nothing. */}
       {channelCatalogPaging.roots}
       {children}
-      <ChannelQuickOpenDialog
-        open={channelQuickOpen}
-        channels={channels}
-        spaces={spaces}
-        currentSpaceId={currentSpaceId}
-        selectedChannelId={selectedChannelId}
-        catalogPaging={currentSpaceCatalog}
-        onSelect={(channelId) => navigateToChannel(channelId)}
-        onCancel={() => setChannelQuickOpen(false)}
-      />
       <WorkspaceSearchDialog
         open={workspaceSearchOpen}
+        initialFilters={searchHereFilters}
+        spaceId={currentSpaceId}
         // Match the channel-list surface: when live catalog is still empty the
         // durable presentation cache is what the user can already see and type.
         channels={channels}
@@ -1205,13 +1221,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         agents={agents}
         projects={projects}
         machineDaemons={machineDaemons}
-        events={events}
-        messages={workspaceSearchMessages}
         pages={pageTree.data ?? []}
         searchMessages={messageSearch}
         searchPages={searchPages}
-        historyRevision={historyRevision}
         catalogPaging={currentSpaceCatalog}
+        onOpenResults={(request) => openSearchResults(searchRequestParams(request).toString())}
         onSelectChannel={(channelId) => navigateToChannel(channelId)}
         onSelectMessage={(channelId, messageId) => navigateToChannel(channelId, messageId)}
         onSelectPage={(pageId, blockId) => {
@@ -1220,6 +1234,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         }}
         onSelectMember={(userId, spaceId) => {
           openHumanProfile(userId, spaceId);
+          setWorkspaceSearchOpen(false);
+        }}
+        onChangeView={(nextView) => {
+          changeAppView(nextView);
           setWorkspaceSearchOpen(false);
         }}
         onCancel={() => setWorkspaceSearchOpen(false)}

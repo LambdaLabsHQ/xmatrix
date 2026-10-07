@@ -241,7 +241,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setChannelMoveTargetSpaceId,
     setMovingChannelId,
     setChannelMoveError,
-    setChannelQuickOpen,
     setWorkspaceSearchOpen,
     setRenamingSpaceId,
     setNewSpaceName,
@@ -1248,6 +1247,19 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setBrowserPath(nextPath);
   }
 
+  /** The search page for a search, written as its query string (`q`, `in`, `from`). */
+  function openSearchResults(query: string) {
+    setView("search");
+    setSelectedChannelId(null);
+    setMobileChannelDetailsOpen(false);
+    setReplyTarget(null);
+    setWorkspaceSearchOpen(false);
+    const viewPath = appViewPath(null, "search", s.currentSpaceId, s.spaces);
+    const nextPath = query ? `${viewPath}?${query}` : viewPath;
+    pushBrowserPath(nextPath);
+    setBrowserPath(nextPath);
+  }
+
   /** `userId` omitted means the viewer's own profile — the rail avatar's case. */
   function openHumanProfile(userId?: string, spaceId?: string) {
     setProfileUserId(userId && userId !== s.user?.id ? userId : null);
@@ -1377,7 +1389,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setSelectedChannelId(channelId);
       s.viewRef.current = "messages";
       s.selectedChannelIdRef.current = channelId;
-      setChannelQuickOpen(false);
       setWorkspaceSearchOpen(false);
       if (!messageId && !s.isMobileViewportRef.current) {
         setComposerAutoFocusRequest((current) => current + 1);
@@ -2808,6 +2819,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
+    openSearchResults,
     openHumanProfile,
     profileUserId,
     openSchedule,

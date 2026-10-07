@@ -4,30 +4,24 @@ import { useCallback, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 
 /**
- * The channel quick-open (Cmd/Ctrl+P) and workspace search (Cmd/Ctrl+F)
- * dialogs: at most one is open, and opening search on mobile focuses its input
+ * Search (Cmd/Ctrl+F, or the rail): one dialog. The shortcut searches where
+ * the reader is, so inside a conversation it starts scoped to it; the rail
+ * button searches the whole Space. Opening search on mobile focuses its input
  * in the same task so the on-screen keyboard comes up.
  */
 export function useShellDialogs(isMobileViewport: boolean) {
-  const [channelQuickOpen, setChannelQuickOpen] = useState(false);
-
   const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
+  /** Whether the open search starts scoped to where it was opened. */
+  const [workspaceSearchHere, setWorkspaceSearchHere] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const hasCommandModifier = event.metaKey || event.ctrlKey;
       if (!hasCommandModifier || event.altKey || event.shiftKey || event.defaultPrevented) return;
-
-      const key = event.key.toLowerCase();
-      if (key === "p") {
-        event.preventDefault();
-        setWorkspaceSearchOpen(false);
-        setChannelQuickOpen(true);
-      } else if (key === "f") {
-        event.preventDefault();
-        setChannelQuickOpen(false);
-        setWorkspaceSearchOpen(true);
-      }
+      if (event.key.toLowerCase() !== "f") return;
+      event.preventDefault();
+      setWorkspaceSearchHere(true);
+      setWorkspaceSearchOpen(true);
     };
 
     document.addEventListener("keydown", handleKeyDown);
@@ -35,7 +29,7 @@ export function useShellDialogs(isMobileViewport: boolean) {
   }, []);
 
   const openWorkspaceSearch = useCallback(() => {
-    setChannelQuickOpen(false);
+    setWorkspaceSearchHere(false);
 
     if (!isMobileViewport || typeof document === "undefined") {
       setWorkspaceSearchOpen(true);
@@ -49,9 +43,8 @@ export function useShellDialogs(isMobileViewport: boolean) {
   }, [isMobileViewport]);
 
   return {
-    channelQuickOpen,
-    setChannelQuickOpen,
     workspaceSearchOpen,
+    workspaceSearchHere,
     setWorkspaceSearchOpen,
     openWorkspaceSearch,
   };
