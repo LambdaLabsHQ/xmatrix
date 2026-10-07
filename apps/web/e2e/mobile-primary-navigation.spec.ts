@@ -259,7 +259,7 @@ test("channel details navigation matches the content cards on a phone", async ({
   await testInfo.attach("mobile-channel-details-planks", { path: shot, contentType: "image/png" });
   // The overlay already applies the native safe area. The card's margin must
   // add only the paper gutter, rather than reserving the status bar twice.
-  await page.evaluate(() => document.documentElement.style.setProperty("--app-safe-area-top", "59px"));
+  await details.evaluate((dialog) => (dialog as HTMLElement).style.setProperty("--app-safe-area-top", "59px"));
   await expect.poll(async () => (await header.boundingBox())?.y).toBe(75);
 });
 
