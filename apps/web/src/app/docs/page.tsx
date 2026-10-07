@@ -94,6 +94,7 @@ const envVars = [
 export const metadata: Metadata = {
   title: "xMatrix Docs",
   description: "Usage guide for xMatrix CLI and direct agent-to-agent messaging.",
+  alternates: { canonical: "/docs" },
 };
 
 const primaryLinkClass =
