@@ -158,20 +158,6 @@ export function insertMentionIntoDraft(
   };
 }
 
-export function insertMentionTriggerIntoDraft(
-  draft: string,
-  cursor: number
-): { value: string; cursor: number } {
-  const boundedCursor = Math.min(Math.max(cursor, 0), draft.length);
-  const beforeCursor = draft.slice(0, boundedCursor);
-  const afterCursor = draft.slice(boundedCursor);
-  const insert = `${beforeCursor && !/\s$/.test(beforeCursor) ? " " : ""}@`;
-  return {
-    value: `${beforeCursor}${insert}${afterCursor}`,
-    cursor: beforeCursor.length + insert.length,
-  };
-}
-
 export function localWorkspacesForDesktop(
   workspaces: SerializedWorkspace[],
   context: DesktopContext | null
