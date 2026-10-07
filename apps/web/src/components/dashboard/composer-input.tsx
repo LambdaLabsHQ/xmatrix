@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -160,6 +161,39 @@ function ComposerInputSurface({
   if (completionApiRef) {
     completionApiRef.current = completion;
   }
+
+  // The completion panel morphs out of the capsule: the glass box itself
+  // grows from the height it had to the panel's (or back), with its content
+  // pinned to the bottom edge and revealed as it grows, as the work dock's
+  // island grows into its panel. The box's last settled height is kept so
+  // the change can start from it.
+  const settledBoxHeightRef = useRef<number | null>(null);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const observer = new ResizeObserver(() => {
+      if (!box.getAnimations().length) settledBoxHeightRef.current = box.getBoundingClientRect().height;
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+  const completionOpen = completion.isCompletionOpen;
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const from = settledBoxHeightRef.current;
+    if (!box || from === null) return;
+    const to = box.getBoundingClientRect().height;
+    settledBoxHeightRef.current = to;
+    if (Math.abs(to - from) < 1 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    for (const running of box.getAnimations()) running.cancel();
+    box.classList.add("app-composer-box-morphing");
+    const animation = box.animate([{ height: `${from}px` }, { height: `${to}px` }], completionOpen
+      ? { duration: 360, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
+      : { duration: 240, easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+    const settle = () => box.classList.remove("app-composer-box-morphing");
+    animation.onfinish = settle;
+    animation.oncancel = settle;
+  }, [completionOpen]);
 
   useEffect(() => {
     if (!autoFocus) return;
