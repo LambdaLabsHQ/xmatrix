@@ -170,7 +170,8 @@ Check lists the account's properties without storing them. Reads:
 `list_sites:*`, `query:<property> [by=<up to three of query,page,country,device,date,searchAppearance>|none] [days=1-480] [limit=1-250] [type=…]`
 (defaults `by=query days=28 limit=25 type=web`, UTC dates ending today),
 `list_sitemaps:<property>` and `inspect_url:<property> <page url>`. The write
-`submit_sitemap:<property> <sitemap url>` needs the Channel's allow policy. A
+`submit_sitemap:<property> <sitemap url>` runs unless a Space admin denies it
+in the Channel. A
 property is `sc-domain:<domain>` or an exact URL-prefix address ending in `/`;
 page and sitemap URLs must belong to the named property before any provider
 call. Google decides whether the connected account can see the property.
@@ -534,14 +535,10 @@ GitHub triggers may use either spelling.
 ### 3.5 Outbound actions and policy
 
 - New `data.app_connector_action_policies (connection_id, channel_id, action_id, mode CHECK IN ('allow','approve','deny'), version)`.
-- Default when no row exists:
-  - `read` actions → `allow`;
-  - `write` actions → `approve` when an Agent initiates them, `allow` when a
-    Human authors the command (the Human's message is the approval);
-  - a write action whose manifest sets `defaultPolicy: "allow"` → `allow` for
-    an Agent too, until a Channel `deny` row overrides it;
-  - manifest-flagged actions (`dispatch_workflow`, `rerun_failed_jobs`) →
-    `deny` until enabled.
+- Default when no row exists: every action, read or write, runs for a Human or
+  an Agent. Connectors do not stand in the way; a Space admin's Channel `deny`
+  row is the only xMatrix policy that blocks an action, and the provider's own
+  permissions still apply.
 - Migration: each `*WriteChannelId` metadata value becomes one
   `(connection, channel, action, allow)` row.
   - The migration is idempotent and bounded per connection.
@@ -606,8 +603,8 @@ or generates a webhook secret in the Apps view.
       Run accepts only explicit success with an exact action ID, execution ID
       and persisted audit confirmation. Untrusted output is fenced and limited
       to 800 characters. Invalid or uncertain receipts never imply safe retry.
-    - Policy is per channel for all OpenConnector actions together. An Agent
-      needs `@openconnector:policy:run allow`.
+    - Policy is per channel for all OpenConnector actions together; a Space
+      admin's `@openconnector:policy:run deny` turns them off there.
 
 ## 5. Delivery plan (one PR each)
 

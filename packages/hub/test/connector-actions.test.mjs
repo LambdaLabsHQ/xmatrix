@@ -63,27 +63,14 @@ test("action commands take one statement whose text spans the following lines", 
   assert.ok("error" in parsePolicyCommand({ target: "post", text: "maybe" }));
 });
 
-test("policy: deny blocks everyone, an Agent's write needs allow, and anything not known to be a Human is an Agent", () => {
-  const base = { providerId: "slack", actionId: "post", effect: "write" };
-  assert.equal(actionRefusal({ ...base, mode: null, senderKind: "user" }), undefined);
-  assert.match(actionRefusal({ ...base, mode: "deny", senderKind: "user" }), /denied/u);
-  assert.match(actionRefusal({ ...base, mode: null, senderKind: "agent" }), /@slack:policy:post allow/u);
-  assert.match(actionRefusal({ ...base, mode: null }), /policy/u);
-  assert.equal(actionRefusal({ ...base, mode: "allow", senderKind: "agent" }), undefined);
-  assert.equal(actionRefusal({ ...base, effect: "read", mode: null, senderKind: "agent" }), undefined);
-});
-
-test("a default-allow write runs for an Agent until the Channel denies it", () => {
-  const sentry = APP_CONNECTOR_PROVIDER_MANIFESTS.find((provider) => provider.id === "sentry");
-  for (const actionId of ["resolve", "unresolve", "ignore"]) {
-    const action = sentry.actions.find((candidate) => candidate.id === actionId);
-    assert.equal(action.effect, "write", actionId);
-    assert.equal(action.defaultPolicy, "allow", actionId);
-    const base = { providerId: "sentry", actionId, effect: "write", defaultPolicy: "allow" };
-    assert.equal(actionRefusal({ ...base, mode: null, senderKind: "agent" }), undefined, actionId);
-    assert.equal(actionRefusal({ ...base, mode: null, senderKind: "user" }), undefined, actionId);
-    assert.match(actionRefusal({ ...base, mode: "deny", senderKind: "agent" }), /denied/u, actionId);
-    assert.equal(actionRefusal({ ...base, mode: "allow", senderKind: "agent" }), undefined, actionId);
+test("policy: every action runs for a Human or an Agent until the Channel denies it", () => {
+  for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
+    for (const action of provider.actions.filter((candidate) => candidate.effect)) {
+      assert.equal("defaultPolicy" in action, false, `${provider.id}:${action.id} carries its own default`);
+      assert.equal(actionRefusal({ actionId: action.id, mode: null }), undefined, `${provider.id}:${action.id}`);
+      assert.equal(actionRefusal({ actionId: action.id, mode: "allow" }), undefined, `${provider.id}:${action.id}`);
+      assert.match(actionRefusal({ actionId: action.id, mode: "deny" }), /denied/u, `${provider.id}:${action.id}`);
+    }
   }
 });
 
@@ -252,7 +239,7 @@ test("connector MCP lists the connected providers' actions and runs a call as th
   const calls = [];
   const run = async (providerId, input, actionId, _action, statement) => {
     calls.push({ providerId, input, actionId, statement });
-    return "Slack post: blocked; an Agent runs post only after a Space admin sends @slack:policy:post allow here.";
+    return "Slack post: blocked; post is denied in this channel.";
   };
   const called = await (await handleConnectorMcp({}, caller, { jsonrpc: "2.0", id: 3, method: "tools/call",
     params: { name: "slack__post", arguments: { target: "C0123456789", text: "hi" } } }, run)).json();
@@ -267,14 +254,14 @@ test("connector MCP lists the connected providers' actions and runs a call as th
   assert.equal((await handleConnectorMcp({}, caller, { jsonrpc: "2.0", method: "notifications/initialized" })).status, 202);
 });
 
-test("Sentry resolve is an MCP tool an Agent may call without a policy allow", async () => {
+test("connector MCP tools carry no policy precondition", async () => {
   const { handleConnectorMcp } = await import("../src/connectors/mcp.ts");
   const caller = { ownerUserId: "owner", channelId: "channel-1", runId: "run-1", spaceId: "space-1" };
   const listed = await (await handleConnectorMcp({}, caller, { jsonrpc: "2.0", id: 1, method: "tools/list" }, undefined,
     async () => new Set(["sentry"]))).json();
   const resolve = listed.result.tools.find((tool) => tool.name === "sentry__resolve");
   assert.ok(resolve, "Sentry resolve is offered");
-  assert.doesNotMatch(resolve.description, /needs @sentry:policy:resolve allow/u);
+  assert.doesNotMatch(resolve.description, /policy/u);
   const read = listed.result.tools.find((tool) => tool.name === "sentry__read_issue");
   assert.ok(read && !read.description.includes("policy"), "a read action still needs no policy");
 });

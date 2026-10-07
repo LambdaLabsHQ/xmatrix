@@ -21,11 +21,6 @@ function readAction(id: string, label: string, description: string, usage: strin
   return { id, label, description, usage, effect: "read", completion: { trailingDelimiter: ":" } };
 }
 
-/* A write an Agent may run by default, unless a Space admin denies it in the Channel. */
-function agentWriteAction(id: string, label: string, description: string, usage: string): Action {
-  return { ...writeAction(id, label, description, usage), defaultPolicy: "allow" };
-}
-
 /* Every provider with write actions takes the per-Channel policy command. */
 function withPolicy(actions: Action[]): Action[] {
   return actions.length === 0 ? [] : [...actions, {
@@ -184,9 +179,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     defaultFeatures: ["issue.created", "issue.regressed", "alert"],
     actions: [
       readAction("read_issue", "Read issue context", "Read one Sentry issue and bounded latest-event exception frames.", "<issue short id or numeric id>"),
-      agentWriteAction("resolve", "Resolve issue", "Mark a Sentry issue resolved.", "<issue short id>"),
-      agentWriteAction("unresolve", "Unresolve issue", "Mark a Sentry issue unresolved.", "<issue short id>"),
-      agentWriteAction("ignore", "Ignore issue", "Mark a Sentry issue ignored.", "<issue short id>"),
+      writeAction("resolve", "Resolve issue", "Mark a Sentry issue resolved.", "<issue short id>"),
+      writeAction("unresolve", "Unresolve issue", "Mark a Sentry issue unresolved.", "<issue short id>"),
+      writeAction("ignore", "Ignore issue", "Mark a Sentry issue ignored.", "<issue short id>"),
     ],
   }),
   eventConnector({
