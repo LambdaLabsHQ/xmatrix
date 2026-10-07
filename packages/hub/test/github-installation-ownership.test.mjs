@@ -8,15 +8,16 @@ import { githubConnectionInstallationIds, githubUserCanAccessInstallation } from
 const load = await compileCommonJsSourceModule(new URL("../src/index-routes-auth-space-management.ts", import.meta.url));
 const env = { GITHUB_APP_CLIENT_SECRET: "app-secret" };
 
-function fixture({ linkedToken = "user-token", reachable = ["111"], stored = ["111"] } = {}) {
+function fixture({ linkedToken = "user-token", reachable = ["111"], stored = ["111"], listed = [] } = {}) {
   const upserts = [];
   const reachability = [];
   const imports = {
     hono: { Hono },
     "./apps": {
       upsertAppConnection: async (_env, input) => { upserts.push(input); return { connection: {} }; },
-      listAppConnections: async () => [],
-      findAppConnection: async () => ({ providerId: "github", metadata: { installationIds: stored } }),
+      listAppConnections: async () => listed,
+      findAppConnection: async () => ({ providerId: "github",
+        metadata: { installationIds: stored, repository: "org/repo" } }),
     },
     "./app-connectors": {
       githubConnectionInstallationIds,
@@ -94,6 +95,27 @@ test("Configure may send the stored installations back but never different ones"
   assert.deepEqual(f.upserts, []);
   assert.notEqual((await f.patch({ installationIds: ["111"], repository: "org/repo" })).status, 400);
   assert.equal(f.upserts.length, 1);
+});
+
+test("Disconnect forgets the linked installations and keeps the rest of the configuration", async () => {
+  const f = fixture({ stored: ["111", "222"] });
+  const response = await f.app.request("/api/spaces/space-1/app-connections/github", { method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ providerId: "github", status: "disconnected" }) }, env);
+  assert.notEqual(response.status, 400);
+  assert.equal(f.upserts.length, 1);
+  assert.equal(f.upserts[0].body.status, "disconnected");
+  assert.deepEqual(f.upserts[0].body.metadata, { repository: "org/repo" });
+});
+
+test("Connect after Disconnect replaces the installations it left behind and keeps the scopes", async () => {
+  const f = fixture({ reachable: ["222"], listed: [{ providerId: "github", status: "disconnected",
+    scopes: ["metadata:read", "contents:write"], metadata: { installationIds: ["111"], repository: "org/repo" } }] });
+  assert.equal(outcome(await f.setup("222")), "connected");
+  assert.equal(f.upserts.length, 1);
+  assert.deepEqual(f.upserts[0].body.metadata, { repository: "org/repo" });
+  assert.deepEqual(f.upserts[0].body.metadataAppend, { installationIds: "222" });
+  assert.equal("scopes" in f.upserts[0].body, false);
 });
 
 test("installation reachability pages GitHub's list of the user's installations", async () => {
