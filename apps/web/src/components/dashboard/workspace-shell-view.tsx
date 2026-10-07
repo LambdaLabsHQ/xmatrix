@@ -1059,7 +1059,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // phone's Pages list, or shown while the Space is being moved to pages.
   const pagesViewSurface = (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
-      onSelectPage={openPage} conversation={pageConversation} focusSection={pageSectionRequest}
+      onSelectPage={openPage} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}
       freshPageId={pageCreation.freshPageId}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>
