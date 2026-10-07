@@ -368,6 +368,15 @@ export function githubConnectionInstallationIds(
  * GitHub's setup redirect carries `installation_id` unsigned, so this is what
  * proves the installation is theirs before a Space may use it.
  */
+/**
+ * The App's public OAuth client id, as GitHub reports it for the App itself.
+ * Read when a deployment configures the App's id and key but not its client id.
+ */
+export async function fetchGitHubAppClientId(env: AppConnectorEnv): Promise<string | undefined> {
+  const payload = githubObject(await fetchGitHubJson(env, "/app", await configuredGitHubAppJwt(env)));
+  return githubString(payload.client_id)?.trim() || undefined;
+}
+
 /** The GitHub account one App installation belongs to, as Configure shows it. */
 export interface GitHubInstallationAccount {
   installationId: string;
