@@ -63,17 +63,17 @@ enum DockGeometry {
 /// destination of its own.
 enum MobileTabView: String, CaseIterable {
     // Pages come first: they are how the Space stands. The order and labels
-    // match the web dock; machines, schedules and the other tools live in More.
+    // match the web dock; agents, machines, schedules and the other tools live in More.
     case pages = "pages"
     case messages = "messages"
-    case agents = "agents"
+    case status = "status"
     case more = "more"
 
     var label: String {
         switch self {
         case .pages: return "Pages"
         case .messages: return "Channels"
-        case .agents: return "Agents"
+        case .status: return "Status"
         case .more: return "More"
         }
     }
@@ -82,23 +82,22 @@ enum MobileTabView: String, CaseIterable {
         switch self {
         case .pages: return "book.fill"
         case .messages: return "bubble.left.and.bubble.right.fill"
-        case .agents: return "cpu"
+        case .status: return "gauge.with.needle"
         case .more: return "ellipsis"
         }
     }
 
     /// The tab that owns a web view, as the web dock's `dockTabOf` decides:
-    /// Pages, Channels and Agents own themselves; every other view is in More.
+    /// Pages, Channels and Status own themselves; every other view, Agents
+    /// included, is in More.
     static func tab(for activeView: String) -> Self {
         switch activeView {
         case "pages":
             return .pages
         case "messages":
             return .messages
-        // `roles` is the Agents view's retired name; web builds served before
-        // the rename still report it. Remove once those are gone.
-        case "agents", "roles":
-            return .agents
+        case "status":
+            return .status
         default: return .more
         }
     }
