@@ -88,6 +88,23 @@ fn apply_spawn_initial_prompt(
     local_env
 }
 
+/// Applies the registration's working mode. Hub launch data is authoritative,
+/// so a value inherited from a local profile never reaches the Run; a mode
+/// this CLI does not know fails the launch instead of silently becoming
+/// another one.
+fn apply_spawn_working_mode(
+    mut local_env: BTreeMap<String, String>,
+    working_mode: Option<&str>,
+) -> error::Result<BTreeMap<String, String>> {
+    use xmatrix_cli_core::bootstrap::WorkingMode;
+    local_env.remove(WorkingMode::ENV);
+    if let Some(working_mode) = working_mode {
+        WorkingMode::parse(working_mode).map_err(CliError::Launch)?;
+        local_env.insert(WorkingMode::ENV.to_string(), working_mode.trim().to_string());
+    }
+    Ok(local_env)
+}
+
 fn write_initial_message_attachments_file(
     attachments: Option<&[protocol::ChannelAttachment]>,
 ) -> error::Result<Option<PathBuf>> {

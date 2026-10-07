@@ -40,3 +40,13 @@ test("routing defaults cannot escape the Space resource set", () => {
     assert.deepEqual(parseSpaceAgentConfiguration({ ...configuration, routing: { ...routing, ...ownerFact } }), { ...configuration, routing });
   }
 });
+
+test("a working mode is autonomous or cautious, and absent unless chosen", () => {
+  for (const workingMode of ["autonomous", "cautious"]) {
+    assert.deepEqual(parseSpaceAgentConfiguration({ ...configuration, workingMode }), { ...configuration, workingMode });
+  }
+  assert.equal(Object.hasOwn(parseSpaceAgentConfiguration(configuration), "workingMode"), false);
+  for (const workingMode of ["reckless", "", 1, null]) {
+    assert.throws(() => parseSpaceAgentConfiguration({ ...configuration, workingMode }), /workingMode/);
+  }
+});

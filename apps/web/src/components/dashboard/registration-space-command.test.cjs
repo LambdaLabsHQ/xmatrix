@@ -32,6 +32,14 @@ test("configuring a name keeps the configuration and renames only the Space's la
   assert.equal("model" in unnamed.configuration, false);
 });
 
+test("choosing a working mode keeps the rest of the configuration", () => {
+  const cautious = registrationSpaceCommand(key, current, { kind: "configure", model: "old", workingMode: "cautious" });
+  assert.deepEqual(cautious.configuration, { ...current.configuration, workingMode: "cautious" });
+  const unchanged = registrationSpaceCommand(key, { ...current, configuration: { ...current.configuration, workingMode: "cautious" } },
+    { kind: "configure", model: "old" });
+  assert.equal(unchanged.configuration.workingMode, "cautious");
+});
+
 const grant = { state: "active", revision: 5, executionRevision: 5,
   limits: { models: ["old"], workspaces: ["repo:owner/project"], capabilities: [] } };
 const owned = { ...current, canManageOwnerGrant: true, canConfigureSpace: false, canRemoveFromSpace: true,
