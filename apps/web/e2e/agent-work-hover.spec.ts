@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
@@ -41,6 +41,14 @@ async function openActiveAgentWorkspace(page: Page) {
     spaces: [E2E_SPACE],
     channels: [ACTIVE_AGENT_CHANNEL],
   });
+}
+
+async function expectToolbarAttached(avatar: Locator, toolbar: Locator) {
+  await expect.poll(async () => {
+    const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
+    if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
+    return Math.abs(avatarBox.y - (toolbarBox.y + toolbarBox.height));
+  }).toBeLessThanOrEqual(12);
 }
 
 for (const mobile of [false, true]) {
@@ -90,11 +98,7 @@ for (const mobile of [false, true]) {
       if (mobile) await issue.getByRole("button").focus();
       else await issue.hover();
       await expect(controls).toHaveCSS("opacity", "1");
-      await expect.poll(async () => {
-        const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
-        if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
-        return Math.abs(avatarBox.y - (toolbarBox.y + toolbarBox.height));
-      }).toBeLessThanOrEqual(12);
+      await expectToolbarAttached(avatar, toolbar);
       await expect(toolbar.getByRole("note")).toHaveText("Usage limit reached: provider refuses requests");
       await toolbar.hover();
       await expect(controls).toHaveCSS("opacity", "1");
@@ -252,13 +256,7 @@ test.describe("mobile agent controls", () => {
       (dock as HTMLElement).style.transform = "translateY(96px)";
     });
 
-    await expect
-      .poll(async () => {
-        const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
-        if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
-        return Math.abs(avatarBox.y - (toolbarBox.y + toolbarBox.height));
-      })
-      .toBeLessThanOrEqual(12);
+    await expectToolbarAttached(avatar, toolbar);
   });
 
   test("agent Instance control is large enough and clears the floating composer", async ({ page }) => {
