@@ -28,6 +28,7 @@ import { channelEventViews } from "./workspace-shell-presence";
 
 const NO_EVENTS: readonly ObservabilityEvent[] = [];
 const NO_CHANNELS: readonly SerializedChannel[] = [];
+const NO_PINNED_CHANNEL_IDS: ReadonlySet<string> = new Set();
 
 /** Keeps the last painted rows for this Space across a refresh that has not
  *  answered yet. Rows remembered for another Space are ignored, so a switch
@@ -418,6 +419,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
             scrollToChannelRef={scrollToConversationRef}
             channels={visibleChannels}
             events={events}
+            pinnedChannelIds={channelPinLookup.pinnedChannelIds}
             row={(channel) => {
               const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
               const hasUnreadMention = channelHasUnreadMention(
@@ -796,15 +798,24 @@ export { SpaceAvatar, spaceAvatarStyle, spaceDisambiguatorId } from "./workspace
 import { SpaceAvatar, spaceDisambiguatorId } from "./workspace-shell-chrome";
 
 /**
- * A conversation list's sections: those whose Agents have work in hand, then
- * the rest, each in the list's own order and each conversation once. A
- * section with no conversations is not shown.
+ * A conversation list's sections: the reader's pins, then those whose Agents
+ * have work in hand, then the rest, each in the list's own order and each
+ * conversation once. A section with no conversations is not shown.
  */
-export function channelListSections(channels: readonly SerializedChannel[], events: ObservabilityEvent[]) {
+export function channelListSections(
+  channels: readonly SerializedChannel[],
+  events: ObservabilityEvent[],
+  pinnedChannelIds: ReadonlySet<string>,
+) {
+  const pinned: SerializedChannel[] = [];
   const inProgress: SerializedChannel[] = [];
   const recent: SerializedChannel[] = [];
-  for (const channel of channels) (channelHasWorkInHand(channel, events) ? inProgress : recent).push(channel);
+  for (const channel of channels) {
+    if (pinnedChannelIds.has(channel.id)) pinned.push(channel);
+    else (channelHasWorkInHand(channel, events) ? inProgress : recent).push(channel);
+  }
   return [
+    { label: "Pinned", count: undefined, channels: pinned },
     { label: "In progress", count: inProgress.length as number | undefined, channels: inProgress },
     { label: "Recent", count: undefined, channels: recent },
   ].filter((section) => section.channels.length > 0);
@@ -816,7 +827,8 @@ function ChannelSectionRows({ channels, events, row }: {
   events: ObservabilityEvent[];
   row: (channel: SerializedChannel) => ReactNode;
 }) {
-  return channelListSections(channels, events).map((section) => (
+  // The cold-start paint has no pins yet; they arrive with the signed-in shell.
+  return channelListSections(channels, events, NO_PINNED_CHANNEL_IDS).map((section) => (
     <Fragment key={section.label}>
       <ListSectionHeading label={section.label} count={section.count} />
       {section.channels.map(row)}
@@ -833,18 +845,19 @@ type ChannelSectionItem =
  * and rows are items, and only those near the viewport are mounted, scrolled
  * by the list's own material sheet (`scrollRoot`).
  */
-function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, events, row }: {
+function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, events, pinnedChannelIds, row }: {
   scrollRoot: HTMLElement | null;
   /** Receives a function that brings a conversation's row into view. */
   scrollToChannelRef?: MutableRefObject<((channelId: string) => void) | null>;
   channels: readonly SerializedChannel[];
   events: ObservabilityEvent[];
+  pinnedChannelIds: ReadonlySet<string>;
   row: (channel: SerializedChannel) => ReactNode;
 }) {
-  const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, events).flatMap((section) => [
+  const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, events, pinnedChannelIds).flatMap((section) => [
     { kind: "heading" as const, label: section.label, count: section.count },
     ...section.channels.map((channel) => ({ kind: "row" as const, channel })),
-  ]), [channels, events]);
+  ]), [channels, events, pinnedChannelIds]);
   const listRef = useRef<VirtuosoHandle | null>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -1369,6 +1382,7 @@ export function MobileChannelChatList({
   }, [conversations, events]);
 
   const [listScrollRoot, setListScrollRoot] = useState<HTMLDivElement | null>(null);
+  const pinnedChannelIds = useMemo(() => new Set(pinState.pinnedChannelIds), [pinState]);
 
   return (
     <>
@@ -1399,6 +1413,7 @@ export function MobileChannelChatList({
               scrollRoot={listScrollRoot}
               channels={conversations}
               events={events}
+              pinnedChannelIds={pinnedChannelIds}
               row={(channel) => {
                 const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
                 const hasMention = channelHasUnreadMention(

@@ -184,3 +184,18 @@ test("the list loads its next page into the same list", async ({ page }) => {
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect.poll(visibleChannelRowIds(page)).toEqual([E2E_CHANNEL.id, older.id]);
 });
+
+test("pinned conversations sit under their own Pinned heading", async ({ page }) => {
+  const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan" };
+  const other = { ...E2E_CHANNEL, id: "channel-other", name: "random" };
+  await openWorkspaceWithStubs(page, {
+    spaces: [E2E_SPACE],
+    channels: [pinned, other],
+    channelViewPreference: { pinnedChannelIds: [pinned.id] },
+  });
+  const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+  await expect(sidebar.locator(`[data-channel-row-id="${pinned.id}"]`)).toBeVisible();
+  const order = await sidebar.locator(".app-list-section-heading, [data-channel-row-id]").evaluateAll((nodes) =>
+    nodes.map((node) => (node as HTMLElement).dataset.channelRowId ?? node.textContent?.trim()));
+  expect(order).toEqual(["Pinned", pinned.id, "Recent", other.id]);
+});
