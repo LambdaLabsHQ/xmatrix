@@ -8,7 +8,6 @@ import {
   ChannelPresenceAvatars,
   CountPill,
   channelHasWorkInHand,
-  ManagementSetupNotice,
   MobileTabDock,
 } from "./workspace-shell-chrome";
 import { ListCreate, type CreateAction } from "./list-create";
@@ -163,7 +162,6 @@ export type ChannelSidebarProps = {
   onCopyChannelLink: (channel: SerializedChannel) => Promise<void>;
   onSelectSpace: (spaceId: string) => void;
   onSelect: (channelId: string, messageId?: string) => void;
-  onOpenManagementSetup: (spaceId: string) => void;
   catalogPaging: SpaceChannelCatalog;
   /** Durable catalog rows, painted until this Space's live answer arrives. */
   fallbackChannels?: readonly SerializedChannel[];
@@ -192,7 +190,6 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   onCopyChannelLink,
   onSelectSpace,
   onSelect,
-  onOpenManagementSetup,
   catalogPaging,
   fallbackChannels = NO_CHANNELS,
   create = null,
@@ -250,7 +247,6 @@ export const ChannelSidebar = memo(function ChannelSidebar({
     () => ({ pinnedChannelIds: new Set(pinState.pinnedChannelIds) }),
     [pinState]
   );
-  const currentSpace = spaces.find((space) => space.id === currentSpaceId) || null;
 
   useLayoutEffect(() => {
     if (view !== "messages" || !selectedChannelId) return;
@@ -361,11 +357,6 @@ export const ChannelSidebar = memo(function ChannelSidebar({
         onManageSpaces={onManageSpaces}
       />
       <ListCreate action={create} />
-      <ManagementSetupNotice
-        space={currentSpace}
-        currentUserId={currentUserId}
-        onSetUp={onOpenManagementSetup}
-      />
       {/* The material sheet rides the scrolling content so rows and texture
           move together. */}
       <div

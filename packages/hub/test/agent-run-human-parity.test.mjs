@@ -64,7 +64,9 @@ test("ordinary Run secret creation is write-only and rejects About and read-only
     assert.equal(allowed("POST", path), false, "only the owner answers a secret request");
   }
   assert.equal(allowed("POST", "/api/secrets", { ...run, runKind: "channel-about-session" }), false);
-  assert.equal(allowed("POST", "/api/secrets", { ...run, managementSpaceId: "space-1" }), false);
+  // An About session, the only Run that carries a Space id, is refused for being read-only.
+  assert.equal(allowed("POST", "/api/secrets", { ...run, runKind: "channel-about-session",
+    managementSpaceId: "space-1", channelWriteAllowed: false }), false);
 });
 
 test("a Channel About session gains none of the collaboration routes", () => {

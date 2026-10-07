@@ -94,14 +94,9 @@ test("a visible stop message controls only its exact live instance", async () =>
   assert.deepEqual(port.notices, []);
 });
 
-test("the reserved xMatrix stop message resolves its aliased target", async () => {
-  const management = target({ mentionTarget: "xMatrix" });
-  const ordinary = target({
-    instanceId: "instance-2",
-    runId: "run-2",
-    mentionTarget: "codex:2",
-  });
-  const port = portWithTargets([management, ordinary]);
+test("@xMatrix:stop names no Run now that the management agent is retired, and never broadens", async () => {
+  // No live Run is presented as xMatrix any more; every target is its registration's Instance.
+  const port = portWithTargets([target(), target({ instanceId: "instance-2", runId: "run-2", mentionTarget: "codex:2" })]);
 
   const result = await orchestrateProductAgentIntervention({
     channelId: "channel-1",
@@ -110,9 +105,9 @@ test("the reserved xMatrix stop message resolves its aliased target", async () =
     port,
   });
 
-  assert.equal(result.stopped, 1);
-  assert.equal(port.stops[0].target.instanceId, "instance-1");
-  assert.deepEqual(port.notices, []);
+  assert.equal(result.stopped, 0);
+  assert.deepEqual(port.stops, []);
+  assert.deepEqual(port.notices, ["xMatrix could not find a live instance for `@xMatrix`."]);
 });
 
 test("an unknown exact target remains visible and does not broaden to all instances", async () => {

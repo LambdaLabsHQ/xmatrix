@@ -888,14 +888,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
     .then(() => setNotice("Link copied."), (cause: Error) => setNotice(cause.message));
   const copyLink = (blockId: string) => copy(blockLink(blockId));
   // Asking about a passage, or asking for it to change, is a discussion on it whose first message
-  // addresses xMatrix; it opens beside the page, where the answer arrives.
+  // addresses @auto, which routes to an enabled harness; it opens beside the page, where the answer arrives.
   const ask: NonNullable<PageSectionActions["ask"]> = async (blockId, anchor, request) => {
     if (!page) return;
     const quote = anchor.quote.split("\n").map((line) => `> ${line}`).join("\n");
     const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
     const firstMessage = request.mode === "ask"
-      ? `@xMatrix ${request.prompt}\n\nAbout this passage of ${where}:\n${quote}`
-      : `@xMatrix ${request.prompt}\n\nChange this passage of ${where} with \`xmatrix page edit\`, then resolve this ` +
+      ? `@auto ${request.prompt}\n\nAbout this passage of ${where}:\n${quote}`
+      : `@auto ${request.prompt}\n\nChange this passage of ${where} with \`xmatrix page edit\`, then resolve this ` +
         `discussion with \`xmatrix page resolve\` (its link id is under \`discussion:\` in \`xmatrix page read\`):\n${quote}`;
     try {
       await onDiscuss({ spaceId, pageId: page.pageId, blockId, restricted,

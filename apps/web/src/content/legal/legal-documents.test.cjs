@@ -49,11 +49,8 @@ test("privacy policy locks the actual Agent, trace, secret, and training boundar
     /MadeByRobot does not use Customer Data[\s\S]*to train a\s+MadeByRobot/,
   );
   assert.doesNotMatch(privacySource, /unless we first obtain explicit permission/);
-  assert.match(privacySource, /all current and future Channels[\s\S]*closed, private/);
-  assert.match(
-    privacySource,
-    /does not by itself extend to[\s\S]*Saved\s+Secret plaintext[\s\S]*Instance Trace/,
-  );
+  assert.doesNotMatch(privacySource, /Management Agent/);
+  assert.match(privacySource, /separate one-shot approval/);
   assert.match(privacySource, /at most 500 events, 768 KiB, or 24 hours/);
   assert.match(privacySource, /does not currently keep a Relay authority, R2, or other persistent copy/);
   assert.match(privacySource, /does not automatically gain trace\s+access/);
@@ -93,7 +90,7 @@ test("terms lock confirmed Agent authority, risk review, and provider responsibi
   assert.match(termsSource, /Customer-operated Agent/);
   assert.match(termsSource, /Service Agent/);
   assert.match(termsSource, /MadeByRobot remains responsible for the Services/);
-  assert.match(termsSource, /full Space role access to all current and future Channels,\s+including/);
+  assert.doesNotMatch(termsSource, /Management Agent/);
   assert.match(termsSource, /separate one-shot human approval/);
   assert.match(termsSource, /does\s+not enforce network egress/);
   assert.match(termsSource, /MadeByRobot\s+does not claim\s+ownership of output/);
@@ -120,7 +117,7 @@ test("terms lock billing, liability, indemnity, and dispute decisions", () => {
   assert.match(termsSource, /FOR A FREE OR NO-FEE SERVICE[\s\S]*USD \$100/);
   assert.match(termsSource, /USD \$100 CAP IS NOT ADDED TO OR USED AS A MINIMUM/);
   assert.match(termsSource, /Mutual third-party indemnities for Business Customers/);
-  assert.match(termsSource, /base cap in Section 19 does not apply/);
+  assert.match(termsSource, /base cap in Section 18 does not apply/);
   assert.match(termsSource, /governed by Delaware law/);
   assert.match(termsSource, /do not require\s+arbitration/);
   assert.match(termsSource, /try in good faith for 30 days/);
