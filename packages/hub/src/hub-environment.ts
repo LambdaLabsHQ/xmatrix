@@ -150,7 +150,7 @@ export const HUB_ENVIRONMENT = {
   SLACK_CLIENT_ID: { kind: "secret", scope: "feature", summary: "Slack OAuth client id for the Slack connector. Unset: the Slack connector cannot be connected." },
   SLACK_CLIENT_SECRET: { kind: "secret", scope: "feature", summary: "Slack OAuth client secret." },
   GITHUB_APP_ID: { kind: "var", scope: "feature", summary: "GitHub App id for the Space GitHub connection. Unset with the other GITHUB_APP_* values: Spaces cannot connect GitHub." },
-  GITHUB_APP_CLIENT_ID: { kind: "var", scope: "feature", summary: "GitHub App OAuth client id. Unset: GitHub Connect reads it from GitHub for the App; Better Auth account linking stays off." },
+  GITHUB_APP_CLIENT_ID: { kind: "var", scope: "feature", summary: "GitHub App OAuth client id." },
   GITHUB_APP_CLIENT_SECRET: { kind: "secret", scope: "feature", summary: "GitHub App OAuth client secret." },
   GITHUB_APP_PRIVATE_KEY: { kind: "secret", scope: "feature", summary: "GitHub App private key (PEM)." },
   GITHUB_APP_SLUG: { kind: "var", scope: "feature", summary: "GitHub App slug used for install links." },
