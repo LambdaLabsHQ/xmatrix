@@ -1,8 +1,8 @@
 import type { Hono } from "hono";
 import { HARNESS_ACTIONS, HUB_ROUTES, hasControlCharacter, validHarnessLoginCode, type HarnessAction,
-  type SerializedMachineDaemon } from "@xmatrix/protocol";
+  type HarnessActionStatus, type SerializedMachineDaemon } from "@xmatrix/protocol";
 import type { Env } from "./types";
-import { readHarnessActionStatus } from "@xmatrix/db";
+import { readHarnessActionStatus, readRecentHarnessActions } from "@xmatrix/db";
 import { privateRouteResponse } from "./private-route-response";
 import { readBoundedRequestBody, requireAuth, requireHumanAuth } from "./index-shared";
 import { listOwnerMachineDaemons, machineDaemonCommand, machineDatabase, machineRepository } from "./machines";
@@ -28,6 +28,8 @@ export interface HarnessActionPort {
   daemons(env: Env, ownerUserId: string): Promise<SerializedMachineDaemon[]>;
   issue(env: Env, command: Record<string, unknown>): Promise<unknown>;
   status(env: Env, ownerUserId: string, controlId: string): Promise<Record<string, unknown>>;
+  /** The latest owner-requested action per preset on one of the owner's Machines. */
+  recent(env: Env, ownerUserId: string, machineId: string): Promise<HarnessActionStatus[]>;
 }
 
 const HARNESS_ACTION_PORT: HarnessActionPort = {
@@ -37,6 +39,8 @@ const HARNESS_ACTION_PORT: HarnessActionPort = {
   issue: machineDaemonCommand,
   status: async (env, ownerUserId, controlId) => ({ ...await readHarnessActionStatus(machineDatabase(env), {
     requestId: crypto.randomUUID(), ownerUserId, controlId }) }),
+  recent: (env, ownerUserId, machineId) => readRecentHarnessActions(machineDatabase(env), {
+    requestId: crypto.randomUUID(), ownerUserId, machineId }),
 };
 
 export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
@@ -77,6 +81,16 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
       payload: { type: "machine_harness_action", requestId, presetId, action, ...(code ? { code } : {}) },
     });
     return Response.json({ controlId: requestId, presetId, action, status: "queued" }, { status: 202, headers: NO_STORE });
+  }));
+
+  // What became of the owner's recent actions on one Machine, so a page opened later still shows it.
+  app.get(HUB_ROUTES.machine_harness_actions, (c) => privateRouteResponse(async () => {
+    const authenticated = await port.authenticate(c.req.raw, c.env);
+    if (authenticated.agentRun) return refuse("Harness actions require the Machine's owner", 403);
+    const user = requireHumanAuth(authenticated);
+    const machineId = c.req.query("machineId");
+    if (!isMachineField(machineId)) return refuse("Invalid harness action request", 400);
+    return Response.json({ actions: await port.recent(c.env, user.id, machineId) }, { headers: NO_STORE });
   }));
 
   app.get(`${HUB_ROUTES.machine_harness_actions}/:controlId`, (c) => privateRouteResponse(async () => {

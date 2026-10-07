@@ -10,6 +10,10 @@ export function machineHarnessState(daemon: SerializedMachineDaemon | undefined,
   const recipePlatform: "windows" | "unix" | undefined = platform === "windows" ? "windows"
     : platform === "linux" || platform === "macos" ? "unix" : undefined;
   const capabilities = daemon?.metadata.capabilities;
+  // Hub keeps a daemon "online" until a connection event says otherwise; work it
+  // left unanswered is evidence an action may not reach it now. That is a
+  // warning, not a lock: the evidence is heuristic and a retry may be delivered.
+  const responding = !daemon?.unansweredSince;
   const canManage = Boolean(daemon && daemon.userId === userId && daemon.machineId &&
     daemon.status === "online" && Array.isArray(capabilities) &&
     capabilities.includes("machine_harness_action_v1"));
@@ -19,7 +23,7 @@ export function machineHarnessState(daemon: SerializedMachineDaemon | undefined,
     preset, item: inventory?.items.find((item) => item.id === preset.id),
   }));
   const installed = catalog.filter((row) => row.item?.installed);
-  return { inventory, recipePlatform, canManage, cursorUpdateReady, uninstallReady,
+  return { inventory, recipePlatform, canManage, responding, cursorUpdateReady, uninstallReady,
     rows: [...installed, ...catalog.filter((row) => !row.item?.installed)] };
 }
 

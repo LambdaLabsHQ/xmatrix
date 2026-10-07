@@ -258,7 +258,7 @@ export type {
 export {
   readsOnly,
 } from "./space-roles.js";
-export { readHarnessActionStatus, readHarnessReleaseTargets, type HarnessReleaseTarget } from "./machine-harness-actions.js";
+export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessReleaseTarget } from "./machine-harness-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
 export { observeRegistrationQuota, readRegistrationQuotaState, registrationQuotaKey, type RegistrationQuotaKey } from "./registration-quota-state.js";
