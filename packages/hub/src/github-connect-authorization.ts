@@ -1,5 +1,5 @@
 import type { Env } from "./types";
-import { listGitHubUserInstallations } from "./app-connectors";
+import { fetchGitHubAppClientId, listGitHubUserInstallations } from "./app-connectors";
 import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
 import { signGitHubAppState, verifyGitHubAppState } from "./index-shared";
 
@@ -22,11 +22,29 @@ type ConnectEnv = Pick<Env, "GITHUB_APP_CLIENT_ID" | "GITHUB_APP_CLIENT_SECRET" 
 /** The connection lands back on the Space's Apps view with this outcome. */
 export type GitHubConnectOutcome = "connected" | "updated" | "authorized" | "failed" | "cancelled";
 
-function credentials(env: ConnectEnv): { clientId: string; clientSecret: string } {
-  const clientId = env.GITHUB_APP_CLIENT_ID?.trim();
+let appClientId: Promise<string | undefined> | undefined;
+
+/** The configured client id, else the one GitHub reports for the App (cached per isolate). */
+async function clientIdOf(env: ConnectEnv): Promise<string> {
+  const configured = env.GITHUB_APP_CLIENT_ID?.trim();
+  if (configured) return configured;
+  appClientId ??= fetchGitHubAppClientId(env).catch(() => undefined);
+  const fetched = await appClientId;
+  if (!fetched) {
+    appClientId = undefined;
+    throw new Error("github_connect_not_configured");
+  }
+  return fetched;
+}
+
+function clientSecretOf(env: ConnectEnv): string {
   const clientSecret = env.GITHUB_APP_CLIENT_SECRET?.trim();
-  if (!clientId || !clientSecret) throw new Error("github_connect_not_configured");
-  return { clientId, clientSecret };
+  if (!clientSecret) throw new Error("github_connect_not_configured");
+  return clientSecret;
+}
+
+async function credentials(env: ConnectEnv): Promise<{ clientId: string; clientSecret: string }> {
+  return { clientId: await clientIdOf(env), clientSecret: clientSecretOf(env) };
 }
 
 function callbackUrl(env: ConnectEnv): string {
@@ -46,7 +64,7 @@ export async function githubConnectAuthorizeUrl(env: ConnectEnv, input: {
   userId: string;
   installation?: { id: string; setupAction: "install" | "update" };
 }): Promise<string> {
-  const { clientId, clientSecret } = credentials(env);
+  const { clientId, clientSecret } = await credentials(env);
   const state = await signGitHubAppState({
     purpose: CONNECT_PURPOSE,
     spaceId: input.spaceId,
@@ -70,7 +88,7 @@ async function verified(state: string, secret: string, purpose: string): Promise
 }
 
 async function exchangeCode(env: ConnectEnv, code: string): Promise<string | undefined> {
-  const { clientId, clientSecret } = credentials(env);
+  const { clientId, clientSecret } = await credentials(env);
   const response = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json", "user-agent": "xmatrix-app-connector" },
@@ -93,7 +111,7 @@ export async function completeGitHubConnectAuthorization(
 ): Promise<Response> {
   const url = new URL(request.url);
   const redirect = (target: string) => Response.redirect(target, 302);
-  const { clientSecret } = credentials(env);
+  const clientSecret = clientSecretOf(env);
   const state = url.searchParams.get("state") || "";
   const payload = await verified(state.slice(CONNECT_STATE_PREFIX.length), clientSecret, CONNECT_PURPOSE);
   const spaceId = typeof payload?.spaceId === "string" ? payload.spaceId : "";
@@ -133,7 +151,7 @@ export async function githubGrantInstallationIds(env: ConnectEnv, grant: string 
   userId: string;
 }): Promise<string[] | undefined> {
   if (!grant) return undefined;
-  const payload = await verified(grant, credentials(env).clientSecret, GRANT_PURPOSE);
+  const payload = await verified(grant, clientSecretOf(env), GRANT_PURPOSE);
   if (!payload || payload.spaceId !== input.spaceId || payload.userId !== input.userId) return undefined;
   return Array.isArray(payload.installationIds)
     ? payload.installationIds.filter((id): id is string => typeof id === "string")
