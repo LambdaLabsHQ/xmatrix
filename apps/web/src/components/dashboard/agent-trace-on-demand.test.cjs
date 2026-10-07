@@ -351,6 +351,12 @@ test("request planning and UI copy preserve bounded and non-complete host states
     instanceId: "i1", phase: "error", complete: false, eventCount: 0, reason: "trace_access_denied",
   });
   assert.equal(offline.title, "Agent host is offline");
+  assert.equal(agentTraceHistoryStatusCopy({
+    instanceId: "i1", phase: "unavailable", complete: false, eventCount: 0, reason: "host_overloaded",
+  }).title, "Agent host is busy", "a connected host with too many reads is not offline");
+  assert.equal(agentTraceHistoryStatusCopy({
+    instanceId: "i1", phase: "unavailable", complete: false, eventCount: 0,
+  }).title, "Agent host could not read its trace", "only host_offline says offline");
   assert.equal(timeout.title, "Agent host timed out");
   assert.equal(expired.title, "Local trace retention expired");
   assert.equal(incomplete.title, "Only recent trace history is available");
