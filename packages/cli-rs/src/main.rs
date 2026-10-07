@@ -39,6 +39,9 @@ async fn run_main() {
         .version(xmatrix_cli_core::version::current())
         .get_matches();
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
+    if let Some(error) = xmatrix_cli_runtime::unknown_command_error(&cli) {
+        error.exit();
+    }
     let result = xmatrix_cli_runtime::run(cli).await;
 
     if let Err(e) = result {
