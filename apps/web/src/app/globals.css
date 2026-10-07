@@ -2687,6 +2687,19 @@
   overflow: hidden;
 }
 
+/* While the box grows into the completion panel (composer-input.tsx), its
+   content rides the bottom edge: the box clips the panel's top as it grows,
+   never the input row. */
+.xmatrix-app .app-composer-box.app-composer-box-morphing {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.xmatrix-app .app-composer-box.app-composer-box-morphing > * {
+  flex: none;
+}
+
 .app-mention-suggestions,
 .xmatrix-app .app-mention-suggestions {
   position: relative !important;
