@@ -90,11 +90,11 @@ for (const mobile of [false, true]) {
       if (mobile) await issue.getByRole("button").focus();
       else await issue.hover();
       await expect(controls).toHaveCSS("opacity", "1");
-      const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
-      expect(avatarBox).not.toBeNull();
-      expect(toolbarBox).not.toBeNull();
-      expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(avatarBox!.y);
-      expect(toolbarBox!.y).toBeGreaterThan(avatarBox!.y - 150);
+      await expect.poll(async () => {
+        const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
+        if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
+        return Math.abs(avatarBox.y - (toolbarBox.y + toolbarBox.height));
+      }).toBeLessThanOrEqual(12);
       await expect(toolbar.getByRole("note")).toHaveText("Usage limit reached: provider refuses requests");
       await toolbar.hover();
       await expect(controls).toHaveCSS("opacity", "1");
