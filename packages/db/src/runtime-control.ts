@@ -1502,6 +1502,8 @@ export class PostgresRuntimeRepository {
               typeof runMetadata.hostId === "string" ? runMetadata.hostId : "",
             ...(typeof runMetadata.executionKey === "string"
               ? { executionKey: runMetadata.executionKey } : {}),
+            ...(input.handoffSource ? { resumeSessionKey: runMetadata.resumeSessionKey,
+              repoPool: runMetadata.repoPool } : {}),
             ...(routedAs ? { routedAs } : {}),
             ...(typeof stopRequest?.sourceMessageId === "string"
               ? { stopRequestSourceMessageId: stopRequest.sourceMessageId } : {}),

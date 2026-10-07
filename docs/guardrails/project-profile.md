@@ -27,7 +27,10 @@ Message syntax and execution selection use the [message interaction protocol](..
 
 Cross-machine handoff stops the exact source Run and Instance even when it
 has already exited, ending its rest before the successor can wake it with a
-reply. Stop issuance failures refuse the handoff; a durable stop may still
+reply. The daemon exports the exact retained checkout or its eviction snapshot
+without a live child registry row, preserving uncommitted work under the pool
+guard. This requires the updated CLI; stale retained authority is refused.
+Stop issuance failures refuse the handoff; a durable stop may still
 await its daemon report. See [instance handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine).
 
 Machine startup failures remain visible as idempotent Channel notices even if

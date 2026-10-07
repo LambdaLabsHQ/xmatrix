@@ -68,7 +68,8 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false } = {}) {
     assert.equal(launch.remoteRepo, repository);
     assert.equal(launch.registration.key.harness, "claude");
     const token = await admitRegisteredSpawn(worker, daemonA, launch);
-    if (sleeping) sendSpawnResult(daemonA, launch, { ok: true, pid: 4242 });
+    const repoPool = { repoIdentity: `https://github.com/${repository}`, repoKeyId: "a".repeat(64), slotId: "b".repeat(32) };
+    if (sleeping) sendSpawnResult(daemonA, launch, { ok: true, pid: 4242, metadata: { repoPool } });
     source = await connectAgent(worker, { identityId: launch.instanceId, name: launch.agentName, agentType: "claude",
       metadata: { tool: "claude", machineId: machineA, hostId: hostA, workspaceMachineId: machineA,
         workspaceCwd: launch.workspace.canonicalCwd, cwd: launch.workspace.canonicalCwd,
@@ -114,15 +115,26 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false } = {}) {
     assert.equal(stop.worktreeDisposition, "retain");
     assert.match(stop.handoffExport.branch, /^xmatrix\/handoff\/[0-9a-f]{16}$/u);
     assert.equal(stop.handoffExport.channelId, channel.id);
+    if (sleeping) {
+      assert.equal(stop.resumeSessionKey, launch.resumeSessionKey);
+      for (const [key, value] of Object.entries(repoPool)) assert.equal(stop[key], value);
+    }
     const spawnB = daemonB.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "codex spawn on machine B", 30_000);
     daemonA.ws.send(JSON.stringify({ type: "machine_stop_result", requestId: stop.requestId, runId: stop.runId,
       executionKey: stop.executionKey, agentId: stop.agentId, instanceId: stop.instanceId,
+      resumeSessionKey: stop.resumeSessionKey,
+      repoIdentity: stop.repoIdentity, repoKeyId: stop.repoKeyId, slotId: stop.slotId,
       worktreeDisposition: stop.worktreeDisposition, ok: true, pid: 4242, cleanupReason: "process_terminated",
       ...answerStop(stop), relayLease: stop.relayLease }));
 
     // codex starts on machine B.
     const successor = await spawnB;
+    const [completedStop] = await inTestTransaction(tx => tx.query({
+      text: "SELECT status,result_json FROM data.machine_daemon_commands WHERE command_id=$1",
+      values: [stop.requestId] }));
+    assert.equal(completedStop.status, "completed", "successor follows the admitted export result");
+    if (sleeping) assert.equal(completedStop.result_json.handoffExport.state, "pushed");
     assert.equal(successor.registration.key.machineId, machineB);
     assert.equal(successor.registration.key.harness, "codex");
     assert.equal(successor.remoteRepo, repository);
@@ -181,5 +193,9 @@ test("a machine whose daemon predates exports still hands off with branch retrie
 });
 
 test("handing off a sleeping source stops it before the successor's reply can wake it", async () => {
-  await usageLimitedOnMachineA(() => ({}), { sleeping: true });
+  const { branch, successor } = await usageLimitedOnMachineA(stop => ({ handoffExport: {
+    branch: stop.handoffExport.branch, state: "pushed", commit: "d".repeat(40), base: "e".repeat(40), dirty: true,
+  } }), { sleeping: true });
+  assert.ok(successor.prompt.includes(`git fetch origin ${branch} && git checkout --detach FETCH_HEAD`));
+  assert.match(successor.prompt, /including uncommitted and untracked work/);
 });

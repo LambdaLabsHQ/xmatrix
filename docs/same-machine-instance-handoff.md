@@ -106,6 +106,15 @@ take its directory:
    Channel's Space that is revoked as soon as the push ends. Branches outside
    `xmatrix/handoff/` are refused by the Hub schema and by the daemon. The stop
    result carries `handoffExport: { branch, state: "pushed" | "failed", commit, base, dirty, error }`.
+   An exited source carries its Hub-recorded session and repo-pool authority
+   in the same stop command. The daemon resolves the exact retained binding
+   after stop admission, without requiring a live child registry row. If the
+   sweep already reclaimed the directory, its recorded snapshot (including
+   dirty work) is pushed from the pinned pool parent. The pool guard remains
+   held through the export, preventing concurrent reclaim or rebind; stale
+   Run, execution, Instance, session or slot tuples fail closed. Missing or
+   unreachable retained work reports export failure. This recovery requires
+   the updated CLI; older daemons retain the bounded recovery behavior below.
 2. A source lookup or stop issuance failure refuses the handoff; it does not
    silently launch a successor. After a durable stop request, Hub waits up to
    15 s for that result (post-commit work runs in a Worker's

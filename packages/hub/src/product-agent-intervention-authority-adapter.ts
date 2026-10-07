@@ -112,7 +112,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
           instanceId: target.instanceId,
           reason,
           worktreeDisposition: "retain",
-          ...(handoffExport ? { handoffExport } : {}),
+          ...(handoffExport ? { handoffExport, resumeSessionKey: target.resumeSessionKey,
+            ...target.repoPool } : {}),
         },
         metadata: {},
         capabilities: [],
@@ -122,7 +123,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
 
   /** The daemon's terminal stop report, or none before the deadline. */
   async function awaitDaemonStopResult(target: ProductAgentKillTarget, controlId: string,
-    timeoutMs: number): Promise<Record<string, unknown> | undefined> {
+    timeoutMs: number, handoff = false): Promise<Record<string, unknown> | undefined> {
     return probeAuthorityUntilTerminal<Record<string, unknown>>({
       deadlineAtMs: Date.now() + timeoutMs,
       probe: async () => {
@@ -136,6 +137,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
           machineId: target.machineId,
           hostId: target.hostId,
           worktreeDisposition: "retain",
+          ...(handoff ? { resumeSessionKey: target.resumeSessionKey, ...target.repoPool } : {}),
         });
         if (statusPayload.status === "completed") return record(statusPayload.result) ?? {};
         if (statusPayload.status === "failed") {
@@ -174,6 +176,10 @@ export function createProductAgentInterventionAuthorityPort(input: {
         const hostId = typeof target?.hostId === "string" ? target.hostId : "";
         if (!instanceId || !runId || !agentId || !mentionTarget || !ownerUserId ||
             !machineOwnerUserId || !machineId) return [];
+        const pool = record(target?.repoPool);
+        const repoPool = typeof pool?.repoIdentity === "string" && typeof pool.repoKeyId === "string" &&
+          typeof pool.slotId === "string" ? { repoIdentity: pool.repoIdentity, repoKeyId: pool.repoKeyId,
+            slotId: pool.slotId } : undefined;
         return [{
           instanceId,
           runId,
@@ -183,6 +189,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
           machineOwnerUserId,
           machineId,
           hostId,
+          ...(typeof target?.resumeSessionKey === "string" ? { resumeSessionKey: target.resumeSessionKey } : {}),
+          ...(repoPool ? { repoPool } : {}),
           ...(typeof target?.executionKey === "string"
             ? { executionKey: target.executionKey }
             : {}),
@@ -264,7 +272,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
       await runtime().stopRestingInstances({ requestId: stableCommandId("handoff-rest-stop", controlId),
         channelId, actorUserId: input.actorUserId, handoffSource: { instanceId: target.instanceId, runId: target.runId } });
       await issueDaemonStop(target, controlId, reason, channelId, handoffExport);
-      const result = await awaitDaemonStopResult(target, controlId, timeoutMs);
+      const result = await awaitDaemonStopResult(target, controlId, timeoutMs, true);
       if (!result) return { stopped: false };
       return { stopped: true, ...(record(result.handoffExport) ? { handoffExport: record(result.handoffExport)! } : {}) };
     },

@@ -10,6 +10,8 @@ export interface ProductAgentKillTarget {
   machineId: string;
   hostId: string;
   executionKey?: string;
+  resumeSessionKey?: string;
+  repoPool?: { repoIdentity: string; repoKeyId: string; slotId: string };
   /** Set when a `/kill all` already fenced this Run in its message append. */
   stopRequestSourceMessageId?: string;
 }

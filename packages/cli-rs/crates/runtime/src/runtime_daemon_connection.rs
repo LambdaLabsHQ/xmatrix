@@ -2446,6 +2446,11 @@ async fn cmd_daemon_connected(
                             let Some(result) = result else {
                                 return;
                             };
+                            // Resolve retained disk authority only after the stop:
+                            // never hold the pool lock while awaiting registry work.
+                            let export_source = if export_source.is_none() && result.is_ok() {
+                                request.retained_export_source().await
+                            } else { export_source };
                             let handoff_export = handoff_export_for_stop(
                                 request.handoff_export.as_ref(),
                                 &result,
