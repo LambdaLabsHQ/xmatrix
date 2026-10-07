@@ -8,6 +8,7 @@ import { diagnosticsDataPoint } from "./diagnostics";
 import { clientNetworkSampleAnalytics, parseClientNetworkSample } from "./client-network-metrics";
 import { authorizedTraceChannelIds, traceAuthorizationChecksForChannels } from "./trace-authorization-batch";
 import { RELAY_RUNTIME_AGENT_TRACE_PATH } from "./relay-runtime";
+import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { AGENT_HOST_TRACE_MAX_WAIT_MS, agentHostTraceTimestampEpochNanoseconds, parseAgentHostTraceCursor, type AgentHostTraceReadResult } from "./agent-host-trace";
 import { createChannel, createSpace } from "./spaces";
 import { postgresMessageAppend } from "./postgres-message-authority";
@@ -54,7 +55,7 @@ async function approveSlackGrant(env: Env, input: Record<string, unknown>): Prom
 /** Whether a user may see an Instance's trace, and where it is when no Channel was named. */
 interface TraceAuthorization {
   allowed?: unknown;
-  traceRoute?: { instanceId?: unknown; channelId?: unknown; terminal?: unknown };
+  traceRoute?: { instanceId?: unknown; channelId?: unknown; terminal?: unknown; ownerUserId?: unknown };
 }
 
 function traceAccessRepository(env: Env) {
@@ -243,7 +244,10 @@ export function registerObservabilityMemoryRoutes(app: Hono<{ Bindings: Env }>):
       const channelId = typeof authorization.traceRoute?.channelId === "string"
         ? authorization.traceRoute.channelId
         : "";
-      if (authorization.traceRoute?.instanceId !== instanceId || !channelId) {
+      const ownerUserId = typeof authorization.traceRoute?.ownerUserId === "string"
+        ? authorization.traceRoute.ownerUserId
+        : "";
+      if (authorization.traceRoute?.instanceId !== instanceId || !channelId || !ownerUserId) {
         return c.json({ error: "Agent trace scope is unavailable", code: "trace_scope_unavailable" },
           503, { "cache-control": "private, no-store" });
       }
@@ -256,11 +260,15 @@ export function registerObservabilityMemoryRoutes(app: Hono<{ Bindings: Env }>):
       if (since) internalUrl.searchParams.set("since", since);
       if (before) internalUrl.searchParams.set("before", before);
       if (waitMs) internalUrl.searchParams.set("waitMs", String(waitMs));
-      const runtimeResponse = await getRelayRuntime(c.env).fetch(
-        new Request(internalUrl, { method: "GET" }),
-      );
-      if (!runtimeResponse.ok) return privateResponse(runtimeResponse);
-      const history = await runtimeResponse.json<AgentHostTraceReadResult>();
+      // The host's socket lives in its owner's cell, or in the single cell
+      // for a client predating owner routing; only the cell holding it reads.
+      const runtimeResponses = await Promise.all(relayRuntimeCellsForOwners(c.env, [ownerUserId])
+        .map((cell) => cell.fetch(new Request(internalUrl, { method: "GET" }))));
+      const failed = runtimeResponses.find((response) => !response.ok);
+      if (failed) return privateResponse(failed);
+      const histories = await Promise.all(runtimeResponses.map((response) =>
+        response.json<AgentHostTraceReadResult>()));
+      const history = histories.find((read) => read?.reason !== "host_offline") ?? histories[0];
       if (!history || !["available", "unavailable", "expired"].includes(history.availability) ||
           typeof history.complete !== "boolean" || !Array.isArray(history.events)) {
         return c.json({ error: "Agent host returned an invalid trace response", code: "trace_host_invalid" },
