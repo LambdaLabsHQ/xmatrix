@@ -44,6 +44,7 @@ import { StatusView } from "./status-view";
 import { MachineHarnessPanel } from "./machine-harness-panel";
 
 import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { PlatformAdminTabs } from "./workspace-platform-admin-tabs";
 import { humanProfileFromSpaceMember } from "./human-profile-summary";
 import { ProfileView } from "./human-profile-view";
@@ -1999,23 +2000,23 @@ export function ChannelDetails({
         aria-label="Channel details"
       >
         <div className="app-details app-mobile-channel-details-surface flex min-h-0 flex-1 flex-col">
-          <header className="app-mobile-channel-details-header flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-2 py-2">
+          <WoodPanel as="header" className="app-detail-plank app-mobile-channel-details-header flex shrink-0 items-center gap-2 p-3">
             <button
               type="button"
               title="Back to channel"
               aria-label="Back to channel"
               onClick={onCloseMobileOverlay}
-              className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+              className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/30 hover:text-foreground"
             >
               <ChevronLeft className="size-5" />
             </button>
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-black">Channel details</h2>
-              <p className="truncate text-xs text-muted-foreground">
+              <h2 className="truncate text-base font-semibold">Channel details</h2>
+              <p className="truncate text-sm text-muted-foreground" title={mobileOverlayChannelLabel}>
                 {mobileOverlayChannelLabel}
               </p>
             </div>
-          </header>
+          </WoodPanel>
           <div className="app-mobile-channel-details-sheet flex min-h-0 flex-1 flex-col">
             {detailsBody}
           </div>
