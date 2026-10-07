@@ -1729,8 +1729,8 @@
    wood-panel rule is only (0,3,1). The rail and sidebar were in the list from
    the start, which is the entire reason they are the only wooden things on
    screen. A tool page is a board with glass cards on it too, so it belongs
-   here as well, and so does the window's top bar. */
-.xmatrix-app *:not(.app-ambient):not(.app-rail, .app-global-bar):not(.app-sidebar):not(.app-details):not(.app-tool-surface),
+   here as well. */
+.xmatrix-app *:not(.app-ambient):not(.app-rail):not(.app-sidebar):not(.app-details):not(.app-tool-surface),
 .xmatrix-app *:not(.app-ambient)::before,
 .xmatrix-app *:not(.app-ambient)::after {
   background-image: none !important;
@@ -4159,8 +4159,9 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
    What each platform keeps clear is one inset, never a per-column patch:
    - iPad: the status bar and home indicator (`safe-area-inset-*`). The
      materials run under them; only content is pushed in.
-   - macOS window: the traffic lights sit at the left of the window's top
-     bar, centred in it; the bar is as tall as their position needs.
+   - macOS window: the traffic lights sit on the rail, centred, which makes
+     the rail as wide as the lights plus their side margin. The rail's
+     content starts below the band they occupy.
    - macOS full screen: no lights, so the rail is its usual width and its
      avatar rises into the band. The desktop shell reports full screen as an
      event (`xmatrix-desktop-fullscreen`).
@@ -4168,9 +4169,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
      Windows block below). */
 @media (min-width: 768px) {
   .xmatrix-app {
-    /* The window's top bar carries search; every column starts below it. */
-    --app-global-bar: 44px;
-    --app-edge-top: calc(var(--app-safe-area-top) + var(--app-global-bar));
+    --app-edge-top: var(--app-safe-area-top);
     --app-edge-bottom: var(--app-safe-area-bottom);
     --app-band: 52px;
     --app-rail-width: 64px;
@@ -4189,50 +4188,13 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     --xmatrix-mac-traffic-light-spacing: 7px;
   }
 
-  /* The lights sit at the top bar's left, centred in it, so the rail keeps
-     its usual width and nothing below the bar has to step around them. */
   .xmatrix-app.xmatrix-desktop-macos:not(.xmatrix-desktop-fullscreen) {
-    --app-global-bar: calc((var(--xmatrix-mac-traffic-light-y) + var(--xmatrix-mac-traffic-light-size) / 2) * 2);
-  }
-
-  .xmatrix-app .app-global-bar {
-    position: fixed;
-    inset: 0 0 auto 0;
-    z-index: var(--z-nav);
-    height: var(--app-edge-top);
-    padding-top: var(--app-safe-area-top);
-    align-items: center;
-    justify-content: center;
-    -webkit-app-region: drag;
-  }
-
-  /* One plank with the rail: both grains start at the window's corner, so
-     the bar runs into the rail without a seam. */
-  html[data-app-theme="wood"] .xmatrix-app .app-global-bar.app-global-bar,
-  html[data-app-theme="wood"] .xmatrix-app .app-rail.app-rail.app-rail {
-    @apply app-wood-panel-recipe;
-    background-position: 0 0 !important;
-  }
-
-  .xmatrix-app .app-global-search {
-    width: var(--app-topbar-search-width);
-    max-width: calc(100vw - 2 * var(--app-rail-width));
-    height: 2.25rem;
-    padding: 0 0.875rem;
-    border-radius: 9999px;
-    font-size: 0.875rem;
-    color: var(--muted-foreground);
-    -webkit-app-region: no-drag;
-  }
-
-  .xmatrix-app .app-global-search-shortcut {
-    font-size: 0.75rem;
-    opacity: 0.7;
-  }
-
-  /* Open search writes in the bar's field, where the resting one was. */
-  .xmatrix-app.app-topbar-search-frame.app-topbar-search-frame {
-    top: calc(var(--app-safe-area-top) + (var(--app-global-bar) - 2.25rem) / 2) !important;
+    --app-rail-width: calc(
+      var(--xmatrix-mac-traffic-light-x) * 2 +
+      var(--xmatrix-mac-traffic-light-size) * 3 +
+      var(--xmatrix-mac-traffic-light-spacing) * 2
+    );
+    --app-rail-top: var(--app-band);
   }
 
   /* Outranks the frame CSS older desktop shells still inject. */
@@ -4319,11 +4281,46 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 }
 
+/* Search floats over the top band like the composer floats over the bottom:
+   one glass capsule, no bar behind it, in the middle of the window. */
+@media (min-width: 768px) {
+  .xmatrix-app .app-global-bar {
+    position: fixed;
+    right: 1rem;
+    top: calc(var(--app-edge-top) + (var(--app-band) - 2.25rem) / 2);
+    z-index: var(--z-nav);
+    pointer-events: none;
+  }
+
+  .xmatrix-app .app-global-search {
+    pointer-events: auto;
+    width: 18rem;
+    height: 2.25rem;
+    padding: 0 0.875rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    color: var(--muted-foreground);
+    -webkit-app-region: no-drag;
+  }
+
+  .xmatrix-app .app-global-search-shortcut {
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  /* Open search writes where the resting capsule was. */
+  .xmatrix-app.app-topbar-search-frame.app-topbar-search-frame {
+    top: calc(var(--app-edge-top) + (var(--app-band) - 2.25rem) / 2) !important;
+  }
+}
+
 /* Windows: no system title bar or menu bar. Windows draws minimize/maximize/
    close over the page's top-right corner on a transparent band (titleBarOverlay
    in the desktop shell) and reports the band through env(titlebar-area-*). The
-   buttons sit on the right of the window's top bar, which keeps its search
-   field clear of them. */
+   rail and the workspace panel keep the one top baseline every platform
+   shares, so the buttons sit on the panel's corner, as in Notion. Whatever
+   would lie under them steps aside: the details planks start below the band,
+   and a header that reaches the right edge keeps the buttons' width free. */
 @media (min-width: 768px) {
   .xmatrix-app.xmatrix-desktop-windows {
     --xmatrix-windows-caption-height: env(titlebar-area-height, 0px);
@@ -4332,14 +4329,16 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     --xmatrix-windows-caption-clearance: max(1rem, calc(var(--xmatrix-windows-caption-width) + 0.5rem));
   }
 
-  /* The caption buttons sit on the top bar, so the bar is at least their
-     height and its field keeps clear of them. */
-  .xmatrix-app.xmatrix-desktop-windows {
-    --app-global-bar: max(44px, var(--xmatrix-windows-caption-height));
+  .xmatrix-app.xmatrix-desktop-windows .app-panel-header {
+    padding-right: var(--xmatrix-windows-caption-clearance);
   }
 
-  .xmatrix-app.xmatrix-desktop-windows .app-global-bar {
-    padding-right: var(--xmatrix-windows-caption-clearance);
+  .xmatrix-app.xmatrix-desktop-windows .app-page-article {
+    padding-top: max(1.5rem, var(--xmatrix-windows-caption-height));
+  }
+
+  .xmatrix-app.xmatrix-desktop-windows .app-main > .app-tool-surface.app-material-wood-panel {
+    margin-top: max(10px, calc(var(--xmatrix-windows-caption-height) + 6px)) !important;
   }
 
   /* First in the root, so every no-drag control after it is cut back out of
