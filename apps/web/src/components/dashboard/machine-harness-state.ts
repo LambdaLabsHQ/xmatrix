@@ -10,8 +10,11 @@ export function machineHarnessState(daemon: SerializedMachineDaemon | undefined,
   const recipePlatform: "windows" | "unix" | undefined = platform === "windows" ? "windows"
     : platform === "linux" || platform === "macos" ? "unix" : undefined;
   const capabilities = daemon?.metadata.capabilities;
+  // Hub keeps a daemon "online" until a connection event says otherwise; work it
+  // left unanswered is the evidence that an action would not reach it now.
+  const responding = !daemon?.unansweredSince;
   const canManage = Boolean(daemon && daemon.userId === userId && daemon.machineId &&
-    daemon.status === "online" && Array.isArray(capabilities) &&
+    daemon.status === "online" && responding && Array.isArray(capabilities) &&
     capabilities.includes("machine_harness_action_v1"));
   const cursorUpdateReady = Array.isArray(capabilities) && capabilities.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY);
   const uninstallReady = Array.isArray(capabilities) && capabilities.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY);
@@ -19,7 +22,7 @@ export function machineHarnessState(daemon: SerializedMachineDaemon | undefined,
     preset, item: inventory?.items.find((item) => item.id === preset.id),
   }));
   const installed = catalog.filter((row) => row.item?.installed);
-  return { inventory, recipePlatform, canManage, cursorUpdateReady, uninstallReady,
+  return { inventory, recipePlatform, canManage, responding, cursorUpdateReady, uninstallReady,
     rows: [...installed, ...catalog.filter((row) => !row.item?.installed)] };
 }
 

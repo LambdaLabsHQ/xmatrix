@@ -818,6 +818,14 @@ export interface SerializedMachineDaemon {
   autoAssign?: false;
   /** Agent Runs starting or running on this Machine. */
   activeRuns?: number;
+  /**
+   * Set while this online daemon has left work unanswered: since when a command
+   * sent to it has waited unclaimed, or a lease it held has lapsed, past a
+   * minute. `status` and `lastSeenAt` follow connection events only, so this is
+   * the evidence that an "online" route is not actually responding. Presence
+   * only; absent from Hubs that predate it.
+   */
+  unansweredSince?: string;
   /** Latest operating-system computer name; an observation, never identity. */
   hostname?: string;
   hostId?: string;

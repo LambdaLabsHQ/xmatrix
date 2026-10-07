@@ -78,7 +78,21 @@ recipe or control for one; anything else is refused when issued.
   `metadata_json.harnesses`.
 - **Status.** `GET /api/machine-daemons/harness-actions/:controlId` returns the
   owner's `HarnessActionStatus`: `queued`, `running`, a result status, or
-  `expired`, with a bounded one-line `error`.
+  `expired`, with a bounded one-line `error` and `requestedAt`. A claimed
+  action whose lease lapsed and that is older than `HARNESS_ACTION_SETTLE_MS`
+  (claim TTL + `HARNESS_ACTION_TIMEOUT_MS` + lease grace) reads as `expired`
+  ("the machine stopped responding before it reported a result"): no daemon
+  can still be running it. The reading is derived, not written, so a late
+  result still completes the command and replaces it.
+- **Recent.** `GET /api/machine-daemons/harness-actions?machineId=` returns
+  the owner's latest action per preset on that Machine from the last day
+  (owner-requested actions only; Hub's `release` notices and sign-ins are not
+  listed), so the Machines page shows how an action ended after a reload.
+- **Not responding.** `status` and `lastSeenAt` follow connection events only
+  (`lastSeenAt` of an online daemon is its last connect). The daemon list adds
+  `unansweredSince` to an online daemon that has a command available but
+  unclaimed, or a lease it stopped renewing, for over a minute. Web shows such
+  a Machine as "not responding" and disables harness actions until it answers.
 - **Registry versions.** Presets name their official npm or PyPI package in
   `management.latest`; inventory items carry `latestVersion` only when the
   daemon read it from that registry. Without it, a newer version is unknown.

@@ -1,4 +1,4 @@
-import { MACHINE_HARNESS_RELEASE_CAPABILITY, parseHarnessActionRequest, parseHarnessActionResult,
+import { HARNESS_ACTION_SETTLE_MS, MACHINE_HARNESS_RELEASE_CAPABILITY, parseHarnessActionRequest, parseHarnessActionResult,
   parseHarnessInventory, type HarnessActionResult, type HarnessActionStatus } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -43,32 +43,78 @@ export async function recordHarnessActionInventory(tx: DatabaseTransaction, inpu
   values: [ownerUserId, machineId, JSON.stringify(next)], maxRows: 0 });
 }
 
+/**
+ * Columns a status is read from. `abandoned` is a claimed action whose lease
+ * lapsed and that is older than HARNESS_ACTION_SETTLE_MS: no daemon can still
+ * be running it, so it reads as expired instead of running forever. A late
+ * result still completes the command and replaces this reading.
+ */
+function statusColumns(settleParameter: number): string {
+  return `payload_json,status,result_json,created_at,completed_at,expires_at<=clock_timestamp() AS expired,
+    (status='leased' AND lease_until<=clock_timestamp()
+      AND created_at<=clock_timestamp()-($${settleParameter}::integer*interval '1 millisecond')) AS abandoned`;
+}
+
+function harnessActionStatus(row: QueryResultRow): HarnessActionStatus {
+  const issued = parseHarnessActionRequest(row.payload_json);
+  const requestedAt = row.created_at ? new Date(row.created_at as Date | string).toISOString() : undefined;
+  const base = { controlId: String(row.command_id), presetId: issued.presetId, action: issued.action,
+    ...(requestedAt ? { requestedAt } : {}) };
+  const completedAt = row.completed_at ? new Date(row.completed_at as Date | string).toISOString() : undefined;
+  if (row.status === "completed") {
+    const result = parseHarnessActionResult((row.result_json as Record<string, unknown>)?.result, issued);
+    return { ...base, status: result.status, result, ...(completedAt ? { completedAt } : {}),
+      ...(result.status === "succeeded" ? {} : { error: boundedError(result) }) };
+  }
+  if (row.status === "failed") return { ...base, status: "failed", error: "The daemon could not run the action",
+    ...(completedAt ? { completedAt } : {}) };
+  if (row.status === "pending" && row.expired === true) return { ...base, status: "expired",
+    error: "The machine did not pick up the action within 10 minutes, so it was not run" };
+  if (row.abandoned === true) return { ...base, status: "expired",
+    error: "The machine stopped responding before it reported a result; check the inventory to see what changed" };
+  return { ...base, status: row.status === "leased" ? "running" : "queued" };
+}
+
 /** The owner's view of one harness action; anything else reads as missing. */
 export async function readHarnessActionStatus(database: AuthorityDatabase, input: {
   requestId: string; ownerUserId: string; controlId: string;
 }): Promise<HarnessActionStatus | { controlId: string; status: "missing" }> {
   return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-action-status" },
     async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_action_status_v1", text: `SELECT
-        payload_json,status,result_json,completed_at,expires_at<=clock_timestamp() AS expired
+      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_action_status_v2", text: `SELECT
+        command_id,${statusColumns(3)}
         FROM data.machine_daemon_commands WHERE command_id=$1 AND owner_user_id=$2
           AND command_type='harness_action' LIMIT 1`,
-      values: [input.controlId, input.ownerUserId], maxRows: 1 });
+      values: [input.controlId, input.ownerUserId, HARNESS_ACTION_SETTLE_MS], maxRows: 1 });
       const row = rows[0];
-      if (!row) return { controlId: input.controlId, status: "missing" };
-      const issued = parseHarnessActionRequest(row.payload_json);
-      const base = { controlId: input.controlId, presetId: issued.presetId, action: issued.action };
-      const completedAt = row.completed_at ? new Date(row.completed_at as Date | string).toISOString() : undefined;
-      if (row.status === "completed") {
-        const result = parseHarnessActionResult((row.result_json as Record<string, unknown>)?.result, issued);
-        return { ...base, status: result.status, result, ...(completedAt ? { completedAt } : {}),
-          ...(result.status === "succeeded" ? {} : { error: boundedError(result) }) };
-      }
-      if (row.status === "failed") return { ...base, status: "failed", error: "The daemon could not run the action",
-        ...(completedAt ? { completedAt } : {}) };
-      if (row.status === "pending" && row.expired === true) return { ...base, status: "expired",
-        error: "No daemon picked up the action in time" };
-      return { ...base, status: row.status === "leased" ? "running" : "queued" };
+      return row ? harnessActionStatus(row) : { controlId: input.controlId, status: "missing" };
+    });
+}
+
+/** Actions the owner asks for from Machines; Hub's own `release` notices and sign-ins are not listed. */
+const LISTED_ACTIONS = ["install", "update", "uninstall", "auto_update_on", "auto_update_off", "refresh"];
+const RECENT_WINDOW_MS = 24 * 60 * 60_000;
+const RECENT_LIMIT = 64;
+
+/**
+ * The latest owner-requested action per preset on one Machine in the last day,
+ * so a page opened later still shows what became of it. Read-only: the same
+ * settlement as {@link readHarnessActionStatus}, never a new fact.
+ */
+export async function readRecentHarnessActions(database: AuthorityDatabase, input: {
+  requestId: string; ownerUserId: string; machineId: string;
+}): Promise<HarnessActionStatus[]> {
+  return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-action-recent" },
+    async (tx) => {
+      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_action_recent_v1", text: `SELECT
+        DISTINCT ON (payload_json->>'presetId') command_id,${statusColumns(6)}
+        FROM data.machine_daemon_commands WHERE owner_user_id=$1 AND machine_id=$2
+          AND command_type='harness_action' AND payload_json->>'action'=ANY($3::text[])
+          AND created_at>clock_timestamp()-($4::integer*interval '1 millisecond')
+        ORDER BY payload_json->>'presetId',created_at DESC,command_id DESC LIMIT $5`,
+      values: [input.ownerUserId, input.machineId, LISTED_ACTIONS, RECENT_WINDOW_MS, RECENT_LIMIT,
+        HARNESS_ACTION_SETTLE_MS], maxRows: RECENT_LIMIT });
+      return rows.map(harnessActionStatus);
     });
 }
 
