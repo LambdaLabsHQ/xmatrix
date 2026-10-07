@@ -95,6 +95,7 @@ section, and none is ever shown again.
 | Telegram | `send:<chat id>` |
 | Discord | `post:<channel id>` (mentions never ping) |
 | Notion | `append:<page id>`, `create_page:<parent page id>` |
+| Google Search Console | `list_sites:*`, `query:<property> [by=…] [days=…] [limit=…] [type=…]`, `list_sitemaps:<property>`, `inspect_url:<property> <page url>` (reads), `submit_sitemap:<property> <sitemap url>` |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 | OpenConnector | `search:<service>` (read), `run:<service.action>[@alias] <json>` (write) against the Space's own runtime |
 
