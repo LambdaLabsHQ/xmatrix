@@ -39,6 +39,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
     }
     await sql(`ALTER TABLE data.instances ADD COLUMN IF NOT EXISTS presentation_json jsonb NOT NULL DEFAULT '{}'::jsonb;
       CREATE TABLE data.space_members (space_id text,user_id text,role text);
+      CREATE TABLE data.spaces (space_id text PRIMARY KEY,metadata_json jsonb);
+      CREATE TABLE data.pages (space_id text,page_id text);
       CREATE TABLE data.channels (channel_id text,space_id text,mode text,metadata_json jsonb,version bigint,archived_at timestamptz);
       CREATE TABLE data.channel_access (channel_id text,space_id text,subject_kind text,subject_id text);
       CREATE TABLE data.messages (space_id text,channel_id text,message_id text,author_kind text,author_id text,
@@ -57,6 +59,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const placement = { spaceId: "space", shardId: "test", placementEpoch: 1 };
     const limits = { workspaces: ["workspace"], models: ["model"], secrets: [], capabilities: [], maxConcurrent: 4 };
     await sql(`INSERT INTO data.space_members VALUES ('space','owner','owner'),('space','caller','member');
+      INSERT INTO data.spaces VALUES ('space','{"governancePageId":"p-rules"}');
+      INSERT INTO data.pages VALUES ('space','p-rules');
       INSERT INTO data.channels VALUES ('channel','space','open','{}',1,NULL);
       INSERT INTO data.agent_registration_authority VALUES ('space','composite',repeat('a',64),1,now());
       INSERT INTO data.agent_registrations VALUES ('owner','machine','codex',1,now(),now());
@@ -119,6 +123,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(run.owner_user_id, "owner");
     const launch = (await sql(`SELECT * FROM data.agent_launches`)).rows[0];
     assert.deepEqual(launch.spawn_payload_json.registration.key, key);
+    assert.equal(launch.spawn_payload_json.spaceRulesPageId, "p-rules");
     const sessionKey = `resume:owner:channel:${replay.instanceId}`;
     assert.equal(run.metadata_json.resumeSessionKey, sessionKey);
     assert.equal(launch.spawn_payload_json.resumeSessionKey, sessionKey);
