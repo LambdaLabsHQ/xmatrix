@@ -3435,6 +3435,23 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   height: var(--app-agent-work-capsule-h, 2.75rem);
 }
 
+/* A bare disc stretches right: the face is the leading seat and its controls
+   sit beside it, centred on the same line. */
+.xmatrix-app .app-agent-work-morph[data-shape="row"] > .app-agent-work-morph-content {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape="row"] .app-agent-work-hover-stack {
+  padding: 0 0.375rem 0 0;
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape="row"] .app-agent-work-morph-seat {
+  align-self: flex-end;
+  width: var(--app-agent-work-capsule-w, 2.75rem);
+}
+
 /* Inside the panel a card is a section of the one glass, not a glass of its own. */
 .xmatrix-app .app-agent-work-morph .app-agent-work-action-menu.app-agent-work-action-menu.app-agent-work-action-menu {
   width: auto;

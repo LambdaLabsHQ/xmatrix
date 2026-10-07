@@ -3582,11 +3582,13 @@ export function AgentWorkAvatar({
         </LiquidGlassPill>
       ) : avatarButton}
       {hoverCards ? (
-        // The capsule grows up into a panel, as the composer does for its
+        // The island grows up into a panel, as the composer does for its
         // completions: one glass whose bottom row is the island itself (the
-        // seat), with the card the pointer asked for above it.
+        // seat), with the card the pointer asked for above it. A bare disc
+        // has no words to sit under, so it just stretches right into a
+        // capsule with its controls beside the face.
         <div ref={actionPopupRef} className="app-agent-work-actions" style={actionToolbarPosition}>
-          <LiquidGlassPill className="app-agent-work-morph">
+          <LiquidGlassPill className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
             <div ref={morphContentRef} className="app-agent-work-morph-content">
               <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
               <span className="app-agent-work-morph-seat" aria-hidden="true" />
