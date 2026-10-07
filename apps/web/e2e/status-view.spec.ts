@@ -21,22 +21,23 @@ const daemons = machines.map((machine, index) => ({
     cpuUsagePercent: 40, cpuLogicalCount: 8, memoryTotalBytes: 100, memoryAvailableBytes: 50,
     diskTotalBytes: 100, diskAvailableBytes: 80 } } : {}) },
 }));
-const registration = (machineId: string, harness: string, working: number) => {
+const registration = (machineId: string, harness: string, working: number, idle = 0) => {
   const machine = machines.find((candidate) => candidate.machineId === machineId)!;
   return {
     key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId, harness },
     displayName: harness, ownerName: "E2E Tester", machineName: machine.name, version: 1, state: "enabled",
     models: [], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
     live: { machine: { online: machine.online, lastSeenAt: recent(), platform: machine.platform },
-      running: Array.from({ length: working }, (_, index) => ({ instanceId: `${machineId}-${harness}-${index}`,
-        channelId: E2E_CHANNEL.id, channelInstanceId: String(index + 1), since: recent() })) },
+      running: Array.from({ length: working + idle }, (_, index) => ({ instanceId: `${machineId}-${harness}-${index}`,
+        channelId: E2E_CHANNEL.id, channelInstanceId: String(index + 1), since: recent(), working: index < working })) },
   };
 };
 const registrations = [
   registration("machine:busy", "codex", 5), registration("machine:busy", "claude", 2),
   registration("machine:wide", "claude", 1), registration("machine:wide", "codex", 1),
   registration("machine:wide", "cursor", 1), registration("machine:wide", "gemini", 1),
-  registration("machine:idle", "codex", 0), registration("machine:gone", "claude", 0),
+  // Live processes waiting for a message, and an offline machine's last Instances, are not working.
+  registration("machine:idle", "codex", 0, 3), registration("machine:gone", "claude", 2),
 ];
 const automation = (id: string, name: string, minutes: number) => ({
   id, version: 1, ownerUserId: "e2e-user", authorityRootUserId: "e2e-user", name, channelId: E2E_CHANNEL.id,
