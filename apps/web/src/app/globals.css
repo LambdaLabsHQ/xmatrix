@@ -4323,9 +4323,17 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     transform: none !important;
   }
 
+  /* The overlay is portaled outside .xmatrix-app, so it reads the Windows
+     caption band from env() directly; elsewhere that width is 0. */
   .app-command-overlay.app-command-overlay {
     justify-content: flex-end !important;
-    padding-right: 1rem !important;
+    padding-right: max(1rem, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 0.5rem)) !important;
+  }
+
+  /* Windows draws its caption buttons in that corner: the capsule stands just
+     left of them, as search does in Windows apps. */
+  .xmatrix-app.xmatrix-desktop-windows {
+    --app-global-search-inset: var(--xmatrix-windows-caption-clearance);
   }
 }
 

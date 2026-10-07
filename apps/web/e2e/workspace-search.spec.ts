@@ -132,3 +132,16 @@ test("a page's controls end before the search capsule", async ({ page }) => {
   const share = await controls.getByRole("button", { name: /Share/u }).boundingBox();
   expect(share!.x + share!.width).toBeLessThanOrEqual(capsule!.x);
 });
+
+test("without a details column, the conversation's own controls end before the search capsule", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const header = page.locator(".app-main .app-panel-header").first();
+  await expect(header).toBeVisible();
+  const capsule = await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).boundingBox();
+  await expect.poll(async () => {
+    const buttons = await header.locator("button:visible").evaluateAll((nodes) =>
+      nodes.map((node) => node.getBoundingClientRect().right));
+    return Math.max(...buttons);
+  }).toBeLessThanOrEqual(capsule!.x);
+});

@@ -4,6 +4,7 @@ import { normalizeChannelSearchText } from "./workspace-shell-search-model";
 import type { LiquidGlassMaterial } from "@/components/ui/liquid-glass-material";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import type { CreateAction } from "./list-create";
+import { useGlobalSearchClearance } from "./global-search-clearance";
 
 import {
   agentInstanceDisplayName,
@@ -386,9 +387,12 @@ export function GlobalSearchBar({ spaceName, searching, onOpenSearch }: {
   onOpenSearch: () => void;
 }) {
   const shortcut = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform) ? "⌘F" : "Ctrl+F";
+  const capsuleRef = useRef<HTMLElement | null>(null);
+  useGlobalSearchClearance(capsuleRef);
   return (
     <div className="app-global-bar hidden md:flex">
       <LiquidGlassPill
+        ref={capsuleRef}
         as="button"
         type="button"
         title={`Search (${shortcut})`}
