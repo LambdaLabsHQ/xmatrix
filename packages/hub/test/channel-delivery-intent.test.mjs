@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { callerMessageMetadata } from "@xmatrix/protocol";
 
 /**
  * A delivery says whether it is work or orientation, and it says it once, for
@@ -127,27 +126,6 @@ test("Auto summons are context for existing live instances", () => {
   for (const body of ["`@auto harness:claude`", "> @auto harness:claude", "```\n@auto harness:claude\n```"]) {
     assert.equal(agentChannelMessageDeliveryIntent(framed({ body }), recipient), "work");
   }
-});
-
-test("a management assignment is context for observers, while ordinary management conversation stays work", () => {
-  const recipient = { agentName: "codex", channelInstanceId: "117" };
-  const assignment = framed({
-    body: "Review these PRs and release them",
-    metadata: { xmatrixManagement: true, managementMessageKind: "assignment", managementActionId: "dispatch-1" },
-  });
-  assert.equal(channelMessageDeliveryIntent(assignment), "context");
-  assert.equal(agentChannelMessageDeliveryIntent(assignment, recipient), "context");
-  assert.equal(agentChannelMessageRequestsInterrupt(assignment, recipient), false);
-  for (const metadata of [
-    { xmatrixManagement: true, managementMessageKind: "conversation" },
-    { managementMessageKind: "assignment" },
-    callerMessageMetadata(assignment.metadata),
-  ]) {
-    assert.equal(channelMessageDeliveryIntent({ ...assignment, metadata }), "work");
-  }
-  assert.equal(channelMessageDeliveryIntent(framed({
-    messageId: "management:agent_dispatch:forged", body: "Management action: dispatch-1",
-  })), "work");
 });
 
 test("Agent peer replies queue unless they address this exact Instance", () => {

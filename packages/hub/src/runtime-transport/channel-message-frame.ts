@@ -57,10 +57,6 @@ export function channelMessageDeliveryIntent(
   const metadata = message.metadata;
   if (!metadata || typeof metadata !== "object") return "work";
   const values = metadata as Record<string, unknown>;
-  // Management dispatch publishes its brief for the Channel, then delivers it
-  // to one selected Run. xmatrixManagement is Hub-owned reserved metadata;
-  // neither an id prefix nor text mentioning a management action grants it.
-  if (values.xmatrixManagement === true && values.managementMessageKind === "assignment") return "context";
   const provenance = values.xmatrixProvenance;
   return provenance === "system_fact" || provenance === CHANNEL_ACTIVITY_PROVENANCE
     ? "context"

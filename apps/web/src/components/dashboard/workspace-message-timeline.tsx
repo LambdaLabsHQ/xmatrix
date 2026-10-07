@@ -35,7 +35,7 @@ import {
 import { agentInstanceDisplayStatus } from "./workspace-shell-presence";
 
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
-import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
+import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
   RichMessageContent,
@@ -96,7 +96,6 @@ import {
   formatFileSize,
   formatTime,
   isMachineRunFailureNotice,
-  isXMatrixDelegateInstance,
   presenceStatusLabel,
   provenanceBadgeClass,
   provenanceLabel,
@@ -166,7 +165,6 @@ import {
   Reply,
   ArrowUp,
   ArrowRightLeft,
-  Shield,
   SmilePlus,
   Trash2,
   X,
@@ -909,17 +907,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                     and topic. Repeating them here as an icon, a title and a
                     #name stacked three names above the first message, so the
                     intro only holds what the top bar does not say. */}
-                {!isThread && channel?.metadata?.xmatrixManagementChannel === true && (
-                  <div className="message-timeline-intro px-5 pb-4">
-                    <div className={noticeClass("secondary", "flex max-w-3xl flex-wrap items-center gap-2 text-xs")}>
-                      <Shield className="size-4 shrink-0" />
-                      <span className="font-bold">xMatrix management office</span>
-                      <span className="text-muted-foreground">
-                        Queries, action claims, proposals, and audit facts for this space appear here.
-                      </span>
-                    </div>
-                  </div>
-                )}
 
           {error && (
             <div className="mx-5 mb-3 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -3733,7 +3720,6 @@ export function agentWorkHandoffSuccessors(harnesses: readonly string[]): string
 export function agentWorkCanReborn(item: AgentWorkItem): boolean {
   if (item.canStop === false) return false;
   if (item.avatarKind === "system") return false;
-  if (isXMatrixDelegateInstance(item.instance)) return false;
   const channelInstanceId = item.instance.channelInstanceId?.trim();
   return Boolean(channelInstanceId && /^[1-9]\d*$/.test(channelInstanceId));
 }

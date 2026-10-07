@@ -4,15 +4,14 @@ import type { Env } from "./types";
 import type { AuthUser } from "./auth";
 import { awaitAuthorityProbeBackoff } from "./authority-probe-backoff";
 import { RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH } from "./runtime-transport/relay-runtime-product-adapter";
-import { beginLiveHumanPresenceRead, channelWithLiveHumanPresence } from "./channel-response-human-presence";
-import { INSTANCE_ABANDON_RESULT_TIMEOUT_MS, requireAuth, requireSpaceManagementRun, requireHumanAuth, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
+import { INSTANCE_ABANDON_RESULT_TIMEOUT_MS, requireAuth, requireHumanAuth, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { deterministicConversationId } from "./system-conversation";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
 import { machineCommandStatus, machineDaemonCommand, machineRepository } from "./machines";
 import { runtimeRepository } from "./runtime";
 import { ControlError } from "@xmatrix/db";
-import { createChannel, createSpace, getChannel, getSpace, getSpaceManagementConfig, listChannels, listSpaces, updateSpace, updateSpaceManagementConfig, updateSpaceMemberCreationPolicy } from "./spaces";
+import { createSpace, getSpace, listSpaces, updateSpace, updateSpaceMemberCreationPolicy } from "./spaces";
 
 /** One status read of a daemon control; a status the authority leaves out counts as failed. */
 async function readDaemonControlStatus(
@@ -672,102 +671,5 @@ export function registerIndexRoutesAuthSpaceInstances(app: Hono<{ Bindings: Env 
       ...(body.automationCreation !== undefined
         ? { automationCreation: body.automationCreation as "members" | "admins" } : {}),
     }));
-  }));
-  app.get("/api/spaces/:spaceId/management-agent", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const spaceId = c.req.param("spaceId");
-    const principal = requireSpaceManagementRun(authUser, spaceId, { humanAllowed: true });
-    return c.json(await getSpaceManagementConfig(c.env, {
-      spaceId, principal: { kind: "user", id: principal?.ownerUserId || authUser.id },
-    }));
-  }));
-  app.patch("/api/spaces/:spaceId/management-agent", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const spaceId = c.req.param("spaceId");
-    let patch = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-    let managementChannel: Record<string, unknown> | undefined;
-    if (patch.enabled === true && patch.managementChannelId === undefined) {
-      const currentConfig = await getSpaceManagementConfig(c.env, {
-        spaceId, principal: { kind: "user", id: authUser.id },
-      });
-      const configured = currentConfig.managementAgent as Record<string, unknown> | undefined;
-      const configuredChannelId = typeof configured?.managementChannelId === "string"
-        ? configured.managementChannelId
-        : undefined;
-      if (configuredChannelId) {
-        const currentChannel = await getChannel(c.env, {
-          channelId: configuredChannelId, principal: { kind: "user", id: authUser.id },
-        }).catch(() => null);
-        if (currentChannel) managementChannel = currentChannel.channel as Record<string, unknown>;
-      } else {
-        const channelId = `channel:xmatrix:${(await sha256Hex(spaceId)).slice(0, 32)}`;
-        const readExistingManagementChannel = async (): Promise<Record<string, unknown> | undefined> => {
-          const existing = await getChannel(c.env, {
-            channelId, principal: { kind: "user", id: authUser.id },
-          }).catch(() => null);
-          const channel = existing?.channel as Record<string, unknown> | undefined;
-          const metadata = channel?.metadata as Record<string, unknown> | undefined;
-          return channel?.id === channelId && channel.spaceId === spaceId &&
-              channel.mode === "open" &&
-              channel.name === "xMatrix" &&
-              metadata?.kind === "xmatrix_management" && metadata.systemOwned === true
-            ? channel
-            : undefined;
-        };
-        managementChannel = await readExistingManagementChannel();
-        if (!managementChannel) {
-          try {
-            const created = await createChannel(c.env, {
-              commandId: productCommandId(c.req.raw, "create-channel", `xmatrix-management:${spaceId}`),
-              channelId, spaceId, name: "xMatrix", mode: "open",
-              metadata: { kind: "xmatrix_management", systemOwned: true },
-              principal: { kind: "user" as const, id: authUser.id },
-            });
-            managementChannel = (created.channel || created) as Record<string, unknown>;
-          } catch (error) {
-            if (!(error instanceof ControlError && error.status === 409)) throw error;
-            // Another request, or an older partially migrated config, may
-            // already own the deterministic Channel. Adopt only the exact
-            // active system Channel; unrelated conflicts remain failures.
-            managementChannel = await readExistingManagementChannel();
-            if (!managementChannel) throw error;
-          }
-        }
-        patch = { ...patch, managementChannelId: channelId };
-      }
-    }
-    const result = await updateSpaceManagementConfig(c.env, {
-      commandId: productCommandId(c.req.raw, "update-space-management-config"),
-      spaceId, actorUserId: authUser.id, patch,
-    });
-    return c.json({
-      space: await getSpace(c.env, { spaceId, principal: { kind: "user", id: authUser.id } }),
-      ...result,
-      ...(managementChannel ? { managementChannel } : {}),
-    });
-  }));
-  app.get("/api/spaces/:spaceId/management/channels", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const spaceId = c.req.param("spaceId");
-    const cursor = c.req.query("cursor");
-    const requestedLimit = Number(c.req.query("limit") || 100);
-    const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0
-      ? Math.min(requestedLimit, 200) : 100;
-    return c.json(await listChannels(c.env, {
-      spaceId, principal: { kind: "user", id: authUser.agentRun?.ownerUserId || authUser.id },
-      limit, ...(cursor ? { cursor } : {}),
-    }), 200, { "cache-control": "private, no-store" });
-  }));
-  app.get("/api/spaces/:spaceId/management/channels/:channelId", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const sessions = beginLiveHumanPresenceRead(c.env, c.req.url);
-    const current = await getChannel(c.env, {
-      channelId: c.req.param("channelId"), principal: { kind: "user", id: authUser.agentRun?.ownerUserId || authUser.id },
-    });
-    return c.json(
-      { channel: await channelWithLiveHumanPresence(current, sessions) },
-      200,
-      { "cache-control": "private, no-store" },
-    );
   }));
 }

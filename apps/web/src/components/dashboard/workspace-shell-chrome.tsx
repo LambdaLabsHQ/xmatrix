@@ -47,7 +47,6 @@ import {
 
 import {
   avatarInitials,
-  canInviteToSpace,
   channelOnlineAgentAvatarItems,
   formatMember,
   initialsFor,
@@ -999,69 +998,6 @@ export function CommandResultButton({
         </span>
       )}
     </button>
-  );
-}
-
-export function managementSetupDismissedKey(spaceId: string): string {
-  return `xmatrix:management-setup-dismissed:${spaceId}`;
-}
-
-export function ManagementSetupNotice({
-  space,
-  currentUserId,
-  onSetUp,
-}: {
-  space: SerializedSpace | null;
-  currentUserId: string;
-  onSetUp: (spaceId: string) => void;
-}) {
-  const spaceId = space?.id;
-  const [dismissed, setDismissed] = useState(true);
-
-  useEffect(() => {
-    if (!spaceId) return;
-    setDismissed(Boolean(window.localStorage.getItem(managementSetupDismissedKey(spaceId))));
-  }, [spaceId]);
-
-  if (
-    !space ||
-    !spaceId ||
-    dismissed ||
-    !canInviteToSpace(space, currentUserId) ||
-    space.managementAgent?.enabled
-  ) {
-    return null;
-  }
-
-  return (
-    <div className="mx-3 mb-1 flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2">
-      <Shield className="mt-0.5 size-3.5 shrink-0 text-primary" />
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-bold text-foreground">No management assistant yet</p>
-        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-          Pick an agent on one of your machines to watch channels and remind people about
-          stalled work.
-        </p>
-        <button
-          type="button"
-          onClick={() => onSetUp(spaceId)}
-          className="mt-1.5 rounded bg-primary px-2 py-1 text-[11px] font-bold text-primary-foreground hover:bg-primary/90"
-        >
-          Set up
-        </button>
-      </div>
-      <button
-        type="button"
-        title="Dismiss"
-        onClick={() => {
-          window.localStorage.setItem(managementSetupDismissedKey(spaceId), "1");
-          setDismissed(true);
-        }}
-        className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        <X className="size-3.5" />
-      </button>
-    </div>
   );
 }
 

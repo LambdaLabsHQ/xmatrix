@@ -14,9 +14,6 @@ const stubPageCreate = (page: Page) => fixtureJson(page, "page-create", /\/api\/
     agentSuggestOnly: false, canEdit: true, updatedAt: "2026-09-27T12:00:00.000Z" } }, { method: "POST" });
 
 test("the conversation list leads with New conversation, lit while the draft is open", async ({ page }) => {
-  // The owner already dismissed the management-assistant notice, so the list starts at its +.
-  await page.addInitScript((key) => window.localStorage.setItem(key, "1"),
-    `xmatrix:management-setup-dismissed:${E2E_SPACE.id}`);
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
 
   const create = page.locator(".app-sidebar .app-list-create");

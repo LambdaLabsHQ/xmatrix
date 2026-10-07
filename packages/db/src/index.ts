@@ -97,7 +97,6 @@ export {
   type PostgresMembershipMutation,
   type PostgresSpaceMutation,
   type SpaceControlPrincipal,
-  type UpdatePostgresSpaceManagementConfig,
   type UpdatePostgresSpaceMemberCreationPolicy,
 } from "./space-control.js";
 export {
@@ -222,7 +221,7 @@ export { PostgresRegistrationExecutionRepository } from "./agent-registration-ex
 export { firstMessageSummonId, readMessageInvocationSelections, XMATRIX_SYSTEM_AUTHOR_ID } from "./message-invocation-selections.js";
 export { PostgresRegistrationRevocationRepository, type RegistrationStopIntent } from "./agent-registration-revocation.js";
 
-export type { RegistrationLaunchCandidate, RegistrationLaunchChooser, RegistrationManagementLaunch, RegistrationLaunchCoalesce, RegistrationAboutSession, ChannelAboutSessionStopTarget } from "./agent-registration-launch.js";
+export type { RegistrationLaunchCandidate, RegistrationLaunchChooser, RegistrationAboutSession, ChannelAboutSessionStopTarget } from "./agent-registration-launch.js";
 export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationCancellations } from "./agent-registration-launch.js";
 export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
 export { readRegistrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,

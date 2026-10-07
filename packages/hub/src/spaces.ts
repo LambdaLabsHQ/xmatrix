@@ -121,22 +121,10 @@ export function restoreSpace(env: SpacesEnv, input: DomainCommand & { spaceId: s
   return repository.restoreSpace({ requestId, ...input });
 }
 
-export function updateSpaceManagementConfig(env: SpacesEnv, input: {
-  commandId: string; spaceId: string; actorUserId: string; expectedVersion?: number; patch: Record<string, unknown>;
-}) {
-  const { repository, requestId } = spaces(env, {}, input.commandId);
-  return repository.updateSpaceManagementConfig({ requestId, ...input });
-}
-
 /** The Spaces a Human deleted that can still be restored. */
 export function listSpaceDeletions(env: SpacesEnv, ownerUserId: string) {
   const { repository, requestId } = spaces(env);
   return repository.listSpaceDeletions({ requestId, ownerUserId });
-}
-
-export function getSpaceManagementConfig(env: SpacesEnv, input: { spaceId: string; principal: Principal }) {
-  const { repository, requestId } = spaces(env);
-  return repository.getSpaceManagementConfig({ requestId, ...input });
 }
 
 /** A Space as its reader may see it. */

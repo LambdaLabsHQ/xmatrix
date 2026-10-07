@@ -46,11 +46,11 @@ test("stop falls back to the presence label when the card has no address label",
   );
 });
 
-test("stop keeps the reserved xMatrix command", async () => {
+test("stop has no command for the reserved xMatrix name", async () => {
   const { agentInstanceStopBody } = await load();
   assert.equal(
     agentInstanceStopBody(undefined, { label: "xMatrix:1", channelInstanceId: "1" }),
-    "@xMatrix:stop",
+    null,
   );
 });
 

@@ -65,10 +65,6 @@ export interface PostgresMessageAgentRunIdentity {
    *  from and the message it was handling there, both read from the Run's own
    *  records. Never taken from the caller. */
   origin?: { channelId: string; runId: string; messageId?: string };
-  managementDelegate?: {
-    spaceId: string;
-    configGeneration: number;
-  };
 }
 
 export interface PreparedPostgresMessageAppend {
@@ -484,22 +480,10 @@ async function effectiveAppendPrincipal(
   if (metadata.routedAs === "management_channel_about") throw new MessageAuthorityError(
     "agent_run_forbidden", 403, "Channel About Runs cannot post Channel messages",
   );
-  if (metadata.routedAs === "management_assistant_mention") {
-    const config = (await transaction.query<QueryResultRow>({
-      name: "message_management_delegate_config_v2",
-      text: `SELECT config_json,version FROM data.space_management_configs
-        WHERE space_id=$1 LIMIT 1 FOR SHARE`,
-      values: [input.spaceId], maxRows: 1,
-    }))[0];
-    const management = config?.config_json as Record<string, unknown> | undefined;
-    const generation = metadata.managementConfigGeneration;
-    if (metadata.managementSpaceId !== input.spaceId || !Number.isSafeInteger(generation) ||
-        generation !== Number(config?.version) || management?.enabled !== true) {
-      throw new MessageAuthorityError("management_delegate_message_forbidden", 403,
-        "Management message requires the exact configured management Run generation");
-    }
-    agentRunIdentity.managementDelegate = { spaceId: input.spaceId, configGeneration: generation as number };
-  }
+  // The retired management delegate; a Run started before it was retired posts nothing.
+  if (metadata.routedAs === "management_assistant_mention") throw new MessageAuthorityError(
+    "agent_run_forbidden", 403, "The xMatrix management agent is retired",
+  );
   if (run.channel_id !== input.channelId) {
     await requireAgentChannelAccess(transaction, {
       spaceId: input.spaceId, channelId: input.channelId, agentId: input.principal.id,
@@ -1328,8 +1312,7 @@ export class PostgresMessageRepository {
         }, "message_append");
         authorizedPrincipal = authorized.principal;
         runOwnerUserId = authorized.runOwnerUserId;
-        origin = authorized.agentRunIdentity?.managementDelegate
-          ? undefined : authorized.agentRunIdentity?.origin;
+        origin = authorized.agentRunIdentity?.origin;
         await messageChannelCapability(transaction, {
           spaceId, channelId, principal: authorizedPrincipal,
         }, "message_append");
