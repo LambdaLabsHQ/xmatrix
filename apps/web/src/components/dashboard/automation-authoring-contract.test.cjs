@@ -11,7 +11,7 @@ const cliArgs = fs.readFileSync(
   "utf8",
 );
 const bootstrap = fs.readFileSync(
-  path.join(repoRoot, "packages", "cli-rs", "crates", "core", "src", "bootstrap.rs"),
+  path.join(repoRoot, "packages", "cli-rs", "crates", "core", "prompts", "bootstrap.md"),
   "utf8",
 );
 const onboarding = fs.readFileSync(
