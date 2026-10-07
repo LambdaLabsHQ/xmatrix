@@ -3,6 +3,7 @@ import { type Page } from "@playwright/test";
 import {
   fixtureChannelCatalog,
   fixtureJson,
+  fixtureSpaceResources,
   installApiFixtures,
   openWorkspaceWithStubs,
 } from "./workspace-fixtures";
@@ -170,6 +171,7 @@ test.describe("mobile workspace switcher", () => {
     await fixtureJson(page, "channels", /\/api\/xmatrix\/channels(?:\?.*)?$/, { channels: [] });
     await fixtureChannelCatalog(page, "channel-catalog", []);
     await fixtureJson(page, "spaces", "**/api/xmatrix/spaces**", { spaces: [TEAM_SPACE] });
+    await fixtureSpaceResources(page);
     await page.goto("/app");
 
     await expect(page.locator(".app-mobile-title")).toBeVisible();

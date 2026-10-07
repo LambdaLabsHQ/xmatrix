@@ -80,9 +80,11 @@
 /* Chips and avatar discs bend through the composer's own lens (the same
    bezel and offset; a thinner lens read as no refraction at all), but Apple
    scales the shadow with the glass: the fitted shadow belongs to a 40pt
-   control, so 18-46px glass casts a third of it. A context or a surface
-   tunes both shadows through liquidGlassMaterialStyle. */
-:is(.xmatrix-app, .site-canvas) :is(.app-shared-chip, .identity-avatar-face, .identity-avatar-badge) {
+   control, so 18-46px glass casts a third of it. The work island is a disc
+   grown sideways, so it casts the disc's shadow; the full one read as a grey
+   ring around it. A context or a surface tunes both shadows through
+   liquidGlassMaterialStyle. */
+:is(.xmatrix-app, .site-canvas) :is(.app-shared-chip, .identity-avatar-face, .identity-avatar-badge, .app-agent-work-island) {
   --app-glass-edge: var(--app-liquid-rim-layers), var(--app-liquid-shadow-small);
 }
 
