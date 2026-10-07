@@ -62,3 +62,10 @@ test("Cursor update readiness requires the vendor launcher capability", () => {
   assert.equal(machineHarnessState({ ...daemon, metadata: { ...daemon.metadata,
     capabilities: ["machine_harness_action_v1", "machine_harness_cursor_launcher_v1"] } }, "owner-a").cursorUpdateReady, true);
 });
+
+test("an online daemon that left work unanswered is flagged but stays manageable", () => {
+  const quiet = machineHarnessState({ ...daemon, unansweredSince: "2026-10-07T10:09:00.000Z" }, "owner-a");
+  assert.equal(quiet.responding, false);
+  assert.equal(quiet.canManage, true);
+  assert.equal(machineHarnessState(daemon, "owner-a").responding, true);
+});

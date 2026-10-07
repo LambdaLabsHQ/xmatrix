@@ -13,3 +13,8 @@ export function readHarnessAction(token: string, controlId: string, signal?: Abo
 export function refreshHarnessInventory(token: string, machineId: string, hostId?: string, signal?: AbortSignal) {
   return queueHarnessAction(token, machineId, hostId, "custom", "refresh", signal);
 }
+export async function readRecentHarnessActions(token: string, machineId: string, signal?: AbortSignal) {
+  const data = await xmatrixApiRequest<{ actions?: HarnessActionStatus[] }>({
+    url: `${ACTIONS}?machineId=${encodeURIComponent(machineId)}`, token, signal });
+  return data.actions ?? [];
+}
