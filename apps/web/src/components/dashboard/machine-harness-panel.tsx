@@ -1,12 +1,17 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { HarnessAction, SerializedMachineDaemon } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type AgentPreset, type HarnessAction, type SerializedMachineDaemon } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth-context";
+import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
+import { useAgentRegistrationCatalog } from "./agent-capability-select";
+import { harnessSpaceCreateCommand, harnessSpaceKey, harnessSpaceRegistration, harnessSpaceSwitch,
+  harnessTurnsOnAfterInstall } from "./harness-space-switch";
+import { useRegistrationCommand } from "./use-registration-command";
 import { fetchMachineDaemons } from "./workspace-admin-views";
 import { queueHarnessAction, readHarnessAction, refreshHarnessInventory } from "./machine-harness-api";
 import { harnessAutoUpdateSupported, harnessCommandLabel, harnessUpdateAvailable, machineHarnessState } from "./machine-harness-state";
@@ -18,7 +23,7 @@ const ACTION_LABELS: Record<HarnessAction, string> = {
 };
 
 type HarnessRowState = ReturnType<typeof machineHarnessState>["rows"][number];
-type Operation = { controlId: string; label: string; startedAt: number };
+type Operation = { controlId: string; action: HarnessAction; label: string; startedAt: number };
 
 /** One harness action and its status, followed until it settles. Each row
  * (and Refresh) holds its own, because the daemon runs actions on different
@@ -52,13 +57,61 @@ function useHarnessOperation({ token, userId, daemonKey, current, canManage, onN
         : queueHarnessAction(token, current.machineId, current.hostId, input.presetId, input.action);
     },
     onSuccess: (result, input) => {
-      setOperation({ controlId: result.controlId, label: `${ACTION_LABELS[input.action]}${input.action === "refresh" ? "" : ` · ${input.presetId}`}`, startedAt: Date.now() });
+      setOperation({ controlId: result.controlId, action: input.action, label: `${ACTION_LABELS[input.action]}${input.action === "refresh" ? "" : ` · ${input.presetId}`}`, startedAt: Date.now() });
       onNotice(null);
     },
     onError: (error) => onNotice(error instanceof Error ? error.message : "The operation could not be requested."),
   });
   return { operation, status, busy: pending || action.isPending, run: action.mutate };
 }
+
+/** The machine owner's switch for each installed harness in the Space being
+ * viewed: on means it can be summoned there. See `harness-space-switch.ts`. */
+function useHarnessSpaceSwitches({ token, spaceId, current, userId }: {
+  token?: string | null; spaceId?: string; current?: SerializedMachineDaemon; userId?: string;
+}) {
+  const machineId = current?.machineId;
+  const owner = Boolean(spaceId && token && userId && machineId && current?.userId === userId);
+  const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", owner);
+  const command = useRegistrationCommand(spaceId ?? "", token ?? "", () => undefined);
+  const [pending, setPending] = useState<{ presetId: string; on: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const keyFor = (presetId: string) => harnessSpaceKey(spaceId!, userId!, machineId!, presetId);
+  const registrationFor = (presetId: string) =>
+    owner ? harnessSpaceRegistration(catalog.data?.registrations, keyFor(presetId)) : undefined;
+
+  async function set(preset: AgentPreset, on: boolean) {
+    if (!owner || pending) return;
+    const key = keyFor(preset.id);
+    setPending({ presetId: preset.id, on });
+    setError(null);
+    try {
+      let toggle = harnessSpaceSwitch(registrationFor(preset.id));
+      if (!toggle || toggle.on === on) return;
+      if (toggle.create) {
+        await xmatrixApiRequest({ url: WEB_PROXY_ROUTES.space_agent_registration_command(spaceId!), token: token!,
+          method: "POST", body: harnessSpaceCreateCommand(key, preset) });
+        // Adding back a removed one keeps a switch the Space turned off; read where it stands now.
+        const fresh = await catalog.refetch();
+        toggle = harnessSpaceSwitch(harnessSpaceRegistration(fresh.data?.registrations, key));
+        if (!toggle || toggle.on) return;
+        if (toggle.create) throw new Error("The agent could not be turned on in this Space. Refresh and try again.");
+      }
+      for (const kind of toggle.changes) if (!(await command.run(key, { kind }))) return;
+      await catalog.refetch();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The agent could not be turned on in this Space.");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return { owner, ready: owner && catalog.isSuccess, registrationFor, set, pending,
+    error: error ?? (command.notice?.error ? command.notice.text : null) ??
+      (catalog.isError ? "This Space's agents could not be read." : null) };
+}
+
+type SpaceSwitches = ReturnType<typeof useHarnessSpaceSwitches>;
 
 function OperationStatus({ operation, status }: {
   operation: Operation; status: ReturnType<typeof useHarnessOperation>["status"];
@@ -74,8 +127,10 @@ function OperationStatus({ operation, status }: {
   </div>;
 }
 
-export function MachineHarnessPanel({ daemon, token }: {
+export function MachineHarnessPanel({ daemon, token, spaceId }: {
   daemon?: SerializedMachineDaemon; token?: string | null;
+  /** The Space being viewed, whose switches the owner sees beside each installed harness. */
+  spaceId?: string;
 }) {
   const { user } = useAuth();
   const [notice, setNotice] = useState<string | null>(null);
@@ -88,6 +143,7 @@ export function MachineHarnessPanel({ daemon, token }: {
   const state = machineHarnessState(current, user?.id);
   const context = { token, userId, daemonKey, current, canManage: state.canManage, onNotice: setNotice };
   const refresh = useHarnessOperation(context);
+  const spaceSwitches = useHarnessSpaceSwitches({ token, spaceId, current, userId: user?.id });
 
   return <div className="space-y-3" data-testid="machine-harness-panel">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -101,34 +157,48 @@ export function MachineHarnessPanel({ daemon, token }: {
       : current?.userId !== user?.id ? "Only the machine owner can manage harnesses."
         : "Update this machine's daemon to enable harness management."}</p>}
     {notice && <p role="alert" className="text-sm text-destructive">{notice}</p>}
+    {spaceSwitches.error && <p role="alert" className="text-sm text-destructive">{spaceSwitches.error}</p>}
     {daemons.isError && <p role="alert" className="text-xs text-destructive">Inventory could not be refreshed. Showing the last reported observation.</p>}
     {refresh.operation && <div className="text-sm"><OperationStatus operation={refresh.operation} status={refresh.status} /></div>}
     <div><table className="block w-full text-left text-xs sm:table">
       <thead className="hidden sm:table-header-group"><tr className="border-b text-muted-foreground"><th className="py-2 pr-3">Harness</th><th className="pr-3">Installed version</th>
-        <th className="pr-3">Latest</th><th className="pr-3">Automatic updates</th><th>Actions</th></tr></thead>
+        <th className="pr-3">Latest</th><th className="pr-3">Automatic updates</th>
+        {spaceSwitches.owner && <th className="pr-3">In this Space</th>}<th>Actions</th></tr></thead>
       <tbody className="block sm:table-row-group">{state.rows.map((row, index) => {
         const beforeDivider = Boolean(row.item?.installed) && index + 1 < state.rows.length && !state.rows[index + 1]?.item?.installed;
         return <Fragment key={row.preset.id}>
-          <HarnessRow row={row} state={state} context={context} beforeDivider={beforeDivider} />
-          {beforeDivider && <HarnessInstallDivider />}
+          <HarnessRow row={row} state={state} context={context} spaceSwitches={spaceSwitches} beforeDivider={beforeDivider} />
+          {beforeDivider && <HarnessInstallDivider columns={spaceSwitches.owner ? 6 : 5} />}
         </Fragment>;
       })}</tbody>
     </table></div>
   </div>;
 }
 
-function HarnessInstallDivider() {
+function HarnessInstallDivider({ columns }: { columns: number }) {
   return <tr data-testid="harness-install-divider" role="separator" aria-hidden="true" className="block sm:table-row">
-    <td colSpan={5} className="block px-0 py-2 sm:table-cell"><div className="h-px bg-border" /></td>
+    <td colSpan={columns} className="block px-0 py-2 sm:table-cell"><div className="h-px bg-border" /></td>
   </tr>;
 }
 
-function HarnessRow({ row: { preset, item }, state, context, beforeDivider = false }: {
+function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, beforeDivider = false }: {
   row: HarnessRowState; state: ReturnType<typeof machineHarnessState>;
-  context: Parameters<typeof useHarnessOperation>[0]; beforeDivider?: boolean;
+  context: Parameters<typeof useHarnessOperation>[0]; spaceSwitches: SpaceSwitches; beforeDivider?: boolean;
 }) {
   const [armed, setArmed] = useState(false);
   const { operation, status, busy, run } = useHarnessOperation(context);
+  const registration = spaceSwitches.registrationFor(preset.id);
+  const spaceSwitch = spaceSwitches.ready && item?.installed ? harnessSpaceSwitch(registration) : null;
+  const spacePending = spaceSwitches.pending?.presetId === preset.id ? spaceSwitches.pending : null;
+  // Installed from here, it is turned on in this Space once.
+  const turnedOn = useRef<string | null>(null);
+  useEffect(() => {
+    if (!operation || !spaceSwitches.ready || turnedOn.current === operation.controlId) return;
+    if (!harnessTurnsOnAfterInstall(registration, { action: operation.action, status: status.data?.status,
+      installed: status.data?.result?.item?.installed })) return;
+    turnedOn.current = operation.controlId;
+    void spaceSwitches.set(preset, true);
+  }, [operation, status.data, spaceSwitches, registration, preset]);
   const install = state.recipePlatform && preset.management?.install[state.recipePlatform];
   const update = state.recipePlatform && preset.management?.update[state.recipePlatform];
   const uninstall = item?.installed && state.recipePlatform && preset.management?.uninstall[state.recipePlatform];
@@ -151,6 +221,13 @@ function HarnessRow({ row: { preset, item }, state, context, beforeDivider = fal
           {autoState === "unknown" && <span className="text-muted-foreground">Unknown</span>}
         </span>
         : null}</td>
+    {spaceSwitches.owner && <td className="col-span-2 min-w-0 pr-3"><span className="block text-muted-foreground sm:hidden">In this Space</span>
+      {spaceSwitch && <span className="inline-flex items-center gap-2"
+        title={spaceSwitch.on ? "It can be summoned in this Space. Turning it off stops its running work here." : "Let it be summoned in this Space"}>
+        <Switch checked={spacePending ? spacePending.on : spaceSwitch.on} disabled={Boolean(spaceSwitches.pending)}
+          label={`In this Space: ${preset.displayName}`} onChange={(on) => void spaceSwitches.set(preset, on)} />
+        {spacePending && <span className="text-muted-foreground">{spacePending.on ? "Turning on…" : "Turning off…"}</span>}
+      </span>}</td>}
     <td className="col-span-2 min-w-0"><div className="flex flex-wrap gap-1">
       <Button size="sm" variant="outline" disabled={!state.canManage || busy || !item || cursorUpdateBlocked || (item.installed ? !update : !install)}
         title={item?.installed ? update ? harnessCommandLabel(update) : undefined : install ? harnessCommandLabel(install) : undefined}
