@@ -21,7 +21,7 @@ const MAX_MANIFEST_BYTES: usize = 1_048_576;
 const MAX_BINDINGS: usize = 512;
 const MAX_SLOTS: usize = 512;
 const MAX_ID_CHARS: usize = 256;
-const MAX_SANITIZED_DETAIL: usize = 160;
+const MAX_SANITIZED_DETAIL: usize = 2_000;
 const MAX_LOCK_REASON_BYTES: u64 = 1024;
 const MAX_GITDIR_POINTER_BYTES: u64 = 4096;
 /// Verifiable ownership tag; no secrets. Format:
@@ -3147,14 +3147,14 @@ async fn perform_required_fetch_and_resolve(base_repo: &Path) -> Result<Resolved
 /// of failing the whole :new lease.
 async fn required_origin_fetch(base_repo: &Path) -> Result<(), PoolError> {
     let spec = origin_default_fetch_spec(base_repo).await;
-    let mut last_error = GitRunError::Failed;
+    let mut last_error = GitCommandError::from(GitRunError::Failed);
     for attempt in 1..=GIT_FETCH_ATTEMPTS {
         let result = match spec.as_deref() {
             Some(branch) => {
                 let refspec = format!("refs/heads/{branch}:refs/remotes/origin/{branch}");
                 git(
                     base_repo,
-                    &["fetch", "--quiet", "--no-tags", "origin", &refspec],
+                    &["fetch", "--no-tags", "origin", &refspec],
                     GIT_FETCH_TIMEOUT,
                 )
                 .await
@@ -3162,7 +3162,7 @@ async fn required_origin_fetch(base_repo: &Path) -> Result<(), PoolError> {
             None => {
                 git(
                     base_repo,
-                    &["fetch", "--quiet", "--no-tags", "origin"],
+                    &["fetch", "--no-tags", "origin"],
                     GIT_FETCH_TIMEOUT,
                 )
                 .await
@@ -3173,12 +3173,12 @@ async fn required_origin_fetch(base_repo: &Path) -> Result<(), PoolError> {
             Err(error) => last_error = error,
         }
         // A refused credential or a missing repository does not change on retry.
-        if matches!(last_error, GitRunError::Auth | GitRunError::NotFound) {
+        if matches!(last_error.kind, GitRunError::Auth | GitRunError::NotFound) {
             break;
         }
         if attempt < GIT_FETCH_ATTEMPTS {
             // A lock clears in moments; an unreachable remote needs longer.
-            let step_ms = if matches!(last_error, GitRunError::Network | GitRunError::Timeout) {
+            let step_ms = if matches!(last_error.kind, GitRunError::Network | GitRunError::Timeout) {
                 3_000
             } else {
                 400
@@ -3194,8 +3194,8 @@ async fn required_origin_fetch(base_repo: &Path) -> Result<(), PoolError> {
 /// `repository_access_unavailable` code the Hub shows for it. The persisted
 /// pool code stays `fetch_required_failed`, which every daemon version reads.
 /// With the host's own credentials it stays an ordinary fetch failure.
-fn required_fetch_error(error: GitRunError, space_scoped: bool) -> PoolError {
-    if space_scoped && matches!(error, GitRunError::Auth | GitRunError::NotFound) {
+fn required_fetch_error(error: GitCommandError, space_scoped: bool) -> PoolError {
+    if space_scoped && matches!(error.kind, GitRunError::Auth | GitRunError::NotFound) {
         return PoolError::new(
             PoolErrorCode::FetchRequiredFailed,
             format!(
@@ -4423,8 +4423,27 @@ fn classify_git_failure(stderr: &str) -> GitRunError {
     GitRunError::Failed
 }
 
-/// Run git. On failure returns a classified error only — never raw stderr
-/// (may contain credentials/URLs). Callers map to stable `PoolErrorCode`.
+/// Keep retry classification separate from the credential-redacted cause.
+#[derive(Debug, Clone)]
+struct GitCommandError {
+    kind: GitRunError,
+    detail: String,
+}
+
+impl GitCommandError {
+    fn new(kind: GitRunError, detail: &str) -> Self {
+        let detail = sanitize_detail(detail.trim());
+        Self { kind, detail: if detail.is_empty() { kind.as_str().to_owned() } else { detail } }
+    }
+
+    fn as_str(&self) -> &str { &self.detail }
+}
+
+impl From<GitRunError> for GitCommandError {
+    fn from(kind: GitRunError) -> Self { Self::new(kind, kind.as_str()) }
+}
+
+/// Run Git with its classification for retry and its redacted cause for display.
 /// Every Git command the pool and run worktrees start: no console window,
 /// no fsmonitor, the current grant's credentials, and no repository bindings
 /// inherited from a hook (explicit `-C` commands must not mutate the hook's
@@ -4449,29 +4468,33 @@ pub(crate) fn git_command(cwd: &Path, args: &[&str]) -> tokio::process::Command 
     command
 }
 
-async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, GitRunError> {
+async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, GitCommandError> {
     let mut command = git_command(cwd, args);
     command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     xmatrix_process_tree::configure_tokio_process_tree(&mut command);
-    let mut child = command.spawn().map_err(|_| GitRunError::Failed)?;
+    let mut child = command.spawn().map_err(|error| GitCommandError::new(GitRunError::Failed, &error.to_string()))?;
     // A timed-out fetch also stops the helpers it started (ssh, credentials).
     let mut tree =
-        xmatrix_process_tree::guard_tokio_child(&mut child).map_err(|_| GitRunError::Failed)?;
+        xmatrix_process_tree::guard_tokio_child(&mut child).map_err(|error| GitCommandError::new(GitRunError::Failed, &error.to_string()))?;
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Err(_) => {
             let _ = tree.terminate();
-            return Err(GitRunError::Timeout);
+            return Err(GitCommandError::new(GitRunError::Timeout, &format!("git {} timed out after {} seconds", args.first().unwrap_or(&"command"), timeout.as_secs())));
         }
-        Ok(Err(_)) => return Err(GitRunError::Failed),
+        Ok(Err(error)) => return Err(GitCommandError::new(GitRunError::Failed, &error.to_string())),
         Ok(Ok(output)) => output,
     };
     if !output.status.success() {
-        return Err(classify_git_failure(&String::from_utf8_lossy(
-            &output.stderr,
-        )));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = if stderr.trim().is_empty() {
+            format!("git {} failed with {}", args.first().unwrap_or(&"command"), output.status)
+        } else {
+            stderr.into_owned()
+        };
+        return Err(GitCommandError::new(classify_git_failure(&detail), &detail));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
@@ -4513,72 +4536,7 @@ fn now_rfc3339() -> String {
 /// Bound + redact credential-like material for operator-facing messages.
 /// Truncation is always on a UTF-8 char boundary (never panics on multi-byte).
 fn sanitize_detail(raw: &str) -> String {
-    let mut s = raw.to_string();
-    // URL userinfo: scheme://user:pass@host → scheme://***@host
-    if let Some(scheme_end) = s.find("://") {
-        let after = scheme_end + 3;
-        if let Some(at) = s[after..].find('@') {
-            let at_abs = after + at;
-            let slash = s[after..].find('/').map(|i| after + i).unwrap_or(s.len());
-            if at_abs < slash && s.is_char_boundary(after) && s.is_char_boundary(at_abs) {
-                s.replace_range(after..at_abs, "***");
-            }
-        }
-    }
-    // scp-like user@host:path credentials
-    if let Some(at) = s.find('@')
-        && s.is_char_boundary(at) && !s[..at].contains("://")
-            && let Some(colon) = s[at..].find(':') {
-                let host_end = at + colon;
-                if s[..at]
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-                {
-                    s.replace_range(..at, "***");
-                    let _ = host_end;
-                }
-            }
-    // Strip query/fragment content
-    if let Some(q) = s.find('?')
-        && s.is_char_boundary(q) {
-            s.truncate(q);
-            s.push_str("?<redacted>");
-        }
-    if let Some(h) = s.find('#')
-        && s.is_char_boundary(h) {
-            s.truncate(h);
-            s.push_str("#<redacted>");
-        }
-    // Collapse obvious token-looking substrings
-    for needle in ["token=", "access_token=", "password=", "secret="] {
-        if let Some(i) = s.to_ascii_lowercase().find(needle) {
-            let start = i + needle.len();
-            if !s.is_char_boundary(start) {
-                continue;
-            }
-            let end = s[start..]
-                .find(['&', ' ', ';', '"'])
-                .map(|e| start + e)
-                .unwrap_or(s.len());
-            if end > start && s.is_char_boundary(end) {
-                s.replace_range(start..end, "***");
-            }
-        }
-    }
-    truncate_str_at_char_boundary(&mut s, MAX_SANITIZED_DETAIL);
-    s
-}
-
-fn truncate_str_at_char_boundary(s: &mut String, max_bytes: usize) {
-    if s.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s.truncate(end);
-    s.push_str("...");
+    super::failure_detail::sanitize(raw, MAX_SANITIZED_DETAIL)
 }
 
 fn looks_like_local_path(value: &str) -> bool {
