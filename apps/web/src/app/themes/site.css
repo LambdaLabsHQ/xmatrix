@@ -3,6 +3,9 @@
    matches the product app instead of a second blur/paper recipe. */
 
 .site-canvas {
+  /* One corner for every site slab, wood or glass: the 20px a liquid glass
+     card already has. Pill-shaped controls stay pills. */
+  --site-surface-radius: 1.25rem;
   color: var(--foreground);
   background:
     radial-gradient(circle at 15% -8%, oklch(1 0.018 92 / 0.95), transparent 34rem),
@@ -95,7 +98,7 @@ html:has(.site-page) {
   --site-wood-ink: oklch(0.12 0.015 55);
   overflow: hidden;
   border: 0;
-  border-radius: 1.35rem;
+  border-radius: var(--site-surface-radius);
   color: var(--site-wood-ink);
   font-weight: 700;
   box-shadow:
@@ -194,13 +197,18 @@ html:has(.site-page) {
   opacity: var(--navbar-wood-reveal);
 }
 
+/* The brand glass is a slab beside the wood bar, not a button: same corner. */
+.site-canvas .site-navbar-brand-glass .app-material-liquid-pill.app-material-liquid-pill {
+  border-radius: var(--site-surface-radius) !important;
+}
+
 .site-navbar-bar {
   position: relative;
   height: 3.5rem;
   width: calc(100% - (2 * var(--site-navbar-brand-slot)));
   max-width: 100%;
   margin-inline: auto;
-  border-radius: 1rem;
+  border-radius: var(--site-surface-radius);
 }
 
 .site-navbar .site-navbar-inner {
@@ -319,10 +327,6 @@ html:has(.site-page) {
     inset: 0;
   }
 
-  .site-navbar-brand-glass > * {
-    border-radius: 0.9rem;
-  }
-
   /* Below lg the bar holds only the menu button, so it wraps just that
      instead of stretching an empty wood slab across the row. */
   .site-navbar-bar {
@@ -344,11 +348,6 @@ html:has(.site-page) {
 
   .site-navbar {
     padding: 0.5rem;
-  }
-
-  .site-navbar-bar,
-  .site-navbar .site-navbar-inner {
-    border-radius: 0.9rem;
   }
 
   .site-page .x-section {
