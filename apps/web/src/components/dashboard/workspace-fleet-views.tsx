@@ -1044,7 +1044,7 @@ export function MachinesView({
               <MachineLoadPanel machine={machine} now={now} token={token} />
             </ToolDetailSection>
             <ToolDetailSection title="Harnesses">
-              <MachineHarnessPanel key={machine.id} daemon={machine.daemon} token={token} spaceId={spaceId} />
+              <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId} />
             </ToolDetailSection>
             <ToolDetailSection title={`Directories · ${machine.workspaces.length}`}>
               {machine.workspaces.length === 0 ? (

@@ -2,6 +2,8 @@ Part of the descriptive project profile. Not policy. The index is `project-profi
 
 ## Public Interfaces And Domain Contracts
 
+- Web derives installed `(machine, harness)` candidates and offers owner-controlled Space switches from Machines, Agents, and first-run onboarding. Existing registration commands remain the authorization boundary; existing switch states are retained without a data rewrite. See [installed harnesses and Space switches](../design/harness-space-switches.md).
+
 - A handoff must change the stable Agent registration, whether on the same or another machine. A usage limit only holds the quota pool and posts an ordinary `handoff:@auto`. Same-machine directory handoff rejects the original harness; the repository-backed move to another machine excludes the predecessor's authoritative registration binding independently of quota refresh, so the same harness elsewhere is eligible. See `docs/same-machine-instance-handoff.md` §2.1–2.2.
 
 - Direct runtime addresses (for example `@codex` and `@claude`) accept the same

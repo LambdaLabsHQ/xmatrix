@@ -69,6 +69,9 @@ import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
+import { AGENT_PRESETS } from "@xmatrix/protocol";
+import { harnessSpaceKey } from "./harness-space-switch";
+import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { SpaceAgentSetupCard } from "./space-agent-setup-card";
 import { composeFirstTaskMessage, spaceFirstTaskState } from "./space-first-task";
 import {
@@ -376,6 +379,22 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         spaceId: registration.key.spaceId })),
     [registrationCatalog.data],
   );
+  const installedFleet = useInstalledHarnesses(currentSpaceId, token, user?.id, channelsLoaded && !selectedChannel);
+  const [bringingLocal, setBringingLocal] = useState(false);
+  const bringingLocalLock = useRef(false);
+  async function enableLocalHarnesses(presetIds: string[]) {
+    if (bringingLocalLock.current || !currentSpaceId || !user || !desktopContext?.machineId) return;
+    bringingLocalLock.current = true;
+    setBringingLocal(true);
+    try {
+      for (const presetId of presetIds) {
+        const preset = AGENT_PRESETS.find((candidate) => candidate.id === presetId);
+        if (preset && !(await installedFleet.set(harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId, presetId), preset, true))) break;
+      }
+    } finally { bringingLocalLock.current = false; setBringingLocal(false); }
+  }
+  const keepHarnessSetup = installedFleet.enablingAll || bringingLocal ||
+    Boolean(installedFleet.error && installedFleet.candidates.length > 0);
   const agentsLoaded = Boolean(token) && !loadingWorkspace && registrationCatalog.isSuccess;
   const spaceAgentsUnreachable = registrationCatalog.isError;
   // A Space's agents are its registrations, so a Space with none cannot do
@@ -387,7 +406,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       channelsLoaded,
       agentsLoaded,
       spaceAgentsUnreachable,
-      spaceAgentCount: spaceAgents.length,
+      spaceAgentCount: keepHarnessSetup ? 0 : (registrationCatalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled").length,
       desktopAvailable: Boolean(desktopBridge),
       discoveryAvailable: Boolean(desktopBridge?.discoverAgentPresets),
       loadingDiscoveries: loadingAgentPresetDiscoveries,
@@ -396,7 +415,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     }),
     [
       agentPresetDiscoveries,
-      spaceAgents,
+      registrationCatalog.data,
+      keepHarnessSetup,
       desktopBridge,
       desktopDaemonStatus,
       loadingAgentPresetDiscoveries,
@@ -424,7 +444,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onboardingCatalog.rows.length]
   );
   // Only on the empty first screen: an open conversation is never covered.
-  const showSpaceAgentSetup = spaceAgentSetup.kind !== "hidden" && !selectedChannel;
+  const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel;
   /* A failed read is not onboarding: it reads on the tool pages' paper, since
      wood carries only liquid glass and this screen has none. */
   const showSpaceUnreachable = showSpaceAgentSetup && spaceAgentSetup.kind === "unreachable";
@@ -841,22 +861,18 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           <SpaceAgentSetupCard
             state={spaceAgentSetup}
             hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
-            busy={localActionBusy}
-            error={localActionError}
+            busy={bringingLocal ? "enabling" : localActionBusy}
+            error={installedFleet.error ?? localActionError}
+            fleet={installedFleet}
+            onManageMachines={() => changeAppView("machines")}
+            onBringAll={() => installedFleet.candidates.length > 0 ? void installedFleet.enableAll() :
+              void enableLocalHarnesses(agentPresetDiscoveries.filter((candidate) => candidate.runtimeAvailable).map((candidate) => candidate.presetId))}
             onStartDaemon={() => void startDesktopDaemon()}
             onRefresh={() => void refreshAgentPresetDiscoveries()}
             // Re-reads the registrations, not the local runtime discovery:
             // the failure this retries is the registration read.
             onRetryAgents={() => void registrationCatalog.refetch()}
-            onBindAgent={(candidate) => {
-              // Binding produces an identity and nothing else. Registering a
-              // directory here is what made a brand-new Space arrive with a
-              // repository already bound to it, which nobody had chosen.
-              const discovery = agentPresetDiscoveries.find(
-                (item) => item.presetId === candidate.presetId
-              );
-              if (discovery) void importDiscoveredAgent(discovery);
-            }}
+            onBindAgent={(candidate) => void enableLocalHarnesses([candidate.presetId])}
           />
         </div>
       )}

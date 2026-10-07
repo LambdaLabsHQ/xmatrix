@@ -279,3 +279,16 @@ test("a harness installed from here is turned on in this Space", async ({ page }
     expect.objectContaining({ action: "create", key: spaceKey("claude") }),
   ]);
 });
+
+test("restoring a successful install from machine history does not enable it in this Space", async ({ page }) => {
+  await openMachine(page, "online", daemon.metadata.capabilities, { recorded: [{
+    controlId: CONTROL, presetId: "codex", action: "install", status: "succeeded", requestedAt: E2E_NOW,
+    result: { presetId: "codex", action: "install", status: "succeeded",
+      item: { id: "codex", installed: true, probeStatus: "ok", version: "1.0.0" } },
+  }] });
+  await fixtureJson(page, "space-command", COMMANDS, { version: 1 }, { method: "POST" });
+  const panel = page.getByTestId("machine-harness-panel");
+  await expect(panel.getByRole("switch", { name: "In this Space: Codex" })).toHaveAttribute("aria-checked", "false");
+  await expect(panel.getByText("Install · Codex: Done")).toBeVisible();
+  expect(await fixtureRequestBodies(page, "space-command")).toEqual([]);
+});
