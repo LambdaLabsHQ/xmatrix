@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { automationReferences, insertAutomationReference, mergePageText, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, removeAutomationReference, replaceAutomationReference } from "../dist/index.js";
+import { automationReferences, gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, parseGitHubFileReference, removeAutomationReference, replaceAutomationReference } from "../dist/index.js";
 
 const page = `Intro line
 # Relay Storage
@@ -103,4 +103,47 @@ test("a change's gist is the first text it added, as a reader sees it, in the se
   assert.deepEqual(pageChangeGist(before, before + "```\ncode line\n```\n"), { blockId: "status", gist: null },
     "code is not a gist");
   assert.equal(pageChangeGist("", "x".repeat(400)).gist.length, 160);
+});
+
+test("a GitHub file embed names one file of a repository, on its default branch unless pinned", () => {
+  const prompt = { repository: "LambdaLabsHQ/xmatrix", path: "docs/prompts/bootstrap.md", ref: null };
+  assert.equal(gitHubFileReferenceHref(prompt), "xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md");
+  assert.deepEqual(parseGitHubFileReference(gitHubFileReferenceHref(prompt)), prompt);
+  const pinned = { repository: "o/r", path: "dir with space/a(1).md", ref: "release/1.0" };
+  const href = gitHubFileReferenceHref(pinned);
+  assert.equal(href, "xmatrix:github-file/o/r/dir%20with%20space/a%281%29.md?ref=release%2F1.0");
+  assert.deepEqual(parseGitHubFileReference(href), pinned, "a pinned ref and an encoded path come back as written");
+
+  for (const invalid of ["xmatrix:github-file/o/r", "xmatrix:github-file/o/r/../secret", "xmatrix:github-file/o/r/a//b",
+    "xmatrix:github-file/-o/r/a.md", "xmatrix:github-file/o/r/a.md?path=x", "xmatrix:github-file/o/r/a.md?ref=..%2Fx",
+    "xmatrix:github-file/o/r/%E0%A4%A", "xmatrix:automation/a-1", "https://github.com/o/r/blob/main/a.md"]) {
+    assert.equal(parseGitHubFileReference(invalid), null, invalid);
+  }
+});
+
+test("a GitHub file link becomes an embed of the same file at the same ref", () => {
+  assert.deepEqual(gitHubFileReferenceFrom(" https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/prompts/bootstrap.md "),
+    { repository: "LambdaLabsHQ/xmatrix", path: "docs/prompts/bootstrap.md", ref: "main" });
+  assert.deepEqual(gitHubFileReferenceFrom("https://github.com/o/r/blob/0123abc/dir%20x/a.md#L3"),
+    { repository: "o/r", path: "dir x/a.md", ref: "0123abc" });
+  assert.deepEqual(gitHubFileReferenceFrom("xmatrix:github-file/o/r/a.md"), { repository: "o/r", path: "a.md", ref: null });
+  for (const other of ["https://github.com/o/r/tree/main/docs", "https://github.com/o/r/blob/main",
+    "http://github.com/o/r/blob/main/a.md", "https://gitlab.com/o/r/blob/main/a.md", "docs/a.md", ""]) {
+    assert.equal(gitHubFileReferenceFrom(other), null, other);
+  }
+  assert.equal(gitHubFileUrl({ repository: "o/r", path: "dir x/a.md", ref: null }),
+    "https://github.com/o/r/blob/HEAD/dir%20x/a.md", "the default branch opens as HEAD");
+  assert.equal(gitHubFileUrl({ repository: "o/r", path: "a.md", ref: "release/1.0" }),
+    "https://github.com/o/r/blob/release/1.0/a.md");
+});
+
+test("a page's GitHub file embeds are read from its prose, each once, in canonical form", () => {
+  const page = "# Prompts\n\n[bootstrap.md](xmatrix:github-file/o/r/docs/bootstrap.md)\n\n" +
+    "```\n[x](xmatrix:github-file/o/r/in-code.md)\n```\n\n`[y](xmatrix:github-file/o/r/inline.md)` and " +
+    "[again](xmatrix:github-file/o/r/docs/bootstrap.md \"title\") [pinned](xmatrix:github-file/o/r/a%2Eb.md?ref=v1)\n" +
+    "[broken](xmatrix:github-file/o/r/../x.md) [automation](xmatrix:automation/a-1)\n";
+  assert.deepEqual(gitHubFileReferences(page), [
+    "xmatrix:github-file/o/r/docs/bootstrap.md",
+    "xmatrix:github-file/o/r/a.b.md?ref=v1",
+  ]);
 });

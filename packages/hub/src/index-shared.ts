@@ -548,7 +548,7 @@ export function agentRunHttpRouteAllowed(
   // the owner's alone, so the decision route never admits a Run.
   // Pages authorize the exact Run in the repository, with its owner's page
   // access: Agents read, edit, arrange, restore and publish pages as the owner may.
-  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes)?)?$/u.test(path)) return true;
+  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file)?)?$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages$/u.test(path)) return true;
   if (["PUT", "PATCH", "DELETE"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:revisions\/[^/]+\/promote|purge)$/u.test(path)) return true;

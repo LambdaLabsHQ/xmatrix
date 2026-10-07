@@ -534,6 +534,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
     setSeenRevision(revision);
     void pageApi.markRead(spaceId, pageId, token, revision).catch(() => undefined);
   }, [opened, pageId, spaceId, token]);
+  // The GitHub files the page embeds are read through the Hub, as this reader (pages-live-document.md §6.5).
+  const readGitHubFile = useCallback((href: string, signal: AbortSignal) =>
+    pageApi.githubFile(spaceId!, pageId!, token, href, signal), [spaceId, pageId, token]);
   const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
   // The page on screen in this tab is read at its head once it has been there a moment.
   useEffect(() => {
@@ -1109,7 +1112,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} />}
+                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
                   </div>
                 </div>
                 {/* The margin holds its room from the start, so the text does not reflow when the page has synced;

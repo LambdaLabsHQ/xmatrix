@@ -165,8 +165,10 @@ stored. It combines:
 The test: **if the text should change in the same pull request as the code,
 it belongs in the repository.**
 
-- **Link repository docs, don't copy or mount them.** A page that needs a
-  repository document links to it on GitHub. Repositories do not share one
+- **Link or embed repository files, never copy or mount them.** A page that
+  needs a repository document links to it on GitHub, or embeds that one file
+  so it reads in place (pages-live-document.md §6.5); the embed is read
+  through from GitHub when the page is opened. Repositories do not share one
   layout for their docs, so xMatrix assumes none, and the page store never
   holds a copy. (Mounting a repository's `docs/` directory into the page tree
   was built and removed: it assumed that layout and only re-showed what

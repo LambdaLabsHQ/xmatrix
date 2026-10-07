@@ -173,6 +173,25 @@ export interface PageDocument extends PageSummary {
   revisionInfo: PageRevision;
 }
 
+/**
+ * A GitHub file a page embeds (`xmatrix:github-file/…`), as the Hub read it
+ * through the Space's GitHub connection a moment ago; never stored.
+ */
+export interface PageGitHubFile {
+  /** `owner/repo`. */
+  repository: string;
+  path: string;
+  /** The ref the embed pins; null for the default branch. */
+  ref: string | null;
+  /** The blob GitHub served. */
+  sha: string;
+  size: number;
+  htmlUrl: string | null;
+  /** The file as UTF-8 text, cut when `truncated`; null for a binary file or one too large for GitHub to inline. */
+  text: string | null;
+  truncated: boolean;
+}
+
 /** One page whose title or current text contains a Ctrl+F query. */
 export interface PageSearchHit {
   pageId: string;
