@@ -146,7 +146,6 @@ export function WorkspaceRail({
   onLogout,
   onReportIssue,
   pendingJoinRequestCount,
-  onOpenSearch,
   updateControl,
 }: {
   activeView: AppView;
@@ -161,7 +160,6 @@ export function WorkspaceRail({
   onReportIssue?: () => void;
   /** People waiting on this admin in the current Space. */
   pendingJoinRequestCount?: number;
-  onOpenSearch: () => void;
   /** The desktop app's update bead, above the bottom actions. */
   updateControl?: React.ReactNode;
 }) {
@@ -191,7 +189,6 @@ export function WorkspaceRail({
         />
       </button>
       <div className="mt-5 flex flex-1 flex-col items-center gap-2">
-        <RailButton active={activeView === "search"} icon={Search} label="Search (⌘F)" onClick={onOpenSearch} />
         <RailButton active={activeView === "pages"} icon={BookOpen} label="Pages" onClick={() => onChangeView("pages")} />
         <RailButton
           active={conversations}
@@ -824,7 +821,7 @@ export function TopWorkspaceBar({
         )}
       </div>
       {onOpenSearch && !showBack && (
-        // Desktop search is the rail button and ⌘F; this icon is the phone's, and the
+        // Desktop search is the list's Search row and ⌘F; this icon is the phone's, and the
         // topbar is hidden on desktop. Channel detail bars keep Share / More
         // only — no search.
         <button

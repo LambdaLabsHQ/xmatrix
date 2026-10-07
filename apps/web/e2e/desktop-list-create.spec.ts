@@ -19,7 +19,7 @@ test("the conversation list leads with New conversation, lit while the draft is 
     `xmatrix:management-setup-dismissed:${E2E_SPACE.id}`);
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
 
-  const create = page.locator(".app-sidebar .app-list-create");
+  const create = page.locator(".app-sidebar .app-list-create:not(.app-list-search)");
   await expect(create).toBeVisible();
   await expect(create).toHaveAccessibleName("New conversation");
   await expect(create).toHaveAttribute("title", /^New conversation \((⌘N|Ctrl\+N)\)$/u);
@@ -36,6 +36,10 @@ test("the conversation list leads with New conversation, lit while the draft is 
   // Directly above them: the +, then the first section's name, then its first row, with no gaps.
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
+  // Search rests on the row above it, in the same geometry.
+  const searchBox = await page.locator(".app-sidebar .app-list-search").boundingBox();
+  expect(createBox!.y - (searchBox!.y + searchBox!.height)).toBeCloseTo(0, 0);
+  expect(searchBox!.height).toBeCloseTo(createBox!.height, 0);
   const paint = await create.evaluate((button) => {
     const style = getComputedStyle(button);
     return { backdrop: style.backdropFilter, image: style.backgroundImage, radius: style.borderTopLeftRadius };
@@ -65,7 +69,7 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
   await expect(page.locator(".app-page-article")).toBeVisible();
 
-  const create = page.locator(".app-sidebar .app-list-create");
+  const create = page.locator(".app-sidebar .app-list-create:not(.app-list-search)");
   await expect(create).toBeVisible();
   await expect(create).toHaveAccessibleName("New page");
   await expect(page.locator(".app-main .app-list-create")).toHaveCount(0);
