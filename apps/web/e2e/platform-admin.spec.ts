@@ -34,6 +34,11 @@ test("the Spaces table searches and sorts, keeping its state in the address", as
   await expect(spaces.getByText("owner@example.com")).toBeVisible();
   await expect(spaces.getByText("Solo Space")).toBeVisible();
   await expect(spaces.getByRole("textbox")).toHaveCSS("box-shadow", "none");
+  // The default desktop width must show every Space column without hiding
+  // the final date behind an otherwise invisible horizontal scroll.
+  await expect.poll(() => spaces.locator(".overflow-x-auto").evaluate((element) =>
+    element.scrollWidth - element.clientWidth,
+  )).toBeLessThanOrEqual(1);
   await page.screenshot({ path: testInfo.outputPath("desktop-spaces.png") });
 
   await spaces.getByPlaceholder("Space, owner, id").fill("solo");

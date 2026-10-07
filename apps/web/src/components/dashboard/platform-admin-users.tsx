@@ -29,7 +29,7 @@ function age(value: string | undefined, fallback = "—"): string {
 
 /** A time cell: one line, the exact UTC time on hover. */
 function TimeCell({ value, fallback }: { value: string | undefined; fallback?: string }) {
-  return <span className="whitespace-nowrap text-xs text-muted-foreground" title={value}>{age(value, fallback)}</span>;
+  return <span className="whitespace-nowrap text-xs text-muted-foreground" title={value}>{age(value, fallback).replace(" UTC", "")}</span>;
 }
 
 function utc(value: string | undefined): string {
@@ -156,14 +156,14 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
 
       <ToolDetailSection title="Account">
         <div className="app-admin-account">
-        <ToolFacts>
-          <ToolFact label="User id"><span className="font-mono text-xs [overflow-wrap:anywhere]">{user.userId}</span></ToolFact>
-          <ToolFact label="Registered">{utc(user.registeredAt)}</ToolFact>
-          <ToolFact label="Sign-in">{user.providers?.join(", ") || "—"}</ToolFact>
-          <ToolFact label="Email verified">{user.emailVerified ? "Yes" : "No"}</ToolFact>
-          <ToolFact label="Profile">{user.profileCompleted ? "Completed" : "Not completed"}</ToolFact>
-          <ToolFact label="Last access">{age(user.lastSessionAt, "Never")}</ToolFact>
-        </ToolFacts>
+          <ToolFacts>
+            <ToolFact label="User id"><span className="font-mono text-xs [overflow-wrap:anywhere]">{user.userId}</span></ToolFact>
+            <ToolFact label="Registered">{utc(user.registeredAt)}</ToolFact>
+            <ToolFact label="Sign-in">{user.providers?.join(", ") || "—"}</ToolFact>
+            <ToolFact label="Email verified">{user.emailVerified ? "Yes" : "No"}</ToolFact>
+            <ToolFact label="Profile">{user.profileCompleted ? "Completed" : "Not completed"}</ToolFact>
+            <ToolFact label="Last access">{age(user.lastSessionAt, "Never")}</ToolFact>
+          </ToolFacts>
         </div>
       </ToolDetailSection>
 

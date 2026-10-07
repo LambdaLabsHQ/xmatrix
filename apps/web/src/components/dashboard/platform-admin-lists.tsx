@@ -32,10 +32,10 @@ const SPACE_COLUMNS: AdminColumn<AdminSpaceSummary>[] = [
   { key: "messages7d", mobile: false, label: "7d", numeric: true, value: (space) => space.messagesLast7d,
     render: (space) => formatAdminCount(space.messagesLast7d) },
   { key: "created", mobile: false, label: "Created", numeric: true, value: (space) => adminTime(space.createdAt),
-    render: (space) => <span className="whitespace-nowrap text-xs text-muted-foreground">{age(space.createdAt)}</span> },
+    render: (space) => <span className="whitespace-nowrap text-xs text-muted-foreground" title={space.createdAt}>{age(space.createdAt).replace(" UTC", "")}</span> },
   { key: "active", label: "Last activity", numeric: true,
     value: (space) => adminTime(space.lastMessageAt || space.createdAt),
-    render: (space) => <span className="whitespace-nowrap text-xs text-muted-foreground">{age(space.lastMessageAt || space.createdAt)}</span> },
+    render: (space) => <span className="whitespace-nowrap text-xs text-muted-foreground" title={space.lastMessageAt || space.createdAt}>{age(space.lastMessageAt || space.createdAt).replace(" UTC", "")}</span> },
 ];
 
 export function PlatformAdminSpaces({ token }: { token?: string }) {

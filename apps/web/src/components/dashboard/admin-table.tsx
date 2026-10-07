@@ -162,7 +162,7 @@ export function AdminTable<Row>({
 
   return (
     <section aria-label={label} className="app-admin-table min-w-0">
-      <div className="app-admin-table-tools flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border/60 px-3">
+      <div className="app-admin-table-tools flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-border/60 px-3 md:gap-x-3">
         {search && (
           <div className={cn("relative", phone && "w-full")}>
             <Search className="pointer-events-none absolute left-0 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -191,7 +191,7 @@ export function AdminTable<Row>({
             />
             <AdminPaperAction onClick={() => toggleSort(sortColumn)}
               aria-label={descending ? "Sorted descending; sort ascending" : "Sorted ascending; sort descending"}
-              className="min-w-8">
+              className="min-w-11 md:min-w-8">
               {descending ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />}
             </AdminPaperAction>
           </>
@@ -213,7 +213,7 @@ export function AdminTable<Row>({
         <AdminRowList rows={shown} columns={visible} rowKey={rowKey} onRowClick={onRowClick} />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border text-left text-xs font-semibold text-muted-foreground">
                 {visible.map((column) => {
@@ -221,7 +221,7 @@ export function AdminTable<Row>({
                   return (
                     <th key={column.key} scope="col"
                       aria-sort={active ? (descending ? "descending" : "ascending") : undefined}
-                      className={cn("whitespace-nowrap px-3 py-2.5", column.numeric && "text-right")}>
+                      className={cn("whitespace-nowrap px-2 py-2.5 first:pl-3 last:pr-3", column.numeric && "text-right")}>
                       {column.value ? (
                         <button type="button" onClick={() => toggleSort(column)}
                           className={cn("inline-flex items-center gap-0.5 hover:text-foreground",
@@ -246,7 +246,7 @@ export function AdminTable<Row>({
                   className={cn("border-b border-border/60", onRowClick && "cursor-pointer hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none")}>
                   {visible.map((column) => (
                     <td key={column.key}
-                      className={cn("max-w-[260px] px-3 py-3 align-top",
+                      className={cn("max-w-[260px] px-2 py-3 align-top first:pl-3 last:pr-3",
                         column.numeric && "text-right tabular-nums")}>
                       {column.render(row)}
                     </td>
@@ -261,13 +261,13 @@ export function AdminTable<Row>({
         <div className="mt-2 flex items-center justify-end gap-2 text-xs text-muted-foreground">
           <AdminPaperAction aria-label="Previous page" disabled={page <= 1}
             onClick={() => setPage(page - 1 <= 1 ? "" : String(page - 1))}
-            className="min-w-8">
+            className="min-w-11 md:min-w-8">
             <ChevronLeft className="size-3.5" />
           </AdminPaperAction>
           <span className="tabular-nums">Page {page} of {pages}</span>
           <AdminPaperAction aria-label="Next page" disabled={page >= pages}
             onClick={() => setPage(String(page + 1))}
-            className="min-w-8">
+            className="min-w-11 md:min-w-8">
             <ChevronRight className="size-3.5" />
           </AdminPaperAction>
         </div>

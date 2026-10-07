@@ -106,6 +106,10 @@ html[data-app-theme] .xmatrix-app .app-admin-view .app-glass-select-option {
 }
 
 @media (max-width: 767px) {
+  .xmatrix-app .app-admin-view .app-glass-select-option {
+    min-height: 44px;
+  }
+
   .xmatrix-app .app-admin-view .app-tool-detail-scroll article > button {
     min-height: 44px;
     margin-bottom: 0;
