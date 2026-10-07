@@ -1619,6 +1619,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         identity_id: None,
         role_initial_prompt: None,
         working_mode: None,
+        space_rules_page_id: None,
         resume: false,
         resume_instance_id: None,
         resume_session_key: Some("session-a".to_string()),

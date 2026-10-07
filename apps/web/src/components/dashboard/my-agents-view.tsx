@@ -66,7 +66,7 @@ const ACTION_ICON: Record<MyAgentAction, ComponentType<{ className?: string }>> 
 };
 
 const ACTION_CONSEQUENCE: Record<MyAgentAction, string> = {
-  configure: "Name, default model and working mode",
+  configure: "Name, default model, working mode and instructions",
   restore: "Offer this agent to the Space again",
 };
 
@@ -371,6 +371,7 @@ function RegistrationEditor({
       initialName={details.data.displayName}
       initialModel={details.data.configuration?.model ?? ""}
       initialWorkingMode={details.data.configuration?.workingMode ?? "autonomous"}
+      initialInstructions={details.data.configuration?.instructions ?? ""}
       busy={busy}
       onCancel={onCancel}
       onSave={onSave}
@@ -382,13 +383,14 @@ function RegistrationEditor({
 type RegistrationEditorActions = {
   busy: boolean;
   onCancel: () => void;
-  onSave: (change: { displayName: string; model: string; workingMode: AgentWorkingMode }) => void;
+  onSave: (change: { displayName: string; model: string; workingMode: AgentWorkingMode; instructions: string }) => void;
 };
 
 function RegistrationEditorForm({
   initialName,
   initialModel,
   initialWorkingMode,
+  initialInstructions,
   busy,
   onCancel,
   onSave,
@@ -396,16 +398,18 @@ function RegistrationEditorForm({
   initialName: string;
   initialModel: string;
   initialWorkingMode: AgentWorkingMode;
+  initialInstructions: string;
 } & RegistrationEditorActions) {
   const [displayName, setDisplayName] = useState(initialName);
   const [model, setModel] = useState(initialModel);
   const [workingMode, setWorkingMode] = useState(initialWorkingMode);
+  const [instructions, setInstructions] = useState(initialInstructions);
   return (
     <form
       className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
       onSubmit={(event) => {
         event.preventDefault();
-        onSave({ displayName, model, workingMode });
+        onSave({ displayName, model, workingMode, instructions });
       }}
     >
       <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
@@ -440,6 +444,17 @@ function RegistrationEditorForm({
           <option value="autonomous">Autonomous</option>
           <option value="cautious">Cautious</option>
         </select>
+      </label>
+      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground sm:col-span-3">
+        Instructions
+        <textarea
+          value={instructions}
+          disabled={busy}
+          rows={4}
+          placeholder="What this Agent should always do, in this Space"
+          onChange={(event) => setInstructions(event.target.value)}
+          className={`${INPUT_CLASS} h-auto py-2 normal-case tracking-normal font-normal`}
+        />
       </label>
       <div className="flex gap-2">
         <button type="button" disabled={busy} onClick={onCancel} className={actionClass({ variant: "secondary", size: "md" })}>

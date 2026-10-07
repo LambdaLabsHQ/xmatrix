@@ -189,8 +189,8 @@ export function ShareDialog({ open, onClose, canPublish, canEdit, published, res
           </Toggle>
         )}
         {canPublish && rulesPage !== undefined && (
-          <Toggle label="Only owners and admins edit this page" checked={rulesPage} onChange={onToggleRulesPage}>
-            It states the project&apos;s rules; participants read it.
+          <Toggle label="Space rules: only owners and admins edit this page" checked={rulesPage} onChange={onToggleRulesPage}>
+            Every Agent in this Space reads and follows it; participants read it.
           </Toggle>
         )}
       </div>

@@ -181,6 +181,9 @@ export interface MachineDaemonSpawnCommand {
   roleInitialPrompt?: string;
   /** The registration's working mode; absent means autonomous. */
   workingMode?: AgentWorkingMode;
+  /** The Space's rules page (its governance page). The Agent reads it on
+   * demand; the launch carries only its id. */
+  spaceRulesPageId?: string;
   resume?: boolean;
   resumeInstanceId?: string;
   resumeSessionKey?: string;

@@ -15,8 +15,30 @@ pub fn channel_collaboration_policy(channel_id: &str) -> String {
 const BOOTSTRAP: &str = include_str!("../prompts/bootstrap.md");
 const CHANNEL_CONTRACT: &str = include_str!("../prompts/channel-contract.md");
 const GOAL_COMMAND: &str = include_str!("../prompts/goal-command.md");
+const SPACE_RULES: &str = include_str!("../prompts/space-rules.md");
 const WORKING_MODE_AUTONOMOUS: &str = include_str!("../prompts/working-mode-autonomous.md");
 const WORKING_MODE_CAUTIOUS: &str = include_str!("../prompts/working-mode-cautious.md");
+
+/// The Space's rules page, set by the daemon from the Hub's launch data.
+pub const SPACE_RULES_PAGE_ENV: &str = "XMATRIX_SPACE_RULES_PAGE_ID";
+
+/// A page id is opaque: letters, digits and dashes only, so it can sit in
+/// the prompt and in the `xmatrix page read` command it names.
+pub fn is_opaque_page_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn space_rules_context() -> String {
+    match trimmed_env(SPACE_RULES_PAGE_ENV) {
+        Some(page_id) if is_opaque_page_id(&page_id) => {
+            render_prompt(SPACE_RULES, &[("page_id", &page_id)])
+        }
+        Some(page_id) => panic!("{SPACE_RULES_PAGE_ENV} is not an opaque page id: `{page_id}`"),
+        None => String::new(),
+    }
+}
 
 /// How far an Agent carries work before it stops to ask a human. The Hub
 /// sends the registration's choice as `XMATRIX_AGENT_WORKING_MODE`; a Run
@@ -88,6 +110,7 @@ pub fn bootstrap_prompt(
             ("identity_context", &identity_context),
             ("goal_context", goal_command_context(supports_self_goal)),
             ("channel_collaboration_policy", &channel_policy),
+            ("space_rules", &space_rules_context()),
             ("working_mode", WorkingMode::from_env().prompt()),
         ],
     ))
@@ -257,6 +280,32 @@ mod tests {
         );
         let error = WorkingMode::parse("yolo").unwrap_err();
         assert!(error.contains(WorkingMode::ENV) && error.contains("yolo"));
+    }
+
+    #[test]
+    fn space_rules_page_is_named_before_the_working_mode_only_when_set() {
+        // SAFETY: test-only env mutation, as in the other bootstrap tests.
+        unsafe { std::env::remove_var(SPACE_RULES_PAGE_ENV) };
+        let without = bootstrap_prompt("claude", "a", "", true).unwrap();
+        assert!(!without.contains("Space rules:"));
+
+        unsafe { std::env::set_var(SPACE_RULES_PAGE_ENV, "0b6e-rules") };
+        let with = bootstrap_prompt("claude", "a", "", true).unwrap();
+        unsafe { std::env::remove_var(SPACE_RULES_PAGE_ENV) };
+        let rules = with
+            .find("Space rules: this Space states its standing rules on page:0b6e-rules")
+            .unwrap();
+        assert!(with.contains("`xmatrix page read 0b6e-rules`"));
+        assert!(rules < with.find("Working mode:").unwrap());
+        assert_eq!(
+            with.len() - without.len(),
+            with[rules..].len() - without[without.find("Working mode:").unwrap()..].len()
+        );
+
+        assert!(is_opaque_page_id("eadbea57-ff54-4cd6-ab69-d1e1fb75e603"));
+        for bad in ["", "a b", "a;rm", "page:x", "a\nb"] {
+            assert!(!is_opaque_page_id(bad), "{bad}");
+        }
     }
 
     #[test]

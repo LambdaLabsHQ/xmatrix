@@ -7,7 +7,7 @@ import type {
  * `configure` is the Space's configuration. An omitted display name keeps
  * the current one. */
 export type RegistrationChange =
-  | { kind: "configure"; model: string; displayName?: string; workingMode?: AgentWorkingMode }
+  | { kind: "configure"; model: string; displayName?: string; workingMode?: AgentWorkingMode; instructions?: string }
   | { kind: "space-disable" }
   | { kind: "space-enable" }
   | { kind: "restore" };
@@ -37,11 +37,14 @@ export function registrationSpaceCommand(key: SpaceAgentRegistrationKey, current
   }
   if (!current.canConfigureSpace) throw new Error("Only a Space owner or admin can change this agent in the Space.");
   if (!current.configuration) throw new Error("Registration configuration is unavailable.");
-  const { model: _previousModel, ...configuration } = current.configuration;
+  const { model: _previousModel, instructions: previousInstructions, ...configuration } = current.configuration;
+  // An omitted `instructions` keeps the current text; an empty one clears it.
+  const instructions = change.instructions === undefined ? previousInstructions : change.instructions.trim();
   return { key, action: "configure", displayName: change.displayName?.trim() || current.displayName,
     expectedVersion: current.version,
     configuration: { ...configuration, ...(change.model.trim() ? { model: change.model.trim() } : {}),
-      ...(change.workingMode ? { workingMode: change.workingMode } : {}) } };
+      ...(change.workingMode ? { workingMode: change.workingMode } : {}),
+      ...(instructions ? { instructions } : {}) } };
 }
 
 /** The owner turns an agent off or on for its machine, in every Space. */
