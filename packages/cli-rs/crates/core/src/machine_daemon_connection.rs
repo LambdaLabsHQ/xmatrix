@@ -417,6 +417,10 @@ pub enum MachineDaemonCommand {
         /// ignored rather than rejected.
         #[serde(default)]
         role_initial_prompt: Option<String>,
+        /// The registration's working mode, `autonomous` or `cautious`.
+        /// Absent means autonomous, which is also what an older Hub gets.
+        #[serde(default)]
+        working_mode: Option<String>,
         #[serde(default)]
         resume: Option<bool>,
         #[serde(default)]
@@ -3513,6 +3517,7 @@ mod tests {
               "runtime":"codex",
               "agentName":"codex",
               "roleInitialPrompt":"Follow the registration instructions.",
+              "workingMode":"cautious",
               "roleReminder":"Stay within the reviewer role.",
               "roleSkills":[{
                 "id":"skill:review",
@@ -3534,12 +3539,14 @@ mod tests {
         let MachineDaemonCommand::MachineSpawnAgent {
             ref request_id,
             ref role_initial_prompt,
+            ref working_mode,
             ..
         } = command
         else {
             panic!("expected Machine Daemon spawn command");
         };
         assert_eq!(request_id, "spawn-3");
+        assert_eq!(working_mode.as_deref(), Some("cautious"));
         assert_eq!(
             role_initial_prompt.as_deref(),
             Some("Follow the registration instructions.")

@@ -254,6 +254,27 @@ fn spawn_initial_prompt_overrides_stale_local_prompt() {
 }
 
 #[test]
+fn spawn_working_mode_comes_only_from_the_launch() {
+    let mut env = std::collections::BTreeMap::new();
+    env.insert(
+        "XMATRIX_AGENT_WORKING_MODE".to_string(),
+        "cautious".to_string(),
+    );
+    // A stale local value never outlives a launch that names no mode.
+    let cleared = super::apply_spawn_working_mode(env.clone(), None).unwrap();
+    assert!(!cleared.contains_key("XMATRIX_AGENT_WORKING_MODE"));
+
+    let env = super::apply_spawn_working_mode(env, Some("autonomous")).unwrap();
+    assert_eq!(
+        env.get("XMATRIX_AGENT_WORKING_MODE").map(String::as_str),
+        Some("autonomous")
+    );
+
+    let error = super::apply_spawn_working_mode(env, Some("reckless")).unwrap_err();
+    assert!(error.to_string().contains("reckless"), "{error}");
+}
+
+#[test]
 fn spawn_env_scrubs_retired_role_values_from_older_state() {
     // A Run resumed from state an older daemon wrote may still carry the
     // retired Role reminder, skills, App requirements, or Role avatar.

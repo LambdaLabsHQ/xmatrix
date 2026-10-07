@@ -1,11 +1,13 @@
-import type { AgentRegistrationDetails, AgentRegistrationEnvironment, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type {
+  AgentRegistrationDetails, AgentRegistrationEnvironment, AgentWorkingMode, SpaceAgentRegistrationKey,
+} from "@xmatrix/protocol";
 
 /** One user-facing change to a Space registration. `space-disable` and
  * `space-enable` are the Space's own state; `restore` is the owner's grant;
  * `configure` is the Space's configuration. An omitted display name keeps
  * the current one. */
 export type RegistrationChange =
-  | { kind: "configure"; model: string; displayName?: string }
+  | { kind: "configure"; model: string; displayName?: string; workingMode?: AgentWorkingMode }
   | { kind: "space-disable" }
   | { kind: "space-enable" }
   | { kind: "restore" };
@@ -38,7 +40,8 @@ export function registrationSpaceCommand(key: SpaceAgentRegistrationKey, current
   const { model: _previousModel, ...configuration } = current.configuration;
   return { key, action: "configure", displayName: change.displayName?.trim() || current.displayName,
     expectedVersion: current.version,
-    configuration: { ...configuration, ...(change.model.trim() ? { model: change.model.trim() } : {}) } };
+    configuration: { ...configuration, ...(change.model.trim() ? { model: change.model.trim() } : {}),
+      ...(change.workingMode ? { workingMode: change.workingMode } : {}) } };
 }
 
 /** The owner turns an agent off or on for its machine, in every Space. */

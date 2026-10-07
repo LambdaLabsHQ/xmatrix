@@ -334,6 +334,8 @@ struct DaemonSpawnRequest {
     identity_id: Option<String>,
     /// The registration's instructions (see `MachineSpawnAgent`).
     role_initial_prompt: Option<String>,
+    /// The registration's working mode (see `MachineSpawnAgent`).
+    working_mode: Option<String>,
     resume: bool,
     resume_instance_id: Option<String>,
     resume_session_key: Option<String>,
@@ -383,6 +385,7 @@ impl DaemonSpawnRequest {
             agent_name,
             identity_id,
             role_initial_prompt,
+            working_mode,
             resume,
             resume_instance_id,
             resume_session_key,
@@ -428,6 +431,7 @@ impl DaemonSpawnRequest {
             agent_name,
             identity_id,
             role_initial_prompt,
+            working_mode,
             resume: resume.unwrap_or(false),
             resume_instance_id,
             resume_session_key,
