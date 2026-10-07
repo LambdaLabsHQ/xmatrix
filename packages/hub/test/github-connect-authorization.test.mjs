@@ -54,10 +54,11 @@ test("authorizing returns a grant of exactly the installations this person reach
   const state = stateOf(await githubConnectAuthorizeUrl(env, { spaceId: "space-1", userId: "admin" }));
   await withGitHub(["111", "222"], async (requests) => {
     const { location, links } = await callback(state);
-    assert.equal(location.origin + location.pathname, "https://app.test/app/space-1/apps");
+    assert.equal(location.origin + location.pathname, "https://app.test/connect/github");
+    assert.equal(location.searchParams.get("space"), "space-1");
     assert.equal(location.searchParams.get("github"), "authorized");
     assert.deepEqual(links, []);
-    const grant = location.searchParams.get("githubGrant");
+    const grant = location.searchParams.get("grant");
     assert.deepEqual(await githubGrantInstallationIds(env, grant, { spaceId: "space-1", userId: "admin" }), ["111", "222"]);
     assert.equal(await githubGrantInstallationIds(env, grant, { spaceId: "space-2", userId: "admin" }), undefined);
     assert.equal(await githubGrantInstallationIds(env, grant, { spaceId: "space-1", userId: "other" }), undefined);
@@ -89,10 +90,10 @@ test("a declined authorization, a forged state, or a grant as a state links noth
     const declined = await callback(state, "error=access_denied");
     assert.equal(declined.location.searchParams.get("github"), "cancelled");
     const forged = await callback(`${state.slice(0, -2)}xx`);
-    assert.equal(forged.location.toString(), "https://app.test/app?github=failed");
-    const granted = (await callback(state)).location.searchParams.get("githubGrant");
+    assert.equal(forged.location.toString(), "https://app.test/connect/github?github=failed");
+    const granted = (await callback(state)).location.searchParams.get("grant");
     const asState = await callback(`xmgh.${granted}`);
-    assert.equal(asState.location.toString(), "https://app.test/app?github=failed");
+    assert.equal(asState.location.toString(), "https://app.test/connect/github?github=failed");
     assert.deepEqual([...declined.links, ...forged.links, ...asState.links], []);
   });
 });

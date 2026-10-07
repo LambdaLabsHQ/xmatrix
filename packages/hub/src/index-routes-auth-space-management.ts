@@ -9,7 +9,7 @@ import { schedulerRepository } from "./automations";
 import { changeMembership, createSpaceInvite, deleteSpace, getSpace, listSpaceDeletions, restoreSpace } from "./spaces";
 import { SpaceControlError } from "@xmatrix/db";
 import { buildGitHubAppInstallUrl, describeGitHubInstallation, githubConnectionInstallationIds, resolveAppConnectorCompletionOptions, type AppConnectorConnectionView } from "./app-connectors";
-import { githubConnectAuthorizeUrl, githubGrantInstallationIds } from "./github-connect-authorization";
+import { githubConnectAuthorizeUrl, githubConnectReturnUrl, githubGrantInstallationIds } from "./github-connect-authorization";
 import { dispatchProductChannelAbout } from "./product-agent-mention-authority-adapter";
 import { dispatchProductGitHubWebhook } from "./product-github-webhook-authority-adapter";
 import { fireGitHubAutomationTriggers } from "./automation-triggers";
@@ -293,14 +293,14 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       const setupAction = c.req.query("setup_action") || "";
       const payload = await verifyGitHubAppState(state, clientSecret);
       // Only an install state: a connect state or a grant is never one.
-      if (payload && "purpose" in payload) return c.redirect(`${appOrigin(c.env)}/app?github=failed`, 302);
+      if (payload && "purpose" in payload) return c.redirect(githubConnectReturnUrl(c.env, "failed"), 302);
       const spaceId = typeof payload?.spaceId === "string" ? payload.spaceId : "";
       const userId = typeof payload?.userId === "string" ? payload.userId : "";
       if (!spaceId || !userId) {
-        return c.redirect(`${appOrigin(c.env)}/app?github=failed`, 302);
+        return c.redirect(githubConnectReturnUrl(c.env, "failed"), 302);
       }
       const appsRedirect = (status: "failed" | "cancelled" | "pending") =>
-        `${appOrigin(c.env)}/app/${encodeURIComponent(spaceId)}/apps?github=${status}`;
+        githubConnectReturnUrl(c.env, status, { spaceId });
       if (setupAction === "request") {
         return c.redirect(appsRedirect("pending"), 302);
       }
@@ -315,7 +315,7 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       return c.redirect(await githubConnectAuthorizeUrl(c.env, { spaceId, userId,
         installation: { id: installationId, setupAction } }), 302);
     } catch {
-      return c.redirect(`${appOrigin(c.env)}/app?github=failed`, 302);
+      return c.redirect(githubConnectReturnUrl(c.env, "failed"), 302);
     }
   });
   app.post("/api/apps/github/webhook", async (c) => {

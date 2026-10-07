@@ -33,7 +33,7 @@ import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, bet
 import { appOrigin } from "./deployment-origins";
 import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space-instances";
 import { linkGitHubInstallation, registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
-import { completeGitHubConnectAuthorization, isGitHubConnectState } from "./github-connect-authorization";
+import { completeGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConnectState } from "./github-connect-authorization";
 import { registerMachineExecutionRoutes } from "./index-routes-machine-executions";
 import { registerReplyRecoveryRoutes } from "./index-routes-reply-recovery";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
@@ -384,7 +384,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       // Connecting GitHub shares the App's registered callback with account linking.
       return await completeGitHubConnectAuthorization(c.env, c.req.raw,
         (spaceId, userId, installationId) => linkGitHubInstallation(c.env, spaceId, userId, installationId))
-        .catch(() => c.redirect(`${appOrigin(c.env)}/app?github=failed`, 302));
+        .catch(() => c.redirect(githubConnectReturnUrl(c.env, "failed"), 302));
     }
     let response: Response;
     try {
