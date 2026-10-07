@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { readPostgresAdminUserDetailFromFleet } from "../src/postgres-admin-user-detail.ts";
 import { listAdminAudit, recordAdminAudit } from "../src/admin-audit.ts";
+import { adminQueryDatabase } from "./support/admin-query-database.mjs";
 
 /* Columns that hold user content or private detail. No operator query may name them. */
 const CONTENT_COLUMNS = [
@@ -18,23 +19,10 @@ function assertMetadataOnly(query) {
 }
 
 function database(resultByQuery, seen = []) {
-  return {
-    cacheMode: "disabled",
-    async transaction(_context, callback) {
-      return callback({
-        async query(query) {
-          if (!Number.isSafeInteger(query.maxRows) || query.maxRows < 0 || query.maxRows > 10_000) {
-            throw new Error("query.maxRows must be between 0 and 10000");
-          }
-          assertMetadataOnly(query);
-          seen.push(query);
-          if (!(query.name in resultByQuery)) throw new Error(`unexpected query ${query.name}`);
-          const result = resultByQuery[query.name];
-          return typeof result === "function" ? result(query) : result;
-        },
-      });
-    },
-  };
+  return adminQueryDatabase(resultByQuery, (query) => {
+    assertMetadataOnly(query);
+    seen.push(query);
+  });
 }
 
 const NOW = "2026-09-30T12:00:00.000Z";

@@ -31,6 +31,14 @@ async function adminFixture(userId, options) {
   return { worker, auth, jsonAuth: { ...auth, "content-type": "application/json" } };
 }
 
+async function createOpenChannel(worker, jsonAuth, spaceId, prefix) {
+  return (await json(await worker.fetch("/api/channels", {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ spaceId, name: `${prefix}-${randomUUID()}`, mode: "open" }),
+  }))).channel;
+}
+
 async function assertNotPlatformAdmin(worker, auth) {
   const me = await json(await worker.fetch("/api/auth/me", { headers: auth }));
   assert.equal(me.capabilities.platformAdmin, false);
@@ -42,11 +50,7 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
   try {
     const spaceName = `Admin Overview ${randomUUID()}`;
     const space = await createSpace(worker, spaceName);
-    const channel = (await json(await worker.fetch("/api/channels", {
-      method: "POST",
-      headers: jsonAuth,
-      body: JSON.stringify({ spaceId: space.id, name: `admin-${randomUUID()}`, mode: "open" }),
-    }))).channel;
+    const channel = await createOpenChannel(worker, jsonAuth, space.id, "admin");
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "first admin overview message");
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "second admin overview message");
 
@@ -104,11 +108,7 @@ test("platform admin reads one user's metadata-only detail, and every read is au
   try {
     const spaceName = `Admin Detail ${randomUUID()}`;
     const space = await createSpace(worker, spaceName);
-    const channel = (await json(await worker.fetch("/api/channels", {
-      method: "POST",
-      headers: jsonAuth,
-      body: JSON.stringify({ spaceId: space.id, name: `detail-${randomUUID()}`, mode: "open" }),
-    }))).channel;
+    const channel = await createOpenChannel(worker, jsonAuth, space.id, "detail");
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "private detail message");
 
     const { detail } = await json(await worker.fetch(
