@@ -7279,12 +7279,19 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-composer-hint[data-rotating="true"] { display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
 .app-composer-hint-trigger {
   --hint-ink: var(--primary);
-  margin-right: 0.1em; padding: 0 0.28em; border-radius: 0.3em; font-weight: 600;
+  position: relative; isolation: isolate;
+  margin-right: 0.1em; padding: 0 0.28em; font-weight: 600;
   color: color-mix(in oklab, var(--hint-ink) 75%, var(--muted-foreground));
+}
+/* The font's box leaves room for accents above the caps, and @ [ / hang below
+   the baseline, so a fill on the box sits high on its glyph; it is drawn
+   lowered by that difference instead. */
+.app-composer-hint-trigger::before {
+  content: ""; position: absolute; z-index: -1; inset: 0.08em 0 -0.08em; border-radius: 0.3em;
   background: color-mix(in oklab, var(--hint-ink) 9%, transparent);
 }
-.app-composer-hint[data-summon="true"] .app-composer-hint-trigger {
-  --hint-ink: oklch(0.62 0.16 285);
+.app-composer-hint[data-summon="true"] .app-composer-hint-trigger { --hint-ink: oklch(0.62 0.16 285); }
+.app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before {
   background:
     linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%) 0 0 / 240% 100% no-repeat,
     color-mix(in oklab, var(--hint-ink) 11%, transparent);
@@ -7294,7 +7301,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 @keyframes composer-hint-summon { from { background-position: 120% 0, 0 0; } to { background-position: -120% 0, 0 0; } }
 @media (prefers-reduced-motion: reduce) {
   .app-composer-hint[data-rotating="true"],
-  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger { animation: none; }
+  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before { animation: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
