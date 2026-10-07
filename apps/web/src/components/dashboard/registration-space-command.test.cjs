@@ -40,6 +40,16 @@ test("choosing a working mode keeps the rest of the configuration", () => {
   assert.equal(unchanged.configuration.workingMode, "cautious");
 });
 
+test("instructions are kept when not edited, replaced when edited, and cleared when emptied", () => {
+  const kept = registrationSpaceCommand(key, current, { kind: "configure", model: "old" });
+  assert.equal(kept.configuration.instructions, "Inspect the project");
+  const replaced = registrationSpaceCommand(key, current, { kind: "configure", model: "old", instructions: "  Review only.  " });
+  assert.equal(replaced.configuration.instructions, "Review only.");
+  const cleared = registrationSpaceCommand(key, current, { kind: "configure", model: "old", instructions: "  " });
+  assert.equal("instructions" in cleared.configuration, false);
+  assert.deepEqual(cleared.configuration.routing, current.configuration.routing);
+});
+
 const grant = { state: "active", revision: 5, executionRevision: 5,
   limits: { models: ["old"], workspaces: ["repo:owner/project"], capabilities: [] } };
 const owned = { ...current, canManageOwnerGrant: true, canConfigureSpace: false, canRemoveFromSpace: true,
