@@ -249,7 +249,7 @@ export function MoreView({
     groups.push({
       label: "Platform",
       items: [
-        viewItem("admin", "Platform admin", "Platform-wide usage, invites, and product prompts", Shield),
+        viewItem("admin", "Platform admin", "Platform usage, users, Spaces, and the audit trail", Shield),
       ],
     });
   }
