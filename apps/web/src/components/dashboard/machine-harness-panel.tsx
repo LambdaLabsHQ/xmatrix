@@ -118,12 +118,12 @@ export function MachineHarnessPanel({ daemon, token }: {
       <Button size="sm" variant="outline" disabled={!state.canManage || refresh.busy}
         onClick={() => refresh.run({ presetId: "custom", action: "refresh" })}>Refresh</Button>
     </div>
-    {!state.canManage && <p className={statusInkClass(current?.status === "online" && !state.responding
-      ? "attention" : "secondary", "text-xs")}>{current?.status !== "online"
+    {state.canManage && !state.responding && <p className={statusInkClass("attention", "text-xs")}>
+      {`This machine is not responding: work sent to it at ${new Date(current!.unansweredSince!).toLocaleString()} `
+        + "is still waiting. Its connection to xMatrix may be unstable, so a new action may not reach it."}</p>}
+    {!state.canManage && <p className={statusInkClass("secondary", "text-xs")}>{current?.status !== "online"
       ? "Connect this machine to refresh or manage harnesses."
       : current?.userId !== user?.id ? "Only the machine owner can manage harnesses."
-        : !state.responding ? `This machine is not responding: work sent to it at ${new Date(current.unansweredSince!).toLocaleString()} `
-          + "is still waiting. Its connection to xMatrix may be unstable, so actions cannot reach it until it responds."
         : "Update this machine's daemon to enable harness management."}</p>}
     {notice && <p role="alert" className="text-sm text-destructive">{notice}</p>}
     {daemons.isError && <p role="alert" className="text-xs text-destructive">Inventory could not be refreshed. Showing the last reported observation.</p>}

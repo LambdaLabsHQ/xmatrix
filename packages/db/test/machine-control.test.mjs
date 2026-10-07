@@ -212,7 +212,7 @@ test("Machine enroll rejects mismatched migrated audit evidence", async () => {
 });
 
 test("Machine list emits the required public connection timestamps", async () => {
-  const db = database((query) => query.name === "machine_control_list_v7"
+  const db = database((query) => query.name === "machine_control_list_v8"
     ? [{ ...daemon, machine_name: "Studio", active_runs: "2", auto_assign: false },
       { ...daemon, daemon_id: "daemon-2", auto_assign: null }] : []);
 
@@ -233,7 +233,7 @@ test("Machine list emits the required public connection timestamps", async () =>
 
 test("Machine list says since when an online daemon left work unanswered", async () => {
   const since = new Date("2026-10-07T10:09:00.000Z");
-  const db = database((query) => query.name === "machine_control_list_v7"
+  const db = database((query) => query.name === "machine_control_list_v8"
     ? [{ ...daemon, unanswered_since: since },
       { ...daemon, daemon_id: "daemon-2", status: "offline", unanswered_since: since }] : []);
   const value = await new PostgresMachineControlRepository(db).list({ requestId: "list-2", ownerUserId: "user-1" });
@@ -242,8 +242,9 @@ test("Machine list says since when an online daemon left work unanswered", async
   assert.equal(value.daemons[0].unansweredSince, "2026-10-07T10:09:00.000Z");
   // An offline daemon is already shown offline; the field only qualifies "online".
   assert.equal(Object.hasOwn(value.daemons[1], "unansweredSince"), false);
-  const list = db.calls.find((call) => call.name === "machine_control_list_v7");
+  const list = db.calls.find((call) => call.name === "machine_control_list_v8");
   assert.equal(list.values[3], 60_000);
+  assert.equal(list.values[4], 30 * 60_000);
   assert.match(list.text, /command_type<>'quota_probe'/u);
   assert.match(list.text, /expires_at IS NULL OR command\.expires_at>clock_timestamp\(\)/u);
 });

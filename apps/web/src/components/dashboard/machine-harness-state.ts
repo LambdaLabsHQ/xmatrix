@@ -11,10 +11,11 @@ export function machineHarnessState(daemon: SerializedMachineDaemon | undefined,
     : platform === "linux" || platform === "macos" ? "unix" : undefined;
   const capabilities = daemon?.metadata.capabilities;
   // Hub keeps a daemon "online" until a connection event says otherwise; work it
-  // left unanswered is the evidence that an action would not reach it now.
+  // left unanswered is evidence an action may not reach it now. That is a
+  // warning, not a lock: the evidence is heuristic and a retry may be delivered.
   const responding = !daemon?.unansweredSince;
   const canManage = Boolean(daemon && daemon.userId === userId && daemon.machineId &&
-    daemon.status === "online" && responding && Array.isArray(capabilities) &&
+    daemon.status === "online" && Array.isArray(capabilities) &&
     capabilities.includes("machine_harness_action_v1"));
   const cursorUpdateReady = Array.isArray(capabilities) && capabilities.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY);
   const uninstallReady = Array.isArray(capabilities) && capabilities.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY);

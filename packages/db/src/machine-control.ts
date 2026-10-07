@@ -41,6 +41,9 @@ const COMMAND_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
  * is evidence the "online" route is not responding.
  */
 const UNANSWERED_AFTER_MS = 60_000;
+/** Only recent work counts, so one command that can never be claimed does not
+ * mark a working machine as not responding for its whole lifetime. */
+const UNANSWERED_WINDOW_MS = 30 * 60 * 1_000;
 const MACHINE_ACTIVATION_RUN_LIMIT = 1_000;
 const SNAPSHOT_ROUTE_WINDOW_MS = 15 * 60 * 1_000;
 const ACTIVATION_TERMINAL_PHASES = new Set(["stable_granted", "aborted"]);
@@ -1331,7 +1334,7 @@ export class PostgresMachineControlRepository {
       // Reachability follows connection events only, so an online daemon also says since when it
       // left work unanswered: a command available but unclaimed, or a lease it stopped renewing,
       // for longer than UNANSWERED_AFTER_MS. Quota probes are bound to one connection and excluded.
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_list_v7", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_list_v8", text: `SELECT
         daemon.*,machine.name AS machine_name,machine.parent_machine_id,machine.auto_assign,
         (SELECT COUNT(*) FROM data.runs run WHERE run.owner_user_id=daemon.owner_user_id
           AND run.metadata_json->>'machineId'=daemon.machine_id AND run.status IN (${ACTIVE_RUN_STATUS_SQL})) AS active_runs,
@@ -1341,15 +1344,15 @@ export class PostgresMachineControlRepository {
           WHERE daemon.status='online' AND command.owner_user_id=daemon.owner_user_id
             AND command.machine_id=daemon.machine_id AND command.command_type<>'quota_probe'
             AND (command.expires_at IS NULL OR command.expires_at>clock_timestamp())
-            AND ((command.status='pending' AND COALESCE(command.available_at,command.created_at)<=
-                clock_timestamp()-($4::integer*interval '1 millisecond'))
-              OR (command.status='leased' AND command.lease_until<=
-                clock_timestamp()-($4::integer*interval '1 millisecond')))) AS unanswered_since
+            AND ((command.status='pending' AND COALESCE(command.available_at,command.created_at) BETWEEN
+                clock_timestamp()-($5::integer*interval '1 millisecond') AND clock_timestamp()-($4::integer*interval '1 millisecond'))
+              OR (command.status='leased' AND command.lease_until BETWEEN
+                clock_timestamp()-($5::integer*interval '1 millisecond') AND clock_timestamp()-($4::integer*interval '1 millisecond')))) AS unanswered_since
         FROM data.machine_daemons daemon
         LEFT JOIN data.machines machine ON machine.owner_user_id=daemon.owner_user_id AND machine.machine_id=daemon.machine_id
         WHERE daemon.owner_user_id=$1 AND daemon.daemon_id>$2 AND machine.retired_at IS NULL
         ORDER BY daemon.daemon_id LIMIT $3`,
-      values: [ownerUserId, cursor, limit + 1, UNANSWERED_AFTER_MS], maxRows: limit + 1 });
+      values: [ownerUserId, cursor, limit + 1, UNANSWERED_AFTER_MS, UNANSWERED_WINDOW_MS], maxRows: limit + 1 });
       return { daemons: rows.slice(0, limit).map(daemon),
         cursor: rows.length > limit ? String(rows[limit - 1]?.daemon_id ?? "") : null };
     });

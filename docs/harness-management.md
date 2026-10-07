@@ -91,8 +91,9 @@ recipe or control for one; anything else is refused when issued.
 - **Not responding.** `status` and `lastSeenAt` follow connection events only
   (`lastSeenAt` of an online daemon is its last connect). The daemon list adds
   `unansweredSince` to an online daemon that has a command available but
-  unclaimed, or a lease it stopped renewing, for over a minute. Web shows such
-  a Machine as "not responding" and disables harness actions until it answers.
+  unclaimed, or a lease it stopped renewing, for over a minute (only work from
+  the last 30 minutes counts). Web shows such a Machine as "not responding" and
+  warns that a new action may not reach it; actions stay available.
 - **Registry versions.** Presets name their official npm or PyPI package in
   `management.latest`; inventory items carry `latestVersion` only when the
   daemon read it from that registry. Without it, a newer version is unknown.
