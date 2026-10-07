@@ -71,13 +71,15 @@ const fakeRequire = (name) => {
   };
 };
 
-async function runAuthorization({ scope = "web", overrides = {}, marker = `Record successful ${scope} production authorization`, requestSha = sha, deploySha = sha } = {}) {
+async function runAuthorization({ scope = "web", overrides = {}, marker = `Record successful ${scope} production authorization`, requestSha = sha, deploySha = sha, lagging = 0 } = {}) {
   const failures = [];
   // The request's own `gates` job stands for every gate its scope selected;
   // ci.yml's job names (`ci / hub (1/6)`, ...) are not part of the evidence.
   const jobs = ["plan", "ci / changes", "ci / hub (1/6)", "ci / web", "gates"]
     .map((name) => ({ name, conclusion: overrides[name] ?? "success" }));
-  jobs.push({ name: "authorize-and-dispatch", steps: [{ name: marker, conclusion: "success" }] });
+  const dispatcher = { name: "authorize-and-dispatch", status: "completed", steps: [{ name: marker, conclusion: "success" }] };
+  jobs.push(dispatcher);
+  let reads = 0;
   const listRuns = () => {};
   const listJobs = () => {};
   const github = {
@@ -91,7 +93,13 @@ async function runAuthorization({ scope = "web", overrides = {}, marker = `Recor
         } }),
       },
     },
-    paginate: async (method) => method === listRuns ? [{ id: 456, head_sha: deploySha }] : jobs,
+    // The first `lagging` reads see the dispatcher still running with its marker pending.
+    paginate: async (method) => {
+      if (method === listRuns) return [{ id: 456, head_sha: deploySha }];
+      reads += 1;
+      return reads > lagging ? jobs : jobs.map((job) => job === dispatcher
+        ? { ...job, status: "in_progress", steps: [{ name: marker, conclusion: null }] } : job);
+    },
   };
   await authorize(github, {
     repo: { owner: "LambdaLabsHQ", repo: "xmatrix" }, ref: "refs/tags/xmatrix-v0.16.339", runId: 456,
@@ -117,4 +125,8 @@ test("tagged preflight accepts only the tested exact scope and its passed gates"
   // The request's release commit (its SHA plus the stamped version) is the same authorization.
   assert.deepEqual(await runAuthorization({ deploySha: "c".repeat(40) }), []);
   assert.notDeepEqual(await runAuthorization({ deploySha: "c".repeat(40), requestSha: "b".repeat(40) }), []);
+});
+
+test("tagged preflight re-reads a dispatcher whose marker GitHub has not yet reported", async () => {
+  assert.deepEqual(await runAuthorization({ lagging: 1 }), []);
 });
