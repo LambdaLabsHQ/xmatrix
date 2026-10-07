@@ -225,7 +225,7 @@ export function MyAgentsView({
             const on = pending ? pending.on : toggle.on;
             return (
               <label className="flex items-center gap-2 text-sm font-semibold"
-                title={on ? "Turning it off stops its running work in this Space" : "Let it take work in this Space"}>
+                title={on ? "Turning it off stops its running work" : "Let it take work"}>
                 <Switch checked={on} disabled={busy || Boolean(pending)} label={`Enabled: ${registration.displayName}`}
                   onChange={() => void (async () => {
                     setSwitching({ id, on: !toggle.on });
