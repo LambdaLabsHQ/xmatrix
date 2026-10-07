@@ -61,7 +61,6 @@ import {
   usageLimitHandoffCommand,
   usageLimitHandoffIds,
 } from "./agent-usage-limit-handoff";
-import { getSpaceManagementConfig } from "../spaces";
 import { recordInstancePresentation, runtimeRepository } from "../runtime";
 import { holdRegistrationUsageLimit } from "../registration-launch-dispatch";
 
@@ -116,10 +115,6 @@ export interface PostgresAgentInstancePortDependencies {
   authenticate(token: string): Promise<AuthUser>;
   messages: RuntimeMessages;
   runtime: AgentInstanceRuntime;
-  /** A Space's management configuration and its generation, as its owner reads it. */
-  managementConfig(spaceId: string, ownerUserId: string): Promise<{
-    managementAgent: Record<string, unknown>; version: number;
-  }>;
   history: AgentChannelHistoryPort;
   signals: AgentInstanceRuntimeSignalsPort;
   /** Runtime cells of a Human, for Human-visible join_birth metrics (Room emitObservabilityEvent). */
@@ -162,9 +157,6 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
           : runtimeRepository(input.env).mutate(command),
         holdUsageLimit: (hold) => holdRegistrationUsageLimit(input.env, hold),
       },
-      managementConfig: (spaceId, ownerUserId) => getSpaceManagementConfig(input.env, {
-        spaceId, principal: { kind: "user", id: ownerUserId },
-      }),
       history: input.history,
       signals: input.signals,
       atomicInstanceConnect: true,
@@ -440,25 +432,9 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     if (!liveRunIsAdmitted(snapshotLiveRunFromProductGateway(value), principal, LIVE_RUN_ROUTED_FIELDS)) {
       throw new RuntimeClientOperationError("agent_run_binding_mismatch");
     }
-    if (
-      metadata.routedAs === "management_assistant_mention" ||
-      metadata.routedAs === "management_channel_about"
-    ) {
-      const managementSpaceId = requiredString(
-        metadata.managementSpaceId,
-        "run.metadata.managementSpaceId",
-      );
-      const configGeneration = requiredNonnegativeInteger(
-        metadata.managementConfigGeneration,
-        "run.metadata.managementConfigGeneration",
-      );
-      const management = await this.dependencies.managementConfig(managementSpaceId, principal.ownerUserId);
-      const config = recordValue(management.managementAgent, "managementAgent");
-      // The Run's own management generation is the authority. A registered
-      // management Run is its Instance, never the configured Profile.
-      if (management.version !== configGeneration || config.enabled !== true) {
-        throw new RuntimeClientOperationError("management_activation_changed");
-      }
+    // The retired management delegate; a Run started before it was retired never connects.
+    if (metadata.routedAs === "management_assistant_mention") {
+      throw new RuntimeClientOperationError("management_agent_retired");
     }
     // Every PostgreSQL handshake claims its own version before becoming live,
     // including a reconnect that races the predecessor's offline write.

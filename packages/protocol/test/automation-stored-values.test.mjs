@@ -13,10 +13,8 @@ test("an Automation cadence is one pair of bounds", () => {
 });
 
 test("Automation commands in the pre-rename spelling canonicalize, and the legacy view inverts it", () => {
-  const legacy = { commandId: "c", kind: "scheduled_task_put", taskId: "a", expectedVersion: 2,
-    managementAudit: { actionId: "x", actionType: "scheduled_task_pause", payloadHash: "h" } };
-  const current = { commandId: "c", kind: "automation_put", automationId: "a", expectedVersion: 2,
-    managementAudit: { actionId: "x", actionType: "automation_pause", payloadHash: "h" } };
+  const legacy = { commandId: "c", kind: "scheduled_task_put", taskId: "a", expectedVersion: 2 };
+  const current = { commandId: "c", kind: "automation_put", automationId: "a", expectedVersion: 2 };
   assert.deepEqual(canonicalAutomationCommand(legacy), current);
   assert.deepEqual(canonicalAutomationCommand(current), current);
   assert.deepEqual(legacyAutomationCommandView(current), legacy);

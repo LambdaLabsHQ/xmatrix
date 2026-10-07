@@ -170,14 +170,12 @@ integration("the fence waits for an in-flight Agent append's Run lock instead of
   }
 });
 
-integration("an exact stop fences only its Run, and @xMatrix:stop only the management delegate", async () => {
+integration("an exact stop fences only its Run; a Channel stop then takes the rest but never About", async () => {
   const setup = new Client({ connectionString: url }); await setup.connect();
   const sql = (text, values) => setup.query(text, values);
   const id = `exact-${process.pid}-${Date.now()}`;
   try {
     const { space, channel, ids } = await seed(sql, id);
-    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"routedAs":"management_assistant_mention"}'
-      WHERE run_id=$1`, [ids.spawning.runId]);
     const db = database();
     const fence = (scope, message) => db.transaction({}, tx => fenceChannelRunsForStop(tx, { spaceId: space,
       channelId: channel, actorUserId: `human-${id}`, sourceMessageId: message, at: new Date().toISOString(), scope }));
@@ -192,10 +190,11 @@ integration("an exact stop fences only its Run, and @xMatrix:stop only the manag
     assert.equal(current[ids.spawning.runId], "starting");
     assert.equal(current[ids.elsewhere.runId], "running");
 
-    assert.equal(await fence({ kind: "management" }, `message-xmatrix-${id}`), 1);
+    assert.equal(await fence({ kind: "channel" }, `message-all-${id}`), 1);
     current = await status();
     assert.equal(current[ids.spawning.runId], "stopping");
     assert.equal(current[ids.about.runId], "running", "About is never a stop target");
+    assert.equal(current[ids.elsewhere.runId], "running");
   } finally {
     await setup.end();
   }

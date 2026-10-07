@@ -66,7 +66,6 @@ import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   COUNT_CHIP_MATERIAL_CLASS,
-  XMATRIX_SYSTEM_AVATAR_URL,
 } from "./workspace-shell-constants";
 
 import {
@@ -110,7 +109,6 @@ import {
   avatarInitials,
   channelAttachmentKindForFile,
   channelOnlineAgentAvatarItems,
-  channelXMatrixDelegateInstance,
   cleanStatusChips,
   clipboardHasTextPayload,
   defaultAttachmentName,
@@ -219,7 +217,6 @@ import {
 } from "@/components/dashboard/composer-caret";
 
 import {
-  channelAboutReviewConfigurationError,
   requestChannelAboutReview,
 } from "@/components/dashboard/channel-about-review-request";
 
@@ -253,7 +250,6 @@ import { spaceVisibilityScope, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelSummarySource,
-  ManagementChannelVisibility,
   ObservabilityEvent,
   SerializedAgent,
   SerializedAgentInstance,
@@ -1460,6 +1456,7 @@ export function ChannelDetails({
 }) {
   const machineCatalog = useAgentRegistrationCatalog(space?.id ?? "", token ?? "", Boolean(space?.id && token));
   const [aboutSummaryBusy, setAboutSummaryBusy] = useState(false);
+  const [aboutSummaryError, setAboutSummaryError] = useState<string | null>(null);
   const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null);
   const [automationMessageDraft, setAutomationMessageDraft] = useState("");
   const [automationIntervalDraft, setAutomationIntervalDraft] = useState(AUTOMATION_MIN_INTERVAL_MINUTES);
@@ -1467,6 +1464,7 @@ export function ChannelDetails({
   const channelSpaceId = channel?.spaceId;
   useEffect(() => {
     setEditingAutomationId(null);
+    setAboutSummaryError(null);
   }, [channelId]);
 
   const members = useMemo(() => (
@@ -1476,25 +1474,6 @@ export function ChannelDetails({
     () => channelOnlineAgentAvatarItems(channel),
     [channel]
   );
-  const managementDelegateInstance = useMemo(
-    () => channelXMatrixDelegateInstance(channel),
-    [channel]
-  );
-  const managementAgent = useMemo(() => {
-    if (!channel) return null;
-    const config = space?.managementAgent;
-    const channelVisibility = channel?.metadata?.managementVisibility;
-    const visibility: ManagementChannelVisibility =
-      channelVisibility === "management-visible" ||
-      channelVisibility === "metadata-only" ||
-      channelVisibility === "excluded"
-        ? channelVisibility
-        : config?.defaultChannelVisibility || "management-visible";
-    return { config, visibility, enabled: config?.enabled === true };
-  }, [channel, space?.managementAgent]);
-  const aboutManagementAgent = space?.managementAgent;
-  const aboutSummaryError = channelAboutReviewConfigurationError(aboutManagementAgent);
-
   const connectorsQuery = useQuery({
     queryKey: xmatrixQueryKeys.domain(
       { userId: currentUserMemberId || "anonymous" },
@@ -1517,12 +1496,15 @@ export function ChannelDetails({
   const requestAboutSummary = useCallback(async () => {
     if (!token || !channel || aboutSummaryBusy) return;
     setAboutSummaryBusy(true);
+    setAboutSummaryError(null);
     try {
-      await requestChannelAboutReview({ token, channel, managementAgent: aboutManagementAgent });
+      await requestChannelAboutReview({ token, channel });
+    } catch (error) {
+      setAboutSummaryError(error instanceof Error ? error.message : String(error));
     } finally {
       setAboutSummaryBusy(false);
     }
-  }, [aboutManagementAgent, aboutSummaryBusy, channel, token]);
+  }, [aboutSummaryBusy, channel, token]);
 
   const channelAutomations = useMemo(
     () => automations.filter((automation) => automation.channelId === channelId),
@@ -1579,9 +1561,10 @@ export function ChannelDetails({
             action={
               <button
                 type="button"
-                title={aboutSummaryError || "Regenerate Summary with xMatrix"}
-                disabled={Boolean(aboutSummaryError) || aboutSummaryBusy}
-                onClick={() => void requestAboutSummary().catch(() => undefined)}
+                title="Regenerate Summary"
+                aria-label="Regenerate Summary"
+                disabled={aboutSummaryBusy}
+                onClick={() => void requestAboutSummary()}
                 className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
               >
                 <RefreshCw className={aboutSummaryBusy ? "size-3.5 animate-spin" : "size-3.5"} />
@@ -1593,6 +1576,9 @@ export function ChannelDetails({
               <p className="mt-1 text-xs text-muted-foreground" title={channel.summarySource.generatedAt}>
                 {summarySourceLine(channel.summarySource, channel.historyHeadSequence)}
               </p>
+            )}
+            {aboutSummaryError && (
+              <p role="alert" className="mt-1 text-xs text-destructive">{aboutSummaryError}</p>
             )}
           </DetailBlock>
 
@@ -1648,35 +1634,10 @@ export function ChannelDetails({
 
           <DetailBlock title="Agents">
             <div className="space-y-2">
-              {!managementAgent && agentItems.length === 0 ? (
+              {agentItems.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No active agent instances</p>
               ) : (
                 <>
-                  {managementAgent ? (
-                    <div className="app-detail-agent-row flex items-start gap-2.5 border-b border-border/60 px-2 py-2.5 text-sm">
-                      <IdentityAvatar
-                        kind="system"
-                        label="xMatrix"
-                        status={managementDelegateInstance?.status}
-                        imageUrl={XMATRIX_SYSTEM_AVATAR_URL}
-                        initials="XM"
-                        size="sm"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate">xMatrix</p>
-                          {managementDelegateInstance ? (
-                            <span className="w-16 shrink-0 text-left text-[11px] capitalize text-muted-foreground">
-                              {presenceStatusLabel(managementDelegateInstance)}
-                            </span>
-                          ) : null}
-                        </div>
-                        {managementDelegateInstance ? (
-                          <LiveAgentPresentationChips instance={managementDelegateInstance} />
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
                   {agentItems.map((item) => {
                     const presence = memberPresence(channel, item.member);
                     if (presence.kind !== "agent") return null;
@@ -2283,7 +2244,6 @@ export function ToolSurface({
   localSetupReady,
   localMachineName,
   onNameLocalMachine,
-  managementSetupSpaceId,
   onStartDesktopDaemon,
   onStopDesktopDaemon,
   onRestartDesktopDaemon,
@@ -2308,7 +2268,6 @@ export function ToolSurface({
   onInviteSpaceMembers,
   onUpdateSpaceMemberRole,
   onRemoveSpaceMember,
-  onUpdateSpaceManagementAgent,
   onUpdateSpaceMemberPermissions,
   onUpdateSpacePreferredLanguage,
   onDeleteSpace,
@@ -2316,7 +2275,6 @@ export function ToolSurface({
   creatingSpace,
   onCreateSpace,
   onSelectSpace,
-  onDismissManagementSetup,
   onLogout,
   onOpenAgentCreate,
   onOpenLocalManagedAgentEdit,
@@ -2366,7 +2324,6 @@ export function ToolSurface({
   localSetupReady: boolean;
   localMachineName: string | null | undefined;
   onNameLocalMachine: (name: string) => void;
-  managementSetupSpaceId: string | null;
   onStartDesktopDaemon: () => void;
   onStopDesktopDaemon: () => void;
   onRestartDesktopDaemon: () => void;
@@ -2390,7 +2347,6 @@ export function ToolSurface({
   creatingSpace: boolean;
   onCreateSpace: (name: string) => Promise<SerializedSpace | undefined>;
   onSelectSpace: (spaceId: string) => void;
-  onDismissManagementSetup: () => void;
   onLogout: () => void;
   onOpenAgentCreate: () => void;
   onOpenLocalManagedAgentEdit: () => void;
@@ -2469,14 +2425,12 @@ export function ToolSurface({
         user={user}
         currentSpace={currentSpace}
         error={spacesError}
-        managementSetupSpaceId={managementSetupSpaceId}
         joinRequestsBySpace={joinRequestsBySpace}
         onDecideJoinRequest={onDecideJoinRequest}
         onCreateSpaceInviteCode={onCreateSpaceInviteCode}
         onInviteSpaceMembers={onInviteSpaceMembers}
         onUpdateSpaceMemberRole={onUpdateSpaceMemberRole}
         onRemoveSpaceMember={onRemoveSpaceMember}
-        onUpdateSpaceManagementAgent={onUpdateSpaceManagementAgent}
         onUpdateSpaceMemberPermissions={onUpdateSpaceMemberPermissions}
         onUpdateSpacePreferredLanguage={onUpdateSpacePreferredLanguage}
         onDeleteSpace={onDeleteSpace}
@@ -2485,7 +2439,6 @@ export function ToolSurface({
         creatingSpace={creatingSpace}
         onCreateSpace={onCreateSpace}
         onSelectSpace={onSelectSpace}
-        onDismissManagementSetup={onDismissManagementSetup}
       />
     );
   }

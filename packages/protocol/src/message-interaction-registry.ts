@@ -7,7 +7,7 @@ const CONTRACTS: Record<InteractionTargetKind, readonly string[]> = {
   human: ["attention.v1"], broadcast: ["attention.v1"],
   agent: ["attention.v1", "registration-launch.v1", "runtime-control.v1", "runtime-lifecycle.v1"],
   instance: ["attention.v1", "registration-launch.v1", "runtime-control.v1", "runtime-lifecycle.v1"],
-  router: ["registration-launch.v1"], management: ["registration-launch.v1"],
+  router: ["registration-launch.v1"],
   connector: ["connector-command.v1"], service: ["registration-launch.v1"],
 };
 const EXTRA_SYNTAX = new Set(["address.v1", "launch-conditions.v1", "first-message-choice.v1"]);
@@ -27,7 +27,7 @@ function validateDescriptor(target: InteractionTargetDescriptor): void {
     if (!token || token.length > 128 || /[@＠]/u.test(token) || spacing.test(token) ||
         [...token].some(character => character.charCodeAt(0) < 32)) throw new Error("Invalid interaction alias");
     if (RESERVED.has(token) && !((target.kind === "broadcast" && MENTION_BROADCAST_NAMES.includes(token)) ||
-        (target.kind === "router" && token === "auto") || (target.kind === "management" && token === "xmatrix"))) {
+        (target.kind === "router" && token === "auto"))) {
       throw new Error("Reserved interaction alias");
     }
   }
