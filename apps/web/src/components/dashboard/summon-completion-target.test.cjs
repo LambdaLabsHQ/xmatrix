@@ -269,15 +269,15 @@ test("future parameter choices complete for any harness and preserve other tags"
 
 
 test("machine field completion excludes directories carrying a machine constraint", () => {
-  const catalog = [{ ...registrations[0], machineName: "srv2006562" }];
+  const catalog = [{ ...registrations[0], machineName: "srv1234567" }];
   const choices = autoLaunchCandidates(targets, { harness: "codex" }, catalog);
-  for (const value of ["", "s", "srv", "srv200", "srv2006562"]) {
+  for (const value of ["", "s", "srv", "srv123", "srv1234567"]) {
     const body = "@codex machine:" + value;
     const active = findLaunchFieldCompletion(body, body.length);
     const matches = filterLaunchCandidates(choices, active.query);
-    assert.deepEqual(matches.map(row => row.name), ["machine:srv2006562"]);
+    assert.deepEqual(matches.map(row => row.name), ["machine:srv1234567"]);
     assert.equal(completeLaunchFragment(body, active, matches[0].launchTags).value,
-      "@codex machine:srv2006562 ");
+      "@codex machine:srv1234567 ");
   }
 });
 
