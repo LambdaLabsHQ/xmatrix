@@ -11,7 +11,7 @@ import {
   ManagementSetupNotice,
   MobileTabDock,
 } from "./workspace-shell-chrome";
-import { ListCreate, ListSearch, type CreateAction } from "./list-create";
+import { ListCreate, type CreateAction } from "./list-create";
 import { ListSectionHeading } from "./list-section-heading";
 
 import { channelRowIndentPx, SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME } from "./workspace-shell-constants";
@@ -169,9 +169,6 @@ export type ChannelSidebarProps = {
   fallbackChannels?: readonly SerializedChannel[];
   /** The list's +, first under the Space: a new conversation. */
   create?: CreateAction | null;
-  /** Opens search; its row sits above the +. */
-  onSearch?: () => void;
-  searchActive?: boolean;
 };
 
 export const ChannelSidebar = memo(function ChannelSidebar({
@@ -199,8 +196,6 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   catalogPaging,
   fallbackChannels = NO_CHANNELS,
   create = null,
-  onSearch,
-  searchActive,
 }: ChannelSidebarProps) {
   const [channelContextMenu, setChannelContextMenu] = useState<{
     channel: SerializedChannel;
@@ -365,7 +360,6 @@ export const ChannelSidebar = memo(function ChannelSidebar({
         onRenameSpace={onRenameSpace}
         onManageSpaces={onManageSpaces}
       />
-      <ListSearch onSearch={onSearch} active={searchActive} />
       <ListCreate action={create} />
       <ManagementSetupNotice
         space={currentSpace}

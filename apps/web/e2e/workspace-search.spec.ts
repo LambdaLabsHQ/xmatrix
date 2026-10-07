@@ -53,11 +53,15 @@ test("⌘F inside a conversation searches only it, and Backspace widens it to th
   await expect(field.getByText("in #general")).toHaveCount(0);
 });
 
-test("the rail carries no search; the list's Search row opens it", async ({ page }) => {
+test("search is the window's, not the rail's: the top bar opens it in every view", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   await expect(page.locator(".app-rail")).toBeVisible();
   await expect(page.locator(".app-rail").getByRole("button", { name: /Search/u })).toHaveCount(0);
-  await page.locator(".app-sidebar").getByRole("button", { name: "Search", exact: true }).click();
+  for (const path of ["pages", "agents", "settings"]) {
+    await page.goto(`/app/${E2E_SPACE.id}/${path}`, { waitUntil: "domcontentloaded" });
+    await expect(page.locator(".app-global-bar").getByRole("button", { name: "Search" })).toBeVisible();
+  }
+  await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
 });
 
@@ -65,7 +69,7 @@ test("Enter opens every result at an address that names the search", async ({ pa
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, RELEASE] });
   await stubMessageSearch(page);
   await page.goto(`/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".app-sidebar").getByRole("button", { name: "Search", exact: true }).click();
+  await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).click();
   await page.keyboard.type("deploy");
   await expect(page.getByRole("dialog", { name: "Search workspace" }).getByText("deploy the hub (1)")).toBeVisible();
   await page.keyboard.press("Enter");
@@ -95,7 +99,7 @@ test("a conversation found by name opens and is revealed in the list", async ({ 
   await expect(row).toBeAttached();
   await expect(row).not.toBeInViewport();
 
-  await page.locator(".app-sidebar").getByRole("button", { name: "Search", exact: true }).click();
+  await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).click();
   await page.keyboard.type(target.name);
   const dialog = page.getByRole("dialog", { name: "Search workspace" });
   await dialog.getByRole("button", { name: new RegExp(`#${target.name}`, "u") }).click();

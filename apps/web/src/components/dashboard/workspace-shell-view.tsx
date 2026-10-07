@@ -39,6 +39,7 @@ import {
   ChannelMoveDialog,
   ChannelSidebar,
   Composer,
+  GlobalSearchBar,
   DesktopUpdateRailButton,
   DesktopUpdateRestartDialog,
   MessageTimeline,
@@ -76,7 +77,7 @@ import {
   type ChosenWorkspace,
 } from "./space-first-task-choose-workspace";
 import { SpaceFirstTaskCard } from "./space-first-task-card";
-import { ListCreate, ListSearch, type CreateAction } from "./list-create";
+import { ListCreate, type CreateAction } from "./list-create";
 import { NewConversation } from "./new-conversation";
 import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
@@ -1296,6 +1297,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             />
           ) : undefined}
         />
+        <GlobalSearchBar
+          spaceName={currentSpace?.name ?? "this Space"}
+          searching={workspaceSearchOpen}
+          onOpenSearch={openWorkspaceSearch}
+        />
         <CreateFab action={mobileCreate} />
         {!isIOSNativeShell && (
           <MobileTabDock
@@ -1324,7 +1330,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           {view === "pages" ? (
             <PageTreePanel spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
               onSelectPage={openPage} onOpenSection={openPageAt} creation={pageCreation}
-              create={<><ListSearch onSearch={openWorkspaceSearch} /><ListCreate action={desktopCreate} /></>} />
+              create={<ListCreate action={desktopCreate} />} />
           ) : <ChannelSidebar
             events={events}
             spaces={spaces}
@@ -1353,8 +1359,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             onCopyChannelLink={(channel) => copyChannelLink(channel)}
             onSelect={(channelId, messageId) => requestChannelNavigation(channelId, messageId)}
             create={desktopCreate}
-            onSearch={openWorkspaceSearch}
-            searchActive={view === "search"}
           />}
         </aside>
 

@@ -374,6 +374,36 @@ export function CountPill({
   );
 }
 
+/**
+ * The window's top bar: wood across the whole width, carrying search in its
+ * middle, where Slack and the Mac put it. Search is the one control every
+ * view shares, so it belongs to the window, not to a list or the rail. When
+ * search opens, its field takes this one's place.
+ */
+export function GlobalSearchBar({ spaceName, searching, onOpenSearch }: {
+  spaceName: string;
+  searching: boolean;
+  onOpenSearch: () => void;
+}) {
+  const shortcut = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform) ? "⌘F" : "Ctrl+F";
+  return (
+    <div className="app-global-bar hidden md:flex">
+      <LiquidGlassPill
+        as="button"
+        type="button"
+        title={`Search (${shortcut})`}
+        aria-label="Search"
+        onClick={onOpenSearch}
+        className={cn("app-global-search flex items-center gap-2 text-left", searching && "invisible")}
+      >
+        <Search className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">Search {spaceName}</span>
+        <span className="app-global-search-shortcut shrink-0">{shortcut}</span>
+      </LiquidGlassPill>
+    </div>
+  );
+}
+
 export function RailButton({
   active,
   icon: Icon,
@@ -821,7 +851,7 @@ export function TopWorkspaceBar({
         )}
       </div>
       {onOpenSearch && !showBack && (
-        // Desktop search is the list's Search row and ⌘F; this icon is the phone's, and the
+        // Desktop search is the window's search bar and ⌘F; this icon is the phone's, and the
         // topbar is hidden on desktop. Channel detail bars keep Share / More
         // only — no search.
         <button
