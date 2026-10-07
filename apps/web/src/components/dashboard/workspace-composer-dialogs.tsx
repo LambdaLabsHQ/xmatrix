@@ -2532,11 +2532,10 @@ export function ToolSurface({
         spaceId={currentSpace?.id ?? null}
         token={token}
         currentUserId={user.id}
-        currentSpace={currentSpace}
         error={agentsError}
         channels={currentSpaceChannels}
         onOpenConversation={onOpenConversation}
-        onOpenAgentCreate={onOpenAgentCreate}
+        onOpenMachines={() => onChangeView("machines")}
       />
     );
   }
@@ -2559,6 +2558,7 @@ export function ToolSurface({
         loading={false}
         error={agentsError}
         token={token}
+        spaceId={currentSpace?.id}
         defaultItem={view === "local" ? THIS_MACHINE_ITEM : undefined}
         thisMachine={desktopAvailable ? {
           machineId: desktopContext?.machineId,
@@ -2583,7 +2583,7 @@ export function ToolSurface({
           setupReady={localSetupReady}
           machineName={localMachineName}
           onNameMachine={onNameLocalMachine}
-          harnesses={<MachineHarnessPanel token={token}
+          harnesses={<MachineHarnessPanel key={currentSpace?.id} token={token} spaceId={currentSpace?.id}
             daemon={machines.find(machine => machine.machineId === desktopContext?.machineId)?.daemon} />}
           onStartDaemon={onStartDesktopDaemon}
           onRestartDaemon={onRestartDesktopDaemon}
