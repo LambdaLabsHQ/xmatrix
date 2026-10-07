@@ -501,8 +501,11 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
           code: "github_connection_required" }, 409);
       }
       const [owner, repo] = reference.repository.split("/") as [string, string];
-      const file = await cachedGitHubFile(`${connection.id}\u0000${href}`, () => readGitHubFile(c.env, connection,
-        { owner, repo, path: reference.path, ref: reference.ref }));
+      const read = () => readGitHubFile(c.env, connection, { owner, repo, path: reference.path, ref: reference.ref });
+      // A changed installation/grant must not reuse the old connection's content.
+      const file = Number.isSafeInteger(connection.version) && connection.version! > 0
+        ? await cachedGitHubFile(`${connection.id}\u0000${connection.version}\u0000${href}`, read)
+        : await read();
       return c.json(file as unknown as Record<string, unknown>, 200, NO_STORE);
     } catch (error) {
       if (error instanceof GitHubFileError) return c.json({ error: error.message, code: error.code }, error.status);

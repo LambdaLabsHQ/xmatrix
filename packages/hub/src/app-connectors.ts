@@ -24,6 +24,7 @@ export interface AppConnectorConnectionView {
   scopes?: string[];
   capabilities?: string[];
   metadata?: Record<string, unknown>;
+  version?: number;
 }
 
 export interface GitHubRepositoryRef {
