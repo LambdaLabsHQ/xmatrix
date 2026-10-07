@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { Popover } from "@base-ui/react/popover";
+import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
 import { preparationFailureSummary, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
@@ -183,7 +184,7 @@ function MentionProseCard({ card, sourceMention, labelContent, title, ariaLabel,
     </Popover.Trigger>
     <Popover.Portal container={portal.container}>
       <Popover.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="app-invocation-positioner">
-        <Popover.Popup className="app-invocation-popup app-intent-popup" data-tone="neutral" onClick={(event) => event.stopPropagation()}>
+        <Popover.Popup render={<LiquidGlassCard />} className="app-invocation-popup app-intent-popup" data-tone="neutral" onClick={(event) => event.stopPropagation()}>
           <div className="app-invocation-heading"><div>
             <Popover.Title className="app-invocation-title">{title}</Popover.Title>
             <p className="app-invocation-machine">{sourceMention}</p>
@@ -376,7 +377,7 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
     </Popover.Trigger>
     <Popover.Portal container={portal.container}>
       <Popover.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="app-invocation-positioner">
-        <Popover.Popup className="app-invocation-popup" data-tone={view.tone} onClick={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+        <Popover.Popup render={<LiquidGlassCard />} className="app-invocation-popup" data-tone={view.tone} onClick={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
           <div className="app-invocation-heading"><div>
             <Popover.Title className="app-invocation-title">@{name}{instanceOrdinal && <>:{instanceOrdinal}</>}{destinationName && <> → @{destinationName}</>}</Popover.Title>
             <p className="app-invocation-machine">{subtitle}</p>
