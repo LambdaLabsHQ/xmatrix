@@ -7,6 +7,7 @@ import { RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH } from "./runtime-transport/re
 import { beginLiveHumanPresenceRead, channelWithLiveHumanPresence } from "./channel-response-human-presence";
 import { INSTANCE_ABANDON_RESULT_TIMEOUT_MS, requireAuth, requireSpaceManagementRun, requireHumanAuth, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
+import { deterministicConversationId } from "./system-conversation";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
 import { machineCommandStatus, machineDaemonCommand, machineRepository } from "./machines";
 import { runtimeRepository } from "./runtime";
@@ -26,6 +27,12 @@ async function readDaemonControlStatus(
 const INSTANCE_ROUTE = "/api/spaces/:spaceId/channels/:channelId/agent-instances/:instanceId";
 
 /** The caller's own membership row carries their current profile, not the stored copy. */
+/** "Ada Lovelace's Space"; the email's name part when the account has none. */
+export function personalSpaceName(user: Pick<AuthUser, "name" | "email">): string {
+  const owner = user.name?.trim() || user.email.split("@")[0]?.trim() || "My";
+  return owner === "My" ? "My Space" : `${owner.slice(0, 60)}'s Space`;
+}
+
 function withCallerMemberProfile(space: Record<string, unknown>, authUser: AuthUser): Record<string, unknown> {
   return {
     ...space,
@@ -590,6 +597,29 @@ export function registerIndexRoutesAuthSpaceInstances(app: Hono<{ Bindings: Env 
         ...(body.metadata && typeof body.metadata === "object" ? { metadata: body.metadata } : {}),
       },
     });
+  }));
+  /* The Space a person lands in the first time they open xMatrix, so a new
+     account never starts on an empty app it cannot act in. It exists only
+     for someone with no Space at all: an invite or join link gives them one
+     first, so they are never handed a second, empty one. The id derives from
+     the account, so a retry or a second tab replays the same command, and a
+     personal Space that was later deleted is not created again. */
+  app.post(HUB_ROUTES.personal_space, (c) => jsonErrors(c, async () => {
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const principal = { kind: "user" as const, id: authUser.id };
+    if ((await listSpaces(c.env, principal)).length > 0) return c.json({ space: null });
+    const spaceId = await deterministicConversationId("personal-space", authUser.id);
+    try {
+      await createSpace(c.env, {
+        commandId: `personal-space:${authUser.id}`,
+        spaceId, ownerUserId: authUser.id, name: personalSpaceName(authUser),
+      });
+    } catch (error) {
+      if (error instanceof ControlError && error.status === 409) return c.json({ space: null });
+      throw error;
+    }
+    const space = (await listSpaces(c.env, principal)).find((candidate) => candidate.id === spaceId);
+    return c.json({ space: space ? withCallerMemberProfile(space, authUser) : null });
   }));
   app.get("/api/spaces/:spaceId", (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
