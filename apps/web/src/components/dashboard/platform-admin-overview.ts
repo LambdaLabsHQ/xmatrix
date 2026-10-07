@@ -8,26 +8,10 @@
 import type {
   AdminActivityPoint,
   AdminPlatformTotals,
-  AdminSpaceSummary,
   AdminUserSummary,
 } from "@xmatrix/protocol";
 
 import { ageInDays, formatRelativeAge } from "./time-display";
-
-export type AdminSpaceSortKey =
-  | "recent"
-  | "messages"
-  | "members"
-  | "channels"
-  | "name";
-
-export type AdminUserSortKey =
-  | "recent"
-  | "registered"
-  | "sessions"
-  | "messages"
-  | "spaces"
-  | "name";
 
 export interface AdminStatTile {
   key: string;
@@ -141,97 +125,65 @@ export function adminActivityBars(points: AdminActivityPoint[]): AdminActivityBa
   }));
 }
 
-export function sortAdminSpaces(
-  spaces: AdminSpaceSummary[],
-  key: AdminSpaceSortKey,
-): AdminSpaceSummary[] {
-  const sorted = [...spaces];
-  sorted.sort((left, right) => {
-    switch (key) {
-      case "messages":
-        return right.messages - left.messages || compareNames(left, right);
-      case "members":
-        return right.members - left.members || compareNames(left, right);
-      case "channels":
-        return right.activeChannels - left.activeChannels || compareNames(left, right);
-      case "name":
-        return compareNames(left, right);
-      default:
-        return compareTimestamps(right.lastMessageAt || right.createdAt, left.lastMessageAt || left.createdAt)
-          || compareNames(left, right);
-    }
-  });
-  return sorted;
-}
-
-export function filterAdminSpaces(
-  spaces: AdminSpaceSummary[],
-  query: string,
-): AdminSpaceSummary[] {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return spaces;
-  return spaces.filter((space) =>
-    space.name.toLowerCase().includes(needle)
-    || space.id.toLowerCase().includes(needle)
-    || (space.ownerEmail || "").toLowerCase().includes(needle)
-    || space.ownerUserId.toLowerCase().includes(needle));
-}
-
-export function filterAdminUsers(users: AdminUserSummary[], query: string): AdminUserSummary[] {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return users;
-  return users.filter((user) =>
-    (user.name || "").toLowerCase().includes(needle)
-    || (user.handle || "").toLowerCase().includes(needle)
-    || (user.email || "").toLowerCase().includes(needle)
-    || user.userId.toLowerCase().includes(needle)
-    || (user.providers || []).some((provider) => provider.toLowerCase().includes(needle)));
-}
-
-export function sortAdminUsers(
-  users: AdminUserSummary[],
-  key: AdminUserSortKey,
-): AdminUserSummary[] {
-  return [...users].sort((left, right) => {
-    switch (key) {
-      case "registered":
-        return compareTimestamps(right.registeredAt, left.registeredAt) || compareUserNames(left, right);
-      case "sessions":
-        return (right.sessionCount ?? 0) - (left.sessionCount ?? 0) || compareUserNames(left, right);
-      case "messages":
-        return right.messages - left.messages || compareUserNames(left, right);
-      case "spaces":
-        return right.spaces - left.spaces || compareUserNames(left, right);
-      case "name":
-        return compareUserNames(left, right);
-      default:
-        return compareTimestamps(right.lastSessionAt, left.lastSessionAt)
-          || compareUserNames(left, right);
-    }
-  });
-}
-
 export function adminUserLabel(
   user: Pick<AdminUserSummary, "name" | "email" | "userId">,
 ): string {
   return user.name || user.email || user.userId;
 }
 
-function compareNames(left: AdminSpaceSummary, right: AdminSpaceSummary): number {
-  return left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+/** One column of an admin table: how it sorts and exports. */
+export interface AdminSortableColumn<Row> {
+  key: string;
+  label: string;
+  value?: (row: Row) => string | number | undefined;
+  noExport?: boolean;
 }
 
-function compareUserNames(left: AdminUserSummary, right: AdminUserSummary): number {
-  return adminUserLabel(left).localeCompare(adminUserLabel(right))
-    || left.userId.localeCompare(right.userId);
+function compareCells(left: string | number | undefined, right: string | number | undefined): number {
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  return String(left).localeCompare(String(right));
 }
 
-function compareTimestamps(left: string | undefined, right: string | undefined): number {
-  const leftMs = left ? Date.parse(left) : Number.NaN;
-  const rightMs = right ? Date.parse(right) : Number.NaN;
-  const leftValue = Number.isFinite(leftMs) ? leftMs : 0;
-  const rightValue = Number.isFinite(rightMs) ? rightMs : 0;
-  return leftValue - rightValue;
+function missingCell(value: string | number | undefined): boolean {
+  return value === undefined || value === "";
+}
+
+/** Stable sort on one column; rows without a value sort last in either direction. */
+export function sortAdminRows<Row>(
+  rows: readonly Row[],
+  column: AdminSortableColumn<Row> | undefined,
+  descending: boolean,
+): Row[] {
+  if (!column?.value) return [...rows];
+  const value = column.value;
+  return [...rows].sort((left, right) => {
+    const a = value(left);
+    const b = value(right);
+    if (missingCell(a) || missingCell(b)) return Number(missingCell(a)) - Number(missingCell(b));
+    const order = compareCells(a, b);
+    return descending ? -order : order;
+  });
+}
+
+function csvCell(value: string | number | undefined): string {
+  const text = value === undefined ? "" : String(value);
+  // A leading formula character is neutralised so a spreadsheet does not run it.
+  const safe = /^[=+\-@]/u.test(text) ? `'${text}` : text;
+  return /[",\n]/u.test(safe) ? `"${safe.replaceAll("\"", "\"\"")}"` : safe;
+}
+
+export function adminTableCsv<Row>(rows: readonly Row[], columns: readonly AdminSortableColumn<Row>[]): string {
+  const exported = columns.filter((column) => column.value && !column.noExport);
+  return [
+    exported.map((column) => csvCell(column.label)).join(","),
+    ...rows.map((row) => exported.map((column) => csvCell(column.value!(row))).join(",")),
+  ].join("\n");
+}
+
+/** Epoch milliseconds for sorting a timestamp column; missing stays missing. */
+export function adminTime(value: string | undefined): number | undefined {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function trimNumber(value: number): string {

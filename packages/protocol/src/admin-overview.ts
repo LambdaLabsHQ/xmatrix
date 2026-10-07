@@ -181,3 +181,138 @@ function boundedAdminNumber(value: unknown, fallback: number, min: number, max: 
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(parsed)));
 }
+
+/**
+ * One user's detail for operators. Like the overview it is metadata only:
+ * identities, roles, counts, statuses, and timestamps. Message and page text,
+ * prompts, secret values, attachments, connector payloads, session IP
+ * addresses and user agents, and Machine host names never appear here.
+ */
+export const ADMIN_USER_DETAIL_HUB_ROUTE = "/api/admin/users/:userId";
+export const ADMIN_USER_DETAIL_WEB_ROUTE = "/api/xmatrix/admin/users";
+
+export function adminUserDetailHubRoute(userId: string): string {
+  return ADMIN_USER_DETAIL_HUB_ROUTE.replace(":userId", encodeURIComponent(userId));
+}
+
+export function adminUserDetailWebRoute(userId: string): string {
+  return `${ADMIN_USER_DETAIL_WEB_ROUTE}/${encodeURIComponent(userId)}`;
+}
+
+/** Days of per-user daily activity in the detail. */
+export const ADMIN_USER_DETAIL_ACTIVITY_DAYS = 30;
+/** Rows per list in the detail; a list at the bound says so instead of growing. */
+export const ADMIN_USER_DETAIL_MAX_ROWS = 100;
+
+export interface AdminUserSession {
+  createdAt: string;
+  lastActiveAt: string;
+  expiresAt: string;
+  active: boolean;
+}
+
+export interface AdminUserSpaceMembership {
+  spaceId: string;
+  name: string;
+  role: string;
+  ownerUserId: string;
+  joinedAt: string;
+  members: number;
+  messages: number;
+  billing?: AdminSpaceBilling;
+}
+
+export interface AdminSpaceBilling {
+  plan: string;
+  status: string;
+  seats: number;
+  currentPeriodEnd?: string;
+  cancelAtPeriodEnd: boolean;
+  graceUntil?: string;
+}
+
+export interface AdminUserAgentRegistration {
+  spaceId: string;
+  machineId: string;
+  harness: string;
+  displayName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminUserMachine {
+  machineId: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminUserConnector {
+  spaceId: string;
+  providerId: string;
+  providerName: string;
+  status: string;
+  createdAt: string;
+  lastCheckedAt?: string;
+}
+
+export interface AdminUserRunSummary {
+  total: number;
+  active: number;
+  last30d: number;
+  byStatus: Record<string, number>;
+  lastRunAt?: string;
+}
+
+export interface AdminUserMessageSummary {
+  total: number;
+  last7d: number;
+  last30d: number;
+  lastMessageAt?: string;
+}
+
+export interface AdminUserDetail {
+  generatedAt: string;
+  user: AdminUserSummary;
+  sessions: AdminUserSession[];
+  spaces: AdminUserSpaceMembership[];
+  agents: AdminUserAgentRegistration[];
+  machines: AdminUserMachine[];
+  connectors: AdminUserConnector[];
+  runs: AdminUserRunSummary;
+  messages: AdminUserMessageSummary;
+  pagesCreated: number;
+  /** The user's own messages per UTC day, oldest first. */
+  activity: Array<{ date: string; messages: number }>;
+  /** Lists that reached `ADMIN_USER_DETAIL_MAX_ROWS`. */
+  truncated: string[];
+}
+
+/**
+ * Every platform-admin read and action is recorded, so operating the platform
+ * leaves a trail operators answer for. Kept on the control shard.
+ */
+export const ADMIN_AUDIT_HUB_ROUTE = "/api/admin/audit";
+export const ADMIN_AUDIT_WEB_ROUTE = "/api/xmatrix/admin/audit";
+export const ADMIN_AUDIT_MAX_ROWS = 500;
+
+export type AdminAuditAction =
+  | "overview.read"
+  | "user.read"
+  | "audit.read"
+  | "handles.backfill"
+  | "agent-senders.repair";
+
+export interface AdminAuditEvent {
+  eventId: string;
+  actorUserId: string;
+  actorEmail?: string;
+  action: AdminAuditAction;
+  targetKind?: string;
+  targetId?: string;
+  createdAt: string;
+}
+
+export function adminAuditLimit(value: unknown): number {
+  return boundedAdminNumber(value, 100, 1, ADMIN_AUDIT_MAX_ROWS);
+}
