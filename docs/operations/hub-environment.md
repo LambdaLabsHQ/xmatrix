@@ -41,7 +41,7 @@ Leave unset to keep the feature off.
 | `CONNECTOR_DINGTALK_COMPANY_CONFIG` | secret | Verified company-console JSON: suite-ticket protocol, sync-http delivery, numeric suiteId, developerCorpId, appId and approved templateId/templateField. Requires complete native suite keys; unset keeps company routes and actions unavailable. |
 | `DIAGNOSTICS_AE` | binding | Analytics Engine dataset for client diagnostics. Unset: diagnostics are dropped. |
 | `DIAGNOSTICS_HASH_SECRET` | secret | Key that pseudonymizes users in diagnostics; defaults to BETTER_AUTH_SECRET. |
-| `GITHUB_APP_CLIENT_ID` | var | GitHub App OAuth client id. |
+| `GITHUB_APP_CLIENT_ID` | var | GitHub App OAuth client id. Unset: GitHub Connect reads it from GitHub for the App; Better Auth account linking stays off. |
 | `GITHUB_APP_CLIENT_SECRET` | secret | GitHub App OAuth client secret. |
 | `GITHUB_APP_ID` | var | GitHub App id for the Space GitHub connection. Unset with the other GITHUB_APP_* values: Spaces cannot connect GitHub. |
 | `GITHUB_APP_PRIVATE_KEY` | secret | GitHub App private key (PEM). |
