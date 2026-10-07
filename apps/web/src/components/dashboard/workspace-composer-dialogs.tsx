@@ -1120,9 +1120,9 @@ export function Composer({
               ? ""
               : channel
                 ? isJoined
-                  ? "输入消息"
+                  ? "Message"
                   : "Join channel to send"
-                : "输入消息"
+                : "Message"
           )}
           ariaLabel={ariaLabel || "Message composer"}
           sendTitle={sendTitle || "Send"}
@@ -2537,6 +2537,7 @@ export function ToolSurface({
         currentUserId={user.id}
         currentSpace={currentSpace}
         error={agentsError}
+        addsOnThisMachine={Boolean(desktopContext?.machineId)}
         channels={currentSpaceChannels}
         onOpenConversation={onOpenConversation}
         onOpenAgentCreate={onOpenAgentCreate}

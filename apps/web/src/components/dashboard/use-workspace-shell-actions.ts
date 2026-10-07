@@ -1,5 +1,6 @@
 "use client";
 
+import { ADD_AGENT_ITEM } from "./my-agents-items";
 import { pageShellActions } from "./page-shell-actions";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { discussionDraft, discussionTitle } from "./selection-discussion";
@@ -2256,6 +2257,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           ? `Only owners and admins can add Agents to ${s.currentSpace.name}.`
           : "Choose a Space before adding an agent.",
       );
+      return;
+    }
+    // Only the desktop app can add an agent on the machine it runs on.
+    if (!s.desktopContext?.machineId) {
+      changeAppView("agents", ADD_AGENT_ITEM);
       return;
     }
     const preset = agentPresetOrCustom("codex");

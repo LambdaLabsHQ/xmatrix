@@ -2,11 +2,12 @@
 
 import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
-import { Check, CloudOff, Copy, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
+import { Check, CloudOff, Copy, Download, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { noticeClass } from "@/components/ui/status-tone";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
+import { cn } from "@/lib/utils";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { IdentityAvatar } from "./identity-avatar";
 import type {
@@ -24,8 +25,16 @@ const RUNTIME_INSTALL_COMMANDS: Array<{ command: string; description: string }> 
   { command: "npm i -g @openai/codex", description: "Codex" },
 ];
 
+/* What runs `xmatrix agent add` for this Space on another machine. The
+   Space id is filled in: a placeholder would send the reader looking for an
+   id the Web shows nowhere. */
+export function agentAddCommand(spaceId: string | null | undefined): string {
+  return `xmatrix agent add claude --space ${spaceId || "<space-id>"}`;
+}
+
 export function SpaceAgentSetupCard({
   state,
+  spaceId,
   hostLabel,
   busy,
   error,
@@ -35,6 +44,7 @@ export function SpaceAgentSetupCard({
   onRetryAgents,
 }: {
   state: SpaceAgentSetupState;
+  spaceId: string | null;
   hostLabel: string;
   busy: string | null;
   error: string | null;
@@ -48,7 +58,7 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
-        {state.kind === "no-local-machine" && <RemoteMachinePanel />}
+        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
@@ -95,7 +105,7 @@ export function SpaceAgentSetupCard({
               Detected on this machine by checking which agent commands are installed. Nothing about
               your projects is read or uploaded by this step. To add a harness from another machine,
               its owner runs{" "}
-              <code>xmatrix agent add &lt;harness&gt; --space &lt;space-id&gt;</code>
+              <code>{agentAddCommand(spaceId)}</code>
               {" "}there.
             </p>
           </>
@@ -225,16 +235,42 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function RemoteMachinePanel() {
+/* Web and mobile: agents are not in this tab, so the one thing to learn here
+   is where they are. The desktop app finds the ones already installed; a
+   machine with the CLI adds one with a single command. */
+export function BringAgentsInPanel({ spaceId }: { spaceId: string | null }) {
   return (
     <>
       <SetupCardHeader
         icon={HardDrive}
-        title="Connect the machine your agents run on"
-        body="Agents run on a real machine, not in this tab. Open the xMatrix desktop app on the machine you code on and it will find the agents already installed there."
+        title="Bring your agents into xMatrix"
+        body="Your agents run on your own computer, and xMatrix connects them with the people they work with. Open the desktop app on that computer and it finds the agents already installed there."
       />
+      <a href="/download" className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
+        <Download className="size-4" />
+        Download xMatrix
+      </a>
+      <AgentAddCommand spaceId={spaceId} />
       <RemoteMachineHint />
     </>
+  );
+}
+
+/* For a machine that already has the CLI: one line, with this Space's id. */
+export function AgentAddCommand({ spaceId, centered = false }: { spaceId: string | null; centered?: boolean }) {
+  const command = agentAddCommand(spaceId);
+  const { copied, copy } = useCopyToClipboard(command);
+  return (
+    <div className="mt-4">
+      <p className="text-sm text-muted-foreground">Already have the xMatrix CLI on that machine? Run:</p>
+      <div className={cn("mt-2 flex min-w-0 flex-wrap items-center gap-2", centered && "justify-center")}>
+        <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono text-xs [overflow-wrap:anywhere]">{command}</code>
+        <button type="button" onClick={() => void copy()} className={actionClass({ variant: "secondary", size: "sm" })}>
+          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
   );
 }
 

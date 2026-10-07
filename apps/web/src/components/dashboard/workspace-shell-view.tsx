@@ -839,6 +839,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
           <SpaceAgentSetupCard
             state={spaceAgentSetup}
+            spaceId={currentSpaceId ?? null}
             hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
             busy={localActionBusy}
             error={localActionError}

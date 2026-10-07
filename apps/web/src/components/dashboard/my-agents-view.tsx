@@ -4,6 +4,8 @@ import { useState, type ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Cpu,
+  Download,
+  HardDrive,
   Loader2,
   Plus,
   RotateCcw,
@@ -50,6 +52,8 @@ import {
   type MyAgentAction,
 } from "./my-agents-registrations";
 import { spaceMemberCanCreate } from "./space-member-permissions";
+import { AgentAddCommand } from "./space-agent-setup-card";
+import { ADD_AGENT_ITEM } from "./my-agents-items";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
@@ -82,6 +86,7 @@ export function MyAgentsView({
   currentSpace,
   channels,
   error,
+  addsOnThisMachine,
   onOpenAgentCreate,
   onOpenConversation,
 }: {
@@ -92,6 +97,8 @@ export function MyAgentsView({
   /** The Space's conversations the reader has, to name where an agent runs. */
   channels: readonly SerializedChannel[];
   error: string | null;
+  /** The desktop app can add an agent on this machine; a browser cannot. */
+  addsOnThisMachine: boolean;
   onOpenAgentCreate: () => void;
   onOpenConversation: (channelId: string) => void;
 }) {
@@ -304,6 +311,21 @@ export function MyAgentsView({
           )}
         </ToolDetailSection>
       </ToolDetail>
+    );
+  } else if (item === ADD_AGENT_ITEM || (catalog.data && rows.length === 0 && !addsOnThisMachine)) {
+    /* A browser cannot start anything on a machine, so New agent here shows
+       where agents come from instead of a form it could never save. */
+    detail = (
+      <ToolDetailEmpty icon={<HardDrive />} title="Bring your agents into xMatrix">
+        <p>
+          Your agents run on your own computer, and xMatrix connects them with the people they work
+          with. Open the desktop app on that computer and it finds the agents already installed there.
+        </p>
+        <a href="/download" className={actionClass({ variant: "primary", size: "sm" })}>
+          <Download className="size-4" /> Download xMatrix
+        </a>
+        <AgentAddCommand spaceId={spaceId} centered />
+      </ToolDetailEmpty>
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (
