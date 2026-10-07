@@ -1317,10 +1317,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             error={channelSidebarError(error)}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
-            onOpenManagementSetup={(spaceId) => {
-              setManagementSetupSpaceId(spaceId);
-              changeAppView("team");
-            }}
             view={view}
             readCounts={channelReadCounts}
             mentionClearedAt={channelMentionClearedAt}
