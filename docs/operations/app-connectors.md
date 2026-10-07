@@ -113,9 +113,9 @@ Use a runtime token restricted to the intended actions and stable connection IDs
 with no proxy grants. Provider credentials remain in that runtime.
 
 Search requires the token and validates service-qualified action IDs, displaying
-at most 30. All `run` calls are writes for xMatrix policy purposes, including
-provider actions described as reads: an Agent needs the Channel administrator's
-`@openconnector:policy:run allow`. Input is one JSON object up to 16 KiB UTF-8.
+at most 30. All `run` calls share one xMatrix policy, `run`, including provider actions
+described as reads; a Channel administrator's `@openconnector:policy:run deny`
+turns them off there. Input is one JSON object up to 16 KiB UTF-8.
 The transport has a 10-second timeout, a 256 KiB response limit and no redirects
 or automatic replay. A successful run must confirm the exact action, a bounded
 execution ID and `auditPersisted: true`; content is fenced, mention-shielded and
@@ -131,13 +131,8 @@ time:
 
 - **`deny`.** A Space admin's `@<provider>:policy:<action> deny` blocks the
   action for everyone in that channel.
-- **Agent writes.** An Agent's write action is blocked until a Space admin
-  sends `@<provider>:policy:<action> allow` in that channel, unless the action
-  is marked `defaultPolicy: "allow"` (Sentry resolve/unresolve/ignore), which
-  runs for an Agent by default and can still be denied there.
-- **Defaults.** A Human's own command, and any read, otherwise runs.
-- **Unknown author.** A message not known to be a Human's is treated as an
-  Agent's.
+- **Default.** Every other action, read or write, runs, whether a Human or an
+  Agent sent it. The provider's own permissions still apply.
 
 Every attempt writes an execution record and a receipt in the channel.
 Persisted completion summaries are limited to 1,000 UTF-8 bytes, and failure or
@@ -369,8 +364,7 @@ In the xMatrix Apps view, configure GitHub for each space that should use it:
 - The first successful `@github:subscribe` in a channel creates that channel's GitHub binding. `@github:unsubscribe` removes selected source features and removes the binding when the final subscription is gone. Channel details displays this derived subscription state and opens Composer `@` completion; Space-wide connection management remains in `Apps`.
 - Set the default repository as `owner/repo` when users should be able to type short issue refs such as `#42`.
 - GitHub write actions follow the generic Channel action policy:
-  - `comment`, `create_issue`, `close_issue`, `reopen_issue`, `review`, `rerun_failed_jobs` and `dispatch_workflow` are off by default. They run in a channel only after a Space admin allows them there, either under Apps → GitHub → Channel action policy or with `@github:policy:<action> allow` in that channel.
-  - `merge` runs from a Human's own command, and from an Agent's command only where allowed.
+  - Every action, including `merge`, `rerun_failed_jobs` and `dispatch_workflow`, runs for a Human or an Agent unless a Space admin denies it in that channel, under Apps → GitHub → Channel action policy or with `@github:policy:<action> deny`. Actions writes still need the GitHub App's Actions write permission.
   - Migration `0127` converted the retired `*WriteChannelId` metadata into `allow` rows. Those keys are no longer read.
 - A GitHub App installation belongs to exactly one User or Organization; a Space links up to 32 of them, and its repositories, webhook delivery and org/repo completion cover every linked installation. The GitHub connector's `GitHub accounts` section, shown whether or not the Space is connected, lists each linked account with `Manage on GitHub` (repository selection for that installation) and `Unlink` (forgets it here; unlinking the last one disconnects). After Connect, or `Find my GitHub accounts`, the installations the grant names but the Space has not linked are listed with `Link`, which links them directly, since GitHub does not return to xMatrix for an installation that is unchanged. `Install on another account` installs the App on a new account. None of these change xMatrix-owned channel/agent/write settings.
 - Use full issue URLs or `owner/repo#42` when no default repository is configured.

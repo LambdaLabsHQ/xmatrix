@@ -80,7 +80,7 @@ test("writes require exact bounded scalar matrices, separate policies, RAW input
   assert.match(response.result.summary, /Updated 4 .* RAW/u); assert.doesNotMatch(response.result.summary, /evil\.example/u);
   for (const actionId of ["update_sheet", "create_sheet"]) {
     assert.equal(getAppConnectorProvider("google").actions.find(action => action.id === actionId).effect, "write");
-    assert.match(actionRefusal({ providerId: "google", actionId, effect: "write", senderKind: "agent", mode: null }), /policy/u);
+    assert.equal(actionRefusal({ providerId: "google", actionId, effect: "write", senderKind: "agent", mode: null }), undefined);
   }
 });
 

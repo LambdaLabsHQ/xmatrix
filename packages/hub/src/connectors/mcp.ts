@@ -41,7 +41,6 @@ function tools(connected: ReadonlySet<string>) {
       name: `${manifest.id}__${action.id}`,
       title: `${manifest.name}: ${action.label}`,
       description: `${action.description} Runs in your Channel with ${manifest.name} connected to the Space; ` +
-        `${action.effect === "write" && action.defaultPolicy !== "allow" ? `needs @${manifest.id}:policy:${action.id} allow from a Space admin. ` : ""}` +
         `Usage: @${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`,
       inputSchema: {
         type: "object",
