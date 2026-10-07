@@ -9,7 +9,7 @@
   color: var(--foreground);
   background:
     radial-gradient(circle at 15% -8%, oklch(1 0.018 92 / 0.95), transparent 34rem),
-    linear-gradient(180deg, oklch(0.988 0.01 88), oklch(0.955 0.019 80));
+    linear-gradient(180deg, oklch(0.994 0.004 88), oklch(0.961 0.008 80));
   background-attachment: fixed;
 }
 
@@ -250,7 +250,7 @@ html:has(.site-page) {
 }
 
 .site-hero {
-  background: oklch(0.985 0.01 88);
+  background: oklch(0.991 0.004 88);
 }
 
 /* Paper as a surface: a hairline and no shadow, so it reads as the same
@@ -320,7 +320,7 @@ html:has(.site-page) {
 .site-login {
   background:
     radial-gradient(circle at 50% 8%, oklch(1 0.02 90 / 0.95), transparent 30rem),
-    linear-gradient(150deg, oklch(0.94 0.027 78), var(--background));
+    linear-gradient(150deg, oklch(0.946 0.011 78), var(--background));
 }
 
 .site-login-panel {
@@ -342,7 +342,7 @@ html:has(.site-page) {
   top: 0;
   z-index: 20;
   border-color: var(--site-wood-line);
-  background: oklch(0.985 0.012 86 / 0.94);
+  background: oklch(0.991 0.005 86 / 0.94);
 }
 
 .site-legal-article.app-material-wood-panel {

@@ -5,7 +5,7 @@ import WebKit
 
 struct WebContainerView: UIViewRepresentable {
     // The Wood theme's light paper, including while a page is loading.
-    static let shellBackground = UIColor(red: 245 / 255, green: 239 / 255, blue: 229 / 255, alpha: 1)
+    static let shellBackground = UIColor(red: 249 / 255, green: 247 / 255, blue: 243 / 255, alpha: 1)
     @ObservedObject var router: AppRouter
 
     func makeCoordinator() -> Coordinator {
