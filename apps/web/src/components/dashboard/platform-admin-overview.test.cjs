@@ -6,14 +6,13 @@ const overview = compileTsModules(__dirname, ["platform-admin-overview", "time-d
 const {
   adminActivityBars,
   agentMessageShare,
-  filterAdminSpaces,
-  filterAdminUsers,
+  adminTableCsv,
+  adminTime,
   formatAdminAge,
   formatAdminBytes,
   formatAdminCount,
   platformAdminStatTiles,
-  sortAdminSpaces,
-  sortAdminUsers,
+  sortAdminRows,
 } = overview.exports;
 
 test.after(overview.dispose);
@@ -112,51 +111,37 @@ test("activity bars scale against the busiest day and keep empty days", () => {
   assert.equal(flat[0].ratio, 0);
 });
 
-test("space sorting is stable and ranks by the selected column", () => {
-  const spaces = [
-    space({ id: "space:a", name: "Alpha", messages: 10, members: 3, activeChannels: 1, lastMessageAt: "2026-08-01T00:00:00.000Z" }),
-    space({ id: "space:b", name: "Bravo", messages: 50, members: 1, activeChannels: 9, lastMessageAt: "2026-08-03T00:00:00.000Z" }),
-    space({ id: "space:c", name: "Charlie", messages: 50, members: 2, activeChannels: 4 }),
+test("table sorting is stable, either direction, and keeps missing values last", () => {
+  const rows = [
+    space({ id: "space:a", name: "Alpha", messages: 10, lastMessageAt: "2026-08-01T00:00:00.000Z" }),
+    space({ id: "space:b", name: "Bravo", messages: 50, lastMessageAt: "2026-08-03T00:00:00.000Z" }),
+    space({ id: "space:c", name: "Charlie", messages: 50 }),
   ];
-  assert.deepEqual(sortAdminSpaces(spaces, "messages").map((item) => item.id), ["space:b", "space:c", "space:a"]);
-  assert.deepEqual(sortAdminSpaces(spaces, "members").map((item) => item.id), ["space:a", "space:c", "space:b"]);
-  assert.deepEqual(sortAdminSpaces(spaces, "channels").map((item) => item.id), ["space:b", "space:c", "space:a"]);
-  assert.deepEqual(sortAdminSpaces(spaces, "name").map((item) => item.id), ["space:a", "space:b", "space:c"]);
-  // "recent" falls back to createdAt when a Space has never carried a message.
-  assert.equal(sortAdminSpaces(spaces, "recent")[0].id, "space:b");
-  assert.equal(sortAdminSpaces(spaces, "messages")[0].id, "space:b");
-  // Sorting never mutates the caller's array.
-  assert.deepEqual(spaces.map((item) => item.id), ["space:a", "space:b", "space:c"]);
+  const messages = { key: "messages", label: "Messages", value: (row) => row.messages };
+  const name = { key: "name", label: "Space", value: (row) => row.name };
+  const last = { key: "last", label: "Last", value: (row) => adminTime(row.lastMessageAt) };
+  assert.deepEqual(sortAdminRows(rows, messages, true).map((row) => row.id), ["space:b", "space:c", "space:a"]);
+  assert.deepEqual(sortAdminRows(rows, name, false).map((row) => row.id), ["space:a", "space:b", "space:c"]);
+  assert.deepEqual(sortAdminRows(rows, last, true).map((row) => row.id), ["space:b", "space:a", "space:c"]);
+  assert.deepEqual(sortAdminRows(rows, last, false).map((row) => row.id), ["space:a", "space:b", "space:c"]);
+  // An unsortable column keeps the given order, and the caller's array is never mutated.
+  assert.deepEqual(sortAdminRows(rows, { key: "x", label: "X" }, true).map((row) => row.id), ["space:a", "space:b", "space:c"]);
+  assert.deepEqual(rows.map((row) => row.id), ["space:a", "space:b", "space:c"]);
 });
 
-test("search matches name, id, owner email, and owner id", () => {
-  const spaces = [
-    space({ id: "space:a", name: "Alpha", ownerEmail: "ops@example.com" }),
-    space({ id: "space:b", name: "Bravo", ownerUserId: "user:zed" }),
+test("CSV export quotes, escapes, and neutralises spreadsheet formulas", () => {
+  const columns = [
+    { key: "name", label: "Name", value: (row) => row.name },
+    { key: "count", label: "Count", value: (row) => row.count },
+    { key: "skip", label: "Skip", value: (row) => row.name, noExport: true },
+    { key: "view", label: "View only" },
   ];
-  assert.deepEqual(filterAdminSpaces(spaces, "  ").map((item) => item.id), ["space:a", "space:b"]);
-  assert.deepEqual(filterAdminSpaces(spaces, "alpha").map((item) => item.id), ["space:a"]);
-  assert.deepEqual(filterAdminSpaces(spaces, "OPS@EXAMPLE").map((item) => item.id), ["space:a"]);
-  assert.deepEqual(filterAdminSpaces(spaces, "zed").map((item) => item.id), ["space:b"]);
-  assert.deepEqual(filterAdminSpaces(spaces, "space:b").map((item) => item.id), ["space:b"]);
-
-  const users = [
-    { userId: "user:1", name: "Operator", handle: "ops", email: "ops@example.com", providers: ["github"], spaces: 1, ownedSpaces: 1, agentRegistrations: 0, machines: 0, messages: 0 },
-    { userId: "user:2", spaces: 1, ownedSpaces: 0, agentRegistrations: 0, machines: 0, messages: 0 },
-  ];
-  assert.deepEqual(filterAdminUsers(users, "ops").map((item) => item.userId), ["user:1"]);
-  assert.deepEqual(filterAdminUsers(users, "github").map((item) => item.userId), ["user:1"]);
-  assert.deepEqual(filterAdminUsers(users, "user:2").map((item) => item.userId), ["user:2"]);
-});
-
-test("user sorting covers access, registration, and engagement dimensions", () => {
-  const users = [
-    { userId: "user:a", email: "a@example.com", spaces: 3, ownedSpaces: 1, agentRegistrations: 0, machines: 0, messages: 4, sessionCount: 2, registeredAt: "2026-08-01T00:00:00.000Z" },
-    { userId: "user:b", email: "b@example.com", spaces: 1, ownedSpaces: 1, agentRegistrations: 0, machines: 0, messages: 8, sessionCount: 5, registeredAt: "2026-08-03T00:00:00.000Z", lastSessionAt: "2026-08-04T00:00:00.000Z" },
-  ];
-  assert.deepEqual(sortAdminUsers(users, "recent").map((item) => item.userId), ["user:b", "user:a"]);
-  assert.deepEqual(sortAdminUsers(users, "registered").map((item) => item.userId), ["user:b", "user:a"]);
-  assert.deepEqual(sortAdminUsers(users, "sessions").map((item) => item.userId), ["user:b", "user:a"]);
-  assert.deepEqual(sortAdminUsers(users, "messages").map((item) => item.userId), ["user:b", "user:a"]);
-  assert.deepEqual(sortAdminUsers(users, "spaces").map((item) => item.userId), ["user:a", "user:b"]);
+  assert.equal(
+    adminTableCsv([
+      { name: "plain", count: 1 },
+      { name: "a, \"quoted\" name", count: 2 },
+      { name: "=HYPERLINK(1)", count: undefined },
+    ], columns),
+    'Name,Count\nplain,1\n"a, ""quoted"" name",2\n\'=HYPERLINK(1),',
+  );
 });

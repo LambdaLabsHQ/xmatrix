@@ -13,6 +13,7 @@ import {
 } from "./migrate.mjs";
 
 export const EXPECTED_SUBSTRATE_TABLES = Object.freeze([
+  "control.admin_audit_events",
   "control.agent_environment_commands",
   "control.agent_registration_enrollments",
   "control.agent_registration_environments",
