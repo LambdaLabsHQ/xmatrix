@@ -20,6 +20,19 @@ test("a new conversation completes the Space's repos after a summon", async ({ p
   await expect(input).toHaveValue("@codex repo:owner/xmatrix ");
 });
 
+test("the empty composer takes turns teaching what typing @, /, [[ and # opens, caret or not", async ({ page }) => {
+  await page.clock.install();
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const composer = await startNewConversation(page);
+  await expect(composer.getByLabel("What should happen")).toBeFocused();
+  const hint = composer.getByTestId("composer-hint");
+  await expect(hint).toHaveText("@ to mention");
+  await page.clock.runFor(4000);
+  await expect(hint).toHaveText("/ for commands");
+  await composer.getByLabel("What should happen").fill("hello");
+  await expect(hint).toHaveCount(0);
+});
+
 test("+ and Ctrl+N open an empty conversation, and its first message creates it, named from what it asks", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const created = { ...E2E_CHANNEL, id: "c-new", name: "fix the flaky login test" };

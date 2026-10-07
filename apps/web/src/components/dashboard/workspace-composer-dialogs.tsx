@@ -3,6 +3,7 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
 import { useAndroidBackHandler } from "./use-android-back";
+import { useComposerHint } from "./composer-hints";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
@@ -463,6 +464,7 @@ export function Composer({
     !readingAttachment &&
     !preparingSend &&
     !sending;
+  const composerHint = useComposerHint(writable && !placeholder && localDraft.length === 0);
   const completionApiRef = useRef<ComposerCompletionApi | null>(null);
   const setCursor = useCallback((value: number) => {
     completionApiRef.current?.setCursor(value);
@@ -1116,15 +1118,7 @@ export function Composer({
           }}
           completionApiRef={completionApiRef}
           textareaRef={textareaRef}
-          placeholder={placeholder || (
-            emptyPasteAnchorActive && localDraft.length === 0
-              ? ""
-              : channel
-                ? isJoined
-                  ? "输入消息"
-                  : "Join channel to send"
-                : "输入消息"
-          )}
+          placeholder={placeholder || (channel && !isJoined ? "Join channel to send" : composerHint)}
           ariaLabel={ariaLabel || "Message composer"}
           sendTitle={sendTitle || "Send"}
           onEscape={onEscape}
