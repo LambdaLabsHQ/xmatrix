@@ -52,7 +52,7 @@ export function SpaceAgentSetupCard({
   onManageMachines: () => void;
 }) {
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
-    <SetupCardHeader title="Your installed agents" body="Turn them on to summon them in this Space. Choose a working folder when you send the first task." />
+    <SetupCardHeader title="Your installed agents" body="Turn them on to summon them. Choose a working folder when you send the first task." />
     <InstalledHarnessSwitchList fleet={fleet} />
     <button type="button" disabled={!fleet.ready || Boolean(fleet.pending) || fleet.enablingAll}
       onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
@@ -82,7 +82,7 @@ export function SpaceAgentSetupCard({
           <>
             <SetupCardHeader
               title={`Found ${describeCandidates(state.candidates)} on ${hostLabel}`}
-              body="Turn on the installed agents so they can take work in this Space."
+              body="Turn on the installed agents so they can take work."
             />
             {state.kind === "daemon-stopped" && (
               <div className={noticeClass("attention", "mt-4 p-3")}>
@@ -173,7 +173,7 @@ function CandidateRow({
           className={actionClass({ variant: "primary", size: "md" })}
         >
           <Check className="size-4" />
-          Enable in this Space
+          Enable
         </button>
       </div>
     </LiquidGlassCard>

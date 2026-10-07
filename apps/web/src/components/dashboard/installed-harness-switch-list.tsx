@@ -28,7 +28,7 @@ export function InstalledHarnessSwitchList({ fleet, onlyNew = false }: {
           <p className="text-xs text-muted-foreground">{candidate.machineName} · {candidate.daemon.status === "online" ? "Installed" : "Offline · last reported installed"}</p>
         </div>
         {toggle ? <Switch checked={pending ? pending.on : toggle.on} disabled={Boolean(fleet.pending) || fleet.enablingAll}
-          label={`In this Space: ${candidate.preset.displayName} on ${candidate.machineName}`}
+          label={`Enabled: ${candidate.preset.displayName} on ${candidate.machineName}`}
           onChange={(on) => void fleet.set(candidate.key, candidate.preset, on)} />
           : <span className="text-xs text-muted-foreground">Sharing request pending</span>}
       </div>;
