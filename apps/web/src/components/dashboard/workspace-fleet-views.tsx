@@ -15,6 +15,7 @@ import {
 
 import { GoogleChatRoomLink } from "./googlechat-room-link";
 import { GitHubInstallationAccounts } from "./github-installation-accounts";
+import { takeGitHubConnectOutcome } from "@/lib/github-connect-return";
 import { WeComCompanyConnection } from "./wecom-company-connection";
 import { DingTalkCompanyConnection } from "./dingtalk-company-connection";
 import type { HumanProfile } from "@xmatrix/protocol";
@@ -1202,11 +1203,8 @@ export function AppsView({
   }, []);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const status = url.searchParams.get("github");
+    const status = takeGitHubConnectOutcome();
     if (!status) return;
-    url.searchParams.delete("github");
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
     if (status === "connected") {
       setSetupNotice({
         tone: "success",
