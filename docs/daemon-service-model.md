@@ -170,3 +170,19 @@ Startup checkpoint history is bounded to 16 first observations from the current 
 ## Execution and reply evidence
 
 Wrapper execution-phase updates cannot set `delivered=true`. The retained legacy field is false for these writes and is not a Channel commit receipt. A delivered bit alone does not make a local process terminal. Machine lifecycle authority classifies execution from explicit phases, completion and exit evidence independently from reply delivery; scheduled execution retains its explicit phase requirement. Final reply receipts and recovery are a separate, still-incomplete contract. Deploy the Hub/DB classification before publishing this CLI semantic change because older servers treated `delivered=false` as execution failure.
+
+## Startup failure diagnostics
+
+The daemon preserves the originating failure text through the Channel startup
+notice and invocation diagnostics. Git retry classification is separate from its
+stderr: a rejected fetch reports `non-fast-forward`, rather than replacing it
+with a network/permissions suggestion. Codes remain stable for existing clients.
+Credentials are redacted before transport; Channel presentation additionally
+redacts machine-private absolute paths, strips control characters, and bounds
+text to 2,000 characters. Redaction preserves subsequent lines and the actual
+cause. Generic text is used only when no cause was supplied. Internal database
+errors retain their existing diagnostic-reference boundary.
+
+This requires Hub support to display the cause and a CLI release to retain Git
+stderr. Old CLIs cannot recover a cause they already discarded. Existing failure
+messages are historical records and are not rewritten.
