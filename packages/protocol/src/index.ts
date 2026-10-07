@@ -428,13 +428,14 @@ export {
 } from "./restricted-content-scope.js";
 export {
   AUTOMATION_REFERENCE_SCHEME, automationReferenceMarkdown,
-  automationReferences, insertAutomationReference, mergePageText, pageBlockAt, pageBlocks,
-  pageChangedBlocks, pageChangeGist, pageHeadingSlug, pageLineDiff, pageReferencesIn,
-  pageReferenceSpans, pageReferenceToken, removeAutomationReference,
-  replaceAutomationReference,
+  automationReferences, GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
+  gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText,
+  pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageHeadingSlug, pageLineDiff,
+  pageReferencesIn, pageReferenceSpans, pageReferenceToken, parseGitHubFileReference,
+  removeAutomationReference, replaceAutomationReference,
 } from "./page-markdown.js";
 export type {
-  PageBlock, PageLineDiff, PageMergeResult, PageReferenceSpan,
+  GitHubFileReference, PageBlock, PageLineDiff, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
   channelReferenceSpans, channelReferenceToken, loneMessageReference,
@@ -448,7 +449,7 @@ export {
 } from "./pages.js";
 export type {
   PageAuthor, PageAwareness, PageBlockAwareness, PageChanges, PageClaim, PageConversation,
-  PageDocument, PageLink, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
+  PageDocument, PageGitHubFile, PageLink, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
   PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PageOwedUpdate, PagePresent,
   PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeAgent, PageWorkingAgent, PublicPage,
 } from "./pages.js";

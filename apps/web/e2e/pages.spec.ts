@@ -1039,3 +1039,73 @@ test("everyday editing works as in Google Docs: rename the page, grow a table, l
   await expect.poll(() => pageMarkdown(server)).toContain("See the notes. <https://xmatrix.sh/docs>\n");
   await expect.poll(() => pageMarkdown(server)).toMatch(/\| Search \| Shipped \| +\|\n\| +\| +\| +\|/u);
 });
+
+const PROMPT_FILE = {
+  repository: "LambdaLabsHQ/xmatrix", path: "docs/prompts/bootstrap.md", ref: null, sha: "abc1234def5678", size: 210,
+  htmlUrl: "https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/prompts/bootstrap.md",
+  text: "# Startup prompt\n\nYou are running inside an xMatrix session.\n\n- Follow the [channel contract](contract.md).\n" +
+    "- Keep responses concise.\n\n```sh\nxmatrix send <channel-id> \"<message>\"\n```\n",
+  truncated: false,
+};
+
+test("a GitHub file the page embeds is drawn below its link, read through the Hub", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-github-file", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/github-file\?href=/u,
+    PROMPT_FILE);
+  const editor = await openLivePage(browser,
+    "# Relay\n\n## Startup prompt\n\n[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md)\n");
+  const card = editor.getByTestId("page-github-file");
+  await expect(card).toContainText("LambdaLabsHQ/xmatrix / docs/prompts/bootstrap.md");
+  await expect(card).toContainText("default branch · abc1234");
+  await expect(card.locator("h1", { hasText: "Startup prompt" })).toBeVisible();
+  await expect(card.locator("pre")).toContainText("xmatrix send <channel-id>");
+  await expect(card.getByRole("link", { name: "channel contract" }), "links point where they do on GitHub")
+    .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/prompts/contract.md");
+  await expect(card.getByRole("link", { name: "Open on GitHub" })).toHaveAttribute("href", PROMPT_FILE.htmlUrl);
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file.png") });
+  await browser.setViewportSize({ width: 393, height: 852 });
+  await expect(card.getByRole("link", { name: "Open on GitHub" })).toBeVisible();
+  await expect.poll(() => card.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file-mobile.png") });
+});
+
+test("a long embedded file unfolds while its source stays accessible", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-github-file", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/github-file\?href=/u,
+    { ...PROMPT_FILE, text: "# Startup prompt\n\n" + "A paragraph in the prompt.\n\n".repeat(40) + "The end of the prompt.\n" });
+  const editor = await openLivePage(browser,
+    "[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md)\n");
+  const file = editor.getByTestId("page-github-file");
+  await expect(file.getByRole("button", { name: "Show all" })).toBeVisible();
+  await expect(file.getByRole("link", { name: "Open on GitHub" })).toBeVisible();
+  await file.getByRole("button", { name: "Show all" }).click();
+  await expect(file.getByText("The end of the prompt.", { exact: true })).toBeVisible();
+  await expect(file.getByRole("button", { name: "Show all" })).toHaveCount(0);
+});
+
+test("the insert menu embeds a pasted GitHub file link, and a refusal names what is missing", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-github-file", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/github-file\?href=/u,
+    { error: "Connect GitHub for this Space to show embedded files", code: "github_connection_required" }, { status: 409 });
+  const server = pageDocument("# Relay\n\n## Prompts\n\nThe startup prompt:\n");
+  const editor = await openLivePage(browser, server);
+  await editor.getByText("The startup prompt:", { exact: true }).click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.press("Enter");
+  await browser.keyboard.type("/github");
+  await expect(browser.getByTestId("page-insert-menu")).toContainText("GitHub file");
+  await browser.keyboard.press("Enter");
+  const form = browser.getByTestId("page-embed-github-file");
+  await form.getByRole("textbox", { name: "GitHub file link" }).fill("https://github.com/LambdaLabsHQ/xmatrix/tree/main/docs");
+  await form.getByRole("button", { name: "Embed" }).click();
+  await expect(form, "a folder link is not a file").toContainText("Paste a file link");
+  await form.getByRole("textbox", { name: "GitHub file link" })
+    .fill("https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/prompts/bootstrap.md");
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file-insert.png") });
+  await form.getByRole("button", { name: "Embed" }).click();
+  await expect(form).toBeHidden();
+  await expect.poll(() => pageMarkdown(server))
+    .toContain("[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md?ref=main)");
+  await expect(editor.getByTestId("page-github-file")).toContainText("Connect GitHub for this Space to show this file.");
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file-refused.png") });
+});
