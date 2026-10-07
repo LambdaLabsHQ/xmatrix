@@ -1,11 +1,14 @@
 "use client";
 
 import { ChevronRight } from "lucide-react";
+import { useMemo } from "react";
 import {
   agentPresetAvatarUrl,
   normalizeAgentPresetRuntime,
   type AgentRegistrationSummary,
+  type ObservabilityEvent,
   type SerializedAutomation,
+  type SerializedChannel,
 } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
@@ -22,6 +25,7 @@ import { registrationActivity, registrationCatalogErrorText, registrationListed 
 import { scheduleRunning } from "./schedules-model";
 import { formatRelativeAge } from "./time-display";
 import { ToolDetailSection, ToolPaperScroll } from "./tool-split";
+import { channelWorkInHandInstanceIds } from "./workspace-shell-chrome";
 import type { MachineSummary } from "./workspace-shell-helpers";
 
 /** Machine rows show at most this many runtimes; the rest are counted. */
@@ -40,6 +44,8 @@ export function StatusView({
   spaceId,
   token,
   machines,
+  channels,
+  events,
   automations,
   onOpenAgents,
   onOpenMachine,
@@ -50,6 +56,8 @@ export function StatusView({
   spaceId: string | null;
   token: string | undefined;
   machines: MachineSummary[];
+  channels: readonly SerializedChannel[];
+  events: ObservabilityEvent[];
   automations: SerializedAutomation[];
   onOpenAgents: () => void;
   onOpenMachine: (machineId: string) => void;
@@ -64,7 +72,12 @@ export function StatusView({
 
   const registrations: Array<AgentRegistrationSummary & { harness: string }> = (catalog.data?.capabilities ?? [])
     .flatMap((group) => group.locations.filter(registrationListed).map((registration) => ({ ...registration, harness: group.harness })));
-  const workingOf = (registration: AgentRegistrationSummary) => registration.live?.running.length ?? 0;
+  // Working is what the conversation list shows as in progress: a live
+  // process waiting for its next message runs but does not work.
+  const working = useMemo(() => new Set(channels.flatMap((channel) => channelWorkInHandInstanceIds(channel, events))),
+    [channels, events]);
+  const workingOf = (registration: AgentRegistrationSummary) =>
+    registration.live?.running.filter((instance) => working.has(instance.instanceId)).length ?? 0;
 
   const runtimes = (catalog.data?.capabilities ?? []).map((group) => {
     const locations = group.locations.filter(registrationListed);
@@ -97,14 +110,15 @@ export function StatusView({
 
   const machineRows = machines.map((machine) => {
     const counts = runtimesOn(machine);
-    const working = counts.reduce((sum, count) => sum + count.working, 0) || machine.activeRuns || 0;
+    // Active Runs count idle processes too; read them only until the catalog says who works.
+    const working = catalog.data ? counts.reduce((sum, count) => sum + count.working, 0) : machine.activeRuns || 0;
     return { machine, counts, working, online: machine.status === "online" };
   }).sort((left, right) => Number(right.online) - Number(left.online) || right.working - left.working
     || left.machine.name.localeCompare(right.machine.name));
   const online = machineRows.filter((row) => row.online).length;
   const busy = machineRows.filter((row) => row.online && row.working > 0).length;
 
-  const working = catalog.data
+  const workingCount = catalog.data
     ? registrations.reduce((sum, registration) => sum + workingOf(registration), 0)
     : machineRows.reduce((sum, row) => sum + row.working, 0);
 
@@ -116,8 +130,8 @@ export function StatusView({
     <ToolPaperScroll>
       <header className="app-status-hero mb-8" data-testid="status-hero">
         <div className="flex items-baseline gap-2.5">
-          <span className="text-6xl font-black leading-none tabular-nums" data-testid="status-working">{working}</span>
-          <span className="text-lg font-semibold">{working === 1 ? "agent working" : "agents working"}</span>
+          <span className="text-6xl font-black leading-none tabular-nums" data-testid="status-working">{workingCount}</span>
+          <span className="text-lg font-semibold">{workingCount === 1 ? "agent working" : "agents working"}</span>
         </div>
         <p className="mt-2 text-sm text-muted-foreground" data-testid="status-summary">
           {busy}/{online} machines busy · {active.length} {active.length === 1 ? "schedule" : "schedules"}
