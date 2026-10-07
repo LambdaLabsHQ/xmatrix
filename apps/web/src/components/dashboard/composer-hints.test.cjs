@@ -18,3 +18,10 @@ test("each hint names a trigger the composer completes", () => {
   assert.equal(findActiveReference("#", 1)?.kind, "channel");
   assert.ok(findActiveSlashCommand("/", 1));
 });
+
+test("a rotating hint splits into its trigger and words; other placeholders do not", () => {
+  const { composerHintParts } = require("./composer-hints.ts");
+  assert.deepEqual(composerHintParts("@ to summon an agent"), { trigger: "@", rest: " to summon an agent" });
+  assert.deepEqual(composerHintParts("[[ for pages"), { trigger: "[[", rest: " for pages" });
+  assert.equal(composerHintParts("Join channel to send"), null);
+});

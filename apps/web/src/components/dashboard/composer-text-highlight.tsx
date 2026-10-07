@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { neighbourRoom, planMentionBands, type MentionBandInput, type MentionFragment } from "./composer-mention-bands";
+import { composerHintParts } from "./composer-hints";
 import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
 const MIRRORED_STYLE_KEYS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "fontStretch",
@@ -87,8 +88,18 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
     style={{ borderColor: "transparent", borderStyle: "solid", boxSizing: "border-box", overflowWrap: "break-word" }}>
     <div ref={layerRef} className="app-composer-mention-bands" />
     {pieces}{value.slice(offset)}
-    {hint ? <span data-testid="composer-hint" className="text-muted-foreground">{hint}</span> : null}{"\n"}
+    {hint ? <ComposerHint hint={hint} /> : null}{"\n"}
   </div>;
+}
+
+/** Faint words after the trigger they teach; keyed by text so each change rises in. */
+function ComposerHint({ hint }: { hint: string }) {
+  const parts = composerHintParts(hint);
+  if (!parts) return <span data-testid="composer-hint" className="app-composer-hint">{hint}</span>;
+  return <span key={hint} data-testid="composer-hint" className="app-composer-hint" data-rotating="true"
+    data-summon={parts.trigger === "@" ? "true" : undefined}>
+    <span className="app-composer-hint-trigger">{parts.trigger}</span>{parts.rest}
+  </span>;
 }
 
 /**
