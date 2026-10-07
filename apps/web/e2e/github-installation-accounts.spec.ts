@@ -12,11 +12,11 @@ const connection = {
 };
 const installations = /\/api\/xmatrix\/spaces\/[^/]+\/app-connections\/github\/installations$/;
 
-async function openConfigure(page: Page) {
+async function openGitHub(page: Page, status = "configured") {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   await fixtureJson(page, "github-providers", "**/api/xmatrix/connectors/oauth/providers", { providers: ["github"] });
   await fixtureJson(page, "github-connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, {
-    connections: [connection],
+    connections: [{ ...connection, status }],
   });
   await fixtureJson(page, "github-executions", "**/api/xmatrix/spaces/*/app-executions", { executions: [] });
   await fixtureJson(page, "github-policies", /\/app-connections\/github\/policies$/, { policies: [] });
@@ -27,12 +27,10 @@ async function openConfigure(page: Page) {
   }, { method: "GET" });
   await page.getByRole("button", { name: "App", exact: true }).click();
   await page.getByTestId("connector-row").filter({ hasText: "GitHub" }).click();
-  await page.getByRole("group", { name: "GitHub connection actions" })
-    .getByRole("button", { name: "Configure", exact: true }).click();
 }
 
-test("Configure lists every linked GitHub account and links one already installed on GitHub", async ({ page }) => {
-  await openConfigure(page);
+test("GitHub lists every linked account and links one already installed on GitHub", async ({ page }) => {
+  await openGitHub(page);
   const accounts = page.getByTestId("github-installation-accounts");
   await expect(accounts.getByTestId("github-installation-account")).toHaveCount(2);
   await expect(accounts).toContainText("LambdaLabsHQ");
@@ -45,4 +43,10 @@ test("Configure lists every linked GitHub account and links one already installe
   await accounts.getByRole("button", { name: "Link yiming" }).click();
   await expect.poll(async () => (await fixtureRequests(page, "github-link")).length).toBe(1);
   expect(await fixtureRequestBodies(page, "github-link")).toEqual([{ installationId: "222" }]);
+});
+
+test("a disconnected GitHub still offers its accounts to link", async ({ page }) => {
+  await openGitHub(page, "disconnected");
+  const accounts = page.getByTestId("github-installation-accounts");
+  await expect(accounts.getByRole("button", { name: "Link yiming" })).toBeVisible();
 });

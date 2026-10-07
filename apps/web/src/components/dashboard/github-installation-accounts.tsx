@@ -46,7 +46,12 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onInstall
 
   const load = useCallback(async () => {
     try {
-      setInstallations(await xmatrixApiRequest<GitHubInstallations>({ url, token }));
+      const payload = await xmatrixApiRequest<Partial<GitHubInstallations>>({ url, token });
+      setInstallations({
+        linked: Array.isArray(payload?.linked) ? payload.linked : [],
+        available: Array.isArray(payload?.available) ? payload.available : [],
+        accountRequired: payload?.accountRequired === true,
+      });
     } catch (caught) {
       setError((caught as Error).message);
     }
@@ -77,9 +82,8 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onInstall
     }));
 
   return (
-    <div className="app-connector-provider-access border-t border-border/60 pt-4" data-testid="github-installation-accounts">
-      <p className="text-sm font-bold">GitHub accounts</p>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+    <div className="app-connector-provider-access" data-testid="github-installation-accounts">
+      <p className="text-xs leading-5 text-muted-foreground">
         Each GitHub account or organization is its own App installation. This Space reaches the
         repositories of every account linked here.
       </p>
