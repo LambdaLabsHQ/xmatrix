@@ -37,6 +37,7 @@ import { avatarInitials } from "@/components/dashboard/completion-option-button"
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
+import type { PageCreation } from "./page-creation";
 
 // The native shell also imports this module for its list screens. The editor
 // (ProseMirror and the page document) belongs to an open document, not to the cold-start list dependency graph.
@@ -240,35 +241,6 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
 }
 
 const PREFETCHED_PAGES = 40;
-
-export type PageCreation = ReturnType<typeof usePageCreation>;
-
-/**
- * Creating a page, shared by the tree's own + and, on a phone, the + in the
- * top bar: one state, so the tree shows the error whichever of them started it.
- */
-export function usePageCreation(spaceId: string | null, token: string, onCreated: (pageId: string) => void) {
-  const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const create = useCallback(async (parentPageId: string | null) => {
-    const title = window.prompt(parentPageId ? "Title of the new sub-page" : "Title of the new page");
-    if (!title?.trim() || !spaceId) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const { page } = await pageApi.create(spaceId, token, { title: title.trim(), parentPageId });
-      await queryClient.invalidateQueries({ queryKey: ["xmatrix"], predicate: (query) =>
-        query.queryKey.includes("page-tree") });
-      onCreated(page.pageId);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create the page");
-    } finally {
-      setCreating(false);
-    }
-  }, [onCreated, queryClient, spaceId, token]);
-  return { create, creating, error };
-}
 
 export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, creation,
   layout = "sidebar", create }: {
