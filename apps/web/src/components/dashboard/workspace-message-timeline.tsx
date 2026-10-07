@@ -67,7 +67,7 @@ import {
   copyImageAttachmentToClipboard,
   copyTextToClipboard,
   dataUrlToBlob,
-  fixedContainingBlockRect, centeredToolbarPosition, observeToolbarLayout,
+  fixedContainingBlockRect, centeredToolbarPosition, morphPanelPosition, observeToolbarLayout,
   isMessageActionBypassTarget,
   isTimelineNearBottom,
   presentationAttachmentKind,
@@ -3308,6 +3308,7 @@ export function AgentWorkAvatar({
   const actionPopupRef = useRef<HTMLDivElement | null>(null);
   const actionToolbarRef = useRef<HTMLDivElement | null>(null);
   const hoverStackRef = useRef<HTMLDivElement | null>(null);
+  const morphContentRef = useRef<HTMLDivElement | null>(null);
   // Which part of the item the pointer is on picks the card above it: the
   // island's words have their own (what it waits on), the face the Instance's.
   const [hoverPart, setHoverPart] = useState<"instance" | "intent">("instance");
@@ -3383,25 +3384,33 @@ export function AgentWorkAvatar({
     const avatar = avatarButtonRef.current;
     const popup = actionPopupRef.current;
     const stack = hoverStackRef.current;
-    if (!avatar || !popup || !stack) return;
-    const anchor = (hoverPart === "intent"
-      ? avatar.closest(".app-agent-work-item")?.querySelector(".app-agent-work-intent") : null) ?? avatar;
-    const viewportPosition = centeredToolbarPosition(anchor,
-      stack.getBoundingClientRect().width || (canReborn ? 220 : 140));
-    // The cards sit outside the glass island. Its backdrop filter contains
+    const content = morphContentRef.current;
+    if (!avatar || !popup || !stack || !content) return;
+    // The panel grows up out of the capsule the pointer is on: the island,
+    // or the bare disc when there is none.
+    const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    // The content keeps its final layout whatever size the glass is at, so
+    // it measures the panel the glass grows into.
+    const contentRect = content.getBoundingClientRect();
+    const morph = morphPanelPosition(capsule, contentRect.width);
+    // The panel sits outside the glass island. Its backdrop filter contains
     // the avatar, but does not contain this sibling popup.
     const containingBlockRect = fixedContainingBlockRect(popup);
     const nextPosition = {
-      left: viewportPosition.left - (containingBlockRect?.left ?? 0),
-      top: viewportPosition.top - (containingBlockRect?.top ?? 0),
-    };
+      left: morph.left - (containingBlockRect?.left ?? 0),
+      top: morph.bottom - (containingBlockRect?.top ?? 0),
+      "--app-agent-work-capsule-x": `${morph.capsuleLeft}px`,
+      "--app-agent-work-capsule-w": `${morph.capsuleWidth}px`,
+      "--app-agent-work-capsule-h": `${morph.capsuleHeight}px`,
+      "--app-agent-work-panel-w": `${Math.max(contentRect.width, morph.capsuleWidth)}px`,
+      "--app-agent-work-panel-h": `${contentRect.height}px`,
+    } as CSSProperties;
     setActionToolbarPosition((currentPosition) => {
-      if (currentPosition.left === nextPosition.left && currentPosition.top === nextPosition.top) {
-        return currentPosition;
-      }
-      return nextPosition;
+      const current = currentPosition as Record<string, unknown>;
+      const next = nextPosition as Record<string, unknown>;
+      return Object.keys(next).every((key) => current[key] === next[key]) ? currentPosition : nextPosition;
     });
-  }, [canReborn, hoverPart]);
+  }, []);
 
   // On the island the capsule is the one glass.
   const island = Boolean(item.intent || waiting || issue || notice);
@@ -3429,9 +3438,18 @@ export function AgentWorkAvatar({
     const layoutRoot = avatar?.closest(".app-message-surface");
     if (!avatar || !stack || !workItem || !layoutRoot) return;
 
-    return observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
+    // The panel opens from the capsule's shape, so that shape has to be known
+    // before the pointer arrives: follow the capsule's size while at rest too.
+    const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    const capsuleObserver = new ResizeObserver(() => positionActionToolbar());
+    capsuleObserver.observe(capsule);
+    const stopFollowingLayout = observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
       () => workItem.matches(":hover, :focus-within"));
-  }, [positionActionToolbar, hasHoverCards]);
+    return () => {
+      capsuleObserver.disconnect();
+      stopFollowingLayout();
+    };
+  }, [positionActionToolbar, hasHoverCards, island]);
 
   useLayoutEffect(() => {
     positionActionToolbar();
@@ -3533,6 +3551,7 @@ export function AgentWorkAvatar({
   return (
     <div
       className="app-agent-work-item group relative flex shrink-0 items-center"
+      data-morph={hoverCards ? "" : undefined}
       onPointerOver={(event) => {
         // Moving onto the card itself keeps the card it is on.
         const target = event.target as Element;
@@ -3563,9 +3582,18 @@ export function AgentWorkAvatar({
         </LiquidGlassPill>
       ) : avatarButton}
       {hoverCards ? (
-        // Every card the item shows sits above it in one column, in one chrome.
+        // The island grows up into a panel, as the composer does for its
+        // completions: one glass whose bottom row is the island itself (the
+        // seat), with the card the pointer asked for above it. A bare disc
+        // has no words to sit under, so it just stretches right into a
+        // capsule with its controls beside the face.
         <div ref={actionPopupRef} className="app-agent-work-actions" style={actionToolbarPosition}>
-          <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
+          <LiquidGlassPill className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
+            <div ref={morphContentRef} className="app-agent-work-morph-content">
+              <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
+              <span className="app-agent-work-morph-seat" aria-hidden="true" />
+            </div>
+          </LiquidGlassPill>
         </div>
       ) : null}
     </div>
