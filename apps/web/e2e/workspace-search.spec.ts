@@ -5,6 +5,7 @@ import {
   E2E_DESKTOP_CONTEXT,
   E2E_NOW,
   E2E_SPACE,
+  installPageTreeStubs,
   installWorkspaceStubs,
   openWorkspaceWithStubs,
 } from "./workspace-fixtures";
@@ -108,4 +109,26 @@ test("a conversation found by name opens and is revealed in the list", async ({ 
   await expect(page).toHaveURL(new RegExp(`/channels/${target.name}--${target.id}$`, "u"));
   await expect(row).toHaveClass(/app-channel-row-active/u);
   await expect(row).toBeInViewport();
+});
+
+test("the search capsule sits edge for edge over the details planks", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const capsule = page.locator(".app-global-bar").getByRole("button", { name: "Search" });
+  const plank = page.locator(".app-details .app-detail-plank").first();
+  await expect(plank).toBeVisible();
+  const [capsuleBox, plankBox] = await Promise.all([capsule.boundingBox(), plank.boundingBox()]);
+  expect(capsuleBox!.x).toBeCloseTo(plankBox!.x, 0);
+  expect(capsuleBox!.x + capsuleBox!.width).toBeCloseTo(plankBox!.x + plankBox!.width, 0);
+  expect(capsuleBox!.y + capsuleBox!.height).toBeLessThanOrEqual(plankBox!.y);
+});
+
+test("a page's controls end before the search capsule", async ({ page }) => {
+  await installPageTreeStubs(page, ["Home"]);
+  await page.goto(`/app/${encodeURIComponent(E2E_SPACE.id)}/pages`, { waitUntil: "domcontentloaded" });
+  await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
+  const controls = page.getByTestId("page-controls");
+  await expect(controls.getByRole("button", { name: /Share/u })).toBeVisible();
+  const capsule = await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).boundingBox();
+  const share = await controls.getByRole("button", { name: /Share/u }).boundingBox();
+  expect(share!.x + share!.width).toBeLessThanOrEqual(capsule!.x);
 });

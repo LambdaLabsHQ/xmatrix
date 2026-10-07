@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
+import { useGlobalSearchClearance } from "@/components/dashboard/global-search-clearance";
 import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
@@ -493,6 +494,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       if (article) setViewport({ top: article.scrollTop, height: article.clientHeight });
     });
   }, []);
+  // History and Share end before the window's search capsule.
+  const clearGlobalSearch = useGlobalSearchClearance<HTMLElement>();
   const measureArticle = useCallback((article: HTMLElement | null) => {
     observer.current?.disconnect();
     observer.current = null;
@@ -1070,7 +1073,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
                 {titleField && <div className="mb-4 flex">{titleField}</div>}
               </>
             ) : (
-              <header className="app-band-header mb-4 flex flex-wrap items-center gap-1.5" data-testid="page-controls">
+              <header ref={clearGlobalSearch} className="app-band-header mb-4 flex flex-wrap items-center gap-1.5" data-testid="page-controls">
                 {titleField ?? <span className="mr-auto" />}
                 <span className="mr-1 text-xs text-muted-foreground" data-testid="page-save-state"
                   title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
