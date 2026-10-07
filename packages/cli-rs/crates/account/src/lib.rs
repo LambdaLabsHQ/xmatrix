@@ -13,8 +13,15 @@ use xmatrix_cli_update::{
     DEFAULT_CLI_RELEASE_API_URL, UpdateHintTarget, warn_if_cli_update_available,
 };
 
-pub async fn cmd_login(hub_url: &str, machine_name: Option<&str>) -> error::Result<()> {
-    let response = auth::login_with_browser(hub_url).await?;
+pub async fn cmd_login(
+    hub_url: &str,
+    machine_name: Option<&str>,
+    connect: Option<&str>,
+) -> error::Result<()> {
+    let response = match connect {
+        Some(setup_intent) => auth::login_for_setup_intent(hub_url, setup_intent).await?,
+        None => auth::login_with_browser(hub_url).await?,
+    };
     if config::normalized_hub_origin(&response.hub_url) != config::normalized_hub_origin(hub_url) {
         return Err(CliError::Auth(format!(
             "Login returned a session for {}, but the selected profile is bound to {}; no session was saved",
@@ -41,8 +48,18 @@ pub async fn cmd_login(hub_url: &str, machine_name: Option<&str>) -> error::Resu
         user.email.dimmed()
     );
     println!("  Hub: {}", session.hub_url.dimmed());
-    xmatrix_cli_core::machine_naming::ensure_machine_name(&session, machine_name).await?;
+    // A setup command names a new machine after its hostname instead of asking.
+    let hostname = connect.map(|_| auth::local_hostname());
+    xmatrix_cli_core::machine_naming::ensure_machine_name(
+        &session,
+        machine_name,
+        hostname.as_deref(),
+    )
+    .await?;
     let rejoined = rejoin_this_machine(&session).await;
+    if let Some(setup_intent) = connect {
+        report_setup_machine(&session, setup_intent).await;
+    }
     if protocol::normalize_hub_url(Some(&config::active_hub_url().await))
         != protocol::normalize_hub_url(Some(&session.hub_url))
     {
@@ -110,6 +127,30 @@ pub async fn cmd_login(hub_url: &str, machine_name: Option<&str>) -> error::Resu
 /// Logging in on a Machine its owner removed is how it comes back. A daemon
 /// refreshing its credential never asks for this, so a removed Machine that
 /// merely wakes up stays removed.
+/// Tells the page that showed the setup command which Machine this terminal became,
+/// so it can follow the machine coming online. The page is only a view: failing to
+/// tell it leaves the machine connected and is reported, not fatal.
+async fn report_setup_machine(session: &config::CliSession, setup_intent: &str) {
+    let Ok(identity) = config::machine_identity_for_owner(&session.user.id).await else {
+        return;
+    };
+    let url = format!(
+        "{}/{}/machine",
+        with_route(&session.hub_url, HubRoutes::SETUP_INTENTS),
+        urlencoding::encode(setup_intent.trim())
+    );
+    let body = serde_json::json!({ "machineId": identity.machine_id });
+    if let Err(error) =
+        http::request_json::<serde_json::Value>(&url, "POST", Some(&session.token), Some(body))
+            .await
+    {
+        eprintln!(
+            "{} Connected, but the xMatrix page could not be told: {error}",
+            "!".yellow().bold()
+        );
+    }
+}
+
 async fn rejoin_this_machine(session: &config::CliSession) -> bool {
     let Ok(identity) = config::machine_identity_for_owner(&session.user.id).await else {
         return false;

@@ -196,6 +196,10 @@ pub enum Commands {
         /// Name this Machine before starting its daemon; required for a new headless login.
         #[arg(long, env = "XMATRIX_MACHINE_NAME")]
         machine_name: Option<String>,
+        /// Connect this machine with the setup command copied from xMatrix: approve the
+        /// terminal on that page; the machine is named after its hostname unless named already.
+        #[arg(long, env = "XMATRIX_CONNECT", value_name = "SETUP_ID")]
+        connect: Option<String>,
     },
     /// Remove stored credentials for the selected environment
     Logout {
@@ -605,7 +609,7 @@ mod tests {
         Cli::command().debug_assert();
         let login = Cli::try_parse_from(["xmatrix", "login", "--machine-name", "Laptop"]).unwrap();
         assert!(
-            matches!(login.command, Some(Commands::Login { machine_name: Some(name) }) if name == "Laptop")
+            matches!(login.command, Some(Commands::Login { machine_name: Some(name), .. }) if name == "Laptop")
         );
         let setup = Cli::try_parse_from(["xmatrix", "setup", "daemon", "--machine-name", "Laptop"])
             .unwrap();
@@ -614,6 +618,15 @@ mod tests {
         );
         assert!(
             Cli::try_parse_from(["xmatrix", "workspace", "register", "--host", "Laptop"]).is_err()
+        );
+    }
+
+    #[test]
+    fn login_takes_the_setup_command_from_xmatrix() {
+        let login =
+            Cli::try_parse_from(["xmatrix", "login", "--connect", "0123456789abcdef"]).unwrap();
+        assert!(
+            matches!(login.command, Some(Commands::Login { connect: Some(id), machine_name: None }) if id == "0123456789abcdef")
         );
     }
 

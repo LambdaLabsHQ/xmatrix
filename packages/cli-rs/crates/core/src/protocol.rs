@@ -10,6 +10,7 @@ pub struct HubRoutes;
 impl HubRoutes {
     pub const LOGIN: &str = "/api/auth/cli/login";
     pub const DEVICE_START: &str = "/api/auth/cli/device/start";
+    pub const SETUP_INTENTS: &str = "/api/setup-intents";
     pub const DEVICE_TOKEN: &str = "/api/auth/cli/device/token";
     pub const REFRESH: &str = "/api/auth/refresh";
     pub const EXCHANGE_SESSION: &str = "/api/auth/cli/exchange-session";

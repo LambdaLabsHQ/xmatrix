@@ -47,10 +47,12 @@ pub async fn require_machine_name(hub_url: &str, token: &str, machine_id: &str) 
 }
 
 /// An existing Machine keeps its chosen name unless an explicit new name is supplied.
-/// A headless invocation cannot silently choose one on behalf of the owner.
+/// A headless invocation cannot silently choose one on behalf of the owner, unless
+/// the owner chose `default` for it (a setup command names a new machine by its hostname).
 pub async fn ensure_machine_name(
     session: &config::CliSession,
     supplied: Option<&str>,
+    default: Option<&str>,
 ) -> Result<String> {
     let identity = config::machine_identity_for_owner(&session.user.id).await?;
     let existing = machine_name(&session.hub_url, &session.token, &identity.machine_id).await?;
@@ -60,21 +62,24 @@ pub async fn ensure_machine_name(
             if let Some(name) = existing {
                 return Ok(name);
             }
-            if !std::io::stdin().is_terminal() {
+            if let Some(name) = default.and_then(|value| validate_name(value).ok()) {
+                name
+            } else if !std::io::stdin().is_terminal() {
                 return Err(CliError::Auth("This Machine needs a name. Pass --machine-name <name> or set XMATRIX_MACHINE_NAME; no daemon was started.".into()));
-            }
-            loop {
-                eprint!("Name this machine (for example, Laptop): ");
-                std::io::stderr().flush()?;
-                let mut line = String::new();
-                if std::io::stdin().read_line(&mut line)? == 0 {
-                    return Err(CliError::Auth(
-                        "A Machine name is required; no daemon was started".into(),
-                    ));
-                }
-                match validate_name(&line) {
-                    Ok(name) => break name,
-                    Err(error) => eprintln!("{error}"),
+            } else {
+                loop {
+                    eprint!("Name this machine (for example, Laptop): ");
+                    std::io::stderr().flush()?;
+                    let mut line = String::new();
+                    if std::io::stdin().read_line(&mut line)? == 0 {
+                        return Err(CliError::Auth(
+                            "A Machine name is required; no daemon was started".into(),
+                        ));
+                    }
+                    match validate_name(&line) {
+                        Ok(name) => break name,
+                        Err(error) => eprintln!("{error}"),
+                    }
                 }
             }
         }

@@ -58,8 +58,8 @@ use agent_presentation::{
 };
 use cli::{
     AttachmentCommand, Cli, CliEnvironmentArg, Commands, DaemonCommand, EnvironmentCommand,
-    ManagementCommand, MigrateCommand, MigrationHistoryMode,
-    ProfileCommand, RequestCommand, SecretCommand, SetupCommand,
+    ManagementCommand, MigrateCommand, MigrationHistoryMode, ProfileCommand, RequestCommand,
+    SecretCommand, SetupCommand,
 };
 use config::CliSession;
 use error::CliError;
@@ -87,8 +87,8 @@ use xmatrix_cli_update::{
 use xmatrix_cli_update::{InstalledCliUpdate, install_cli_update_for_daemon_restart};
 use xmatrix_cli_update::{install_cli_from_seed, install_daemon_service};
 use xmatrix_cli_workspace::{
-    cmd_workspace, list_machine_daemon_workspaces, observed_hostname,
-    upsert_workspace, validate_daemon_workspace_allowed, validate_daemon_workspace_path_isolated,
+    cmd_workspace, list_machine_daemon_workspaces, observed_hostname, upsert_workspace,
+    validate_daemon_workspace_allowed, validate_daemon_workspace_path_isolated,
 };
 
 type SharedMachineDaemonConnection = Arc<MachineDaemonConnectionClient>;
@@ -625,9 +625,10 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
     }
 
     match cli.command {
-        Some(Commands::Login { machine_name }) => {
-            cmd_login(&hub_url, machine_name.as_deref()).await
-        }
+        Some(Commands::Login {
+            machine_name,
+            connect,
+        }) => cmd_login(&hub_url, machine_name.as_deref(), connect.as_deref()).await,
         Some(Commands::Session { command }) => {
             crate::runtime_session_commands::cmd_session(&hub_url, command).await
         }
@@ -2012,7 +2013,7 @@ async fn ensure_setup_machine_name(hub_url: &str, name: Option<&str>) -> error::
     // Installing a service before login creates no Machine. Its enrollment is
     // separately guarded; once signed in, setup must resolve the required name.
     if let Some(session) = config::load_session_for_hub(hub_url).await {
-        xmatrix_cli_core::machine_naming::ensure_machine_name(&session, name).await?;
+        xmatrix_cli_core::machine_naming::ensure_machine_name(&session, name, None).await?;
     }
     Ok(())
 }
