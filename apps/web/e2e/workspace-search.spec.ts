@@ -62,7 +62,7 @@ test("search is the window's, not the rail's: the top bar opens it in every view
     await page.goto(`/app/${E2E_SPACE.id}/${path}`, { waitUntil: "domcontentloaded" });
     await expect(page.locator(".app-global-bar").getByRole("button", { name: "Search" })).toBeVisible();
   }
-  await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).filter({ visible: true }).click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
 });
 
@@ -70,7 +70,7 @@ test("Enter opens every result at an address that names the search", async ({ pa
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, RELEASE] });
   await stubMessageSearch(page);
   await page.goto(`/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).filter({ visible: true }).click();
   await page.keyboard.type("deploy");
   await expect(page.getByRole("dialog", { name: "Search workspace" }).getByText("deploy the hub (1)")).toBeVisible();
   await page.keyboard.press("Enter");
@@ -100,7 +100,7 @@ test("a conversation found by name opens and is revealed in the list", async ({ 
   await expect(row).toBeAttached();
   await expect(row).not.toBeInViewport();
 
-  await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).filter({ visible: true }).click();
   await page.keyboard.type(target.name);
   const dialog = page.getByRole("dialog", { name: "Search workspace" });
   await dialog.getByRole("button", { name: new RegExp(`#${target.name}`, "u") }).click();
@@ -111,15 +111,27 @@ test("a conversation found by name opens and is revealed in the list", async ({ 
   await expect(row).toBeInViewport();
 });
 
-test("the search capsule sits edge for edge over the details planks", async ({ page }) => {
+test("conversation actions and borderless search sit beside its name", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
-  const capsule = page.locator(".app-global-bar").getByRole("button", { name: "Search" });
-  const plank = page.locator(".app-details .app-detail-plank").first();
-  await expect(plank).toBeVisible();
-  const [capsuleBox, plankBox] = await Promise.all([capsule.boundingBox(), plank.boundingBox()]);
-  expect(capsuleBox!.x).toBeCloseTo(plankBox!.x, 0);
-  expect(capsuleBox!.x + capsuleBox!.width).toBeCloseTo(plankBox!.x + plankBox!.width, 0);
-  expect(capsuleBox!.y + capsuleBox!.height).toBeLessThanOrEqual(plankBox!.y);
+  const header = page.locator(".app-main .app-panel-header").first();
+  const name = header.getByText(E2E_CHANNEL.name, { exact: true });
+  const actions = header.getByRole("button", { name: `Actions for #${E2E_CHANNEL.name}` });
+  const search = header.getByRole("button", { name: "Search", exact: true });
+  await expect(search).toBeVisible();
+  await expect(page.locator(".app-global-bar")).toHaveCount(0);
+  const [nameBox, actionsBox, searchBox] = await Promise.all([name.boundingBox(), actions.boundingBox(), search.boundingBox()]);
+  expect(actionsBox!.x - (nameBox!.x + nameBox!.width)).toBeLessThanOrEqual(8);
+  expect(searchBox!.x - (actionsBox!.x + actionsBox!.width)).toBeLessThanOrEqual(8);
+  expect(await search.evaluate((node) => getComputedStyle(node).borderWidth)).toBe("0px");
+  await search.hover();
+  expect(await search.evaluate((node) => getComputedStyle(node).boxShadow)).toBe("none");
+  await actions.click();
+  const menu = page.getByRole("menu", { name: `Actions for #${E2E_CHANNEL.name}` });
+  await expect(menu.getByRole("menuitem", { name: /Copy.*link/u })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await search.click();
+  await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
+  await expect(page.locator(".app-topbar-search-input").getByText("in #general")).toHaveCount(0);
 });
 
 test("a page's controls end before the search capsule", async ({ page }) => {
@@ -133,15 +145,16 @@ test("a page's controls end before the search capsule", async ({ page }) => {
   expect(share!.x + share!.width).toBeLessThanOrEqual(capsule!.x);
 });
 
-test("without a details column, the conversation's own controls end before the search capsule", async ({ page }) => {
+test("a long conversation name keeps its search and actions visible without a details column", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 800 });
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const channel = { ...E2E_CHANNEL, name: "a-very-long-conversation-name-".repeat(3) + "end" };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [channel] });
   const header = page.locator(".app-main .app-panel-header").first();
   await expect(header).toBeVisible();
-  const capsule = await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).boundingBox();
-  await expect.poll(async () => {
-    const buttons = await header.locator("button:visible").evaluateAll((nodes) =>
-      nodes.map((node) => node.getBoundingClientRect().right));
-    return Math.max(...buttons);
-  }).toBeLessThanOrEqual(capsule!.x);
+  const search = header.getByRole("button", { name: "Search", exact: true });
+  await expect(search).toBeInViewport();
+  await expect(header.getByRole("button", { name: `Actions for #${channel.name}` })).toBeInViewport();
+  await expect(header.getByRole("button", { name: "Channel details" })).toBeInViewport();
+  await search.click();
+  await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
 });

@@ -844,6 +844,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           channel={selectedChannel}
           spaces={spaces}
           currentUserId={user.id}
+          onOpenSearch={openWorkspaceSearch}
           onRename={(name) => void renameChannel(selectedChannel.id, name)}
           onVisibilityChange={(mode) => void updateChannelVisibility(selectedChannel, mode)}
           onMove={() => openChannelMove(selectedChannel)}
@@ -1297,11 +1298,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             />
           ) : undefined}
         />
-        <GlobalSearchBar
+        {!(view === "messages" && selectedChannel && !composingConversation) && <GlobalSearchBar
           spaceName={currentSpace?.name ?? "this Space"}
           searching={workspaceSearchOpen}
           onOpenSearch={openWorkspaceSearch}
-        />
+        />}
         <CreateFab action={mobileCreate} />
         {!isIOSNativeShell && (
           <MobileTabDock

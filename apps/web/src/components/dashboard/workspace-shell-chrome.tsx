@@ -375,12 +375,7 @@ export function CountPill({
   );
 }
 
-/**
- * The window's top bar: wood across the whole width, carrying search in its
- * middle, where Slack and the Mac put it. Search is the one control every
- * view shares, so it belongs to the window, not to a list or the rail. When
- * search opens, its field takes this one's place.
- */
+/** The global search entry for destinations without a conversation header. */
 export function GlobalSearchBar({ spaceName, searching, onOpenSearch }: {
   spaceName: string;
   searching: boolean;
@@ -1188,7 +1183,7 @@ export function ChannelActionsMenu({
     const menuHeight = canManageVisibility ? 248 : 196;
     const below = rect.bottom + 8;
     setPos({
-      right: Math.max(12, window.innerWidth - rect.right),
+      right: Math.max(12, Math.min(window.innerWidth - 224 - 12, window.innerWidth - rect.right)),
       top: below + menuHeight <= window.innerHeight
         ? below
         : Math.max(12, rect.top - menuHeight - 8),
@@ -1451,6 +1446,7 @@ export function ChannelHeader({
   updatingVisibility,
   moving,
   onToggleMembers,
+  onOpenSearch,
   actions,
 }: {
   channel: SerializedChannel | null;
@@ -1463,6 +1459,7 @@ export function ChannelHeader({
   updatingVisibility: boolean;
   moving: boolean;
   onToggleMembers: () => void;
+  onOpenSearch: () => void;
   /** Controls of where the conversation is shown, such as closing it beside a page. */
   actions?: React.ReactNode;
 }) {
@@ -1543,6 +1540,28 @@ export function ChannelHeader({
               {channelHeading}
             </span>
             {channel && (
+              <div className="flex shrink-0 items-center gap-1 font-normal">
+                <ChannelActionsMenu
+                  channel={channel}
+                  shareUrl={absoluteChannelUrl(channel, spaces)}
+                  moving={moving}
+                  canManageVisibility={canManageVisibility}
+                  updatingVisibility={updatingVisibility}
+                  onMove={onMove}
+                  onVisibilityChange={onVisibilityChange}
+                />
+                <button
+                  type="button"
+                  title="Search (⌘F / Ctrl+F)"
+                  aria-label="Search"
+                  onClick={onOpenSearch}
+                  className="app-channel-search hidden size-8 shrink-0 items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground md:flex"
+                >
+                  <Search className="size-4" />
+                </button>
+              </div>
+            )}
+            {channel && (
               <button
                 type="button"
                 title={`Rename #${channelTitle(channel)}`}
@@ -1579,17 +1598,6 @@ export function ChannelHeader({
               ? visibleHumanChannelMembers(channel, channelSpace).length
               : 0}
         </button>
-        {channel && (
-          <ChannelActionsMenu
-            channel={channel}
-            shareUrl={absoluteChannelUrl(channel, spaces)}
-            moving={moving}
-            canManageVisibility={canManageVisibility}
-            updatingVisibility={updatingVisibility}
-            onMove={onMove}
-            onVisibilityChange={onVisibilityChange}
-          />
-        )}
         {actions}
       </div>
     </div>

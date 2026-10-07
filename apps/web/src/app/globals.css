@@ -4281,6 +4281,15 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 }
 
+/* The conversation's search action is ink beside its title, including on hover. */
+.xmatrix-app .app-panel-header .app-channel-search {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 /* Search floats over the top band like the composer floats over the bottom:
    one glass capsule, no bar behind it, at the window's top right, edge for
    edge over the details column's planks (21rem column, 1rem inset). */

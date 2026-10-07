@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 
 /**
- * Search (Cmd/Ctrl+F, or the rail): one dialog. The shortcut searches where
- * the reader is, so inside a conversation it starts scoped to it; the rail
+ * Search (Cmd/Ctrl+F, or a search button): one dialog. The shortcut searches where
+ * the reader is, so inside a conversation it starts scoped to it; the search
  * button searches the whole Space. Opening search on mobile focuses its input
  * in the same task so the on-screen keyboard comes up.
  */
