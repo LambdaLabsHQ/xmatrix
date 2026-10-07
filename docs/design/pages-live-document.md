@@ -523,12 +523,13 @@ A phone shows the same things on the page itself: avatars and the
 conversation count in the header, headings and bubbles in the text,
 and Share and History in the page's top bar.
 
-Creating a page uses one in-app title dialog for the desktop list and
-Ctrl/⌘+N shortcut, the phone's existing FAB, the empty list, and a parent row's
-sub-page +. It works in native WebViews without browser prompt support.
-Blank titles cannot be submitted; pending creation disables further submission
-and dismissal. A failed request keeps the title and shows the error for retry.
-Success refreshes the tree and opens the new page under the chosen parent.
+Creating a page works as in Notion: the desktop list's + and Ctrl/⌘+N, the
+phone's FAB, the empty list and a parent row's sub-page + each make an
+"Untitled" page at once, with no dialog or browser prompt, and open it under
+the chosen parent. The page opens with its title field focused and selected, on
+a phone as on a desktop, so typing names it; Enter or leaving the field saves
+the name, and an emptied field keeps the old one. While one creation is on its
+way another cannot start; a failure shows its error above the page list.
 
 ## 8. Build order
 
