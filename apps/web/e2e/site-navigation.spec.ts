@@ -1,6 +1,37 @@
 import { expect, test } from "@playwright/test";
 
 for (const width of [393, 820, 1440]) {
+  test(`navigation logo glass follows scrolling at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    const glass = page.locator(".site-navbar-brand-glass");
+    await expect(glass).toHaveCSS("opacity", "0");
+
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect(glass).toHaveCSS("opacity", "1");
+    const surface = glass.locator('[data-material="liquid-glass-pill"]');
+    await expect(surface).toBeVisible();
+    await expect.poll(() => surface.evaluate((element) => getComputedStyle(element).backdropFilter)).toContain("url(");
+    const logo = page.getByRole("link", { name: "xMatrix home", exact: true });
+    const logoBounds = (await logo.boundingBox())!;
+    const glassBounds = (await glass.boundingBox())!;
+    expect(glassBounds.x).toBeLessThanOrEqual(logoBounds.x);
+    expect(glassBounds.y).toBeLessThanOrEqual(logoBounds.y);
+    expect(glassBounds.x + glassBounds.width).toBeGreaterThanOrEqual(logoBounds.x + logoBounds.width);
+    expect(glassBounds.y + glassBounds.height).toBeGreaterThanOrEqual(logoBounds.y + logoBounds.height);
+    await expect(logo).toBeVisible();
+    await logo.click();
+    await expect(glass).toHaveCSS("opacity", "0");
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.evaluate(() => window.scrollTo(0, 25));
+    await expect(glass).toHaveCSS("opacity", "1");
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(glass).toHaveCSS("opacity", "0");
+  });
+}
+
+for (const width of [393, 820, 1440]) {
   test(`public navigation does not obscure content at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
 
