@@ -101,7 +101,7 @@ import { registrationTupleId } from "./use-registration-command";
 
 import {
   Building,
-  Cpu,
+  Bot,
   FileText,
   Hash,
   HardDrive,
@@ -755,7 +755,7 @@ export function searchResultIcon(kind: WorkspaceSearchResult["kind"]): React.Com
   if (kind === "page") return FileText;
   if (kind === "member") return UserRound;
   if (kind === "message") return MessageSquare;
-  if (kind === "agent") return Cpu;
+  if (kind === "agent") return Bot;
   if (kind === "space") return Building;
   if (kind === "machine") return HardDrive;
   return Radio;
