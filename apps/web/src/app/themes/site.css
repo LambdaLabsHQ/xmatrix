@@ -185,17 +185,13 @@ html:has(.site-page) {
   opacity: var(--navbar-wood-reveal);
 }
 
-/* The brand glass is a slab beside the wood bar, not a button: same corner. */
-.site-canvas .site-navbar-brand-glass .app-material-liquid-pill.app-material-liquid-pill {
-  border-radius: var(--site-surface-radius) !important;
-}
-
 .site-navbar-bar {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   height: 3.5rem;
-  border-radius: var(--site-surface-radius);
+  /* Capsule, like the logo glass beside it. */
+  border-radius: 999px;
 }
 
 .site-navbar .site-navbar-inner {
@@ -208,7 +204,7 @@ html:has(.site-page) {
 }
 
 .site-navbar-content {
-  padding-inline: 1rem;
+  padding-inline: 1.75rem 0.5rem;
 }
 
 .site-navbar a:not(.app-material-liquid-pill) {
@@ -254,7 +250,7 @@ html:has(.site-page) {
 }
 
 .site-hero {
-  background: none;
+  background: oklch(0.985 0.01 88);
 }
 
 /* Paper as a surface: a hairline and no shadow, so it reads as the same
