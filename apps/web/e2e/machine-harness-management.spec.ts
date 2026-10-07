@@ -179,12 +179,13 @@ test("a reload still shows how an earlier install ended, and says when it found 
   await expect(claude).not.toContainText("succeeded");
 });
 
-test("a machine that left work unanswered is not responding, and its actions wait", async ({ page }) => {
+test("a machine that left work unanswered is not responding, and its actions stay available", async ({ page }) => {
   await openMachine(page, "online", daemon.metadata.capabilities, { unansweredSince: E2E_NOW });
   const panel = page.getByTestId("machine-harness-panel");
   await expect(panel).toContainText("This machine is not responding");
-  await expect(panel.getByRole("button", { name: "Refresh", exact: true })).toBeDisabled();
-  await expect(panel.getByRole("row").filter({ hasText: "Claude Code" }).getByRole("button", { name: "Install", exact: true })).toBeDisabled();
+  await expect(panel).toContainText("a new action may not reach it");
+  await expect(panel.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
+  await expect(panel.getByRole("row").filter({ hasText: "Claude Code" }).getByRole("button", { name: "Install", exact: true })).toBeEnabled();
 });
 
 test("old daemons cannot uninstall", async ({ page }) => {
