@@ -431,16 +431,15 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 .page-automation-status[data-state="missing"] { cursor: default; }
 .page-automation-status:hover:not(:disabled) { color: var(--foreground); }
 
-/* A GitHub file the page embeds (§6.5): its link reads as the file's label, and the file is drawn below it,
-   read through from GitHub. Long files start folded. */
+/* A GitHub file the page embeds (§6.5): text on the page's paper, with its
+   source in a small citation below. Long files start folded. */
 .page-document .page-github-file-link,
 .page-document .page-github-file-link a,
 .page-document a:has(> .page-github-file-link) { color: var(--muted-foreground); text-decoration: none; }
 .page-document .page-github-file-link { font-size: 0.85em; }
 .page-github-file {
   margin: 0.5em 0 1em;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border-block: 1px solid var(--border);
   overflow: hidden;
   user-select: text;
   cursor: auto;
@@ -450,18 +449,17 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 12px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 0.75em 0;
   color: var(--muted-foreground);
   font-size: 0.8em;
 }
-.page-github-file-name { font-family: var(--font-mono, ui-monospace, monospace); color: var(--foreground); overflow-wrap: anywhere; }
+.page-github-file-name { overflow-wrap: anywhere; }
 .page-github-file-open { margin-left: auto; color: inherit; }
 .page-github-file-open:hover { color: var(--foreground); }
-.page-github-file-body { max-height: 32rem; overflow: hidden; padding: 4px 12px; }
-/* The file reads as a document inside the page, a step smaller, so its headings never outrank the page's. */
-.page-github-file-doc { font-size: 0.92em; }
-.page-github-file-doc > :first-child { margin-top: 0.5em; }
+.page-github-file-body { max-height: 32rem; overflow: hidden; padding: 1em 0 0; }
+/* Body text keeps the page's reading size; file headings sit below the page's. */
+.page-github-file-doc > * + * { margin-top: 0.75em; }
+.page-document .page-github-file-doc > :first-child { margin-top: 0; }
 .page-document .page-github-file-doc h1 { font-size: 1.3em; margin-top: 0.9em; }
 .page-document .page-github-file-doc h2 { font-size: 1.15em; margin-top: 0.9em; }
 .page-document .page-github-file-doc h3 { font-size: 1.05em; margin-top: 0.8em; }
@@ -480,8 +478,7 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 .page-github-file-unfold {
   display: block;
   width: 100%;
-  padding: 6px 12px;
-  border-top: 1px solid var(--border);
+  padding: 0.75em 0 0;
   color: var(--muted-foreground);
   font-size: 0.8em;
   text-align: left;

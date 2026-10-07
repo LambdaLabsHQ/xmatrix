@@ -100,7 +100,7 @@ function drawFile(card: HTMLElement, body: HTMLElement, reference: GitHubFileRef
       card.dataset.folded = "false";
       unfold.remove();
     });
-    card.append(unfold);
+    body.after(unfold);
   });
 }
 
@@ -166,7 +166,7 @@ export function githubFileEmbeds(read: () => ReadGitHubFile | undefined): Plugin
     card.dataset.testid = "page-github-file";
     const body = element("div", "page-github-file-body");
     body.append(note("Reading the file…"));
-    card.append(header(reference), body);
+    card.append(body, header(reference));
     const controller = new AbortController();
     aborts.set(card, controller);
     load(card, body, href, reference, controller.signal, 0);

@@ -1066,6 +1066,24 @@ test("a GitHub file the page embeds is drawn below its link, read through the Hu
     .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/prompts/contract.md");
   await expect(card.getByRole("link", { name: "Open on GitHub" })).toHaveAttribute("href", PROMPT_FILE.htmlUrl);
   await browser.screenshot({ path: test.info().outputPath("pages-github-file.png") });
+  await browser.setViewportSize({ width: 393, height: 852 });
+  await expect(card.getByRole("link", { name: "Open on GitHub" })).toBeVisible();
+  await expect.poll(() => card.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file-mobile.png") });
+});
+
+test("a long embedded file unfolds while its source stays accessible", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-github-file", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/github-file\?href=/u,
+    { ...PROMPT_FILE, text: "# Startup prompt\n\n" + "A paragraph in the prompt.\n\n".repeat(40) + "The end of the prompt.\n" });
+  const editor = await openLivePage(browser,
+    "[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md)\n");
+  const file = editor.getByTestId("page-github-file");
+  await expect(file.getByRole("button", { name: "Show all" })).toBeVisible();
+  await expect(file.getByRole("link", { name: "Open on GitHub" })).toBeVisible();
+  await file.getByRole("button", { name: "Show all" }).click();
+  await expect(file.getByText("The end of the prompt.", { exact: true })).toBeVisible();
+  await expect(file.getByRole("button", { name: "Show all" })).toHaveCount(0);
 });
 
 test("the insert menu embeds a pasted GitHub file link, and a refusal names what is missing", async ({ page: browser }) => {

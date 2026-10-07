@@ -522,7 +522,10 @@ place without copying it:
 - **The editor draws the file below the paragraph** that holds the link:
   markdown as the page draws its own text, read only, with its links pointing
   where they do on GitHub; any other text file as code; a binary file, or one
-  too large for GitHub to inline, as a link. A long file starts folded.
+  too large for GitHub to inline, as a link. It reads on the page's paper,
+  aligned with the surrounding text, between two hairlines. The repository,
+  path, revision and GitHub link form a small source citation below the text.
+  A long file starts folded, with its source still visible.
 - **It is read through, never stored.** `GET
   /api/spaces/:spaceId/pages/:pageId/github-file?href=` reads the file as the
   caller: only a Space member who may read the page, only a file the page's
