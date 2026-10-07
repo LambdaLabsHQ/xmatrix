@@ -118,7 +118,7 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-executions`,
     github_app_install: (
       spaceId: string,
-      options?: { mode?: "add" | "manage" | "install"; installationId?: string }
+      options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
     ) => {
       const params = new URLSearchParams({ spaceId });
       if (options?.mode) params.set("mode", options.mode);
