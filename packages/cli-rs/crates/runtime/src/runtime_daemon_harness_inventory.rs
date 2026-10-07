@@ -353,13 +353,25 @@ impl Drop for InventoryReportTask {
     }
 }
 
+/// A harness installed, linked or removed outside xMatrix changes nothing
+/// xMatrix observes, so the daemon also re-probes on this cadence.
+const INVENTORY_REPROBE: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
+
 /// The daemon's start is when Hub first needs this machine's harnesses; later
-/// reports follow the events that change them (releases, updates, actions).
+/// reports follow the events that change them (releases, updates, actions),
+/// plus a periodic re-probe for changes made outside xMatrix.
 /// Hub tells a daemon whose inventory lacks a preset's latest version.
 pub(crate) fn spawn_inventory_report(
     relay: Arc<MachineDaemonConnectionClient>,
 ) -> InventoryReportTask {
-    InventoryReportTask(tokio::spawn(async move { report_inventory(&relay).await }))
+    InventoryReportTask(tokio::spawn(async move {
+        let mut every = tokio::time::interval(INVENTORY_REPROBE);
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            every.tick().await;
+            report_inventory(&relay).await;
+        }
+    }))
 }
 
 #[cfg(test)]

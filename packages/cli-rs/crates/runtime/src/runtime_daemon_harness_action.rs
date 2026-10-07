@@ -448,6 +448,128 @@ async fn set_auto_update(preset: &AgentPreset, enabled: bool) -> HarnessActionRe
     result
 }
 
+/// An install that exits 0 is only a success if xMatrix can now find the
+/// launcher. npm puts global binaries in its own prefix, which a node install
+/// under the home directory (or a service-manager PATH) does not cover; link
+/// the launcher into `~/.local/bin`, which both inventory and Runs search,
+/// and otherwise say where it went instead of reporting success.
+async fn verify_launcher(
+    preset: &AgentPreset,
+    recipe: &HarnessCommand,
+    mut outcome: HarnessActionResult,
+) -> HarnessActionResult {
+    if outcome.status != HarnessActionStatus::Succeeded || resolve_launcher(preset).is_some() {
+        return outcome;
+    }
+    let mut note = format!(
+        "{} finished, but xMatrix cannot find {} on this machine's PATH.",
+        recipe.command, preset.display_name
+    );
+    let global_bin = if xmatrix_cli_agent::launcher_stem(&recipe.command) == "npm" {
+        npm_global_bin(&preset.id, recipe).await
+    } else {
+        None
+    };
+    match (&global_bin, dirs::home_dir()) {
+        (Some(bin), Some(home)) => {
+            match link_launcher(preset, bin, &home.join(".local").join("bin")) {
+                Ok(Some(link)) => {
+                    note = format!("Linked {} to {}.", link.display(), bin.display());
+                }
+                Ok(None) => {
+                    note.push_str(&format!(
+                        " npm installs global commands in {}.",
+                        bin.display()
+                    ));
+                }
+                Err(error) => note.push_str(&format!(" {error}")),
+            }
+        }
+        (Some(bin), None) => {
+            note.push_str(&format!(
+                " npm installs global commands in {}.",
+                bin.display()
+            ));
+        }
+        _ => {}
+    }
+    if resolve_launcher(preset).is_none() {
+        outcome.status = HarnessActionStatus::Failed;
+        note.push_str(" Add that directory to PATH, then refresh.");
+    }
+    let mut tail = outcome.output_tail.take().unwrap_or_default();
+    if !tail.is_empty() {
+        tail.push('\n');
+    }
+    tail.push_str(&note);
+    with_tail(outcome, &tail)
+}
+
+/// npm's global command directory: `<prefix>/bin` on Unix, the prefix itself
+/// on Windows.
+async fn npm_global_bin(preset_id: &str, recipe: &HarnessCommand) -> Option<std::path::PathBuf> {
+    let npm = resolve_recipe_program(preset_id, &recipe.command)?;
+    let output = tokio::time::timeout(
+        CONTROL_TIMEOUT,
+        harness_command(&npm, &["prefix", "-g"]).output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let prefix = std::str::from_utf8(&output.stdout).ok()?.trim();
+    if prefix.is_empty() || prefix.lines().count() != 1 {
+        return None;
+    }
+    let prefix = std::path::PathBuf::from(prefix);
+    if !prefix.is_absolute() {
+        return None;
+    }
+    Some(if cfg!(windows) {
+        prefix
+    } else {
+        prefix.join("bin")
+    })
+}
+
+/// Link the preset's first launcher found in `source` into `target`. Never
+/// replaces an existing entry; `Ok(None)` when there is nothing to link.
+fn link_launcher(
+    preset: &AgentPreset,
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> std::result::Result<Option<std::path::PathBuf>, String> {
+    #[cfg(unix)]
+    {
+        for name in preset
+            .launcher_names
+            .iter()
+            .filter(|name| !name.contains('.'))
+        {
+            let binary = source.join(name);
+            if !binary.is_file() {
+                continue;
+            }
+            let link = target.join(name);
+            if link.symlink_metadata().is_ok() {
+                return Ok(None);
+            }
+            std::fs::create_dir_all(target)
+                .and_then(|()| std::os::unix::fs::symlink(&binary, &link))
+                .map_err(|error| format!("Could not link {}: {error}.", link.display()))?;
+            return Ok(Some(link));
+        }
+        Ok(None)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (preset, source, target);
+        Ok(None)
+    }
+}
+
 pub(crate) async fn probed_item(preset: &AgentPreset) -> Option<serde_json::Value> {
     serde_json::to_value(probe(preset, &HarnessPolicy::load()).await).ok()
 }
@@ -505,6 +627,10 @@ pub(crate) async fn execute(preset_id: &str, action: HarnessAction) -> HarnessAc
         result(preset_id, action, HarnessActionStatus::Unsupported)
     } else if let Some(_lock) = try_lock_preset(&preset.id) {
         match (action, recipe) {
+            (HarnessAction::Install | HarnessAction::Update, Some(recipe)) => {
+                let outcome = run_recipe(preset_id, action, recipe, ACTION_TIMEOUT).await;
+                verify_launcher(preset, recipe, outcome).await
+            }
             (_, Some(recipe)) => run_recipe(preset_id, action, recipe, ACTION_TIMEOUT).await,
             (HarnessAction::AutoUpdateOn, _) => set_auto_update(preset, true).await,
             (HarnessAction::AutoUpdateOff, _) => set_auto_update(preset, false).await,
@@ -653,6 +779,30 @@ async fn update_and_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn npm_launcher_is_linked_once_and_never_replaces_an_existing_entry() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("xmatrix-npm-link-{}", uuid::Uuid::new_v4()));
+        let global = root.join("opt").join("node").join("bin");
+        let local = root.join(".local").join("bin");
+        std::fs::create_dir_all(&global).unwrap();
+        let preset = agent_presets().iter().find(|p| p.id == "codex").unwrap();
+        assert_eq!(link_launcher(preset, &global, &local), Ok(None));
+        let binary = global.join("codex");
+        std::fs::write(&binary, b"fixture").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = local.join("codex");
+        assert_eq!(
+            link_launcher(preset, &global, &local),
+            Ok(Some(link.clone()))
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), binary);
+        // A second install, or a launcher the person placed there, is left alone.
+        assert_eq!(link_launcher(preset, &global, &local), Ok(None));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn output_tail_strips_controls_and_keeps_the_last_four_kib() {

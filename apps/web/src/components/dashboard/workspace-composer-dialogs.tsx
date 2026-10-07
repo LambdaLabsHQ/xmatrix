@@ -3,6 +3,7 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
 import { useAndroidBackHandler } from "./use-android-back";
+import { useComposerHint } from "./composer-hints";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
@@ -44,6 +45,7 @@ import { StatusView } from "./status-view";
 import { MachineHarnessPanel } from "./machine-harness-panel";
 
 import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { PlatformAdminTabs } from "./workspace-platform-admin-tabs";
 import { humanProfileFromSpaceMember } from "./human-profile-summary";
 import { ProfileView } from "./human-profile-view";
@@ -462,6 +464,7 @@ export function Composer({
     !readingAttachment &&
     !preparingSend &&
     !sending;
+  const composerHint = useComposerHint(writable && !placeholder && localDraft.length === 0);
   const completionApiRef = useRef<ComposerCompletionApi | null>(null);
   const setCursor = useCallback((value: number) => {
     completionApiRef.current?.setCursor(value);
@@ -1115,15 +1118,7 @@ export function Composer({
           }}
           completionApiRef={completionApiRef}
           textareaRef={textareaRef}
-          placeholder={placeholder || (
-            emptyPasteAnchorActive && localDraft.length === 0
-              ? ""
-              : channel
-                ? isJoined
-                  ? "输入消息"
-                  : "Join channel to send"
-                : "输入消息"
-          )}
+          placeholder={placeholder || (channel && !isJoined ? "Join channel to send" : composerHint)}
           ariaLabel={ariaLabel || "Message composer"}
           sendTitle={sendTitle || "Send"}
           onEscape={onEscape}
@@ -1999,23 +1994,23 @@ export function ChannelDetails({
         aria-label="Channel details"
       >
         <div className="app-details app-mobile-channel-details-surface flex min-h-0 flex-1 flex-col">
-          <header className="app-mobile-channel-details-header flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-2 py-2">
+          <WoodPanel as="header" className="app-detail-plank app-mobile-channel-details-header flex shrink-0 items-center gap-2 p-3">
             <button
               type="button"
               title="Back to channel"
               aria-label="Back to channel"
               onClick={onCloseMobileOverlay}
-              className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+              className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/30 hover:text-foreground"
             >
               <ChevronLeft className="size-5" />
             </button>
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-black">Channel details</h2>
-              <p className="truncate text-xs text-muted-foreground">
+              <h2 className="truncate text-base font-semibold">Channel details</h2>
+              <p className="truncate text-sm text-muted-foreground" title={mobileOverlayChannelLabel}>
                 {mobileOverlayChannelLabel}
               </p>
             </div>
-          </header>
+          </WoodPanel>
           <div className="app-mobile-channel-details-sheet flex min-h-0 flex-1 flex-col">
             {detailsBody}
           </div>
@@ -2518,6 +2513,8 @@ export function ToolSurface({
           spaceId={currentSpace?.id ?? null}
           token={token}
           machines={currentSpaceMachines}
+          channels={currentSpaceChannels}
+          events={currentSpaceEvents}
           automations={currentSpaceAutomations}
           onOpenAgents={() => onChangeView("agents")}
           onOpenMachine={(machineId) => onChangeView("machines", machineId)}

@@ -20,9 +20,12 @@ const daemon = {
 };
 
 async function openMachine(page: Parameters<typeof openWorkspaceWithStubs>[0], status = "online", capabilities = daemon.metadata.capabilities,
-  registrations: NonNullable<Parameters<typeof openWorkspaceWithStubs>[1]>["registrations"] = []) {
+  { recorded = [], unansweredSince, registrations = [] }: { recorded?: unknown[]; unansweredSince?: string; registrations?: NonNullable<Parameters<typeof openWorkspaceWithStubs>[1]>["registrations"] } = {}) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], registrations,
-    machineDaemons: [{ ...daemon, status, metadata: { ...daemon.metadata, capabilities } }] });
+    machineDaemons: [{ ...daemon, status, metadata: { ...daemon.metadata, capabilities },
+      ...(unansweredSince ? { unansweredSince } : {}) }] });
+  await fixtureJson(page, "harness-recent", /\/api\/xmatrix\/machine-daemons\/harness-actions\?machineId=/u,
+    { actions: recorded });
   await page.goto("/app/personal-sspaceperso/machines");
   await page.locator('[data-testid="machine-row"]').filter({ hasText: "Harness machine" }).click();
   await expect(page.getByTestId("machine-harness-panel")).toBeVisible();
@@ -42,7 +45,7 @@ test("update runs from its row at once and shows its outcome on that row", async
   const update = row.getByRole("button", { name: "Update", exact: true });
   await expect(update).toHaveAttribute("title", /@openai\/codex@latest/);
   await update.click();
-  await expect(row.getByText("Update · codex: succeeded")).toBeVisible();
+  await expect(row.getByText("Update · Codex: Done")).toBeVisible();
   expect(await fixtureRequestBodies(page, "harness-action")).toEqual([
     { machineId: MACHINE, hostId: "host-harness", presetId: "codex", action: "update" },
   ]);
@@ -60,7 +63,7 @@ test("a running action holds only its own row", async ({ page }) => {
   const panel = page.getByTestId("machine-harness-panel");
   const codex = panel.getByRole("row").filter({ hasText: "Codex" });
   await codex.getByRole("button", { name: "Update", exact: true }).click();
-  await expect(codex.getByText("Update · codex: running")).toBeVisible();
+  await expect(codex.getByText("Update · Codex: Running on the machine…")).toBeVisible();
   await expect(codex.getByRole("button", { name: "Update", exact: true })).toBeDisabled();
   await expect(codex.getByRole("switch", { name: "Automatic updates: Codex" })).toBeDisabled();
   const copilot = panel.getByRole("row").filter({ hasText: "Copilot" });
@@ -97,7 +100,7 @@ test("automatic update control and inventory refresh send closed actions", async
   const copilotUpdates = copilot.getByRole("switch", { name: "Automatic updates: GitHub Copilot CLI" });
   await expect(copilotUpdates).toHaveAttribute("aria-checked", "true");
   await copilotUpdates.click();
-  await expect(panel.getByText("Disable automatic updates · copilot: succeeded")).toBeVisible();
+  await expect(panel.getByText("Disable automatic updates · GitHub Copilot CLI: Done")).toBeVisible();
   expect(await fixtureRequestBodies(page, "harness-action")).toEqual([
     { machineId: MACHINE, hostId: "host-harness", presetId: "copilot", action: "auto_update_off" },
   ]);
@@ -129,7 +132,7 @@ test("an unknown state reads as unknown and the switch turns it on", async ({ pa
   const updates = row.getByRole("switch", { name: "Automatic updates: Junie" });
   await expect(updates).toHaveAttribute("aria-checked", "false");
   await updates.click();
-  await expect(panel.getByText("Enable automatic updates \u00b7 junie: succeeded")).toBeVisible();
+  await expect(panel.getByText("Enable automatic updates \u00b7 Junie: Done")).toBeVisible();
   expect(await fixtureRequestBodies(page, "harness-action")).toEqual([
     { machineId: MACHINE, hostId: "host-harness", presetId: "junie", action: "auto_update_on" },
   ]);
@@ -160,10 +163,31 @@ test("uninstall takes a second tap on its row and is offered only where one exis
   await expect(codex).toContainText("Settings and sessions are kept.");
   expect(await fixtureRequestBodies(page, "harness-action")).toEqual([]);
   await codex.getByRole("button", { name: "Confirm uninstall", exact: true }).click();
-  await expect(codex.getByText("Uninstall \u00b7 codex: succeeded")).toBeVisible();
+  await expect(codex.getByText("Uninstall \u00b7 Codex: Done")).toBeVisible();
   expect(await fixtureRequestBodies(page, "harness-action")).toEqual([
     { machineId: MACHINE, hostId: "host-harness", presetId: "codex", action: "uninstall" },
   ]);
+});
+
+test("a reload still shows how an earlier install ended, and says when it found nothing", async ({ page }) => {
+  const recorded = { controlId: CONTROL, presetId: "claude", action: "install", status: "succeeded",
+    requestedAt: E2E_NOW, completedAt: E2E_NOW,
+    result: { presetId: "claude", action: "install", status: "succeeded", exitCode: 0,
+      item: { id: "claude", installed: false, probeStatus: "missing" } } };
+  await fixtureJson(page, "harness-status", "**/api/xmatrix/machine-daemons/harness-actions/*", recorded);
+  await openMachine(page, "online", daemon.metadata.capabilities, { recorded: [recorded] });
+  const claude = page.getByTestId("machine-harness-panel").getByRole("row").filter({ hasText: "Claude Code" });
+  await expect(claude).toContainText("Install · Claude Code: Install finished, but Claude Code was not found on this machine's PATH");
+  await expect(claude).not.toContainText("succeeded");
+});
+
+test("a machine that left work unanswered is not responding, and its actions stay available", async ({ page }) => {
+  await openMachine(page, "online", daemon.metadata.capabilities, { unansweredSince: E2E_NOW });
+  const panel = page.getByTestId("machine-harness-panel");
+  await expect(panel).toContainText("This machine is not responding");
+  await expect(panel).toContainText("a new action may not reach it");
+  await expect(panel.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
+  await expect(panel.getByRole("row").filter({ hasText: "Claude Code" }).getByRole("button", { name: "Install", exact: true })).toBeEnabled();
 });
 
 test("old daemons cannot uninstall", async ({ page }) => {
@@ -226,7 +250,7 @@ test("an installed harness is summoned in this Space once its owner turns it on"
 });
 
 test("turning it off disables it in this Space only", async ({ page }) => {
-  await openMachine(page, "online", daemon.metadata.capabilities, [spaceRegistration("codex")]);
+  await openMachine(page, "online", daemon.metadata.capabilities, { registrations: [spaceRegistration("codex")] });
   await fixtureJson(page, "space-query", "**/api/xmatrix/spaces/*/agent-registrations/query", {
     ...spaceRegistration("codex"), access: { grant: { revision: 3, limits: {} }, policy: { revision: 4 } } }, { method: "POST" });
   await fixtureJson(page, "space-command", COMMANDS, { key: spaceKey("codex"), version: 1 }, { method: "POST" });

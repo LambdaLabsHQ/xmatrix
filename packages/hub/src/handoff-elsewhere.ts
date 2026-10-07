@@ -90,15 +90,16 @@ export async function launchHandoffSuccessorElsewhere(env: Env, input: HandoffEl
 /** Stop the source so its daemon pushes its checkout; the directory stays. */
 async function saveSourceWork(env: Env, input: HandoffElsewhere, branch: string,
   dependencies: Dependencies): Promise<void> {
-  try {
-    const port = (dependencies.intervention ?? createProductAgentInterventionAuthorityPort)({
-      env, actorUserId: input.actorUserId, sourceMessageId: input.sourceMessageId });
-    const target = (await port.listKillTargets(input.channelId)).find(candidate =>
-      candidate.runId === input.sourceRunId && candidate.instanceId === input.sourceInstanceId);
-    if (!target || !port.issueHandoffStop) return;
-    await port.issueHandoffStop(target, `handoff-stop:${input.sourceInstanceId}`.slice(0, 200),
-      `${input.sourceAddress} handed off`, input.channelId, { branch, channelId: input.channelId }, HANDOFF_STOP_WAIT_MS);
-  } catch (error) {
-    console.error("Handoff source could not be stopped", error);
-  }
+  const port = (dependencies.intervention ?? createProductAgentInterventionAuthorityPort)({
+    env, actorUserId: input.actorUserId, sourceMessageId: input.sourceMessageId });
+  const target = (await port.listKillTargets(input.channelId, {
+    runId: input.sourceRunId, instanceId: input.sourceInstanceId,
+  })).find(candidate => candidate.runId === input.sourceRunId && candidate.instanceId === input.sourceInstanceId);
+  if (!target || !port.issueHandoffStop) throw Object.assign(new Error("Handoff source stop is unavailable"), {
+    code: "handoff_source_stop_unavailable",
+  });
+  // A timeout follows a durable stop request. An authority/issuance failure
+  // must surface instead of starting a successor while the source can still act.
+  await port.issueHandoffStop(target, `handoff-stop:${input.sourceRunId}`.slice(0, 200),
+    `${input.sourceAddress} handed off`, input.channelId, { branch, channelId: input.channelId }, HANDOFF_STOP_WAIT_MS);
 }

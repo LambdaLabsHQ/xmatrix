@@ -37,6 +37,7 @@ import { avatarInitials } from "@/components/dashboard/completion-option-button"
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
+import { NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 
 // The native shell also imports this module for its list screens. The editor
 // (ProseMirror and the page document) belongs to an open document, not to the cold-start list dependency graph.
@@ -241,35 +242,6 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
 
 const PREFETCHED_PAGES = 40;
 
-export type PageCreation = ReturnType<typeof usePageCreation>;
-
-/**
- * Creating a page, shared by the tree's own + and, on a phone, the + in the
- * top bar: one state, so the tree shows the error whichever of them started it.
- */
-export function usePageCreation(spaceId: string | null, token: string, onCreated: (pageId: string) => void) {
-  const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const create = useCallback(async (parentPageId: string | null) => {
-    const title = window.prompt(parentPageId ? "Title of the new sub-page" : "Title of the new page");
-    if (!title?.trim() || !spaceId) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const { page } = await pageApi.create(spaceId, token, { title: title.trim(), parentPageId });
-      await queryClient.invalidateQueries({ queryKey: ["xmatrix"], predicate: (query) =>
-        query.queryKey.includes("page-tree") });
-      onCreated(page.pageId);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create the page");
-    } finally {
-      setCreating(false);
-    }
-  }, [onCreated, queryClient, spaceId, token]);
-  return { create, creating, error };
-}
-
 export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, creation,
   layout = "sidebar", create }: {
   spaceId: string | null; token: string; selectedPageId: string | null; onSelectPage: (pageId: string) => void;
@@ -445,7 +417,8 @@ type PageDialogState =
   | { kind: "attach"; blockId: string };
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conversation, activeConversationId = null,
-  renderConversation, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null }: {
+  renderConversation, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
+  freshPageId = null }: {
   spaceId: string | null;
   token: string;
   selectedPageId: string | null;
@@ -472,6 +445,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
   layout?: "desktop" | "phone";
   /** A section a reference opened the page at; a new `seq` brings it into view again. */
   focusSection?: { pageId: string; blockId: string; seq: number } | null;
+  /** A page just made with +: it opens with its title selected, ready to type over. */
+  freshPageId?: string | null;
 }) {
   const { user } = useAuth();
   const tree = usePageTree(spaceId, token);
@@ -559,6 +534,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
     setSeenRevision(revision);
     void pageApi.markRead(spaceId, pageId, token, revision).catch(() => undefined);
   }, [opened, pageId, spaceId, token]);
+  // The GitHub files the page embeds are read through the Hub, as this reader (pages-live-document.md §6.5).
+  const readGitHubFile = useCallback((href: string, signal: AbortSignal) =>
+    pageApi.githubFile(spaceId!, pageId!, token, href, signal), [spaceId, pageId, token]);
   const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
   // The page on screen in this tab is read at its head once it has been there a moment.
   useEffect(() => {
@@ -824,6 +802,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
     }
   };
 
+  const titleInput = useRef<HTMLInputElement>(null);
+  const titledPageId = useRef<string | null>(null);
+  useEffect(() => {
+    const input = titleInput.current;
+    if (!input || !page || page.pageId !== freshPageId || titledPageId.current === page.pageId) return;
+    titledPageId.current = page.pageId;
+    input.focus();
+    input.select();
+  }, [canEdit, freshPageId, page]);
+
   const renamePage = async (value: string) => {
     const title = value.trim();
     if (!spaceId || !page || !title || title === page.title) return;
@@ -834,6 +822,22 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       setNotice(cause instanceof Error ? cause.message : "Could not rename the page");
     }
   };
+
+  // The page's name, when the document does not already open with it. Plain text: a field well would repeat the heading.
+  const titleField = page && !documentOpensWithTitle(page.title, blocks, document.data?.body) ? (canEdit ? (
+    <input ref={titleInput} key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
+      data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") { event.currentTarget.value = page.title; event.currentTarget.blur(); }
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.value.trim()) event.currentTarget.value = page.title;
+        void renamePage(event.currentTarget.value);
+      }}
+      className="page-title mr-auto min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-2xl font-black shadow-none outline-none" />
+  ) : (
+    <h1 className="mr-auto text-2xl font-black">{page.title}</h1>
+  )) : null;
 
   const toggleSuggestOnly = async () => {
     if (!spaceId || !page) return;
@@ -1057,25 +1061,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       <PageScrollMarks marks={scrollMarks} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
-        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
+        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
           : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
           <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
             {phone ? (
-              <div className="flex items-center justify-end gap-1 py-2" data-testid="page-controls">{controls}</div>
+              <>
+                <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>
+                {titleField && <div className="mb-4 flex">{titleField}</div>}
+              </>
             ) : (
               <header className="app-band-header mb-4 flex flex-wrap items-center gap-1.5" data-testid="page-controls">
-                {page && !documentOpensWithTitle(page.title, blocks, document.data?.body) ? (canEdit ? (
-                  // The page's name, when the document does not already open with it. Plain text: a field well would repeat the heading.
-                  <input key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
-                    data-testid="page-title" onKeyDown={(event) => {
-                      if (event.key === "Enter") event.currentTarget.blur();
-                      if (event.key === "Escape") { event.currentTarget.value = page.title; event.currentTarget.blur(); }
-                    }}
-                    onBlur={(event) => void renamePage(event.currentTarget.value)}
-                    className="page-title mr-auto min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-2xl font-black shadow-none outline-none" />
-                ) : (
-                  <h1 className="mr-auto text-2xl font-black">{page.title}</h1>
-                )) : <span className="mr-auto" />}
+                {titleField ?? <span className="mr-auto" />}
                 <span className="mr-1 text-xs text-muted-foreground" data-testid="page-save-state"
                   title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
                   {saveState === "saving" ? "Saving…" : saveState === "saved" ? "All changes saved"
@@ -1116,7 +1112,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} />}
+                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
                   </div>
                 </div>
                 {/* The margin holds its room from the start, so the text does not reflow when the page has synced;

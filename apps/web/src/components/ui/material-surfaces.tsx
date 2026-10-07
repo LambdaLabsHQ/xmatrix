@@ -9,6 +9,7 @@ import { LiquidGlassSurface } from "./liquid-glass-surface";
 type MaterialElementProps = React.HTMLAttributes<HTMLElement> & {
   as?: React.ElementType;
   disabled?: boolean;
+  href?: string;
   type?: React.ButtonHTMLAttributes<HTMLButtonElement>["type"];
 };
 

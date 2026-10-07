@@ -82,7 +82,8 @@ import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
 import { DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
-import { PageTreePanel, PagesView, usePageCreation, usePageTree } from "@/components/pages/pages-view";
+import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
+import { usePageCreation } from "@/components/pages/page-creation";
 import { searchWorkspacePages } from "./workspace-message-search";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
 
@@ -1052,6 +1053,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const pagesViewSurface = (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
       onSelectPage={openPage} conversation={pageConversation} focusSection={pageSectionRequest}
+      freshPageId={pageCreation.freshPageId}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>
         renderConversationSurface(placement === "margin" ? "page-margin" : "beside-page") } : {})}

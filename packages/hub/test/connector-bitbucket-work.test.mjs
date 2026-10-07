@@ -159,12 +159,12 @@ test("review comments write once with bounded Markdown and validate the provider
   await withProvider([{ body: {}, status: 401 }], calls => assert.rejects(execute("comment", { text: "Review result" })).then(() => assert.equal(calls.length, 1)));
 });
 
-test("read/deny is independent of the admin-controlled Agent comment policy", () => {
+test("reads and an Agent comment run until the Channel denies them", () => {
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === "bitbucket");
   assert.equal(manifest.actions.find(action => action.id === "read_pull_request").effect, "read");
   assert.equal(actionRefusal({ providerId: "bitbucket", actionId: "read_pull_request", effect: "read", senderKind: "agent", mode: null }), undefined);
   assert.match(actionRefusal({ providerId: "bitbucket", actionId: "read_pull_request", effect: "read", senderKind: "agent", mode: "deny" }), /denied/);
-  assert.match(actionRefusal({ providerId: "bitbucket", actionId: "comment", effect: "write", senderKind: "agent", mode: null }), /policy/);
+  assert.equal(actionRefusal({ providerId: "bitbucket", actionId: "comment", effect: "write", senderKind: "agent", mode: null }), undefined);
 });
 
 

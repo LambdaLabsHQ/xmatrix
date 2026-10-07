@@ -22,7 +22,6 @@ interface ProductGitHubConnectorInput {
   messageId: string;
   body: string;
   actorUserId: string;
-  senderKind?: "user" | "agent";
 }
 
 /**
@@ -182,8 +181,8 @@ async function runGitHubConnectorStatement(
      (docs/design/connector-platform.md §3.5): a subscription brings the
      repository's content into the Channel. Unsubscribing only narrows it. */
   if (action !== "unsubscribe") {
-    const refusal = await channelActionRefusal(input.env, { providerId: "github", connectionId: connection.id,
-      channelId: input.channelId, actionId: action, senderKind: input.senderKind });
+    const refusal = await channelActionRefusal(input.env, { connectionId: connection.id,
+      channelId: input.channelId, actionId: action });
     if (refusal) {
       await finalizeExecution(executionId, input, "blocked", refusal.slice(0, 500));
       input.status(`GitHub ${action}: blocked; ${refusal}.`);

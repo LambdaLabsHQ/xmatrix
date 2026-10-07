@@ -34,7 +34,7 @@ function rejectFenced(metadata: Record<string, unknown>): void {
 }
 async function source(tx: DatabaseTransaction, instanceId: string): Promise<QueryResultRow> {
   const row = (await tx.query<QueryResultRow>({ name: "reborn_source_lock_v2", text: `SELECT
-    instance.run_id,instance.channel_id,instance.channel_instance_id,instance.status AS instance_status,
+    instance.run_id,instance.channel_id,instance.channel_instance_id,instance.status AS instance_status,instance.rest_state,
     run.owner_user_id,run.status AS run_status,run.metadata_json,
     run.workspace_machine_id,run.workspace_canonical_cwd
     FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
@@ -100,6 +100,10 @@ async function recordIntent(tx: DatabaseTransaction, input: { kind: Continuation
   sourceRunId: string; sourceInstanceId: string; machineId: string; hostId: string; run: Record<string, unknown>;
   instance: Record<string, unknown>; spawn: Record<string, unknown>; at: string }): Promise<Record<string, unknown>> {
   const { before, previous, sourceInstanceId } = input;
+  if (input.kind === "wake" && (previous.instance_status !== "offline" ||
+      !["sleeping", "interrupted"].includes(String(previous.rest_state)))) {
+    throw new RuntimeControlError("instance_not_resting", 409, "Instance no longer accepts an automatic wake");
+  }
   const pending = await tx.query({ name: "continuation_source_pending_v1", text: `SELECT intent_id
     FROM data.agent_reborn_intents WHERE source_instance_id=$1 AND state IN ('waiting','prepared') LIMIT 1`,
     values: [sourceInstanceId], maxRows: 1 });

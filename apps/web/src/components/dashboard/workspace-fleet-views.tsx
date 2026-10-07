@@ -14,6 +14,8 @@ import {
 } from "./workspace-admin-views";
 
 import { GoogleChatRoomLink } from "./googlechat-room-link";
+import { GitHubInstallationAccounts } from "./github-installation-accounts";
+import { takeGitHubConnectOutcome } from "@/lib/github-connect-return";
 import { WeComCompanyConnection } from "./wecom-company-connection";
 import { DingTalkCompanyConnection } from "./dingtalk-company-connection";
 import type { HumanProfile } from "@xmatrix/protocol";
@@ -247,7 +249,7 @@ export function MoreView({
     groups.push({
       label: "Platform",
       items: [
-        viewItem("admin", "Platform admin", "Platform-wide usage, invites, and product prompts", Shield),
+        viewItem("admin", "Platform admin", "Platform usage, users, Spaces, and the audit trail", Shield),
       ],
     });
   }
@@ -889,8 +891,11 @@ export function MachinesView({
   const thisLabel = thisOs === "macos" ? "This Mac" : thisOs === "windows" ? "This PC" : "This Machine";
   const thisTag = <span className="font-semibold text-foreground" data-testid="this-machine-tag">{thisLabel}</span>;
   // What a Machine is doing now: Agents running on it while online, when it was last seen once offline.
+  // "Online" follows connection events only; work it left unanswered says it is not actually responding.
+  const unresponsive = (machine: MachineSummary) => machine.status === "online" && Boolean(machine.daemon?.unansweredSince);
   const stateOf = (machine: MachineSummary) => machine.status === "online"
-    ? machine.activeRuns === undefined ? null
+    ? unresponsive(machine) ? "Not responding"
+      : machine.activeRuns === undefined ? null
       : machine.activeRuns === 0 ? "Idle" : `${machine.activeRuns} ${machine.activeRuns === 1 ? "agent" : "agents"} running`
     : machine.lastSeenAt ? `Offline · seen ${relativeTime(machine.lastSeenAt)}` : "Offline";
 
@@ -911,6 +916,7 @@ export function MachinesView({
           const name = machine ? nameOf(machine) : thisMachine!.name;
           const host = machine ? hostOf(machine) : undefined;
           const online = machine ? machine.status === "online" : thisMachine!.online;
+          const stalled = Boolean(machine && unresponsive(machine));
           const facts = [host ? `WSL on ${nameOf(host)}` : null,
             machine ? stateOf(machine) : thisMachine!.summary,
             machine && !autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
@@ -920,8 +926,9 @@ export function MachinesView({
               shownBeside={local ? showThisBeside && !item
                 : !chosen && !showingThis && !showThisBeside && machine!.id === shown?.id}
               onSelect={() => select(local ? THIS_MACHINE_ITEM : machine!.id)}
-              leading={<span className={cn("app-tool-state-icon", host && "pl-4")} data-state={online ? "running" : "offline"}
-                aria-label={`${name}: ${online ? "online" : "offline"}`} role="img">
+              leading={<span className={cn("app-tool-state-icon", host && "pl-4")}
+                data-state={stalled ? "attention" : online ? "running" : "offline"}
+                aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
                 <MachineGlyph os={machineOs(local ? thisMachine!.platform : platformOf(machine!))} /></span>}
               trailing={machine && <MachineLoadGlance machine={machine} now={now} />}
               title={name}
@@ -943,6 +950,7 @@ export function MachinesView({
     const unnamed = name === "Unnamed machine";
     const renaming = Boolean(machine && editing && machine.machineId && editing.machineId === machine.machineId);
     const online = machine ? machine.status === "online" : thisMachine!.online;
+    const stalled = Boolean(machine && unresponsive(machine));
     const titleControl = "flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
     detail = (
       <ToolDetail
@@ -992,10 +1000,12 @@ export function MachinesView({
         ) : undefined}
         status={
           <span className="flex flex-wrap items-center gap-x-2">
-            <ToolStateDot state={online ? "running" : "offline"} />
-            <span className="capitalize text-foreground">{online ? "online" : "offline"}</span>
+            <ToolStateDot state={stalled ? "attention" : online ? "running" : "offline"} />
+            <span className="capitalize text-foreground">{stalled ? "not responding" : online ? "online" : "offline"}</span>
             <span>· {local ? thisTag : null}{local && host ? " · " : null}{host ? `WSL on ${nameOf(host)}` : local ? null : "machine"}</span>
-            {machine?.lastSeenAt && <span>· seen {relativeTime(machine.lastSeenAt)}</span>}
+            {/* While online, the stored time is its last connection, not a heartbeat. */}
+            {machine?.lastSeenAt && <span>· {online ? "connected" : "seen"} {relativeTime(machine.lastSeenAt)}</span>}
+            {stalled && machine?.daemon?.unansweredSince && <span>· work waiting since {relativeTime(machine.daemon.unansweredSince)}</span>}
           </span>
         }
       >
@@ -1023,7 +1033,7 @@ export function MachinesView({
               <MachineVersionFacts machine={machine} />
             </>
           ),
-          load: <MachineLoadPanel machine={machine} now={now} />,
+          load: <MachineLoadPanel machine={machine} now={now} token={token} />,
         } : null) : machine && (
           <>
             <ToolDetailSection title="Daemon">
@@ -1031,7 +1041,7 @@ export function MachinesView({
                 <ToolFact label="Daemon">{daemonPresenceLabel(machine.daemon)}</ToolFact>
                 <MachineVersionFacts machine={machine} />
               </ToolFacts>
-              <MachineLoadPanel machine={machine} now={now} />
+              <MachineLoadPanel machine={machine} now={now} token={token} />
             </ToolDetailSection>
             <ToolDetailSection title="Harnesses">
               <MachineHarnessPanel key={machine.id} daemon={machine.daemon} token={token} spaceId={spaceId} />
@@ -1196,11 +1206,8 @@ export function AppsView({
   }, []);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const status = url.searchParams.get("github");
+    const status = takeGitHubConnectOutcome();
     if (!status) return;
-    url.searchParams.delete("github");
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
     if (status === "connected") {
       setSetupNotice({
         tone: "success",
@@ -1220,11 +1227,12 @@ export function AppsView({
       });
     } else if (status === "cancelled") {
       setSetupNotice({ tone: "warning", message: "GitHub connection was cancelled before installation completed." });
-    } else if (status === "account_required") {
+    } else if (status === "authorized") {
       setSetupNotice({
-        tone: "warning",
-        message: "Link the GitHub account that installed the app in your profile, then Connect GitHub again.",
+        tone: "success",
+        message: "GitHub confirmed your accounts. Choose which ones this Space reaches under GitHub accounts.",
       });
+      setSelectedConnectorId("github");
     } else {
       setSetupNotice({
         tone: "warning",
@@ -1241,7 +1249,7 @@ export function AppsView({
 
   async function configureConnector(
     connector: AppConnectorManifest,
-    options?: { mode?: "add" | "manage" | "install"; installationId?: string }
+    options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
   ) {
     if (!token || !currentSpace) return;
     const existingConnection = connectionsByProvider.get(connector.id);
@@ -1577,6 +1585,16 @@ export function AppsView({
               afterRefresh={async () => { await connectionsQuery.refetch(); }} />
           </ToolDetailSection>
         ) : null)}
+      {connector.id === "github" && token && currentSpace ? (
+        // Shown in every state, so a disconnected Space can link an account directly.
+        <ToolDetailSection title="GitHub accounts">
+          <GitHubInstallationAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token}
+            onManage={(installationId) => void configureConnector(connector, { mode: "manage", installationId })}
+            onAuthorize={() => void configureConnector(connector, { mode: "add" })}
+            onInstall={() => void configureConnector(connector, { mode: "account" })}
+            onChanged={async () => { await connectionsQuery.refetch(); }} />
+        </ToolDetailSection>
+      ) : null}
       {configuring && selectedConnection && configurationDraft ? (
         <ToolDetailSection title="Configuration">
           <p className="mb-4 text-sm text-muted-foreground">Choose where this connector can run and which write actions are allowed.</p>
@@ -1587,11 +1605,6 @@ export function AppsView({
             onChange={setConfigurationDraft}
             onCancel={closeConnectorConfiguration}
             onSave={() => void saveConnectorConfiguration(connector, selectedConnection)}
-            onUpdateProviderAccess={() => void configureConnector(connector, {
-              mode: "manage",
-              installationId: githubConnectionInstallationIdsFromMetadata(selectedConnection.metadata)[0],
-            })}
-            onAddProviderAccount={() => void configureConnector(connector, { mode: "add" })}
           />
         </ToolDetailSection>
       ) : (
@@ -1669,8 +1682,6 @@ export function ConnectorConfiguration({
   onChange,
   onCancel,
   onSave,
-  onUpdateProviderAccess,
-  onAddProviderAccount,
 }: {
   connector: AppConnectorManifest;
   draft: AppConnectorConfigurationDraft;
@@ -1678,8 +1689,6 @@ export function ConnectorConfiguration({
   onChange: (draft: AppConnectorConfigurationDraft) => void;
   onCancel: () => void;
   onSave: () => void;
-  onUpdateProviderAccess: () => void;
-  onAddProviderAccount: () => void;
 }) {
   function update(patch: Partial<AppConnectorConfigurationDraft>) {
     onChange({ ...draft, ...patch });
@@ -1734,34 +1743,6 @@ export function ConnectorConfiguration({
         </fieldset>
       ) : null}
 
-      {connector.id === "github" ? (
-        <div className="app-connector-provider-access border-t border-border/60 pt-4">
-          <p className="text-sm font-bold">GitHub repository access</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Each GitHub account or organization keeps its own App installation. Manage repo selection
-            for an existing account, or add another account without replacing the first.
-            xMatrix does not edit GitHub permissions here.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onUpdateProviderAccess}
-              className={cn("app-connector-secondary-action inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-bold", COUNT_CHIP_MATERIAL_CLASS)}
-            >
-              <GitPullRequest className="size-4" />
-              Manage access on GitHub
-            </button>
-            <button
-              type="button"
-              onClick={onAddProviderAccount}
-              className={cn("app-connector-secondary-action inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-bold", COUNT_CHIP_MATERIAL_CLASS)}
-            >
-              <Plus className="size-4" />
-              Add account or organization
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-4">
         <button

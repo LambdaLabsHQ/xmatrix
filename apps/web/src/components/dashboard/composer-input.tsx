@@ -19,6 +19,7 @@ import { LiquidGlassSurface } from "@/components/ui/liquid-glass-surface";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
+import { stripEmptyPasteSentinel } from "./composer-caret";
 import { ComposerTextHighlight } from "./composer-text-highlight";
 import { channelMentionCandidates } from "./mention-complete";
 import { buildMentionReadIndex } from "./mention-read-state";
@@ -227,7 +228,8 @@ function ComposerInputSurface({
           <div className="relative min-w-0 flex-1">
           <ComposerTextHighlight value={textareaValue ?? draft} textareaRef={textareaRef}
             mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
-            references={referenceRanges} />
+            references={referenceRanges}
+            hint={stripEmptyPasteSentinel(textareaValue ?? draft).length === 0 ? placeholder : undefined} />
           <Textarea
             ref={textareaRef}
             value={textareaValue ?? draft}
@@ -265,7 +267,6 @@ function ComposerInputSurface({
               }
               onKeyDownExtra?.(event);
             }}
-            placeholder={placeholder}
             aria-label={ariaLabel}
             className={cn(
               "composer-textarea flex-1 resize-none border-0 bg-transparent shadow-none outline-none transition-all duration-200 focus-visible:ring-0",

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Navbar } from "@/components/shared/navbar";
 import { Hero } from "@/components/landing/hero";
 import { QuickStart } from "@/components/landing/quick-start";
@@ -13,6 +14,10 @@ import { Footer } from "@/components/landing/footer";
 // Additive agentic quick start: a hero CTA plus one extra section. Set to
 // false to hide both and render the homepage exactly as before.
 const SHOW_AGENT_QUICK_START: boolean = true;
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 export default function Home() {
   return (

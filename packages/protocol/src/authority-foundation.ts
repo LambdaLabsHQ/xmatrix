@@ -97,6 +97,10 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/teams/link`,
     space_app_connection_googlechat_link: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/googlechat/link`,
+    space_app_connection_github_installations: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/github/installations`,
+    space_app_connection_github_installation: (spaceId: string, installationId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/github/installations/${encodeURIComponent(installationId)}`,
     space_app_connection_feishu_link: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/feishu/link`,
     space_app_connection_telegram_link: (spaceId: string) =>
@@ -114,7 +118,7 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-executions`,
     github_app_install: (
       spaceId: string,
-      options?: { mode?: "add" | "manage" | "install"; installationId?: string }
+      options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
     ) => {
       const params = new URLSearchParams({ spaceId });
       if (options?.mode) params.set("mode", options.mode);
@@ -231,6 +235,8 @@ export const HUB_ROUTES = {
   channel_transfer_proposals: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/transfer-proposals`,
   machine_name: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/name`,
+  /** The owner reads one Machine's load history; `range` is one of 1h, 24h, 7d, 30d, 90d. */
+  machine_resource_history: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/resource-history`,
   machine_auto_assign: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/auto-assign`,
   machine: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}`,
   space_channel_transfers: (spaceId: string) =>
@@ -426,6 +432,8 @@ export const WEB_PROXY_ROUTES = {
   channel_transfer_proposals: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/transfer-proposals`,
   machine_name: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}/name`,
+  machine_resource_history: (machineId: string) =>
+    `/api/xmatrix/machines/${encodeURIComponent(machineId)}/resource-history`,
   machine_auto_assign: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}/auto-assign`,
   machine: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}`,
   space_channel_transfers: (spaceId: string) =>
@@ -814,6 +822,14 @@ export interface SerializedMachineDaemon {
   autoAssign?: false;
   /** Agent Runs starting or running on this Machine. */
   activeRuns?: number;
+  /**
+   * Set while this online daemon has left work unanswered: since when a command
+   * sent to it has waited unclaimed, or a lease it held has lapsed, past a
+   * minute. `status` and `lastSeenAt` follow connection events only, so this is
+   * the evidence that an "online" route is not actually responding. Presence
+   * only; absent from Hubs that predate it.
+   */
+  unansweredSince?: string;
   /** Latest operating-system computer name; an observation, never identity. */
   hostname?: string;
   hostId?: string;

@@ -332,6 +332,15 @@ export function toolItemPath(viewPath: string, item: string | null): string {
   return item ? `${viewPath}?item=${encodeURIComponent(item)}` : viewPath;
 }
 
+/**
+ * Platform admin's address also names its open user and each table's search,
+ * sort, and page, so a filtered view can be shared: it keeps its whole query.
+ */
+export function adminViewPath(viewPath: string, location: string): string {
+  const query = parseAppLocation(location).searchParams.toString();
+  return query ? `${viewPath}?${query}` : viewPath;
+}
+
 /** The item a list destination's address names; the reverse of `toolItemPath`. */
 export function toolItemSelection(location: string): string | null {
   return parseAppLocation(location).searchParams.get("item")?.trim() || null;

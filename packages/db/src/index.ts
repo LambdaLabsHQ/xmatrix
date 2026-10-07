@@ -179,6 +179,10 @@ export {
 } from "./machine-run-terminal-reports.js";
 export { MachineNameError, renameMachine, nameMachine, getMachineName, setMachineAutoAssign } from "./machine-names.js";
 export { rejoinMachine, retireMachine } from "./machine-retirement.js";
+export {
+  MachineResourceHistoryError, maintainMachineResourceHistory, parseMachineResourceHistoryRange,
+  readMachineResourceHistory,
+} from "./machine-resource-history.js";
 export { MachineIdentityAdoptionError, adoptLegacyMachineIds } from "./machine-identity-adoption.js";
 export {
   PostgresAutomationRepository,
@@ -258,7 +262,7 @@ export type {
 export {
   readsOnly,
 } from "./space-roles.js";
-export { readHarnessActionStatus, readHarnessReleaseTargets, type HarnessReleaseTarget } from "./machine-harness-actions.js";
+export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessReleaseTarget } from "./machine-harness-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
 export { observeRegistrationQuota, readRegistrationQuotaState, registrationQuotaKey, type RegistrationQuotaKey } from "./registration-quota-state.js";
