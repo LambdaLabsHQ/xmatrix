@@ -86,7 +86,6 @@ import {
 
 import {
   insertMentionIntoDraft,
-  insertMentionTriggerIntoDraft,
 } from "./workspace-shell-helpers-extra";
 
 import {
@@ -161,7 +160,6 @@ import { BranchBadge } from "./status-tag";
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
 import {
-  AtSign,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -393,7 +391,7 @@ export function Composer({
   placeholder?: string;
   ariaLabel?: string;
   sendTitle?: string;
-  /** Extra controls beside Mention agent, inside the input box. */
+  /** Extra controls inside the input box, before Send. */
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
 }) {
@@ -1359,25 +1357,11 @@ export function Composer({
           }
           afterSend={afterSend}
           inputTrailing={
-            <div className="composer-inline-actions flex shrink-0 items-center gap-1 text-muted-foreground">
-              <ComposerIcon
-                label="Mention agent"
-                icon={AtSign}
-                onClick={() => {
-                  const target = textareaRef.current;
-                  const nextCursor = target?.selectionStart ?? localDraft.length;
-                  const next = insertMentionTriggerIntoDraft(localDraft, nextCursor);
-                  setDraftText(next.value);
-                  setCursor(next.cursor);
-                  scheduleTextareaSelection(
-                    () => textareaRef.current,
-                    next.value,
-                    { start: next.cursor, end: next.cursor }
-                  );
-                }}
-              />
-              {inlineActions}
-            </div>
+            inlineActions ? (
+              <div className="composer-inline-actions flex shrink-0 items-center gap-1 text-muted-foreground">
+                {inlineActions}
+              </div>
+            ) : null
           }
         />
     </div>
