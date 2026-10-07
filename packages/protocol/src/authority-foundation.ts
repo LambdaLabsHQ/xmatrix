@@ -235,6 +235,8 @@ export const HUB_ROUTES = {
   channel_transfer_proposals: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/transfer-proposals`,
   machine_name: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/name`,
+  /** The owner reads one Machine's load history; `range` is one of 1h, 24h, 7d, 30d, 90d. */
+  machine_resource_history: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/resource-history`,
   machine_auto_assign: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/auto-assign`,
   machine: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}`,
   space_channel_transfers: (spaceId: string) =>
@@ -430,6 +432,8 @@ export const WEB_PROXY_ROUTES = {
   channel_transfer_proposals: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/transfer-proposals`,
   machine_name: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}/name`,
+  machine_resource_history: (machineId: string) =>
+    `/api/xmatrix/machines/${encodeURIComponent(machineId)}/resource-history`,
   machine_auto_assign: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}/auto-assign`,
   machine: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}`,
   space_channel_transfers: (spaceId: string) =>

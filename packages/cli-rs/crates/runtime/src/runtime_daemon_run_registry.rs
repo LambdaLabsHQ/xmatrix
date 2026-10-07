@@ -1231,19 +1231,24 @@ async fn send_daemon_run_snapshot(
 }
 
 /// Reports what changed, when it changes: one partial snapshot naming only the
-/// Runs whose progress moved, and the machine's resources only when they moved
-/// materially. The full snapshot is sent once per connection (see
-/// `report_daemon_run_snapshot`); nothing here repeats on a timer.
+/// Runs whose progress moved, and the machine's resources when they moved
+/// materially or once a history interval has passed. The full snapshot is sent
+/// once per connection (see `report_daemon_run_snapshot`).
 #[derive(Default)]
 struct DaemonRunProgressReporter {
     reported: HashMap<String, MachineRunSnapshotItem>,
     resources: Option<Vec<u64>>,
     resources_at: Option<Instant>,
+    /// When a resource sample last reached the Hub.
+    resources_reported_at: Option<Instant>,
     /// The Hub connection the last resource report went to.
     connection_epoch: Option<u64>,
 }
 
 const DAEMON_RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+/// The Hub keeps one sample per interval as the machine's load history, so an
+/// unchanged machine still reports this often.
+const DAEMON_RESOURCE_HISTORY_INTERVAL: Duration = Duration::from_secs(60);
 
 impl DaemonRunProgressReporter {
     async fn report(
@@ -1291,6 +1296,7 @@ impl DaemonRunProgressReporter {
         }
         if signature.is_some() {
             self.resources = signature;
+            self.resources_reported_at = Some(Instant::now());
         }
     }
 
@@ -1303,6 +1309,7 @@ impl DaemonRunProgressReporter {
             self.connection_epoch = epoch;
             self.resources = None;
             self.resources_at = None;
+            self.resources_reported_at = None;
         }
     }
 
@@ -1319,7 +1326,17 @@ impl DaemonRunProgressReporter {
             .await
             .ok()
             .flatten()?;
-        (self.resources.as_ref() != Some(&machine_resource_signature(&sample))).then_some(sample)
+        self.resource_report_due(&machine_resource_signature(&sample), now)
+            .then_some(sample)
+    }
+
+    /// A sample is news when it left the last reported bucket, and history
+    /// when the last report is an interval old.
+    fn resource_report_due(&self, signature: &[u64], now: Instant) -> bool {
+        self.resources.as_deref() != Some(signature)
+            || self.resources_reported_at.is_none_or(|at| {
+                now.duration_since(at) >= DAEMON_RESOURCE_HISTORY_INTERVAL
+            })
     }
 }
 
@@ -2686,6 +2703,21 @@ mod machine_resource_tests {
         assert_eq!(reporter.resources, None);
         assert_eq!(reporter.resources_at, None);
         assert_eq!(reporter.connection_epoch, Some(4));
+    }
+
+    #[test]
+    fn an_unchanged_machine_still_reports_once_per_history_interval() {
+        let start = std::time::Instant::now();
+        let mut reporter = super::DaemonRunProgressReporter::default();
+        assert!(reporter.resource_report_due(&[8, 4], start));
+        reporter.resources = Some(vec![8, 4]);
+        reporter.resources_reported_at = Some(start);
+        let interval = super::DAEMON_RESOURCE_HISTORY_INTERVAL;
+        let before = start + interval - std::time::Duration::from_secs(1);
+        assert!(!reporter.resource_report_due(&[8, 4], before));
+        // A material change does not wait for the interval.
+        assert!(reporter.resource_report_due(&[8, 5], before));
+        assert!(reporter.resource_report_due(&[8, 4], start + interval));
     }
 
     #[test]
