@@ -6340,7 +6340,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .composer-input-row {
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-box:not(.app-agent-work-card) .composer-textarea {
   min-height: 2.5rem !important;
   max-height: min(9rem, 34dvh) !important;
-  padding: 0.55rem 0.125rem !important;
+  /* One line fills the 2.5rem minimum exactly, so its middle meets the
+     attach and send buttons' middles at any font size. */
+  padding: calc((2.5rem - 1.38em) / 2) 0.125rem !important;
   line-height: 1.38 !important;
 }
 
