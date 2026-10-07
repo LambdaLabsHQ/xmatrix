@@ -7473,12 +7473,12 @@ html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row.app-list-row:
 
 html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row.app-list-row:is(:active, .app-channel-row-active,
   .app-page-row-selected, .app-tool-list-row-selected, .app-list-create-active) {
-  --app-liquid-surface-bg: var(--app-panel-paper) !important;
+  --app-liquid-surface-bg: var(--app-panel-row-active) !important;
   --app-liquid-fill-tint: transparent !important;
   --app-glass-caustics: transparent !important;
   --app-glass-edge: none !important;
   --app-liquid-backdrop-filter: none !important;
-  background: var(--app-panel-paper) !important;
+  background: var(--app-panel-row-active) !important;
   box-shadow: none !important;
 }
 

@@ -417,10 +417,13 @@
   --foreground: oklch(0.24 0.03 60);
   --card-foreground: oklch(0.24 0.03 60);
 
-  /* The panel's paper, its lists' tone and its inks, on a phone as beside a
-     desktop's rail: a phone's lists are the same lists. */
+  /* The panel's paper, its lists' tone and its inks. Beside a desktop's rail
+     the list column sits next to the conversation, so it takes a deeper tone;
+     a phone shows one screen at a time, so its lists are the same paper. */
   --app-panel-paper: oklch(0.976 0.005 85);
   --app-panel-list: oklch(0.941 0.007 82);
+  /* A pressed or selected row takes the conversation's paper. */
+  --app-panel-row-active: var(--app-panel-paper);
   --app-panel-ink: oklch(0.24 0.03 60);
   --app-panel-ink-muted: oklch(0.46 0.03 65);
   --app-panel-ink-faint: oklch(0.6 0.028 70);
@@ -429,5 +432,8 @@
 @media (max-width: 767px) {
   .xmatrix-app {
     --app-message-avatar-size: 2.5rem;
+    --app-panel-list: var(--app-panel-paper);
+    /* The list is already paper, so a pressed row deepens instead. */
+    --app-panel-row-active: oklch(0.941 0.007 82);
   }
 }
