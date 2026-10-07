@@ -7273,6 +7273,30 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 @media (prefers-reduced-motion: reduce) {
   .app-composer-mention-band[data-entering="true"] { animation: none; }
 }
+/* The empty composer's hint (composer-hints.ts), painted in the same mirror.
+   The words stay faint; the trigger they teach sits in the band it will become,
+   and @ wears the summon violet because typing it calls an Agent in. */
+.app-composer-hint { color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
+.app-composer-hint[data-rotating="true"] { display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
+.app-composer-hint-trigger {
+  --hint-ink: var(--primary);
+  margin-right: 0.1em; padding: 0 0.28em; border-radius: 0.3em; font-weight: 600;
+  color: color-mix(in oklab, var(--hint-ink) 75%, var(--muted-foreground));
+  background: color-mix(in oklab, var(--hint-ink) 9%, transparent);
+}
+.app-composer-hint[data-summon="true"] .app-composer-hint-trigger {
+  --hint-ink: oklch(0.62 0.16 285);
+  background:
+    linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%) 0 0 / 240% 100% no-repeat,
+    color-mix(in oklab, var(--hint-ink) 11%, transparent);
+  animation: composer-hint-summon 2.4s cubic-bezier(.45, 0, .25, 1) 300ms infinite;
+}
+@keyframes composer-hint-in { from { opacity: 0; transform: translateY(0.45em); filter: blur(3px); } }
+@keyframes composer-hint-summon { from { background-position: 120% 0, 0 0; } to { background-position: -120% 0, 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .app-composer-hint[data-rotating="true"],
+  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger { animation: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .xmatrix-app .app-mention-summon-written[data-reading="true"] { animation: none; background: color-mix(in oklab, var(--invocation-color) 14%, transparent); }
