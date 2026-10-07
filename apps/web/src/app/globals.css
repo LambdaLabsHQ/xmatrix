@@ -7388,13 +7388,14 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   html[data-app-theme="wood"] .xmatrix-app .app-sidebar .app-space-switcher-name {
     color: var(--app-panel-ink) !important;
   }
+}
 
-  /* Each details block is a small WoodPanel (DetailBlock). The plank is only
-     the background: it sets no glass token, so the glass on it (chips,
-     avatars, Subscribe) is the shared recipe as on the paper. */
-  html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-details.app-details .app-detail-plank.app-detail-plank {
-    border-radius: 16px !important;
-  }
+/* Each details block is a small WoodPanel (DetailBlock), on the desktop
+   column and the phone's channel details sheet alike. The plank is only
+   the background: it sets no glass token, so the glass on it (chips,
+   avatars, Subscribe) is the shared recipe as on the paper. */
+html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-details.app-details .app-detail-plank.app-detail-plank {
+  border-radius: 16px !important;
 }
 
 @media (max-width: 767px) {
