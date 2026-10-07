@@ -23,7 +23,7 @@ test('one harness leaves Jev only the parameters; equal machines keep candidate 
   assert.equal(Object.hasOwn(result, "oneshot"), false);
   assert.equal(calls.length, 1);
   assert.deepEqual(Object.keys(calls[0].questions), ['modelEffort', 'workspace']);
-  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v8');
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v9');
   assert.equal(result.parameterEvidence.harness, undefined);
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
@@ -302,19 +302,21 @@ test('input that needs no repository may run in a private managed directory', as
 
 const modelOptions = call => Object.values(call.questions.modelEffort.criteria).map(value => JSON.parse(value));
 
-test('an empty model list offers only the runtime default, even beside an observed catalog', async () => {
+test('an empty model list skips model selection, even beside an observed catalog', async () => {
   for (const harness of ['cursor', 'codex', 'claude', 'kimi']) {
     const candidate = { ...candidates[0], key: { ...candidates[0].key, harness }, models: [], supportsRequestedEffort: true,
       modelCatalog: [{ model: 'gpt-5.4', description: 'Reported', efforts: [{ value: 'medium', description: 'Default' }] }] };
     const calls = [];
     const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
       message: `@${harness}`, tags: {}, candidates: [candidate] });
-    assert.deepEqual(modelOptions(calls.at(-1)), [{ model: '', description: 'Use runtime defaults without model or effort overrides',
-      effortDescription: 'Runtime default effort', default: true }]);
+    assert.deepEqual(Object.keys(calls.at(-1).questions), ['workspace']);
     assert.equal(chosen.useRuntimeDefaultModel, true);
     assert.equal(chosen.model, '');
     assert.equal(chosen.effort, undefined);
-    assert.equal(chosen.parameterEvidence.selections.model, 'Harness default');
+    assert.equal(Object.hasOwn(chosen.parameterEvidence.selections, 'model'), false);
+    assert.deepEqual(chosen.parameterEvidence.choices.map(choice => choice.key), ['workspace']);
+    const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+    assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
     // No model override is allowed, so any explicit model or effort is unavailable,
     // including one spelled like the harness.
     for (const tags of [{ model: harness }, { model: 'gpt-5.4' }, { effort: 'medium' }]) {
@@ -323,6 +325,31 @@ test('an empty model list offers only the runtime default, even beside an observ
         ? 'registration_effort_unavailable' : 'registration_model_unavailable'));
     }
   }
+});
+
+test('default-only harnesses still choose intent, harness and location, then measure machine load', async () => {
+  const calls = [];
+  const available = twoHarnesses.map(candidate => ({ ...candidate, models: [] }));
+  available.push({ ...available[1], key: { ...available[1].key, ownerUserId: 'idle', machineId: 'idle' },
+    workspaces: available[1].workspaces.map(workspace => ({ ...workspace, machineId: 'idle' })),
+    observations: { outstandingMachineAllocations: 0, quota: { remainingPercent: 100, assumed: true },
+      machineResources: { cpuUsagePercent: 5 } } });
+  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, { intent: 'summon' }); })({
+    message: '@auto inspect', tags: {}, candidates: available,
+    summon: { text: '@auto', start: 0, end: 5, authorKind: 'human' } });
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['intent', 'harness'], ['workspace']]);
+  assert.equal(chosen.key.machineId, 'idle');
+  assert.equal(chosen.useRuntimeDefaultModel, true);
+  assert.equal(chosen.parameterEvidence.harness.selected, 'claude');
+});
+
+test('declared models stay real choices beside default-only environments of the same harness', async () => {
+  const calls = [];
+  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@codex', tags: {}, candidates: [{ ...candidates[0], models: [] }, candidates[1]] });
+  assert.deepEqual(modelOptions(calls.at(-1)).map(option => option.model), ['small', 'large']);
+  assert.equal(chosen.key.machineId, 'last');
+  assert.equal(chosen.useRuntimeDefaultModel, undefined);
 });
 
 test('an explicit model list offers the observed catalog intersected with it', async () => {

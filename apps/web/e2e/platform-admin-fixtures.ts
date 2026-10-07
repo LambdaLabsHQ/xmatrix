@@ -1,5 +1,5 @@
 import type { Page } from "./fixtures";
-import { E2E_CHANNEL, E2E_SPACE, fixtureJson, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { E2E_CHANNEL, E2E_SPACE, fixtureJson, installWorkspaceStubs } from "./workspace-fixtures";
 
 export const OVERVIEW = {
   generatedAt: "2026-08-04T12:00:00.000Z",
@@ -135,7 +135,7 @@ const AUDIT = [{
 }];
 
 export async function openWorkspaceAs(page: Page, platformAdmin: boolean, overviewStatus = 200) {
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   await fixtureJson(page, "me", /\/api\/xmatrix\/me$/, {
     user: { id: "user:1", email: "owner@example.com" },
     hubUrl: "https://hub.example",
@@ -150,5 +150,7 @@ export async function openWorkspaceAs(page: Page, platformAdmin: boolean, overvi
     overviewStatus === 200 ? { detail: USER_DETAIL } : denied, status);
   await fixtureJson(page, "admin-audit", /\/api\/xmatrix\/admin\/audit(?:\?.*)?$/,
     overviewStatus === 200 ? { events: AUDIT } : denied, status);
+  // Install the operator capability before the first /me read; otherwise More
+  // can retain the default non-operator bootstrap depending on fetch timing.
+  await page.goto("/app", { waitUntil: "domcontentloaded" });
 }
-

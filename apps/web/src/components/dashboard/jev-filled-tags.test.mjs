@@ -83,6 +83,14 @@ test("a directory Jev chose is never named", () => {
   assert.deepEqual(jevFilledTags(mention({}), local), [{ field: "model", value: "grok-4" }]);
 });
 
+test("a skipped model decision adds no model or effort tag to summons or handoffs", () => {
+  const parameters = evidence({ rubricVersion: "registration-parameters-v9",
+    selections: { workspaceKind: "repo", repo: "LambdaLabsHQ/xmatrix" },
+    choices: [{ key: "workspace", selected: "workspace_0", probabilities: { workspace_0: 1 } }] });
+  assert.deepEqual(jevFilledTags(mention({}), parameters).map(tag => tag.field), ["harness", "repo"]);
+  assert.deepEqual(jevFilledTagsForHandoff("grok", parameters, "Workstation").map(tag => tag.field), ["repo", "machine"]);
+});
+
 test("@auto shows the harness Jev picked; a named successor does not repeat it", () => {
   assert.deepEqual(jevFilledTagsForHandoff("auto", evidence()).map(tag => tag.field),
     ["harness", "model", "effort", "repo"]);

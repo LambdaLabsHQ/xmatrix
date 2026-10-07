@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
@@ -40,6 +40,73 @@ async function openActiveAgentWorkspace(page: Page) {
   await openWorkspaceWithStubs(page, {
     spaces: [E2E_SPACE],
     channels: [ACTIVE_AGENT_CHANNEL],
+  });
+}
+
+async function expectToolbarAttached(avatar: Locator, toolbar: Locator) {
+  await expect.poll(async () => {
+    const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
+    if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
+    return Math.abs(avatarBox.y - (toolbarBox.y + toolbarBox.height));
+  }).toBeLessThanOrEqual(12);
+}
+
+for (const mobile of [false, true]) {
+  test.describe(`failed-turn controls ${mobile ? "mobile" : "desktop"}`, () => {
+    test.use({
+      ...(mobile ? E2E_MOBILE_CONTEXT : DESKTOP_HOVER_CONTEXT),
+      deviceScaleFactor: 4,
+      viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 },
+    });
+    test("failed-turn island keeps hover controls beside the avatar and reachable from the status", async ({ page }, testInfo) => {
+      const presence = ACTIVE_AGENT_CHANNEL.memberPresence["agent:codex"];
+      const instance = presence.instances[0];
+      await openWorkspaceWithStubs(page, {
+        spaces: [E2E_SPACE],
+        channels: [{
+          ...ACTIVE_AGENT_CHANNEL,
+          memberPresence: {
+            "agent:codex": {
+              ...presence,
+              status: "online",
+              instances: [{
+                ...instance,
+                status: "online",
+                usage: {
+                  quotaState: "observed",
+                  quotaSource: "provider_api",
+                  quotaObservedAt: new Date().toISOString(),
+                  quotaUsages: [{ label: "5h", usedPercent: 100 }],
+                  quotaAccount: { allowed: false },
+                },
+                runtimeState: { status: "idle", issue: { kind: "failed", sinceMillis: Date.now() - 480_000 } },
+              }],
+            },
+          },
+        }],
+      });
+
+      if (mobile) {
+        await page.locator(".app-mobile-channel-list-pane")
+          .getByText(ACTIVE_AGENT_CHANNEL.name || "general", { exact: true }).first().tap();
+      }
+      const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+      const issue = page.locator(".app-agent-work-dock [data-runtime-issue='failed']");
+      const controls = page.locator(".app-agent-work-actions");
+      const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
+      await expect(avatar.locator(".app-agent-work-limit")).toHaveText("limit");
+      if (mobile) await issue.getByRole("button").focus();
+      else await issue.hover();
+      await expect(controls).toHaveCSS("opacity", "1");
+      await expectToolbarAttached(avatar, toolbar);
+      await expect(toolbar.getByRole("note")).toHaveText("Usage limit reached: provider refuses requests");
+      await toolbar.hover();
+      await expect(controls).toHaveCSS("opacity", "1");
+      await page.screenshot({ path: testInfo.outputPath("failed-turn-hover.png") });
+      await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeEnabled();
+      await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
+      await expect(page.getByRole("heading", { name: "Stop agent?" })).toBeVisible();
+    });
   });
 }
 
@@ -189,13 +256,7 @@ test.describe("mobile agent controls", () => {
       (dock as HTMLElement).style.transform = "translateY(96px)";
     });
 
-    await expect
-      .poll(async () => {
-        const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
-        if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
-        return Math.abs(avatarBox.y - (toolbarBox.y + toolbarBox.height));
-      })
-      .toBeLessThanOrEqual(12);
+    await expectToolbarAttached(avatar, toolbar);
   });
 
   test("agent Instance control is large enough and clears the floating composer", async ({ page }) => {

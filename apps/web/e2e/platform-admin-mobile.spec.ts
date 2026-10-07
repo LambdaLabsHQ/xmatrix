@@ -10,6 +10,24 @@ async function expectPaperFits(page: Page) {
   const paper = page.locator(".app-tool-detail-scroll:visible");
   await expect(paper).toBeVisible();
   await expect.poll(() => paper.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  // The detail must use the same paper as Pages, even outside the desktop panel.
+  await expect.poll(() => page.locator(".app-tool-detail:visible").evaluate((element) => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--app-panel-paper)";
+    element.append(probe);
+    const matches = getComputedStyle(element).backgroundColor === getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return matches;
+  })).toBe(true);
+  // Wrapped UTC times must stay inside their row and clear the next label.
+  await expect.poll(() => page.locator(".app-admin-account dl > div").evaluateAll((rows) =>
+    rows.every((row, index) => {
+      const next = rows[index + 1];
+      if (!next) return true;
+      const bottom = Math.max(...Array.from(row.children, (cell) => cell.getBoundingClientRect().bottom));
+      return bottom <= next.getBoundingClientRect().top;
+    }),
+  )).toBe(true);
 }
 
 test("a phone enters Platform from More, opens a section, and returns to its sections", async ({ page }, testInfo) => {
@@ -33,6 +51,9 @@ test("a phone shares a filtered user list, opens a user, and Back restores the f
   await page.goto(`${ADMIN}?item=users&uq=owner&usort=user`);
   const users = page.getByRole("region", { name: "Registered users" });
   await expect(users.getByRole("textbox")).toHaveValue("owner");
+  await expect(users.getByRole("textbox")).toHaveCSS("box-shadow", "none");
+  await expect(users.getByRole("textbox")).toHaveCSS("border-radius", "0px");
+  await expect(users.getByRole("button", { name: "Export Registered users as CSV" })).toHaveCSS("box-shadow", "none");
   await expect(users.locator("table")).toHaveCount(0);
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-users.png") });
@@ -61,6 +82,9 @@ test("phone sorting, search, and CSV export work without table headers", async (
   await expect(spaces.getByText("Lambda Labs")).toHaveCount(0);
   await search.fill("");
   await spaces.getByRole("combobox", { name: "Sort Spaces" }).click();
+  await expect(spaces.getByRole("combobox")).toHaveCSS("box-shadow", "none");
+  await expect(spaces.getByRole("listbox")).toHaveCSS("box-shadow", "none");
+  await expect(spaces.getByRole("listbox")).toHaveCSS("border-radius", "0px");
   await spaces.getByRole("option", { name: "Space", exact: true }).click();
   await expect(spaces.locator("li").first()).toContainText("Lambda Labs");
   await spaces.getByRole("button", { name: "Sorted ascending; sort descending" }).click();
