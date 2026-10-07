@@ -1762,6 +1762,24 @@ impl DaemonStopRequest {
         .await
     }
 
+    async fn retained_export_source(&self) -> Option<HandoffExportSource> {
+        self.handoff_export.as_ref()?;
+        retained_handoff_export_source_at(
+            &repo_pool::default_repo_pools_root().ok()?,
+            RetainedRunAuthority {
+                run_id: self.run_id.as_deref(),
+                execution_key: self.execution_key.as_deref(),
+                instance_id: self.instance_id.as_deref(),
+                resume_session_key: self.resume_session_key.as_deref(),
+                repo_identity: self.repo_identity.as_deref(),
+                repo_key_id: self.repo_key_id.as_deref(),
+                slot_id: self.slot_id.as_deref(),
+            },
+        )
+        .await
+        .ok()
+    }
+
     async fn stop(&self, registry: &DaemonRunRegistry) -> error::Result<DaemonStopOutcome> {
         stop_daemon_child(
             registry,
@@ -2063,6 +2081,47 @@ struct HandoffExportSource {
     run_id: String,
     execution_key: String,
     label: String,
+    retained: Option<repo_pool::RetainedHandoffSource>,
+}
+
+async fn retained_handoff_export_source_at(
+    pools_root: &Path,
+    authority: RetainedRunAuthority<'_>,
+) -> error::Result<HandoffExportSource> {
+    let identity = repo_pool::canonical_repo_identity(exact_stop_value(
+        "repoIdentity",
+        authority.repo_identity,
+    )?)
+    .map_err(|error| CliError::Launch(format!("invalid handoff repo identity ({error})")))?;
+    let key = exact_stop_value("repoKeyId", authority.repo_key_id)?;
+    if repo_pool::repo_key_id(&identity).as_str() != key {
+        return Err(CliError::Launch(
+            "handoff repo key does not match identity".into(),
+        ));
+    }
+    let exact = repo_pool::BindingAuthority {
+        session_key: exact_stop_value("resumeSessionKey", authority.resume_session_key)?
+            .to_string(),
+        instance_id: exact_stop_value("instanceId", authority.instance_id)?.to_string(),
+        run_id: exact_stop_value("runId", authority.run_id)?.to_string(),
+        execution_key: exact_stop_value("executionKey", authority.execution_key)?.to_string(),
+        slot_id: exact_stop_value("slotId", authority.slot_id)?.to_string(),
+    };
+    let layout = repo_pool::RepoPoolLayout::from_persisted(pools_root, key)
+        .map_err(|error| CliError::Launch(format!("invalid handoff pool layout ({error})")))?;
+    let retained = repo_pool::retained_handoff_source_at(&layout, &exact)
+        .await
+        .map_err(|error| {
+            CliError::Launch(format!("retained handoff source unavailable ({error})"))
+        })?;
+    Ok(HandoffExportSource {
+        cwd: retained.cwd.clone(),
+        repository: github_repository_of_pool_identity(identity.as_str()),
+        run_id: exact.run_id,
+        execution_key: exact.execution_key,
+        label: exact.instance_id,
+        retained: Some(retained),
+    })
 }
 
 async fn handoff_export_source(
@@ -2087,6 +2146,7 @@ async fn handoff_export_source(
             .clone()
             .or_else(|| managed.instance_id.clone())
             .unwrap_or_else(|| "an xMatrix Run".to_string()),
+        retained: None,
     })
 }
 
@@ -2136,7 +2196,14 @@ async fn export_handoff_after_stop(
         return handoff_export_failure(branch, "the daemon could not issue a Git credential");
     };
     let outcome = git_credential::with_scoped_capability(Some(capability.clone()), async {
-        let work = run_worktree::capture_handoff_work(&source.cwd, &source.label).await?;
+        let work = match source
+            .retained
+            .as_ref()
+            .and_then(|retained| retained.captured.clone())
+        {
+            Some(work) => work,
+            None => run_worktree::capture_handoff_work(&source.cwd, &source.label).await?,
+        };
         run_worktree::push_handoff_work(&source.cwd, &work.commit, branch).await?;
         Ok::<_, String>(work)
     })
@@ -2501,9 +2568,10 @@ fn host_capabilities() -> Vec<String> {
     let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
     if let Ok(guard) = cache.lock()
         && let Some((at, capabilities)) = guard.as_ref()
-            && at.elapsed() < HOST_CAPABILITY_PROBE_INTERVAL {
-                return capabilities.clone();
-            }
+        && at.elapsed() < HOST_CAPABILITY_PROBE_INTERVAL
+    {
+        return capabilities.clone();
+    }
     let mut capabilities = Vec::new();
     if github_cli_authenticated() {
         capabilities.push("github".to_string());
@@ -2794,7 +2862,75 @@ mod handoff_export_tests {
             run_id: "run-1".to_string(),
             execution_key: "exec-1".to_string(),
             label: "@claude:3".to_string(),
+            retained: None,
         }
+    }
+
+    #[tokio::test]
+    async fn sleeping_checkout_exports_after_its_child_registry_row_is_gone() {
+        let (remote, base) = stopped_checkout();
+        let pools = base.parent().unwrap().join("pools");
+        std::fs::create_dir_all(&pools).unwrap();
+        let repository = "https://github.com/acme/app";
+        git(&base, &["remote", "set-url", "origin", repository]);
+        git(
+            &base,
+            &[
+                "config",
+                &format!("url.{}.insteadOf", remote.display()),
+                repository,
+            ],
+        );
+        let identity = repo_pool::canonical_repo_identity(repository).unwrap();
+        let key = repo_pool::repo_key_id(&identity);
+        let layout = repo_pool::RepoPoolLayout::create(&pools, key.clone()).unwrap();
+        let request = repo_pool::LeaseRequest {
+            session_key: "session-1".into(),
+            instance_id: "instance-1".into(),
+            run_id: "run-1".into(),
+            execution_key: "exec-1".into(),
+        };
+        let lease = repo_pool::lease_available_or_create_at(&layout, &base, repository, &request)
+            .await
+            .unwrap();
+        std::fs::write(lease.worktree_path.join("draft.txt"), "sleeping work\n").unwrap();
+        assert!(
+            repo_pool::retain_exited_at(&layout, &request)
+                .await
+                .unwrap()
+        );
+        let registry: DaemonRunRegistry = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        assert!(
+            handoff_export_source(&registry, Some("run-1"), Some("exec-1"))
+                .await
+                .is_none()
+        );
+        let source = retained_handoff_export_source_at(
+            &pools,
+            RetainedRunAuthority {
+                run_id: Some("run-1"),
+                execution_key: Some("exec-1"),
+                instance_id: Some("instance-1"),
+                resume_session_key: Some("session-1"),
+                repo_identity: Some(identity.as_str()),
+                repo_key_id: Some(key.as_str()),
+                slot_id: Some(lease.slot_id.as_str()),
+            },
+        )
+        .await
+        .unwrap();
+        let broker = broker();
+        let result = export_handoff_after_stop(Some(source), &export(), Some(&broker)).await;
+        assert_eq!(result.state, "pushed", "{result:?}");
+        assert_eq!(
+            git(
+                &remote,
+                &["show", &format!("{}:draft.txt", result.commit.unwrap())]
+            ),
+            "sleeping work"
+        );
+        assert!(broker.git_credentials.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(base.parent().unwrap());
     }
 
     #[tokio::test]

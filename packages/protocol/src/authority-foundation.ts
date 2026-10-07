@@ -97,6 +97,10 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/teams/link`,
     space_app_connection_googlechat_link: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/googlechat/link`,
+    space_app_connection_github_installations: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/github/installations`,
+    space_app_connection_github_installation: (spaceId: string, installationId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/github/installations/${encodeURIComponent(installationId)}`,
     space_app_connection_feishu_link: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/feishu/link`,
     space_app_connection_telegram_link: (spaceId: string) =>
@@ -114,7 +118,7 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-executions`,
     github_app_install: (
       spaceId: string,
-      options?: { mode?: "add" | "manage" | "install"; installationId?: string }
+      options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
     ) => {
       const params = new URLSearchParams({ spaceId });
       if (options?.mode) params.set("mode", options.mode);
@@ -814,6 +818,14 @@ export interface SerializedMachineDaemon {
   autoAssign?: false;
   /** Agent Runs starting or running on this Machine. */
   activeRuns?: number;
+  /**
+   * Set while this online daemon has left work unanswered: since when a command
+   * sent to it has waited unclaimed, or a lease it held has lapsed, past a
+   * minute. `status` and `lastSeenAt` follow connection events only, so this is
+   * the evidence that an "online" route is not actually responding. Presence
+   * only; absent from Hubs that predate it.
+   */
+  unansweredSince?: string;
   /** Latest operating-system computer name; an observation, never identity. */
   hostname?: string;
   hostId?: string;

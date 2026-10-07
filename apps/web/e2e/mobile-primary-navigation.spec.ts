@@ -233,18 +233,34 @@ test("channel details keeps web back navigation above the material sheet", async
   await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
 });
 
-test("channel details planks keep their rounded corners on a phone", async ({ page }, testInfo) => {
+test("channel details navigation matches the content cards on a phone", async ({ page }, testInfo) => {
   await openGeneralChannel(page);
   const { details } = await openChannelDetailsFrom(page, "More");
-  // The radius once lived only in the desktop media query, so the phone's
-  // sheet showed square wood cards.
-  const plank = details.locator(".app-detail-plank").first();
+  const header = details.locator(".app-mobile-channel-details-header");
+  const plank = details.locator(".app-mobile-channel-details-sheet .app-detail-plank").first();
+  await expect(header).toHaveAttribute("data-material", "wood-panel");
   await expect(plank).toBeVisible();
-  await expect(plank).toHaveCSS("border-top-left-radius", "16px");
-  await expect(plank).toHaveCSS("border-bottom-right-radius", "16px");
+  for (const card of [header, plank]) {
+    await expect(card).toHaveCSS("border-top-left-radius", "16px");
+    await expect(card).toHaveCSS("border-bottom-right-radius", "16px");
+  }
+  const headerBox = await header.boundingBox();
+  const plankBox = await plank.boundingBox();
+  expect(headerBox).not.toBeNull();
+  expect(plankBox).not.toBeNull();
+  expect(headerBox!.x).toBe(16);
+  expect(headerBox!.x).toBe(plankBox!.x);
+  expect(headerBox!.width).toBe(plankBox!.width);
+  expect(plankBox!.y - headerBox!.y - headerBox!.height).toBe(16);
+  await expect(header.getByRole("button", { name: "Back to channel" })).toHaveCSS("width", "44px");
+  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   const shot = testInfo.outputPath("mobile-channel-details-planks.png");
   await page.screenshot({ path: shot, fullPage: false });
   await testInfo.attach("mobile-channel-details-planks", { path: shot, contentType: "image/png" });
+  // The overlay already applies the native safe area. The card's margin must
+  // add only the paper gutter, rather than reserving the status bar twice.
+  await details.evaluate((dialog) => (dialog as HTMLElement).style.setProperty("--app-safe-area-top", "59px"));
+  await expect.poll(async () => (await header.boundingBox())?.y).toBe(75);
 });
 
 test("Android Back closes channel details before leaving the channel", async ({ page }) => {

@@ -25,6 +25,14 @@ The component map is `docs/ARCHITECTURE.md`. The rest of this snapshot is split 
 
 Message syntax and execution selection use the [message interaction protocol](../design/message-interaction-protocol.md), with a shared TypeScript/Rust grammar and domain-owned authorization.
 
+Cross-machine handoff stops the exact source Run and Instance even when it
+has already exited, ending its rest before the successor can wake it with a
+reply. The daemon exports the exact retained checkout or its eviction snapshot
+without a live child registry row, preserving uncommitted work under the pool
+guard. This requires the updated CLI; stale retained authority is refused.
+Stop issuance failures refuse the handoff; a durable stop may still
+await its daemon report. See [instance handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine).
+
 Machine startup failures remain visible as idempotent Channel notices even if
 the Launch has already failed its Run. Public invocation details classify known
 repository preparation errors with actionable copy; subsequent stop cleanup

@@ -539,7 +539,8 @@ export class AgentInstanceRuntimeTransport {
       this.pendingTraceRequestIdsByKey.delete(key);
     }
     const requestId = crypto.randomUUID();
-    if (!this.traceRequestBudget.tryStart(instanceId, requestId)) {
+    if (!this.traceRequestBudget.tryStart(instanceId, requestId) &&
+        !(this.retireOldestTraceWait(instanceId) && this.traceRequestBudget.tryStart(instanceId, requestId))) {
       return Promise.resolve(unavailableAgentHostTrace("host_overloaded"));
     }
     const binding: AgentHostTraceBinding = {
@@ -777,6 +778,21 @@ export class AgentInstanceRuntimeTransport {
       if (pending.socket !== ws) continue;
       this.finishTraceRequest(requestId, result);
     }
+  }
+
+  /**
+   * A viewer that closed a trace leaves its live read pending here until the
+   * host's wait ends, so reopening a few times used to fill the Instance's
+   * budget and answer every new viewer `host_overloaded`. Answer the oldest
+   * held live read early instead; a viewer still following it just reads again.
+   */
+  private retireOldestTraceWait(instanceId: string): boolean {
+    for (const [requestId, pending] of this.pendingTraceRequests) {
+      if (pending.binding.instanceId !== instanceId || !pending.request.waitMs) continue;
+      this.finishTraceRequest(requestId, unavailableAgentHostTrace("host_timeout"));
+      return true;
+    }
+    return false;
   }
 
   private finishTraceRequest(requestId: string, result: AgentHostTraceReadResult): void {

@@ -368,22 +368,61 @@ export function githubConnectionInstallationIds(
  * GitHub's setup redirect carries `installation_id` unsigned, so this is what
  * proves the installation is theirs before a Space may use it.
  */
-export async function githubUserCanAccessInstallation(
+/** The GitHub account one App installation belongs to, as Configure shows it. */
+export interface GitHubInstallationAccount {
+  installationId: string;
+  login: string;
+  type: string;
+  avatarUrl?: string;
+  repositorySelection?: string;
+}
+
+function githubInstallationAccount(value: unknown): GitHubInstallationAccount | undefined {
+  const installation = githubObject(value);
+  const id = githubNumber(installation.id);
+  const account = githubObject(installation.account);
+  const login = githubString(account.login) || githubString(account.slug) || githubString(account.name);
+  if (typeof id !== "number" || !login) return undefined;
+  const avatarUrl = githubString(account.avatar_url);
+  const repositorySelection = githubString(installation.repository_selection);
+  return {
+    installationId: String(id),
+    login: login.slice(0, 160),
+    type: (githubString(account.type) || "User").slice(0, 40),
+    ...(avatarUrl?.startsWith("https://") ? { avatarUrl } : {}),
+    ...(repositorySelection ? { repositorySelection } : {}),
+  };
+}
+
+/** The account of one installation, read as the App; undefined when GitHub no longer knows it. */
+export async function describeGitHubInstallation(
   env: AppConnectorEnv,
-  userToken: string,
   installationId: string
-): Promise<boolean> {
-  const needle = installationId.trim();
-  if (!/^[1-9][0-9]{0,19}$/u.test(needle)) return false;
+): Promise<GitHubInstallationAccount | undefined> {
+  const jwt = await configuredGitHubAppJwt(env);
+  const payload = await fetchGitHubJson(env, `/app/installations/${encodeURIComponent(installationId)}`, jwt)
+    .catch(() => undefined);
+  return payload ? githubInstallationAccount(payload) : undefined;
+}
+
+/** Every installation of this App that the user's GitHub account can reach. */
+export async function listGitHubUserInstallations(
+  env: AppConnectorEnv,
+  userToken: string
+): Promise<GitHubInstallationAccount[]> {
+  const accounts: GitHubInstallationAccount[] = [];
   // Bounded: 10 pages of 100 covers every account that can install one App.
   for (let page = 1; page <= 10; page += 1) {
     const payload = await fetchGitHubJson(env, `/user/installations?per_page=100&page=${page}`, userToken) as
-      { installations?: Array<{ id?: unknown }> };
+      { installations?: unknown[] };
     const installations = Array.isArray(payload?.installations) ? payload.installations : [];
-    if (installations.some((installation) => String(installation?.id ?? "") === needle)) return true;
-    if (installations.length < 100) return false;
+    for (const installation of installations) {
+      const account = githubInstallationAccount(installation);
+      if (account) accounts.push(account);
+    }
+    if (installations.length < 100) break;
   }
-  return false;
+  return accounts;
 }
 
 export function githubConnectionHasInstallation(

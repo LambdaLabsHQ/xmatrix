@@ -25,7 +25,7 @@ function fixture({ targets, stop, dispatch, harness } = {}) {
     intervention: context => {
       calls.push(["intervention", context]);
       return {
-        async listKillTargets(channelId) { calls.push(["list", channelId]); return targets ?? [
+        async listKillTargets(channelId, source) { calls.push(["list", channelId, source]); return targets ?? [
           { runId: "run-0", instanceId: "instance-0", mentionTarget: "claude:1" },
           { runId: "run-1", instanceId: "instance-1", mentionTarget: "claude:3" },
         ]; },
@@ -48,7 +48,8 @@ test("the source stops and pushes its checkout, then a successor of the named ha
   assert.deepEqual(f.calls.map(call => call[0]), ["intervention", "list", "stop", "dispatch"]);
   const stop = f.calls.find(call => call[0] === "stop");
   assert.equal(stop[1].runId, "run-1");
-  assert.equal(stop[2], "handoff-stop:instance-1");
+  assert.equal(stop[2], "handoff-stop:run-1");
+  assert.deepEqual(f.calls.find(call => call[0] === "list")[2], { instanceId: "instance-1", runId: "run-1" });
   assert.match(stop[3], /@claude:3 handed off/);
   assert.deepEqual(stop[5], { branch, channelId: "channel" });
   assert.ok(stop[6] <= 20_000, "a Worker's background work cannot wait minutes for the push");
@@ -93,8 +94,6 @@ test("unsaved work still gets a successor, told the work stayed behind", async (
     [async () => ({ stopped: true })],
     [async (...args) => ({ stopped: true, handoffExport: { branch: args[4].branch, state: "failed", dirty: false,
       error: "remote: Permission denied" } })],
-    [async () => { throw new Error("offline"); }],
-    [undefined, []],
     [async () => ({ stopped: true, handoffExport: { branch: "main", state: "pushed", commit, dirty: true } })],
   ]) {
     const f = fixture({ stop, targets });
@@ -104,7 +103,7 @@ test("unsaved work still gets a successor, told the work stayed behind", async (
   }
 });
 
-test("a lost wake replays the same launch after the source disappears, without another successor", async () => {
+test("a lost wake replays the same launch after the source stops, without another successor", async () => {
   let staged;
   let launches = 0;
   const dispatch = async request => {
@@ -118,10 +117,23 @@ test("a lost wake replays the same launch after the source disappears, without a
   };
   const first = fixture({ dispatch });
   await assert.rejects(launchHandoffSuccessorElsewhere({}, first.input, first.dependencies), /wake response lost/);
-  const replay = fixture({ dispatch, targets: [] });
+  // The stopped source is still durably addressable by its exact Run/Instance.
+  const replay = fixture({ dispatch });
   assert.equal((await launchHandoffSuccessorElsewhere({}, replay.input, replay.dependencies)).agentName, "codex");
   assert.equal(launches, 1);
-  assert.equal(replay.calls.some(call => call[0] === "stop"), false);
+  assert.equal(replay.calls.some(call => call[0] === "stop"), true);
+});
+
+test("a failed source lookup or stop does not silently start a successor", async () => {
+  for (const options of [
+    { targets: [] },
+    { targets: [{ instanceId: "instance-1", runId: "new-run" }] },
+    { stop: async () => { throw new Error("stop issuance failed"); } },
+  ]) {
+    const f = fixture(options);
+    await assert.rejects(launchHandoffSuccessorElsewhere({}, f.input, f.dependencies));
+    assert.equal(f.calls.some(call => call[0] === "dispatch"), false);
+  }
 });
 
 test("pending, successful and failed exports keep the same launch request", async () => {
