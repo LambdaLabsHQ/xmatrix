@@ -13,7 +13,6 @@ function client(deleteCounts = [], reservationDeleteCounts = [], executionDelete
     async query(text, values = []) {
       calls.push({ text, values });
       if (text.includes("FROM pg_class")) return { rows: [] };
-      if (text.includes("idempotency_oldest_at")) return { rows: [{}] };
       if (text.includes("FROM data.outbox GROUP BY")) return { rows: [] };
       if (text.includes("expiredIdempotencyRowsCapped")) assert.fail("unexpected label in SQL");
       if (text.includes("AS idempotency_rows")) return { rows: [{
@@ -63,7 +62,10 @@ test("dry-run reports lifecycle state without opening a write transaction", asyn
   assert.equal(result.deletedExpiredIdempotencyRows, 0);
   assert.equal(result.deletedExpiredSequenceReservationRows, 0);
   assert.equal(result.batches, 0);
-  assert.equal(fake.calls.some(({ text }) => /BEGIN|DELETE FROM/u.test(text)), false);
+  assert.equal(fake.calls.some(({ text }) => text.includes("DELETE FROM")), false);
+  fake.calls.forEach(({ text }, index) => {
+    if (text === "BEGIN") assert.equal(fake.calls[index + 1].text, "SET TRANSACTION READ ONLY");
+  });
   assert.equal(result.before.expiredIdempotencyRowsCapped, 7);
   assert.equal(result.before.expiredSequenceReservationRowsCapped, 3);
   assert.equal(result.before.expiredMessageExecutionRowsCapped, 2);
@@ -152,4 +154,57 @@ test("maintenance expires scoped command replays last, in bounded batches", asyn
   assert.deepEqual(deletes.map(value => value.values[0]), [1_000, 1_000]); assertBoundedExpiryDeletes(deletes);
   const lastDelete = fake.calls.findLastIndex(value => /DELETE FROM/u.test(value.text));
   assert.match(fake.calls[lastDelete].text, /control\.scoped_control_command_replays/u);
+});
+
+test("the snapshot reads one statement at a time under its own read-only timeout", async () => {
+  const fake = client();
+  let inFlight = 0;
+  const original = fake.query;
+  fake.query = async (text, values) => {
+    assert.equal(inFlight, 0, "a pg client must not be handed overlapping queries");
+    inFlight += 1;
+    try { return await original(text, values); } finally { inFlight -= 1; }
+  };
+  const result = await runLifecycleMaintenance(fake, parseLifecycleOptions(["--dry-run"]));
+  const texts = fake.calls.map(({ text }) => text);
+  assert.equal(texts.filter((text) => text === "SET TRANSACTION READ ONLY").length, 2);
+  const begin = texts.indexOf("BEGIN");
+  assert.deepEqual(texts.slice(begin, begin + 3),
+    ["BEGIN", "SET TRANSACTION READ ONLY", "SET LOCAL statement_timeout = '30s'"]);
+  assert.equal(texts.filter((text) => /FROM data\.outbox/u.test(text)).length, 2,
+    "one outbox scan per snapshot");
+  assert.ok(texts.indexOf("SET statement_timeout = '5s'") < begin);
+  assert.deepEqual(Object.keys(result.before.oldest), [
+    "idempotency_oldest_at", "sequence_reservation_oldest_at", "outbox_oldest_at",
+    "message_execution_oldest_at", "mutation_oldest_at",
+  ]);
+});
+
+test("the oldest outbox row comes from the per-status scan", async () => {
+  const fake = client();
+  const original = fake.query;
+  fake.query = async (text, values) => text.includes("FROM data.outbox GROUP BY")
+    ? { rows: [
+      { status: "delivered", oldest_at: new Date("2026-09-12T00:00:00Z") },
+      { status: "pending", oldest_at: new Date("2026-09-09T00:00:00Z") },
+    ] }
+    : original(text, values);
+  const result = await runLifecycleMaintenance(fake, parseLifecycleOptions(["--dry-run"]));
+  assert.deepEqual(result.before.oldest.outbox_oldest_at, new Date("2026-09-09T00:00:00Z"));
+});
+
+test("a snapshot failure names the read that failed and rolls back", async () => {
+  const fake = client();
+  const original = fake.query;
+  fake.query = async (text, values) => {
+    if (text.includes("FROM data.outbox GROUP BY")) {
+      fake.calls.push({ text, values });
+      throw new Error("canceling statement due to statement timeout");
+    }
+    return original(text, values);
+  };
+  await assert.rejects(runLifecycleMaintenance(fake, parseLifecycleOptions([])),
+    /lifecycle snapshot outbox by status: canceling statement due to statement timeout/u);
+  assert.equal(fake.calls.at(-1).text, "ROLLBACK");
+  assert.equal(fake.calls.some(({ text }) => text.includes("DELETE FROM")), false);
 });
