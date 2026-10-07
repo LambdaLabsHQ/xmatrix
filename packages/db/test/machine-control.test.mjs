@@ -757,6 +757,11 @@ test("Partial snapshots reach only the Channels of the Runs they name, and bind 
   assert.equal(db.calls.some((call) => call.name === "machine_control_snapshot_routes_v3"), false);
   const resources = db.calls.find((call) => call.name === "machine_resource_observation_v2");
   assert.deepEqual(JSON.parse(resources.values[2]), { observedAt, cpuLogicalCount: 8, connectionEpoch: 1 });
+  // The same sample is kept as history for the owner's Machine, only while its connection is live.
+  const history = db.calls.find((call) => call.name === "machine_resource_history_sample_v1");
+  assert.deepEqual(history.values.slice(0, 4), ["user-1", "machine-1", "daemon-1", observedAt]);
+  assert.equal(history.values.at(-1), 1);
+  assert.match(history.text, /status='online'\s+AND connection_epoch=\$13/u);
 });
 
 test("Snapshots persist a valid harness inventory for their connection and drop an invalid one", async () => {

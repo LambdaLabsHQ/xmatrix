@@ -130,6 +130,8 @@ export const EXPECTED_SUBSTRATE_TABLES = Object.freeze([
   "data.machine_daemon_commands",
   "data.machine_daemon_control_audit",
   "data.machine_daemons",
+  "data.machine_resource_hourly",
+  "data.machine_resource_samples",
   "data.machine_run_routes",
   "data.machine_run_snapshot_heads",
   "data.machine_run_terminal_reports",
