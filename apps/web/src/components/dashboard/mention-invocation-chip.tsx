@@ -430,12 +430,16 @@ function InvocationPanelBody({ jev, view, lead, context, details, sourceAddress,
 
 function InvocationSteps({ steps, label }: { steps: InvocationStep[]; label: string }) {
   return <ol className="app-invocation-steps" aria-label={label}>
-    {steps.map((step) => <li key={step.label} data-state={step.state}>
-      <span className="app-invocation-step-mark" aria-hidden="true">{step.state === "done" ? <Check size={12} /> : step.state === "failed" ? <X size={12} /> : step.state === "current" ? <span /> : null}</span>
-      <span>{step.label}{step.note && <span className="app-invocation-step-note"> · {step.note}</span>}</span>
-      <span className="app-invocation-step-time">{step.at
-        ? <time dateTime={step.at}>{new Date(step.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
-        : step.state === "current" ? "Waiting" : step.state === "done" ? "" : step.state === "failed" ? "Reported" : ""}</span>
-    </li>)}
+    {steps.map((step) => {
+      // The step in progress says what is happening now, in the chip's word.
+      const live = step.state === "current" && step.status;
+      return <li key={step.label} data-state={step.state}>
+        <span className="app-invocation-step-mark" aria-hidden="true">{step.state === "done" ? <Check size={12} /> : step.state === "failed" ? <X size={12} /> : step.state === "current" ? <span /> : null}</span>
+        <span>{live || step.label}{step.note && <span className="app-invocation-step-note"> · {step.note}</span>}</span>
+        <span className="app-invocation-step-time">{step.at
+          ? <time dateTime={step.at}>{new Date(step.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
+          : step.state === "current" ? (live ? "" : "Waiting") : step.state === "failed" ? "Reported" : ""}</span>
+      </li>;
+    })}
   </ol>;
 }
