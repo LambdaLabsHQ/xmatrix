@@ -21,43 +21,21 @@ import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from 
  * A provider's Channel commands (docs/design/connector-platform.md §3.3, §3.5):
  * subscriptions for event providers, one outbound action per message, and the
  * per-Channel action policy for Space admins. Policy is read at execution
- * time: `deny` blocks everyone; a write action from an Agent needs `allow`
- * unless its manifest marks it default-allow.
+ * time: every action runs for a Human or an Agent unless a Space admin denies
+ * it in the Channel.
  */
 
-/**
- * Why the Channel's policy refuses an action, if it does (§3.5): `deny` blocks
- * everyone; a write action defaults to allow for a Human's own command, and for
- * an Agent when the manifest marks it default-allow, otherwise it needs `allow`;
- * a read otherwise runs.
- */
-export function actionRefusal(input: { providerId: string; actionId: string; effect: "read" | "write";
-  mode: "allow" | "deny" | null; senderKind?: "user" | "agent"; defaultPolicy?: "allow" | "deny" }): string | undefined {
-  if (input.mode === "deny") return `${input.actionId} is denied in this channel`;
-  if (input.defaultPolicy === "deny" && input.mode !== "allow") {
-    return `${input.actionId} is off in this channel until a Space admin sends @${input.providerId}:policy:${input.actionId} allow here`;
-  }
-  /* Only a message known to be a Human's counts as the Human's approval. */
-  if (input.senderKind !== "user" && input.effect === "write" && input.mode !== "allow" && input.defaultPolicy !== "allow") {
-    return `an Agent runs ${input.actionId} only after a Space admin sends @${input.providerId}:policy:${input.actionId} allow here`;
-  }
-  return undefined;
+/** Why the Channel's policy refuses an action, if it does (§3.5): only `deny` blocks it. */
+export function actionRefusal(input: { actionId: string; mode: "allow" | "deny" | null }): string | undefined {
+  return input.mode === "deny" ? `${input.actionId} is denied in this channel` : undefined;
 }
 
-/**
- * Why the Channel's policy refuses an action as it stands now, read from the
- * Channel's mode and the action's manifest; an effect the manifest does not
- * name counts as a write, so an unknown action fails closed.
- */
-export async function channelActionRefusal(env: Env, input: { providerId: string; connectionId: string;
-  channelId: string; actionId: string; senderKind?: "user" | "agent"; effect?: "read" | "write" }):
-  Promise<string | undefined> {
-  const declared = getAppConnectorProvider(input.providerId)?.actions.find((action) => action.id === input.actionId);
+/** Why the Channel's policy refuses an action as it stands now. */
+export async function channelActionRefusal(env: Env, input: { connectionId: string; channelId: string;
+  actionId: string }): Promise<string | undefined> {
   const mode = await connectorActionPolicyRepository(env).mode({ requestId: crypto.randomUUID(),
     connectionId: input.connectionId, channelId: input.channelId, actionId: input.actionId });
-  return actionRefusal({ providerId: input.providerId, actionId: input.actionId,
-    effect: input.effect ?? declared?.effect ?? "write", mode, senderKind: input.senderKind,
-    defaultPolicy: declared?.defaultPolicy });
+  return actionRefusal({ actionId: input.actionId, mode });
 }
 
 /** Whether a Channel policy can name this action: one that acts on the provider. */
@@ -139,8 +117,8 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   const scope = await commandScope(manifest, input);
   if (typeof scope === "string") return `${manifest.name} ${actionId}: blocked; ${scope}.`;
   return withExecution(manifest, input, scope, { id: actionId, label, key: "" }, async () => {
-    const refusal = await channelActionRefusal(input.env, { providerId, connectionId: scope.connectionId,
-      channelId: input.channelId, actionId, senderKind: input.senderKind, effect: action.effect });
+    const refusal = await channelActionRefusal(input.env, { connectionId: scope.connectionId,
+      channelId: input.channelId, actionId });
     if (refusal) return { status: "blocked", summary: refusal };
     try {
       const authorizeWrite = async () => {
@@ -148,8 +126,8 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
         if (typeof liveScope === "string" || liveScope.spaceId !== scope.spaceId || liveScope.connectionId !== scope.connectionId) {
           throw new ProviderRequestError(409, `${manifest.name} Channel access changed before posting`);
         }
-        const changed = await channelActionRefusal(input.env, { providerId, connectionId: scope.connectionId,
-          channelId: input.channelId, actionId, senderKind: input.senderKind, effect: action.effect });
+        const changed = await channelActionRefusal(input.env, { connectionId: scope.connectionId,
+          channelId: input.channelId, actionId });
         if (changed) throw new ProviderRequestError(403, changed);
       };
       const googleChat = providerId === "googlechat" && actionId === "post"

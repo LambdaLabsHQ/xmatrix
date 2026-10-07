@@ -179,6 +179,10 @@ export {
 } from "./machine-run-terminal-reports.js";
 export { MachineNameError, renameMachine, nameMachine, getMachineName, setMachineAutoAssign } from "./machine-names.js";
 export { rejoinMachine, retireMachine } from "./machine-retirement.js";
+export {
+  MachineResourceHistoryError, maintainMachineResourceHistory, parseMachineResourceHistoryRange,
+  readMachineResourceHistory,
+} from "./machine-resource-history.js";
 export { MachineIdentityAdoptionError, adoptLegacyMachineIds } from "./machine-identity-adoption.js";
 export {
   PostgresAutomationRepository,

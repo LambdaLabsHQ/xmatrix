@@ -15,6 +15,7 @@ import {
 
 import { GoogleChatRoomLink } from "./googlechat-room-link";
 import { GitHubInstallationAccounts } from "./github-installation-accounts";
+import { takeGitHubConnectOutcome } from "@/lib/github-connect-return";
 import { WeComCompanyConnection } from "./wecom-company-connection";
 import { DingTalkCompanyConnection } from "./dingtalk-company-connection";
 import type { HumanProfile } from "@xmatrix/protocol";
@@ -248,7 +249,7 @@ export function MoreView({
     groups.push({
       label: "Platform",
       items: [
-        viewItem("admin", "Platform admin", "Platform-wide usage, invites, and product prompts", Shield),
+        viewItem("admin", "Platform admin", "Platform usage, users, Spaces, and the audit trail", Shield),
       ],
     });
   }
@@ -1029,7 +1030,7 @@ export function MachinesView({
               <MachineVersionFacts machine={machine} />
             </>
           ),
-          load: <MachineLoadPanel machine={machine} now={now} />,
+          load: <MachineLoadPanel machine={machine} now={now} token={token} />,
         } : null) : machine && (
           <>
             <ToolDetailSection title="Daemon">
@@ -1037,7 +1038,7 @@ export function MachinesView({
                 <ToolFact label="Daemon">{daemonPresenceLabel(machine.daemon)}</ToolFact>
                 <MachineVersionFacts machine={machine} />
               </ToolFacts>
-              <MachineLoadPanel machine={machine} now={now} />
+              <MachineLoadPanel machine={machine} now={now} token={token} />
             </ToolDetailSection>
             <ToolDetailSection title="Harnesses">
               <MachineHarnessPanel key={machine.id} daemon={machine.daemon} token={token} />
@@ -1202,11 +1203,8 @@ export function AppsView({
   }, []);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const status = url.searchParams.get("github");
+    const status = takeGitHubConnectOutcome();
     if (!status) return;
-    url.searchParams.delete("github");
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
     if (status === "connected") {
       setSetupNotice({
         tone: "success",

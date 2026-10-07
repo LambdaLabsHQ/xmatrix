@@ -2045,14 +2045,18 @@ export function channelAgentAvatarStatus(
   });
 }
 
-/** One of the conversation's Agents has work in hand, as its row's avatars show: busy, or waiting on something. */
-export function channelHasWorkInHand(channel: SerializedChannel, events: ObservabilityEvent[]): boolean {
-  return channelOnlineAgentAvatarItems(channel).some((item) => {
+/** The conversation's Instances with work in hand, as its row's avatars show: busy, or waiting on something. */
+export function channelWorkInHandInstanceIds(channel: SerializedChannel, events: ObservabilityEvent[]): string[] {
+  return channelOnlineAgentAvatarItems(channel).flatMap((item) => {
     const presence = memberPresence(channel, item.member);
-    if (presence.kind !== "agent") return false;
+    if (presence.kind !== "agent" || !item.instance) return [];
     const status = channelAgentAvatarStatus(channel, item.member, presence, events, item.instance);
-    return status === "busy" || status === "waiting";
+    return status === "busy" || status === "waiting" ? [item.instance.id] : [];
   });
+}
+
+export function channelHasWorkInHand(channel: SerializedChannel, events: ObservabilityEvent[]): boolean {
+  return channelWorkInHandInstanceIds(channel, events).length > 0;
 }
 
 export { channelQuickOpenScore } from "./workspace-shell-search-model";

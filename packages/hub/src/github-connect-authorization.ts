@@ -19,8 +19,22 @@ const GRANT_TTL_MS = 30 * 60_000;
 type ConnectEnv = Pick<Env, "GITHUB_APP_CLIENT_ID" | "GITHUB_APP_CLIENT_SECRET" | "HUB_URL" | "APP_URL"
   | "GITHUB_API_BASE_URL" | "GITHUB_APP_ID" | "GITHUB_APP_PRIVATE_KEY">;
 
-/** The connection lands back on the Space's Apps view with this outcome. */
-export type GitHubConnectOutcome = "connected" | "updated" | "authorized" | "failed" | "cancelled";
+/** How a GitHub connect ended, as the Web's return page reports it. */
+export type GitHubConnectOutcome = "connected" | "updated" | "authorized" | "pending" | "failed" | "cancelled";
+
+/**
+ * Every GitHub connect returns through the Web's `/connect/github` page, which
+ * keeps the outcome and grant for the tab and then opens the Space's Apps
+ * view; the app's own address canonicalization never sees them.
+ */
+export function githubConnectReturnUrl(env: Pick<Env, "APP_URL">, outcome: GitHubConnectOutcome,
+  target: { spaceId?: string; grant?: string } = {}): string {
+  const url = new URL(`${appOrigin(env)}/connect/github`);
+  url.searchParams.set("github", outcome);
+  if (target.spaceId) url.searchParams.set("space", target.spaceId);
+  if (target.grant) url.searchParams.set("grant", target.grant);
+  return url.toString();
+}
 
 function credentials(env: ConnectEnv): { clientId: string; clientSecret: string } {
   const clientId = env.GITHUB_APP_CLIENT_ID?.trim();
@@ -98,13 +112,9 @@ export async function completeGitHubConnectAuthorization(
   const payload = await verified(state.slice(CONNECT_STATE_PREFIX.length), clientSecret, CONNECT_PURPOSE);
   const spaceId = typeof payload?.spaceId === "string" ? payload.spaceId : "";
   const userId = typeof payload?.userId === "string" ? payload.userId : "";
-  if (!spaceId || !userId) return redirect(`${appOrigin(env)}/app?github=failed`);
-  const apps = (outcome: GitHubConnectOutcome, grant?: string) => {
-    const target = new URL(`${appOrigin(env)}/app/${encodeURIComponent(spaceId)}/apps`);
-    target.searchParams.set("github", outcome);
-    if (grant) target.searchParams.set("githubGrant", grant);
-    return redirect(target.toString());
-  };
+  if (!spaceId || !userId) return redirect(githubConnectReturnUrl(env, "failed"));
+  const apps = (outcome: GitHubConnectOutcome, grant?: string) =>
+    redirect(githubConnectReturnUrl(env, outcome, { spaceId, grant }));
   if (url.searchParams.get("error")) return apps("cancelled");
   const code = url.searchParams.get("code");
   const token = code ? await exchangeCode(env, code).catch(() => undefined) : undefined;

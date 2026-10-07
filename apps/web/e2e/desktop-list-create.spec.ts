@@ -1,10 +1,17 @@
+import type { Page } from "@playwright/test";
+
 import { expect, test } from "./fixtures";
+import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 /* A desktop list leads with its +: its first row, full width and square like
    the rows, set apart by its tone. Nothing floats over what is open. */
 
 test.use(E2E_DESKTOP_CONTEXT);
+
+const stubPageCreate = (page: Page) => fixtureJson(page, "page-create", /\/api\/xmatrix\/spaces\/[^/]+\/pages$/u,
+  { page: { pageId: "p-new", parentPageId: null, title: "Untitled", position: "Z", accessMode: "open", headRevision: 1,
+    agentSuggestOnly: false, canEdit: true, updatedAt: "2026-09-27T12:00:00.000Z" } }, { method: "POST" });
 
 test("the conversation list leads with New conversation, lit while the draft is open", async ({ page }) => {
   // The owner already dismissed the management-assistant notice, so the list starts at its +.
@@ -73,10 +80,11 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
 
-  const prompts: string[] = [];
-  page.on("dialog", (dialog) => { prompts.push(dialog.message()); void dialog.dismiss(); });
+  // Ctrl+N makes an untitled page at once, as Notion does; it is named on the page.
+  await stubPageCreate(page);
   await page.keyboard.press("Control+n");
-  await expect.poll(() => prompts).toEqual(["Title of the new page"]);
+  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Untitled", parentPageId: null }]);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByTestId("new-conversation")).toBeHidden();
 });
 
@@ -109,8 +117,8 @@ test("a page row makes a page under it from its own +, shown while the row is ho
   await row.hover();
   await expect(create).toHaveCSS("opacity", "1");
 
-  const prompts: string[] = [];
-  page.on("dialog", (dialog) => { prompts.push(dialog.message()); void dialog.dismiss(); });
+  await stubPageCreate(page);
   await create.click();
-  await expect.poll(() => prompts).toEqual(["Title of the new sub-page"]);
+  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Untitled", parentPageId: "p-home" }]);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });

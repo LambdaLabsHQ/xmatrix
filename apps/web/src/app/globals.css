@@ -3717,6 +3717,8 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block {
    planks. Its former separate sheets used a different blend and grain origin. */
 html[data-app-theme="wood"] .xmatrix-app .app-rail.app-rail {
   @apply app-wood-panel-recipe;
+  /* The wood meets the paper directly, without a bevel or cast shadow. */
+  box-shadow: none !important;
 }
 
 html[data-app-theme="wood"] .xmatrix-app .app-rail.app-rail::before,
@@ -5286,10 +5288,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     box-shadow:
       inset 0 1px 0 oklch(1 0 0 / 0.75),
       0 12px 28px oklch(0.28 0 0 / 0.12) !important;
-  }
-
-  :root:not(.dark) .xmatrix-app.xmatrix-app-shell .app-main {
-    background: oklch(0.975 0 0) !important;
   }
 
   .xmatrix-app.xmatrix-app-shell .app-topbar button:not(.app-mobile-space-trigger) {
@@ -7273,6 +7271,30 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 @media (prefers-reduced-motion: reduce) {
   .app-composer-mention-band[data-entering="true"] { animation: none; }
 }
+/* The empty composer's hint (composer-hints.ts), painted in the same mirror.
+   The words stay faint; the trigger they teach sits in the band it will become,
+   and @ wears the summon violet because typing it calls an Agent in. */
+.app-composer-hint { color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
+.app-composer-hint[data-rotating="true"] { display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
+.app-composer-hint-trigger {
+  --hint-ink: var(--primary);
+  margin-right: 0.1em; padding: 0 0.28em; border-radius: 0.3em; font-weight: 600;
+  color: color-mix(in oklab, var(--hint-ink) 75%, var(--muted-foreground));
+  background: color-mix(in oklab, var(--hint-ink) 9%, transparent);
+}
+.app-composer-hint[data-summon="true"] .app-composer-hint-trigger {
+  --hint-ink: oklch(0.62 0.16 285);
+  background:
+    linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%) 0 0 / 240% 100% no-repeat,
+    color-mix(in oklab, var(--hint-ink) 11%, transparent);
+  animation: composer-hint-summon 2.4s cubic-bezier(.45, 0, .25, 1) 300ms infinite;
+}
+@keyframes composer-hint-in { from { opacity: 0; transform: translateY(0.45em); filter: blur(3px); } }
+@keyframes composer-hint-summon { from { background-position: 120% 0, 0 0; } to { background-position: -120% 0, 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .app-composer-hint[data-rotating="true"],
+  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger { animation: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .xmatrix-app .app-mention-summon-written[data-reading="true"] { animation: none; background: color-mix(in oklab, var(--invocation-color) 14%, transparent); }
@@ -7327,12 +7349,17 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    The rail is the one heavy object on screen: a narrow wood plank lit from
    the top-left. Everything it navigates — the conversation list, the
    conversation and its details — is one paper panel next to it: one
-   element, one paper, one shadow, lit from straight above. Inside it nothing casts a shadow;
+   element, one paper, lit from straight above. Inside it nothing casts a shadow;
    the conversation list reads a shade darker than the conversation, and the
    row under the pointer or selected lifts to the conversation's own paper. The details' small panels are wood — small planks on the paper, the
    same material as the rail at a size where grain reads as an accent. */
 .xmatrix-app .app-workspace-panel {
   display: contents;
+}
+
+/* The main pane is the same paper on phones and desktops, including Pages. */
+.xmatrix-app.xmatrix-app-shell .app-main {
+  background: var(--app-panel-paper, var(--background)) !important;
 }
 
 @media (min-width: 768px) {
@@ -7343,9 +7370,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
     min-width: 0;
     overflow: hidden;
     background: var(--app-panel-paper, oklch(0.97 0.012 85));
-    /* The paper runs to the window's edges; only its seam with the rail
-       is drawn. */
-    box-shadow: inset 1px 0 0 oklch(0.35 0.07 60 / 0.16);
+    box-shadow: none;
   }
 
   /* The panes are regions of the panel, not surfaces on it. */

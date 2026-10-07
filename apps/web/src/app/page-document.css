@@ -85,6 +85,23 @@
 }
 .page-document .ProseMirror-gapcursor { position: relative; }
 
+/* On a phone the page reads like Notion's or Google Docs' mobile view: 16px
+   text (which also keeps iOS from zooming on focus) inside the article's 24px
+   gutters, wrapped list items with air between them, and headings that sit
+   closer to their own section than to the one above. */
+@media (max-width: 767px) {
+  .page-document { font-size: 16px; line-height: 1.65; }
+  .page-document > * + * { margin-top: 0.8em; }
+  .page-document :is(h1, h2, h3, h4, h5, h6) + * { margin-top: 0.4em; }
+  .page-document h1 { font-size: 1.6em; margin-top: 1.4em; }
+  .page-document h2 { font-size: 1.3em; margin-top: 1.6em; }
+  .page-document h3 { margin-top: 1.4em; }
+  .page-document :is(ul, ol) { padding-left: 1.3em; }
+  .page-document li + li { margin-top: 0.45em; }
+  .page-document li.page-task { margin-left: -1.3em; }
+  .page-document blockquote { padding-left: 0.75em; }
+}
+
 /* Other people's and Agents' cursors (y-prosemirror). */
 .ProseMirror-yjs-cursor {
   position: relative;
@@ -413,6 +430,61 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 .page-automation-status[data-state="paused"] { background: color-mix(in oklab, var(--muted-foreground) 8%, transparent); }
 .page-automation-status[data-state="missing"] { cursor: default; }
 .page-automation-status:hover:not(:disabled) { color: var(--foreground); }
+
+/* A GitHub file the page embeds (§6.5): text on the page's paper, with its
+   source in a small citation below. Long files start folded. */
+.page-document .page-github-file-link,
+.page-document .page-github-file-link a,
+.page-document a:has(> .page-github-file-link) { color: var(--muted-foreground); text-decoration: none; }
+.page-document .page-github-file-link { font-size: 0.85em; }
+.page-github-file {
+  margin: 0.5em 0 1em;
+  border-block: 1px solid var(--border);
+  overflow: hidden;
+  user-select: text;
+  cursor: auto;
+}
+.page-github-file-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 0.75em 0;
+  color: var(--muted-foreground);
+  font-size: 0.8em;
+}
+.page-github-file-name { overflow-wrap: anywhere; }
+.page-github-file-open { margin-left: auto; color: inherit; }
+.page-github-file-open:hover { color: var(--foreground); }
+.page-github-file-body { max-height: 32rem; overflow: hidden; padding: 1em 0 0; }
+/* Body text keeps the page's reading size; file headings sit below the page's. */
+.page-github-file-doc > * + * { margin-top: 0.75em; }
+.page-document .page-github-file-doc > :first-child { margin-top: 0; }
+.page-document .page-github-file-doc h1 { font-size: 1.3em; margin-top: 0.9em; }
+.page-document .page-github-file-doc h2 { font-size: 1.15em; margin-top: 0.9em; }
+.page-document .page-github-file-doc h3 { font-size: 1.05em; margin-top: 0.8em; }
+.page-github-file[data-folded="true"] .page-github-file-body {
+  mask-image: linear-gradient(to bottom, black 75%, transparent);
+}
+.page-github-file[data-folded="false"] .page-github-file-body { max-height: none; }
+.page-github-file-note { color: var(--muted-foreground); font-size: 0.9em; }
+.page-github-file-code {
+  margin: 4px 0;
+  white-space: pre;
+  overflow-x: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+}
+.page-github-file-unfold {
+  display: block;
+  width: 100%;
+  padding: 0.75em 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.8em;
+  text-align: left;
+}
+.page-github-file-unfold:hover { color: var(--foreground); }
+.page-github-file-body .page-github-file-unfold { border-top: 0; padding: 4px 0; width: auto; }
 
 /* What someone else just wrote (§3.1): tinted in their caret's colour, fading over REMOTE_CHANGE_MS. */
 @keyframes page-remote-change {

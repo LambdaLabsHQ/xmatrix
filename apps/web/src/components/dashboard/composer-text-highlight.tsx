@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { neighbourRoom, planMentionBands, type MentionBandInput, type MentionFragment } from "./composer-mention-bands";
+import { composerHintParts } from "./composer-hints";
 import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
 const MIRRORED_STYLE_KEYS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "fontStretch",
@@ -12,8 +13,11 @@ const MIRRORED_STYLE_KEYS = ["fontFamily", "fontSize", "fontWeight", "fontStyle"
 
 /** Paint only backgrounds behind the native textarea. Text, selection and IME
  * remain owned by that textarea; this projection never writes to the draft. */
-export function ComposerTextHighlight({ value, textareaRef, mentionIndex, currentUserIdentityId, references }: {
+export function ComposerTextHighlight({ value, textareaRef, mentionIndex, currentUserIdentityId, references, hint }: {
   value: string;
+  /** Shown where the text would start while the draft is empty, caret or not:
+   * the empty paste anchor fills a focused textarea, so its own placeholder never shows. */
+  hint?: string;
   /** Picked channel and page references, painted like the chips they send as. */
   references?: ReadonlyArray<{ start: number; end: number; text: string }>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -83,8 +87,19 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
     className="pointer-events-none absolute left-0 top-0 overflow-hidden whitespace-pre-wrap break-words text-transparent"
     style={{ borderColor: "transparent", borderStyle: "solid", boxSizing: "border-box", overflowWrap: "break-word" }}>
     <div ref={layerRef} className="app-composer-mention-bands" />
-    {pieces}{value.slice(offset)}{"\n"}
+    {pieces}{value.slice(offset)}
+    {hint ? <ComposerHint hint={hint} /> : null}{"\n"}
   </div>;
+}
+
+/** Faint words after the trigger they teach; keyed by text so each change rises in. */
+function ComposerHint({ hint }: { hint: string }) {
+  const parts = composerHintParts(hint);
+  if (!parts) return <span data-testid="composer-hint" className="app-composer-hint">{hint}</span>;
+  return <span key={hint} data-testid="composer-hint" className="app-composer-hint" data-rotating="true"
+    data-summon={parts.trigger === "@" ? "true" : undefined}>
+    <span className="app-composer-hint-trigger">{parts.trigger}</span>{parts.rest}
+  </span>;
 }
 
 /**

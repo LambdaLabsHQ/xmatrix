@@ -6,25 +6,51 @@ the xMatrix app, without opening a database console.
 ## What it shows
 
 `Platform admin` is an app view (`/app/<space>/admin`, plus a rail entry and a
-"Platform" group in **More**). Its **Overview** tab renders one Hub read:
+"Platform" group in **More**) with four sections. Every list is the same
+`AdminTable`: search, sortable headers, 50-row pages, CSV export, and its
+search/sort/page state in the address (`?item=<section>&<id>q=…&<id>sort=…`).
 
-- **Totals**: users, Spaces by kind, active/archived Channels, messages (total,
-  24h, 7d, human vs agent), Agent registrations, runs, live instances, enrolled and
-  online Machines, Automations, stored logical bytes, archived bytes.
-- **Messages per day** for a selectable 7/14/30/90 day window.
-- **Spaces table**: name, kind, owner, members, active Channels, Agent registrations,
-  total and 7-day messages, last activity. Searchable and sortable.
-- **Users table**: identity, Space count, owned Spaces, Agent registrations, Machines,
-  authored messages, last message.
-- **Storage by category** aggregated from each scoped authority's `storage_usage` accounting.
+On phones, the section list opens each section as a screen with a way back.
+Table rows become labelled list rows; sorting uses an inline selector and a
+direction button. Search, 50-row pagination, CSV export, and user-detail links
+retain the same address state as desktop. Storage bars and user detail fit
+narrow screens without horizontal scrolling.
+
+- **Overview**: platform totals (users, Spaces, active/archived Channels,
+  messages, Agents, running Runs, Machines, Automations, storage), registered
+  user access (active 24h/7d/30d, verified, profiles completed), messages per
+  day for a 7/14/30/90-day window, and storage by category.
+- **Users**: every registered user with sign-in methods, registration, last
+  access, sessions, Spaces, Agents, Machines, and messages. Opening a user
+  (`&user=<id>`) reads `GET /api/admin/users/:userId`: account facts, usage
+  (messages 7d/30d, Runs by status, Spaces owned, pages created), their own
+  messages per day for 30 days, and tables of their Spaces (role, members,
+  their messages, plan and billing status), Agent registrations, Machines
+  (status and timestamps), connectors they added (provider and status), and
+  sessions (signed in, last active, expires).
+- **Spaces**: name, owner, members, Channels, Agents, messages, 7-day messages,
+  created, last activity.
+- **Audit**: `GET /api/admin/audit`, every operator read and action, newest first.
 
 ## What it deliberately does not show
 
-The aggregate carries counts, identities, and timestamps only. No message body,
-payload ref, attachment, annotation, Channel name, or Channel topic crosses this
-path, so holding operator authority is never the same thing as holding a
-content-read authority over other people's Channels. The Hub e2e suite asserts
-this.
+Operators see metadata only: identities, roles, counts, statuses, and
+timestamps. No message or page text, Channel name or topic, page title, secret
+value, attachment, prompt, connector payload or error text, `metadata_json`,
+Agent configuration, Machine host name, or session IP address and user agent
+crosses this path. Each query names its columns, and
+`packages/hub/test/postgres-admin-user-detail.test.mjs` fails if an admin query
+names a content column; the Hub e2e suite asserts message text and Channel
+names never appear in a response. Holding operator authority is therefore never
+the same thing as holding a content-read authority over other people's work.
+
+## Audit trail
+
+Every admin read and action writes a row to `control.admin_audit_events`
+(actor, action, target kind and id, time) on the directory shard **before** its
+result is returned; a request whose row cannot be written is refused. Reading
+the trail is itself recorded. Actions: `overview.read`, `user.read`,
+`audit.read`, `handles.backfill`, `agent-senders.repair`.
 
 ## Authority
 
@@ -51,7 +77,8 @@ Membership is resolved with the ordinary Space read authority — Relay authorit
 answers 404 for a non-member — so this adds no second authorization rule, and
 any non-success (including a Core failure) fails closed.
 
-- `GET /api/admin/overview` re-checks authority on every request and answers
+- `GET /api/admin/overview`, `GET /api/admin/users/:userId`, and
+  `GET /api/admin/audit` re-check authority on every request and answer
   `403 platform_admin_required` otherwise.
 - `GET /api/auth/me` reports `capabilities.platformAdmin`. Clients use it only to
   decide whether to offer the view; forcing it on client-side still yields a 403.
@@ -115,7 +142,14 @@ failing the read.
 - Authority: `packages/hub/src/admin-platform-access.ts`
 - Route: `packages/hub/src/index-routes-admin.ts`
 - Aggregate: `packages/hub/src/postgres-admin-overview.ts`
-- App view: `apps/web/src/components/dashboard/workspace-platform-admin-view.tsx`
+- User detail: `packages/hub/src/postgres-admin-user-detail.ts`,
+  `authDirectoryAdminUser` in `packages/hub/src/auth-authority.ts`
+- Audit: `packages/hub/src/admin-audit.ts`,
+  `packages/db/migrations/0166_expand_admin_audit_events.sql`
+- App views: `apps/web/src/components/dashboard/workspace-platform-admin-tabs.tsx`
+  and the `platform-admin-*` and `admin-table` modules beside it
 - Tests: `packages/hub/test/platform-admin-overview.e2e.mjs`,
+  `packages/hub/test/postgres-admin-user-detail.test.mjs`,
+  `apps/web/e2e/platform-admin.spec.ts`,
   `packages/hub/test/admin-platform-access.test.mjs`,
   `apps/web/src/components/dashboard/platform-admin-overview.test.cjs`

@@ -110,6 +110,11 @@ html:has(.site-page) {
   font-weight: 700 !important;
 }
 
+/* A WoodPanel used as a call-to-action button: the same plank, pill-shaped. */
+.site-page .app-material-wood-panel.site-wood-pill {
+  border-radius: 999px;
+}
+
 .site-page .app-material-liquid-card,
 .site-page .app-material-liquid-pill,
 .site-nav-sheet .app-material-liquid-pill {
@@ -180,6 +185,10 @@ html:has(.site-page) {
   top: 50%;
   z-index: 2;
   transform: translateY(-50%);
+}
+
+.site-navbar-brand-glass {
+  display: none;
 }
 
 .site-navbar-bar {
@@ -294,19 +303,40 @@ html:has(.site-page) {
     gap: 0.75rem;
   }
 
+  /* Below lg the logo floats over the page as it scrolls under, so it gets
+     the same glass the page's pills use, revealed with the wood button. */
   .site-navbar-brand {
-    position: static;
+    position: relative;
     transform: none;
+    display: flex;
+    align-items: center;
+    height: 3.5rem;
+    padding-inline: 0.75rem 1rem;
   }
 
+  .site-navbar-brand-glass {
+    display: block;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: var(--navbar-wood-reveal);
+  }
+
+  .site-navbar-brand-glass > * {
+    border-radius: 0.9rem;
+  }
+
+  /* Below lg the bar holds only the menu button, so it wraps just that
+     instead of stretching an empty wood slab across the row. */
   .site-navbar-bar {
-    width: auto;
-    flex: 1 1 auto;
+    width: 3.5rem;
+    flex: none;
     margin-inline: 0;
   }
 
   .site-navbar-content {
-    justify-content: flex-end;
+    justify-content: center;
+    padding-inline: 0;
   }
 }
 
@@ -322,10 +352,6 @@ html:has(.site-page) {
   .site-navbar-bar,
   .site-navbar .site-navbar-inner {
     border-radius: 0.9rem;
-  }
-
-  .site-navbar-content {
-    padding-inline: 0.8rem;
   }
 
   .site-page .x-section {

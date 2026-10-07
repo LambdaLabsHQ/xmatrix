@@ -217,6 +217,15 @@ The Web Machines page shows the same parsed sample as the Machine's load and pol
 the owner's daemon list every 30 seconds while it is open, because relay push does
 not carry resource samples. An online Machine without a current sample is shown as
 having no recent sample, never as idle.
+
+The daemon also reports a sample at least once a minute when nothing moved, so the
+Hub keeps the Machine's load history: each sample accepted from the live connection
+becomes one row per minute in `data.machine_resource_samples` (kept 7 days), and the
+Worker's scheduled tick rolls completed hours into `data.machine_resource_hourly`
+(kept 90 days) and prunes both at minute 7 of every hour. Only the Machine's owner,
+signed in as a Human, reads it through `GET /api/machines/:machineId/resource-history`
+(`range` 1h or 24h per minute, 7d, 30d or 90d per hour); the Web Machines page charts
+it below the current load. History is an observation, never routing input.
 The original message is immutable input, not a generated request form.
 
 Record identity selection separately from parameter selection, including the
