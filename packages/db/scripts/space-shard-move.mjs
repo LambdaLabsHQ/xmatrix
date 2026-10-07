@@ -215,9 +215,9 @@ const BLOCKER_QUERIES = Object.freeze({
     "workspace_id IN (SELECT workspace_id FROM data.runs WHERE channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1) AND workspace_id IS NOT NULL)",
 });
 
-const SELECTORS = Object.freeze({
-  ...Object.fromEntries(MOVABLE_SPACE_TABLES.map((table) => [table, "space_id = $1"])),
-});
+const SELECTORS = Object.freeze(
+  Object.fromEntries(MOVABLE_SPACE_TABLES.map((table) => [table, "space_id = $1"])),
+);
 
 function required(value, name) {
   const result = value?.trim();
