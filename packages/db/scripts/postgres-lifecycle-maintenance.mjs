@@ -3,7 +3,7 @@
 import process from "node:process";
 import { Client } from "pg";
 
-import { runIfInvoked, withClient } from "./cli.mjs";
+import { runIfInvoked, withClient, withClientTransaction } from "./cli.mjs";
 
 const DEFAULT_BATCH_SIZE = 1_000;
 const DEFAULT_MAX_ROWS = 10_000;
@@ -43,7 +43,7 @@ export function parseLifecycleOptions(argv) {
 // Evidence reads scan tables no index serves: `data.outbox` alone took 4 s on the
 // production origin, and the five oldest-row scans together exceeded the 5 s delete
 // timeout before any delete began. They run one at a time in a read-only
-// transaction with their own ceiling, so a slow scan cannot stall the deletes.
+// transaction with their own ceiling; the deletes keep the tighter one.
 const SNAPSHOT_STATEMENT_TIMEOUT = "30s";
 const DELETE_STATEMENT_TIMEOUT = "5s";
 
@@ -56,17 +56,12 @@ async function snapshotQuery(client, label, text, values) {
   }
 }
 
-async function snapshot(client) {
-  await client.query("BEGIN TRANSACTION READ ONLY");
-  try {
+function snapshot(client) {
+  return withClientTransaction(client, async () => {
+    await client.query("SET TRANSACTION READ ONLY");
     await client.query(`SET LOCAL statement_timeout = '${SNAPSHOT_STATEMENT_TIMEOUT}'`);
-    const result = await readSnapshot(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  }
+    return readSnapshot(client);
+  });
 }
 
 async function oldest(client, relation, column) {

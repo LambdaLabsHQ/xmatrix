@@ -62,7 +62,10 @@ test("dry-run reports lifecycle state without opening a write transaction", asyn
   assert.equal(result.deletedExpiredIdempotencyRows, 0);
   assert.equal(result.deletedExpiredSequenceReservationRows, 0);
   assert.equal(result.batches, 0);
-  assert.equal(fake.calls.some(({ text }) => /^BEGIN$|DELETE FROM/u.test(text)), false);
+  assert.equal(fake.calls.some(({ text }) => text.includes("DELETE FROM")), false);
+  fake.calls.forEach(({ text }, index) => {
+    if (text === "BEGIN") assert.equal(fake.calls[index + 1].text, "SET TRANSACTION READ ONLY");
+  });
   assert.equal(result.before.expiredIdempotencyRowsCapped, 7);
   assert.equal(result.before.expiredSequenceReservationRowsCapped, 3);
   assert.equal(result.before.expiredMessageExecutionRowsCapped, 2);
@@ -164,9 +167,10 @@ test("the snapshot reads one statement at a time under its own read-only timeout
   };
   const result = await runLifecycleMaintenance(fake, parseLifecycleOptions(["--dry-run"]));
   const texts = fake.calls.map(({ text }) => text);
-  assert.equal(texts.filter((text) => text === "BEGIN TRANSACTION READ ONLY").length, 2);
-  const begin = texts.indexOf("BEGIN TRANSACTION READ ONLY");
-  assert.equal(texts[begin + 1], "SET LOCAL statement_timeout = '30s'");
+  assert.equal(texts.filter((text) => text === "SET TRANSACTION READ ONLY").length, 2);
+  const begin = texts.indexOf("BEGIN");
+  assert.deepEqual(texts.slice(begin, begin + 3),
+    ["BEGIN", "SET TRANSACTION READ ONLY", "SET LOCAL statement_timeout = '30s'"]);
   assert.equal(texts.filter((text) => /FROM data\.outbox/u.test(text)).length, 2,
     "one outbox scan per snapshot");
   assert.ok(texts.indexOf("SET statement_timeout = '5s'") < begin);
