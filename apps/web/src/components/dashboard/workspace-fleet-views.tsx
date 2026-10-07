@@ -1030,7 +1030,7 @@ export function MachinesView({
               <MachineVersionFacts machine={machine} />
             </>
           ),
-          load: <MachineLoadPanel machine={machine} now={now} />,
+          load: <MachineLoadPanel machine={machine} now={now} token={token} />,
         } : null) : machine && (
           <>
             <ToolDetailSection title="Daemon">
@@ -1038,7 +1038,7 @@ export function MachinesView({
                 <ToolFact label="Daemon">{daemonPresenceLabel(machine.daemon)}</ToolFact>
                 <MachineVersionFacts machine={machine} />
               </ToolFacts>
-              <MachineLoadPanel machine={machine} now={now} />
+              <MachineLoadPanel machine={machine} now={now} token={token} />
             </ToolDetailSection>
             <ToolDetailSection title="Harnesses">
               <MachineHarnessPanel key={machine.id} daemon={machine.daemon} token={token} />

@@ -8,6 +8,7 @@ import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
 import { registerMachineRetirementRoutes } from "./index-routes-machine-retirement";
 import { registerHarnessActionRoutes } from "./index-routes-harness-actions";
+import { maintainMachineResourceHistoryOnSchedule, registerMachineResourceRoutes } from "./index-routes-machine-resources";
 import { registerSetupIntentRoutes } from "./index-routes-setup-intents";
 import { registerChannelTransferRoutes } from "./index-routes-channel-transfer";
 import { registerPageRoutes } from "./index-routes-pages";
@@ -97,6 +98,7 @@ registerGooglePickerRoutes(app);
 registerSentryInstallationRoutes(app);
 registerChannelTransferRoutes(app);
 registerMachineNameRoutes(app);
+registerMachineResourceRoutes(app);
 registerMachineRetirementRoutes(app);
 registerHarnessActionRoutes(app);
 registerSetupIntentRoutes(app);
@@ -111,11 +113,12 @@ export default {
       executionCtx.waitUntil(sendErrorReports());
     }
   },
-  scheduled: (_event: ScheduledController, env: Env, executionCtx: ExecutionContext) => {
+  scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => {
     const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
     run("Sentry event recovery", () => drainSentryEvents(env));
     run("Harness release watch", () => watchHarnessReleases(env));
+    run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
     for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
       run(`${provider} lifecycle maintenance`, () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }));
     }
