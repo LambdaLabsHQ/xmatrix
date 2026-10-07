@@ -5,6 +5,7 @@ import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { GitPullRequest, Link2, Plus, Search, Unlink } from "lucide-react";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { readGitHubGrant } from "@/lib/github-connect-return";
 import { cn } from "@/lib/utils";
 
 type GitHubInstallationAccount = {
@@ -20,25 +21,6 @@ type GitHubInstallations = {
   available: GitHubInstallationAccount[];
   authorized: boolean;
 };
-
-const GRANT_PARAM = "githubGrant";
-const GRANT_STORAGE_KEY = "xmatrix:github-grant";
-
-/**
- * The signed list of installations GitHub confirmed on Connect. It arrives in
- * the return URL once and is kept for this tab, so a reload can still link.
- */
-function takeGitHubGrant(): string | undefined {
-  const url = new URL(window.location.href);
-  const arrived = url.searchParams.get(GRANT_PARAM);
-  if (arrived) {
-    url.searchParams.delete(GRANT_PARAM);
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    window.sessionStorage.setItem(GRANT_STORAGE_KEY, arrived);
-    return arrived;
-  }
-  return window.sessionStorage.getItem(GRANT_STORAGE_KEY) ?? undefined;
-}
 
 const ACTION_CLASS = cn(
   "app-connector-secondary-action inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-bold disabled:opacity-50",
@@ -80,7 +62,7 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthori
   }, [url, token]);
 
   useEffect(() => {
-    const current = takeGitHubGrant();
+    const current = readGitHubGrant();
     setGrant(current);
     void load(current);
   }, [load]);

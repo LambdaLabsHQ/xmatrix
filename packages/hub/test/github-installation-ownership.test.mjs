@@ -31,6 +31,8 @@ function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "c
         authorizations.push(input);
         return `https://github.test/authorize?installation=${input.installation?.id ?? ""}`;
       },
+      githubConnectReturnUrl: (_env, outcome, target = {}) =>
+        `https://xmatrix.test/connect/github?github=${outcome}${target.spaceId ? `&space=${target.spaceId}` : ""}`,
       // The grant "grant" is this admin's own authorization for space-1.
       githubGrantInstallationIds: async (_env, grant, input) =>
         grant === "grant" && input.spaceId === "space-1" && input.userId === "admin" ? granted : undefined,
@@ -75,7 +77,9 @@ test("setup refuses a connect state or grant used as an install state", async ()
 
 test("setup reports a pending approval and a cancelled install without authorizing", async () => {
   const f = fixture();
-  assert.equal(outcome(await f.setup("111", "request")), "pending");
+  const pending = await f.setup("111", "request");
+  assert.equal(pending.headers.get("location"), "https://xmatrix.test/connect/github?github=pending&space=space-1");
+  assert.equal(outcome(pending), "pending");
   assert.equal(outcome(await f.setup("111", "other")), "cancelled");
   assert.deepEqual(f.authorizations, []);
 });

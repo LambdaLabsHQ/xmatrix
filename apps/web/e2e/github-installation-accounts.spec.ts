@@ -66,3 +66,15 @@ test("a disconnected GitHub still shows its accounts section", async ({ page }) 
   await expect(accounts).toContainText("No GitHub account is linked to this Space.");
   await expect(accounts.getByRole("button", { name: "Link yiming" })).toBeVisible();
 });
+
+test("returning from GitHub lands on Apps with the outcome and the grant, past the address rewrite", async ({ page }) => {
+  await openGitHub(page);
+  await page.goto(`/connect/github?github=authorized&space=${encodeURIComponent(E2E_SPACE.id)}&grant=grant-2`,
+    { waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/app\/[^?]+\/apps/u);
+  await expect(page.getByText("GitHub confirmed your accounts.", { exact: false })).toBeVisible();
+  // The accounts list asks with the grant the return page kept for this tab.
+  await expect.poll(async () => (await fixtureRequests(page, "github-installations"))
+    .some((url) => url.endsWith("?grant=grant-2"))).toBe(true);
+  expect(page.url()).not.toContain("grant");
+});
