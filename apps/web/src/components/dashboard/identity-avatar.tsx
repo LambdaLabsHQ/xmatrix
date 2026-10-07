@@ -1,7 +1,7 @@
 "use client";
 
 import { type MouseEvent } from "react";
-import { AlertTriangle, Boxes, Cpu, Moon, Server, UserRound } from "lucide-react";
+import { AlertTriangle, Boxes, Bot, Moon, Server, UserRound } from "lucide-react";
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
@@ -83,7 +83,7 @@ export function IdentityAvatar({
   onClick,
 }: IdentityAvatarProps) {
   const kindLabel = identityKindLabel(kind);
-  const Icon = kind === "agent" ? Cpu : kind === "app" ? Boxes : kind === "machine" ? Server : UserRound;
+  const Icon = kind === "agent" ? Bot : kind === "app" ? Boxes : kind === "machine" ? Server : UserRound;
   const statusLabel = identityStatusLabel(status);
   const title = titleOverride ?? `${label} - ${kindLabel}${statusLabel ? ` - ${statusLabel}` : ""}`;
   const ariaLabel = `${label} ${kindLabel}${statusLabel ? ` ${statusLabel}` : ""}`;
