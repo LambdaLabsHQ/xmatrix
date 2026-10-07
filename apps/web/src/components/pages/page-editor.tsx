@@ -104,7 +104,9 @@ function embedGitHubFile(text: string): Command | null {
   return (state, dispatch) => {
     if (dispatch) {
       const link = pageSchema.marks.link.create({ href: gitHubFileReferenceHref(reference) });
-      dispatch(state.tr.replaceSelectionWith(pageSchema.text(reference.path, [link]), false));
+      // Labelled with the file's name; the embed's header names its repository and path.
+      const name = reference.path.slice(reference.path.lastIndexOf("/") + 1);
+      dispatch(state.tr.replaceSelectionWith(pageSchema.text(name, [link]), false));
     }
     return true;
   };
