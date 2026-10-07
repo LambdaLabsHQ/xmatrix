@@ -9,6 +9,7 @@ import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
 import { RegistrationAccessError, registrationRouteRefusal } from "./agent-registration-errors.js";
 import { registrationInstructionsSpawnFields } from "./registration-instructions-spawn.js";
+import { spaceRulesSpawnFields } from "./space-rules-spawn.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
@@ -364,13 +365,14 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         metadata: runMetadata, ...(workspace ? { workspace } : {}), registration,
         ...(invocationSource ? { invocationSource } : {}) };
       const instance = { instanceId, runId, channelId: input.channelId, status: "offline", channelInstanceId, spaceId };
+      const spaceRules = await spaceRulesSpawnFields(tx, spaceId);
       const spawn = { type: "machine_spawn_agent", requestId: `handoff:1-spawn:${suffix}`, spaceId, channelId: input.channelId,
         runId, instanceId, executionKey, identityId: instanceId, resumeSessionKey,
         handoffTransfer: true, handoffSourceInstanceId: input.sourceInstanceId,
         ...(source.resumeSessionKey ? { handoffSourceResumeSessionKey: source.resumeSessionKey } : {}),
         ...registrationLaunchSpawnFields(physical.environment.launch, key.harness),
         agentName: displayName, prompt: input.prompt, sourceMessageId: input.sourceMessageId, context: {},
-        ...registrationInstructionsSpawnFields(configuration),
+        ...registrationInstructionsSpawnFields(configuration), ...spaceRules,
         ...continuationSpawnWorkspace(source, key, hostId, physical, at) };
       const value = await prepareHandoff(tx, { run, instance, spawnPayload: spawn, channelId: input.channelId,
         sourceRunId: source.runId, sourceInstanceId: input.sourceInstanceId }, input.actorUserId, spaceId, at);

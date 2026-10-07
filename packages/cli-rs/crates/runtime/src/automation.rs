@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn automation_json_preserves_the_concrete_latest_execution_failure() {
-        let error = "Focus organization needs an enabled xMatrix Management Agent";
+        let error = "Automation dispatch could not reach a machine for this agent";
         let rendered = automations_json(&[serde_json::json!({
             "id": "task-focus",
             "latestExecution": {

@@ -95,7 +95,6 @@ import {
   LocalManagedAgent,
   MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY,
   MOBILE_MORE_RETURN_PATH_STATE_KEY,
-  ManagementAgentPatch,
   OLDER_HISTORY_LIMIT,
   OutgoingMessage,
   SpaceInviteResult,
@@ -142,7 +141,6 @@ import {
   latestSequence,
   localWorkspacesForDesktop,
   metadataString,
-  mergeSpaceListSnapshot,
   nativeNotificationEventMessageId,
   nativeNotificationEventMessageIdWasHandled,
   notificationPathForEvent,
@@ -245,7 +243,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setRenamingSpaceId,
     setNewSpaceName,
     setCreatingSpace,
-    setManagementSetupSpaceId,
     authorizeHistoryRender,
     mergeAndRememberChannelHistory,
     queueChannelTimelineScroll,
@@ -1515,7 +1512,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       }
 
       setChannels(nextChannels);
-      s.spacesRef.current = mergeSpaceListSnapshot(s.spacesRef.current, nextSpaces);
+      s.spacesRef.current = nextSpaces;
       setSpaces(s.spacesRef.current);
       s.channelsRef.current = nextChannels;
       setHistoryError(null);
@@ -1684,7 +1681,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       ]);
       reconcileAgentTraceChannelAccess(nextChannels);
       setChannels(nextChannels);
-      setSpaces((current) => mergeSpaceListSnapshot(current, nextSpaces));
+      setSpaces(nextSpaces);
       setProjects(nextProjects);
       setEvents(nextEvents.filter((event) => !isLlmTraceEvent(event)));
       setError(null);
@@ -1846,7 +1843,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const payload = (await res.json()) as { space?: SerializedSpace };
       if (payload.space) {
         setSpaces((current) => replaceSpace(current, payload.space!));
-        setManagementSetupSpaceId(payload.space.id);
         if (options?.select) {
           const nextSpaces = replaceSpace(s.spaces, payload.space);
           setPendingExplicitSpaceId(payload.space.id);
@@ -1935,35 +1931,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }, "Failed to remove member");
     setSpaces((current) => replaceSpace(current, updated));
     return { space: updated };
-  }
-
-  async function updateSpaceManagementAgent(
-    spaceId: string,
-    patch: ManagementAgentPatch
-  ): Promise<void> {
-    if (!s.token || !s.user) throw new Error("Sign in before managing the space");
-    const space = s.spaces.find((item) => item.id === spaceId);
-    if (!space || !canInviteToSpace(space, s.user.id)) {
-      throw new Error("Only workspace owners and admins can manage the management agent");
-    }
-    const payload = await requestHub<{
-      space?: SerializedSpace;
-      managementAgent?: SerializedSpace["managementAgent"];
-      managementChannel?: SerializedChannel;
-    }>(
-      WEB_PROXY_ROUTES.space_management_agent(spaceId),
-      { method: "PATCH", body: patch },
-      "Failed to update the management agent",
-      (answer) => Boolean(answer.space || answer.managementAgent),
-    );
-    // The hub returns the full space today; fall back to patching the config
-    // in place so a slimmer response shape cannot strand the UI.
-    const nextSpace =
-      payload.space || { ...space, managementAgent: payload.managementAgent };
-    setSpaces((current) => replaceSpace(current, nextSpace));
-    if (payload.managementChannel) {
-      setChannels((current) => replaceChannel(current, payload.managementChannel!));
-    }
   }
 
   const reconcileUnconfirmedSend = createUnconfirmedSendReconciler({
@@ -2853,7 +2820,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     inviteSpaceMembers,
     updateSpaceMemberRole,
     removeSpaceMember,
-    updateSpaceManagementAgent,
     stopAgentInstance,
     rebornAgentInstance,
     handoffAgentInstance,

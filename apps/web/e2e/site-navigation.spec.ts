@@ -50,14 +50,14 @@ for (const width of [393, 820, 1440]) {
         await header.getByRole("button", { name: "Open navigation menu" }).click();
         const sheet = page.locator(".site-nav-sheet");
         await expect(sheet).toBeVisible();
-        await sheet.getByRole("link", { name: "How it Works", exact: true }).click();
+        await sheet.getByRole("link", { name: "Setup", exact: true }).click();
         await expect(sheet).toBeHidden();
       } else {
-        await header.getByRole("link", { name: "How it Works", exact: true }).click();
+        await header.getByRole("link", { name: "Setup", exact: true }).click();
       }
 
       await expect(page).toHaveURL(/\/#how-it-works$/);
-      const title = page.getByRole("heading", { name: "Connect your workspace", exact: true });
+      const title = page.getByRole("heading", { name: "Install xMatrix", exact: true });
       // Sticky header stays put; land the installation panel just below it.
       await title.evaluate((element) => {
         const panel = element.closest('[data-material="wood-panel"]')!;

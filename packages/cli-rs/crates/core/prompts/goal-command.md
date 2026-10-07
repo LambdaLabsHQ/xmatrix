@@ -1,0 +1,1 @@
+- `xmatrix goal set "<condition>"` — give this run a completion condition it keeps working toward across turns; after every turn a separate model checks whether the condition holds and the run continues until it does. `xmatrix goal clear` drops it and `xmatrix goal status` shows it. A set or clear applies at the end of the current turn.

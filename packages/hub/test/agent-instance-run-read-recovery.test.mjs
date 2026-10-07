@@ -82,6 +82,27 @@ for (const changed of ["terminal", "execution"]) test(
   },
 );
 
+test("a Run routed to the retired xMatrix management agent never connects", async () => {
+  const principal = { ...binding, channelId: "channel", spaceId: "space", agentId: "agent", agentName: "Agent",
+    executionKey: "execution", machineId: "machine", hostId: "host", managementSpaceId: "space" };
+  const run = { id: binding.runId, runId: binding.runId, instanceId: "agent", channelId: "channel", status: "running",
+    metadata: { executionKey: "execution", machineId: "machine", hostId: "host",
+      routedAs: "management_assistant_mention", managementSpaceId: "space", managementConfigGeneration: 3 } };
+  const { runtime } = setup(() => ({ run }));
+  const transitions = [];
+  const port = new PostgresAgentInstancePort({
+    authenticate: async () => ({ id: "owner", email: "owner@example.test", agentRun: principal }),
+    runtime: { ...runtime, async transition(command) { transitions.push(command); return {}; } },
+    history: { async join() {}, async leave() {}, async replay() {}, async history() {} },
+    signals: { async publish() {} },
+  });
+  await assert.rejects(port.authenticate({ type: "agent_instance_connect", token: "fixture",
+    identityId: "agent", name: "Agent" }),
+  error => error.failure?.code === "management_agent_retired" &&
+    /management agent is retired/u.test(error.publicMessage));
+  assert.deepEqual(transitions, []);
+});
+
 for (const error of [
   new RuntimeControlError("not_found", 404, "Run not found", true),
   new RuntimeControlError("postgres_runtime_unavailable", 503, "unavailable", false),

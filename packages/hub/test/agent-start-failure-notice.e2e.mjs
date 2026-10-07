@@ -93,7 +93,10 @@ test("a Workstation startup failure is persisted in-channel as a product notice"
   }
 });
 
-test("pre-spawn repository failure reaches Channel history and invocation details despite the earlier Launch failure", async () => {
+for (const [reason, code] of [
+  ["base_ref_unresolved: could not resolve origin default branch after fetch", "repository_base_unresolved"],
+  ["fetch_required_failed: required origin fetch failed (\n ! [rejected] main -> origin/main (non-fast-forward))", "repository_fetch_failed"],
+]) test(`pre-spawn ${code} preserves its cause in Channel history and invocation details`, async () => {
   const worker = await startMockUserHubWorker({ id: `pre-spawn-failure-${randomUUID()}`,
     email: "pre-spawn-failure@example.com", name: "Pre-spawn Failure" });
   let daemon;
@@ -102,14 +105,15 @@ test("pre-spawn repository failure reaches Channel history and invocation detail
     ({ daemon } = scenario);
     const { auth, channelId } = scenario;
     const { command } = await launchScenarioRun(worker, scenario, "reproduce repository preparation failure");
-    const failure = { ok: false, error: "repo pool lease unavailable (base_ref_unresolved: could not resolve origin default branch after fetch) /private/TOKEN_SENTINEL" };
+    const failure = { ok: false, error: `repo pool lease unavailable (${reason}) /private/TOKEN_SENTINEL` };
     sendSpawnResult(daemon, command, failure);
     const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channelId,
       message => message.metadata?.source === "machine_run_failure" && message.metadata?.runId === command.runId,
       "pre-spawn failure notice");
-    assert.match(notice.body, /no usable default branch/u);
-    assert.match(notice.body, /initial commit/u);
-    assert.equal(notice.metadata.failureCode, "repository_base_unresolved");
+    assert.ok(notice.body.includes(reason));
+    assert.ok(notice.metadata.failureDetail.includes(reason));
+    assert.doesNotMatch(notice.body, /initial commit|Check the machine/u);
+    assert.equal(notice.metadata.failureCode, code);
     assert.doesNotMatch(JSON.stringify(notice), /TOKEN_SENTINEL/u);
     const headers = { ...auth, "content-type": "application/json" };
     const diagnosis = await json(await worker.fetch("/api/invocations/diagnostics", {
@@ -117,12 +121,12 @@ test("pre-spawn repository failure reaches Channel history and invocation detail
     }));
     const launch = diagnosis.launches.find(value => value.runId === command.runId);
     assert.equal(launch.state, "failed");
-    assert.equal(launch.errorCode, "repository_base_unresolved");
+    assert.equal(launch.errorCode, code);
     assert.equal(launch.spawnedAt, undefined);
     const page = await json(await worker.fetch(`/api/channels/${channelId}/agent-launches/query`, {
       method: "POST", headers, body: JSON.stringify({ sourceMessageIds: [launch.sourceMessageId] }),
     }));
-    assert.match(page.launches[0].errorMessage, /no usable default branch/u);
+    assert.ok(page.launches[0].errorMessage.includes(reason));
     assert.doesNotMatch(JSON.stringify(page), /TOKEN_SENTINEL/u);
     sendSpawnResult(daemon, command, failure);
     // A following stop on the same ordered socket proves the replay has been

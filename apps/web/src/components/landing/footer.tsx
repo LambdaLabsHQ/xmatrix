@@ -5,8 +5,7 @@ const links = {
   Product: [
     { label: "Online App", href: "/app" },
     { label: "Download", href: "/download" },
-    { label: "How it Works", href: "/#how-it-works" },
-    { label: "Architecture", href: "/#architecture" },
+    { label: "Setup", href: "/#how-it-works" },
     { label: "Pricing", href: "/#pricing" },
     { label: "Docs", href: "/docs" },
     { label: "Console", href: "/console" },
@@ -23,7 +22,6 @@ const links = {
 export function Footer() {
   return (
     <WoodPanel as="footer" className="site-footer pt-16 pb-8">
-      <div className="pointer-events-none absolute inset-0 matrix-grid opacity-18" />
 
       <div className="relative z-10 mx-auto max-w-6xl px-6">
         <div className="grid gap-12 border-b border-border pb-16 md:grid-cols-[1.5fr_1fr]">
@@ -38,7 +36,7 @@ export function Footer() {
           <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
             {Object.entries(links).map(([category, items]) => (
               <div key={category} className="space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">{category}</h4>
+                <h4 className="text-sm font-bold text-foreground">{category}</h4>
                 <ul className="space-y-3">
                   {items.map((item) => (
                     <li key={item.label}>

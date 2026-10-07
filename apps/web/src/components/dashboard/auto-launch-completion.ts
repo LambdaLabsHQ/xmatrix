@@ -5,6 +5,7 @@ import {
   formatAutoLaunchMention,
   machineLaunchTagValue,
   machineMentionValue,
+  machineTagSelects,
   parseAutoLaunchMentions,
   type AutoLaunchField,
   type AutoLaunchMention,
@@ -57,7 +58,7 @@ export function filterLaunchCandidates(candidates: MentionCandidate[], query: st
     return candidates.filter(candidate => {
       const tags = candidate.launchTags;
       const tag = tags?.[field as AutoLaunchField];
-      return tag !== undefined && `${tag} ${candidate.name}`.toLowerCase().includes(value);
+      return candidate.launchField === field && tag !== undefined && `${tag} ${candidate.name}`.toLowerCase().includes(value);
     });
   }
   return candidates.filter(candidate => `${candidate.name} ${candidate.description}`.toLowerCase().includes(query.toLowerCase()));
@@ -101,13 +102,13 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
     seen.add(id);
     result.push({ id, name: field === "harness" ? `@${label}` : `${field}:${label}`, kind: "launch", status: "offline",
       description: unavailable ?? AUTO_LAUNCH_FIELD_LABEL[field], ...(unavailable ? { unavailable } : {}),
-      launchTags: { [field]: value, ...extra } });
+      launchField: field, launchTags: { [field]: value, ...extra } });
   };
   for (const repo of targets?.repos ?? []) add("repo", repo.value);
   // A directory names its Machine as the owner did; a hostname never selects one.
   for (const workspace of targets?.workspaces ?? []) {
-    if (!selected.machine || selected.machine === workspace.machineId) {
-      const machineName = registrationMachineName(registrations, workspace.machineId, workspace.ownerUserId) ?? "";
+    const machineName = registrationMachineName(registrations, workspace.machineId, workspace.ownerUserId) ?? "";
+    if (!selected.machine || machineTagSelects(selected.machine, workspace.machineId, machineName)) {
       const machine = machineMentionValue(workspace.machineId, machineName);
       add("pwd", workspace.canonicalCwd, `${workspace.canonicalCwd} · ${machine === workspace.machineId
         ? machineLaunchTagValue(workspace.machineId) : machine}`, { machine },
@@ -117,7 +118,7 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
   for (const registration of registrations) {
     const { machineId, harness } = registration.key;
     if (registration.state !== "enabled" || !registration.routingReady ||
-        selected.machine && selected.machine !== machineId ||
+        selected.machine && !machineTagSelects(selected.machine, machineId, registration.machineName) ||
         selected.harness && selected.harness !== harness) continue;
     // Allowed models are the complete list; an empty list allows only the
     // runtime default, so no model or effort is offered for it.
@@ -138,7 +139,7 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
         if (seen.has(id)) continue;
         seen.add(id);
         result.push({ id, name: `param.${parameter.id}:${value}`, kind: "launch", status: "offline", description: parameter.label,
-          launchTags: { parameters: JSON.stringify({ [parameter.id]: value }) } });
+          launchField: "parameters", launchTags: { parameters: JSON.stringify({ [parameter.id]: value }) } });
       }
     }
     for (const model of reported.length ? reported : allowed) add("model", model);

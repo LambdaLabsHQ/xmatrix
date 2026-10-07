@@ -212,8 +212,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     isMobileViewport,
     renamingSpaceId,
     creatingSpace,
-    managementSetupSpaceId,
-    setManagementSetupSpaceId,
     desktopSidebarWidth,
     resizingDesktopSidebar,
     startDesktopSidebarResize,
@@ -311,7 +309,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     inviteSpaceMembers,
     updateSpaceMemberRole,
     removeSpaceMember,
-    updateSpaceManagementAgent,
     stopAgentInstance,
     rebornAgentInstance,
     handoffAgentInstance,
@@ -1068,7 +1065,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // phone's Pages list, or shown while the Space is being moved to pages.
   const pagesViewSurface = (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
-      onSelectPage={openPage} conversation={pageConversation} focusSection={pageSectionRequest}
+      onSelectPage={openPage} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}
       freshPageId={pageCreation.freshPageId}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>
@@ -1140,7 +1137,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       localSetupReady={localSetupReady}
       localMachineName={localMachineName}
       onNameLocalMachine={(name) => void nameLocalMachine(name)}
-      managementSetupSpaceId={managementSetupSpaceId}
       onStartDesktopDaemon={() => void startDesktopDaemon()}
       onStopDesktopDaemon={() => void stopDesktopDaemon()}
       onRestartDesktopDaemon={() => void restartDesktopDaemon()}
@@ -1165,7 +1161,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onInviteSpaceMembers={inviteSpaceMembers}
       onUpdateSpaceMemberRole={updateSpaceMemberRole}
       onRemoveSpaceMember={removeSpaceMember}
-      onUpdateSpaceManagementAgent={updateSpaceManagementAgent}
       onUpdateSpaceMemberPermissions={updateSpaceMemberPermissions}
       onUpdateSpacePreferredLanguage={updateSpacePreferredLanguage}
       onDeleteSpace={deleteSpace}
@@ -1173,7 +1168,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       creatingSpace={creatingSpace}
       onCreateSpace={(name) => createSpace(name, { select: true })}
       onSelectSpace={selectSpace}
-      onDismissManagementSetup={() => setManagementSetupSpaceId(null)}
       onLogout={() => void logoutAndClearDeviceData().catch(() => undefined)}
       onOpenAgentCreate={openAgentCreate}
       onOpenLocalManagedAgentEdit={openLocalManagedAgentEdit}
@@ -1341,10 +1335,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             error={channelSidebarError(error)}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
-            onOpenManagementSetup={(spaceId) => {
-              setManagementSetupSpaceId(spaceId);
-              changeAppView("team");
-            }}
             view={view}
             readCounts={channelReadCounts}
             mentionClearedAt={channelMentionClearedAt}

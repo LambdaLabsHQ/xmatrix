@@ -281,14 +281,15 @@ test("chat webhook actions only post to their provider's own hosts", async () =>
   assert.match(telegram.calls[0].url, /^https:\/\/api\.telegram\.org\/bot12345:/u);
 });
 
-test("an Agent Run reaches the connector MCP endpoint, but not a management or read-only Run", async () => {
+test("an Agent Run reaches the connector MCP endpoint, but not a read-only Channel About Run", async () => {
   const { agentRunHttpRouteAllowed } = await import("../src/index-shared.ts");
   const request = (method) => new Request("https://hub.test/api/connectors/mcp", { method });
   const run = { ownerUserId: "u", agentId: "a", agentName: "claude", runId: "r", executionKey: "e",
     spaceId: "s", channelId: "c", machineId: "m", hostId: "h", permissions: [] };
   assert.equal(agentRunHttpRouteAllowed(request("POST"), run), true);
   assert.equal(agentRunHttpRouteAllowed(request("GET"), run), false);
-  assert.equal(agentRunHttpRouteAllowed(request("POST"), { ...run, managementSpaceId: "m" }), false);
+  assert.equal(agentRunHttpRouteAllowed(request("POST"), { ...run, runKind: "channel-about-session",
+    managementSpaceId: "s", channelWriteAllowed: false }), false);
   assert.equal(agentRunHttpRouteAllowed(request("POST"), { ...run, channelWriteAllowed: false }), false);
 });
 

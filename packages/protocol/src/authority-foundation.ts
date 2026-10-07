@@ -209,11 +209,9 @@ export const HUB_ROUTES = {
   space_billing_portal: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/portal`,
   space_billing_reconcile: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/reconcile`,
   stripe_billing_webhook: "/api/billing/stripe/webhook",
-  space_management_agent: (spaceId: string) =>
-    `/api/spaces/${encodeURIComponent(spaceId)}/management-agent`,
-  /** Starts a direct management-Agent pass that refreshes one Channel About. */
-  space_management_channel_about: (spaceId: string) =>
-    `/api/spaces/${encodeURIComponent(spaceId)}/management/channel-about`,
+  /** Starts an Agent session that refreshes one Channel About. */
+  space_channel_about: (spaceId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/channel-about`,
   space_locale_preference: (spaceId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/locale-preference`,
   space_channel_view_preference: (spaceId: string) =>
@@ -407,10 +405,8 @@ export const WEB_PROXY_ROUTES = {
   space_billing_reconcile: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/reconcile`,
   space_member_permissions: (spaceId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/member-permissions`,
-  space_management_agent: (spaceId: string) =>
-    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/management-agent`,
-  space_management_channel_about: (spaceId: string) =>
-    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/management/channel-about`,
+  space_channel_about: (spaceId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/channel-about`,
   space_locale_preference: (spaceId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/locale-preference`,
   space_channel_view_preference: (spaceId: string) =>

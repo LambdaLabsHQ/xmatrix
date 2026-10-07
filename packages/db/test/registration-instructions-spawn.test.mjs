@@ -18,3 +18,10 @@ test("a configuration stored with a retired Role assignment launches with its in
     assert.equal(Object.hasOwn(fields, retired), false);
   }
 });
+
+test("a registration's working mode rides on its spawn; none means the Run's autonomous default", () => {
+  const configuration = parseSpaceAgentConfiguration({ workingMode: "cautious", workspaceReferences: [] });
+  assert.deepEqual(registrationInstructionsSpawnFields(configuration), { workingMode: "cautious" });
+  assert.deepEqual(registrationInstructionsSpawnFields({ instructions: "Be brief.", workingMode: "autonomous", workspaceReferences: [] }),
+    { roleInitialPrompt: "Be brief.", workingMode: "autonomous" });
+});

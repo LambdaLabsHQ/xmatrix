@@ -255,21 +255,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             })
           : undefined;
         const trustedAgentSenderPresentation = principal
-          ? principal.managementSpaceId ? {
-              identityId: "xmatrix:management", kind: "agent", agentId: principal.agentId,
-              label: "xMatrix", name: "xMatrix", agentName: "xMatrix",
-              // Every other sender snapshot carries `email`, empty when the
-              // identity has none. Omitting it made this one sender shape
-              // unreadable to released clients that require the field.
-              email: "",
-              userId: principal.ownerUserId, avatarUrl: "/brand/xmatrix-management-icon.png",
-              instanceId: agentInstanceId!,
-              xmatrixManagementDelegate: {
-                agentId: principal.agentId, agentName: principal.agentName, runId: principal.runId,
-                instanceId: agentInstanceId!, managementSpaceId: principal.managementSpaceId,
-                managementConfigGeneration: principal.managementConfigGeneration,
-              },
-            } : liveMessagePresentation ?? {
+          ? liveMessagePresentation ?? {
               identityId: principal.agentId, kind: "agent", agentId: principal.agentId,
               label: principal.agentName, name: principal.agentName, agentName: principal.agentName,
               email: "",

@@ -20,7 +20,6 @@ import {
   connectorInteractionTarget,
   humanInteractionTarget,
   interactionRegistry,
-  managementInteractionTarget,
 } from "@xmatrix/protocol";
 import {
   AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA,
@@ -54,6 +53,7 @@ export type MentionAppConnector = {
 
 export type MentionCandidate = {
   launchTags?: import("@xmatrix/protocol").AutoLaunchTags;
+  launchField?: import("@xmatrix/protocol").AutoLaunchField;
   invocationTarget?: AgentInvocationTarget;
   id: string;
   name: string;
@@ -173,13 +173,11 @@ export type MentionDesktopContext = {
   hostName?: string | null;
 };
 
-type MentionSpace = Pick<SerializedSpace, "id" | "managementAgent" | "members">;
+type MentionSpace = Pick<SerializedSpace, "id" | "members">;
 
 const MENTION_QUERY_RE = /(?:^|\s)@(\S*)$/;
 const COMPOSABLE_AGENT_MENTION_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,123}$/;
 const AGENT_COMMAND_QUERY_RE = /^\S+\s+\/.*$/;
-
-const XMATRIX_SYSTEM_AVATAR_URL = "/brand/xmatrix-management-icon.png";
 
 function agentRegistryAvatarUrl(agent: SerializedAgent | undefined): string | undefined {
   if (!agent) return undefined;
@@ -372,23 +370,6 @@ function channelTargetEntries(
   const agentTargetDescription = instanceTargetScope === "none"
     ? "Agent reference"
     : "Choose a channel instance";
-  if (space) {
-    // xMatrix is a Space service launched through Jev, not one configured Agent.
-    addCandidate({
-      id: "xmatrix-management-assistant",
-      name: "xMatrix",
-      kind: "agent",
-      status: space.managementAgent?.enabled ? "online" : "offline",
-      avatarUrl: XMATRIX_SYSTEM_AVATAR_URL,
-      mention: "xMatrix",
-      local: false,
-      description: space.managementAgent?.enabled
-        ? "Workspace management assistant"
-        : "Workspace management assistant · setup required",
-      completionSuffix: " ",
-    }, managementInteractionTarget("xMatrix"));
-  }
-
   for (const memberId of visibleHumanChannelMemberIds(channel, space)) {
     const directoryMember = spaceMemberForChannelIdentity(space, memberId);
     if (!directoryMember) continue;
@@ -449,9 +430,6 @@ function channelTargetEntries(
   }
 
   return candidates.sort(({ candidate: left }, { candidate: right }) => {
-    const leftFixed = left.id === "xmatrix-management-assistant";
-    const rightFixed = right.id === "xmatrix-management-assistant";
-    if (leftFixed !== rightFixed) return leftFixed ? -1 : 1;
     if (left.kind === "app" || right.kind === "app") {
       if (left.kind !== right.kind) return left.kind === "app" ? 1 : -1;
       return left.name.localeCompare(right.name);

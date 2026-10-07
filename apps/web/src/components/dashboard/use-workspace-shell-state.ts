@@ -163,7 +163,6 @@ import {
   latestSequence,
   loginPathWithNext,
   mergeObservabilityEvents,
-  mergeSpaceListSnapshot,
   patchChannelAgentPresenceFromMessage,
   patchChannelsAgentPresenceFromAgent,
   persistWorkingSpace,
@@ -726,7 +725,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [creatingSpace, setCreatingSpace] = useState(false);
 
-  const [managementSetupSpaceId, setManagementSetupSpaceId] = useState<string | null>(null);
 
   const {
     desktopSidebarWidth,
@@ -2156,7 +2154,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }
     const nextSpaces = spacesQuery.data;
     if (!nextSpaces) return;
-    setSpaces((current) => mergeSpaceListSnapshot(current, nextSpaces));
+    setSpaces(nextSpaces);
     setSpacesLoadedUserId(authenticatedUserId);
     setError(null);
     setSpacesError(null);
@@ -2989,8 +2987,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setNewSpaceName,
     creatingSpace,
     setCreatingSpace,
-    managementSetupSpaceId,
-    setManagementSetupSpaceId,
     desktopSidebarWidth,
     resizingDesktopSidebar,
     startDesktopSidebarResize,

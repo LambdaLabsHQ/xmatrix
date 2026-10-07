@@ -1,7 +1,7 @@
-import { publicMachineStartupFailure, sha256Hex } from "@xmatrix/protocol";
+import { sha256Hex } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
 import { humanizeMachineRunFailureDetail, machineStopFailureCode } from "./machine-run-failure";
-import { XMATRIX_MANAGEMENT_AVATAR_URL, XMATRIX_MANAGEMENT_LABEL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import type { Env } from "./types";
 
 export interface MachineRunFailureNotice {
@@ -22,8 +22,8 @@ function onMachine(input: { machineName?: string }): string {
 function systemNoticeAuthor(input: { ownerUserId: string; ownerEmail: string }) {
   return { principal: { kind: "user", id: input.ownerUserId },
     senderSnapshot: { identityId: `user:${input.ownerUserId}`, kind: "user", userId: input.ownerUserId,
-      email: input.ownerEmail, label: XMATRIX_MANAGEMENT_LABEL, name: XMATRIX_MANAGEMENT_LABEL,
-      avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL } };
+      email: input.ownerEmail, label: XMATRIX_SYSTEM_LABEL, name: XMATRIX_SYSTEM_LABEL,
+      avatarUrl: XMATRIX_SYSTEM_AVATAR_URL } };
 }
 
 /** Stable per-Run key: a replay retries the append, never adds another notice. */
@@ -39,8 +39,7 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
     messageKind: "xmatrix.system.runtime-failure", ...systemNoticeAuthor(input),
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
       source: "machine_run_failure", runId: input.runId, machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
-      failureCode: humanized.code, failureDetail: publicMachineStartupFailure(detail)
-        ? humanized.summary : detail.slice(0, 1_000),
+      failureCode: humanized.code, failureDetail: humanized.summary,
       ...(input.phase ? { statusPhase: input.phase } : {}) } },
   };
 }

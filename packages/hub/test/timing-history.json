@@ -612,14 +612,6 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/management-agent-identity.e2e.mjs": {
-      "durationMs": 4014,
-      "peakRssBytes": 475843764,
-      "peakFdCount": 37,
-      "samples": 53,
-      "failures": 2,
-      "timeouts": 0
-    },
     "test/mention-attention-family.e2e.mjs": {
       "durationMs": 3321,
       "peakRssBytes": 684531765,
