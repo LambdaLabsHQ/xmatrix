@@ -32,8 +32,8 @@ test("every material parameter drives a custom property the recipe reads", () =>
   }
   assert.match(
     liquidGlassCss,
-    /\.app-shared-chip, \.identity-avatar-face, \.identity-avatar-badge\) \{\s*--app-glass-edge: var\(--app-liquid-rim-layers\), var\(--app-liquid-shadow-small\);/,
-    "chips take their shadow from the token a context can tune",
+    /\.app-shared-chip, \.identity-avatar-face, \.identity-avatar-badge, \.app-agent-work-island\) \{\s*--app-glass-edge: var\(--app-liquid-rim-layers\), var\(--app-liquid-shadow-small\);/,
+    "chips, discs and the work island take their shadow from the token a context can tune",
   );
 });
 
