@@ -409,3 +409,12 @@ export async function changeMembership(env: SpacesEnv, change: MembershipChange,
   await wakeAffectedChannels(env, dependencies, database, spaceId);
   return result;
 }
+
+/** Immutable metadata history is visible only to the Channel's current readers. */
+export async function channelMetadataHistory(env: SpacesEnv, input: {
+  channelId: string; principal: Principal; beforeRevision?: number; revision?: number; inputId?: string; limit?: number;
+}) {
+  const { repository, requestId } = spaces(env);
+  const spaceId = await repository.resolveChannelSpaceId({ requestId, channelId: input.channelId });
+  return repository.metadataHistory({ requestId, spaceId, ...input });
+}

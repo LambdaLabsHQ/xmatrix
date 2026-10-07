@@ -662,8 +662,11 @@ export async function postgresMessageHistory(
     selected.push(message);
     pageBytes += bytes;
   }
+  if (result.aboutInput && selected.length !== candidates.length) throw new MessageAuthorityError(
+    "about_history_page_budget", 413, "About history page exceeds byte budget; retry with a smaller limit");
   const messages = forward ? selected : selected.slice().reverse();
   return {
+    ...(result.aboutInput ? { aboutInput: result.aboutInput } : {}),
     channelId,
     messages,
     hasMore: result.hasMore || selected.length < candidates.length,

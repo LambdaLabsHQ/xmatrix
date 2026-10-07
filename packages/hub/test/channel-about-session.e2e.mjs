@@ -142,6 +142,33 @@ test("channel activity starts an implicit About session without posting a reques
       false,
       "Channel About sessions never appear as Channel Agent Instances",
     );
+    const aboutHistory = await channelHistory(worker, managementToken, root.id);
+    assert.equal(aboutHistory.aboutInput.expectedRevision, 0);
+    const metadataBefore = await json(await worker.fetch(`/api/channels/${root.id}/metadata-history`, {
+      headers: { Authorization: `Bearer ${managementToken}` },
+    }));
+    assert.equal(metadataBefore.currentRevision, 0);
+    const catalog = await json(await worker.fetch(`/api/channels?familyOfChannelId=${root.id}`, {
+      headers: { Authorization: `Bearer ${managementToken}` },
+    }));
+    assert.deepEqual(catalog.channels.map(channel => channel.id), [root.id]);
+    assert.equal(catalog.catalogSync, undefined, "no other Channel catalog context reaches About");
+    const foreign = await createClosedChannel(worker, `foreign-${randomUUID()}`);
+    for (const path of [`/api/channels/${foreign.id}/history`, `/api/channels/${foreign.id}/metadata-history`,
+      `/api/channels?familyOfChannelId=${foreign.id}`]) {
+      const denied = await worker.fetch(path, { headers: { Authorization: `Bearer ${managementToken}` } });
+      assert.ok([401,403].includes(denied.status), `${path}: ${denied.status}`);
+    }
+    const stale = await worker.fetch(`/api/channels/${root.id}`, {
+      method: "PATCH", headers: { Authorization: `Bearer ${managementToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ summary: "Stale About", throughMessageId: evidenceMessages.at(-1).messageId, expectedRevision: 99 }),
+    });
+    assert.equal(stale.status, 409, await stale.clone().text());
+    const foreignInput = await worker.fetch(`/api/channels/${root.id}`, {
+      method: "PATCH", headers: { Authorization: `Bearer ${managementToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ summary: "Foreign input", throughMessageId: "other-channel-message", expectedRevision: 0 }),
+    });
+    assert.equal(foreignInput.status, 403, await foreignInput.clone().text());
     // What a Windows code-page shell leaves of that text is refused and not
     // saved; the session stays open, so the write below still succeeds.
     const mangled = await worker.fetch(`/api/channels/${encodeURIComponent(root.id)}`, {
@@ -155,11 +182,31 @@ test("channel activity starts an implicit About session without posting a reques
     const update = await worker.fetch(`/api/channels/${encodeURIComponent(root.id)}`, {
       method: "PATCH",
       headers: { authorization: `Bearer ${managementToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ summary, throughMessageId: evidenceMessages.at(-1).messageId }),
+      body: JSON.stringify({ summary, throughMessageId: evidenceMessages.at(-1).messageId, expectedRevision: 0 }),
     });
     assert.equal(update.status, 200, await update.clone().text());
     const updated = await json(update);
     assert.equal(updated.channel.metadata.summary, summary);
+    assert.equal(updated.channel.metadata.metadataRevision, 1);
+    const revisions = await json(await worker.fetch(`/api/channels/${root.id}/metadata-history`, { headers: auth }));
+    assert.deepEqual(revisions.revisions.map(row => Number(row.revision)), [1,0]);
+    assert.equal(revisions.revisions[0].summary, summary);
+    assert.equal(revisions.revisions[0].source_json.runId, managementCommand.runId);
+    assert.ok(revisions.revisions[0].source_json.inputIds.includes(aboutHistory.aboutInput.inputId));
+    assert.equal(revisions.revisions[0].source_json.triggerMessageId, evidenceMessages.at(-1).messageId);
+    const inputEvidence = await json(await worker.fetch(`/api/channels/${root.id}/metadata-history?inputId=${aboutHistory.aboutInput.inputId}`, { headers: auth }));
+    assert.deepEqual(inputEvidence.input.references_json.map(ref => ref.messageId), aboutHistory.messages.map(message => message.messageId));
+    assert.ok(inputEvidence.input.references_json[0].recordDigest);
+    assert.ok(inputEvidence.input.references_json[0].payloadBundleBase64);
+    const restored = await worker.fetch(`/api/channels/${root.id}/metadata-restore`, {
+      method: "POST",headers: { ...auth,"content-type": "application/json" },
+      body: JSON.stringify({ revision: 0, expectedRevision: 1 }),
+    });
+    assert.equal(restored.status, 200, await restored.clone().text());
+    const restoreResult = await json(restored);
+    assert.equal(restoreResult.channel.metadata.metadataRevision, 2);
+    assert.equal(restoreResult.channel.metadata.summary, undefined);
+    assert.equal((await json(await worker.fetch(`/api/channels/${root.id}/metadata-history?revision=1`, { headers: auth }))).revisions[0].summary, summary);
     // The Hub, not the session, records who wrote the summary and how far it read.
     assert.deepEqual(updated.channel.summarySource, {
       author: { kind: "run", runId: managementCommand.runId, agentName: managementCommand.agentName },

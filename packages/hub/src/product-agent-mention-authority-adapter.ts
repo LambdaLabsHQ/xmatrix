@@ -180,6 +180,7 @@ export function createProductAgentMentionAuthorityPort(input: {
       }
       return {
         id: channel.id,
+        ...(typeof channel.name === "string" ? { name: channel.name } : {}),
         spaceId: channel.spaceId,
         mode: channel.mode === "closed" ? "closed" : "open",
         ...(typeof channel.archivedAt === "string" ? { archivedAt: channel.archivedAt } : {}),
@@ -402,6 +403,7 @@ export async function dispatchProductChannelAbout(input: {
   spaceId?: string;
   channelId: string;
   requestId: string;
+  triggerMessageId?: string;
   successorOfRunId?: string;
   actorUserId: string;
   skipDaemonWake?: boolean;
@@ -412,6 +414,7 @@ export async function dispatchProductChannelAbout(input: {
     ...(input.spaceId ? { spaceId: input.spaceId } : {}),
     channelId: input.channelId,
     requestId: input.requestId,
+    ...(input.triggerMessageId ? { triggerMessageId: input.triggerMessageId } : {}),
     ...(input.successorOfRunId ? { successorOfRunId: input.successorOfRunId } : {}),
     actorUserId: input.actorUserId,
     port: createProductAgentMentionAuthorityPort({

@@ -1,3 +1,4 @@
+import { registerChannelMetadataRoutes } from "./index-routes-channel-metadata.js";
 import { AgentChannelAccessError, ControlError, PostgresAgentChannelAccessRepository } from "@xmatrix/db";
 import { stopChannelAboutSessions } from "./channel-about-session-stop";
 import { channelAboutTextRefusal } from "./channel-about-text";
@@ -199,6 +200,17 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
   }));
   app.get(HUB_ROUTES.channels, (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
+    // About has a single Channel capability. Do not read the Space catalog and
+    // filter afterwards: manifests, attention and pagination also carry inputs.
+    if (authUser.agentRun?.runKind === "channel-about-session") {
+      const run = authUser.agentRun;
+      if ((c.req.query("spaceId") && c.req.query("spaceId") !== run.spaceId) ||
+          (c.req.query("familyOfChannelId") && c.req.query("familyOfChannelId") !== run.channelId)) {
+        return c.json({ error: "About context is limited to its own Channel", code: "channel_about_scope_invalid" }, 403);
+      }
+      const result = await getChannel(c.env, { channelId: run.channelId, principal: { kind: "user", id: run.ownerUserId } });
+      return c.json({ channels: [result.channel] }, 200, NO_STORE);
+    }
     const spaceId = c.req.query("spaceId");
     // `familyOfChannelId` narrows the read to one Channel and its direct children.
     const familyOfChannelId = c.req.query("familyOfChannelId")?.trim() || undefined;
@@ -257,10 +269,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
         "runtime_presence",
         presencePromise,
       );
-      const visibleChannels = authUser.agentRun?.runKind === "channel-about-session"
-        ? catalog.channels.filter((channel) =>
-            (channel as { id?: unknown }).id === authUser.agentRun!.channelId)
-        : catalog.channels;
+      const visibleChannels = catalog.channels;
       observedChannelCount = visibleChannels.length;
       observationOutcome = "ok";
       // Scoped-authority channel serialization is durable membership only. Overlay
@@ -397,6 +406,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       code: "channel_create_result_invalid",
     }, 502);
   }));
+  registerChannelMetadataRoutes(app);
   app.patch("/api/channels/:channelId", (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
     const channelId = c.req.param("channelId");
@@ -412,7 +422,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     // same request may name a Channel nobody has named yet.
     const about = run?.runKind === "channel-about-session" ? run : undefined;
     if (about && (about.channelId !== channelId || typeof patch.summary !== "string" ||
-        Object.keys(patch).some((field) => !["summary", "name", "throughMessageId"].includes(field)))) {
+        Object.keys(patch).some((field) => !["summary", "name", "throughMessageId", "expectedRevision"].includes(field)))) {
       return c.json({
         error: "A Channel About session may only replace its Channel's summary and automatic name",
         code: "channel_about_operation_forbidden",
@@ -431,6 +441,9 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     if (mangled) return c.json(mangled, 422);
     const throughMessageId = typeof patch.throughMessageId === "string" && patch.throughMessageId.trim()
       ? patch.throughMessageId.trim().slice(0, 200) : undefined;
+    if (patch.expectedRevision !== undefined && (!Number.isSafeInteger(patch.expectedRevision) || Number(patch.expectedRevision) < 0)) {
+      return c.json({ error: "expectedRevision must be a non-negative safe integer" }, 400);
+    }
     const actingUserId = run ? run.ownerUserId : authUser.id;
     // The About session is scoped to this Channel already; it is not a delegate.
     if (run && !about) {
@@ -449,6 +462,8 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     const result = await configureChannel(c.env, {
       commandId: productCommandId(c.req.raw, "domain"),
       actorUserId: actingUserId, at: new Date().toISOString(), channelId,
+      ...(run ? { actorRunId: run.runId } : {}),
+      ...(typeof patch.expectedRevision === "number" ? { expectedRevision: patch.expectedRevision } : {}),
       ...(typeof patch.name === "string" ? { name: patch.name } : {}),
       ...(about && typeof patch.name === "string" ? { automaticName: true } : {}),
       ...(about ? { summary, summaryAuthor: {

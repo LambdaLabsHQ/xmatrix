@@ -59,3 +59,9 @@ Webhook Events lifecycle endpoint. It binds the current app/guild/installing
 Human grant and retires user deauthorization under PostgreSQL locks; it does not
 receive ordinary guild messages. See [connector lifecycle](../design/connector-platform.md#signed-discord-installation-lifecycle)
 and [native acceptance](../operations/app-connectors.md#discord-company-bot-registration-and-acceptance).
+
+Channel title and About changes retain full immutable revisions, with scoped
+history and append-only restoration through HTTP and CLI. About writes prove
+the live Channel-bound Run and its recorded authoritative inputs, and reject
+stale metadata revisions. Automatic titles may still refresh. Legacy overwritten
+content cannot be reconstructed. See [Channel metadata revisions](../design/channel-metadata-revisions.md).
