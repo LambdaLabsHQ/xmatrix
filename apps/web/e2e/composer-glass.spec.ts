@@ -62,11 +62,16 @@ function blurRadius(value: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-async function expectLegibleComposer(page: Page, testInfo: TestInfo, screenshotName: string) {
+/** The mock-auth app's API: everything empty but its Space, Channels and pages reads. */
+async function installMockAppFixtures(page: Page) {
   await installApiFixtures(page);
   await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
-    await fixtureSpaceResources(page);
+  await fixtureSpaceResources(page);
   await fixtureMockChannelCatalog(page);
+}
+
+async function expectLegibleComposer(page: Page, testInfo: TestInfo, screenshotName: string) {
+  await installMockAppFixtures(page);
 
   await page.goto("/app/fixture-space/channels/launch");
 
@@ -126,10 +131,7 @@ test.describe("mock-auth app fixture", () => {
   });
 
   test("submits verified attachment bindings with append before the first delivery", async ({ page }) => {
-    await installApiFixtures(page);
-    await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
-    await fixtureSpaceResources(page);
-    await fixtureMockChannelCatalog(page);
+    await installMockAppFixtures(page);
     await fixtureRule(page, {
       id: "r2-upload-intents",
       pattern: "**/relay-v2/private-r2/upload-intents",
@@ -194,10 +196,7 @@ test.describe("mock-auth app fixture", () => {
     test.use({ viewport: { width: 430, height: 932 }, deviceScaleFactor: 3 });
 
     test("composer is a taller capsule concentric with the device corners", async ({ page }, testInfo) => {
-      await installApiFixtures(page);
-      await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
-    await fixtureSpaceResources(page);
-      await fixtureMockChannelCatalog(page);
+      await installMockAppFixtures(page);
       await page.goto("/app/fixture-space/channels/launch");
       await expect(page.locator(".app-message-timeline").getByText("Mobile list pass is ready for screenshot review.")).toBeVisible();
       await page.locator(".xmatrix-app-shell").evaluate((shell) => {
@@ -254,10 +253,7 @@ test.describe("mobile channel list visual states", () => {
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
-    await installApiFixtures(page);
-    await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
-    await fixtureSpaceResources(page);
-    await fixtureMockChannelCatalog(page);
+    await installMockAppFixtures(page);
     await fixtureRule(page, {
       id: "channel-view-preference",
       pattern: "**/api/xmatrix/spaces/*/channel-view-preference**",
