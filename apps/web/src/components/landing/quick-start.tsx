@@ -1,16 +1,10 @@
 "use client";
 
-import Link from "next/link";
+import Image from "next/image";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  quickStartDecisions,
-  quickStartRunbookUrl,
-  quickStartSeedPrompt,
-  quickStartSteps,
-} from "@/lib/quick-start";
+import { quickStartSeedPrompt } from "@/lib/quick-start";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
-import { WoodPanel } from "@/components/ui/material-surfaces";
 
 function SeedPromptBlock() {
   const { copied, copy: handleCopy } = useCopyToClipboard(quickStartSeedPrompt);
@@ -82,47 +76,16 @@ export function QuickStart() {
             </p>
           </div>
 
-          <WoodPanel className="min-w-0 p-6">
-            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-muted-foreground">
-              What gets set up
-            </p>
-            <ol className="mt-4 space-y-2.5">
-              {quickStartSteps.map((step, index) => (
-                <li key={step.id} className="flex items-center gap-3 text-sm">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted font-mono text-[11px] font-bold text-primary">
-                    {index + 1}
-                  </span>
-                  <span className="font-medium text-foreground">{step.title}</span>
-                  <span className="ml-auto hidden font-mono text-[11px] text-muted-foreground sm:block">
-                    {step.probe}
-                  </span>
-                </li>
-              ))}
-            </ol>
-            <p className="mt-5 text-[10px] font-bold uppercase tracking-[0.24em] text-muted-foreground">
-              You stay in control of
-            </p>
-            <ul className="mt-3 space-y-1.5">
-              {quickStartDecisions.map((decision) => (
-                <li
-                  key={decision}
-                  className="flex items-start gap-2 text-sm text-muted-foreground"
-                >
-                  <Check className="mt-1 size-3.5 shrink-0 text-primary" />
-                  {decision}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-5 text-sm text-muted-foreground">
-              Agent-readable guide:{" "}
-              <Link
-                href={quickStartRunbookUrl}
-                className="font-mono text-foreground underline-offset-4 hover:underline"
-              >
-                xmatrix.sh/start.md
-              </Link>
-            </p>
-          </WoodPanel>
+          <div className="relative min-w-0 overflow-hidden rounded-xl border border-foreground/10 shadow-[0_18px_44px_rgba(0,0,0,0.18)]">
+            <Image
+              src="/brand/xmatrix-app-conversations.webp"
+              alt="xMatrix showing a Space's conversations beside one where a person, Claude and Codex work on a landing page"
+              width={1890}
+              height={1520}
+              sizes="(min-width: 1024px) 40vw, 100vw"
+              className="h-auto w-full"
+            />
+          </div>
         </div>
       </div>
     </section>
