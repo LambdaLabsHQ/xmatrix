@@ -159,6 +159,27 @@ and [Google web-server OAuth](https://developers.google.com/identity/protocols/o
 The browser flow follows [Google's Picker sample](https://developers.google.com/workspace/drive/picker/guides/web-picker-sample)
 with incremental scope union disabled and [Picker disposal](https://developers.google.com/workspace/drive/picker/reference/picker.picker.dispose).
 
+Google Search Console is a separate `googlesearchconsole` connection with its
+own token. It signs in with the same company Google OAuth client
+(`CONNECTOR_GOOGLE_CLIENT_ID` / `CONNECTOR_GOOGLE_CLIENT_SECRET`) but requests
+only `https://www.googleapis.com/auth/webmasters`, offline access and consent;
+the Hub requires exactly that provider-confirmed scope on exchange and refresh,
+so neither Google connection can hold the other's permission. The signed state
+names the provider, so a Docs state cannot complete a Search Console connect.
+Check lists the account's properties without storing them. Reads:
+`list_sites:*`, `query:<property> [by=<up to three of query,page,country,device,date,searchAppearance>|none] [days=1-480] [limit=1-250] [type=…]`
+(defaults `by=query days=28 limit=25 type=web`, UTC dates ending today),
+`list_sitemaps:<property>` and `inspect_url:<property> <page url>`. The write
+`submit_sitemap:<property> <sitemap url>` needs the Channel's allow policy. A
+property is `sc-domain:<domain>` or an exact URL-prefix address ending in `/`;
+page and sitemap URLs must belong to the named property before any provider
+call. Google decides whether the connected account can see the property.
+Search Console has no webhooks, so it has no inbound events; schedule a page
+Automation for recurring reports. Enable the Search Console API on the company
+Google project and add the `webmasters` scope to its consent screen; it is a
+sensitive scope, so external use beyond Testing users needs Google verification.
+See [Search Console API](https://developers.google.com/webmaster-tools/v1/api_reference_index).
+
 Google Sheets uses the same per-file Google connection and `drive.file` grant.
 `read_sheet:<spreadsheet id> <A1 range>` returns an explicit rectangle (up to
 50 rows by 20 columns) as untrusted JSON, with formula text and formatted dates;
