@@ -588,10 +588,24 @@ export function agentTraceHistoryStatusCopy(
       detail: "The exact Agent host did not answer the latest live-sync request. Sync retries while this detail stays open; Hub and R2 provide no fallback history.",
     };
   }
-  if (state.phase === "unavailable") {
+  if (state.phase === "unavailable" && state.reason === "host_overloaded") {
+    return {
+      title: "Agent host is busy",
+      detail: "Too many trace reads are open for this instance right now. Sync retries while this detail stays open; Hub and R2 provide no fallback history.",
+    };
+  }
+  // Only a Hub that holds no connection for the instance knows its host is
+  // offline; any other unavailable answer comes from a host that is connected.
+  if (state.phase === "unavailable" && state.reason === "host_offline") {
     return {
       title: "Agent host is offline",
       detail: "Local trace history is unavailable until the exact Agent host can answer. Sync retries while this detail stays open; Hub and R2 provide no fallback history.",
+    };
+  }
+  if (state.phase === "unavailable") {
+    return {
+      title: "Agent host could not read its trace",
+      detail: "The Agent host is connected but did not return this instance's trace history. Sync retries while this detail stays open; Hub and R2 provide no fallback history.",
     };
   }
   if (state.phase === "error" &&
