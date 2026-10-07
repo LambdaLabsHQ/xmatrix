@@ -431,6 +431,55 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 .page-automation-status[data-state="missing"] { cursor: default; }
 .page-automation-status:hover:not(:disabled) { color: var(--foreground); }
 
+/* A GitHub file the page embeds (§6.5): its link reads as the file's label, and the file is drawn below it,
+   read through from GitHub. Long files start folded. */
+.page-github-file-link { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.9em; }
+.page-github-file {
+  margin: 0.5em 0 1em;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  user-select: text;
+  cursor: auto;
+}
+.page-github-file-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.8em;
+}
+.page-github-file-name { font-family: var(--font-mono, ui-monospace, monospace); color: var(--foreground); overflow-wrap: anywhere; }
+.page-github-file-open { margin-left: auto; color: inherit; }
+.page-github-file-open:hover { color: var(--foreground); }
+.page-github-file-body { max-height: 32rem; overflow: hidden; padding: 4px 12px; }
+.page-github-file[data-folded="true"] .page-github-file-body {
+  mask-image: linear-gradient(to bottom, black 75%, transparent);
+}
+.page-github-file[data-folded="false"] .page-github-file-body { max-height: none; }
+.page-github-file-note { color: var(--muted-foreground); font-size: 0.9em; }
+.page-github-file-code {
+  margin: 4px 0;
+  white-space: pre;
+  overflow-x: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+}
+.page-github-file-unfold {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.8em;
+  text-align: left;
+}
+.page-github-file-unfold:hover { color: var(--foreground); }
+.page-github-file-body .page-github-file-unfold { border-top: 0; padding: 4px 0; width: auto; }
+
 /* What someone else just wrote (§3.1): tinted in their caret's colour, fading over REMOTE_CHANGE_MS. */
 @keyframes page-remote-change {
   0%, 40% { background-color: color-mix(in oklab, var(--page-change-color) 24%, transparent); }

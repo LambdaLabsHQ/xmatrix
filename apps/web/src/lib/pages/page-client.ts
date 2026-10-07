@@ -1,6 +1,7 @@
 import {
   DEFAULT_HUB_URL, PAGE_DOCUMENT_FRAGMENT, WEB_PROXY_ROUTES, normalizeHubUrl,
-  type AutomationTrigger, type PageAwareness, type PageClaim, type PageConversation, type PageDocument, type PageLinkAnchor,
+  type AutomationTrigger, type PageAwareness, type PageClaim, type PageConversation, type PageDocument,
+  type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeAgent,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
@@ -52,6 +53,10 @@ export const pageApi = {
   markRead: (spaceId: string, pageId: string, token: string, revision: number) =>
     xmatrixApiRequest<{ revision: number }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
       method: "PUT", body: { revision } }),
+  /** A GitHub file the page embeds, read through from GitHub by the Hub (pages-live-document.md §6.5). */
+  githubFile: (spaceId: string, pageId: string, token: string, href: string, signal?: AbortSignal) =>
+    xmatrixApiRequest<PageGitHubFile>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/github-file?href=${encodeURIComponent(href)}`, token, signal }),
   awareness: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<PageAwareness>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness`, token, signal }),
   claims: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
