@@ -90,19 +90,6 @@ export async function cancelRunExecution(tx: DatabaseTransaction, input: {
   await expireInstanceTraceAccess(tx, run.instance_id, input.at);
 }
 
-/** Whether an existing management delegate still serves its Channel. */
-export function managementActivationDecision(candidate: QueryResultRow, configGeneration: number,
-  nowMs: number): "connected" | "connecting" | "reconnecting" | null {
-  if (Number(metadata(candidate).managementConfigGeneration) !== configGeneration ||
-      !["starting", "running"].includes(String(candidate.run_status))) return null;
-  if (isLiveAgentStatus(candidate.instance_status)) return "connected";
-  if (candidate.instance_status !== "offline") return null;
-  const timestamp = Date.parse(String(candidate.run_status === "starting"
-    ? candidate.run_created_at : candidate.instance_updated_at));
-  if (!Number.isFinite(timestamp) || nowMs - timestamp >= 60_000) return null;
-  return candidate.run_status === "starting" ? "connecting" : "reconnecting";
-}
-
 function runStatus(value: unknown): RunStatus {
   const result = text(value, "status", 32) as RunStatus;
   if (!isRunStatus(result)) throw new RuntimeControlError(
@@ -1488,13 +1475,10 @@ export class PostgresRuntimeRepository {
           const routedAs = typeof runMetadata.routedAs === "string" ? runMetadata.routedAs : undefined;
           const stopRequest = runMetadata.stopRequest && typeof runMetadata.stopRequest === "object"
             ? runMetadata.stopRequest as Record<string, unknown> : undefined;
-          const management = routedAs === "management_assistant_mention" ||
-            routedAs === "management_channel_about";
           return {
             instanceId: String(row.instance_id), runId: String(row.run_id),
             agentId: String(row.instance_id), agentName: String(row.agent_name),
-            mentionTarget: management
-              ? "xMatrix" : `${String(row.agent_name)}:${Number(row.channel_instance_id)}`,
+            mentionTarget: `${String(row.agent_name)}:${Number(row.channel_instance_id)}`,
             ownerUserId: String(row.owner_user_id),
             machineOwnerUserId: String(row.machine_owner_user_id),
             machineId: typeof runMetadata.machineId === "string" ? runMetadata.machineId : "",

@@ -21,7 +21,7 @@ import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message
 import { agentAvatarUrlFromMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
   supersededByOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage } from "@xmatrix/protocol";
 import { REDACTED_CONTENT_HASH, productGatewayAttachmentKind } from "./product-message-command";
-import { XMATRIX_MANAGEMENT_AVATAR_URL, XMATRIX_MANAGEMENT_LABEL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import {
   decodeRelayV2MessagePayloadBundle,
   prepareRelayV2MessageRecord,
@@ -86,7 +86,7 @@ function record(value: unknown, field: string): Record<string, unknown> {
 /** How xMatrix's own messages present their author. */
 const XMATRIX_MESSAGE_SENDER_SNAPSHOT = {
   identityId: `system:${XMATRIX_SYSTEM_AUTHOR_ID}`, kind: "system", userId: "", email: "",
-  label: XMATRIX_MANAGEMENT_LABEL, name: XMATRIX_MANAGEMENT_LABEL, avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL,
+  label: XMATRIX_SYSTEM_LABEL, name: XMATRIX_SYSTEM_LABEL, avatarUrl: XMATRIX_SYSTEM_AVATAR_URL,
 };
 
 function principal(value: unknown): MessagePrincipal {
@@ -134,31 +134,19 @@ function postgresSenderSnapshot(
     identityId, kind: "agent", agentId: identity.id, label: instanceLabel ?? identity.name,
     name: identity.name, agentName: identity.name, runtime: identity.runtime,
     userId: identity.ownerUserId,
-    ...(runIdentity && !runIdentity.managementDelegate ? { registration: runIdentity.registration } : {}),
+    ...(runIdentity ? { registration: runIdentity.registration } : {}),
     ...(runIdentity ? {
       instanceId: runIdentity.instanceId,
       channelInstanceId,
       instanceLabel,
     } : {}),
-    ...(runIdentity?.origin && !runIdentity.managementDelegate ? {
+    ...(runIdentity?.origin ? {
       originChannelId: runIdentity.origin.channelId,
       ...(runIdentity.origin.messageId ? { originMessageId: runIdentity.origin.messageId } : {}),
     } : {}),
     ...(identity.ownerEmail ? { email: identity.ownerEmail } : {}),
     ...(avatarUrl ? { avatarUrl } : {}),
     profileVersion: identity.version,
-    ...(runIdentity?.managementDelegate ? {
-      identityId: "xmatrix:management",
-      label: XMATRIX_MANAGEMENT_LABEL, name: XMATRIX_MANAGEMENT_LABEL,
-      agentName: XMATRIX_MANAGEMENT_LABEL, instanceLabel: XMATRIX_MANAGEMENT_LABEL,
-      avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL,
-      xmatrixManagementDelegate: {
-        agentId: identity.id, agentName: identity.name,
-        runId: runIdentity.runId, instanceId: runIdentity.instanceId,
-        managementSpaceId: runIdentity.managementDelegate.spaceId,
-        managementConfigGeneration: runIdentity.managementDelegate.configGeneration,
-      },
-    } : {}),
   };
 }
 

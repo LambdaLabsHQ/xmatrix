@@ -12,7 +12,7 @@ import { appendChannelMessage } from "./channel-messages";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
-import { XMATRIX_MANAGEMENT_AVATAR_URL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL } from "./xmatrix-system-identity";
 import type { Env } from "./types";
 
 /**
@@ -97,7 +97,7 @@ async function appendNotice(env: Env, grant: CrossSpaceReadGrant, ownerEmail: st
     messageKind: CROSS_SPACE_READ_MESSAGE_KIND,
     senderSnapshot: { identityId: `user:${grant.ownerUserId}`, kind: "user", userId: grant.ownerUserId,
       email: ownerEmail, label: "xMatrix access request", name: "xMatrix access request",
-      avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL },
+      avatarUrl: XMATRIX_SYSTEM_AVATAR_URL },
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
       crossSpaceRead: { grantId: grant.id, spaceId: grant.spaceId, ownerUserId: grant.ownerUserId,
         ...(grant.agentName ? { agentName: grant.agentName } : {}) } } },

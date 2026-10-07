@@ -8,9 +8,8 @@ import { resolveMessageAgentTargets } from "./message-agent-targets.js";
 /** Bounded like every Runtime scan; a repeated `/kill all` fences the rest. */
 const CHANNEL_STOP_FENCE_LIMIT = 200;
 
-/** What a stop command addresses: every live Run, one exact Run, or the
- * Channel's management delegate (`@xMatrix:stop`). */
-export type ChannelStopScope = { kind: "channel" } | { kind: "run"; runId: string } | { kind: "management" };
+/** What a stop command addresses: every live Run, or one exact Run. */
+export type ChannelStopScope = { kind: "channel" } | { kind: "run"; runId: string };
 
 /**
  * Stop fence. Runs inside the Human's message append transaction, so the stop
@@ -29,7 +28,7 @@ export async function fenceChannelRunsForStop(tx: DatabaseTransaction, input: {
 }): Promise<number> {
   const stopRequest = { sourceMessageId: input.sourceMessageId, actorUserId: input.actorUserId,
     requestedAt: input.at };
-  const fenced = await tx.query<QueryResultRow>({ name: "channel_stop_fence_v2", text: `WITH authorized AS (
+  const fenced = await tx.query<QueryResultRow>({ name: "channel_stop_fence_v3", text: `WITH authorized AS (
       SELECT c.channel_id FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$2
         AND ${channelCapabilityPredicate({ capability: "runtime_terminalize", channelAlias: "c",
           principalKindSql: "'user'", principalIdSql: "$3::text" })}
@@ -38,7 +37,6 @@ export async function fenceChannelRunsForStop(tx: DatabaseTransaction, input: {
       WHERE r.status IN ('starting','running')
         AND COALESCE(r.metadata_json->>'routedAs','')<>'management_channel_about'
         AND ($5::text IS NULL OR r.run_id=$5)
-        AND (NOT $6 OR r.metadata_json->>'routedAs'='management_assistant_mention')
       ORDER BY r.run_id LIMIT ${CHANNEL_STOP_FENCE_LIMIT} FOR UPDATE OF r
     ), cancelled AS (
       UPDATE data.agent_launches l SET state='cancelled',retryable=FALSE,lease_owner=NULL,lease_until=NULL,
@@ -50,7 +48,7 @@ export async function fenceChannelRunsForStop(tx: DatabaseTransaction, input: {
     FROM target WHERE r.run_id=target.run_id
     RETURNING r.run_id,r.version,(SELECT i.instance_id FROM data.instances i WHERE i.run_id=r.run_id) AS instance_id`,
   values: [input.spaceId, input.channelId, input.actorUserId, JSON.stringify(stopRequest),
-    input.scope.kind === "run" ? input.scope.runId : null, input.scope.kind === "management"],
+    input.scope.kind === "run" ? input.scope.runId : null],
   maxRows: CHANNEL_STOP_FENCE_LIMIT });
   for (const row of fenced) {
     await commitRuntime(tx, input.spaceId, { commandId: `channel-stop:${input.sourceMessageId}:${row.run_id}`
@@ -70,7 +68,6 @@ export async function channelStopScope(tx: DatabaseTransaction, input: {
   const command = parseAgentStopCommand(input.body);
   if (!command) return undefined;
   if (command.all) return { kind: "channel" };
-  if (command.target.toLowerCase() === "xmatrix") return { kind: "management" };
   if (!/:[1-9]\d*$/u.test(command.target)) return undefined;
   const [target] = await resolveMessageAgentTargets(tx, { spaceId: input.spaceId, channelId: input.channelId,
     messageId: input.messageId, body: `@${command.target}` }) ?? [];

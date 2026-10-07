@@ -174,13 +174,11 @@ function openAppendRows(channelId) {
 
 for (const scenario of [
   { name: "ordinary Agent" },
-  { name: "management mention", routedAs: "management_assistant_mention" },
-  { name: "stale management generation", routedAs: "management_assistant_mention", configVersion: 3 },
-  { name: "disabled management", routedAs: "management_assistant_mention", enabled: false },
-  { name: "management changed before commit", routedAs: "management_assistant_mention", changeAtCommit: true },
-  { name: "wrong management Space", routedAs: "management_assistant_mention", managementSpaceId: "other" },
-  { name: "missing management generation", routedAs: "management_assistant_mention", generation: null },
-  { name: "Channel About cannot post", routedAs: "management_channel_about", error: "agent_run_forbidden" },
+  // The retired xMatrix management delegate: a Run started before it was retired posts nothing.
+  { name: "retired management delegate", routedAs: "management_assistant_mention", error: "agent_run_forbidden",
+    message: /management agent is retired/u },
+  { name: "Channel About cannot post", routedAs: "management_channel_about", error: "agent_run_forbidden",
+    message: /Channel About Runs cannot post/u },
 ]) test(`PostgreSQL sender identity: ${scenario.name}`, async () => {
   const calls = [];
   const observations = [];
@@ -191,15 +189,9 @@ for (const scenario of [
         owner_user_id: "owner-1", channel_id: "channel-1",
         run_status: "running", instance_status: "busy", instance_channel_id: "channel-1",
         channel_instance_id: "7", metadata_json: { executionKey: "execution-1",
-          ...(scenario.routedAs ? { routedAs: scenario.routedAs,
-            managementSpaceId: scenario.managementSpaceId ?? "space-1",
-            managementConfigGeneration: scenario.generation === null ? undefined : 2 } : {}),
+          ...(scenario.routedAs ? { routedAs: scenario.routedAs, managementSpaceId: "space-1",
+            managementConfigGeneration: 2 } : {}),
         },
-      }];
-      if (query.name === "message_management_delegate_config_v2") return [{
-        version: scenario.changeAtCommit && calls.filter(
-          (call) => call.name === query.name).length > 1 ? 3 : scenario.configVersion ?? 2,
-        config_json: { enabled: scenario.enabled ?? true },
       }];
       return agentChannelRows(query);
     } });
@@ -226,11 +218,11 @@ for (const scenario of [
     ...(scenario.name === "ordinary Agent" ? { agentSendFingerprint: "2".repeat(64) } : {}),
     placement: { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 },
   });
-  if (scenario.configVersion || scenario.enabled === false || scenario.changeAtCommit ||
-      scenario.managementSpaceId || scenario.generation === null || scenario.error) {
-    await assert.rejects(append, (error) => error.code ===
-      (scenario.error ?? "management_delegate_message_forbidden"));
+  if (scenario.error) {
+    await assert.rejects(append, (error) => error.code === scenario.error && scenario.message.test(error.message));
     assert.equal(calls.some((query) => query.name === "message_append_commit_facts_v5"), false);
+    assert.equal(calls.some((query) => /space_management_configs/u.test(query.text ?? "")), false,
+      "no Space management configuration is consulted");
     assert.equal(observations.length, 1);
     assert.equal(observations[0].blobs[0], "message_append");
     assert.equal(observations[0].blobs[1], "error");
@@ -242,26 +234,19 @@ for (const scenario of [
   assert.equal(observations[0].blobs[1], "ok");
   assert.equal(observations[0].doubles.length, 8);
   assert.partialDeepStrictEqual(result.senderSnapshot, {
-    identityId: scenario.routedAs ? "xmatrix:management" : "instance-1",
+    identityId: "instance-1",
     agentId: "instance-1", instanceId: "instance-1",
-    channelInstanceId: "7", instanceLabel: scenario.routedAs ? "xMatrix" : "Codex:7",
-    label: scenario.routedAs ? "xMatrix" : "Codex:7",
+    channelInstanceId: "7", instanceLabel: "Codex:7",
+    label: "Codex:7",
     goal: { status: "working", summary: "Review" },
   });
   assert.equal(result.senderSnapshot.unreviewed, undefined);
-  assert.deepEqual(result.senderSnapshot.registration, scenario.routedAs ? undefined : {
+  assert.deepEqual(result.senderSnapshot.registration, {
     ownerUserId: "owner-1", machineId: "machine-1", harness: "codex",
   });
   assert.equal(result.senderSnapshot.managementActivityKind, undefined);
-  assert.deepEqual(result.senderSnapshot.xmatrixManagementDelegate, scenario.routedAs ? {
-    agentId: "instance-1", agentName: "Codex", runId: "run-1", instanceId: "instance-1",
-    managementSpaceId: "space-1", managementConfigGeneration: 2,
-  } : undefined);
-  if (scenario.routedAs) {
-    assert.equal(result.senderSnapshot.name, "xMatrix");
-    assert.equal(result.senderSnapshot.agentName, "xMatrix");
-    assert.equal(result.senderSnapshot.avatarUrl, "/brand/xmatrix-management-icon.png");
-  }
+  // A forged xMatrix persona in the caller's overlay never survives.
+  assert.equal(result.senderSnapshot.xmatrixManagementDelegate, undefined);
   assert.equal(calls.filter((query) => query.name === "message_append_run_proof_v3").length, 2);
 });
 

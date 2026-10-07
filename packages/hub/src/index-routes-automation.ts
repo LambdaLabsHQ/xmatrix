@@ -1,10 +1,5 @@
 import { Hono } from "hono";
-import {
-  automationRef,
-  HUB_ROUTES,
-  sha256Hex,
-  type AutomationActionType,
-} from "@xmatrix/protocol";
+import { automationRef, HUB_ROUTES } from "@xmatrix/protocol";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
 import type { Env } from "./types";
 import {
@@ -23,14 +18,13 @@ import {
   automationPayload,
 } from "./index-shared";
 import { commitAutomation, getAutomation, listAutomations } from "./automations";
-import { publishAutomationSystemFact } from "./product-automation-system-fact";
 import { automationEvaluatorBinding } from "./automation-evaluator-binding";
 import * as pages from "./index-routes-page-automations";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
 
 /**
  * Everything these routes take from the Hub: authentication, the Automation
- * repository, system facts and the generic Automation helpers. Production passes nothing and gets the real
+ * repository and the generic Automation helpers. Production passes nothing and gets the real
  * ones; tests pass their own boundary instead of rewriting module resolution.
  */
 export interface AutomationRouteBoundary {
@@ -50,8 +44,6 @@ export interface AutomationRouteBoundary {
   automationExpression: typeof automationExpression;
   automationIntervalMinutes: typeof automationIntervalMinutes;
   automationPayload: typeof automationPayload;
-  sha256Hex: typeof sha256Hex;
-  publishAutomationSystemFact: typeof publishAutomationSystemFact;
 }
 
 export const hubBoundary: AutomationRouteBoundary = {
@@ -71,8 +63,6 @@ export const hubBoundary: AutomationRouteBoundary = {
   automationExpression,
   automationIntervalMinutes,
   automationPayload,
-  sha256Hex,
-  publishAutomationSystemFact,
 };
 
 const FORBIDDEN_AUTOMATION_FIELDS = new Set([
@@ -208,31 +198,6 @@ export function commandPayload(
   return parsed.payload;
 }
 
-async function managementAudit(
-  boundary: AutomationRouteBoundary,
-  request: Request,
-  principal: AgentRunPrincipal,
-  type: AutomationActionType,
-  automation: AutomationRecord,
-  reason: string,
-  evidence: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const idempotencyKey = request.headers.get("idempotency-key")?.trim() || crypto.randomUUID();
-  // The payloadHash preimage is frozen in its pre-rename spelling: the hash is
-  // part of the command body a retry from before the rename was digested with.
-  const payloadHash = await boundary.sha256Hex(JSON.stringify({
-    type: type.replace("automation_", "scheduled_task_"), taskId: automation.id,
-    taskVersion: automation.version, reason, evidence }));
-  return {
-    actionId: `automation-action:${await boundary.sha256Hex(`${principal.runId}:${idempotencyKey}`)}`.slice(0, 200),
-    idempotencyKey,
-    actionType: type,
-    reason,
-    evidence,
-    payloadHash,
-  };
-}
-
 async function mutateAutomation(boundary: AutomationRouteBoundary, input: {
   env: Env;
   request: Request;
@@ -272,31 +237,14 @@ async function mutateAutomation(boundary: AutomationRouteBoundary, input: {
   const nextRunAt = input.action === "resume"
     ? new Date(Date.now() + intervalMinutes * 60_000).toISOString()
     : input.automation.nextRunAt;
-  let audit: Record<string, unknown> | undefined;
-  const reason = typeof input.body.reason === "string" ? input.body.reason.trim() : "";
-  if (input.agent && input.automation.capabilities.reasonRequired) {
-    if (!reason) return Response.json({ error: "reason is required for Agent schedule governance" }, { status: 400 });
-    audit = await managementAudit(boundary, input.request, input.agent,
-      `automation_${input.action}`,
-      input.automation, reason, input.body.evidence && typeof input.body.evidence === "object" ? input.body.evidence as Record<string, unknown> : {});
-  }
   await boundary.commitAutomation(input.env, {
-    commandId: boundary.productCommandId(input.request, "domain", audit ? `automation:${audit.idempotencyKey}` : undefined),
+    commandId: boundary.productCommandId(input.request, "domain"),
     actorUserId: boundary.actorUserId(input.user), at: new Date().toISOString(), kind: "automation_put",
     automationId: input.automation.id, expectedVersion: version, channelId: input.automation.channelId,
     nextRunAt, enabled: nextEnabled, payload, automationAction: input.action,
-    ...principalInput(boundary, input.user, input.agent), ...(audit ? { managementAudit: audit } : {}),
+    ...principalInput(boundary, input.user, input.agent),
   });
   const updated = await readAutomationRecord(boundary, input.env, input.automation.id, input.user, input.agent);
-  if (audit) {
-    const messageFailure = await boundary.publishAutomationSystemFact({
-      env: input.env, ownerUserId: input.automation.authorityRootUserId,
-      channelId: input.automation.channelId, actionId: String(audit.actionId), phase: "result",
-      body: `xMatrix Agent ${input.action}d Automation “${String(input.automation.name || input.automation.id)}”. Reason: ${reason}`,
-      metadata: { automationId: input.automation.id, automationVersion: updated.version, action: input.action },
-    });
-    if (messageFailure) return messageFailure;
-  }
   await notifyAutomationSpace(input.env, updated);
   return Response.json({ automation: updated });
 }
@@ -363,15 +311,11 @@ export function registerIndexRoutesAutomation(
       const agent = user.agentRun ? await boundary.requireLiveAgentRun(c.env, user) : undefined;
       const requestedChannelId = c.req.query("channelId")?.trim();
       const requestedSpaceId = c.req.query("spaceId")?.trim();
-      if (agent && !agent.managementSpaceId && requestedChannelId && requestedChannelId !== agent.channelId) {
+      if (agent && requestedChannelId && requestedChannelId !== agent.channelId) {
         return c.json({ error: "Agent Automation reads require the birth channelId" }, 403);
       }
-      if (agent?.managementSpaceId && requestedSpaceId && requestedSpaceId !== agent.managementSpaceId) {
-        return c.json({ error: "Management Agent Automation reads require its management Space" }, 403);
-      }
-      const channelId = agent && !agent.managementSpaceId && !requestedSpaceId
-        ? agent.channelId : requestedChannelId;
-      const spaceId = agent?.managementSpaceId || requestedSpaceId;
+      const channelId = agent && !requestedSpaceId ? agent.channelId : requestedChannelId;
+      const spaceId = requestedSpaceId;
       const { automations, executionEnabled } = await boundary.listAutomations(c.env, {
         ...(channelId ? { channelId } : {}), ...(spaceId ? { spaceId } : {}), ...principalInput(boundary, user, agent) });
       return c.json({ automations, executionEnabled, agentManagementEnabled: true });
@@ -467,29 +411,11 @@ export function registerIndexRoutesAutomation(
       const version = expectedVersion(body);
       if (!automation.capabilities.delete) return c.json({ error: "Automation delete is not permitted" }, 403);
       if (version !== automation.version) return c.json({ error: "expectedVersion must match the current Automation version" }, 409);
-      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
-      let audit: Record<string, unknown> | undefined;
-      if (agent && automation.capabilities.reasonRequired) {
-        if (!reason) return c.json({ error: "reason is required for Management Agent governance" }, 400);
-        audit = await managementAudit(boundary, c.req.raw, agent, "automation_delete", automation, reason,
-          body.evidence && typeof body.evidence === "object" && !Array.isArray(body.evidence)
-            ? body.evidence as Record<string, unknown> : {});
-      }
       await boundary.commitAutomation(c.env, {
-        commandId: boundary.productCommandId(c.req.raw, "domain", audit ? `automation:${audit.idempotencyKey}` : undefined),
+        commandId: boundary.productCommandId(c.req.raw, "domain"),
         actorUserId: boundary.actorUserId(user), at: new Date().toISOString(), kind: "automation_remove",
         automationId: automation.id, expectedVersion: version, ...principalInput(boundary, user, agent),
-        ...(audit ? { managementAudit: audit } : {}),
       });
-      if (audit) {
-        const failure = await boundary.publishAutomationSystemFact({
-          env: c.env, ownerUserId: automation.authorityRootUserId,
-          channelId: automation.channelId, actionId: String(audit.actionId), phase: "result",
-          body: `xMatrix management deleted Automation lineage “${String(automation.name || automation.id)}”. Reason: ${reason}`,
-          metadata: { automationId: automation.id, automationVersion: version, action: "delete" },
-        });
-        if (failure) return failure;
-      }
       await notifyAutomationSpace(c.env, automation);
       return c.json({ ok: true, automationId: automation.id });
     } catch (error) {

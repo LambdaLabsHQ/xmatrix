@@ -106,7 +106,7 @@ const CLIENT_FAILURES = {
   agent_delivery_binding_stale: ["Agent Instance live delivery binding is stale; reconnect required", "relay.bind_delivery"],
   agent_channel_scope_mismatch: ["Agent Instance operation is outside its run-bound channel", "authority.access"],
   agent_read_only_session: ["Channel About sessions cannot write Channel messages", "authority.access"],
-  management_activation_changed: ["Management activation no longer matches the current configuration. Start a new authorized activation.", "relay.validate_binding"],
+  management_agent_retired: ["The xMatrix management agent is retired", "relay.validate_binding"],
   invalid_agent_message_fields: ["Agent message contains unsupported fields", "request.validate"],
   invalid_channel_activity: ["Channel activity report is malformed", "request.validate"],
 } as const;

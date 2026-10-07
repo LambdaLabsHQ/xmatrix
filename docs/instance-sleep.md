@@ -38,7 +38,7 @@ Channel message wakes it.
 | `interrupted` | A persistent, resumable registration Run exited without a stop and without a sleep (crash, machine or wrapper restart) | Yes | Greyed avatar with a warning badge |
 | `wake_failed` | A wake was refused or its resume failed; `rest_reason` holds the failure code and what the failing step said | No; only `:reborn` | Greyed avatar with a red warning badge; the dock tooltip shows the reason |
 | `stopped` | An exact stop succeeded (`@name:N:stop`, the dock Stop, `/kill all`, from a Human or an Agent), or a stop targeted an Instance that was already resting | No; only `:reborn` | Not in the dock or Channel list |
-| `NULL` | The Instance is live, or its offline state predates rest states, or its Run was never resumable (automation, management, Channel About, startup failure) | No | Not shown |
+| `NULL` | The Instance is live, or its offline state predates rest states, or its Run was never resumable (automation, the retired management agent, Channel About, startup failure) | No | Not shown |
 
 A live connection claim clears `rest_state` and `rest_reason`. A wake or reborn
 keeps them until the successor connects, so a waking Instance stays visible.

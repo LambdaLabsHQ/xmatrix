@@ -827,7 +827,7 @@ test("selecting a passage asks AI about it without leaving the page", async ({ p
   await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
     conversationId: asked.id, blockId: "status", anchor: { quote: "In progress" } });
   const [message] = await fixtureRequestBodies(browser, "ask-message");
-  expect(String(message!.body)).toBe("@xMatrix what is left\n\nAbout this passage of page:p-relay (section #status):\n> In progress");
+  expect(String(message!.body)).toBe("@auto what is left\n\nAbout this passage of page:p-relay (section #status):\n> In progress");
   // The discussion opens beside the page, where the answer arrives.
   await expect(browser).toHaveURL(/conversation=channel-ask/u);
   await expect(browser.getByTestId("page-conversation")).toBeVisible();

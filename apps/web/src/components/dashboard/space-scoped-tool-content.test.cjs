@@ -52,14 +52,14 @@ test("Activity keeps this Space's events and the ones that name no Space", () =>
     { id: "e-c", type: "agent_connected", workspaceUserId: "u1", channelId: "ch-c", timestamp: "2" },
     {
       id: "e-meta",
-      type: "space_management_action_executed",
+      type: "space_settings_updated",
       workspaceUserId: "u1",
       metadata: { spaceId: SPACE },
       timestamp: "3",
     },
     {
       id: "e-other-meta",
-      type: "space_management_action_executed",
+      type: "space_settings_updated",
       workspaceUserId: "u1",
       metadata: { spaceId: OTHER },
       timestamp: "4",

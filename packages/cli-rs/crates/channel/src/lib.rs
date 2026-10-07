@@ -15,9 +15,7 @@ use std::sync::{Arc, Mutex};
 use colored::Colorize;
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use xmatrix_cli_args::{
-    ChannelCommand, ChannelVisibilityState, ManagementReadState, SpaceCommand, WorktreeState,
-};
+use xmatrix_cli_args::{ChannelCommand, ChannelVisibilityState, SpaceCommand, WorktreeState};
 use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_marker};
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::hex::sha256_hex;
@@ -1509,10 +1507,6 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
             cmd_channel_worktree(hub_url, token, &channel_id, state).await
         }
-        ChannelCommand::ManagementRead { channel_id, state } => {
-            let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_management_read(hub_url, token, &channel_id, state).await
-        }
         ChannelCommand::Send(args) => cmd_send_args(hub_url, token, args).await,
         ChannelCommand::History {
             channel_id,
@@ -2008,50 +2002,6 @@ async fn cmd_channel_visibility(
         "✓".green().bold(),
         response.channel.id.dimmed(),
         label
-    );
-    Ok(())
-}
-
-async fn cmd_channel_management_read(
-    hub_url: &str,
-    token: &str,
-    channel_id: &str,
-    state: ManagementReadState,
-) -> error::Result<()> {
-    #[derive(Deserialize)]
-    struct UpdateResponse {
-        channel: protocol::SerializedChannel,
-    }
-
-    let visibility = match state {
-        ManagementReadState::On => serde_json::Value::String("management-visible".to_string()),
-        ManagementReadState::Activity => serde_json::Value::String("metadata-only".to_string()),
-        ManagementReadState::Off => serde_json::Value::String("excluded".to_string()),
-        ManagementReadState::Inherit => serde_json::Value::Null,
-    };
-
-    let response: UpdateResponse = http::request_json(
-        &with_route(
-            hub_url,
-            &format!("/api/channels/{}", urlencoding::encode(channel_id)),
-        ),
-        "PATCH",
-        Some(token),
-        Some(serde_json::json!({ "managementVisibility": visibility })),
-    )
-    .await?;
-
-    let label = match state {
-        ManagementReadState::On => "can read messages",
-        ManagementReadState::Activity => "can see activity only",
-        ManagementReadState::Off => "cannot read this channel",
-        ManagementReadState::Inherit => "uses the space default",
-    };
-    println!(
-        "{} Management assistant {} for {}",
-        "✓".green().bold(),
-        label,
-        channel_label(&response.channel)
     );
     Ok(())
 }
