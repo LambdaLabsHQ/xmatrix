@@ -14,6 +14,7 @@ import {
 } from "./workspace-admin-views";
 
 import { GoogleChatRoomLink } from "./googlechat-room-link";
+import { GitHubInstallationAccounts } from "./github-installation-accounts";
 import { WeComCompanyConnection } from "./wecom-company-connection";
 import { DingTalkCompanyConnection } from "./dingtalk-company-connection";
 import type { HumanProfile } from "@xmatrix/protocol";
@@ -1584,11 +1585,12 @@ export function AppsView({
             onChange={setConfigurationDraft}
             onCancel={closeConnectorConfiguration}
             onSave={() => void saveConnectorConfiguration(connector, selectedConnection)}
-            onUpdateProviderAccess={() => void configureConnector(connector, {
-              mode: "manage",
-              installationId: githubConnectionInstallationIdsFromMetadata(selectedConnection.metadata)[0],
-            })}
-            onAddProviderAccount={() => void configureConnector(connector, { mode: "add" })}
+            githubAccounts={connector.id === "github" && token && currentSpace ? (
+              <GitHubInstallationAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token}
+                onManage={(installationId) => void configureConnector(connector, { mode: "manage", installationId })}
+                onInstall={() => void configureConnector(connector, { mode: "add" })}
+                onChanged={async () => { await connectionsQuery.refetch(); }} />
+            ) : null}
           />
         </ToolDetailSection>
       ) : (
@@ -1666,8 +1668,7 @@ export function ConnectorConfiguration({
   onChange,
   onCancel,
   onSave,
-  onUpdateProviderAccess,
-  onAddProviderAccount,
+  githubAccounts,
 }: {
   connector: AppConnectorManifest;
   draft: AppConnectorConfigurationDraft;
@@ -1675,8 +1676,7 @@ export function ConnectorConfiguration({
   onChange: (draft: AppConnectorConfigurationDraft) => void;
   onCancel: () => void;
   onSave: () => void;
-  onUpdateProviderAccess: () => void;
-  onAddProviderAccount: () => void;
+  githubAccounts?: React.ReactNode;
 }) {
   function update(patch: Partial<AppConnectorConfigurationDraft>) {
     onChange({ ...draft, ...patch });
@@ -1731,34 +1731,7 @@ export function ConnectorConfiguration({
         </fieldset>
       ) : null}
 
-      {connector.id === "github" ? (
-        <div className="app-connector-provider-access border-t border-border/60 pt-4">
-          <p className="text-sm font-bold">GitHub repository access</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Each GitHub account or organization keeps its own App installation. Manage repo selection
-            for an existing account, or add another account without replacing the first.
-            xMatrix does not edit GitHub permissions here.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onUpdateProviderAccess}
-              className={cn("app-connector-secondary-action inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-bold", COUNT_CHIP_MATERIAL_CLASS)}
-            >
-              <GitPullRequest className="size-4" />
-              Manage access on GitHub
-            </button>
-            <button
-              type="button"
-              onClick={onAddProviderAccount}
-              className={cn("app-connector-secondary-action inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-bold", COUNT_CHIP_MATERIAL_CLASS)}
-            >
-              <Plus className="size-4" />
-              Add account or organization
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {githubAccounts}
 
       <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-4">
         <button

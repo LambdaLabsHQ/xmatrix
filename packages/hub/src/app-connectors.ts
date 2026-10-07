@@ -386,6 +386,63 @@ export async function githubUserCanAccessInstallation(
   return false;
 }
 
+/** The GitHub account one App installation belongs to, as Configure shows it. */
+export interface GitHubInstallationAccount {
+  installationId: string;
+  login: string;
+  type: string;
+  avatarUrl?: string;
+  repositorySelection?: string;
+}
+
+function githubInstallationAccount(value: unknown): GitHubInstallationAccount | undefined {
+  const installation = githubObject(value);
+  const id = githubNumber(installation.id);
+  const account = githubObject(installation.account);
+  const login = githubString(account.login) || githubString(account.slug) || githubString(account.name);
+  if (typeof id !== "number" || !login) return undefined;
+  const avatarUrl = githubString(account.avatar_url);
+  const repositorySelection = githubString(installation.repository_selection);
+  return {
+    installationId: String(id),
+    login: login.slice(0, 160),
+    type: (githubString(account.type) || "User").slice(0, 40),
+    ...(avatarUrl?.startsWith("https://") ? { avatarUrl } : {}),
+    ...(repositorySelection ? { repositorySelection } : {}),
+  };
+}
+
+/** The account of one installation, read as the App; undefined when GitHub no longer knows it. */
+export async function describeGitHubInstallation(
+  env: AppConnectorEnv,
+  installationId: string
+): Promise<GitHubInstallationAccount | undefined> {
+  const jwt = await configuredGitHubAppJwt(env);
+  const payload = await fetchGitHubJson(env, `/app/installations/${encodeURIComponent(installationId)}`, jwt)
+    .catch(() => undefined);
+  return payload ? githubInstallationAccount(payload) : undefined;
+}
+
+/** Every installation of this App that the user's GitHub account can reach. */
+export async function listGitHubUserInstallations(
+  env: AppConnectorEnv,
+  userToken: string
+): Promise<GitHubInstallationAccount[]> {
+  const accounts: GitHubInstallationAccount[] = [];
+  // Bounded like githubUserCanAccessInstallation.
+  for (let page = 1; page <= 10; page += 1) {
+    const payload = await fetchGitHubJson(env, `/user/installations?per_page=100&page=${page}`, userToken) as
+      { installations?: unknown[] };
+    const installations = Array.isArray(payload?.installations) ? payload.installations : [];
+    for (const installation of installations) {
+      const account = githubInstallationAccount(installation);
+      if (account) accounts.push(account);
+    }
+    if (installations.length < 100) break;
+  }
+  return accounts;
+}
+
 export function githubConnectionHasInstallation(
   connection: Pick<AppConnectorConnectionView, "metadata"> | { metadata?: Record<string, unknown> },
   installationId: string

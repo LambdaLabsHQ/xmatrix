@@ -97,6 +97,10 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/teams/link`,
     space_app_connection_googlechat_link: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/googlechat/link`,
+    space_app_connection_github_installations: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/github/installations`,
+    space_app_connection_github_installation: (spaceId: string, installationId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/github/installations/${encodeURIComponent(installationId)}`,
     space_app_connection_feishu_link: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/feishu/link`,
     space_app_connection_telegram_link: (spaceId: string) =>
