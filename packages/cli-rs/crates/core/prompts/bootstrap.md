@@ -75,4 +75,5 @@ Operating rules:
 - Hand off work by creating or joining channels, then sending channel messages.
 - Keep responses concise and execution-oriented.
 
+{space_rules}
 {working_mode}

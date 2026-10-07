@@ -126,13 +126,16 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   await expect(toolbar.locator(".app-agent-work-instance-name")).toHaveText("codex:1");
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toContainText("Reborn");
   await expect(toolbar.getByRole("button", { name: "Stop codex:1" })).toContainText("Stop");
-  await expect(toolbar).toHaveCSS("backdrop-filter", /^(?!none$).+/);
+  // The glass is the panel the capsule grows into, not the toolbar inside it.
+  await expect(controls.locator(".app-agent-work-morph")).toHaveCSS("backdrop-filter", /^(?!none$).+/);
 
   const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
   expect(avatarBox).not.toBeNull();
   expect(toolbarBox).not.toBeNull();
   expect(toolbarBox!.width).toBeGreaterThan(toolbarBox!.height * 2);
-  expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(avatarBox!.y);
+  // A bare disc stretches right: the controls sit beside the face, on its line.
+  expect(toolbarBox!.x).toBeGreaterThanOrEqual(avatarBox!.x + avatarBox!.width - 1);
+  expect(Math.abs((toolbarBox!.y + toolbarBox!.height / 2) - (avatarBox!.y + avatarBox!.height / 2))).toBeLessThanOrEqual(2);
 
   const mainBox = await page.locator(".app-main").boundingBox();
   expect(mainBox).not.toBeNull();
@@ -256,7 +259,12 @@ test.describe("mobile agent controls", () => {
       (dock as HTMLElement).style.transform = "translateY(96px)";
     });
 
-    await expectToolbarAttached(avatar, toolbar);
+    // A bare disc stretches right, so its controls stay on the face's line.
+    await expect.poll(async () => {
+      const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
+      if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
+      return Math.abs((avatarBox.y + avatarBox.height / 2) - (toolbarBox.y + toolbarBox.height / 2));
+    }).toBeLessThanOrEqual(2);
   });
 
   test("agent Instance control is large enough and clears the floating composer", async ({ page }) => {

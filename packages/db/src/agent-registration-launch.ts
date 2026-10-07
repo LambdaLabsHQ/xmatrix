@@ -43,6 +43,7 @@ import { ACTIVE_RUN_STATUS_SQL,
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { registrationInstructionsSpawnFields } from "./registration-instructions-spawn.js";
+import { spaceRulesSpawnFields } from "./space-rules-spawn.js";
 import { RegistrationAccessError, registrationRouteRefusal } from "./agent-registration-errors.js";
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
@@ -528,6 +529,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       // The daemon's durable harness-session map and Runtime recovery must use
       // the same key. A registration identity alone does not identify a session.
       const resumeSessionKey = `resume:${input.key.ownerUserId}:${input.channelId}:${row.instance_id}`;
+      const spaceRules = await spaceRulesSpawnFields(tx, input.key.spaceId);
       const payload = withInitialMessageSource({ type: "machine_spawn_agent", requestId: row.control_id, spaceId: input.key.spaceId,
         channelId: input.channelId, runId: row.run_id, instanceId: row.instance_id, launchId: row.launch_id,
         executionKey: row.execution_key, registration: registrationLaunchBindingForDaemon(binding), identityId: row.instance_id, resumeSessionKey,
@@ -541,7 +543,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         context: { ...(!input.useRuntimeDefaultModel ? { requestedModel: allocation.runtimeModel } : {}),
           ...(input.requirements.effort ? { requestedEffort: input.requirements.effort } : {}),
           ...(input.requirements.parameters ? { requestedParameters: input.requirements.parameters } : {}) },
-        ...registrationInstructionsSpawnFields(configuration),
+        ...registrationInstructionsSpawnFields(configuration), ...spaceRules,
         ...(workspace.remote_repo ? { remoteRepo: workspace.remote_repo, runWorktree: true } : {}),
         workspace: { ...(workspace.managed_key ? { managedKey: workspace.managed_key, metadata: workspace.metadata_json } : {}), ownerUserId: input.key.ownerUserId, machineId: input.key.machineId, hostId: workspace.hostname ?? "", hostname: workspace.hostname ?? undefined,
           canonicalCwd: workspace.canonical_cwd, displayName: String(workspace.metadata_json?.displayName ?? "Workspace"),

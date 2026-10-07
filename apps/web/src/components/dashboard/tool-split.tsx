@@ -137,7 +137,7 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
           {label}
         </button>
       ) : (
-        <p className={titleClass}>{label}</p>
+        <div className={titleClass}>{label}</div>
       )}
       <IdentityIndent.Provider value={Boolean(identity)}>
         <ul>{children}</ul>
