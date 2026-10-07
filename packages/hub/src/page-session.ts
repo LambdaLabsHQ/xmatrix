@@ -191,6 +191,10 @@ export class PageSession {
   private ended = false;
 
   constructor(private readonly ports: PageSessionPorts) {
+    // Awareness expires stale states on a 3 s interval, and a pending timer
+    // keeps the Durable Object from hibernating: every open tab would bill
+    // its whole wall-clock time. Stale states expire on arrival instead.
+    clearInterval(this.awareness._checkInterval);
     this.awareness.setLocalState(null);
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       this.version++;
@@ -319,6 +323,15 @@ export class PageSession {
     }
   }
 
+  /** Drops states nobody renewed within Awareness's timeout, as its interval would have. */
+  private dropOutdated(): void {
+    const now = Date.now();
+    const outdated = [...this.awareness.meta].filter(([clientId, meta]) =>
+      this.awareness.states.has(clientId) && now - meta.lastUpdated >= awarenessProtocol.outdatedTimeout)
+      .map(([clientId]) => clientId);
+    if (outdated.length) awarenessProtocol.removeAwarenessStates(this.awareness, outdated, "timeout");
+  }
+
   connect(connection: PageSessionConnection): void {
     this.connections.set(connection.id, connection);
     const encoder = encoding.createEncoder();
@@ -326,6 +339,7 @@ export class PageSession {
     syncProtocol.writeSyncStep1(encoder, this.doc);
     this.ports.send(connection.id, encoding.toUint8Array(encoder));
     this.renewAgents(0);
+    this.dropOutdated();
     const states = [...this.awareness.getStates().keys()];
     if (states.length) {
       const aware = encoding.createEncoder();
@@ -367,6 +381,7 @@ export class PageSession {
     } else if (type === PAGE_MESSAGE_AWARENESS) {
       awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), connectionId);
       this.renewAgents(AGENT_RENEW_MS);
+      this.dropOutdated();
     }
   }
 
@@ -614,7 +629,7 @@ export class PageSession {
     });
   }
 
-  /** Stops the awareness timer and releases the document. */
+  /** Releases the awareness and the document. */
   destroy(): void {
     this.awareness.destroy();
     this.doc.destroy();

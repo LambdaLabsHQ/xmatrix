@@ -246,6 +246,28 @@ test("closing a connection removes its awareness", async () => {
   assert.equal(bob.awareness.getStates().has(ann.doc.clientID), false);
 });
 
+test("a session holds no timer, so its Durable Object can hibernate", () => {
+  const timers = () => process.getActiveResourcesInfo().filter((kind) => kind === "Timeout").length;
+  const before = timers();
+  const h = harness();
+  assert.equal(timers(), before, "a pending timer keeps the object in memory and billed");
+  assert.ok(h.session);
+});
+
+test("presence nobody renewed expires when the next connection arrives", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  ann.awareness.setLocalStateField("user", { name: "ann" });
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, PAGE_MESSAGE_AWARENESS);
+  encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(ann.awareness, [ann.doc.clientID]));
+  h.session.receive("c-ann", encoding.toUint8Array(encoder));
+  h.session.awareness.meta.get(ann.doc.clientID).lastUpdated -= awarenessProtocol.outdatedTimeout;
+  const bob = h.connect("c-bob", human("bob"));
+  assert.equal(h.session.awareness.getStates().has(ann.doc.clientID), false);
+  assert.equal(bob.awareness.getStates().has(ann.doc.clientID), false);
+});
+
 test("an edit the repository refuses never reaches the live text", async () => {
   const h = harness();
   const ann = await annConnected(h);
