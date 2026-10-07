@@ -80,7 +80,6 @@ export function NewConversation({
         autoFocusRequest={autoFocus ? 1 : 0}
         sending={sending}
         error={null}
-        placeholder="What should happen?"
         ariaLabel="What should happen"
         sendTitle="Start conversation"
         onDraftChange={(value) => { draftRef.current = value; }}
