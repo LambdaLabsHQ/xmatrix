@@ -6,8 +6,9 @@ export function publicRuntimeErrorCode(value: unknown): string | undefined {
 }
 
 export function publicLaunchFailureCode(code: unknown, detail: unknown): string | undefined {
-  return (code === "daemon_spawn_failed" || code === "machine_spawn_failed"
-    ? publicMachineStartupFailure(detail)?.code : undefined) ?? publicRuntimeErrorCode(code);
+  const failure = code === "daemon_spawn_failed" || code === "machine_spawn_failed"
+    ? publicMachineStartupFailure(detail) : undefined;
+  return (failure?.code !== "startup_failed" ? failure?.code : undefined) ?? publicRuntimeErrorCode(code);
 }
 
 const LAUNCH_FAILURE_MESSAGES: Record<string, string> = {
@@ -24,7 +25,7 @@ const LAUNCH_FAILURE_MESSAGES: Record<string, string> = {
 export function publicLaunchFailureMessage(code: unknown, detail?: unknown): string {
   const failure = code === "daemon_spawn_failed" || code === "machine_spawn_failed"
     ? publicMachineStartupFailure(detail) : undefined;
-  if (failure) return `${failure.summary} ${failure.action}`;
+  if (failure) return failure.summary;
   return typeof code === "string" && Object.hasOwn(LAUNCH_FAILURE_MESSAGES, code)
     ? LAUNCH_FAILURE_MESSAGES[code]!
     : "Startup failed. Inspect the recorded steps and diagnostic reference before retrying.";

@@ -4,6 +4,7 @@ import { acknowledgeMachineExecution, recordMessageExecutions } from "./runtime-
 import type { QueryResultRow } from "pg";
 import {
   automationRunIdentity,
+  publicMachineStartupFailure,
   isTerminalRunStatus,
   machineExecutionCompleted,
   scheduledMachineExecutionCompleted,
@@ -121,7 +122,8 @@ async function commit(tx: DatabaseTransaction, input: { spaceId: string; command
 
 function failureDetail(payload: Record<string, unknown>): string {
   for (const field of ["runStatusDetail", "error", "status", "statusPhase"] as const) {
-    if (typeof payload[field] === "string" && payload[field].trim()) return payload[field].trim().slice(0, 1_000);
+    const failure = publicMachineStartupFailure(payload[field]);
+    if (failure) return failure.summary;
   }
   return "Machine Daemon did not complete the Agent Run successfully";
 }

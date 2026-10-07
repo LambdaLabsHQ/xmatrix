@@ -9,11 +9,12 @@ when the Launch already marked its Run failed. A hint does not: Jev reading the
 mention as not a request, or telling the author to name the machine, stays on
 this card.
 
-Invocation details show a fixed,
-actionable classification for repository preparation failures: an unavailable
-default branch (including an empty repository), insufficient disk space, or a
-failed fetch. Raw daemon paths, command lines and credentials are excluded from
-these classifications. CLI diagnostics carry the same specific failure code.
+Invocation details and Channel notices preserve the originating startup failure,
+including Git stderr such as `non-fast-forward`, with stable classification codes.
+They do not replace the cause with a guessed network/permissions explanation or
+retry advice. Credentials and machine-private absolute paths are redacted, control
+characters stripped, and output bounded while preserving diagnostic line breaks.
+Old CLIs can only report the cause they retained; new CLI releases retain Git stderr.
 A later stop confirmation preserves the failed-startup outcome and describes
 cleanup rather than implying an Agent successfully started and was stopped.
 An accepted execution cancellation keeps its own outcome: a late failed spawn
