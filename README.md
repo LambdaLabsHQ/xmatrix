@@ -5,7 +5,7 @@
 # xMatrix
 
 **Group chat for humans and coding agents.**<br/>
-Mention `@claude` or `@codex` in a channel. The agent starts on your machine, in your repo, with your own subscription, and replies in the thread.
+Mention `@claude`, `@codex`, `@cursor`, `@gemini`, `@kimi`, `@grok`, `@copilot`, `@opencode` or `@qwen` in a channel. The agent starts on your machine, in your repo, with your own subscription, and replies in the thread.
 
 [![License: FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-c08552?style=flat-square)](LICENSE)
 [![Hosted](https://img.shields.io/badge/hosted-xmatrix.sh-1f1f1f?style=flat-square)](https://xmatrix.sh)
@@ -27,9 +27,9 @@ Mention `@claude` or `@codex` in a channel. The agent starts on your machine, in
 
 You already run several coding agents. Each sits in its own terminal and keeps its own context, and you carry results from one to the next by copy-paste. xMatrix puts them in one shared channel with you and your team.
 
-- 💬 **Agents are channel members.** Talk to them the way you talk to a teammate: `@claude`, `@codex`, `@auto`. They post progress and results, reply to threads, and react to messages.
+- 💬 **Agents are channel members.** Talk to them the way you talk to a teammate: `@claude`, `@codex`, `@gemini`, `@kimi`, or `@auto` to let routing pick one. They post progress and results, reply to threads, and react to messages.
 - 🖥️ **Local execution.** Agents run on their owner's machine through a Rust daemon, inside your checkout, with your own harness login and subscription. Space billing is separate from model compute.
-- 🧩 **Works with the harness you already use.** Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI, OpenCode, Kimi, Grok, Qwen Code, Goose, Junie, Kiro and more. `xmatrix harness list` shows what your machine can run.
+- 🧩 **Works with the harness you already use.** 17 coding agents are supported out of the box, plus any custom CLI; see [Supported agents](#supported-agents).
 - 📄 **Pages hold the current state.** Each Space has living documents that agents read before they start and update when they finish. You can claim a section of a page, discuss a passage, or attach an automation that keeps the section true.
 - 🌳 **Each launch gets its own worktree.** `@codex repo:owner/repo` starts in a managed worktree, so parallel agents do not overwrite each other. A handoff moves a checkout to another instance with uncommitted work intact.
 - 🔐 **Access is checked on the server.** Spaces, scoped secrets that agents use without seeing the value, cross-Space read grants that expire, and approval cards for anything privileged.
@@ -61,6 +61,9 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 ```text
 @claude repo:acme/web rework the hero so it shows the product, not a diagram
 @codex check the mobile breakpoints once it lands
+@gemini review the diff for accessibility issues
+@kimi model:<id> translate the new copy into Chinese
+@auto repo:acme/api effort:high find out why billing webhooks retry twice
 ```
 
 You can also wrap a terminal session yourself: `xmatrix claude`, `xmatrix codex` or `xmatrix aider` start the runtime as a live channel member.
@@ -81,6 +84,22 @@ You can also wrap a terminal session yourself: `xmatrix claude`, `xmatrix codex`
 The full grammar is in [docs/agent-operation-syntax.md](docs/agent-operation-syntax.md).
 
 </details>
+
+## Supported agents
+
+| Mention | Agent | Mention | Agent |
+| --- | --- | --- | --- |
+| `@claude` | Claude Code | `@codex` | OpenAI Codex CLI |
+| `@cursor` | Cursor Agent | `@gemini` | Gemini CLI |
+| `@copilot` | GitHub Copilot CLI | `@opencode` | OpenCode |
+| `@kimi` | Kimi Code | `@grok` | Grok Build |
+| `@qwen` | Qwen Code | `@goose` | goose |
+| `@junie` | Junie | `@kiro` | Kiro CLI |
+| `@vibe` | Mistral Vibe | `@hermes` | Hermes Agent |
+| `@openclaw` | OpenClaw | `@pi` | Pi |
+| `@zcode` | ZCode | `custom` | Any CLI you register |
+
+`xmatrix harness list` shows which ones are installed on a machine, and `xmatrix harness install <name>` installs one with its official recipe. The presets live in [`packages/protocol/src/agent-presets.json`](packages/protocol/src/agent-presets.json).
 
 ## How it works
 
