@@ -8,7 +8,7 @@ import {
   isLiveAgentStatus, pageAuthorColor, type SerializedAutomation, type SerializedChannel,
 } from "@xmatrix/protocol";
 import {
-  ChevronDown, ChevronRight, FileText, History, Lock, MessageSquare, Plus, Share2,
+  ChevronDown, ChevronRight, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -24,7 +24,7 @@ import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation
 import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
-  ConversationList, PageDialog, PageHistory, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageDialog, PageHistory, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin } from "./page-margin";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
@@ -413,16 +413,18 @@ const MARGIN_ROOM_PX = 640 + 24 + 320;
 
 type PageDialogState =
   | "share"
+  | "delete"
   | { kind: "conversations"; blockId: string | null }
   | { kind: "attach"; blockId: string };
 
-export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conversation, activeConversationId = null,
+export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPageDeleted, conversation, activeConversationId = null,
   renderConversation, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
   freshPageId = null }: {
   spaceId: string | null;
   token: string;
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
+  onPageDeleted: () => void;
   /** What this client knows live about a conversation: the channel it holds, when it holds it. */
   conversation: (conversationId: string) => SerializedChannel | null;
   /** The conversation open beside the page: in the margin at what it is about, or docked when there is no room. */
@@ -1036,6 +1038,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
   })();
   const listSection = dialog && typeof dialog === "object" && dialog.kind === "conversations" ? dialog : null;
 
+  const hasChildren = pages.some((item) => item.parentPageId === pageId);
+  const removePage = async () => {
+    if (!spaceId || !page) return;
+    await pageApi.remove(spaceId, page.pageId, token);
+    queryClient.setQueryData<PageSummary[]>(xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-tree", [spaceId]), (current) =>
+      current?.filter((item) => item.pageId !== page.pageId));
+    setDialog(null);
+    onPageDeleted();
+    await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
+  };
+
   const controls = (
     <>
       <PresenceStack people={people} onFollow={jumpTo} />
@@ -1052,6 +1065,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       <Button variant="ghost" size="sm" onClick={() => setDialog("share")}>
         <Share2 /> Share
       </Button>
+      {canEdit && (
+        <Button variant="ghost" size="sm" title="Delete page" aria-label="Delete page"
+          onClick={() => setDialog("delete")}><Trash2 /></Button>
+      )}
     </>
   );
 
@@ -1136,6 +1153,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       {docked && renderConversation?.("dock")}
       {page && (
         <>
+          <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}
+            onClose={() => setDialog(null)} onDelete={removePage} />
           <ShareDialog open={dialog === "share"} onClose={() => setDialog(null)} canPublish={canMigrate}
             canEdit={canEdit} published={Boolean(page.publishedAt)} restricted={restricted} publicUrl={publicUrl}
             suggestOnly={page.agentSuggestOnly} rulesPage={page.governance} onTogglePublished={() => void togglePublished()}
