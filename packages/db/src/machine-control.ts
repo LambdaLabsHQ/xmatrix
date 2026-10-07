@@ -2,7 +2,7 @@ import { storeScopedCommandReplay } from "./command-replay.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import type { QueryResultRow } from "pg";
 import {
-  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
+  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   stableMachineDaemonId,
   sha256Hex } from "@xmatrix/protocol";
@@ -35,8 +35,15 @@ const RESULT_TYPES: Record<string, string> = {
 };
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const COMMAND_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
-// An owner's harness action that no daemon claimed soon must not run unexpectedly later.
-const HARNESS_ACTION_CLAIM_TTL_MS = 10 * 60 * 1_000;
+/**
+ * A connected daemon claims a command within a second of its wake and renews a
+ * held lease every 15 s. Work left unclaimed, or a lease left lapsed, this long
+ * is evidence the "online" route is not responding.
+ */
+const UNANSWERED_AFTER_MS = 60_000;
+/** Only recent work counts, so one command that can never be claimed does not
+ * mark a working machine as not responding for its whole lifetime. */
+const UNANSWERED_WINDOW_MS = 30 * 60 * 1_000;
 const MACHINE_ACTIVATION_RUN_LIMIT = 1_000;
 const SNAPSHOT_ROUTE_WINDOW_MS = 15 * 60 * 1_000;
 const ACTIVATION_TERMINAL_PHASES = new Set(["stable_granted", "aborted"]);
@@ -142,6 +149,8 @@ function daemon(row: QueryResultRow) {
     ...(row.parent_machine_id ? { parentMachineId: String(row.parent_machine_id) } : {}),
     ...(row.auto_assign === false ? { autoAssign: false } : {}),
     ...(row.active_runs != null ? { activeRuns: Number(row.active_runs) } : {}),
+    ...(row.unanswered_since && row.status === "online"
+      ? { unansweredSince: new Date(row.unanswered_since as Date | string).toISOString() } : {}),
     capabilities: Array.isArray(row.capabilities_json) ? row.capabilities_json : [],
     metadata: row.metadata_json && typeof row.metadata_json === "object" ? row.metadata_json : {},
     version: Number(row.version), connectedAt: new Date(row.created_at as Date).toISOString(),
@@ -1322,15 +1331,28 @@ export class PostgresMachineControlRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "machine-control.list" }, async (tx) => {
       // A retired Machine is gone from its owner's list; a live one says how many Agents it is running.
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_list_v6", text: `SELECT
+      // Reachability follows connection events only, so an online daemon also says since when it
+      // left work unanswered: a command available but unclaimed, or a lease it stopped renewing,
+      // for longer than UNANSWERED_AFTER_MS. Quota probes are bound to one connection and excluded.
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_list_v8", text: `SELECT
         daemon.*,machine.name AS machine_name,machine.parent_machine_id,machine.auto_assign,
         (SELECT COUNT(*) FROM data.runs run WHERE run.owner_user_id=daemon.owner_user_id
-          AND run.metadata_json->>'machineId'=daemon.machine_id AND run.status IN (${ACTIVE_RUN_STATUS_SQL})) AS active_runs
+          AND run.metadata_json->>'machineId'=daemon.machine_id AND run.status IN (${ACTIVE_RUN_STATUS_SQL})) AS active_runs,
+        (SELECT MIN(CASE WHEN command.status='pending'
+            THEN COALESCE(command.available_at,command.created_at) ELSE command.lease_until END)
+          FROM data.machine_daemon_commands command
+          WHERE daemon.status='online' AND command.owner_user_id=daemon.owner_user_id
+            AND command.machine_id=daemon.machine_id AND command.command_type<>'quota_probe'
+            AND (command.expires_at IS NULL OR command.expires_at>clock_timestamp())
+            AND ((command.status='pending' AND COALESCE(command.available_at,command.created_at) BETWEEN
+                clock_timestamp()-($5::integer*interval '1 millisecond') AND clock_timestamp()-($4::integer*interval '1 millisecond'))
+              OR (command.status='leased' AND command.lease_until BETWEEN
+                clock_timestamp()-($5::integer*interval '1 millisecond') AND clock_timestamp()-($4::integer*interval '1 millisecond')))) AS unanswered_since
         FROM data.machine_daemons daemon
         LEFT JOIN data.machines machine ON machine.owner_user_id=daemon.owner_user_id AND machine.machine_id=daemon.machine_id
         WHERE daemon.owner_user_id=$1 AND daemon.daemon_id>$2 AND machine.retired_at IS NULL
         ORDER BY daemon.daemon_id LIMIT $3`,
-      values: [ownerUserId, cursor, limit + 1], maxRows: limit + 1 });
+      values: [ownerUserId, cursor, limit + 1, UNANSWERED_AFTER_MS, UNANSWERED_WINDOW_MS], maxRows: limit + 1 });
       return { daemons: rows.slice(0, limit).map(daemon),
         cursor: rows.length > limit ? String(rows[limit - 1]?.daemon_id ?? "") : null };
     });

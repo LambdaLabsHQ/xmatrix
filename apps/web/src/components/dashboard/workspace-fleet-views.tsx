@@ -887,8 +887,11 @@ export function MachinesView({
   const thisLabel = thisOs === "macos" ? "This Mac" : thisOs === "windows" ? "This PC" : "This Machine";
   const thisTag = <span className="font-semibold text-foreground" data-testid="this-machine-tag">{thisLabel}</span>;
   // What a Machine is doing now: Agents running on it while online, when it was last seen once offline.
+  // "Online" follows connection events only; work it left unanswered says it is not actually responding.
+  const unresponsive = (machine: MachineSummary) => machine.status === "online" && Boolean(machine.daemon?.unansweredSince);
   const stateOf = (machine: MachineSummary) => machine.status === "online"
-    ? machine.activeRuns === undefined ? null
+    ? unresponsive(machine) ? "Not responding"
+      : machine.activeRuns === undefined ? null
       : machine.activeRuns === 0 ? "Idle" : `${machine.activeRuns} ${machine.activeRuns === 1 ? "agent" : "agents"} running`
     : machine.lastSeenAt ? `Offline · seen ${relativeTime(machine.lastSeenAt)}` : "Offline";
 
@@ -909,6 +912,7 @@ export function MachinesView({
           const name = machine ? nameOf(machine) : thisMachine!.name;
           const host = machine ? hostOf(machine) : undefined;
           const online = machine ? machine.status === "online" : thisMachine!.online;
+          const stalled = Boolean(machine && unresponsive(machine));
           const facts = [host ? `WSL on ${nameOf(host)}` : null,
             machine ? stateOf(machine) : thisMachine!.summary,
             machine && !autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
@@ -918,8 +922,9 @@ export function MachinesView({
               shownBeside={local ? showThisBeside && !item
                 : !chosen && !showingThis && !showThisBeside && machine!.id === shown?.id}
               onSelect={() => select(local ? THIS_MACHINE_ITEM : machine!.id)}
-              leading={<span className={cn("app-tool-state-icon", host && "pl-4")} data-state={online ? "running" : "offline"}
-                aria-label={`${name}: ${online ? "online" : "offline"}`} role="img">
+              leading={<span className={cn("app-tool-state-icon", host && "pl-4")}
+                data-state={stalled ? "attention" : online ? "running" : "offline"}
+                aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
                 <MachineGlyph os={machineOs(local ? thisMachine!.platform : platformOf(machine!))} /></span>}
               trailing={machine && <MachineLoadGlance machine={machine} now={now} />}
               title={name}
@@ -941,6 +946,7 @@ export function MachinesView({
     const unnamed = name === "Unnamed machine";
     const renaming = Boolean(machine && editing && machine.machineId && editing.machineId === machine.machineId);
     const online = machine ? machine.status === "online" : thisMachine!.online;
+    const stalled = Boolean(machine && unresponsive(machine));
     const titleControl = "flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
     detail = (
       <ToolDetail
@@ -990,10 +996,12 @@ export function MachinesView({
         ) : undefined}
         status={
           <span className="flex flex-wrap items-center gap-x-2">
-            <ToolStateDot state={online ? "running" : "offline"} />
-            <span className="capitalize text-foreground">{online ? "online" : "offline"}</span>
+            <ToolStateDot state={stalled ? "attention" : online ? "running" : "offline"} />
+            <span className="capitalize text-foreground">{stalled ? "not responding" : online ? "online" : "offline"}</span>
             <span>· {local ? thisTag : null}{local && host ? " · " : null}{host ? `WSL on ${nameOf(host)}` : local ? null : "machine"}</span>
-            {machine?.lastSeenAt && <span>· seen {relativeTime(machine.lastSeenAt)}</span>}
+            {/* While online, the stored time is its last connection, not a heartbeat. */}
+            {machine?.lastSeenAt && <span>· {online ? "connected" : "seen"} {relativeTime(machine.lastSeenAt)}</span>}
+            {stalled && machine?.daemon?.unansweredSince && <span>· work waiting since {relativeTime(machine.daemon.unansweredSince)}</span>}
           </span>
         }
       >
