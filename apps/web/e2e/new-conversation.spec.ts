@@ -26,7 +26,7 @@ test("the empty composer takes turns teaching what typing @, /, [[ and # opens, 
   const composer = await startNewConversation(page);
   await expect(composer.getByLabel("What should happen")).toBeFocused();
   const hint = composer.getByTestId("composer-hint");
-  await expect(hint).toHaveText("@ to mention");
+  await expect(hint).toHaveText("@ to summon an agent");
   await page.clock.runFor(4000);
   await expect(hint).toHaveText("/ for commands");
   await composer.getByLabel("What should happen").fill("hello");
