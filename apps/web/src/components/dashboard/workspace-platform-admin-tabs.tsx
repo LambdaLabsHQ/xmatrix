@@ -16,19 +16,18 @@ import { SectionedToolView } from "./tool-split";
 
 export function PlatformAdminTabs({ token }: { token?: string }) {
   return (
-    <SectionedToolView title="Platform admin" sections={[
-      { key: "overview", label: "Overview", icon: BarChart3, summary: "Usage across the platform",
-        description: "Platform-wide totals, activity, and storage.",
-        content: <PlatformAdminView token={token} /> },
-      { key: "users", wide: true, label: "Users", icon: Users, summary: "Every registered user",
-        description: "Open a user for their Spaces, Agents, Machines, sessions, and usage.",
-        content: <PlatformAdminUsers token={token} /> },
-      { key: "spaces", wide: true, label: "Spaces", icon: Building, summary: "Every Space and its usage",
-        description: "Members, Channels, Agents, and message volume per Space.",
-        content: <PlatformAdminSpaces token={token} /> },
-      { key: "audit", wide: true, label: "Audit", icon: ScrollText, summary: "What operators read and did",
-        description: "Every operator read and action, newest first. Operators see metadata only — never message or page text, secrets, attachments, or prompts.",
-        content: <PlatformAdminAudit token={token} /> },
-    ]} />
+    <div className="app-admin-view flex min-h-0 min-w-0 flex-1">
+      <SectionedToolView title="Platform admin" sections={[
+        { key: "overview", label: "Overview", icon: BarChart3, summary: "Usage across the platform",
+          content: <PlatformAdminView token={token} /> },
+        { key: "users", wide: true, label: "Users", icon: Users, summary: "Every registered user",
+          content: <PlatformAdminUsers token={token} /> },
+        { key: "spaces", wide: true, label: "Spaces", icon: Building, summary: "Every Space and its usage",
+          content: <PlatformAdminSpaces token={token} /> },
+        { key: "audit", wide: true, label: "Audit", icon: ScrollText, summary: "What operators read and did",
+          description: "Operator access to metadata is recorded here.",
+          content: <PlatformAdminAudit token={token} /> },
+      ]} />
+    </div>
   );
 }

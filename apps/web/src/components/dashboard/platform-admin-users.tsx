@@ -11,8 +11,8 @@
 import type { AdminUserDetail, AdminUserSummary } from "@xmatrix/protocol";
 import { ChevronLeft } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { AdminTable, type AdminColumn } from "./admin-table";
+import { AdminPaperAction } from "./admin-paper";
 import { useAdminParam, useAdminUserDetail, usePlatformOverview } from "./platform-admin-data";
 import {
   adminTime,
@@ -29,7 +29,7 @@ function age(value: string | undefined, fallback = "—"): string {
 
 /** A time cell: one line, the exact UTC time on hover. */
 function TimeCell({ value, fallback }: { value: string | undefined; fallback?: string }) {
-  return <span className="whitespace-nowrap text-xs text-muted-foreground" title={value}>{age(value, fallback)}</span>;
+  return <span className="whitespace-nowrap text-xs text-muted-foreground" title={value}>{age(value, fallback).replace(" UTC", "")}</span>;
 }
 
 function utc(value: string | undefined): string {
@@ -68,17 +68,17 @@ const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
     render: (user) => <TimeCell value={user.lastSessionAt} fallback="Never" />,
   },
   {
-    key: "sessions", label: "Sessions", numeric: true, value: (user) => user.activeSessions ?? 0,
+    key: "sessions", mobile: false, label: "Sessions", numeric: true, value: (user) => user.activeSessions ?? 0,
     render: (user) => `${formatAdminCount(user.activeSessions ?? 0)} / ${formatAdminCount(user.sessionCount ?? 0)}`,
   },
   {
     key: "verified", label: "Verified", hidden: true, value: (user) => (user.emailVerified ? "yes" : "no"),
     render: (user) => <span className="text-xs">{user.emailVerified === undefined ? "—" : user.emailVerified ? "Yes" : "No"}</span>,
   },
-  { key: "spaces", label: "Spaces", numeric: true, value: (user) => user.spaces, render: (user) => formatAdminCount(user.spaces) },
-  { key: "agents", label: "Agents", numeric: true, value: (user) => user.agentRegistrations, render: (user) => formatAdminCount(user.agentRegistrations) },
-  { key: "machines", label: "Machines", numeric: true, value: (user) => user.machines, render: (user) => formatAdminCount(user.machines) },
-  { key: "messages", label: "Messages", numeric: true, value: (user) => user.messages, render: (user) => formatAdminCount(user.messages) },
+  { key: "spaces", mobile: "metric", label: "Spaces", numeric: true, value: (user) => user.spaces, render: (user) => formatAdminCount(user.spaces) },
+  { key: "agents", mobile: "metric", label: "Agents", numeric: true, value: (user) => user.agentRegistrations, render: (user) => formatAdminCount(user.agentRegistrations) },
+  { key: "machines", mobile: "metric", label: "Machines", numeric: true, value: (user) => user.machines, render: (user) => formatAdminCount(user.machines) },
+  { key: "messages", mobile: "metric", label: "Messages", numeric: true, value: (user) => user.messages, render: (user) => formatAdminCount(user.messages) },
   {
     key: "lastMessage", label: "Last message", hidden: true, numeric: true, value: (user) => adminTime(user.lastMessageAt),
     render: (user) => <TimeCell value={user.lastMessageAt} />,
@@ -99,7 +99,7 @@ export function PlatformAdminUsers({ token }: { token?: string }) {
 
 function UsersList({ token, onOpen }: { token?: string; onOpen: (userId: string) => void }) {
   return (
-    <AdminQueryView query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
+    <AdminQueryView title="Users" query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
       emptyTitle="No users yet" emptyBody="Registered users appear here once someone signs up.">
       {(overview) => (
         <AdminTable
@@ -124,14 +124,15 @@ function UsersList({ token, onOpen }: { token?: string; onOpen: (userId: string)
 
 function AdminUserDetailView({ token, userId, onBack }: { token?: string; userId: string; onBack: () => void }) {
   return (
-    <AdminQueryView query={useAdminUserDetail(token, userId)} generatedAt={(detail) => detail.generatedAt}
-      lead={<button type="button" onClick={onBack}
-        className="-ml-1 mr-auto flex items-center gap-0.5 text-sm font-medium text-muted-foreground hover:text-foreground">
-        <ChevronLeft className="size-4" /> Users
-      </button>}
-      emptyTitle="User not found" emptyBody="No registered user or Space member has this id.">
-      {(detail) => <div className="space-y-7"><UserDetailBody detail={detail} /></div>}
-    </AdminQueryView>
+    <div className="app-admin-user-detail">
+      <AdminQueryView query={useAdminUserDetail(token, userId)} generatedAt={(detail) => detail.generatedAt}
+        lead={<AdminPaperAction onClick={onBack} className="-ml-1 mr-auto">
+          <ChevronLeft className="size-4" /> Users
+        </AdminPaperAction>}
+        emptyTitle="User not found" emptyBody="No registered user or Space member has this id.">
+        {(detail) => <div className="space-y-7"><UserDetailBody detail={detail} /></div>}
+      </AdminQueryView>
+    </div>
   );
 }
 
@@ -142,7 +143,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
   return (
     <>
       <header>
-        <h3 className="text-2xl font-black [overflow-wrap:anywhere]">{adminUserLabel(user)}</h3>
+        <h2 className="text-2xl font-semibold leading-tight [overflow-wrap:anywhere]">{adminUserLabel(user)}</h2>
         <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
           {[user.email, user.handle ? `@${user.handle}` : undefined].filter(Boolean).join(" · ")}
         </p>
@@ -154,14 +155,16 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
       </header>
 
       <ToolDetailSection title="Account">
-        <ToolFacts>
-          <ToolFact label="User id"><span className="font-mono text-xs [overflow-wrap:anywhere]">{user.userId}</span></ToolFact>
-          <ToolFact label="Registered">{utc(user.registeredAt)}</ToolFact>
-          <ToolFact label="Sign-in">{user.providers?.join(", ") || "—"}</ToolFact>
-          <ToolFact label="Email verified">{user.emailVerified ? "Yes" : "No"}</ToolFact>
-          <ToolFact label="Profile">{user.profileCompleted ? "Completed" : "Not completed"}</ToolFact>
-          <ToolFact label="Last access">{age(user.lastSessionAt, "Never")}</ToolFact>
-        </ToolFacts>
+        <div className="app-admin-account">
+          <ToolFacts>
+            <ToolFact label="User id"><span className="font-mono text-xs [overflow-wrap:anywhere]">{user.userId}</span></ToolFact>
+            <ToolFact label="Registered">{utc(user.registeredAt)}</ToolFact>
+            <ToolFact label="Sign-in">{user.providers?.join(", ") || "—"}</ToolFact>
+            <ToolFact label="Email verified">{user.emailVerified ? "Yes" : "No"}</ToolFact>
+            <ToolFact label="Profile">{user.profileCompleted ? "Completed" : "Not completed"}</ToolFact>
+            <ToolFact label="Last access">{age(user.lastSessionAt, "Never")}</ToolFact>
+          </ToolFacts>
+        </div>
       </ToolDetailSection>
 
       <ToolDetailSection title="Usage">
@@ -194,7 +197,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             { key: "name", label: "Space", value: (space) => space.name,
               render: (space) => <span className="block truncate font-bold">{space.name}</span> },
             { key: "role", label: "Role", value: (space) => space.role,
-              render: (space) => <Badge variant="secondary">{space.role}</Badge> },
+              render: (space) => <span className="text-xs">{space.role}</span> },
             { key: "members", label: "Members", numeric: true, value: (space) => space.members,
               render: (space) => formatAdminCount(space.members) },
             { key: "messages", label: "Their messages", numeric: true, value: (space) => space.messages,
@@ -230,7 +233,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             { key: "id", label: "Machine", value: (machine) => machine.machineId,
               render: (machine) => <span className="block truncate font-mono text-xs">{machine.machineId}</span> },
             { key: "status", label: "Status", value: (machine) => machine.status,
-              render: (machine) => <Badge variant={machine.status === "online" ? "default" : "secondary"}>{machine.status}</Badge> },
+              render: (machine) => <span className="text-xs">{machine.status}</span> },
             { key: "created", label: "Enrolled", numeric: true, value: (machine) => adminTime(machine.createdAt),
               render: (machine) => <TimeCell value={machine.createdAt} /> },
             { key: "updated", label: "Last seen", numeric: true, value: (machine) => adminTime(machine.updatedAt),
@@ -248,7 +251,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             { key: "space", label: "Space", value: (connector) => spaceName(connector.spaceId),
               render: (connector) => <span className="block truncate">{spaceName(connector.spaceId)}</span> },
             { key: "status", label: "Status", value: (connector) => connector.status,
-              render: (connector) => <Badge variant={connector.status === "error" ? "destructive" : "secondary"}>{connector.status}</Badge> },
+              render: (connector) => <span className="text-xs">{connector.status}</span> },
             { key: "created", label: "Added", numeric: true, value: (connector) => adminTime(connector.createdAt),
               render: (connector) => <TimeCell value={connector.createdAt} /> },
           ]} />
@@ -259,7 +262,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
           defaultSort="last" empty="No session on record."
           columns={[
             { key: "state", label: "State", value: (session) => (session.active ? "active" : "expired"),
-              render: (session) => <Badge variant={session.active ? "default" : "secondary"}>{session.active ? "active" : "expired"}</Badge> },
+              render: (session) => <span className="text-xs">{session.active ? "active" : "expired"}</span> },
             { key: "created", label: "Signed in", numeric: true, value: (session) => adminTime(session.createdAt),
               render: (session) => <span className="text-xs">{utc(session.createdAt)}</span> },
             { key: "last", label: "Last active", numeric: true, value: (session) => adminTime(session.lastActiveAt),
