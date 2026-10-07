@@ -1575,6 +1575,15 @@ export function AppsView({
               afterRefresh={async () => { await connectionsQuery.refetch(); }} />
           </ToolDetailSection>
         ) : null)}
+      {connector.id === "github" && token && currentSpace ? (
+        // Shown in every state, so a disconnected Space can link an account directly.
+        <ToolDetailSection title="GitHub accounts">
+          <GitHubInstallationAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token}
+            onManage={(installationId) => void configureConnector(connector, { mode: "manage", installationId })}
+            onInstall={() => void configureConnector(connector, { mode: "add" })}
+            onChanged={async () => { await connectionsQuery.refetch(); }} />
+        </ToolDetailSection>
+      ) : null}
       {configuring && selectedConnection && configurationDraft ? (
         <ToolDetailSection title="Configuration">
           <p className="mb-4 text-sm text-muted-foreground">Choose where this connector can run and which write actions are allowed.</p>
@@ -1585,12 +1594,6 @@ export function AppsView({
             onChange={setConfigurationDraft}
             onCancel={closeConnectorConfiguration}
             onSave={() => void saveConnectorConfiguration(connector, selectedConnection)}
-            githubAccounts={connector.id === "github" && token && currentSpace ? (
-              <GitHubInstallationAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token}
-                onManage={(installationId) => void configureConnector(connector, { mode: "manage", installationId })}
-                onInstall={() => void configureConnector(connector, { mode: "add" })}
-                onChanged={async () => { await connectionsQuery.refetch(); }} />
-            ) : null}
           />
         </ToolDetailSection>
       ) : (
@@ -1668,7 +1671,6 @@ export function ConnectorConfiguration({
   onChange,
   onCancel,
   onSave,
-  githubAccounts,
 }: {
   connector: AppConnectorManifest;
   draft: AppConnectorConfigurationDraft;
@@ -1676,7 +1678,6 @@ export function ConnectorConfiguration({
   onChange: (draft: AppConnectorConfigurationDraft) => void;
   onCancel: () => void;
   onSave: () => void;
-  githubAccounts?: React.ReactNode;
 }) {
   function update(patch: Partial<AppConnectorConfigurationDraft>) {
     onChange({ ...draft, ...patch });
@@ -1731,7 +1732,6 @@ export function ConnectorConfiguration({
         </fieldset>
       ) : null}
 
-      {githubAccounts}
 
       <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-4">
         <button
