@@ -10,7 +10,6 @@
  * on 403 is a UI courtesy, not the security boundary.
  */
 
-import { actionClass } from "@/components/ui/action-tone";
 import { useState, type ReactNode } from "react";
 import {
   ADMIN_OVERVIEW_DEFAULT_ACTIVITY_DAYS,
@@ -18,7 +17,6 @@ import {
 } from "@xmatrix/protocol";
 import { Loader2, RefreshCw, Shield } from "lucide-react";
 
-import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { noticeClass } from "@/components/ui/status-tone";
 import { ContentSkeleton } from "./content-skeleton";
 import { EmptyToolState } from "./workspace-admin-views";
@@ -32,6 +30,7 @@ import {
   platformAdminStatTiles,
 } from "./platform-admin-overview";
 import { ToolDetailSection } from "./tool-split";
+import { AdminPaperAction } from "./admin-paper";
 
 const ACTIVITY_RANGES = [7, 14, 30, 90] as const;
 
@@ -74,13 +73,12 @@ export function AdminRefresh({ loading, onRefresh, generatedAt }: {
 }) {
   return (
     <>
-      <button type="button" onClick={onRefresh} disabled={loading}
-        className={actionClass({ variant: "secondary", size: "sm" })}>
+      <AdminPaperAction onClick={onRefresh} disabled={loading} title={generatedAt ? `Updated ${generatedAt}` : undefined}>
         {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
         Refresh
-      </button>
+      </AdminPaperAction>
       {generatedAt && (
-        <span className="text-xs text-muted-foreground">
+        <span className="hidden text-[11px] text-muted-foreground md:inline">
           Updated {formatAdminAge(generatedAt, Date.now()) || "just now"}
         </span>
       )}
@@ -92,9 +90,10 @@ export function AdminRefresh({ loading, onRefresh, generatedAt }: {
  * One admin read laid out the same way everywhere: refresh and its age on
  * top, then the shared read states, then the data.
  */
-export function AdminQueryView<Data>({ query, generatedAt, lead, emptyTitle, emptyBody, children }: {
+export function AdminQueryView<Data>({ query, generatedAt, title, lead, emptyTitle, emptyBody, children }: {
   query: { data: Data | null | undefined; error: unknown; isFetching: boolean; refetch: () => unknown };
   generatedAt?: (data: Data) => string;
+  title?: string;
   /** Sits before the refresh button, such as a way back. */
   lead?: ReactNode;
   emptyTitle: string;
@@ -104,7 +103,8 @@ export function AdminQueryView<Data>({ query, generatedAt, lead, emptyTitle, emp
   const data = query.data ?? null;
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="app-admin-heading flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {title && <h2 className="mr-auto text-2xl font-semibold leading-tight">{title}</h2>}
         {lead}
         <AdminRefresh loading={query.isFetching} onRefresh={() => void query.refetch()}
           generatedAt={data && generatedAt ? generatedAt(data) : undefined} />
@@ -124,15 +124,18 @@ export function PlatformAdminView({ token }: { token?: string }) {
 
   return (
     <div className="space-y-7">
-      <div className="flex flex-wrap items-center gap-2">
-        <SegmentedTabs
-          value={String(activityDays)}
-          onChange={(value) => setActivityDays(Number(value))}
-          items={ACTIVITY_RANGES.map((days) => ({ key: String(days), label: `${days}d` }))}
-          label="Activity range"
-        />
+      <div className="app-admin-heading flex flex-wrap items-center gap-x-3 gap-y-1">
+        <h2 className="mr-auto text-2xl font-semibold leading-tight">Overview</h2>
         <AdminRefresh loading={overviewQuery.isFetching} onRefresh={() => void overviewQuery.refetch()}
           generatedAt={overview?.generatedAt} />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/60 pb-1">
+        <div role="group" aria-label="Activity range" className="mr-auto flex gap-4">
+          {ACTIVITY_RANGES.map((days) => (
+            <AdminPaperAction key={days} aria-pressed={activityDays === days}
+              onClick={() => setActivityDays(days)}>{days}d</AdminPaperAction>
+          ))}
+        </div>
       </div>
       <AdminReadState error={overviewQuery.error} loading={overviewQuery.isFetching} hasData={Boolean(overview)}
         emptyTitle="No platform data yet"
@@ -169,12 +172,12 @@ function OverviewBody({ overview }: { overview: AdminPlatformOverview }) {
 /** Large numbers on the paper, a short line under each. No card around them. */
 export function AdminStatGrid({ stats }: { stats: Array<{ label: string; value: string; hint?: string }> }) {
   return (
-    <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-4">
+    <dl className="app-admin-stat-grid grid grid-cols-2 gap-x-6 gap-y-4 p-3 sm:grid-cols-3 lg:grid-cols-4">
       {stats.map((stat) => (
         <div key={stat.label} className="min-w-0">
           <dt className="text-xs text-muted-foreground">{stat.label}</dt>
-          <dd className="text-2xl font-black tabular-nums">{stat.value}</dd>
-          {stat.hint && <dd className="text-xs text-muted-foreground">{stat.hint}</dd>}
+          <dd className="my-0.5 text-2xl font-semibold leading-tight tabular-nums">{stat.value}</dd>
+          {stat.hint && <dd className="text-[11px] leading-4 text-muted-foreground">{stat.hint}</dd>}
         </div>
       ))}
     </dl>
@@ -260,8 +263,8 @@ function Storage({ overview }: { overview: AdminPlatformOverview }) {
         {overview.storage.slice(0, 12).map((entry) => (
           <li key={entry.category} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 sm:flex">
             <span className="min-w-0 truncate text-xs text-muted-foreground sm:w-40 sm:shrink-0">{entry.category}</span>
-            <span className="col-span-3 row-start-2 h-2 overflow-hidden rounded bg-muted sm:flex-1">
-              <span className="block h-full rounded bg-chart-1"
+            <span className="col-span-3 row-start-2 h-1 overflow-hidden bg-muted sm:flex-1">
+              <span className="block h-full bg-chart-1"
                 style={{ width: `${peak > 0 ? Math.max((entry.logicalBytes / peak) * 100, 1) : 0}%` }} />
             </span>
             <span className="shrink-0 text-right text-xs tabular-nums sm:w-24">{formatAdminBytes(entry.logicalBytes)}</span>
