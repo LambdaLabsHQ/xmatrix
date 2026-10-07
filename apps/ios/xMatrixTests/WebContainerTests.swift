@@ -42,14 +42,14 @@ final class WebContainerTests: XCTestCase {
         let (coordinator, container) = makeCoordinator { scripts.append($1) }
         coordinator.load(AppConfiguration.mobileTabURL(.pages))
         let first = page(coordinator)
-        for tab in [MobileTabView.messages, .agents, .more, .pages] {
+        for tab in [MobileTabView.messages, .status, .more, .pages] {
             NotificationCenter.default.post(name: .xmatrixMobileTabSelected, object: nil,
                                             userInfo: ["view": tab.rawValue])
         }
         XCTAssertTrue(coordinator.webView === first)
         XCTAssertEqual(container.subviews.count, 1)
         XCTAssertEqual(first.requests.count, 1)
-        XCTAssertEqual(scripts, ["messages", "agents", "more", "pages"].map {
+        XCTAssertEqual(scripts, ["messages", "status", "more", "pages"].map {
             "window.__xmatrixMobileTabChange?.(...[\"\($0)\"]);"
         })
     }
@@ -112,8 +112,8 @@ final class WebContainerTests: XCTestCase {
     func testReportedViewPicksTheActiveTab() {
         let (coordinator, container) = makeCoordinator()
         defer { withExtendedLifetime(container) {} }
-        for (view, tab) in [("pages", MobileTabView.pages), ("messages", .messages), ("agents", .agents),
-                            ("roles", .agents), ("machines", .more), ("security", .more)] {
+        for (view, tab) in [("pages", MobileTabView.pages), ("messages", .messages), ("status", .status),
+                            ("agents", .more), ("roles", .more), ("machines", .more), ("security", .more)] {
             coordinator.update(MobileTabState(visible: true, activeView: view))
             XCTAssertEqual(coordinator.activeTab, tab, view)
         }
@@ -131,9 +131,10 @@ final class WebContainerTests: XCTestCase {
         XCTAssertEqual(received.activeView, "pages")
     }
 
-    func testAgentsTabNamesTheCanonicalWebView() {
-        XCTAssertEqual(MobileTabView.agents.rawValue, "agents")
-        XCTAssertEqual(AppConfiguration.mobileTabURL(.agents).query?.contains("view=agents"), true)
+    func testStatusTabNamesTheCanonicalWebView() {
+        XCTAssertEqual(MobileTabView.status.rawValue, "status")
+        XCTAssertEqual(MobileTabView.status.label, "Status")
+        XCTAssertEqual(AppConfiguration.mobileTabURL(.status).query?.contains("view=status"), true)
     }
 
     func testDockMarginIsConcentricWithTheDeviceCorner() {
