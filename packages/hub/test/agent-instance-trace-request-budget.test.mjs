@@ -8,10 +8,14 @@ import {
 } from "../src/runtime-transport/agent-instance-port.ts";
 import { agentInstanceAttachment, FakeSocket } from "./support/runtime-transport.mjs";
 
-function transport() {
-  return new AgentInstanceRuntimeTransport({
+/** A transport whose one live Instance is on the returned socket. */
+function liveTransport() {
+  const runtime = new AgentInstanceRuntimeTransport({
     capabilities: new Set(AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES),
   });
+  const socket = new FakeSocket();
+  assert.equal(runtime.rehydrate(socket, agentInstanceAttachment()), true);
+  return { runtime, socket };
 }
 
 function liveRead(runtime, index) {
@@ -21,9 +25,7 @@ function liveRead(runtime, index) {
 }
 
 test("closed viewers' held live reads do not report a connected host as overloaded", async () => {
-  const runtime = transport();
-  const socket = new FakeSocket();
-  assert.equal(runtime.rehydrate(socket, agentInstanceAttachment()), true);
+  const { runtime, socket } = liveTransport();
 
   const abandoned = Array.from({ length: AGENT_HOST_TRACE_MAX_PENDING_REQUESTS_PER_INSTANCE },
     (_, index) => liveRead(runtime, index));
@@ -37,9 +39,7 @@ test("closed viewers' held live reads do not report a connected host as overload
 });
 
 test("a full budget of reads that do not wait is still overloaded", async () => {
-  const runtime = transport();
-  const socket = new FakeSocket();
-  assert.equal(runtime.rehydrate(socket, agentInstanceAttachment()), true);
+  const { runtime } = liveTransport();
 
   for (let index = 0; index < AGENT_HOST_TRACE_MAX_PENDING_REQUESTS_PER_INSTANCE; index += 1) {
     void runtime.requestTraceHistory("instance-1", { maxEvents: index + 1 });
