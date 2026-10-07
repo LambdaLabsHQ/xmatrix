@@ -63,7 +63,7 @@ export function jevFilledTags(mention: AutoLaunchMention, parameters: LaunchPara
   if (parameters.harness?.selected && written.harness === undefined) {
     tags.push({ field: "harness", value: parameters.harness.selected });
   }
-  if (written.model === undefined) tags.push({ field: "model", value: selections.model });
+  if (selections.model && written.model === undefined) tags.push({ field: "model", value: selections.model });
   if (selections.effort && written.effort === undefined) tags.push({ field: "effort", value: selections.effort });
   if (selections.repo && written.repo === undefined && written.pwd === undefined) {
     tags.push({ field: "repo", value: selections.repo });

@@ -99,7 +99,7 @@ export function RoutingDecisionBoard({ decision, compact = false, evidenceOnly =
       <p>{rows.length} candidates in the requested scope.</p>
     </>}
     {decision.parameters && <details className="app-invocation-request"><summary>Launch parameter decisions</summary>
-      <p>Model: {decision.parameters.selections.model} · Effort: {decision.parameters.selections.effort ?? "harness default"}</p>
+      {decision.parameters.selections.model && <p>Model: {decision.parameters.selections.model} · Effort: {decision.parameters.selections.effort ?? "harness default"}</p>}
       <p>Workspace: {decision.parameters.selections.workspaceKind}{decision.parameters.selections.repo ? ` · ${decision.parameters.selections.repo}` : ""}</p>
       <p>Evaluated {formatZonedDateTime(decision.parameters.evaluatedAt)} · {decision.parameters.rubricVersion}</p>
       {decision.parameters.harness && <DecisionStage label="Harness" stage={decision.parameters.harness} />}
