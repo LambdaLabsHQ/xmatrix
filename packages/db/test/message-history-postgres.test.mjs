@@ -184,4 +184,15 @@ integration("search candidates cover only readable live messages, newest first, 
   const outsider = await repository.searchCandidates({ requestId: `${id}-outsider`, spaceId: space,
     principal: { kind: "user", id: `outsider-${id}` }, limit: 50 });
   assert.deepEqual(outsider, [], "a non-member reads nothing");
+  const inChannel = await repository.searchCandidates({ requestId: `${id}-in`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, channelId: seeded.channel, limit: 50 });
+  assert.ok(inChannel.length > 0 && inChannel.every((candidate) => candidate.channelId === seeded.channel),
+    "a Channel filter keeps only that Channel's messages");
+  const byAuthor = await repository.searchCandidates({ requestId: `${id}-from`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, authorKind: "user", authorId: seeded.author, limit: 50 });
+  assert.ok(byAuthor.length > 0 && byAuthor.every((candidate) => candidate.authorId === seeded.author),
+    "an author filter keeps only that author's messages");
+  const byStranger = await repository.searchCandidates({ requestId: `${id}-from-none`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, authorKind: "user", authorId: `nobody-${id}`, limit: 50 });
+  assert.deepEqual(byStranger, [], "an author with no messages finds nothing");
 }));

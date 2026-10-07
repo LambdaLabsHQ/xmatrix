@@ -733,6 +733,11 @@ export interface MessageSearchCandidatesInput {
   principal: MessagePrincipal;
   /** Continue strictly after (older than) this search rank. */
   beforeRank?: string;
+  /** Only this Channel and its threads. */
+  channelId?: string;
+  /** Only messages this author wrote; an Agent is matched by its sender name. */
+  authorKind?: "user" | "agent";
+  authorId?: string;
   limit: number;
 }
 
@@ -2642,15 +2647,22 @@ export class PostgresMessageRepository {
       throw new MessageAuthorityError("invalid_request", 400, "Search candidate limit is invalid");
     }
     const beforeRank = input.beforeRank === undefined ? null : bounded(input.beforeRank, "beforeRank");
+    const channelId = input.channelId === undefined ? null : bounded(input.channelId, "channelId");
+    const authorKind = input.authorKind ?? null;
+    if (authorKind !== null && authorKind !== "user" && authorKind !== "agent") {
+      throw new MessageAuthorityError("invalid_request", 400, "Search author is invalid");
+    }
+    const authorId = authorKind === "user" ? bounded(input.authorId, "authorId") : null;
     const placement = await this.placement(input.requestId, "message.search", spaceId);
     const rows = await this.database.transaction({
       requestId: input.requestId, operation: "message.search", statement: "single_read",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
     }, (transaction) => transaction.query<QueryResultRow>({
-      name: "message_search_candidates_v2",
+      name: "message_search_candidates_v3",
       text: `WITH readable AS MATERIALIZED (
           SELECT c.channel_id FROM data.channels c
-          WHERE c.space_id=$1 AND ${channelCapabilityPredicate({ capability: "message_content_read",
+          WHERE c.space_id=$1 AND ($6::text IS NULL OR c.channel_id=$6 OR c.parent_channel_id=$6)
+            AND ${channelCapabilityPredicate({ capability: "message_content_read",
             channelAlias: "c", principalKindSql: "$2::text", principalIdSql: "$3::text" })}
         )
         SELECT m.message_id,m.channel_id,m.timeline_sequence,m.entity_version,m.search_rank_sequence,
@@ -2659,8 +2671,9 @@ export class PostgresMessageRepository {
         WHERE m.space_id=$1 AND m.channel_id IN (SELECT channel_id FROM readable)
           AND m.deleted_at IS NULL AND m.recalled_at IS NULL
           AND ($4::text IS NULL OR m.search_rank_sequence < $4)
+          AND ($7::text IS NULL OR m.author_kind=$7) AND ($8::text IS NULL OR m.author_id=$8)
         ORDER BY m.search_rank_sequence DESC LIMIT $5`,
-      values: [spaceId, input.principal.kind, principalId, beforeRank, limit],
+      values: [spaceId, input.principal.kind, principalId, beforeRank, limit, channelId, authorKind, authorId],
       maxRows: limit,
     }));
     return rows.map((row) => ({

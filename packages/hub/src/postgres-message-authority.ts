@@ -1127,21 +1127,28 @@ function searchSenderLabel(snapshot: Record<string, unknown> | undefined): strin
   return "";
 }
 
-/** One candidate's hit for a lower-cased needle: body, then an attachment name, then the sender label. */
+/**
+ * One candidate's hit for a lower-cased needle: body, then an attachment name,
+ * then the sender label. An empty needle matches every message (a filter-only
+ * search); `agentName` keeps only an Agent's messages sent under that name.
+ */
 export function matchMessageSearchCandidate(
   candidate: MessageSearchCandidate,
   needle: string,
+  agentName?: string,
 ): MessageSearchHit | null {
   const bundle = candidate.payloadBundleBase64
     ? decodeRelayV2MessagePayloadBundle(base64UrlDecodeBytes(candidate.payloadBundleBase64))
     : undefined;
+  const senderLabel = searchSenderLabel(bundle?.senderSnapshot);
+  if (agentName !== undefined && !searchAgentNameMatches(bundle?.senderSnapshot, agentName)) return null;
   const body = bundle?.body ?? candidate.legacyBody ?? "";
   const bodyAt = body.toLocaleLowerCase().indexOf(needle);
   const attachmentName = bodyAt < 0
     ? (candidate.attachmentNames ?? []).find((name) => name.toLocaleLowerCase().includes(needle)) ?? ""
     : "";
   const senderAt = bodyAt < 0 && !attachmentName
-    ? searchSenderLabel(bundle?.senderSnapshot).toLocaleLowerCase().indexOf(needle) : -1;
+    ? senderLabel.toLocaleLowerCase().indexOf(needle) : -1;
   if (bodyAt < 0 && !attachmentName && senderAt < 0) return null;
   const field = bodyAt >= 0 ? "body" : attachmentName ? "attachment" : "sender";
   return {
@@ -1156,7 +1163,18 @@ export function matchMessageSearchCandidate(
     channelId: candidate.channelId,
     messageId: candidate.messageId,
     timelineSequence: candidate.timelineSequence,
+    senderLabel,
+    sentAt: candidate.sentAt,
   };
+}
+
+/** An Agent's messages carry its name in the sender snapshot; its Instances do not share an author id. */
+function searchAgentNameMatches(snapshot: Record<string, unknown> | undefined, agentName: string): boolean {
+  const wanted = agentName.toLocaleLowerCase();
+  return ["agentName", "name"].some((key) => {
+    const value = snapshot?.[key];
+    return typeof value === "string" && value.toLocaleLowerCase() === wanted;
+  });
 }
 
 /**
@@ -1166,13 +1184,21 @@ export function matchMessageSearchCandidate(
  */
 export async function postgresMessageSearch(
   env: Env,
-  input: { spaceId: string; query: string; resumeToken?: string; principal: AuthorityPrincipal },
+  input: {
+    spaceId: string; query: string; resumeToken?: string; principal: AuthorityPrincipal;
+    /** Only this Channel and its threads. */
+    channelId?: string;
+    /** Only this author's messages: a person by user id, an Agent by name. */
+    from?: { kind: "user"; userId: string } | { kind: "agent"; name: string };
+  },
   dependencies: PostgresMessageDependencies = {},
 ): Promise<MessageSearchPage> {
   const needle = input.query.trim().toLocaleLowerCase();
-  if (!needle || needle.length > 200) {
+  // A filter alone is a search: every message in the Channel, or by the author.
+  if ((!needle && !input.channelId && !input.from) || needle.length > 200) {
     throw new MessageAuthorityError("invalid_request", 400, "Search query is invalid");
   }
+  const agentName = input.from?.kind === "agent" ? input.from.name : undefined;
   const repository = new PostgresMessageRepository(
     dependencies.database ?? database(env), dependencies.requestScoped === true,
   );
@@ -1187,12 +1213,15 @@ export async function postgresMessageSearch(
       spaceId: bounded(input.spaceId, "spaceId"),
       principal: principal(input.principal),
       beforeRank,
+      ...(input.channelId ? { channelId: input.channelId } : {}),
+      ...(input.from ? { authorKind: input.from.kind } : {}),
+      ...(input.from?.kind === "user" ? { authorId: input.from.userId } : {}),
       limit: requested,
     });
     for (const candidate of candidates) {
       scanned += 1;
       beforeRank = candidate.searchRankSequence;
-      const hit = matchMessageSearchCandidate(candidate, needle);
+      const hit = matchMessageSearchCandidate(candidate, needle, agentName);
       if (hit) results.push(hit);
       if (results.length >= MESSAGE_SEARCH_RESULT_LIMIT) break;
     }
