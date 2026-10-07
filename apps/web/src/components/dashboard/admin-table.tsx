@@ -11,10 +11,12 @@ import { useMemo, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
 
 import { actionClass } from "@/components/ui/action-tone";
+import { GlassSelect } from "@/components/ui/glass-select";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAdminParam } from "./platform-admin-data";
 import { adminTableCsv, sortAdminRows, type AdminSortableColumn } from "./platform-admin-overview";
+import { useIsMobileViewport } from "./workspace-shell-helpers";
 
 /** A column: its sort and export value (none: not sortable), and how a cell reads. */
 export interface AdminColumn<Row> extends AdminSortableColumn<Row> {
@@ -34,6 +36,50 @@ function download(name: string, csv: string) {
   link.download = name;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * A phone reads each row as a list row: the first column as its name, the
+ * others as labelled values under it, so nothing scrolls sideways.
+ */
+function AdminRowList<Row>({ rows, columns, rowKey, onRowClick }: {
+  rows: readonly Row[];
+  columns: readonly AdminColumn<Row>[];
+  rowKey: (row: Row) => string;
+  onRowClick?: (row: Row) => void;
+}) {
+  const [lead, ...rest] = columns;
+  return (
+    <ul className="divide-y divide-border/60 border-y border-border/60">
+      {rows.map((row) => {
+        const body = (
+          <>
+            <div className="min-w-0 [overflow-wrap:anywhere]">{lead?.render(row)}</div>
+            {rest.length > 0 && (
+              <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
+                {rest.map((column) => (
+                  <div key={column.key} className="flex min-w-0 max-w-full items-baseline gap-1">
+                    <dt className="shrink-0 text-muted-foreground">{column.label}</dt>
+                    <dd className="min-w-0 tabular-nums [overflow-wrap:anywhere]">{column.render(row)}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </>
+        );
+        return (
+          <li key={rowKey(row)}>
+            {onRowClick ? (
+              <button type="button" onClick={() => onRowClick(row)}
+                className="block w-full min-w-0 py-3 text-left active:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring">
+                {body}
+              </button>
+            ) : <div className="py-2.5">{body}</div>}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 export function AdminTable<Row>({
@@ -71,11 +117,15 @@ export function AdminTable<Row>({
   const [sortParam, setSort] = useAdminParam(`${id}sort`);
   const [pageParam, setPage] = useAdminParam(`${id}page`);
   // "-key" sorts descending, "key" ascending.
-  const sort = sortParam || (defaultSort ? `-${defaultSort}` : "");
+  const requestedSort = sortParam || (defaultSort ? `-${defaultSort}` : "");
+  const sortable = columns.filter((column) => column.value);
+  const sort = sortable.some((column) => column.key === requestedSort.replace(/^-/, ""))
+    ? requestedSort : defaultSort ? `-${defaultSort}` : sortable[0]?.key ?? "";
   const descending = sort.startsWith("-");
   const sortKey = descending ? sort.slice(1) : sort;
   const sortColumn = columns.find((column) => column.key === sortKey);
   const visible = columns.filter((column) => !column.hidden);
+  const phone = useIsMobileViewport();
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -100,32 +150,55 @@ export function AdminTable<Row>({
     <section aria-label={label} className="min-w-0">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         {search && (
-          <div className="relative">
+          <div className={cn("relative", phone && "w-full")}>
             <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(event) => { setQuery(event.target.value); setPage(""); }}
               placeholder={searchPlaceholder ?? "Search"}
               aria-label={`Search ${label}`}
-              className="h-8 w-60 pl-7 text-xs"
+              className={cn("pl-7", phone ? "h-11 w-full text-base" : "h-8 w-60 text-xs")}
             />
           </div>
         )}
         {toolbar}
+        {/* A phone has no headers to tap: the sort is chosen here, its direction beside it. */}
+        {phone && sortColumn && (
+          <>
+            <GlassSelect
+              value={sortColumn.key}
+              onChange={(key) => {
+                const column = columns.find((candidate) => candidate.key === key);
+                if (column && column.key !== sortKey) toggleSort(column);
+              }}
+              options={sortable.map((column) => ({ value: column.key, label: column.label }))}
+              aria-label={`Sort ${label}`}
+              className="h-11 rounded-md px-2 text-sm"
+            />
+            <button type="button" onClick={() => toggleSort(sortColumn)}
+              aria-label={descending ? "Sorted descending; sort ascending" : "Sorted ascending; sort descending"}
+              className={cn(actionClass({ variant: "secondary", size: "sm" }), "min-h-11 min-w-11")}>
+              {descending ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />}
+            </button>
+          </>
+        )}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {filtered.length === rows.length ? rows.length : `${filtered.length} of ${rows.length}`}
         </span>
         <button
           type="button"
+          aria-label={`Export ${label} as CSV`}
           onClick={() => download(`${id || "admin"}-${new Date().toISOString().slice(0, 10)}.csv`, adminTableCsv(filtered, columns))}
           disabled={filtered.length === 0}
-          className={actionClass({ variant: "secondary", size: "sm" })}
+          className={cn(actionClass({ variant: "secondary", size: "sm" }), phone && "min-h-11 min-w-11")}
         >
-          <Download className="size-3.5" /> CSV
+          <Download className="size-3.5" /> {!phone && "CSV"}
         </button>
       </div>
       {filtered.length === 0 ? (
         <p className="py-6 text-sm text-muted-foreground">{empty}</p>
+      ) : phone ? (
+        <AdminRowList rows={shown} columns={visible} rowKey={rowKey} onRowClick={onRowClick} />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -176,13 +249,13 @@ export function AdminTable<Row>({
         <div className="mt-2 flex items-center justify-end gap-2 text-xs text-muted-foreground">
           <button type="button" aria-label="Previous page" disabled={page <= 1}
             onClick={() => setPage(page - 1 <= 1 ? "" : String(page - 1))}
-            className={actionClass({ variant: "secondary", size: "sm" })}>
+            className={cn(actionClass({ variant: "secondary", size: "sm" }), phone && "min-h-11 min-w-11")}>
             <ChevronLeft className="size-3.5" />
           </button>
           <span className="tabular-nums">Page {page} of {pages}</span>
           <button type="button" aria-label="Next page" disabled={page >= pages}
             onClick={() => setPage(String(page + 1))}
-            className={actionClass({ variant: "secondary", size: "sm" })}>
+            className={cn(actionClass({ variant: "secondary", size: "sm" }), phone && "min-h-11 min-w-11")}>
             <ChevronRight className="size-3.5" />
           </button>
         </div>

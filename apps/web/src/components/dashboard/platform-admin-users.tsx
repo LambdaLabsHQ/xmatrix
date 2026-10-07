@@ -142,8 +142,8 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
   return (
     <>
       <header>
-        <h3 className="break-words text-2xl font-black">{adminUserLabel(user)}</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h3 className="text-2xl font-black [overflow-wrap:anywhere]">{adminUserLabel(user)}</h3>
+        <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
           {[user.email, user.handle ? `@${user.handle}` : undefined].filter(Boolean).join(" · ")}
         </p>
         {detail.truncated.length > 0 && (
@@ -155,7 +155,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
 
       <ToolDetailSection title="Account">
         <ToolFacts>
-          <ToolFact label="User id"><span className="font-mono text-xs">{user.userId}</span></ToolFact>
+          <ToolFact label="User id"><span className="font-mono text-xs [overflow-wrap:anywhere]">{user.userId}</span></ToolFact>
           <ToolFact label="Registered">{utc(user.registeredAt)}</ToolFact>
           <ToolFact label="Sign-in">{user.providers?.join(", ") || "—"}</ToolFact>
           <ToolFact label="Email verified">{user.emailVerified ? "Yes" : "No"}</ToolFact>

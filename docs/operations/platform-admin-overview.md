@@ -10,6 +10,12 @@ the xMatrix app, without opening a database console.
 `AdminTable`: search, sortable headers, 50-row pages, CSV export, and its
 search/sort/page state in the address (`?item=<section>&<id>q=…&<id>sort=…`).
 
+On phones, the section list opens each section as a screen with a way back.
+Table rows become labelled list rows; sorting uses an inline selector and a
+direction button. Search, 50-row pagination, CSV export, and user-detail links
+retain the same address state as desktop. Storage bars and user detail fit
+narrow screens without horizontal scrolling.
+
 - **Overview**: platform totals (users, Spaces, active/archived Channels,
   messages, Agents, running Runs, Machines, Automations, storage), registered
   user access (active 24h/7d/30d, verified, profiles completed), messages per

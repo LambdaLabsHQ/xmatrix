@@ -258,14 +258,14 @@ function Storage({ overview }: { overview: AdminPlatformOverview }) {
     <ToolDetailSection title="Storage by category">
       <ul className="space-y-2">
         {overview.storage.slice(0, 12).map((entry) => (
-          <li key={entry.category} className="flex items-center gap-3">
-            <span className="w-40 shrink-0 truncate text-xs text-muted-foreground">{entry.category}</span>
-            <span className="h-2 flex-1 overflow-hidden rounded bg-muted">
+          <li key={entry.category} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 sm:flex">
+            <span className="min-w-0 truncate text-xs text-muted-foreground sm:w-40 sm:shrink-0">{entry.category}</span>
+            <span className="col-span-3 row-start-2 h-2 overflow-hidden rounded bg-muted sm:flex-1">
               <span className="block h-full rounded bg-chart-1"
                 style={{ width: `${peak > 0 ? Math.max((entry.logicalBytes / peak) * 100, 1) : 0}%` }} />
             </span>
-            <span className="w-24 shrink-0 text-right text-xs tabular-nums">{formatAdminBytes(entry.logicalBytes)}</span>
-            <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+            <span className="shrink-0 text-right text-xs tabular-nums sm:w-24">{formatAdminBytes(entry.logicalBytes)}</span>
+            <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:w-16">
               {formatAdminCount(entry.rows)}
             </span>
           </li>
