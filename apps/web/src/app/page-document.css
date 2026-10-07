@@ -85,6 +85,23 @@
 }
 .page-document .ProseMirror-gapcursor { position: relative; }
 
+/* On a phone the page reads like Notion's or Google Docs' mobile view: 16px
+   text (which also keeps iOS from zooming on focus) inside the article's 24px
+   gutters, wrapped list items with air between them, and headings that sit
+   closer to their own section than to the one above. */
+@media (max-width: 767px) {
+  .page-document { font-size: 16px; line-height: 1.65; }
+  .page-document > * + * { margin-top: 0.8em; }
+  .page-document :is(h1, h2, h3, h4, h5, h6) + * { margin-top: 0.4em; }
+  .page-document h1 { font-size: 1.6em; margin-top: 1.4em; }
+  .page-document h2 { font-size: 1.3em; margin-top: 1.6em; }
+  .page-document h3 { margin-top: 1.4em; }
+  .page-document :is(ul, ol) { padding-left: 1.3em; }
+  .page-document li + li { margin-top: 0.45em; }
+  .page-document li.page-task { margin-left: -1.3em; }
+  .page-document blockquote { padding-left: 0.75em; }
+}
+
 /* Other people's and Agents' cursors (y-prosemirror). */
 .ProseMirror-yjs-cursor {
   position: relative;
