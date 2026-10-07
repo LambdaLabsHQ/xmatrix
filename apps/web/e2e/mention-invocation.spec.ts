@@ -78,7 +78,8 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await expect(detail).toContainText("Workstation");
   await expect(detail).toContainText("Connection attempt 7.");
   const startup = detail.getByRole("list", { name: "Invocation progress" });
-  await expect(startup.locator("li", { hasText: "Joined channel" })).toHaveAttribute("data-state", "current");
+  await expect(startup.locator("li[data-state=current]")).toHaveText(/^Connecting$/);
+  await expect(startup).not.toContainText("Joined channel");
   await expect(startup.locator("li", { hasText: "Process started" })).toHaveAttribute("data-state", "done");
   await detail.hover();
   await expect(detail).toBeVisible();
