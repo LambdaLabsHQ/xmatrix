@@ -6,6 +6,12 @@ set -euo pipefail
 #   XMATRIX_BIN_NAME        Installed command name (default: xmatrix)
 #   XMATRIX_RELEASE_API_URL Release metadata URL
 #   XMATRIX_SKIP_DAEMON_AUTOSTART
+#   XMATRIX_CONNECT         Setup id from xMatrix's "Bring your agents in"
+#                           command; the same as `--connect <id>`
+#
+# Options:
+#   --connect <id>          Connect this machine to the xMatrix page that
+#                           showed the command: approve the terminal there.
 # The installer never uses sudo. System locations such as /usr/local/bin are
 # only used when XMATRIX_INSTALL_DIR points at a directory the user can write.
 
@@ -272,14 +278,28 @@ setup_daemon() {
     return 0
   fi
 
+  # A setup command from xMatrix is approved on the page that showed it, so it
+  # needs no terminal input and links this machine to that page even when a
+  # session exists. A failed approval still installs the daemon and says how to
+  # resume rather than ending the install.
   # Re-running the installer must not force a second browser round trip, and a
   # non-interactive install must not block on one. Without a session the daemon
   # still installs; the next `xmatrix login` hands it the credentials.
-  if "$bin_path" whoami >/dev/null 2>&1; then
+  local connect_id="${CONNECT_ID:-}"
+  if [ -n "$connect_id" ]; then
+    info "Approve this terminal on the xMatrix page that showed this command"
+    if ! XMATRIX_SKIP_DAEMON_AUTOSTART=1 "$bin_path" login --connect "$connect_id" </dev/null; then
+      error "This machine is not connected yet"
+      dim "Resume with: ${BIN_NAME:-xmatrix} login --connect $connect_id"
+    fi
+  elif "$bin_path" whoami >/dev/null 2>&1; then
     info "Using the existing xMatrix login"
   elif has_controlling_tty; then
     info "Browser sign-in is required before starting the daemon"
-    XMATRIX_SKIP_DAEMON_AUTOSTART=1 "$bin_path" login
+    if ! XMATRIX_SKIP_DAEMON_AUTOSTART=1 "$bin_path" login; then
+      error "Sign-in did not finish"
+      dim "Resume with: ${BIN_NAME:-xmatrix} login"
+    fi
   else
     info "No interactive terminal for sign-in; run 'xmatrix login' to finish setup"
   fi
@@ -303,6 +323,15 @@ header() {
   echo -e "  ${DIM}-------------------------${RESET}"
   echo ""
 }
+
+CONNECT_ID="${XMATRIX_CONNECT:-}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --connect) CONNECT_ID="${2:-}"; shift 2 || shift ;;
+    --connect=*) CONNECT_ID="${1#--connect=}"; shift ;;
+    *) shift ;;
+  esac
+done
 
 header
 

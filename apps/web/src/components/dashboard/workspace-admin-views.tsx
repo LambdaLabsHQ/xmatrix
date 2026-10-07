@@ -2000,6 +2000,21 @@ export async function fetchSpaces(token: string, signal?: AbortSignal): Promise<
   return sortSpaces(data.spaces || []);
 }
 
+/* The Spaces a signed-in person lands with. Someone with none is given their
+   own, so the first screen is a Space they can act in rather than an empty
+   app; the Hub creates it only for an account that has no Space at all. */
+export async function fetchSpacesForLanding(
+  token: string,
+  signal?: AbortSignal,
+): Promise<SerializedSpace[]> {
+  const spaces = await fetchSpaces(token, signal);
+  if (spaces.length > 0) return spaces;
+  const data = await xmatrixApiRequest<{ space?: SerializedSpace | null }>({
+    url: WEB_PROXY_ROUTES.personal_space, token, method: "POST", signal,
+  });
+  return data.space ? [data.space] : fetchSpaces(token, signal);
+}
+
 export async function fetchProjects(
   token: string,
   signal?: AbortSignal,

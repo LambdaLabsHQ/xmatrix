@@ -71,6 +71,36 @@ pub async fn start_device_login(hub_url: &str) -> Result<DeviceLoginStartRespons
         .map_err(|e| CliError::Auth(format!("Failed to start browser login: {e}")))
 }
 
+/// Signs in with the setup command copied from xMatrix. The terminal names the
+/// setup intent; the owner approves it on the page that showed the command, so
+/// no browser is opened here and there is no localhost fallback.
+pub async fn login_for_setup_intent(hub_url: &str, setup_intent: &str) -> Result<AuthResponse> {
+    crate::access::prepare_for_hub(hub_url, true).await?;
+    let url = with_route(hub_url, HubRoutes::DEVICE_START);
+    let body = serde_json::json!({
+        "setupIntentId": setup_intent.trim(),
+        "hostname": local_hostname(),
+        "platform": format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+    });
+    let device_login: DeviceLoginStartResponse =
+        crate::http::request_json(&url, "POST", None, Some(body))
+            .await
+            .map_err(|e| CliError::Auth(format!("Could not connect this machine: {e}")))?;
+    println!("Approve this terminal in xMatrix, on the page that showed this command.");
+    println!("Verification code: {}", device_login.user_code);
+    println!("Only approve it if the page shows the same code.\n");
+    println!("Waiting for approval...");
+    poll_device_login(hub_url, &device_login).await
+}
+
+/// This machine's name as its operating system reports it.
+pub fn local_hostname() -> String {
+    gethostname::gethostname()
+        .to_string_lossy()
+        .trim()
+        .to_string()
+}
+
 async fn login_with_browser_device_flow(
     hub_url: &str,
     device_login: &DeviceLoginStartResponse,

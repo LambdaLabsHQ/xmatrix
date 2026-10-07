@@ -147,7 +147,7 @@ import {
   fetchEvents,
   fetchProjects,
   fetchAutomations,
-  fetchSpaces,
+  fetchSpacesForLanding,
   fetchWorkingSpace,
   historyMessageCountEstimate,
   isLlmTraceEvent,
@@ -2090,7 +2090,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     : HISTORY_REFRESH_INTERVAL_MS;
   const spacesQuery = useQuery({
     queryKey: xmatrixQueryKeys.spaces({ userId: authenticatedUserId || "anonymous" }),
-    queryFn: ({ signal }) => fetchSpaces(token!, signal),
+    queryFn: ({ signal }) => fetchSpacesForLanding(token!, signal),
     enabled: workspaceQueriesEnabled,
     staleTime: 15_000,
     refetchInterval: workspaceRefetchInterval,

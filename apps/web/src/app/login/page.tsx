@@ -121,6 +121,10 @@ function LoginContent() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [cliComplete, setCliComplete] = useState(false);
+  /* A device sign-in hands this account's session to whoever started it, so
+     it is approved only by an explicit click after the person compares the
+     code, never by opening a link while signed in. */
+  const [deviceApprovalConfirmed, setDeviceApprovalConfirmed] = useState(false);
   const [desktopBridge, setDesktopBridge] = useState<DesktopBridge | null>(null);
   const [nativeClient, setNativeClient] = useState<NativeLoginClient>("desktop");
   const [desktopLogin, setDesktopLogin] = useState<DesktopLoginState>({ status: "idle" });
@@ -152,6 +156,9 @@ function LoginContent() {
     authError ||
     (oauthError ? "Google sign-in did not complete. Try again, or use a login code." : "");
   const cliMode = Boolean(deviceCode || legacyCliContext);
+  const awaitingDeviceConfirmation = Boolean(
+    session?.access_token && deviceCode && userCode && !deviceApprovalConfirmed && !cliComplete,
+  );
   const cliModeActive = cliMode && !cliError;
   const desktopMode = Boolean(desktopBridge) && !cliMode;
   const desktopModeActive = desktopMode && !user;
@@ -386,6 +393,7 @@ function LoginContent() {
         !session?.access_token ||
         !deviceCode ||
         !userCode ||
+        !deviceApprovalConfirmed ||
         deviceApprovalSubmittedRef.current
       ) {
         return;
@@ -407,6 +415,7 @@ function LoginContent() {
           return;
         }
         deviceApprovalSubmittedRef.current = false;
+        setDeviceApprovalConfirmed(false);
         setError((nextError as Error).message);
       } finally {
         setLoading(false);
@@ -476,6 +485,7 @@ function LoginContent() {
     }
   }, [
     cliCallbackContext,
+    deviceApprovalConfirmed,
     deviceCode,
     userCode,
     legacyCliContext,
@@ -627,7 +637,9 @@ function LoginContent() {
                     ? "xMatrix only returns CLI sessions to loopback addresses on this device. Start a fresh login from your terminal."
                     : cliMode
                       ? deviceCode
-                        ? `Finish sign-in on xmatrix.sh to approve code ${userCode || "shown in your client"} for your ${deviceClientLabel}.`
+                        ? awaitingDeviceConfirmation
+                          ? `Approve only if your ${deviceClientLabel} shows this code. Approving signs it in as you.`
+                          : `Finish sign-in on xmatrix.sh to approve code ${userCode || "shown in your client"} for your ${deviceClientLabel}.`
                         : `Finish sign-in to send your session back to the terminal on this device${cliCallbackContext?.hubHost ? ` for ${cliCallbackContext.hubHost}` : ""}.`
                       : desktopModeActive
                         ? desktopLogin.status === "error"
@@ -677,6 +689,28 @@ function LoginContent() {
               </Button>
               <Button nativeButton={false} variant="ghost" className="w-full" render={<Link href="/" />}>
                 Back to Home
+              </Button>
+            </div>
+          ) : awaitingDeviceConfirmation ? (
+            <div className="mt-6 space-y-4">
+              <div className="rounded-lg border border-border bg-muted/40 p-4 text-center">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Verification code
+                </p>
+                <p className="mt-2 font-mono text-2xl font-semibold tracking-[0.2em] text-foreground"
+                  data-testid="device-approval-code">
+                  {userCode}
+                </p>
+                {user?.email ? (
+                  <p className="mt-2 text-xs text-muted-foreground">Signing in as {user.email}</p>
+                ) : null}
+              </div>
+              <Button type="button" className="w-full" onClick={() => setDeviceApprovalConfirmed(true)}>
+                Approve
+              </Button>
+              <Button type="button" variant="ghost" className="w-full text-xs text-muted-foreground"
+                onClick={() => router.replace("/app")}>
+                This is not my code
               </Button>
             </div>
           ) : desktopModeActive ? (

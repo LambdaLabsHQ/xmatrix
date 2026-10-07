@@ -8,6 +8,7 @@ import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
 import { registerMachineRetirementRoutes } from "./index-routes-machine-retirement";
 import { registerHarnessActionRoutes } from "./index-routes-harness-actions";
+import { registerSetupIntentRoutes } from "./index-routes-setup-intents";
 import { registerChannelTransferRoutes } from "./index-routes-channel-transfer";
 import { registerPageRoutes } from "./index-routes-pages";
 import { registerPageAutomationRoutes } from "./index-routes-page-automations";
@@ -98,6 +99,7 @@ registerChannelTransferRoutes(app);
 registerMachineNameRoutes(app);
 registerMachineRetirementRoutes(app);
 registerHarnessActionRoutes(app);
+registerSetupIntentRoutes(app);
 registerIndexRoutesHumanProfile(app);
 registerIndexRoutesHumanAvatar(app);
 
