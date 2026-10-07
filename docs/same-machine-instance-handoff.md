@@ -89,7 +89,12 @@ exactly that mention, and nothing else:
 `handoff-elsewhere.ts` moves a repository-backed source whose machine cannot
 take its directory:
 
-1. Hub stops the source with `worktreeDisposition: "retain"` and a
+1. Hub resolves the exact source Run and Instance even when its Run has
+   already exited. A sleeping/interrupted source is marked `stopped` before
+   dispatch, so the successor's reply cannot wake it again. This serializes
+   with wake preparation; a pending continuation or changed source refuses
+   the handoff. An automatic wake rechecks rest under the source lock.
+   Hub then stops the source with `worktreeDisposition: "retain"` and a
    `handoffExport: { branch, channelId }` (branch `xmatrix/handoff/<16 hex>`,
    one per handoff message). A daemon advertising `machine_handoff_export_v1`
    waits until the process tree is gone, then, before reporting the stop,
@@ -101,7 +106,9 @@ take its directory:
    Channel's Space that is revoked as soon as the push ends. Branches outside
    `xmatrix/handoff/` are refused by the Hub schema and by the daemon. The stop
    result carries `handoffExport: { branch, state: "pushed" | "failed", commit, base, dirty, error }`.
-2. Hub waits up to 15 s for that result (post-commit work runs in a Worker's
+2. A source lookup or stop issuance failure refuses the handoff; it does not
+   silently launch a successor. After a durable stop request, Hub waits up to
+   15 s for that result (post-commit work runs in a Worker's
    background budget), then starts the successor through an ordinary
    any-input launch as the handoff's author, pinned to `repo:<repository>` and,
    for a named successor, `harness:<harness>`. The dispatch carries

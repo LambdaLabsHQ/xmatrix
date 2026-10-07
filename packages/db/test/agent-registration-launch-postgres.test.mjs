@@ -850,6 +850,9 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(Object.hasOwn(repoWake.run_input_json.metadata, 'connectorRepositoryAuthorization'), false);
     const wakeIntent = (await sql(`SELECT * FROM data.agent_reborn_intents WHERE intent_id=$1`,
       [woke.woken.find(item => item.instanceId === sleeper.instanceId).intentId])).rows[0];
+    await assert.rejects(new PostgresRuntimeRepository(database).stopRestingInstances({ requestId: "handoff-pending-wake",
+      channelId: "channel", actorUserId: "caller", handoffSource: { instanceId: sleeper.instanceId, runId: sleeper.runId } }),
+      error => error.code === "reborn_pending", "a pending wake must refuse the cross-machine handoff");
     assert.equal(wakeIntent.actor_user_id, "owner", "a wake acts as the Instance's owner, whoever posted");
     assert.equal(wakeIntent.stop_required, false, "a resting predecessor has no process to stop");
     assert.equal(wakeIntent.kind, "wake", "a wake is recorded as a wake, not a reborn");
