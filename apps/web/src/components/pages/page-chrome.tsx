@@ -441,3 +441,36 @@ export function PageHistory({ spaceId, pageId, token, headRevision, canEdit, con
     </div>
   );
 }
+
+/** Deletion uses the existing server authority and never recursively removes children. */
+export function DeletePageDialog({ open, title, hasChildren, onClose, onDelete }: {
+  open: boolean; title: string; hasChildren: boolean; onClose: () => void; onDelete: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { if (open) setError(null); }, [open]);
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try { await onDelete(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete this page."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <CenteredDialogShell open={open} busy={busy} labelledBy="page-delete-title" onCancel={onClose}
+      panelClassName="max-w-md">
+      <DialogPanelHeader labelledBy="page-delete-title" title="Delete this page?" />
+      <div className="space-y-2 px-5 py-4 text-sm">
+        <p className="break-words font-semibold">{title}</p>
+        <p>{hasChildren ? "Move or delete its child pages first."
+          : "This permanently deletes the page and its version history, and stops its automations. Linked conversations are kept."}</p>
+        {error && <p role="alert" className={noticeClass("attention")}>{error}</p>}
+      </div>
+      <DialogPanelFooter>
+        <DialogButton disabled={busy} onClick={onClose}>Cancel</DialogButton>
+        <DialogButton tone="destructive" busy={busy} disabled={busy || hasChildren}
+          onClick={() => void remove()}>Delete page</DialogButton>
+      </DialogPanelFooter>
+    </CenteredDialogShell>
+  );
+}
