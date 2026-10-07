@@ -1,12 +1,20 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo, type ReactNode } from "react";
 
 import { shouldRetryXMatrixQuery } from "./api-client";
 
 function createClient(): QueryClient {
   return new QueryClient({
+    // React Query names a query that resolved to undefined only in development.
+    // Name it in every build: a response did not have the shape its reader
+    // expects. The e2e page fixture fails on this line.
+    queryCache: new QueryCache({
+      onError: (error) => {
+        if (error.message.endsWith(" data is undefined")) console.error(`xMatrix query resolved to undefined: ${error.message}`);
+      },
+    }),
     defaultOptions: {
       queries: {
         retry: shouldRetryXMatrixQuery,

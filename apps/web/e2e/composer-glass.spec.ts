@@ -8,6 +8,7 @@ import {
   fixtureRule,
   installApiFixtures,
 } from "./in-page-api-fixtures";
+import { fixtureSpaceResources } from "./workspace-fixtures";
 
 const LEGACY_BIND_RULE = "legacy-attachment-bind";
 const SEND_MESSAGE_RULE = "channel-launch-send";
@@ -64,6 +65,7 @@ function blurRadius(value: string): number | null {
 async function expectLegibleComposer(page: Page, testInfo: TestInfo, screenshotName: string) {
   await installApiFixtures(page);
   await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
+    await fixtureSpaceResources(page);
   await fixtureMockChannelCatalog(page);
 
   await page.goto("/app/fixture-space/channels/launch");
@@ -126,6 +128,7 @@ test.describe("mock-auth app fixture", () => {
   test("submits verified attachment bindings with append before the first delivery", async ({ page }) => {
     await installApiFixtures(page);
     await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
+    await fixtureSpaceResources(page);
     await fixtureMockChannelCatalog(page);
     await fixtureRule(page, {
       id: "r2-upload-intents",
@@ -193,6 +196,7 @@ test.describe("mock-auth app fixture", () => {
     test("composer is a taller capsule concentric with the device corners", async ({ page }, testInfo) => {
       await installApiFixtures(page);
       await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
+    await fixtureSpaceResources(page);
       await fixtureMockChannelCatalog(page);
       await page.goto("/app/fixture-space/channels/launch");
       await expect(page.locator(".app-message-timeline").getByText("Mobile list pass is ready for screenshot review.")).toBeVisible();
@@ -252,6 +256,7 @@ test.describe("mobile channel list visual states", () => {
     });
     await installApiFixtures(page);
     await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
+    await fixtureSpaceResources(page);
     await fixtureMockChannelCatalog(page);
     await fixtureRule(page, {
       id: "channel-view-preference",

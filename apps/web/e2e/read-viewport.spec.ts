@@ -7,6 +7,7 @@ import {
   fixtureChannelCatalog,
   fixtureJson,
   fixtureRequestBodies,
+  fixtureSpaceResources,
   installApiFixtures,
 } from "./workspace-fixtures";
 
@@ -50,6 +51,7 @@ async function openChannelRecordingReads(page: Page): Promise<void> {
   for (const [id, pattern, payload] of stubs) {
     await fixtureJson(page, id, pattern, payload);
   }
+  await fixtureSpaceResources(page);
   await fixtureChannelCatalog(page, "channel-catalog", [CHANNEL]);
   await fixtureJson(page, READ_RULE, "**/api/xmatrix/channels/*/read", { ok: true });
   await page.goto("/app");
