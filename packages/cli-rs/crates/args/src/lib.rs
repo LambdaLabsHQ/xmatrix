@@ -401,12 +401,6 @@ pub enum Commands {
         #[command(subcommand)]
         command: PageCommand,
     },
-    /// Run the xMatrix space management runtime
-    Management {
-        /// Boxed: the management surface is much larger than every other command.
-        #[command(subcommand)]
-        command: Box<ManagementCommand>,
-    },
     /// Create and manage Channel Automations
     Automation {
         #[command(subcommand)]
@@ -504,49 +498,6 @@ pub enum AutomationCommand {
         #[arg(long)]
         json: bool,
     },
-}
-
-#[derive(Subcommand)]
-pub enum ManagementCommand {
-    /// Search active or archived channels across metadata, bindings, loops, and messages
-    Channels {
-        /// Space ID managed by this run
-        #[arg(long)]
-        space: String,
-        /// Search query; empty lists channels
-        #[arg(long, default_value = "")]
-        query: String,
-        /// Maximum matches
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
-        /// Print machine-readable JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Inspect one authoritative channel detail view
-    Channel {
-        /// Space ID managed by this run
-        #[arg(long)]
-        space: String,
-        /// Stable channel ID
-        #[arg(long)]
-        channel: String,
-        /// Number of tail messages to include
-        #[arg(long, default_value_t = 50)]
-        message_limit: u32,
-        /// Print machine-readable JSON
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-impl ManagementCommand {
-    /// The `--space` a command names, so it can be resolved to an id first.
-    pub fn space_mut(&mut self) -> &mut String {
-        match self {
-            Self::Channels { space, .. } | Self::Channel { space, .. } => space,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -859,24 +810,6 @@ mod tests {
                 }
             })
         ));
-    }
-
-    #[test]
-    fn channel_management_read_parses() {
-        let cli =
-            Cli::try_parse_from(["xmatrix", "channel", "management-read", "channel-1", "off"])
-                .expect("channel management-read should parse");
-        let Some(Commands::Channel {
-            command:
-                ChannelCommand::ManagementRead {
-                    channel_id,
-                    state: ManagementReadState::Off,
-                },
-        }) = cli.command
-        else {
-            panic!("expected channel management-read command");
-        };
-        assert_eq!(channel_id, "channel-1");
     }
 
     #[test]
@@ -1964,13 +1897,6 @@ pub enum ChannelCommand {
         /// Desired worktree isolation state
         state: WorktreeState,
     },
-    /// Control whether the management assistant can read this channel
-    ManagementRead {
-        /// Channel ID or xmatrix.sh channel URL
-        channel_id: String,
-        /// Read setting for the management assistant
-        state: ManagementReadState,
-    },
     /// Send a message to a channel
     Send(SendArgs),
     /// Show all available message history for a channel
@@ -2003,18 +1929,6 @@ pub enum ChannelVisibilityState {
 pub enum WorktreeState {
     On,
     Off,
-    Inherit,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-pub enum ManagementReadState {
-    /// The assistant can read messages in this channel
-    On,
-    /// The assistant can see activity only, not message text
-    Activity,
-    /// The assistant cannot read this channel
-    Off,
-    /// Use the space default
     Inherit,
 }
 
@@ -2736,35 +2650,17 @@ mod registration_argument_tests {
     use clap::Parser;
 
     #[test]
-    fn management_channel_discovery_commands_parse() {
-        let channels = Cli::try_parse_from([
-            "xmatrix",
-            "management",
-            "channels",
-            "--space",
-            "space-1",
-            "--query",
-            "verification",
-            "--json",
-        ])
-        .expect("management channels should parse");
-        let Some(Commands::Management { command }) = channels.command else {
-            panic!("expected a management command");
-        };
-        let ManagementCommand::Channels {
-            space,
-            query,
-            limit: 50,
-            json: true,
-        } = *command
-        else {
-            panic!("expected management channels command");
-        };
-        assert_eq!(space, "space-1");
-        assert_eq!(query, "verification");
+    fn retired_management_commands_do_not_parse() {
+        // Not a built-in any more: it falls through to the external passthrough.
+        assert!(matches!(
+            Cli::try_parse_from(["xmatrix", "management", "channels", "--space", "space-1"])
+                .expect("unknown commands fall through to the passthrough")
+                .command,
+            Some(Commands::External(_))
+        ));
         assert!(
-            Cli::try_parse_from(["xmatrix", "management", "agents", "--space", "space-1"]).is_err(),
-            "Agents are listed with `xmatrix agent list`"
+            Cli::try_parse_from(["xmatrix", "channel", "management-read", "channel-1", "off"])
+                .is_err()
         );
     }
 

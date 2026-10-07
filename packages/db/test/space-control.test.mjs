@@ -137,53 +137,6 @@ test("catalog pagination preserves the existing total fanout bound", async () =>
   assert.equal(pages, 11);
 });
 
-test("Space management config validates references and commits one control revision", async () => {
-  const db = database((query) => query.name === "space_placement_resolve_v1"
-    ? [activePlacementRow()]
-    : query.name === "space_management_config_admin_v1"
-      ? [{ user_id: "user-1" }]
-      : query.name === "space_management_config_channel_v1"
-        ? [{ channel_id: "channel-1" }]
-        : query.name === "space_management_config_head_v1"
-          ? [{ commit_sequence: 1 }]
-          : []);
-  const result = await new PostgresSpaceControlRepository(db, "shard-0")
-    .updateSpaceManagementConfig({
-      requestId: "request-1",
-      commandId: "command-1",
-      spaceId: "space-1",
-      actorUserId: "user-1",
-      expectedVersion: 0,
-      patch: { enabled: true, managementChannelId: "channel-1" },
-    });
-
-  assert.equal(result.version, 1);
-  assert.equal(result.managementAgent.enabled, true);
-  for (const queryName of [
-    "space_management_config_upsert_v1",
-    "space_management_config_head_v1",
-    "space_management_config_outbox_v1",
-    "space_control_idempotency_write_v1",
-  ]) assert.equal(db.calls.some((call) => call.name === queryName), true, queryName);
-});
-
-test("a Space management prompt is checked when saved, and an empty one clears it", async () => {
-  const db = database((query) => query.name === "space_placement_resolve_v1"
-    ? [activePlacementRow()]
-    : query.name === "space_management_config_admin_v1" ? [{ user_id: "user-1" }]
-      : query.name === "space_management_config_lock_v1"
-        ? [{ config_json: { enabled: true, prompt: "old" }, version: 1 }]
-        : query.name === "space_management_config_head_v1" ? [{ commit_sequence: 1 }] : []);
-  const repository = new PostgresSpaceControlRepository(db, "shard-0");
-  const update = (commandId, prompt) => repository.updateSpaceManagementConfig({
-    requestId: commandId, commandId, spaceId: "space-1", actorUserId: "user-1", patch: { prompt } });
-  await assert.rejects(update("invalid-pwd", "@auto pwd:/tmp"), error => error.code === "invalid_management_prompt");
-  const saved = await update("valid", "@auto harness:codex");
-  assert.equal(saved.managementAgent.prompt, "@auto harness:codex");
-  const reset = await update("reset", null);
-  assert.equal(reset.managementAgent.prompt, undefined);
-});
-
 test("Space update resolves the current PostgreSQL version when the product route omits it", async () => {
   const db = database((query) => query.name === "space_placement_resolve_v1"
     ? [activePlacementRow()]
@@ -485,6 +438,9 @@ test("Space listing fans the global membership page into the routed physical sha
 
   assert.deepEqual(result.spaces.map((space) => space.id), ["space-1"]);
   assert.equal(result.spaces[0].pendingJoinRequestCount, 2);
+  // The retired management agent left no Space configuration behind.
+  assert.equal("managementAgent" in result.spaces[0], false);
+  assert.equal(db.calls.some((call) => /space_management_configs/u.test(call.text ?? "")), false);
   const shardContext = db.calls.find((call) => call.context?.operation === "space.list-shard");
   assert.deepEqual(shardContext.context.placement, {
     spaceId: "space-1", shardId: "shard-1", placementEpoch: 4,

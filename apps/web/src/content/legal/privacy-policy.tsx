@@ -122,20 +122,10 @@ export function PrivacyPolicyContent() {
           A run configured without a supported sandbox does not receive that sandbox protection.
         </p>
         <p>
-          A Space may have no Management Agent. When an Owner or Admin designates one, that designation
-          gives it Space-wide role access to all current and future Channels—including closed, private,
-          or restricted Channels—and their threads, attachments, tasks, and organization memory. It
-          need not join each Channel. The Owner or Admin can replace or cancel the designation. This
-          access does not by itself extend to another Space, raw local files or terminal output, Saved
-          Secret plaintext, or Instance Trace.
-        </p>
-        <p>
-          Within that role, the Management Agent may autonomously perform ordinary, visible management
-          work, such as summarizing the Space, maintaining tasks and plans, updating Channel topics,
-          and dispatching authorized Profiles. Secret injection, privileged host commands, destructive
-          changes, external publication, production deployment, security-permission changes, purchases,
-          and other high-risk actions require a separate one-shot approval or an Owner/Admin policy that
-          expressly authorizes the bounded action.
+          Secret injection, privileged host commands, destructive changes, external publication,
+          production deployment, security-permission changes, purchases, and other high-risk actions
+          require a separate one-shot approval or an Owner/Admin policy that expressly authorizes the
+          bounded action.
         </p>
       </LegalSection>
 
@@ -166,8 +156,8 @@ export function PrivacyPolicyContent() {
         <p>
           An Agent&apos;s owner controls trace access and may view its available trace. Another user
           requires an active owner-approved trace grant plus the required shared Space and per-event
-          Channel access. A Space Owner, Admin, or Management Agent does not automatically gain trace
-          access. Revocation, expiry, loss of Channel access, or host expiry ends access immediately.
+          Channel access. A Space Owner or Admin does not automatically gain trace access.
+          Revocation, expiry, loss of Channel access, or host expiry ends access immediately.
         </p>
         <p>
           xMatrix does not publish a provider&apos;s complete private chain of thought. ACP thought chunks

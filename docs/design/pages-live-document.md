@@ -500,8 +500,7 @@ change.
   Automations by trigger key, and delivered to the Automation's authority as
   "due now".
 - There is no Channel-scoped Automation: the page creates one on one of its
-  sections, and a Management Agent's `automation_*` operations act through the
-  page as its owner. The contract migration moved the existing ones: each
+  sections. The contract migration moved the existing ones: each
   one's reference was appended to the page its conversation was last linked
   to, or else its Space's first root page.
 

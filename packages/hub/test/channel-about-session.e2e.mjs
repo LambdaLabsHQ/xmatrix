@@ -9,7 +9,7 @@ import {
   sleep,
   test,
 } from "./agent-mention-spawn.fixture.mjs";
-import { admitRegisteredSpawn, connectDaemon, createClosedChannel, createRoutableAgent, enableManagementAgent, sendSpawnResult, startPgHubWorker, testMachine, homeSpaceId } from "./agent-launch-postgres.fixture.mjs";
+import { admitRegisteredSpawn, connectDaemon, createClosedChannel, createRoutableAgent, sendSpawnResult, startPgHubWorker, testMachine, homeSpaceId } from "./agent-launch-postgres.fixture.mjs";
 import { Client } from "pg";
 
 async function channelRowCount(connectionString, channelId) {
@@ -24,9 +24,9 @@ async function channelRowCount(connectionString, channelId) {
 
 // Every worker runs the singleton Launch coordinator, which claims every
 // eligible Launch in its database. Sharing one database let a concurrent
-// test's coordinator claim this suite's fresh management Launch, settle it
+// test's coordinator claim this suite's fresh About Launch, settle it
 // daemon-offline (its daemon socket lives in the other worker) and defer it
-// 30s, so the management spawn below timed out.
+// 30s, so the About spawn below timed out.
 test("concurrent PostgreSQL test workers never share the database their Launch coordinators claim from", async () => {
   const userId = `pg-worker-isolation-e2e-${randomUUID()}`;
   const vars = { XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN, XMATRIX_MOCK_AUTH_USER_ID: userId,
@@ -57,7 +57,7 @@ test("channel activity starts an implicit About session without posting a reques
     },
   });
   let daemon;
-  let managementAgent;
+  let aboutAgent;
   try {
     const auth = { Authorization: `Bearer ${MOCK_TOKEN}` };
     const { hostId, machineId } = testMachine("channel-about");
@@ -75,16 +75,17 @@ test("channel activity starts an implicit About session without posting a reques
     assert.equal(languageConfigured.status, 200, await languageConfigured.clone().text());
 
     daemon = await connectDaemon(worker, { machineId, hostId });
-    // Channel About launches through registrations: Jev chooses among them.
+    // Channel About launches through ordinary registrations: Jev chooses among
+    // them, and no Space management configuration exists or is needed.
     await createRoutableAgent(worker, { token: MOCK_TOKEN, spaceId: root.spaceId,
-      name: `channel-about-manager-${randomUUID()}`, machineId, hostId, capabilities: ["maintenance"] });
-    const configured = await enableManagementAgent(worker, root.spaceId);
-    assert.equal(configured.status, 200, await configured.clone().text());
+      name: `channel-about-registration-${randomUUID()}`, machineId, hostId, capabilities: ["maintenance"] });
+    const space = await json(await worker.fetch(`/api/spaces/${encodeURIComponent(root.spaceId)}`, { headers: auth }));
+    assert.equal((space.space ?? space).managementAgent, undefined, "the retired management agent has no Space config");
 
     const managerSpawn = daemon.inbox.waitFor(
       (message) => message.type === "machine_spawn_agent" &&
         message.channelId === root.id && message.registration !== undefined,
-      "implicit channel About management agent spawn",
+      "implicit Channel About session spawn",
     );
     const evidenceMessages = [];
     for (let index = 1; index <= 5; index += 1) {
@@ -97,13 +98,15 @@ test("channel activity starts an implicit About session without posting a reques
       evidenceMessages.push(posted.message);
     }
 
-    const managementCommand = await managerSpawn;
-    assert.equal(managementCommand.sourceMessageId, undefined, "About organization has no synthetic message");
-    assert.match(managementCommand.prompt, /implicit system request, not a Channel message/u);
-    assert.match(managementCommand.prompt, /Always recompute and apply the About/u);
-    assert.match(managementCommand.prompt, /Do not post an acknowledgement, proposal, confirmation, or any other message/u);
-    assert.match(managementCommand.prompt, /entirely in Simplified Chinese \(zh\)/u);
-    assert.match(managementCommand.prompt, /only source of the About output language/u);
+    const aboutCommand = await managerSpawn;
+    assert.equal(aboutCommand.sourceMessageId, undefined, "About organization has no synthetic message");
+    assert.match(aboutCommand.prompt, /^You keep this Channel's About current\.\n/u);
+    assert.doesNotMatch(aboutCommand.prompt, /xMatrix system agent/u);
+    assert.match(aboutCommand.prompt, /implicit system request, not a Channel message/u);
+    assert.match(aboutCommand.prompt, /Always recompute and apply the About/u);
+    assert.match(aboutCommand.prompt, /Do not post an acknowledgement, proposal, confirmation, or any other message/u);
+    assert.match(aboutCommand.prompt, /entirely in Simplified Chinese \(zh\)/u);
+    assert.match(aboutCommand.prompt, /only source of the About output language/u);
 
     const historyAfterTrigger = await channelHistory(worker, MOCK_TOKEN, root.id);
     assert.deepEqual(
@@ -113,14 +116,20 @@ test("channel activity starts an implicit About session without posting a reques
     );
 
     // About binds its own Run, never a Channel Instance.
-    assert.equal(managementCommand.instanceId, `${root.id}:about#1`);
-    assert.equal(managementCommand.runId, managementCommand.instanceId);
-    assert.equal(managementCommand.registration.instanceId, managementCommand.instanceId);
-    const managementToken = await admitRegisteredSpawn(worker, daemon, managementCommand);
-    sendSpawnResult(daemon, managementCommand, { ok: true, pid: 4242 });
-    managementAgent = await connectAgent(worker, {
-      identityId: managementCommand.identityId,
-      name: managementCommand.agentName,
+    assert.equal(aboutCommand.instanceId, `${root.id}:about#1`);
+    assert.equal(aboutCommand.runId, aboutCommand.instanceId);
+    assert.equal(aboutCommand.registration.instanceId, aboutCommand.instanceId);
+    // Its private directory reads only this Channel, on demand, under the real Space id.
+    assert.equal(aboutCommand.managementSpaceId, root.spaceId);
+    assert.equal(aboutCommand.remoteRepo, undefined);
+    assert.equal(aboutCommand.workspace.metadata.syntheticManagementWorkspace, true);
+    assert.equal(aboutCommand.workspace.metadata.managementProjectionKind, "channel");
+    assert.match(aboutCommand.workspace.canonicalCwd, /^\.xmatrix-management\/registration-/u);
+    const aboutToken = await admitRegisteredSpawn(worker, daemon, aboutCommand);
+    sendSpawnResult(daemon, aboutCommand, { ok: true, pid: 4242 });
+    aboutAgent = await connectAgent(worker, {
+      identityId: aboutCommand.identityId,
+      name: aboutCommand.agentName,
       agentType: "codex",
       autoProvisionRun: false,
       metadata: {
@@ -128,44 +137,44 @@ test("channel activity starts an implicit About session without posting a reques
         machineId,
         hostId,
         hostName: hostId,
-        workspaceMachineId: managementCommand.workspace.machineId,
-        workspaceCwd: managementCommand.workspace.canonicalCwd,
-        cwd: managementCommand.workspace.canonicalCwd,
-        runId: managementCommand.runId,
-        executionKey: managementCommand.executionKey,
+        workspaceMachineId: aboutCommand.workspace.machineId,
+        workspaceCwd: aboutCommand.workspace.canonicalCwd,
+        cwd: aboutCommand.workspace.canonicalCwd,
+        runId: aboutCommand.runId,
+        executionKey: aboutCommand.executionKey,
         autoJoinChannelId: root.id,
       },
-    }, managementToken);
+    }, aboutToken);
     const instances = await json(await worker.fetch("/api/agent-instances", { headers: auth }));
     assert.equal(
-      instances.instances.some((instance) => instance.instanceId === managementCommand.instanceId),
+      instances.instances.some((instance) => instance.instanceId === aboutCommand.instanceId),
       false,
       "Channel About sessions never appear as Channel Agent Instances",
     );
-    const aboutHistory = await channelHistory(worker, managementToken, root.id);
+    const aboutHistory = await channelHistory(worker, aboutToken, root.id);
     assert.equal(aboutHistory.aboutInput.expectedRevision, 0);
     const metadataBefore = await json(await worker.fetch(`/api/channels/${root.id}/metadata-history`, {
-      headers: { Authorization: `Bearer ${managementToken}` },
+      headers: { Authorization: `Bearer ${aboutToken}` },
     }));
     assert.equal(metadataBefore.currentRevision, 0);
     const catalog = await json(await worker.fetch(`/api/channels?familyOfChannelId=${root.id}`, {
-      headers: { Authorization: `Bearer ${managementToken}` },
+      headers: { Authorization: `Bearer ${aboutToken}` },
     }));
     assert.deepEqual(catalog.channels.map(channel => channel.id), [root.id]);
     assert.equal(catalog.catalogSync, undefined, "no other Channel catalog context reaches About");
     const foreign = await createClosedChannel(worker, `foreign-${randomUUID()}`);
     for (const path of [`/api/channels/${foreign.id}/history`, `/api/channels/${foreign.id}/metadata-history`,
       `/api/channels?familyOfChannelId=${foreign.id}`]) {
-      const denied = await worker.fetch(path, { headers: { Authorization: `Bearer ${managementToken}` } });
+      const denied = await worker.fetch(path, { headers: { Authorization: `Bearer ${aboutToken}` } });
       assert.ok([401,403].includes(denied.status), `${path}: ${denied.status}`);
     }
     const stale = await worker.fetch(`/api/channels/${root.id}`, {
-      method: "PATCH", headers: { Authorization: `Bearer ${managementToken}`, "content-type": "application/json" },
+      method: "PATCH", headers: { Authorization: `Bearer ${aboutToken}`, "content-type": "application/json" },
       body: JSON.stringify({ summary: "Stale About", throughMessageId: evidenceMessages.at(-1).messageId, expectedRevision: 99 }),
     });
     assert.equal(stale.status, 409, await stale.clone().text());
     const foreignInput = await worker.fetch(`/api/channels/${root.id}`, {
-      method: "PATCH", headers: { Authorization: `Bearer ${managementToken}`, "content-type": "application/json" },
+      method: "PATCH", headers: { Authorization: `Bearer ${aboutToken}`, "content-type": "application/json" },
       body: JSON.stringify({ summary: "Foreign input", throughMessageId: "other-channel-message", expectedRevision: 0 }),
     });
     assert.equal(foreignInput.status, 403, await foreignInput.clone().text());
@@ -173,7 +182,7 @@ test("channel activity starts an implicit About session without posting a reques
     // saved; the session stays open, so the write below still succeeds.
     const mangled = await worker.fetch(`/api/channels/${encodeURIComponent(root.id)}`, {
       method: "PATCH",
-      headers: { authorization: `Bearer ${managementToken}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${aboutToken}`, "content-type": "application/json" },
       body: JSON.stringify({ summary: "?????? Management Agent ???? About?", name: "????" }),
     });
     assert.equal(mangled.status, 422, await mangled.clone().text());
@@ -181,7 +190,7 @@ test("channel activity starts an implicit About session without posting a reques
     const summary = "自动整理并验证 Management Agent 的频道 About。";
     const update = await worker.fetch(`/api/channels/${encodeURIComponent(root.id)}`, {
       method: "PATCH",
-      headers: { authorization: `Bearer ${managementToken}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${aboutToken}`, "content-type": "application/json" },
       body: JSON.stringify({ summary, throughMessageId: evidenceMessages.at(-1).messageId, expectedRevision: 0 }),
     });
     assert.equal(update.status, 200, await update.clone().text());
@@ -191,7 +200,7 @@ test("channel activity starts an implicit About session without posting a reques
     const revisions = await json(await worker.fetch(`/api/channels/${root.id}/metadata-history`, { headers: auth }));
     assert.deepEqual(revisions.revisions.map(row => Number(row.revision)), [1,0]);
     assert.equal(revisions.revisions[0].summary, summary);
-    assert.equal(revisions.revisions[0].source_json.runId, managementCommand.runId);
+    assert.equal(revisions.revisions[0].source_json.runId, aboutCommand.runId);
     assert.ok(revisions.revisions[0].source_json.inputIds.includes(aboutHistory.aboutInput.inputId));
     assert.equal(revisions.revisions[0].source_json.triggerMessageId, evidenceMessages.at(-1).messageId);
     const inputEvidence = await json(await worker.fetch(`/api/channels/${root.id}/metadata-history?inputId=${aboutHistory.aboutInput.inputId}`, { headers: auth }));
@@ -209,21 +218,21 @@ test("channel activity starts an implicit About session without posting a reques
     assert.equal((await json(await worker.fetch(`/api/channels/${root.id}/metadata-history?revision=1`, { headers: auth }))).revisions[0].summary, summary);
     // The Hub, not the session, records who wrote the summary and how far it read.
     assert.deepEqual(updated.channel.summarySource, {
-      author: { kind: "run", runId: managementCommand.runId, agentName: managementCommand.agentName },
+      author: { kind: "run", runId: aboutCommand.runId, agentName: aboutCommand.agentName },
       generatedAt: updated.channel.summarySource.generatedAt,
       throughSequence: evidenceMessages.at(-1).sequence,
     });
     // Its one job is done, so the Hub has its daemon end it; the refresh it
     // was handed meanwhile then starts as its successor.
     const aboutStop = await daemon.inbox.waitFor(
-      (message) => message.type === "machine_stop_agent" && message.runId === managementCommand.runId,
+      (message) => message.type === "machine_stop_agent" && message.runId === aboutCommand.runId,
       "Channel About session stop after its summary was saved",
     );
-    assert.equal(aboutStop.instanceId, managementCommand.instanceId);
+    assert.equal(aboutStop.instanceId, aboutCommand.instanceId);
     assert.equal(aboutStop.channelId, root.id);
     assert.match(updated.channel.metadata.summary, /\p{Script=Han}/u);
 
-    const forbiddenRuntimeWrite = await managementAgent.request({
+    const forbiddenRuntimeWrite = await aboutAgent.request({
       type: "channel_message",
       channelId: root.id,
       body: "Channel About must never publish over Runtime",
@@ -235,7 +244,7 @@ test("channel activity starts an implicit About session without posting a reques
       `/api/channels/${encodeURIComponent(root.id)}/messages`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${managementToken}`, "content-type": "application/json" },
+        headers: { Authorization: `Bearer ${aboutToken}`, "content-type": "application/json" },
         body: JSON.stringify({ body: "Channel About must never post this message" }),
       },
     );
@@ -254,30 +263,37 @@ test("channel activity starts an implicit About session without posting a reques
         (message) => message.type === "machine_spawn_agent" &&
           message.channelId === root.id &&
           message.registration !== undefined &&
-          message.runId !== managementCommand.runId,
+          message.runId !== aboutCommand.runId,
         "unexpected concurrent Channel About session",
         250,
       ),
       /Timed out waiting for unexpected concurrent Channel About session/u,
       "a second cadence trigger must coalesce while About is active",
     );
+    // An explicit refresh while the session serves is accepted as its pending request.
+    const refresh = await worker.fetch(`/api/spaces/${encodeURIComponent(root.spaceId)}/channel-about`, {
+      method: "POST", headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ channelId: root.id, requestId: `channel-about-refresh-${randomUUID()}` }),
+    });
+    assert.equal(refresh.status, 200, await refresh.clone().text());
+    assert.deepEqual(await refresh.json(), { accepted: true, coalesced: true });
 
-    managementAgent.ws.close();
-    managementAgent = undefined;
+    aboutAgent.ws.close();
+    aboutAgent = undefined;
     const refreshSpawn = daemon.inbox.waitFor(
       (message) => message.type === "machine_spawn_agent" &&
         message.channelId === root.id &&
         message.registration !== undefined &&
-        message.runId !== managementCommand.runId,
+        message.runId !== aboutCommand.runId,
       "coalesced Channel About successor",
     );
     daemon.ws.send(JSON.stringify({
       type: "machine_run_exited",
-      runId: managementCommand.runId,
-      instanceId: managementCommand.instanceId,
-      executionKey: managementCommand.executionKey,
-      agentId: managementCommand.identityId,
-      agentName: managementCommand.agentName,
+      runId: aboutCommand.runId,
+      instanceId: aboutCommand.instanceId,
+      executionKey: aboutCommand.executionKey,
+      agentId: aboutCommand.identityId,
+      agentName: aboutCommand.agentName,
       pid: 4242,
       status: "completed",
       exitCode: 0,
@@ -318,7 +334,7 @@ test("channel activity starts an implicit About session without posting a reques
       "an implicit About runtime failure must not leak a visible Channel notice",
     );
   } finally {
-    if (managementAgent) managementAgent.ws.close();
+    if (aboutAgent) aboutAgent.ws.close();
     if (daemon) daemon.ws.close();
     await worker.stop();
   }

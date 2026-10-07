@@ -41,7 +41,7 @@ test('a registration is offered only where preparation can route its launch', as
     registeredWorkspaceIds: new Set(['ws-a', 'ws-b']) };
   assert.equal(routableRegistrationLaunch([daemon('h1'), daemon('h2')], both), undefined);
   assert.deepEqual(routableRegistrationLaunch([daemon('h1')], both)?.workspaceReferences, ['repo:o/r', 'ws-a', 'ws-b']);
-  // A management launch runs in a managed directory only on a daemon that declares it.
+  // A launch with no workspace runs in a managed directory only on a daemon that declares it.
   const managed = { workspaceReferences: [], registeredWorkspaceIds: new Set(), managedWorkspace: true, runtimeDefaultOnly: false };
   assert.equal(routableRegistrationLaunch([daemon('h')], managed), undefined);
   assert.ok(routableRegistrationLaunch([daemon('h', 'registration_managed_v1')], managed));

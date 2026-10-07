@@ -226,7 +226,7 @@ export function SpaceBillingSection({ userId, space }: {
                 </button>
                 <p className="text-xs text-muted-foreground">
                   Renews until you cancel in the billing portal; cancelling takes effect at the end of the paid period.
-                  Tax is added at checkout. See <Link className="underline underline-offset-4" href="/terms#billing">Terms §12</Link>.
+                  Tax is added at checkout. See <Link className="underline underline-offset-4" href="/terms#billing">Terms §11</Link>.
                 </p>
               </div>
             ) : <p className="text-sm">Ask the Space owner to upgrade.</p>}

@@ -51,7 +51,6 @@ const boundary = {
   requireHumanAuth: (user) => user,
   requireLiveAgentRun: async () => { throw new Error("unexpected Agent path"); },
   requestErrorResponse: (c, error) => c.json({ error: error.message }, error.status || 500),
-  sha256Hex: async () => "digest",
   listAutomations: async () => { throw new Error("unexpected list"); },
   async getAutomation(_env, input) {
     state.calls.push({ kind: "get", input });
@@ -69,7 +68,6 @@ const boundary = {
     state.tasks.set(input.automationId, next);
     return {};
   },
-  publishAutomationSystemFact: async () => undefined,
 };
 
 const app = new Hono();

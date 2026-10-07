@@ -209,8 +209,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     isMobileViewport,
     renamingSpaceId,
     creatingSpace,
-    managementSetupSpaceId,
-    setManagementSetupSpaceId,
     desktopSidebarWidth,
     resizingDesktopSidebar,
     startDesktopSidebarResize,
@@ -308,7 +306,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     inviteSpaceMembers,
     updateSpaceMemberRole,
     removeSpaceMember,
-    updateSpaceManagementAgent,
     stopAgentInstance,
     rebornAgentInstance,
     handoffAgentInstance,
@@ -1131,7 +1128,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       localSetupReady={localSetupReady}
       localMachineName={localMachineName}
       onNameLocalMachine={(name) => void nameLocalMachine(name)}
-      managementSetupSpaceId={managementSetupSpaceId}
       onStartDesktopDaemon={() => void startDesktopDaemon()}
       onStopDesktopDaemon={() => void stopDesktopDaemon()}
       onRestartDesktopDaemon={() => void restartDesktopDaemon()}
@@ -1156,7 +1152,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onInviteSpaceMembers={inviteSpaceMembers}
       onUpdateSpaceMemberRole={updateSpaceMemberRole}
       onRemoveSpaceMember={removeSpaceMember}
-      onUpdateSpaceManagementAgent={updateSpaceManagementAgent}
       onUpdateSpaceMemberPermissions={updateSpaceMemberPermissions}
       onUpdateSpacePreferredLanguage={updateSpacePreferredLanguage}
       onDeleteSpace={deleteSpace}
@@ -1164,7 +1159,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       creatingSpace={creatingSpace}
       onCreateSpace={(name) => createSpace(name, { select: true })}
       onSelectSpace={selectSpace}
-      onDismissManagementSetup={() => setManagementSetupSpaceId(null)}
       onLogout={() => void logoutAndClearDeviceData().catch(() => undefined)}
       onOpenAgentCreate={openAgentCreate}
       onOpenLocalManagedAgentEdit={openLocalManagedAgentEdit}

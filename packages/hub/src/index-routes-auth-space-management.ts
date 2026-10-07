@@ -65,7 +65,7 @@ function deploymentPinnedSpace(env: Env, spaceId: string): boolean {
     .some((pinned) => typeof pinned === "string" && pinned.trim() === spaceId);
 }
 
-/** The execution Channel and request id a management launch names; undefined when either is missing or too long. */
+/** The Channel and request id a Channel About refresh names; undefined when either is missing or too long. */
 async function readLaunchRequest(c: Context): Promise<{ channelId: string; requestId: string } | undefined> {
   const body = (await c.req.json().catch(() => ({}))) as { channelId?: unknown; requestId?: unknown };
   const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
@@ -77,7 +77,7 @@ async function readLaunchRequest(c: Context): Promise<{ channelId: string; reque
 
 
 export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env }>): void {
-  app.post("/api/spaces/:spaceId/management/channel-about", (c) => jsonErrors(c, async () => {
+  app.post("/api/spaces/:spaceId/channel-about", (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
     const spaceId = c.req.param("spaceId");
     const launch = await readLaunchRequest(c);
@@ -92,7 +92,8 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       requestId,
       actorUserId: authUser.id,
     });
-    if (result.spawned !== 1) {
+    // A session already serving the Channel takes the request as its pending refresh.
+    if (result.spawned !== 1 && result.coalesced !== 1) {
       return c.json({
         error: result.notices[0] || "Could not start Channel About",
         code: "channel_about_not_started",

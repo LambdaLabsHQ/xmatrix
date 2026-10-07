@@ -3,10 +3,8 @@ import { test } from "node:test";
 import { MessageAuthorityError } from "@xmatrix/db";
 
 import {
-  hasProductManagementAgentMention,
   orchestrateProductAgentMentions,
   orchestrateProductChannelAbout,
-  orchestrateProductManagementAgentMention,
   orchestrateProductNewConversationStart,
   parseProductHandoffInstanceMentions,
   productSpacePreferredLanguage,
@@ -21,13 +19,6 @@ import {
   parseProductAgentStopCommand,
 } from "../src/product-agent-intervention.ts";
 
-function enabledManagementPort(overrides = {}) {
-  return basePort({
-    async getManagementConfig() { return { enabled: true, sideEffectsEnabled: true, generation: 3 }; },
-    ...overrides,
-  });
-}
-
 function handoffTarget({ channelInstanceId }, overrides = {}) {
   return { instanceId: "ch-1:2", instanceStatus: "online", channelId: "ch-1", channelInstanceId,
     runId: "run-2", runStatus: "running", agentName: "codex", harness: "codex", ownerUserId: "user-1",
@@ -40,11 +31,12 @@ test("literal lifecycle examples perform no preparation, lookup, stop or spawn",
   const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "literal", body, actorUserId: "user-1", port });
   assert.equal(result.considered, 0);
   assert.equal(result.spawned, 0);
-  assert.equal(hasProductManagementAgentMention("`@xmatrix`"), false);
-  assert.equal(hasProductManagementAgentMention("> @xmatrix"), false);
-  assert.equal(hasProductManagementAgentMention("\\@xmatrix"), false);
-  assert.equal(hasProductManagementAgentMention("@xmatrix.example"), false);
-  assert.equal(hasProductManagementAgentMention("Please (@xmatrix) inspect"), true);
+  // The retired management agent: an @xMatrix mention reaches no execution port either.
+  for (const retired of ["@xMatrix check the space", "Please (@xmatrix) inspect", "@xMatrix:stop"]) {
+    const ignored = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "xmatrix", body: retired,
+      actorUserId: "user-1", port });
+    assert.deepEqual(ignored, { considered: 0, spawned: 0, notices: [] }, retired);
+  }
   for (const command of ["@codex:stop", "/stop all", "xmatrix stop all"]) {
     assert.equal(parseProductAgentStopCommand(`    ${command}`), undefined);
     assert.ok(parseProductAgentStopCommand(`  ${command}`));
@@ -79,12 +71,6 @@ import {
   productAgentSystemNoticeId,
   productAgentSystemNoticeSenderSnapshot,
 } from "../src/product-agent-mention-authority-adapter.ts";
-
-test("reserved stop commands do not wake a replacement management delegate", () => {
-  assert.equal(hasProductManagementAgentMention("@xMatrix:stop"), false);
-  assert.equal(hasProductManagementAgentMention("＠xMatrix:kill maintenance"), false);
-  assert.equal(hasProductManagementAgentMention("@xMatrix inspect this channel"), true);
-});
 
 test("filesystem paths are never treated as owner/repo summon refs", () => {
   assert.equal(repoSummonReference("/tmp/project"), undefined);
@@ -128,9 +114,6 @@ function basePort(overrides = {}) {
     },
     async getChannel() {
       return { id: "ch-1", spaceId: "space-1", mode: "open" };
-    },
-    async getManagementConfig() {
-      return { enabled: false, generation: 0 };
     },
     async getSpacePreferredLanguage() {
       return "en";
@@ -264,100 +247,9 @@ test("handoff mention parse uses the shared existing-to-new grammar", () => {
   );
 });
 
-test("@xMatrix launches a persistent management delegate through Jev, with no configured Agent", async () => {
+test("implicit Channel About starts a silent one-shot session through ordinary registration, with no Space config", async () => {
+  // The port has no management configuration to read: About is gated by nothing but its Channel.
   const port = basePort({
-    async getManagementConfig() {
-      return { enabled: true, generation: 3 };
-    },
-  });
-  const result = await orchestrateProductManagementAgentMention({
-    channelId: "ch-1",
-    messageId: "msg-3",
-    body: "@xMatrix check the space",
-    actorUserId: "user-1",
-    port,
-  });
-  assert.equal(result.spawned, 1);
-  const [launch] = port.registrationLaunches;
-  assert.equal(launch.commandId, "management:msg-3");
-  assert.equal(Object.hasOwn(launch, "oneshot"), false);
-  assert.equal(launch.initialMessageId, "msg-3");
-  assert.deepEqual(launch.management, { spaceId: "space-1" });
-  assert.deepEqual(launch.coalesce, { routedAs: "management_assistant_mention", configGeneration: 3 });
-  assert.deepEqual(launch.runMetadata, { routedAs: "management_assistant_mention",
-    managementSpaceId: "space-1", managementConfigGeneration: 3 });
-  assert.match(launch.body, /check the space/u);
-  assert.match(launch.body, /after removing the @xMatrix mention: check the space$/u);
-});
-
-test("@xMatrix reuses the delegate already serving the Channel", async () => {
-  const port = basePort({
-    async getManagementConfig() {
-      return { enabled: true, generation: 3 };
-    },
-    async launchRegistrationInput() {
-      return { runId: "run:live", instanceId: "instance:live", launchId: "", agentName: "codex",
-        hostId: "host-1", coalesced: true };
-    },
-  });
-  const result = await orchestrateProductManagementAgentMention({
-    channelId: "ch-1", messageId: "msg-4", body: "@xMatrix again", actorUserId: "user-1", port,
-  });
-  assert.equal(result.spawned, 0);
-  assert.equal(result.coalesced, 1);
-  assert.deepEqual(result.notices, []);
-});
-
-test("@xMatrix reports a disabled Space instead of launching", async () => {
-  const port = basePort({
-    async getManagementConfig() {
-      return { enabled: false, generation: 3 };
-    },
-  });
-  const result = await orchestrateProductManagementAgentMention({
-    channelId: "ch-1", messageId: "msg-5", body: "@xMatrix hello", actorUserId: "user-1", port,
-  });
-  assert.equal(result.spawned, 0);
-  assert.equal(port.registrationLaunches.length, 0);
-  assert.match(result.notices[0], /management is turned off/u);
-});
-
-test("management conversation wakes xMatrix without requiring an @mention", async () => {
-  const port = basePort({
-    async getManagementConfig() {
-      return { enabled: true, managementChannelId: "ch-1", generation: 4 };
-    },
-  });
-  const result = await orchestrateProductManagementAgentMention({
-    channelId: "ch-1",
-    messageId: "msg-management-conversation",
-    body: "What is blocked across the space?",
-    actorUserId: "user-1",
-    port,
-  });
-
-  assert.equal(result.spawned, 1);
-  assert.match(port.registrationLaunches[0].body, /What is blocked across the space\?/u);
-});
-
-test("@xMatrix runs where the Space prompt's summon says", async () => {
-  const port = basePort({
-    async getManagementConfig() {
-      return { enabled: true, generation: 3, prompt: "@claude effort:high" };
-    },
-  });
-  const result = await orchestrateProductManagementAgentMention({
-    channelId: "ch-1", messageId: "msg-prompt", body: "@xMatrix check", actorUserId: "user-1", port,
-  });
-  assert.equal(result.spawned, 1);
-  assert.deepEqual(port.registrationLaunches[0].tags, { harness: "claude", effort: "high" });
-});
-
-test("implicit Channel About starts a silent one-shot session through Jev, with no configured Agent", async () => {
-  const port = basePort({
-    async getManagementConfig() {
-      return { enabled: true, sideEffectsEnabled: true, generation: 3, prompt: "@auto harness:codex" };
-    },
     async getSpacePreferredLanguage() {
       return "zh";
     },
@@ -375,16 +267,21 @@ test("implicit Channel About starts a silent one-shot session through Jev, with 
   const [launch] = port.registrationLaunches;
   assert.equal(launch.commandId, "about:channel-about:ch-1:20");
   assert.equal(Object.hasOwn(launch, "oneshot"), false);
-  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:20", triggerMessageId: "m-trigger", configGeneration: 3 });
-  assert.equal(launch.runMetadata.channelAboutTriggerMessageId, "m-trigger");
+  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:20", triggerMessageId: "m-trigger" });
+  assert.deepEqual(launch.runMetadata, { routedAs: "management_channel_about",
+    channelAboutTriggerMessageId: "m-trigger", managementSpaceId: "space-1" });
+  // Only the About session itself selects its private directory; no management launch or summon tags ride along.
+  assert.equal(Object.hasOwn(launch, "management"), false);
+  assert.equal(Object.hasOwn(launch, "coalesce"), false);
+  assert.equal(Object.hasOwn(launch, "tags"), false);
+  assert.match(launch.body, /^You keep this Channel's About current\.\n/u);
+  assert.doesNotMatch(launch.body, /xMatrix system agent/u);
   assert.match(launch.body, /Task context .*"channelId":"ch-1".*"triggerMessageId":"m-trigger"/);
   assert.match(launch.body, /Other channels, pages, local transcripts, caches/);
   assert.match(launch.body, /--expected-revision/);
   // It reads its own Channel on demand; it never mirrors the Space.
-  assert.deepEqual(launch.management, { spaceId: "space-1" });
   assert.match(launch.body, /`xmatrix channel history ch-1 --authoritative`/u);
   assert.match(launch.body, /Write the About to a UTF-8 file, then apply it with `xmatrix channel about ch-1 --summary-file <about file> --through </u);
-  assert.deepEqual(launch.tags, { harness: "codex" });
   assert.equal(launch.runMetadata.routedAs, "management_channel_about");
   assert.equal(launch.initialMessageId, undefined);
   assert.match(launch.body, /Always recompute and apply the About/u);
@@ -402,7 +299,6 @@ test("a conversation's first message names it only while nobody has named it", a
   const run = async (metadata) => {
     const port = basePort({
       async getChannel() { return { id: "ch-1", spaceId: "space-1", mode: "open", metadata }; },
-      async getManagementConfig() { return { enabled: true, sideEffectsEnabled: true, generation: 3 }; },
     });
     const result = await orchestrateProductChannelAbout({ channelId: "ch-1", requestId: "channel-about:ch-1:0",
       actorUserId: "user-1", automaticNameOnly: true, port });
@@ -417,7 +313,7 @@ test("a conversation's first message names it only while nobody has named it", a
 });
 
 test("implicit Channel About joins the session already serving the Channel", async () => {
-  const port = enabledManagementPort({
+  const port = basePort({
     async launchRegistrationInput(input) {
       this.registrationLaunches.push(input);
       return { runId: "run:about", instanceId: "session:about", launchId: "", agentName: "codex",
@@ -439,7 +335,7 @@ test("a Channel About session that finished its turn is ended by its daemon, not
   const retired = [{ runId: "run:about-done", channelId: "ch-1", sessionId: "session:done",
     machineOwnerUserId: "owner-1", machineId: "machine-1", hostId: "host-1", executionKey: "execution:done" }];
   const stopped = [];
-  const port = enabledManagementPort({
+  const port = basePort({
     async launchRegistrationInput(input) {
       this.registrationLaunches.push(input);
       return { runId: "run:about-next", instanceId: "session:next", launchId: "launch-1", agentName: "codex",
@@ -458,7 +354,7 @@ test("a Channel About session that finished its turn is ended by its daemon, not
 });
 
 test("a Channel About successor follows its exact predecessor", async () => {
-  const port = enabledManagementPort({
+  const port = basePort({
   });
   await orchestrateProductChannelAbout({
     channelId: "ch-1", requestId: "channel-about:ch-1:22", successorOfRunId: "run:about-prior",
@@ -466,7 +362,7 @@ test("a Channel About successor follows its exact predecessor", async () => {
   });
   const [launch] = port.registrationLaunches;
   assert.equal(launch.commandId, "about-successor:run:about-prior");
-  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:22", configGeneration: 3,
+  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:22",
     successorOfRunId: "run:about-prior" });
 });
 
@@ -481,7 +377,7 @@ test("Channel About language comes only from the explicit Space preference", () 
 });
 
 test("implicit Channel About uses the stable Space default without inferring from Channel content", async () => {
-  const port = enabledManagementPort({
+  const port = basePort({
   });
   const result = await orchestrateProductChannelAbout({
     channelId: "ch-1",
