@@ -3742,9 +3742,9 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail.app-rail::after {
   z-index: 1;
 }
 
-/* Phone channel details is the desktop details column: wood planks on the
-   paper, under the same wood bar as every phone screen. A wood sheet behind
-   the planks put wood on wood, and wood carries only liquid glass. */
+/* Phone channel details uses wood cards on paper, including its pinned
+   navigation card. The header shares the content cards' gutters and material
+   rather than painting a full-width bar above them. */
 .xmatrix-app .app-mobile-channel-details-surface.app-details {
   background: var(--app-panel-paper, oklch(0.97 0.012 85)) !important;
   background-image: none !important;
@@ -3763,13 +3763,7 @@ html[data-app-theme] .xmatrix-app .app-mobile-channel-details-surface .app-mater
   position: relative;
   z-index: var(--z-raised);
   isolation: isolate;
-}
-
-/* Repeated classes: the global reset that blanks unlisted textures outranks a
-   plain selector. */
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-mobile-channel-details-surface > .app-mobile-channel-details-header.app-mobile-channel-details-header.app-mobile-channel-details-header {
-  border-bottom: 0 !important;
-  @apply app-wood-panel-recipe;
+  margin: 1rem 1rem 0;
 }
 
 .xmatrix-app .app-mobile-channel-details-surface > .app-mobile-channel-details-sheet {
