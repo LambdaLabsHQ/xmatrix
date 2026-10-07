@@ -404,7 +404,7 @@ export class PostgresTraceAccessRepository {
           [{ userId: principalId, channelId }]);
         const allowed = allowedByPolicy === true && (routeLookup || !terminal);
         return { allowed, ...(routeLookup && allowed
-          ? { traceRoute: { instanceId, channelId, terminal } } : {}) };
+          ? { traceRoute: { instanceId, channelId, terminal, ownerUserId: String(instance.owner_user_id) } } : {}) };
       });
   }
 
