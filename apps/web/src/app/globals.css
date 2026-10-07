@@ -5288,10 +5288,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
       0 12px 28px oklch(0.28 0 0 / 0.12) !important;
   }
 
-  :root:not(.dark) .xmatrix-app.xmatrix-app-shell .app-main {
-    background: oklch(0.975 0 0) !important;
-  }
-
   .xmatrix-app.xmatrix-app-shell .app-topbar button:not(.app-mobile-space-trigger) {
     width: 2.375rem !important;
     height: 2.375rem !important;
@@ -7357,6 +7353,11 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    same material as the rail at a size where grain reads as an accent. */
 .xmatrix-app .app-workspace-panel {
   display: contents;
+}
+
+/* The main pane is the same paper on phones and desktops, including Pages. */
+.xmatrix-app.xmatrix-app-shell .app-main {
+  background: var(--app-panel-paper, var(--background)) !important;
 }
 
 @media (min-width: 768px) {
