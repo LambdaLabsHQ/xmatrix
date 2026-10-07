@@ -11,6 +11,7 @@ import {
   test,
 } from "./agent-mention-spawn.fixture.mjs";
 import { createAuthorityDatabase, PostgresSpaceControlRepository } from "../../db/dist/index.js";
+import { Client } from "pg";
 
 const ADMIN_EMAIL = "platform-admin-e2e@example.com";
 const OPERATOR_TOKEN = `operator-${"0123456789abcdef".repeat(4)}`;
@@ -143,6 +144,29 @@ test("platform admin reads one user's metadata-only detail, and every read is au
   } finally {
     await worker.stop();
   }
+});
+
+test("admin reads fail closed when their audit record cannot be written", async () => {
+  const userId = `platform-admin-audit-failure-${randomUUID()}`;
+  const { worker, auth } = await adminFixture(userId);
+  try {
+    await createSpace(worker, "Audit failure fixture");
+    // Only this worker's disposable database is changed; the test template
+    // and other workers retain their audit table.
+    const client = new Client({ connectionString: worker.postgresUrl });
+    await client.connect();
+    try {
+      await client.query("ALTER TABLE control.admin_audit_events RENAME TO unavailable_admin_audit_events");
+    } finally { await client.end(); }
+    for (const route of ["/api/admin/overview", `/api/admin/users/${userId}`, "/api/admin/audit"]) {
+      const response = await worker.fetch(route, { headers: auth });
+      assert.equal(response.status, 500, `${route} must refuse an unaudited read`);
+      const body = await response.json();
+      assert.equal(body.overview, undefined);
+      assert.equal(body.detail, undefined);
+      assert.equal(body.events, undefined);
+    }
+  } finally { await worker.stop(); }
 });
 
 test("a signed-in user off the allowlist cannot read the platform overview", async () => {
