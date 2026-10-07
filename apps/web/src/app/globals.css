@@ -3636,7 +3636,7 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block {
     inset 0 -1px 0 oklch(1 0 0 / 0.5) !important;
 
   /* code blocks: warm parchment, not syntax-theme blue-gray */
-  background: oklch(0.945 0.015 84) !important;
+  background: oklch(0.951 0.006 84) !important;
   border-color: oklch(0.88 0.02 80) !important;
 }
 
@@ -3749,7 +3749,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail.app-rail::after {
    navigation card. The header shares the content cards' gutters and material
    rather than painting a full-width bar above them. */
 .xmatrix-app .app-mobile-channel-details-surface.app-details {
-  background: var(--app-panel-paper, oklch(0.97 0.012 85)) !important;
+  background: var(--app-panel-paper, oklch(0.976 0.005 85)) !important;
   background-image: none !important;
   box-shadow: none !important;
 }
@@ -3882,9 +3882,9 @@ html[data-app-theme="wood"] .xmatrix-app .app-sender-kind-badge {
   --popover-foreground: oklch(0.06 0 0);
   --muted-foreground: oklch(0.28 0.03 55);
   --primary: oklch(0.06 0 0);
-  --primary-foreground: oklch(0.98 0.01 85);
+  --primary-foreground: oklch(0.986 0.004 85);
   --accent: oklch(0.06 0 0);
-  --accent-foreground: oklch(0.98 0.01 85);
+  --accent-foreground: oklch(0.986 0.004 85);
   color: oklch(0.06 0 0);
 }
 
@@ -6271,7 +6271,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app .app-list-create.app-list-create:not(:hover, .app-list-create-active) {
-    background: oklch(0.955 0.015 84) !important;
+    background: oklch(0.961 0.006 84) !important;
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app [data-testid="page-tree"] > .app-list-create.app-list-create {
@@ -7379,7 +7379,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
     flex: 1 1 0%;
     min-width: 0;
     overflow: hidden;
-    background: var(--app-panel-paper, oklch(0.97 0.012 85));
+    background: var(--app-panel-paper, oklch(0.976 0.005 85));
     box-shadow: none;
   }
 
@@ -7887,7 +7887,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 
 /* Buttons on the paper are plain white, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]) {
-  background: oklch(0.995 0.004 85) !important;
+  background: oklch(0.995 0.002 85) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   border: 1px solid oklch(0.35 0.07 60 / 0.14) !important;
@@ -7901,7 +7901,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-li
 
 /* Notices on the paper: plain white with the tone's rail, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-notice {
-  background: oklch(0.995 0.004 85) !important;
+  background: oklch(0.995 0.002 85) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   border-radius: 10px !important;
@@ -7934,12 +7934,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail :is(.rounded-lg.b
 /* Glass surfaces the views still draw become plain white on the paper. Glass
    set on a WoodPanel is on wood, not paper, and stays glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass-surface.app-liquid-glass-surface:not([data-slot="button"], .app-material-wood-panel *) {
-  --app-liquid-surface-bg: oklch(0.995 0.004 85);
+  --app-liquid-surface-bg: oklch(0.995 0.002 85);
   --app-liquid-fill-tint: transparent;
   --app-glass-caustics: transparent;
   --app-liquid-backdrop-filter: none;
   --app-glass-edge: 0 0 0 1px oklch(0.35 0.07 60 / 0.1), 0 1px 2px oklch(0.35 0.07 60 / 0.08);
-  background: oklch(0.995 0.004 85) !important;
+  background: oklch(0.995 0.002 85) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.1), 0 1px 2px oklch(0.35 0.07 60 / 0.08) !important;
@@ -8322,7 +8322,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
 .xmatrix-app.xmatrix-app.xmatrix-app :is(.launch-choice-option, .launch-choice-skip)[data-picked] {
   border-color: var(--launch-brass);
   background: var(--launch-brass);
-  color: oklch(0.99 0.008 85);
+  color: oklch(0.99 0.003 85);
 }
 
 .xmatrix-app.xmatrix-app.xmatrix-app :is(.launch-choice-option, .launch-choice-skip):disabled {
