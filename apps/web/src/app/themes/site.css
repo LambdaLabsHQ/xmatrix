@@ -262,102 +262,76 @@ html:has(.site-page) {
   color: var(--site-ink);
 }
 
-/* The homepage's live app preview: one paper sheet holding the wood rail,
-   the conversation list and the open conversation. */
-.site-app-preview {
-  display: grid;
-  grid-template-columns: 1fr;
+/* The homepage's app window: the real app (AppWindowPreview) in a macOS
+   window frame with a macOS window shadow. The content box's `contain` and
+   transform keep the app's position: fixed layers inside it. */
+.site-app-window {
+  position: relative;
+  height: 40rem;
   overflow: hidden;
-  border: 1px solid var(--site-wood-line);
-  border-radius: var(--site-surface-radius);
-  background: var(--site-paper);
-  box-shadow: var(--site-paper-shadow);
-  color: var(--site-ink);
-  text-align: left;
+  border-radius: 12px;
+  background: var(--background);
+  box-shadow:
+    0 0 0 0.5px oklch(0 0 0 / 0.22),
+    0 22px 70px 4px oklch(0.25 0.03 60 / 0.32),
+    0 6px 16px oklch(0.25 0.03 60 / 0.12);
 }
 
-@media (min-width: 768px) {
-  .site-app-preview {
-    grid-template-columns: 4.5rem 17rem minmax(0, 1fr);
-    height: 34rem;
-  }
-}
-
-@media (min-width: 1024px) {
-  .site-app-preview {
-    grid-template-columns: 4.5rem 21rem minmax(0, 1fr);
-    height: 38rem;
-  }
-}
-
-.site-page .app-material-wood-panel.site-preview-rail {
-  flex-direction: column;
-  align-items: center;
-  padding: 1rem 0 0.75rem;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.site-preview-list {
+.site-app-window-content {
+  height: 100%;
   overflow: hidden;
-  border-right: 1px solid var(--site-wood-line);
-  background: var(--site-paper-soft);
+  pointer-events: none;
+  user-select: none;
+  contain: layout paint;
+  transform: translateZ(0);
 }
 
-.site-preview-row {
-  padding: 0.7rem 1.25rem;
+/* The app sizes itself to the browser window (100dvh); in the frame it is
+   the frame's height instead. */
+.site-app-window .xmatrix-app.xmatrix-app > .app-rail {
+  height: 100% !important;
 }
 
-.site-preview-row[data-active="true"] {
-  background: var(--site-paper);
+.site-app-window .xmatrix-app .app-workspace-panel.app-workspace-panel {
+  height: 100%;
 }
 
-.site-preview-conversation {
+.site-app-window .xmatrix-app.xmatrix-app-shell.site-app-window-app {
+  height: 100%;
+  max-height: 100%;
+}
+
+.site-app-window-lights {
+  position: absolute;
+  top: 16px;
+  left: 14px;
+  z-index: 10;
   display: flex;
-  min-width: 0;
-  flex-direction: column;
-  padding: 1.25rem 1.25rem 1rem;
+  gap: 8px;
 }
 
-@media (min-width: 768px) {
-  .site-preview-conversation {
-    padding: 1.5rem 1.75rem 1.25rem;
-  }
-}
-
-.site-preview-avatar {
-  display: flex;
-  width: 2.25rem;
-  height: 2.25rem;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--site-wood-line);
+.site-app-window-lights > span {
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
-  background: var(--site-paper);
+  box-shadow: inset 0 0 0 0.5px oklch(0 0 0 / 0.18);
 }
 
-.site-preview-mention {
-  border-radius: 0.4rem;
-  background: oklch(0.93 0.025 80);
-  padding: 0.05rem 0.3rem;
-  font-weight: 600;
-}
+.site-app-window-lights > span:nth-child(1) { background: #ff5f57; }
+.site-app-window-lights > span:nth-child(2) { background: #febc2e; }
+.site-app-window-lights > span:nth-child(3) { background: #28c840; }
 
-@keyframes site-preview-arrive {
-  from {
-    opacity: 0;
-    transform: translateY(0.4rem);
+/* A phone shows the app's phone layout, which has no rail for the traffic
+   lights to sit on, so the window gets a title bar for them. */
+@media (max-width: 767px) {
+  .site-app-window {
+    height: 36rem;
+    padding-top: 2.25rem;
+    background: var(--site-paper-soft);
   }
-}
 
-.site-preview-reveal {
-  animation: site-preview-arrive 0.45s ease-out both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .site-preview-reveal {
-    animation: none;
+  .site-app-window-lights {
+    top: 12px;
   }
 }
 

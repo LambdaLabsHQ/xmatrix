@@ -38,10 +38,10 @@ test("hero image can extend under the fixed public navbar", () => {
 
 test("Get started renders the product live instead of a screenshot", () => {
   const quickStartSource = source("../components/landing/quick-start.tsx");
-  assert.match(quickStartSource, /<AppPreview \/>/);
+  assert.match(quickStartSource, /<AppWindow \/>/);
+  assert.match(source("../components/landing/app-window-preview.tsx"), /MessageTimeline[\s\S]*ChannelSidebar|ChannelSidebar[\s\S]*MessageTimeline/);
   assert.doesNotMatch(quickStartSource, /next\/image|\.png|\.webp/);
   assert.match(source("page.tsx"), /<Hero \/>\s*<QuickStart \/>/);
-  assert.match(siteCss, /@media \(prefers-reduced-motion: reduce\) \{\s*\.site-preview-reveal \{\s*animation: none/);
 });
 
 test("public site labels carry no decorative eyebrow bar", () => {

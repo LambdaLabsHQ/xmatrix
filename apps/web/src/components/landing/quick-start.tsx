@@ -1,4 +1,4 @@
-import { AppPreview } from "@/components/landing/app-preview";
+import { AppWindow } from "@/components/landing/app-window";
 import { CopySetupPrompt } from "@/components/landing/copy-setup-prompt";
 
 export function QuickStart() {
@@ -16,7 +16,7 @@ export function QuickStart() {
         </div>
 
         <div className="mt-10">
-          <AppPreview />
+          <AppWindow />
         </div>
 
         <div className="mt-6 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
