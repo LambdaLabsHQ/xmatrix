@@ -50,22 +50,13 @@ html:has(.site-page) {
 .site-page .x-section {
   padding-block: clamp(5.5rem, 9vw, 8.5rem);
   border-top: 0;
-  background:
-    radial-gradient(circle at 8% 0%, oklch(1 0.014 90 / 0.84), transparent 28rem),
-    linear-gradient(180deg, var(--background), oklch(0.957 0.02 80));
+  background: none;
 }
 
-.site-page .x-section:nth-of-type(even) {
-  background:
-    radial-gradient(circle at 92% 12%, oklch(1 0.014 90 / 0.86), transparent 30rem),
-    linear-gradient(180deg, oklch(0.95 0.025 78), var(--background));
-}
-
+/* The page is one sheet of paper: no tinted bands or ruled margins between
+   sections; spacing alone separates them. */
 .site-page .x-section::before {
-  background:
-    linear-gradient(90deg, transparent 7%, var(--site-wood-line) 7%, var(--site-wood-line) calc(7% + 1px), transparent calc(7% + 1px)),
-    linear-gradient(90deg, transparent 93%, var(--site-wood-line) 93%, var(--site-wood-line) calc(93% + 1px), transparent calc(93% + 1px));
-  opacity: 0.48;
+  content: none;
 }
 
 .site-page .x-container {
@@ -263,7 +254,115 @@ html:has(.site-page) {
 }
 
 .site-hero {
-  background: oklch(0.985 0.01 88);
+  background: none;
+}
+
+/* Paper as a surface: a hairline and no shadow, so it reads as the same
+   sheet as the page, just bounded. */
+.site-paper-sheet {
+  border: 1px solid var(--site-wood-line);
+  border-radius: var(--site-surface-radius);
+  background: var(--site-paper);
+  color: var(--site-ink);
+}
+
+/* The homepage's live app preview: one paper sheet holding the wood rail,
+   the conversation list and the open conversation. */
+.site-app-preview {
+  display: grid;
+  grid-template-columns: 1fr;
+  overflow: hidden;
+  border: 1px solid var(--site-wood-line);
+  border-radius: var(--site-surface-radius);
+  background: var(--site-paper);
+  box-shadow: var(--site-paper-shadow);
+  color: var(--site-ink);
+  text-align: left;
+}
+
+@media (min-width: 768px) {
+  .site-app-preview {
+    grid-template-columns: 4.5rem 17rem minmax(0, 1fr);
+    height: 34rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .site-app-preview {
+    grid-template-columns: 4.5rem 21rem minmax(0, 1fr);
+    height: 38rem;
+  }
+}
+
+.site-page .app-material-wood-panel.site-preview-rail {
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem 0 0.75rem;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.site-preview-list {
+  overflow: hidden;
+  border-right: 1px solid var(--site-wood-line);
+  background: var(--site-paper-soft);
+}
+
+.site-preview-row {
+  padding: 0.7rem 1.25rem;
+}
+
+.site-preview-row[data-active="true"] {
+  background: var(--site-paper);
+}
+
+.site-preview-conversation {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 1.25rem 1.25rem 1rem;
+}
+
+@media (min-width: 768px) {
+  .site-preview-conversation {
+    padding: 1.5rem 1.75rem 1.25rem;
+  }
+}
+
+.site-preview-avatar {
+  display: flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--site-wood-line);
+  border-radius: 999px;
+  background: var(--site-paper);
+}
+
+.site-preview-mention {
+  border-radius: 0.4rem;
+  background: oklch(0.93 0.025 80);
+  padding: 0.05rem 0.3rem;
+  font-weight: 600;
+}
+
+@keyframes site-preview-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(0.4rem);
+  }
+}
+
+.site-preview-reveal {
+  animation: site-preview-arrive 0.45s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-preview-reveal {
+    animation: none;
+  }
 }
 
 .site-login {
@@ -329,9 +428,6 @@ html:has(.site-page) {
     padding-block: 5rem;
   }
 
-  .site-page .x-mobile-card-scroller > * {
-    border-radius: 1.15rem;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -30,10 +30,15 @@ test("public routes share one warm material layer", () => {
   }
 });
 
-test("hero image can extend under the fixed public navbar", () => {
-  assert.match(heroSource, /min-h-svh/);
-  assert.match(heroSource, /pt-20/);
-  assert.match(heroSource, /md:absolute md:inset-0/);
+test("hero renders the product live instead of a picture", () => {
+  assert.match(heroSource, /<AppPreview \/>/);
+  assert.doesNotMatch(heroSource, /next\/image|\.png|\.webp/);
+  assert.match(source("../components/landing/app-preview.tsx"), /prefers-reduced-motion|site-preview-reveal/);
+  assert.match(siteCss, /@media \(prefers-reduced-motion: reduce\) \{\s*\.site-preview-reveal \{\s*animation: none/);
+});
+
+test("public site labels carry no decorative eyebrow bar", () => {
+  assert.doesNotMatch(siteCss, /\.x-eyebrow::before/);
 });
 
 test("public actions use shared materials and the Hero has one wood CTA", () => {

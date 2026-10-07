@@ -10,9 +10,8 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 const navLinks = [
   { href: "/download", label: "Download" },
-  { href: "/#how-it-works", label: "How it Works" },
-  { href: "/#agent-materials", label: "Agent Setup" },
-  { href: "/#architecture", label: "Platform" },
+  { href: "/#how-it-works", label: "Setup" },
+  { href: "/#connectors", label: "Connectors" },
   { href: "/#pricing", label: "Pricing" },
 ];
 
