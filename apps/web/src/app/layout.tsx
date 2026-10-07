@@ -6,8 +6,7 @@ import "./themes/site.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
-
-const siteUrl = new URL(process.env.NEXT_PUBLIC_APP_URL || "https://xmatrix.sh");
+import { siteUrl } from "@/lib/site-url";
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
