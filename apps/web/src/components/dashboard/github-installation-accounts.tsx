@@ -46,7 +46,12 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onInstall
 
   const load = useCallback(async () => {
     try {
-      setInstallations(await xmatrixApiRequest<GitHubInstallations>({ url, token }));
+      const payload = await xmatrixApiRequest<Partial<GitHubInstallations>>({ url, token });
+      setInstallations({
+        linked: Array.isArray(payload?.linked) ? payload.linked : [],
+        available: Array.isArray(payload?.available) ? payload.available : [],
+        accountRequired: payload?.accountRequired === true,
+      });
     } catch (caught) {
       setError((caught as Error).message);
     }
