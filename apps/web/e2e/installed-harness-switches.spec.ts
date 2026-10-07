@@ -21,7 +21,7 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
     test("Agents offers installed harnesses from a remote machine without registering them", async ({ page }) => {
       await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], machineDaemons: [machine] });
       await page.goto("/app/personal-sspaceperso/agents");
-      const list = page.locator('[data-testid="installed-harness-switches"]:visible');
+      const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
       await expect(list.getByRole("switch")).toHaveCount(2);
       const codex = list.getByRole("switch", { name: "In this Space: Codex on Remote server" });
       await expect(codex).toHaveAttribute("aria-checked", "false");
@@ -66,7 +66,7 @@ test("a refused owner switch stays off and reports the server failure", async ({
   await page.goto("/app/personal-sspaceperso/agents");
   await fixtureRule(page, { id: "enable-refused", pattern: COMMANDS, method: "POST",
     responder: { kind: "static", status: 403, json: { error: "Machine owner access was revoked" } } });
-  const list = page.locator('[data-testid="installed-harness-switches"]:visible');
+  const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
   const codex = list.getByRole("switch", { name: "In this Space: Codex on Remote server" });
   await codex.click();
   await expect(list.getByRole("alert")).toHaveText("Machine owner access was revoked");
