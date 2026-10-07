@@ -16,6 +16,7 @@ import {
   normalizeAgentPresetRuntime,
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
+  type AgentWorkingMode,
   type SerializedChannel,
 } from "@xmatrix/protocol";
 
@@ -65,8 +66,15 @@ const ACTION_ICON: Record<MyAgentAction, ComponentType<{ className?: string }>> 
 };
 
 const ACTION_CONSEQUENCE: Record<MyAgentAction, string> = {
-  configure: "Name and default model",
+  configure: "Name, default model and working mode",
   restore: "Offer this agent to the Space again",
+};
+
+/** What each working mode tells the Agent, in one line. The full text is in
+ * `packages/cli-rs/crates/core/prompts/working-mode-*.md`. */
+const WORKING_MODE_HINT: Record<AgentWorkingMode, string> = {
+  autonomous: "Finishes work by the repository's rules, through merge and release",
+  cautious: "Asks before larger changes, merging or releasing",
 };
 
 const INPUT_CLASS =
@@ -362,6 +370,7 @@ function RegistrationEditor({
     <RegistrationEditorForm
       initialName={details.data.displayName}
       initialModel={details.data.configuration?.model ?? ""}
+      initialWorkingMode={details.data.configuration?.workingMode ?? "autonomous"}
       busy={busy}
       onCancel={onCancel}
       onSave={onSave}
@@ -373,27 +382,30 @@ function RegistrationEditor({
 type RegistrationEditorActions = {
   busy: boolean;
   onCancel: () => void;
-  onSave: (change: { displayName: string; model: string }) => void;
+  onSave: (change: { displayName: string; model: string; workingMode: AgentWorkingMode }) => void;
 };
 
 function RegistrationEditorForm({
   initialName,
   initialModel,
+  initialWorkingMode,
   busy,
   onCancel,
   onSave,
 }: {
   initialName: string;
   initialModel: string;
+  initialWorkingMode: AgentWorkingMode;
 } & RegistrationEditorActions) {
   const [displayName, setDisplayName] = useState(initialName);
   const [model, setModel] = useState(initialModel);
+  const [workingMode, setWorkingMode] = useState(initialWorkingMode);
   return (
     <form
-      className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+      className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
       onSubmit={(event) => {
         event.preventDefault();
-        onSave({ displayName, model });
+        onSave({ displayName, model, workingMode });
       }}
     >
       <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
@@ -415,6 +427,19 @@ function RegistrationEditorForm({
           onChange={(event) => setModel(event.target.value)}
           className={INPUT_CLASS}
         />
+      </label>
+      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        Working mode
+        <select
+          value={workingMode}
+          disabled={busy}
+          title={WORKING_MODE_HINT[workingMode]}
+          onChange={(event) => setWorkingMode(event.target.value as AgentWorkingMode)}
+          className={INPUT_CLASS}
+        >
+          <option value="autonomous">Autonomous</option>
+          <option value="cautious">Cautious</option>
+        </select>
       </label>
       <div className="flex gap-2">
         <button type="button" disabled={busy} onClick={onCancel} className={actionClass({ variant: "secondary", size: "md" })}>

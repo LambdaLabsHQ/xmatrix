@@ -391,10 +391,10 @@ export type {
   AgentInvocationSelection, AgentInvocationSelections, AgentInvocationTarget,
 } from "./agent-invocation-selection.js";
 export {
-  parseSpaceAgentConfiguration, spaceConfigurationResources,
+  AGENT_WORKING_MODES, parseSpaceAgentConfiguration, spaceConfigurationResources,
 } from "./agent-registration-configuration.js";
 export type {
-  SpaceAgentConfiguration, SpaceAgentRoutingSettings,
+  AgentWorkingMode, SpaceAgentConfiguration, SpaceAgentRoutingSettings,
 } from "./agent-registration-configuration.js";
 export {
   parseAgentRegistrationCommand,

@@ -1,4 +1,5 @@
 import type { MachineHandoffExport, MachineHandoffExportResult } from "../handoff-export.js";
+import type { AgentWorkingMode } from "../agent-registration-configuration.js";
 import type { AgentHarnessSpec, AgentRuntimeExecutionEvidence } from "../authority-foundation.js";
 import type { RoutingQuotaProbeRequest, RoutingQuotaProbeResponse } from "../agent-routing-quota-probe.js";
 import type {
@@ -178,6 +179,8 @@ export interface MachineDaemonSpawnCommand {
       initial prompt. The wire name predates the retired Agent Role feature;
       daemons of every version read it, so it keeps this spelling. */
   roleInitialPrompt?: string;
+  /** The registration's working mode; absent means autonomous. */
+  workingMode?: AgentWorkingMode;
   resume?: boolean;
   resumeInstanceId?: string;
   resumeSessionKey?: string;

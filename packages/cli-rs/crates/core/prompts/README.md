@@ -18,5 +18,7 @@ and `working_mode` in `bootstrap.md`, and `channel_id` in
 `channel-contract.md`. A placeholder alone on its line disappears with its line
 when empty. Other braces, such as the JSON example, are literal.
 
-`XMATRIX_AGENT_WORKING_MODE` (`autonomous` or `cautious`) selects the working
-mode; a Run launched without it works autonomously.
+A Space owner or admin picks each Agent's working mode in its settings
+(`workingMode` in the Space Agent configuration). The Hub sends it with the
+spawn, the daemon sets `XMATRIX_AGENT_WORKING_MODE` (`autonomous` or
+`cautious`) for the Run, and a Run launched without one works autonomously.
