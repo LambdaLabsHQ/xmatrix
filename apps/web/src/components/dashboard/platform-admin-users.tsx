@@ -11,8 +11,8 @@
 import type { AdminUserDetail, AdminUserSummary } from "@xmatrix/protocol";
 import { ChevronLeft } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { AdminTable, type AdminColumn } from "./admin-table";
+import { AdminPaperAction } from "./admin-paper";
 import { useAdminParam, useAdminUserDetail, usePlatformOverview } from "./platform-admin-data";
 import {
   adminTime,
@@ -124,14 +124,15 @@ function UsersList({ token, onOpen }: { token?: string; onOpen: (userId: string)
 
 function AdminUserDetailView({ token, userId, onBack }: { token?: string; userId: string; onBack: () => void }) {
   return (
-    <AdminQueryView query={useAdminUserDetail(token, userId)} generatedAt={(detail) => detail.generatedAt}
-      lead={<button type="button" onClick={onBack}
-        className="-ml-1 mr-auto flex items-center gap-0.5 text-sm font-medium text-muted-foreground hover:text-foreground">
-        <ChevronLeft className="size-4" /> Users
-      </button>}
-      emptyTitle="User not found" emptyBody="No registered user or Space member has this id.">
-      {(detail) => <div className="space-y-7"><UserDetailBody detail={detail} /></div>}
-    </AdminQueryView>
+    <div className="app-admin-user-detail">
+      <AdminQueryView query={useAdminUserDetail(token, userId)} generatedAt={(detail) => detail.generatedAt}
+        lead={<AdminPaperAction onClick={onBack} className="-ml-1 mr-auto">
+          <ChevronLeft className="size-4" /> Users
+        </AdminPaperAction>}
+        emptyTitle="User not found" emptyBody="No registered user or Space member has this id.">
+        {(detail) => <div className="space-y-7"><UserDetailBody detail={detail} /></div>}
+      </AdminQueryView>
+    </div>
   );
 }
 
@@ -194,7 +195,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             { key: "name", label: "Space", value: (space) => space.name,
               render: (space) => <span className="block truncate font-bold">{space.name}</span> },
             { key: "role", label: "Role", value: (space) => space.role,
-              render: (space) => <Badge variant="secondary">{space.role}</Badge> },
+              render: (space) => <span className="text-xs">{space.role}</span> },
             { key: "members", label: "Members", numeric: true, value: (space) => space.members,
               render: (space) => formatAdminCount(space.members) },
             { key: "messages", label: "Their messages", numeric: true, value: (space) => space.messages,
@@ -230,7 +231,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             { key: "id", label: "Machine", value: (machine) => machine.machineId,
               render: (machine) => <span className="block truncate font-mono text-xs">{machine.machineId}</span> },
             { key: "status", label: "Status", value: (machine) => machine.status,
-              render: (machine) => <Badge variant={machine.status === "online" ? "default" : "secondary"}>{machine.status}</Badge> },
+              render: (machine) => <span className="text-xs">{machine.status}</span> },
             { key: "created", label: "Enrolled", numeric: true, value: (machine) => adminTime(machine.createdAt),
               render: (machine) => <TimeCell value={machine.createdAt} /> },
             { key: "updated", label: "Last seen", numeric: true, value: (machine) => adminTime(machine.updatedAt),
@@ -248,7 +249,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
             { key: "space", label: "Space", value: (connector) => spaceName(connector.spaceId),
               render: (connector) => <span className="block truncate">{spaceName(connector.spaceId)}</span> },
             { key: "status", label: "Status", value: (connector) => connector.status,
-              render: (connector) => <Badge variant={connector.status === "error" ? "destructive" : "secondary"}>{connector.status}</Badge> },
+              render: (connector) => <span className="text-xs">{connector.status}</span> },
             { key: "created", label: "Added", numeric: true, value: (connector) => adminTime(connector.createdAt),
               render: (connector) => <TimeCell value={connector.createdAt} /> },
           ]} />
@@ -259,7 +260,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
           defaultSort="last" empty="No session on record."
           columns={[
             { key: "state", label: "State", value: (session) => (session.active ? "active" : "expired"),
-              render: (session) => <Badge variant={session.active ? "default" : "secondary"}>{session.active ? "active" : "expired"}</Badge> },
+              render: (session) => <span className="text-xs">{session.active ? "active" : "expired"}</span> },
             { key: "created", label: "Signed in", numeric: true, value: (session) => adminTime(session.createdAt),
               render: (session) => <span className="text-xs">{utc(session.createdAt)}</span> },
             { key: "last", label: "Last active", numeric: true, value: (session) => adminTime(session.lastActiveAt),

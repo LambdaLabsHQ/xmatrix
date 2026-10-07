@@ -334,12 +334,14 @@ export type ToolSection = {
  * admin: the list names the sections and the paper shows one. On a desktop
  * the first is shown until another is chosen; on a phone the list comes first.
  */
-export function SectionedToolView({ title, sections, label = title, defaultKey }: {
+export function SectionedToolView({ title, sections, label = title, defaultKey, showContext = true }: {
   title: string;
   sections: ToolSection[];
   label?: string;
   /** The section shown on a desktop while the address names none. */
   defaultKey?: string;
+  /** The destination may already be named by its surrounding navigation. */
+  showContext?: boolean;
 }) {
   const [item, select] = useToolItem();
   const chosen = sections.find((section) => section.key === item);
@@ -369,7 +371,7 @@ export function SectionedToolView({ title, sections, label = title, defaultKey }
         </ToolList>
       }
       detail={shown ? (
-        <ToolDetail onBack={() => select(null)} backLabel={title} context={title} title={shown.label}
+        <ToolDetail onBack={() => select(null)} backLabel={title} context={showContext ? title : undefined} title={shown.label}
           status={shown.description} actions={shown.actions} wide={shown.wide}>
           {shown.content}
         </ToolDetail>

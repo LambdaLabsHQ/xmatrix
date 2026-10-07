@@ -4,7 +4,7 @@ import { openWorkspaceAs } from "./platform-admin-fixtures";
 // The operator rail entry is desktop-only (md:flex), so this spec runs wide.
 test.use({ viewport: { width: 1280, height: 900 } });
 
-test("a platform admin sees platform totals, user access, and activity", async ({ page }) => {
+test("a platform admin sees platform totals, user access, and activity", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
   await page.goto("/app/personal-sspaceperso/admin");
 
@@ -20,9 +20,12 @@ test("a platform admin sees platform totals, user access, and activity", async (
 
   // The rail offers the operator entry only for an allowlisted account.
   await expect(page.getByRole("button", { name: "Platform admin" })).toBeVisible();
+  await page.getByRole("group", { name: "Activity range" }).getByRole("button", { name: "30d", exact: true }).click();
+  await expect(page.getByRole("button", { name: "30d", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: testInfo.outputPath("desktop-overview.png") });
 });
 
-test("the Spaces table searches and sorts, keeping its state in the address", async ({ page }) => {
+test("the Spaces table searches and sorts, keeping its state in the address", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
   await page.goto("/app/personal-sspaceperso/admin?item=spaces");
 
@@ -30,6 +33,8 @@ test("the Spaces table searches and sorts, keeping its state in the address", as
   await expect(spaces.getByText("Lambda Labs")).toBeVisible();
   await expect(spaces.getByText("owner@example.com")).toBeVisible();
   await expect(spaces.getByText("Solo Space")).toBeVisible();
+  await expect(spaces.getByRole("textbox")).toHaveCSS("box-shadow", "none");
+  await page.screenshot({ path: testInfo.outputPath("desktop-spaces.png") });
 
   await spaces.getByPlaceholder("Space, owner, id").fill("solo");
   await expect(spaces.getByText("Lambda Labs")).toHaveCount(0);

@@ -1,0 +1,67 @@
+/* Platform data reads as ink on the existing paper, like a Page. The board's
+   raised action and recessed-field rules must not turn its tools into objects. */
+.xmatrix-app .app-admin-view {
+  --app-field-radius: 0px;
+  --app-field-shell-radius: 0px;
+}
+
+.xmatrix-app .app-admin-view .app-tool-detail {
+  background: var(--app-panel-paper, var(--background));
+  color: var(--app-panel-ink, var(--foreground));
+}
+
+.xmatrix-app .app-admin-view .app-admin-table-tools {
+  border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+html[data-app-theme] .xmatrix-app .app-admin-view :is(input, .app-glass-select-trigger) {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-app-theme] .xmatrix-app .app-admin-view input:focus {
+  box-shadow: none !important;
+}
+
+html[data-app-theme] .xmatrix-app .app-admin-view .app-glass-select-list {
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  border-block: 1px solid var(--border);
+}
+
+html[data-app-theme] .xmatrix-app .app-admin-view .app-glass-select-list::before,
+html[data-app-theme] .xmatrix-app .app-admin-view .app-glass-select-list::after {
+  content: none !important;
+}
+
+html[data-app-theme] .xmatrix-app .app-admin-view .app-glass-select-option {
+  border-radius: 0;
+}
+
+.xmatrix-app .app-admin-view .app-glass-select-trigger {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.xmatrix-app .app-admin-view .app-glass-select-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.xmatrix-app .app-admin-view .app-admin-action[aria-pressed="true"] {
+  color: var(--foreground);
+  box-shadow: inset 0 -1px currentColor;
+}
+
+.xmatrix-app .app-admin-view .app-tool-detail-header {
+  margin-bottom: 1rem;
+}
+
+.xmatrix-app .app-admin-view:has(.app-admin-user-detail) .app-tool-detail-header {
+  display: none;
+}

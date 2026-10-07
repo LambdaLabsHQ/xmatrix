@@ -7,7 +7,6 @@
 
 import type { AdminAuditEvent, AdminSpaceSummary } from "@xmatrix/protocol";
 
-import { Badge } from "@/components/ui/badge";
 import { AdminTable, type AdminColumn } from "./admin-table";
 import { useAdminAudit, usePlatformOverview } from "./platform-admin-data";
 import { adminTime, formatAdminAge, formatAdminCount } from "./platform-admin-overview";
@@ -75,7 +74,7 @@ const AUDIT_COLUMNS: AdminColumn<AdminAuditEvent>[] = [
   { key: "actor", label: "Operator", value: (event) => event.actorEmail || event.actorUserId,
     render: (event) => <span className="block truncate">{event.actorEmail || event.actorUserId}</span> },
   { key: "action", label: "Action", value: (event) => event.action,
-    render: (event) => <Badge variant="secondary">{ACTION_LABELS[event.action] ?? event.action}</Badge> },
+    render: (event) => <span className="text-xs">{ACTION_LABELS[event.action] ?? event.action}</span> },
   { key: "target", label: "Target", value: (event) => event.targetId,
     render: (event) => event.targetId
       ? <span className="block truncate font-mono text-xs">{event.targetKind}:{event.targetId}</span>
