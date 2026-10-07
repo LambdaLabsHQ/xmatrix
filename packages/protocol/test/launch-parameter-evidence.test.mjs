@@ -24,6 +24,21 @@ test('incomplete, mismatched and invalid decisions cannot appear as verified cho
   }
 });
 
+test('v9 records a skipped model decision without inventing a selection', () => {
+  const input = evidence();
+  input.rubricVersion = 'registration-parameters-v9';
+  input.selections = { workspaceKind: 'local-path' };
+  input.choices.shift();
+  assert.deepEqual(parseLaunchParameterEvidence(input).selections, { workspaceKind: 'local-path' });
+  assert.deepEqual(parsePresentedRoutingDecision({ source: 'jev', rows: [], parameters: input }).parameters.choices, input.choices);
+  for (const change of [e => e.rubricVersion = 'registration-parameters-v8',
+    e => e.selections.model = '', e => e.selections.model = 'claimed', e => e.selections.effort = 'high',
+    e => e.choices.unshift(evidence().choices[0]), e => e.choices = []]) {
+    const malformed = structuredClone(input); change(malformed);
+    assert.equal(parseLaunchParameterEvidence(malformed), undefined);
+  }
+});
+
 test('environment choice survives public projection without private candidate fields', () => {
   const input = evidence();
   input.environment = { inputDigest: 'b'.repeat(64), selected: 'candidate_1', probabilities: { candidate_0: .2, candidate_1: .8 }, privatePath: '/private' };
