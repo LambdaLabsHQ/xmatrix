@@ -368,24 +368,6 @@ export function githubConnectionInstallationIds(
  * GitHub's setup redirect carries `installation_id` unsigned, so this is what
  * proves the installation is theirs before a Space may use it.
  */
-export async function githubUserCanAccessInstallation(
-  env: AppConnectorEnv,
-  userToken: string,
-  installationId: string
-): Promise<boolean> {
-  const needle = installationId.trim();
-  if (!/^[1-9][0-9]{0,19}$/u.test(needle)) return false;
-  // Bounded: 10 pages of 100 covers every account that can install one App.
-  for (let page = 1; page <= 10; page += 1) {
-    const payload = await fetchGitHubJson(env, `/user/installations?per_page=100&page=${page}`, userToken) as
-      { installations?: Array<{ id?: unknown }> };
-    const installations = Array.isArray(payload?.installations) ? payload.installations : [];
-    if (installations.some((installation) => String(installation?.id ?? "") === needle)) return true;
-    if (installations.length < 100) return false;
-  }
-  return false;
-}
-
 /** The GitHub account one App installation belongs to, as Configure shows it. */
 export interface GitHubInstallationAccount {
   installationId: string;
@@ -429,7 +411,7 @@ export async function listGitHubUserInstallations(
   userToken: string
 ): Promise<GitHubInstallationAccount[]> {
   const accounts: GitHubInstallationAccount[] = [];
-  // Bounded like githubUserCanAccessInstallation.
+  // Bounded: 10 pages of 100 covers every account that can install one App.
   for (let page = 1; page <= 10; page += 1) {
     const payload = await fetchGitHubJson(env, `/user/installations?per_page=100&page=${page}`, userToken) as
       { installations?: unknown[] };

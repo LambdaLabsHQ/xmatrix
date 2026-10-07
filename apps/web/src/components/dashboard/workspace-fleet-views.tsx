@@ -1218,11 +1218,12 @@ export function AppsView({
       });
     } else if (status === "cancelled") {
       setSetupNotice({ tone: "warning", message: "GitHub connection was cancelled before installation completed." });
-    } else if (status === "account_required") {
+    } else if (status === "authorized") {
       setSetupNotice({
-        tone: "warning",
-        message: "Link the GitHub account that installed the app in your profile, then Connect GitHub again.",
+        tone: "success",
+        message: "GitHub confirmed your accounts. Choose which ones this Space reaches under GitHub accounts.",
       });
+      setSelectedConnectorId("github");
     } else {
       setSetupNotice({
         tone: "warning",
@@ -1239,7 +1240,7 @@ export function AppsView({
 
   async function configureConnector(
     connector: AppConnectorManifest,
-    options?: { mode?: "add" | "manage" | "install"; installationId?: string }
+    options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
   ) {
     if (!token || !currentSpace) return;
     const existingConnection = connectionsByProvider.get(connector.id);
@@ -1580,7 +1581,8 @@ export function AppsView({
         <ToolDetailSection title="GitHub accounts">
           <GitHubInstallationAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token}
             onManage={(installationId) => void configureConnector(connector, { mode: "manage", installationId })}
-            onInstall={() => void configureConnector(connector, { mode: "add" })}
+            onAuthorize={() => void configureConnector(connector, { mode: "add" })}
+            onInstall={() => void configureConnector(connector, { mode: "account" })}
             onChanged={async () => { await connectionsQuery.refetch(); }} />
         </ToolDetailSection>
       ) : null}
