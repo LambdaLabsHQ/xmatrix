@@ -19,7 +19,6 @@ import { useAndroidBackHandler } from "./use-android-back";
 import { Loader2, Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
-import { spaceMemberCanCreate } from "@/components/dashboard/space-member-permissions";
 import {
   decideSpaceJoinRequest,
   spaceJoinRequestsQueryOptions,
@@ -641,8 +640,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     : view === "pages"
       ? { label: "New page", onCreate: () => void pageCreation.create(null),
         disabled: pageCreation.creating || !currentSpaceId }
-      : view === "agents" && user && spaceMemberCanCreate(currentSpace, user.id, "agentCreation")
-        ? { label: "New agent", onCreate: openAgentCreate }
+      : view === "agents" && user
+        ? { label: "Manage machines", onCreate: () => changeAppView("machines") }
         : null;
   // On a desktop each list leads with its +, and Ctrl/⌘+N makes what the list shows.
   const desktopCreate: CreateAction | null = isMobileViewport || agentConfigDialog
@@ -653,8 +652,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       ? { label: "New page", onCreate: () => void pageCreation.create(null),
         disabled: pageCreation.creating || !currentSpaceId }
       : view === "agents" && user
-        ? { label: "New agent", onCreate: openAgentCreate,
-          disabled: !spaceMemberCanCreate(currentSpace, user.id, "agentCreation") }
+        ? { label: "Manage machines", onCreate: () => changeAppView("machines") }
         : null;
   // Elsewhere Ctrl/⌘+N starts a new conversation (browsers that reserve it for a new window keep it).
   const shortcutCreate = desktopCreate && !desktopCreate.disabled ? desktopCreate.onCreate
