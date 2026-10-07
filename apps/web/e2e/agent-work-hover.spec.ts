@@ -126,7 +126,8 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   await expect(toolbar.locator(".app-agent-work-instance-name")).toHaveText("codex:1");
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toContainText("Reborn");
   await expect(toolbar.getByRole("button", { name: "Stop codex:1" })).toContainText("Stop");
-  await expect(toolbar).toHaveCSS("backdrop-filter", /^(?!none$).+/);
+  // The glass is the panel the capsule grows into, not the toolbar inside it.
+  await expect(controls.locator(".app-agent-work-morph")).toHaveCSS("backdrop-filter", /^(?!none$).+/);
 
   const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
   expect(avatarBox).not.toBeNull();

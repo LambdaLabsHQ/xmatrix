@@ -1175,6 +1175,29 @@ export function centeredToolbarPosition(avatar: Element, toolbarWidth: number) {
   return { left: Math.min(Math.max(preferredLeft, minLeft), maxLeft), top: avatarRect.top };
 }
 
+/**
+ * A panel that grows up out of a capsule: its bottom edge is the capsule's,
+ * its left edge the capsule's unless the main viewport's gutter pushes it in,
+ * and it is never narrower than the capsule. Returns where the capsule sits
+ * inside the panel, so the panel can start clipped to exactly that shape.
+ */
+export function morphPanelPosition(capsule: Element, panelWidth: number) {
+  const capsuleRect = capsule.getBoundingClientRect();
+  const boundaryRect = capsule.closest(".app-main")?.getBoundingClientRect();
+  const gutter = 12;
+  const width = Math.max(panelWidth, capsuleRect.width);
+  const minLeft = (boundaryRect?.left ?? 0) + gutter;
+  const maxLeft = Math.max(minLeft, (boundaryRect?.right ?? window.innerWidth) - width - gutter);
+  const left = Math.min(Math.max(capsuleRect.left, minLeft), maxLeft);
+  return {
+    left,
+    bottom: capsuleRect.bottom,
+    capsuleLeft: capsuleRect.left - left,
+    capsuleWidth: capsuleRect.width,
+    capsuleHeight: capsuleRect.height,
+  };
+}
+
 /** Follow viewport and layout changes with one queued animation frame. */
 export function observeToolbarLayout(avatar: Element, toolbar: Element, layoutRoot: Element,
   position: () => void, observeMutations: boolean, shouldPosition?: () => boolean) {
