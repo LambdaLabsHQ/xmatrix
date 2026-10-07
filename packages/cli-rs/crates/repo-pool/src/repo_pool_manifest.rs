@@ -1496,9 +1496,16 @@ async fn retained_authority_for_session_at(
             "retained session is not unique",
         ));
     }
-    let slot = manifest
-        .slots
-        .get(&binding.slot_id)
+    require_retained_slot(&manifest, &binding.slot_id)?;
+    SlotId::parse(&binding.slot_id)?;
+    Ok(RetainedLease {
+        authority: binding.authority(),
+        canonical_repo_identity: manifest.canonical_repo_identity,
+    })
+}
+
+fn require_retained_slot(manifest: &RepoPoolManifest, slot_id: &str) -> Result<(), PoolError> {
+    let slot = manifest.slots.get(slot_id)
         .ok_or_else(|| PoolError::new(PoolErrorCode::InvalidSlotId, "binding slot missing"))?;
     if slot.state != SlotState::Retained {
         return Err(PoolError::new(
@@ -1506,11 +1513,7 @@ async fn retained_authority_for_session_at(
             "session binding is not retained",
         ));
     }
-    SlotId::parse(&binding.slot_id)?;
-    Ok(RetainedLease {
-        authority: binding.authority(),
-        canonical_repo_identity: manifest.canonical_repo_identity,
-    })
+    Ok(())
 }
 
 /// The retained slot this machine holds for `session_key`, if it holds any.

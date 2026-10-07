@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  admitRegisteredSpawn, connectAgent, createRoutableAgent, homeSpaceId, json, MOCK_TOKEN, randomUUID,
-  REGISTERED_DAEMON_CAPABILITIES, startPgHubWorker,
+  admitRegisteredSpawn, connectAgent, createRoutableAgent, homeSpaceId, inTestTransaction, json, MOCK_TOKEN, randomUUID,
+  REGISTERED_DAEMON_CAPABILITIES, sendSpawnResult, startPgHubWorker,
 } from "./agent-launch-postgres.fixture.mjs";
-import { channelHistory, waitForChannelHistoryMessage } from "./agent-mention-spawn.fixture.mjs";
+import { channelHistory, sleep, waitForChannelHistoryMessage } from "./agent-mention-spawn.fixture.mjs";
 import { githubAppPrivateKey, githubInstallationCatalog, grantRegistrationRepository } from "./registration-launch.fixture.mjs";
 
 /**
@@ -27,13 +27,13 @@ const capabilities = [...REGISTERED_DAEMON_CAPABILITIES, "machine_handoff_export
  * plays machine A's daemon answering the handoff stop. Returns what the
  * Channel and machine B saw.
  */
-async function usageLimitedOnMachineA(answerStop) {
+async function usageLimitedOnMachineA(answerStop, { sleeping = false } = {}) {
   const userId = `cross-machine-handoff-${randomUUID()}`;
   const github = await githubInstallationCatalog(installationId, [{
     id: 1, name: "xmatrix", full_name: repository, private: true, archived: false,
     pushed_at: "2026-09-01T00:00:00Z", owner: { login: "LambdaLabsHQ" },
   }]);
-  let worker, daemonA, daemonB, source;
+  let worker, daemonA, daemonB, source, successorAgent;
   try {
     worker = await startPgHubWorker({ vars: { XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN,
       GITHUB_API_BASE_URL: github.url, GITHUB_APP_ID: "12345", GITHUB_APP_PRIVATE_KEY: await githubAppPrivateKey(),
@@ -68,16 +68,39 @@ async function usageLimitedOnMachineA(answerStop) {
     assert.equal(launch.remoteRepo, repository);
     assert.equal(launch.registration.key.harness, "claude");
     const token = await admitRegisteredSpawn(worker, daemonA, launch);
+    const repoPool = { repoIdentity: `https://github.com/${repository}`, repoKeyId: "a".repeat(64), slotId: "b".repeat(32) };
+    if (sleeping) sendSpawnResult(daemonA, launch, { ok: true, pid: 4242, metadata: { repoPool } });
     source = await connectAgent(worker, { identityId: launch.instanceId, name: launch.agentName, agentType: "claude",
       metadata: { tool: "claude", machineId: machineA, hostId: hostA, workspaceMachineId: machineA,
         workspaceCwd: launch.workspace.canonicalCwd, cwd: launch.workspace.canonicalCwd,
         runId: launch.runId, executionKey: launch.executionKey, autoJoinChannelId: channel.id } }, token);
     assert.equal((await source.request({ type: "join_channel", channelId: channel.id, historyLimit: 0 })).type, "channel_joined");
 
-    // Its provider account runs out.
+    // A sleeping source has no active Run: the old handoff implementation
+    // omitted it from stop targets, then the successor's reply woke it again.
+    if (sleeping) {
+      daemonA.ws.send(JSON.stringify({ type: "machine_run_exited", runId: launch.runId,
+        executionKey: launch.executionKey, agentId: launch.instanceId, agentName: launch.agentName,
+        pid: 4242, status: "exit status: 0", exitCode: 0, completed: false, delivered: false, restReason: "sleeping" }));
+      let resting;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        [resting] = await inTestTransaction(tx => tx.query({
+          text: "SELECT status,rest_state,channel_instance_id FROM data.instances WHERE instance_id=$1",
+          values: [launch.instanceId] }));
+        if (resting.status === "offline" && resting.rest_state === "sleeping") break;
+        await sleep(25);
+      }
+      assert.equal(resting.rest_state, "sleeping", JSON.stringify(resting));
+      source.ws.close();
+      const response = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
+        method: "POST", headers, body: JSON.stringify({ body: `@claude:${resting.channel_instance_id}:handoff:@auto` }) });
+      assert.equal(response.status, 200, await response.clone().text());
+    }
+
+    // Its provider account runs out, or the owner hands off its sleeping work.
     const stopA = daemonA.inbox.waitFor(message => message.type === "machine_stop_agent" && message.runId === launch.runId,
       "handoff stop on machine A", 30_000);
-    source.ws.send(JSON.stringify({ type: "agent_lifecycle", channelId: channel.id, layer: "application",
+    if (!sleeping) source.ws.send(JSON.stringify({ type: "agent_lifecycle", channelId: channel.id, layer: "application",
       status: "failed", reason: "usage_limited", detail: "You've hit your session limit · resets 10:20am (UTC)",
       resetsAt: new Date(Date.now() + 3_600_000).toISOString() }));
 
@@ -85,26 +108,59 @@ async function usageLimitedOnMachineA(answerStop) {
     const handoff = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
       message => /^@claude:\d+:handoff:@auto$/u.test(message.body ?? ""), "handoff message", 30_000);
     // Short ASCII ids: live delivery caps a message id at 160 characters.
-    assert.match(handoff.messageId, /^system:usage-limit-handoff:[0-9a-f]{32}$/u);
+    if (!sleeping) assert.match(handoff.messageId, /^system:usage-limit-handoff:[0-9a-f]{32}$/u);
 
     // Machine A is asked to stop the source and push its checkout, keeping it.
     const stop = await stopA;
     assert.equal(stop.worktreeDisposition, "retain");
     assert.match(stop.handoffExport.branch, /^xmatrix\/handoff\/[0-9a-f]{16}$/u);
     assert.equal(stop.handoffExport.channelId, channel.id);
+    if (sleeping) {
+      assert.equal(stop.resumeSessionKey, launch.resumeSessionKey);
+      for (const [key, value] of Object.entries(repoPool)) assert.equal(stop[key], value);
+    }
     const spawnB = daemonB.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "codex spawn on machine B", 30_000);
     daemonA.ws.send(JSON.stringify({ type: "machine_stop_result", requestId: stop.requestId, runId: stop.runId,
       executionKey: stop.executionKey, agentId: stop.agentId, instanceId: stop.instanceId,
+      resumeSessionKey: stop.resumeSessionKey,
+      repoIdentity: stop.repoIdentity, repoKeyId: stop.repoKeyId, slotId: stop.slotId,
       worktreeDisposition: stop.worktreeDisposition, ok: true, pid: 4242, cleanupReason: "process_terminated",
       ...answerStop(stop), relayLease: stop.relayLease }));
 
     // codex starts on machine B.
     const successor = await spawnB;
+    const [completedStop] = await inTestTransaction(tx => tx.query({
+      text: "SELECT status,result_json FROM data.machine_daemon_commands WHERE command_id=$1",
+      values: [stop.requestId] }));
+    assert.equal(completedStop.status, "completed", "successor follows the admitted export result");
+    if (sleeping) assert.equal(completedStop.result_json.handoffExport.state, "pushed");
     assert.equal(successor.registration.key.machineId, machineB);
     assert.equal(successor.registration.key.harness, "codex");
     assert.equal(successor.remoteRepo, repository);
     assert.match(successor.prompt, /@claude:\d+ handed its work to you/);
+
+    if (sleeping) {
+      const successorToken = await admitRegisteredSpawn(worker, daemonB, successor);
+      sendSpawnResult(daemonB, successor, { ok: true, pid: 5252 });
+      successorAgent = await connectAgent(worker, { identityId: successor.instanceId, name: successor.agentName,
+        agentType: "codex", metadata: { tool: "codex", machineId: machineB, hostId: hostB,
+          workspaceMachineId: machineB, workspaceCwd: successor.workspace.canonicalCwd,
+          cwd: successor.workspace.canonicalCwd, runId: successor.runId, executionKey: successor.executionKey,
+          autoJoinChannelId: channel.id } }, successorToken);
+      await successorAgent.request({ type: "join_channel", channelId: channel.id, historyLimit: 0 });
+      const reply = await successorAgent.request({ type: "channel_message", channelId: channel.id,
+        body: "I have taken over the sleeping source's work." });
+      assert.equal(reply.type, "channel_message_dispatched", JSON.stringify(reply));
+      await sleep(500);
+      const [previous] = await inTestTransaction(tx => tx.query({
+        text: "SELECT run_id,rest_state FROM data.instances WHERE instance_id=$1", values: [launch.instanceId] }));
+      assert.equal(previous.run_id, launch.runId, "the source must not resume into a new Run");
+      assert.equal(previous.rest_state, "stopped");
+      const intents = await inTestTransaction(tx => tx.query({ text: `SELECT intent_id
+        FROM data.agent_reborn_intents WHERE source_instance_id=$1 AND kind='wake'`, values: [launch.instanceId] }));
+      assert.equal(intents.length, 0, "the successor's reply must not prepare a source wake");
+    }
 
     // A handoff that went through says nothing more.
     const history = await channelHistory(worker, MOCK_TOKEN, channel.id);
@@ -112,6 +168,7 @@ async function usageLimitedOnMachineA(answerStop) {
     assert.equal(history.messages.filter(message => /:handoff:@auto/u.test(message.body ?? "")).length, 1);
     return { branch: stop.handoffExport.branch, successor };
   } finally {
+    successorAgent?.ws?.close();
     source?.ws?.close();
     daemonA?.ws?.close();
     daemonB?.ws?.close();
@@ -133,4 +190,12 @@ test("a machine whose daemon predates exports still hands off with branch retrie
   const { branch, successor } = await usageLimitedOnMachineA(() => ({}));
   assert.ok(successor.prompt.includes(`git fetch origin ${branch} && git checkout --detach FETCH_HEAD`));
   assert.match(successor.prompt, /If the branch never appears, its directory remains on its machine/);
+});
+
+test("handing off a sleeping source stops it before the successor's reply can wake it", async () => {
+  const { branch, successor } = await usageLimitedOnMachineA(stop => ({ handoffExport: {
+    branch: stop.handoffExport.branch, state: "pushed", commit: "d".repeat(40), base: "e".repeat(40), dirty: true,
+  } }), { sleeping: true });
+  assert.ok(successor.prompt.includes(`git fetch origin ${branch} && git checkout --detach FETCH_HEAD`));
+  assert.match(successor.prompt, /including uncommitted and untracked work/);
 });
