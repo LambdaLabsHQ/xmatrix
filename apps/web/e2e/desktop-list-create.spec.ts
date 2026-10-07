@@ -88,14 +88,14 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await expect(page.getByTestId("new-conversation")).toBeHidden();
 });
 
-test("the agent list leads with New agent, and an agent, its machines and the + are one height", async ({ page }) => {
+test("the agent list leads with Manage machines, and an agent, its machines and the + are one height", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
     registrations: [{ key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness: "codex" },
       displayName: "codex", machineName: "My Mac", models: [] }] });
   await page.locator(".app-rail").getByRole("button", { name: "Agents", exact: true }).click();
 
   const create = page.locator(".app-tool-list .app-list-create");
-  await expect(create).toHaveAccessibleName("New agent");
+  await expect(create).toHaveAccessibleName("Manage machines");
   const heading = page.locator(".app-tool-list-group-title").first();
   const machine = page.locator(".app-tool-list-row").first();
   await expect(machine).toBeVisible();

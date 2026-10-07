@@ -19,7 +19,6 @@ import { useAndroidBackHandler } from "./use-android-back";
 import { Loader2, Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
-import { spaceMemberCanCreate } from "@/components/dashboard/space-member-permissions";
 import {
   decideSpaceJoinRequest,
   spaceJoinRequestsQueryOptions,
@@ -69,6 +68,9 @@ import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
+import { AGENT_PRESETS } from "@xmatrix/protocol";
+import { harnessSpaceKey } from "./harness-space-switch";
+import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { SpaceAgentSetupCard } from "./space-agent-setup-card";
 import { composeFirstTaskMessage, spaceFirstTaskState } from "./space-first-task";
 import {
@@ -376,6 +378,22 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         spaceId: registration.key.spaceId })),
     [registrationCatalog.data],
   );
+  const installedFleet = useInstalledHarnesses(currentSpaceId, token, user?.id, channelsLoaded && !selectedChannel);
+  const [bringingLocal, setBringingLocal] = useState(false);
+  const bringingLocalLock = useRef(false);
+  async function enableLocalHarnesses(presetIds: string[]) {
+    if (bringingLocalLock.current || !currentSpaceId || !user || !desktopContext?.machineId) return;
+    bringingLocalLock.current = true;
+    setBringingLocal(true);
+    try {
+      for (const presetId of presetIds) {
+        const preset = AGENT_PRESETS.find((candidate) => candidate.id === presetId);
+        if (preset && !(await installedFleet.set(harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId, presetId), preset, true))) break;
+      }
+    } finally { bringingLocalLock.current = false; setBringingLocal(false); }
+  }
+  const keepHarnessSetup = installedFleet.enablingAll || bringingLocal ||
+    Boolean(installedFleet.error && installedFleet.candidates.length > 0);
   const agentsLoaded = Boolean(token) && !loadingWorkspace && registrationCatalog.isSuccess;
   const spaceAgentsUnreachable = registrationCatalog.isError;
   // A Space's agents are its registrations, so a Space with none cannot do
@@ -387,7 +405,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       channelsLoaded,
       agentsLoaded,
       spaceAgentsUnreachable,
-      spaceAgentCount: spaceAgents.length,
+      spaceAgentCount: keepHarnessSetup ? 0 : (registrationCatalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled").length,
       desktopAvailable: Boolean(desktopBridge),
       discoveryAvailable: Boolean(desktopBridge?.discoverAgentPresets),
       loadingDiscoveries: loadingAgentPresetDiscoveries,
@@ -396,7 +414,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     }),
     [
       agentPresetDiscoveries,
-      spaceAgents,
+      registrationCatalog.data,
+      keepHarnessSetup,
       desktopBridge,
       desktopDaemonStatus,
       loadingAgentPresetDiscoveries,
@@ -424,7 +443,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onboardingCatalog.rows.length]
   );
   // Only on the empty first screen: an open conversation is never covered.
-  const showSpaceAgentSetup = spaceAgentSetup.kind !== "hidden" && !selectedChannel;
+  const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel;
   /* A failed read is not onboarding: it reads on the tool pages' paper, since
      wood carries only liquid glass and this screen has none. */
   const showSpaceUnreachable = showSpaceAgentSetup && spaceAgentSetup.kind === "unreachable";
@@ -621,8 +640,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     : view === "pages"
       ? { label: "New page", onCreate: () => void pageCreation.create(null),
         disabled: pageCreation.creating || !currentSpaceId }
-      : view === "agents" && user && spaceMemberCanCreate(currentSpace, user.id, "agentCreation")
-        ? { label: "New agent", onCreate: openAgentCreate }
+      : view === "agents" && user
+        ? { label: "Manage machines", onCreate: () => changeAppView("machines") }
         : null;
   // On a desktop each list leads with its +, and Ctrl/⌘+N makes what the list shows.
   const desktopCreate: CreateAction | null = isMobileViewport || agentConfigDialog
@@ -633,8 +652,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       ? { label: "New page", onCreate: () => void pageCreation.create(null),
         disabled: pageCreation.creating || !currentSpaceId }
       : view === "agents" && user
-        ? { label: "New agent", onCreate: openAgentCreate,
-          disabled: !spaceMemberCanCreate(currentSpace, user.id, "agentCreation") }
+        ? { label: "Manage machines", onCreate: () => changeAppView("machines") }
         : null;
   // Elsewhere Ctrl/⌘+N starts a new conversation (browsers that reserve it for a new window keep it).
   const shortcutCreate = desktopCreate && !desktopCreate.disabled ? desktopCreate.onCreate
@@ -729,6 +747,30 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     );
   }
 
+  const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && installedFleet.ready &&
+    installedFleet.candidates.length > 0;
+  const spaceAgentSetupSurface = (
+        <div className={cn("min-h-0 flex-1 overflow-y-auto",
+          showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
+          <SpaceAgentSetupCard
+            state={spaceAgentSetup}
+            hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
+            busy={bringingLocal ? "enabling" : localActionBusy}
+            error={installedFleet.error ?? localActionError}
+            fleet={installedFleet}
+            onManageMachines={() => changeAppView("machines")}
+            onBringAll={() => installedFleet.candidates.length > 0 ? void installedFleet.enableAll() :
+              void enableLocalHarnesses(agentPresetDiscoveries.filter((candidate) => candidate.runtimeAvailable).map((candidate) => candidate.presetId))}
+            onStartDaemon={() => void startDesktopDaemon()}
+            onRefresh={() => void refreshAgentPresetDiscoveries()}
+            // Re-reads the registrations, not the local runtime discovery:
+            // the failure this retries is the registration read.
+            onRetryAgents={() => void registrationCatalog.refetch()}
+            onBindAgent={(candidate) => void enableLocalHarnesses([candidate.presetId])}
+          />
+        </div>
+  );
+
   const mobileChannelListPane = (
     /* The outer slab clips the fixed edge lighting. The texture lives
        on the full-height content wrapper inside the scroll viewport,
@@ -738,7 +780,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
        is — otherwise "the channel list" and "Follow-ups" are the same
        selector now that both stay mounted. */
     <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-      <MobileChannelChatList
+      {showMobileHarnessSetup ? spaceAgentSetupSurface : <MobileChannelChatList
             currentSpaceId={currentSpaceId}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
@@ -753,7 +795,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             onCopyChannelLink={(channel) => copyChannelLink(channel)}
             pendingChannelId={pendingChannelNavigationId}
             onSelect={(channelId, messageId) => requestChannelNavigation(channelId, messageId)}
-          />
+          />}
     </div>
   );
   const pendingCrossSpaceReads = canUseSelectedChannel ? pendingCrossSpaceReadRequests : [];
@@ -835,31 +877,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <ConversationPageCards spaceId={selectedChannel.spaceId} conversationId={selectedChannel.id} token={token}
           onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
-      {showSpaceAgentSetup && (
-        <div className={cn("min-h-0 flex-1 overflow-y-auto",
-          showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
-          <SpaceAgentSetupCard
-            state={spaceAgentSetup}
-            hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
-            busy={localActionBusy}
-            error={localActionError}
-            onStartDaemon={() => void startDesktopDaemon()}
-            onRefresh={() => void refreshAgentPresetDiscoveries()}
-            // Re-reads the registrations, not the local runtime discovery:
-            // the failure this retries is the registration read.
-            onRetryAgents={() => void registrationCatalog.refetch()}
-            onBindAgent={(candidate) => {
-              // Binding produces an identity and nothing else. Registering a
-              // directory here is what made a brand-new Space arrive with a
-              // repository already bound to it, which nobody had chosen.
-              const discovery = agentPresetDiscoveries.find(
-                (item) => item.presetId === candidate.presetId
-              );
-              if (discovery) void importDiscoveredAgent(discovery);
-            }}
-          />
-        </div>
-      )}
+      {showSpaceAgentSetup && !showMobileHarnessSetup && spaceAgentSetupSurface}
       {showSpaceFirstTask && (
         <div className="app-space-setup-canvas min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard

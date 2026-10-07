@@ -11,14 +11,17 @@ import {
 } from "lucide-react";
 import {
   WEB_PROXY_ROUTES,
+  AGENT_PRESETS,
   agentPresetAvatarUrl,
   normalizeAgentPresetRuntime,
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
   type SerializedChannel,
-  type SerializedSpace,
 } from "@xmatrix/protocol";
 
+import { harnessSpaceSwitch } from "./harness-space-switch";
+import { useInstalledHarnesses } from "./use-installed-harnesses";
+import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
 import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
 import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
@@ -49,7 +52,6 @@ import {
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
-import { spaceMemberCanCreate } from "./space-member-permissions";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
@@ -79,20 +81,18 @@ export function MyAgentsView({
   spaceId,
   token,
   currentUserId,
-  currentSpace,
   channels,
   error,
-  onOpenAgentCreate,
+  onOpenMachines,
   onOpenConversation,
 }: {
   spaceId: string | null;
   token: string | undefined;
   currentUserId: string;
-  currentSpace: SerializedSpace | null;
   /** The Space's conversations the reader has, to name where an agent runs. */
   channels: readonly SerializedChannel[];
   error: string | null;
-  onOpenAgentCreate: () => void;
+  onOpenMachines: () => void;
   onOpenConversation: (channelId: string) => void;
 }) {
   const ready = Boolean(spaceId && token);
@@ -104,7 +104,8 @@ export function MyAgentsView({
   const [switching, setSwitching] = useState<{ id: string; on: boolean } | null>(null);
   const [item, select] = useToolItem();
 
-  const canCreateAgent = spaceMemberCanCreate(currentSpace, currentUserId, "agentCreation");
+  const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
+  const newCandidates = fleet.candidates.filter((candidate) => !candidate.registration);
 
   function act(registration: AgentRegistrationSummary, action: MyAgentAction) {
     const id = registrationTupleId(registration.key);
@@ -138,10 +139,10 @@ export function MyAgentsView({
   const shown = chosen ?? (item ? undefined : rows[0]);
 
   const list = (
-    <ToolList title="Agents" createLead="avatar" create={{ label: "New agent", onCreate: onOpenAgentCreate, disabled: !canCreateAgent }}>
+    <ToolList title="Agents" createLead="avatar" create={{ label: "Manage machines", onCreate: onOpenMachines }}>
       {error && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{error}</p>}
       {!ready ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see the agents registered in it.</p>
+        <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents and installed harnesses.</p>
       ) : catalog.isError ? (
         <div className="space-y-2 px-4 md:px-5">
           <p role="alert" className="text-sm text-destructive">{registrationCatalogErrorText(catalog.error)}</p>
@@ -150,7 +151,7 @@ export function MyAgentsView({
       ) : !catalog.data ? (
         <ListSkeleton label="Loading agents" rows={4} className="px-4 md:px-5" />
       ) : rows.length === 0 ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">No agents yet.</p>
+        <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
       ) : groups.map((group) => (
         <ToolListGroup key={group.harness} title={group.harness} count={group.rows.length} identity
           icon={<IdentityAvatar kind="agent" label={group.harness}
@@ -169,6 +170,9 @@ export function MyAgentsView({
           ))}
         </ToolListGroup>
       ))}
+      {ready && (newCandidates.length > 0 || fleet.daemons.isError) && <ToolListGroup title="Installed on your machines" count={newCandidates.length}>
+        <div className="px-4 md:px-5"><InstalledHarnessSwitchList fleet={fleet} onlyNew /></div>
+      </ToolListGroup>}
     </ToolList>
   );
 
@@ -176,9 +180,11 @@ export function MyAgentsView({
   if (shown) {
     const { registration, id, activity, harness, title, machineInLine } = shown;
     const status = registrationStatus(registration);
-    const allActions = registrationActions(registration);
-    const toggle = registrationSwitch(registration);
-    const busy = command.pendingId === id;
+    const ownerPreset = registration.key.ownerUserId === currentUserId
+      ? AGENT_PRESETS.find((preset) => preset.id === harness) : undefined;
+    const toggle = ownerPreset ? harnessSpaceSwitch(registration) : registrationSwitch(registration);
+    const allActions = registrationActions(registration).filter((action) => action !== "restore" || !ownerPreset);
+    const busy = command.pendingId === id || Boolean(fleet.pending) || fleet.enablingAll;
     const live = registration.live;
     const seen = formatRelativeAge(live?.machine.lastSeenAt, now);
     const machineState = !live ? null : live.machine.online ? "online" : seen ? `offline, seen ${seen}` : "offline";
@@ -224,7 +230,11 @@ export function MyAgentsView({
                   onChange={() => void (async () => {
                     setSwitching({ id, on: !toggle.on });
                     try {
-                      for (const kind of toggle.changes) if (!(await command.run(registration.key, { kind }))) return;
+                      if (ownerPreset) {
+                        if (!(await fleet.set(registration.key, ownerPreset, !toggle.on))) return;
+                      } else {
+                        for (const kind of toggle.changes) if (!(await command.run(registration.key, { kind }))) return;
+                      }
                       await catalog.refetch();
                     } finally {
                       setSwitching(null);
@@ -236,14 +246,10 @@ export function MyAgentsView({
           })()}
         </>}
       >
+        {fleet.error && <p role="alert" className={noticeClass("alert", "rounded-lg p-3")}>{fleet.error}</p>}
         {command.notice && (
           <p role="status" className={noticeClass(command.notice.error ? "alert" : "settled", "rounded-lg p-3")}>{command.notice.text}</p>
         )}
-        {!canCreateAgent && currentSpace ? (
-          <p className="text-sm text-muted-foreground">
-            Only owners and admins can add agents to {currentSpace.name}. Existing agents remain available.
-          </p>
-        ) : null}
         {editingId === id && token && (
           <ToolDetailSection title="Settings">
             <RegistrationEditor
@@ -307,9 +313,9 @@ export function MyAgentsView({
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (
-      <ToolDetailEmpty icon={<Cpu />} title="No agents yet">
-        <p>Add an agent with New agent, or from the machine that runs it with xmatrix agent add.</p>
-        <Button size="sm" variant="outline" disabled={!canCreateAgent} onClick={onOpenAgentCreate}><Plus /> New agent</Button>
+      <ToolDetailEmpty icon={<Cpu />} title={newCandidates.length ? "Enable an installed harness" : "Connect your agents"}>
+        <p>Turn on an installed harness in the list, or install one from Machines.</p>
+        <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> Manage machines</Button>
       </ToolDetailEmpty>
     );
   }
