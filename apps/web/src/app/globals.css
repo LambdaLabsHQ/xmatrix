@@ -3400,6 +3400,14 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 .xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions {
   transform: translateY(-100%);
   transition: opacity 0s;
+  /* Only the cards take the pointer. The glass around them, and the seat
+     row beside the island, lie over the neighbouring items, which have to
+     stay tappable while this panel is out. */
+  pointer-events: none;
+}
+
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions .app-agent-work-hover-stack {
+  pointer-events: auto;
 }
 
 .xmatrix-app .app-agent-work-morph.app-agent-work-morph.app-liquid-glass-surface {
