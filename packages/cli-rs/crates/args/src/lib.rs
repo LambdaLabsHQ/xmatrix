@@ -1345,6 +1345,83 @@ mod tests {
     }
 
     #[test]
+    fn metadata_history_and_restore_have_bounded_explicit_revision_arguments() {
+        assert!(
+            Cli::try_parse_from(["xmatrix", "channel", "history", "c", "--authoritative"]).is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-history",
+                "c",
+                "--revision",
+                "0"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-history",
+                "c",
+                "--input",
+                "input-id"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-history",
+                "c",
+                "--limit",
+                "101"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-restore",
+                "c",
+                "--revision",
+                "0"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-restore",
+                "c",
+                "--revision",
+                "0",
+                "--expected-revision",
+                "2"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "about",
+                "c",
+                "--summary",
+                "text",
+                "--expected-revision",
+                "2"
+            ])
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn channel_about_reads_summary_and_name_from_files() {
         let cli = Cli::try_parse_from([
             "xmatrix",
@@ -1831,6 +1908,30 @@ pub enum ChannelCommand {
         /// The newest message the summary covers
         #[arg(long)]
         through: Option<String>,
+        /// Revision printed by the authoritative history read
+        #[arg(long)]
+        expected_revision: Option<u64>,
+    },
+    /// Read immutable title / About revisions and their recorded input
+    MetadataHistory {
+        channel_id: String,
+        #[arg(long)]
+        before_revision: Option<u64>,
+        #[arg(long, conflicts_with_all = ["before_revision", "input"])]
+        revision: Option<u64>,
+        /// Inspect one input id listed in a revision's source
+        #[arg(long, conflicts_with = "before_revision")]
+        input: Option<String>,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: u32,
+    },
+    /// Restore a title / About by appending a new revision
+    MetadataRestore {
+        channel_id: String,
+        #[arg(long)]
+        revision: u64,
+        #[arg(long)]
+        expected_revision: u64,
     },
     /// Move a channel to another Space; human admins of both Spaces confirm it
     Move {
@@ -1877,6 +1978,10 @@ pub enum ChannelCommand {
     History {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
+
+        /// Bypass the daemon cache and record About input at the Hub
+        #[arg(long)]
+        authoritative: bool,
     },
     /// Open a simple line-based channel chat with manual refresh
     Chat {

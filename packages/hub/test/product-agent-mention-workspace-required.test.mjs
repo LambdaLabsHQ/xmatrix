@@ -365,6 +365,7 @@ test("implicit Channel About starts a silent one-shot session through Jev, with 
   const result = await orchestrateProductChannelAbout({
     channelId: "ch-1",
     requestId: "channel-about:ch-1:20",
+    triggerMessageId: "m-trigger",
     actorUserId: "user-1",
     port,
   });
@@ -374,10 +375,14 @@ test("implicit Channel About starts a silent one-shot session through Jev, with 
   const [launch] = port.registrationLaunches;
   assert.equal(launch.commandId, "about:channel-about:ch-1:20");
   assert.equal(Object.hasOwn(launch, "oneshot"), false);
-  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:20", configGeneration: 3 });
+  assert.deepEqual(launch.aboutSession, { triggerRequestId: "channel-about:ch-1:20", triggerMessageId: "m-trigger", configGeneration: 3 });
+  assert.equal(launch.runMetadata.channelAboutTriggerMessageId, "m-trigger");
+  assert.match(launch.body, /Task context .*"channelId":"ch-1".*"triggerMessageId":"m-trigger"/);
+  assert.match(launch.body, /Other channels, pages, local transcripts, caches/);
+  assert.match(launch.body, /--expected-revision/);
   // It reads its own Channel on demand; it never mirrors the Space.
   assert.deepEqual(launch.management, { spaceId: "space-1" });
-  assert.match(launch.body, /`xmatrix channel history ch-1`/u);
+  assert.match(launch.body, /`xmatrix channel history ch-1 --authoritative`/u);
   assert.match(launch.body, /Write the About to a UTF-8 file, then apply it with `xmatrix channel about ch-1 --summary-file <about file> --through </u);
   assert.deepEqual(launch.tags, { harness: "codex" });
   assert.equal(launch.runMetadata.routedAs, "management_channel_about");

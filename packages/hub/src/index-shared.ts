@@ -499,7 +499,7 @@ export function agentRunHttpRouteAllowed(
   if (agentBillingReadRoute(request, principal)) return true;
   const path = new URL(request.url).pathname;
   if (principal.runKind === "channel-about-session") {
-    const history = /^\/api\/channels\/([^/]+)\/history$/.exec(path);
+    const history = /^\/api\/channels\/([^/]+)\/(?:history|metadata-history)$/.exec(path);
     if (request.method === "GET" && history) {
       try {
         return decodeURIComponent(history[1]) === principal.channelId;
@@ -516,6 +516,8 @@ export function agentRunHttpRouteAllowed(
       return false;
     }
   }
+  if (request.method === "GET" && /^\/api\/channels\/[^/]+\/metadata-history$/.test(path)) return true;
+  if (request.method === "POST" && /^\/api\/channels\/[^/]+\/metadata-restore$/.test(path)) return true;
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/messages\/[^/]+\/decision-evidence$/.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/join$/.test(path)) return true;
   // The route stops the run itself, and refuses any Channel but its own.

@@ -53,3 +53,9 @@ Summary and exact parent-message-to-thread references from the authorized active
 Channel catalog. Context refreshes independently of cached transcript records;
 see [Channel Agent read context](../architecture/channel-agent-read-context.md)
 for consumer coverage and additive compatibility.
+
+About metadata writes recheck the exact Channel-bound registration Run inside
+the PostgreSQL transaction and use server-recorded input revisions for CAS.
+Historical metadata and input evidence use current Channel content permissions;
+restoration preserves prior revisions. About catalog reads return only their
+own Channel. See [Channel metadata revisions](../design/channel-metadata-revisions.md).

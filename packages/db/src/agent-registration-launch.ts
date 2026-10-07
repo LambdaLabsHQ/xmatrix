@@ -127,7 +127,7 @@ const ABOUT_SESSION_DONE_PHASES = new Set([
   "wrapper_startup_failed", "run_delivery_failed",
 ]);
 
-export interface RegistrationAboutSession { triggerRequestId: string; successorOfRunId?: string; configGeneration: number }
+export interface RegistrationAboutSession { triggerMessageId?: string; triggerRequestId: string; successorOfRunId?: string; configGeneration: number }
 
 export interface RegistrationLaunchCandidate {
   key: SpaceAgentRegistrationKey;
@@ -548,6 +548,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           visibility: "private", createdAt: at, updatedAt: at, lastSeenAt: at } }, messageSource);
       const session = input.aboutSession ? { runtimeSessionId: String(row.instance_id), channelWriteAllowed: false,
         channelAboutTriggerRequestId: input.aboutSession.triggerRequestId,
+        channelAboutTriggerMessageId: input.aboutSession.triggerMessageId ?? null,
+        channelAboutPendingMessageId: input.aboutSession.triggerMessageId ?? null,
         channelAboutPendingRequestId: input.aboutSession.triggerRequestId, channelAboutPendingActorUserId: input.actorUserId,
         ...(input.aboutSession.successorOfRunId ? { channelAboutSuccessorOfRunId: input.aboutSession.successorOfRunId } : {}) } : {};
       // The spawn command's id is how a delete of a still-starting Instance waits
@@ -899,6 +901,12 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const serving = await this.database.transaction({ requestId: commandId, operation: "registration.launch.about-session",
       placement: this.placement }, async tx => {
       await this.requireManagementGeneration(tx, about.configGeneration);
+      if (about.triggerMessageId) {
+        const trigger = await tx.query({ name: "registration_about_trigger_message_v1",
+          text: "SELECT message_id FROM data.messages WHERE space_id=$1 AND channel_id=$2 AND message_id=$3",
+          values: [this.placement.spaceId,channelId,about.triggerMessageId], maxRows: 1 });
+        if (!trigger[0]) throw new RegistrationAccessError("channel_about_input_mismatch", 403);
+      }
       await tx.query({ name: "registration_launch_channel_lock_v1", text: `SELECT pg_advisory_xact_lock(hashtextextended('runtime-instance:'||$1,0))`,
         values: [channelId], maxRows: 1 });
       if (about.successorOfRunId) {
@@ -920,6 +928,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         await tx.query({ name: "registration_launch_about_pending_v1", text: `UPDATE data.runs SET metadata_json=$1::jsonb,
           version=version+1,updated_at=clock_timestamp() WHERE run_id=$2 AND version=$3`,
         values: [JSON.stringify({ ...body, channelAboutPendingRequestId: about.triggerRequestId,
+          channelAboutPendingMessageId: about.triggerMessageId ?? null,
           channelAboutPendingActorUserId: actorUserId }), keeper.run_id, keeper.run_version], maxRows: 0 });
       }
       return { keeper, retired };

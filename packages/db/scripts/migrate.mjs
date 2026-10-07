@@ -25,7 +25,12 @@ const destructiveExpandPatterns = [
 
 
 export function assertExpandOnlyPostgresMigration(source, name = "migration") {
-  const sql = executableSql(source);
+  let sql = executableSql(source);
+  const newTables = new Set([...sql.matchAll(/\bCREATE\s+TABLE\s+([a-z_][a-z0-9_.]*)\s*\(/giu)].map((match) => match[1].toLowerCase()));
+  // UPDATE in a trigger event is not a mutation. An expand migration may add
+  // this exact content guard only to a table it creates, never an existing writer.
+  sql = sql.replace(/\bCREATE\s+TRIGGER\s+[a-z_][a-z0-9_]*\s+BEFORE\s+UPDATE\s+ON\s+([a-z_][a-z0-9_.]*)\s+FOR\s+EACH\s+ROW\s+EXECUTE\s+FUNCTION\s+[a-z_][a-z0-9_.]*\(\)\s*;/giu,
+    (statement, table) => newTables.has(table.toLowerCase()) ? "" : statement);
   for (const pattern of destructiveExpandPatterns) {
     if (pattern.test(sql)) throw new Error(`${name} is not expand-only; matched ${pattern}`);
   }

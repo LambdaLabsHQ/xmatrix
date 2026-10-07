@@ -155,7 +155,8 @@ async function channelAboutFollowUp(tx: DatabaseTransaction, runId: string) {
       AND metadata_json->>'channelAboutTriggerRequestId'=$3 LIMIT 1`,
   values: [run.channel_id, runId, pending], maxRows: 1 });
   return duplicate[0] ? undefined : { spaceId, channelId: String(run.channel_id), requestId: pending,
-    successorOfRunId: runId, actorUserId: actor };
+    successorOfRunId: runId, actorUserId: actor,
+    ...(typeof body.channelAboutPendingMessageId === "string" ? { triggerMessageId: body.channelAboutPendingMessageId } : {}) };
 }
 
 export interface MachineLifecycleInput {
