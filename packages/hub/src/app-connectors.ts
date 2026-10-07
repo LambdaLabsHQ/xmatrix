@@ -8,6 +8,7 @@ import {
   type ChannelMessage,
   type ChannelAppMention,
   type LaunchTargetRepo,
+  type PageGitHubFile,
 } from "@xmatrix/protocol";
 import { githubRepositoryIsPublic } from "./github-subscription-domain";
 import type { Env } from "./types";
@@ -23,6 +24,7 @@ export interface AppConnectorConnectionView {
   scopes?: string[];
   capabilities?: string[];
   metadata?: Record<string, unknown>;
+  version?: number;
 }
 
 export interface GitHubRepositoryRef {
@@ -584,6 +586,83 @@ export async function readGitHubRepositoryForImport(
         .filter(Boolean),
       excerpt: (githubString(issue.body) || "").slice(0, 300),
     })),
+  };
+}
+
+/** What a page's embed shows of one repository file (docs/design/pages-live-document.md §6.5). */
+export type GitHubFileContent = PageGitHubFile;
+
+export class GitHubFileError extends Error {
+  constructor(
+    readonly code: "github_repository_not_covered" | "github_file_not_found" | "github_file_not_a_file"
+      | "github_read_failed",
+    readonly status: 403 | 404 | 422 | 502,
+  ) {
+    super(code);
+  }
+}
+
+/** The most text an embed carries; a longer file is cut there and links to GitHub for the rest. */
+export const GITHUB_FILE_TEXT_LIMIT = 256 * 1024;
+
+/** The refusals that mean this Space's installation does not reach the repository, or cannot read its files. */
+const GITHUB_REPOSITORY_NOT_COVERED = /^(?:github_installation_missing|github_repository_not_installed|github_installation_not_linked_to_space|missing_capabilities:.*)$/u;
+
+/**
+ * One file of a repository this Space's GitHub connection covers, read with a
+ * token that can only read that repository's contents. Nothing is stored.
+ */
+export async function readGitHubFile(
+  env: AppConnectorEnv,
+  connection: AppConnectorConnectionView,
+  file: { owner: string; repo: string; path: string; ref: string | null }
+): Promise<GitHubFileContent> {
+  let auth: GitHubInstallationAuth;
+  try {
+    auth = await githubInstallationAuthWithCapability(env, connection, "github.contents.read",
+      { owner: file.owner, repo: file.repo });
+  } catch (error) {
+    if (error instanceof Error && GITHUB_REPOSITORY_NOT_COVERED.test(error.message)) {
+      throw new GitHubFileError("github_repository_not_covered", 403);
+    }
+    throw new GitHubFileError("github_read_failed", 502);
+  }
+  const contents = `/repos/${encodeURIComponent(file.owner)}/${encodeURIComponent(file.repo)}/contents/${
+    file.path.split("/").map(encodeURIComponent).join("/")}${file.ref ? `?ref=${encodeURIComponent(file.ref)}` : ""}`;
+  let payload: unknown;
+  try {
+    payload = await fetchGitHubJson(env, contents, auth.token);
+  } catch (error) {
+    if (error instanceof Error && error.message === "github_api_404") throw new GitHubFileError("github_file_not_found", 404);
+    throw new GitHubFileError("github_read_failed", 502);
+  }
+  const item = githubObject(payload);
+  if (Array.isArray(payload) || item.type !== "file") throw new GitHubFileError("github_file_not_a_file", 422);
+  // GitHub inlines a file's content up to 1 MiB; a larger one arrives without it.
+  const encoded = item.encoding === "base64" && typeof item.content === "string" ? item.content.replace(/\s/gu, "") : "";
+  let text: string | null = null;
+  let truncated = false;
+  if (encoded) {
+    const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+    try {
+      text = bytes.includes(0) ? null : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      text = null;
+    }
+    if (text !== null && text.length > GITHUB_FILE_TEXT_LIMIT) {
+      text = text.slice(0, GITHUB_FILE_TEXT_LIMIT);
+      truncated = true;
+    }
+  }
+  return {
+    repository: `${file.owner}/${file.repo}`,
+    path: file.path,
+    ref: file.ref,
+    sha: githubString(item.sha) || "",
+    size: typeof item.size === "number" ? item.size : 0,
+    htmlUrl: githubString(item.html_url) || null,
+    text,
+    truncated,
   };
 }
 

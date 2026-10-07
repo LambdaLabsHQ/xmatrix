@@ -54,8 +54,9 @@ designed for both.
    intent are visible to people. It is derived from live sources and never
    stored (parent §2.7).
 4. **Facts with an authority are referenced, not restated.** A pull request,
-   release, CI run, schedule or claim is embedded as a live reference that
-   renders its current state. Prose holds what has no other authority.
+   release, CI run, schedule, claim or repository file is embedded as a live
+   reference that renders its current state. Prose holds what has no other
+   authority.
 5. **Markdown stays the Agent's medium and the durable format.** Revisions,
    git and Agent edits remain markdown; the editor is a view over it.
 
@@ -503,6 +504,43 @@ change.
   page as its owner. The contract migration moved the existing ones: each
   one's reference was appended to the page its conversation was last linked
   to, or else its Space's first root page.
+
+### 6.5 A GitHub file is embedded by reference
+
+A section that needs a repository file, a prompt or a runbook, shows it in
+place without copying it:
+
+```
+## Startup prompt
+[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md)
+```
+
+- **The link is the embed.** `xmatrix:github-file/<owner>/<repo>/<path>` names
+  one file on the repository's default branch; `?ref=<branch, tag or commit>`
+  pins it. The `/` menu's *GitHub file* turns a pasted GitHub file link into
+  one. A link that does not parse stays an ordinary link.
+- **The editor draws the file below the paragraph** that holds the link:
+  markdown as the page draws its own text, read only, with its links pointing
+  where they do on GitHub; any other text file as code; a binary file, or one
+  too large for GitHub to inline, as a link. It reads on the page's paper,
+  aligned with the surrounding text, between two hairlines. The repository,
+  path, revision and GitHub link form a small source citation below the text.
+  A long file starts folded, with its source still visible.
+- **It is read through, never stored.** `GET
+  /api/spaces/:spaceId/pages/:pageId/github-file?href=` reads the file as the
+  caller: only a Space member who may read the page, only a file the page's
+  head revision references, and only through the Space's GitHub connection,
+  with a token that reads that one repository's contents. The Hub keeps a
+  read for a minute per connection; the page keeps nothing. A link the page
+  has only just gained is shown once the page session commits it.
+- **Each refusal names what is missing**: no GitHub connection, a repository
+  the connection does not reach, a file that is not there, a folder.
+- **A published page shows the link, not the file**, so a public reader never
+  sees a private repository's contents. Agents read the link in `page read`
+  and the file in their checkout.
+- **A directory is never mounted.** Mounting a repository's `docs/` into the
+  page tree assumed one layout and was removed (parent §3); an embed is one
+  file a page chose to show.
 
 ## 7. Around the page
 

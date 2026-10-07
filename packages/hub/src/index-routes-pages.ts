@@ -5,8 +5,8 @@ import type { Context, Hono } from "hono";
 import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-principal";
 import { requireAuth } from "./index-shared";
 import { PreReviewError, publishPreReviewVerdict } from "./github-pre-review";
-import { pageLineDiff, type PageAwareness, type PageChanges, type PageConversation, type PageLink,
-  type PageLinkAnchor } from "@xmatrix/protocol";
+import { gitHubFileReferenceHref, gitHubFileReferences, pageLineDiff, parseGitHubFileReference, type PageAwareness,
+  type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
 import { PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
@@ -17,6 +17,8 @@ import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database
 import { requireMachineDaemonAuth } from "./index-shared";
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { fireOwedAutomationTriggers } from "./automation-triggers";
+import { GitHubFileError, readGitHubFile, type GitHubFileContent } from "./app-connectors";
+import { findAppConnection } from "./apps";
 import type { Env } from "./types";
 
 /**
@@ -75,6 +77,26 @@ function integer(value: unknown): number {
 }
 
 const NO_STORE = { "cache-control": "no-store" } as const;
+
+/**
+ * Files read for page embeds in the last minute, per Space connection, so a
+ * busy page does not spend GitHub's rate limit. A failed read is not kept.
+ */
+const GITHUB_FILE_CACHE_MS = 60_000;
+const GITHUB_FILE_CACHE_ENTRIES = 200;
+const githubFiles = new Map<string, { at: number; file: Promise<GitHubFileContent> }>();
+
+function cachedGitHubFile(key: string, read: () => Promise<GitHubFileContent>): Promise<GitHubFileContent> {
+  const now = Date.now();
+  const hit = githubFiles.get(key);
+  if (hit && now - hit.at < GITHUB_FILE_CACHE_MS) return hit.file;
+  githubFiles.delete(key);
+  const file = read();
+  githubFiles.set(key, { at: now, file });
+  file.catch(() => { if (githubFiles.get(key)?.file === file) githubFiles.delete(key); });
+  while (githubFiles.size > GITHUB_FILE_CACHE_ENTRIES) githubFiles.delete(githubFiles.keys().next().value!);
+  return file;
+}
 
 /** The page named by the route, read as the caller, which is also its access check. */
 async function readAsCaller(c: Context<{ Bindings: Env }>) {
@@ -459,6 +481,37 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       ...(before ? { before: Number(before) } : {}), ...(limit ? { limit: Number(limit) } : {}),
     });
   }));
+
+  // A GitHub file the page embeds (pages-live-document.md §6.5), read through
+  // as the caller: only a file the page's head text references, only through
+  // this Space's GitHub connection, and never stored.
+  app.get(`${base}/:pageId/github-file`, async (c) => {
+    try {
+      const { spaceId, authUser, page } = await readAsCaller(c);
+      const reference = parseGitHubFileReference(c.req.query("href") ?? "");
+      if (!reference) return c.json({ error: "href is not a GitHub file embed", code: "invalid_request" }, 400);
+      const href = gitHubFileReferenceHref(reference);
+      if (!gitHubFileReferences(page.body).includes(href)) {
+        return c.json({ error: "The page does not embed this file", code: "page_github_file_not_referenced" }, 404);
+      }
+      const connection = await findAppConnection(c.env, { spaceId, providerId: "github",
+        actorUserId: authUser.agentRun?.ownerUserId ?? authUser.id });
+      if (!connection || connection.status !== "configured") {
+        return c.json({ error: "Connect GitHub for this Space to show embedded files",
+          code: "github_connection_required" }, 409);
+      }
+      const [owner, repo] = reference.repository.split("/") as [string, string];
+      const read = () => readGitHubFile(c.env, connection, { owner, repo, path: reference.path, ref: reference.ref });
+      // A changed installation/grant must not reuse the old connection's content.
+      const file = Number.isSafeInteger(connection.version) && connection.version! > 0
+        ? await cachedGitHubFile(`${connection.id}\u0000${connection.version}\u0000${href}`, read)
+        : await read();
+      return c.json(file as unknown as Record<string, unknown>, 200, NO_STORE);
+    } catch (error) {
+      if (error instanceof GitHubFileError) return c.json({ error: error.message, code: error.code }, error.status);
+      return failure(c, error);
+    }
+  });
 
   app.post(`${base}/:pageId/revisions/:revision/promote`, async (c) => run(c, async () => {
     const body = await json(c);
