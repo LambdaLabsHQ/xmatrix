@@ -298,6 +298,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.app_teams_link_attempts", "data.app_teams_room_bindings",
     "data.app_googlechat_link_attempts", "data.app_googlechat_room_bindings",
     "data.app_connector_executions", "data.app_source_relations", "data.blob_upload_intents",
+    "data.channel_metadata_revisions", "data.channel_about_inputs",
     "data.channel_access", "data.channel_content_counters", "data.channel_message_sequences",
     "data.content_closure_heads", "data.content_gc_candidates", "data.content_objects",
     "data.content_refs", "data.cross_space_read_notices", "data.delivery_cursors", "data.first_message_launch_choices",

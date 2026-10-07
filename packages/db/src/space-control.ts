@@ -1,3 +1,4 @@
+import { appendMetadataRevision, metadataRevision } from "./channel-metadata-revisions.js";
 import { DetailedControlError } from "./control-error.js";
 import type { DatabaseRequestContext } from "./context.js";
 import { readsOnly } from "./space-roles.js";
@@ -118,6 +119,8 @@ interface PostgresChannelMutationBase {
   at: string;
   channelId: string;
   expectedVersion?: number;
+  expectedRevision?: number;
+  actorRunId?: string;
 }
 
 export type PostgresChannelMutation = PostgresChannelMutationBase & {
@@ -129,6 +132,7 @@ export type PostgresChannelMutation = PostgresChannelMutationBase & {
    * name that is still automatic; any other rename makes the name a person's.
    */
   automaticName?: boolean;
+  restoreRevision?: number;
   topic?: string | null;
   summary?: string | null;
   /**
@@ -674,6 +678,10 @@ async function moveChannelSpaceFacts(
   channelIds: readonly string[],
 ): Promise<void> {
   const values = [sourceSpaceId, targetSpaceId, channelIds];
+  for (const table of ["channel_metadata_revisions", "channel_about_inputs"] as const) {
+    await transaction.query({ name: `channel_move_${table}_v1`,
+      text: `UPDATE data.${table} ${CHANNEL_MOVE_FACT_SQL}`, values, maxRows: 0 });
+  }
   // Reborn history follows its Channel; releaseChannelTreeForMove has already
   // ended any of it that was still in progress.
   await transaction.query({
@@ -1928,6 +1936,48 @@ export class PostgresSpaceControlRepository {
     });
   }
 
+  async metadataHistory(input: { requestId: string; spaceId: string; channelId: string;
+    principal: SpaceControlPrincipal; beforeRevision?: number; revision?: number; inputId?: string; limit?: number }) {
+    const { requestId, spaceId, principalId } = principalScope(input);
+    const limit = input.limit ?? 20;
+    if ([input.beforeRevision,input.revision,input.inputId].filter(value => value !== undefined).length > 1 ||
+        (input.inputId !== undefined && (!input.inputId || input.inputId.length > 300)) ||
+        !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+        [input.beforeRevision,input.revision].some((n) => n !== undefined && (!Number.isSafeInteger(n) || n < 0))) {
+      throw new SpaceControlError("invalid_command", 400, "Invalid metadata history bounds");
+    }
+    return this.inSpace(requestId, "channel.metadata-history", spaceId, async (tx) => {
+      const visible = await tx.query<ChannelRow>({ name: "channel_metadata_history_access_v1",
+        text: `SELECT c.* FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$2
+          AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
+            principalKindSql: "$3", principalIdSql: "$4", channelAboutSessionRead: true })} FOR SHARE OF c`,
+        values: [spaceId,input.channelId,input.principal.kind,principalId], maxRows: 1 });
+      if (!visible[0]) throw new SpaceControlError("channel_not_found", 404, "Channel not found");
+      if (input.inputId) {
+        const sources = await tx.query({ name: "channel_metadata_input_read_v1",
+          text: `SELECT input.space_id,input.origin_space_id,input.channel_id,input.input_id,input.run_id,
+            input.metadata_revision,input.snapshot_json,input.created_at,
+            (SELECT COALESCE(jsonb_agg(CASE WHEN EXISTS (SELECT 1 FROM data.messages current
+              WHERE current.channel_id=input.channel_id AND current.message_id=ref->>'messageId'
+                AND current.content_hash=ref->>'contentHash'
+                AND current.deleted_at IS NULL AND current.recalled_at IS NULL)
+              THEN ref ELSE (ref-'payloadBundleBase64'-'payloadRef') || '{"contentUnavailable":true}'::jsonb END
+              ORDER BY ordinal),'[]'::jsonb)
+              FROM jsonb_array_elements(input.references_json) WITH ORDINALITY refs(ref,ordinal)) AS references_json
+            FROM data.channel_about_inputs input WHERE input.channel_id=$1 AND input.input_id=$2`,
+          values: [input.channelId,input.inputId], maxRows: 1 });
+        return { input: sources[0] ?? null };
+      }
+      const revisions = await tx.query({ name: "channel_metadata_history_read_v1",
+        text: `SELECT * FROM data.channel_metadata_revisions WHERE channel_id=$1
+          AND ($2::bigint IS NULL OR revision<$2) AND ($3::bigint IS NULL OR revision=$3)
+          ORDER BY revision DESC LIMIT $4`,
+        values: [input.channelId,input.beforeRevision ?? null,input.revision ?? null,limit + 1], maxRows: limit + 1 });
+      return { currentRevision: metadataRevision(visible[0].metadata_json),
+        revisions: revisions.slice(0,limit), hasMore: revisions.length > limit };
+    });
+  }
+
   async resolveChannelSpaceRoute(
     input: { requestId: string; channelId: string; operation?: `channel.resolve-space${string}` },
   ): Promise<ChannelSpaceRoute> {
@@ -3080,6 +3130,29 @@ export class PostgresSpaceControlRepository {
       });
       if (!admins[0] && !transfer) throw new SpaceControlError("forbidden", 403, "Space admin required");
 
+      if (input.actorRunId) {
+        const actor = await transaction.query<QueryResultRow & { metadata_json: Record<string, unknown> }>({
+          name: "channel_metadata_actor_run_v1", text: `SELECT metadata_json FROM data.runs
+            WHERE run_id=$1 AND owner_user_id=$2 AND status IN (${ACTIVE_RUN_STATUS_SQL}) FOR SHARE`,
+          values: [input.actorRunId,actorUserId], maxRows: 1 });
+        if (!actor[0] || (actor[0].metadata_json.routedAs === "management_channel_about" &&
+            input.summaryAuthor?.runId !== input.actorRunId)) throw new SpaceControlError(
+          "channel_about_scope_invalid", 403, "Run cannot use an unscoped metadata writer");
+      }
+      if (input.summaryAuthor && (input.mode !== undefined || input.topic !== undefined ||
+          input.spaceId !== undefined || input.managementMetadata !== undefined ||
+          input.restoreRevision !== undefined || (input.name !== undefined && !input.automaticName))) {
+        throw new SpaceControlError("channel_about_scope_invalid", 403, "About may only update its summary and automatic name");
+      }
+      if (input.expectedRevision !== undefined && metadataRevision(root.metadata_json) !== input.expectedRevision) {
+        throw new SpaceControlError("metadata_revision_conflict", 409, "Channel metadata revision conflict");
+      }
+      if (input.restoreRevision !== undefined) {
+        if (!Number.isSafeInteger(input.restoreRevision) || input.restoreRevision < 0 ||
+            input.expectedRevision === undefined || input.name !== undefined || input.summary !== undefined ||
+            input.spaceId !== undefined || input.summaryAuthor) throw new SpaceControlError(
+          "invalid_command", 400, "Restore requires restoreRevision and expectedRevision only");
+      }
       let entityVersion = Number(root.version);
       let affected: ChannelRow[] = [];
       let movedToSpaceId: string | null = null;
@@ -3204,6 +3277,9 @@ export class PostgresSpaceControlRepository {
               version,
               updated_at: at,
             };
+            if (isRoot && (input.name !== undefined || input.summary !== undefined)) {
+              await appendMetadataRevision(transaction, root, nextRow, input);
+            }
             const changed = await transaction.query({
               name: "channel_move_row_v2",
               text: `UPDATE data.channels SET space_id = $2,
@@ -3249,9 +3325,23 @@ export class PostgresSpaceControlRepository {
         if (movedToSpaceId) {
           // The exact tree was already updated above.
         } else {
-        const nextName = input.name === undefined ? root.name : bounded(input.name, "name");
+        let nextName = input.name === undefined ? root.name : bounded(input.name, "name");
         const nextMode = input.mode ?? root.mode;
         const nextMetadata = { ...root.metadata_json };
+        if (input.restoreRevision !== undefined) {
+          const restored = await transaction.query<QueryResultRow & { name: string; summary: string | null;
+            auto_name: boolean; summary_source_json: unknown }>({ name: "channel_metadata_restore_read_v1",
+            text: `SELECT name,summary,auto_name,summary_source_json FROM data.channel_metadata_revisions
+              WHERE channel_id=$1 AND revision=$2`, values: [channelId,input.restoreRevision], maxRows: 1 });
+          if (!restored[0]) throw new SpaceControlError("not_found", 404, "Metadata revision not found");
+          nextName = restored[0].name;
+          if (restored[0].summary === null) delete nextMetadata.summary;
+          else nextMetadata.summary = restored[0].summary;
+          if (restored[0].auto_name) nextMetadata.autoName = true;
+          else delete nextMetadata.autoName;
+          if (restored[0].summary_source_json === null) delete nextMetadata.summarySource;
+          else nextMetadata.summarySource = restored[0].summary_source_json;
+        }
         if (input.name !== undefined) {
           if (input.automaticName && nextMetadata.autoName !== true) {
             throw new SpaceControlError("channel_named_by_person", 409, "Someone named this conversation");
@@ -3275,6 +3365,10 @@ export class PostgresSpaceControlRepository {
               ? nextMetadata.xmatrixManagement as Record<string, unknown> : {}),
             ...input.managementMetadata,
           };
+        }
+        if (input.name !== undefined || input.summary !== undefined || input.restoreRevision !== undefined) {
+          await appendMetadataRevision(transaction, root,
+            { ...root, name: nextName, metadata_json: nextMetadata }, input);
         }
         entityVersion += 1;
         const updated = await transaction.query<ChannelRow>({

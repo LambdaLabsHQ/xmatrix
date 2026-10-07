@@ -121,6 +121,11 @@ try {
     "packages/db/test/placement-fence-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
   });
+  // Catalog/metadata fixtures reset their Space closure: run after the other
+  // PostgreSQL files, never concurrently with their live authorities.
+  if (hubSuitePackages) run("node", ["--test", "packages/db/test/channel-catalog-postgres.test.mjs"], {
+    XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
+  });
   // Workspace packages whose SQL only a real database proves declare test:postgres.
   if (hubSuitePackages) run("pnpm", ["--recursive", "--if-present", "run", "test:postgres"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),

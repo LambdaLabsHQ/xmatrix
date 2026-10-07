@@ -356,6 +356,7 @@ export async function dispatchProductMessagePostCommit(
         env: input.env,
         channelId: input.channelId,
         requestId: aboutRequestId,
+        triggerMessageId: input.messageId,
         actorUserId: input.actorUserId,
         ...(input.sequence === 1 ? { automaticNameOnly: true } : {}),
       }).catch((error) => {

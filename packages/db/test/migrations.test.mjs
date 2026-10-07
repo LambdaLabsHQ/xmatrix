@@ -252,6 +252,7 @@ test("checked-in PostgreSQL migration manifest is contiguous and names every con
     { id: "0164_expand_machine_daemon_command_indexes", phase: "expand" },
     { id: "0165_expand_machine_resource_history", phase: "expand" },
     { id: "0166_expand_admin_audit_events", phase: "expand" },
+    { id: "0167_expand_channel_metadata_revisions", phase: "expand" },
   ]);
   assert.equal(manifest.every(({ checksumSha256 }) => /^[0-9a-f]{64}$/u.test(checksumSha256)), true);
 });
@@ -302,4 +303,11 @@ test("ledger reconciliation rejects edited history and applied gaps", async () =
     }]),
     /ledger has a gap/u,
   );
+});
+
+test("expand triggers guard only newly created history tables and cannot hide mutations", () => {
+  const trigger = "CREATE TRIGGER immutable BEFORE UPDATE ON data.history FOR EACH ROW EXECUTE FUNCTION data.guard();";
+  assert.doesNotThrow(() => assertExpandOnlyPostgresMigration("CREATE TABLE data.history (id TEXT); " + trigger));
+  assert.throws(() => assertExpandOnlyPostgresMigration(trigger), /not expand-only/);
+  assert.throws(() => assertExpandOnlyPostgresMigration("CREATE TABLE data.history (id TEXT); " + trigger + " UPDATE data.old SET id='x';"), /not expand-only/);
 });
