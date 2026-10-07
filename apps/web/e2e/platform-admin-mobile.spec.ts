@@ -19,6 +19,15 @@ async function expectPaperFits(page: Page) {
     probe.remove();
     return matches;
   })).toBe(true);
+  // Wrapped UTC times must stay inside their row and clear the next label.
+  await expect.poll(() => page.locator(".app-admin-account dl > div").evaluateAll((rows) =>
+    rows.every((row, index) => {
+      const next = rows[index + 1];
+      if (!next) return true;
+      const bottom = Math.max(...Array.from(row.children, (cell) => cell.getBoundingClientRect().bottom));
+      return bottom <= next.getBoundingClientRect().top;
+    }),
+  )).toBe(true);
 }
 
 test("a phone enters Platform from More, opens a section, and returns to its sections", async ({ page }, testInfo) => {

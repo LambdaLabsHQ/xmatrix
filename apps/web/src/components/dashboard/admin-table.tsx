@@ -24,6 +24,8 @@ export interface AdminColumn<Row> extends AdminSortableColumn<Row> {
   numeric?: boolean;
   /** Exported but not drawn, e.g. a value already shown inside another cell. */
   hidden?: boolean;
+  /** A phone emphasizes a few counts; other visible fields remain labelled metadata. */
+  mobile?: "metric" | "meta" | false;
   render: (row: Row) => ReactNode;
 }
 
@@ -49,18 +51,30 @@ function AdminRowList<Row>({ rows, columns, rowKey, onRowClick }: {
   onRowClick?: (row: Row) => void;
 }) {
   const [lead, ...rest] = columns;
+  const metrics = rest.filter((column) => column.mobile === "metric");
+  const metadata = rest.filter((column) => column.mobile !== "metric" && column.mobile !== false);
   return (
-    <ul className="divide-y divide-border/60 border-b border-border/60">
+    <ul className="app-admin-row-list divide-y divide-border/60 border-b border-border/60">
       {rows.map((row) => {
         const body = (
           <>
             <div className="min-w-0 [overflow-wrap:anywhere]">{lead?.render(row)}</div>
-            {rest.length > 0 && (
-              <dl className="mt-2 grid grid-cols-2 gap-x-5 gap-y-1.5 text-xs">
-                {rest.map((column) => (
-                  <div key={column.key} className={cn("min-w-0", !column.numeric && "col-span-2")}>
+            {metrics.length > 0 && (
+              <dl className="app-admin-row-metrics mt-3 grid grid-cols-4 gap-x-2 py-2 text-xs">
+                {metrics.map((column) => (
+                  <div key={column.key} className="min-w-0">
+                    <dt className="text-[11px] text-muted-foreground">{column.label}</dt>
+                    <dd className="mt-0.5 text-base font-semibold leading-5 tabular-nums">{column.render(row)}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {metadata.length > 0 && (
+              <dl className="mt-2 space-y-1 text-[11px]">
+                {metadata.map((column) => (
+                  <div key={column.key} className="flex min-w-0 items-baseline justify-between gap-3">
                     <dt className="shrink-0 text-muted-foreground">{column.label}</dt>
-                    <dd className="min-w-0 tabular-nums [overflow-wrap:anywhere]">{column.render(row)}</dd>
+                    <dd className="min-w-0 text-right tabular-nums [overflow-wrap:anywhere] [&_.truncate]:whitespace-normal">{column.render(row)}</dd>
                   </div>
                 ))}
               </dl>
@@ -71,10 +85,10 @@ function AdminRowList<Row>({ rows, columns, rowKey, onRowClick }: {
           <li key={rowKey(row)}>
             {onRowClick ? (
               <button type="button" onClick={() => onRowClick(row)}
-                className="block w-full min-w-0 py-3 text-left active:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring">
+                className="block w-full min-w-0 px-3 py-3 text-left active:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring">
                 {body}
               </button>
-            ) : <div className="py-2.5">{body}</div>}
+            ) : <div className="px-3 py-3">{body}</div>}
           </li>
         );
       })}
@@ -147,17 +161,17 @@ export function AdminTable<Row>({
   };
 
   return (
-    <section aria-label={label} className="min-w-0">
-      <div className="app-admin-table-tools mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border/60">
+    <section aria-label={label} className="app-admin-table min-w-0">
+      <div className="app-admin-table-tools flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border/60 px-3">
         {search && (
           <div className={cn("relative", phone && "w-full")}>
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-0 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(event) => { setQuery(event.target.value); setPage(""); }}
               placeholder={searchPlaceholder ?? "Search"}
               aria-label={`Search ${label}`}
-              className={cn("rounded-none border-0 bg-transparent pl-6 pr-0 shadow-none focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-ring", phone ? "h-11 w-full text-base" : "h-8 w-60 text-xs")}
+              className={cn("rounded-none border-0 bg-transparent pl-5 pr-0 shadow-none focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-ring", phone ? "h-11 w-full text-base" : "h-8 w-60 text-xs")}
             />
           </div>
         )}
@@ -183,7 +197,7 @@ export function AdminTable<Row>({
           </>
         )}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-          {filtered.length === rows.length ? rows.length : `${filtered.length} of ${rows.length}`}
+          {filtered.length === rows.length ? `${rows.length} ${rows.length === 1 ? "row" : "rows"}` : `${filtered.length} of ${rows.length}`}
         </span>
         <AdminPaperAction
           aria-label={`Export ${label} as CSV`}
@@ -201,16 +215,16 @@ export function AdminTable<Row>({
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] font-black uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-border text-left text-xs font-semibold text-muted-foreground">
                 {visible.map((column) => {
                   const active = column.key === sortKey && Boolean(column.value);
                   return (
                     <th key={column.key} scope="col"
                       aria-sort={active ? (descending ? "descending" : "ascending") : undefined}
-                      className={cn("whitespace-nowrap px-2 py-2 first:pl-0 last:pr-0", column.numeric && "text-right")}>
+                      className={cn("whitespace-nowrap px-3 py-2.5", column.numeric && "text-right")}>
                       {column.value ? (
                         <button type="button" onClick={() => toggleSort(column)}
-                          className={cn("inline-flex items-center gap-0.5 uppercase hover:text-foreground",
+                          className={cn("inline-flex items-center gap-0.5 hover:text-foreground",
                             active && "text-foreground")}>
                           {column.label}
                           {active && (descending ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />)}
@@ -232,7 +246,7 @@ export function AdminTable<Row>({
                   className={cn("border-b border-border/60", onRowClick && "cursor-pointer hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none")}>
                   {visible.map((column) => (
                     <td key={column.key}
-                      className={cn("max-w-[260px] px-2 py-2 align-top first:pl-0 last:pr-0",
+                      className={cn("max-w-[260px] px-3 py-3 align-top",
                         column.numeric && "text-right tabular-nums")}>
                       {column.render(row)}
                     </td>

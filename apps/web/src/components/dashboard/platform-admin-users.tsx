@@ -68,17 +68,17 @@ const USER_COLUMNS: AdminColumn<AdminUserSummary>[] = [
     render: (user) => <TimeCell value={user.lastSessionAt} fallback="Never" />,
   },
   {
-    key: "sessions", label: "Sessions", numeric: true, value: (user) => user.activeSessions ?? 0,
+    key: "sessions", mobile: false, label: "Sessions", numeric: true, value: (user) => user.activeSessions ?? 0,
     render: (user) => `${formatAdminCount(user.activeSessions ?? 0)} / ${formatAdminCount(user.sessionCount ?? 0)}`,
   },
   {
     key: "verified", label: "Verified", hidden: true, value: (user) => (user.emailVerified ? "yes" : "no"),
     render: (user) => <span className="text-xs">{user.emailVerified === undefined ? "—" : user.emailVerified ? "Yes" : "No"}</span>,
   },
-  { key: "spaces", label: "Spaces", numeric: true, value: (user) => user.spaces, render: (user) => formatAdminCount(user.spaces) },
-  { key: "agents", label: "Agents", numeric: true, value: (user) => user.agentRegistrations, render: (user) => formatAdminCount(user.agentRegistrations) },
-  { key: "machines", label: "Machines", numeric: true, value: (user) => user.machines, render: (user) => formatAdminCount(user.machines) },
-  { key: "messages", label: "Messages", numeric: true, value: (user) => user.messages, render: (user) => formatAdminCount(user.messages) },
+  { key: "spaces", mobile: "metric", label: "Spaces", numeric: true, value: (user) => user.spaces, render: (user) => formatAdminCount(user.spaces) },
+  { key: "agents", mobile: "metric", label: "Agents", numeric: true, value: (user) => user.agentRegistrations, render: (user) => formatAdminCount(user.agentRegistrations) },
+  { key: "machines", mobile: "metric", label: "Machines", numeric: true, value: (user) => user.machines, render: (user) => formatAdminCount(user.machines) },
+  { key: "messages", mobile: "metric", label: "Messages", numeric: true, value: (user) => user.messages, render: (user) => formatAdminCount(user.messages) },
   {
     key: "lastMessage", label: "Last message", hidden: true, numeric: true, value: (user) => adminTime(user.lastMessageAt),
     render: (user) => <TimeCell value={user.lastMessageAt} />,
@@ -99,7 +99,7 @@ export function PlatformAdminUsers({ token }: { token?: string }) {
 
 function UsersList({ token, onOpen }: { token?: string; onOpen: (userId: string) => void }) {
   return (
-    <AdminQueryView query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
+    <AdminQueryView title="Users" query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
       emptyTitle="No users yet" emptyBody="Registered users appear here once someone signs up.">
       {(overview) => (
         <AdminTable
@@ -143,7 +143,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
   return (
     <>
       <header>
-        <h3 className="text-2xl font-black [overflow-wrap:anywhere]">{adminUserLabel(user)}</h3>
+        <h2 className="text-2xl font-semibold leading-tight [overflow-wrap:anywhere]">{adminUserLabel(user)}</h2>
         <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
           {[user.email, user.handle ? `@${user.handle}` : undefined].filter(Boolean).join(" · ")}
         </p>
@@ -155,6 +155,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
       </header>
 
       <ToolDetailSection title="Account">
+        <div className="app-admin-account">
         <ToolFacts>
           <ToolFact label="User id"><span className="font-mono text-xs [overflow-wrap:anywhere]">{user.userId}</span></ToolFact>
           <ToolFact label="Registered">{utc(user.registeredAt)}</ToolFact>
@@ -163,6 +164,7 @@ function UserDetailBody({ detail }: { detail: AdminUserDetail }) {
           <ToolFact label="Profile">{user.profileCompleted ? "Completed" : "Not completed"}</ToolFact>
           <ToolFact label="Last access">{age(user.lastSessionAt, "Never")}</ToolFact>
         </ToolFacts>
+        </div>
       </ToolDetailSection>
 
       <ToolDetailSection title="Usage">

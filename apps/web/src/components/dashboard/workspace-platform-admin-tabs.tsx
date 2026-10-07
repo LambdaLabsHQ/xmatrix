@@ -17,7 +17,7 @@ import { SectionedToolView } from "./tool-split";
 export function PlatformAdminTabs({ token }: { token?: string }) {
   return (
     <div className="app-admin-view flex min-h-0 min-w-0 flex-1">
-      <SectionedToolView title="Platform admin" showContext={false} sections={[
+      <SectionedToolView title="Platform admin" sections={[
         { key: "overview", label: "Overview", icon: BarChart3, summary: "Usage across the platform",
           content: <PlatformAdminView token={token} /> },
         { key: "users", wide: true, label: "Users", icon: Users, summary: "Every registered user",

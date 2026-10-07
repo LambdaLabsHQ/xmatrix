@@ -3,6 +3,8 @@
 .xmatrix-app .app-admin-view {
   --app-field-radius: 0px;
   --app-field-shell-radius: 0px;
+  --app-admin-wash: color-mix(in oklab, var(--app-panel-list, var(--muted)) 60%, var(--app-panel-paper, var(--background)));
+  --app-admin-row-tone: color-mix(in oklab, var(--foreground) 2.5%, transparent);
 }
 
 .xmatrix-app .app-admin-view .app-tool-detail {
@@ -11,7 +13,44 @@
 }
 
 .xmatrix-app .app-admin-view .app-admin-table-tools {
+  background: var(--app-admin-wash);
   border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+.xmatrix-app .app-admin-view .app-admin-stat-grid,
+.xmatrix-app .app-admin-view .app-admin-table thead {
+  background: var(--app-admin-wash);
+}
+
+.xmatrix-app .app-admin-view .app-admin-table :is(tbody tr, .app-admin-row-list > li):nth-child(even) {
+  background: var(--app-admin-row-tone);
+}
+
+.xmatrix-app .app-admin-view .app-admin-row-metrics {
+  border-block: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+
+.xmatrix-app .app-admin-view .app-tool-detail-section-title {
+  font-weight: 600;
+  letter-spacing: 0.045em;
+}
+
+.xmatrix-app .app-admin-view .app-admin-account dl {
+  row-gap: 0;
+}
+
+.xmatrix-app .app-admin-view .app-admin-account dl > div {
+  display: grid;
+  grid-template-columns: 6.25rem minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 8px;
+  border-bottom: 1px solid color-mix(in oklab, var(--foreground) 7%, transparent);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.xmatrix-app .app-admin-view .app-admin-account dt {
+  width: auto;
 }
 
 html[data-app-theme] .xmatrix-app .app-admin-view :is(input, .app-glass-select-trigger) {
@@ -59,9 +98,21 @@ html[data-app-theme] .xmatrix-app .app-admin-view .app-glass-select-option {
 }
 
 .xmatrix-app .app-admin-view .app-tool-detail-header {
-  margin-bottom: 1rem;
+  display: none;
 }
 
-.xmatrix-app .app-admin-view:has(.app-admin-user-detail) .app-tool-detail-header {
+.xmatrix-app .app-admin-view:has(.app-admin-user-detail) .app-tool-detail-scroll article > button {
   display: none;
+}
+
+@media (max-width: 767px) {
+  .xmatrix-app .app-admin-view .app-tool-detail-scroll article > button {
+    min-height: 44px;
+    margin-bottom: 0;
+    font-size: 12px;
+  }
+
+  .xmatrix-app .app-admin-view .app-tool-detail-scroll article {
+    padding-top: 4px;
+  }
 }
