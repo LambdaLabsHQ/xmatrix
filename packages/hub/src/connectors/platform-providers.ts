@@ -8,6 +8,7 @@ import { JIRA_ACTIONS, verifyJira } from "./actions/jira";
 import { LINEAR_ACTIONS, verifyLinear } from "./actions/linear";
 import { NOTION_ACTIONS, verifyNotion } from "./actions/notion";
 import { GOOGLE_ACTIONS, verifyGoogle } from "./actions/google";
+import { GOOGLE_SEARCH_CONSOLE_ACTIONS, verifyGoogleSearchConsole } from "./actions/google-search-console";
 import { OPENCONNECTOR_ACTIONS, verifyOpenConnector } from "./actions/openconnector";
 import { PAGERDUTY_ACTIONS, verifyPagerDuty } from "./actions/pagerduty";
 import { SENTRY_ACTIONS, verifySentry } from "./actions/sentry";
@@ -55,6 +56,7 @@ const PROVIDERS: Record<string, {
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },
   notion: { actions: NOTION_ACTIONS, verify: verifyNotion },
   google: { actions: GOOGLE_ACTIONS, verify: verifyGoogle },
+  googlesearchconsole: { actions: GOOGLE_SEARCH_CONSOLE_ACTIONS, verify: verifyGoogleSearchConsole },
   bitbucket: { receive: receiveBitbucketDelivery, actions: BITBUCKET_ACTIONS, verify: verifyBitbucket },
   circleci: { receive: receiveCircleCiDelivery },
   buildkite: { receive: receiveBuildkiteDelivery },

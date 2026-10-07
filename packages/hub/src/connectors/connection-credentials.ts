@@ -13,7 +13,7 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
   const credentials: Record<string, string> = { ...resolved?.values };
   const notionOAuth = providerId === "notion" && !!credentials.oauthRefreshToken;
   let refreshed = await refreshOAuthFields(env, providerId, credentials).catch(error => {
-    if (notionOAuth || ["google", "bitbucket", "pagerduty", "sentry", "discord"].includes(providerId)) throw error;
+    if (notionOAuth || ["google", "googlesearchconsole", "bitbucket", "pagerduty", "sentry", "discord"].includes(providerId)) throw error;
     return undefined;
   });
   const persist = async (fields: Record<string, string | null>) => {
