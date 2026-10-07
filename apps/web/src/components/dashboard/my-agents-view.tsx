@@ -3,7 +3,7 @@
 import { useState, type ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Cpu,
+  Bot,
   Loader2,
   Plus,
   RotateCcw,
@@ -313,7 +313,7 @@ export function MyAgentsView({
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (
-      <ToolDetailEmpty icon={<Cpu />} title={newCandidates.length ? "Enable an installed harness" : "Connect your agents"}>
+      <ToolDetailEmpty icon={<Bot />} title={newCandidates.length ? "Enable an installed harness" : "Connect your agents"}>
         <p>Turn on an installed harness in the list, or install one from Machines.</p>
         <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> Manage machines</Button>
       </ToolDetailEmpty>
