@@ -1250,7 +1250,9 @@ export function AppsView({
         const installationId = options?.installationId?.trim()
           || retainedInstallationIds[0]
           || "";
-        if (existingConnection?.status !== "configured" && installationId && options?.mode !== "add") {
+        // Only a connection in error recovers by a check; after Disconnect,
+        // Connect authorizes on GitHub again.
+        if (existingConnection?.status === "error" && installationId && options?.mode !== "add") {
           const checkPayload = await connectionMutation.mutateAsync({
             url: WEB_PROXY_ROUTES.space_app_connection_check(currentSpace.id, connector.id),
             method: "POST",

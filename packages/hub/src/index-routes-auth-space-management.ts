@@ -229,12 +229,13 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       .catch(() => null);
     if (listedConnections) {
       const connections = listedConnections as Array<
-        { providerId?: string; metadata?: Record<string, unknown> }
+        { providerId?: string; status?: string; metadata?: Record<string, unknown> }
       >;
       const githubConnection = connections.find(
         (connection) => connection.providerId === "github"
       );
-      const retainedIds = githubConnection
+      // A disconnected connection has nothing to manage: Connect installs anew.
+      const retainedIds = githubConnection && githubConnection.status !== "disconnected"
         ? githubConnectionInstallationIds(githubConnection)
         : [];
       if (!modeQuery) {
@@ -311,18 +312,28 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       // other installations, default repository and channel/write config. Only set
       // baseline scopes on the first successful connection.
       let hasExistingConnection = false;
+      let reconnectMetadata: Record<string, unknown> | undefined;
       const listedExisting = await listAppConnections(c.env, { spaceId, actorUserId: userId })
         .catch(() => null);
       if (listedExisting) {
         const existingConnections = listedExisting as Array<
-          { providerId?: string; metadata?: Record<string, unknown> }
+          { providerId?: string; status?: string; scopes?: string[]; metadata?: Record<string, unknown> }
         >;
         const existingGithub = existingConnections.find(
           (connection) => connection.providerId === "github"
         );
+        // A reconnect after Disconnect keeps the scopes chosen before it.
         hasExistingConnection = Boolean(
-          existingGithub && githubConnectionInstallationIds(existingGithub).length > 0
+          existingGithub && (githubConnectionInstallationIds(existingGithub).length > 0 ||
+            (existingGithub.scopes?.length ?? 0) > 0)
         );
+        if (existingGithub?.status === "disconnected") {
+          // Reconnecting replaces the installations a disconnect left behind
+          // rather than appending to them.
+          const { installationId: _installationId, installationIds: _installationIds, ...kept } =
+            existingGithub.metadata ?? {};
+          reconnectMetadata = kept;
+        }
       }
 
       const body: UpsertAppConnectorConnectionRequest = {
@@ -342,6 +353,7 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
         body.scopes = ["metadata:read", "issues:read"];
         body.capabilities = ["github.metadata.read", "github.issues.read"];
       }
+      if (reconnectMetadata) body.metadata = reconnectMetadata;
 
       const connected = await upsertAppConnection(c.env, {
         // The append is idempotent itself; a fresh command id keeps a repeated
@@ -413,7 +425,15 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     if (providerId !== "github" && body.status !== "disconnected" && body.status !== "error") {
       return c.json({ error: "Save the app's credentials and check it to connect" }, 400);
     }
-    if (providerId === "github" && body.metadata !== undefined) {
+    if (providerId === "github" && body.status === "disconnected") {
+      // Disconnect forgets the linked installations, so the next Connect
+      // authorizes on GitHub again instead of reviving the old ones by a check.
+      const stored = await findAppConnection(c.env, { spaceId: c.req.param("spaceId"), providerId: "github",
+        actorUserId: authUser.id });
+      const { installationId: _installationId, installationIds: _installationIds, ...kept } =
+        (stored?.metadata ?? {}) as Record<string, unknown>;
+      body.metadata = kept;
+    } else if (providerId === "github" && body.metadata !== undefined) {
       // Configure may send the stored installations back, never different ones.
       const stored = await findAppConnection(c.env, { spaceId: c.req.param("spaceId"), providerId: "github",
         actorUserId: authUser.id });
