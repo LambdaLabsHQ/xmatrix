@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { GitPullRequest, Link2, Plus, Unlink } from "lucide-react";
+import { GitPullRequest, Link2, Plus, Search, Unlink } from "lucide-react";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { cn } from "@/lib/utils";
@@ -18,8 +18,27 @@ type GitHubInstallationAccount = {
 type GitHubInstallations = {
   linked: GitHubInstallationAccount[];
   available: GitHubInstallationAccount[];
-  accountRequired: boolean;
+  authorized: boolean;
 };
+
+const GRANT_PARAM = "githubGrant";
+const GRANT_STORAGE_KEY = "xmatrix:github-grant";
+
+/**
+ * The signed list of installations GitHub confirmed on Connect. It arrives in
+ * the return URL once and is kept for this tab, so a reload can still link.
+ */
+function takeGitHubGrant(): string | undefined {
+  const url = new URL(window.location.href);
+  const arrived = url.searchParams.get(GRANT_PARAM);
+  if (arrived) {
+    url.searchParams.delete(GRANT_PARAM);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    window.sessionStorage.setItem(GRANT_STORAGE_KEY, arrived);
+    return arrived;
+  }
+  return window.sessionStorage.getItem(GRANT_STORAGE_KEY) ?? undefined;
+}
 
 const ACTION_CLASS = cn(
   "app-connector-secondary-action inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-bold disabled:opacity-50",
@@ -28,43 +47,50 @@ const ACTION_CLASS = cn(
 
 /**
  * The GitHub accounts and organizations this Space reaches, one App
- * installation each. Installations the admin's GitHub account already has are
- * linked here directly, since GitHub does not return to xMatrix for an account
- * whose installation is unchanged.
+ * installation each. Connecting authorizes on GitHub, which confirms the
+ * installations this person reaches; they are linked here directly, since
+ * GitHub does not return to xMatrix for an installation that is unchanged.
  */
-export function GitHubInstallationAccounts({ spaceId, token, onManage, onInstall, onChanged }: {
+export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthorize, onInstall, onChanged }: {
   spaceId: string;
   token: string;
   onManage: (installationId: string) => void;
+  onAuthorize: () => void;
   onInstall: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const [grant, setGrant] = useState<string | undefined>(undefined);
   const [installations, setInstallations] = useState<GitHubInstallations | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const url = WEB_PROXY_ROUTES.space_app_connection_github_installations(spaceId);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (currentGrant: string | undefined) => {
     try {
-      const payload = await xmatrixApiRequest<Partial<GitHubInstallations>>({ url, token });
+      const query = currentGrant ? `?grant=${encodeURIComponent(currentGrant)}` : "";
+      const payload = await xmatrixApiRequest<Partial<GitHubInstallations>>({ url: `${url}${query}`, token });
       setInstallations({
         linked: Array.isArray(payload?.linked) ? payload.linked : [],
         available: Array.isArray(payload?.available) ? payload.available : [],
-        accountRequired: payload?.accountRequired === true,
+        authorized: payload?.authorized === true,
       });
     } catch (caught) {
       setError((caught as Error).message);
     }
   }, [url, token]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const current = takeGitHubGrant();
+    setGrant(current);
+    void load(current);
+  }, [load]);
 
   async function change(installationId: string, request: () => Promise<unknown>) {
     setBusyId(installationId);
     setError(null);
     try {
       await request();
-      await Promise.all([load(), onChanged()]);
+      await Promise.all([load(grant), onChanged()]);
     } catch (caught) {
       setError((caught as Error).message);
     } finally {
@@ -73,7 +99,7 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onInstall
   }
 
   const link = (installationId: string) => change(installationId, () =>
-    xmatrixApiRequest({ url, token, method: "POST", body: { installationId } }));
+    xmatrixApiRequest({ url, token, method: "POST", body: { installationId, grant } }));
   const unlink = (installationId: string) => change(installationId, () =>
     xmatrixApiRequest({
       url: WEB_PROXY_ROUTES.space_app_connection_github_installation(spaceId, installationId),
@@ -110,7 +136,7 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onInstall
       ) : null}
       {installations && installations.available.length > 0 ? (
         <>
-          <p className="mt-4 text-xs font-bold uppercase text-muted-foreground">Installed on GitHub, not linked here</p>
+          <p className="mt-4 text-xs font-bold uppercase text-muted-foreground">Your GitHub accounts, not linked here</p>
           <ul className="mt-2 space-y-2">
             {installations.available.map((account) => (
               <AccountRow key={account.installationId} account={account}>
@@ -123,13 +149,18 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onInstall
           </ul>
         </>
       ) : null}
-      {installations?.accountRequired ? (
+      {installations?.authorized && installations.available.length === 0 ? (
         <p className="mt-3 text-xs leading-5 text-muted-foreground">
-          Link your GitHub account in your profile to see the accounts where the App is already installed.
+          Every account where your GitHub can reach the App is already linked.
         </p>
       ) : null}
       {error ? <p className="mt-3 text-xs text-destructive" role="alert">{error}</p> : null}
-      <div className="mt-3">
+      <div className="mt-3 flex flex-wrap gap-2">
+        {installations && !installations.authorized ? (
+          <button type="button" className={ACTION_CLASS} onClick={onAuthorize}>
+            <Search className="size-3.5" /> Find my GitHub accounts
+          </button>
+        ) : null}
         <button type="button" className={ACTION_CLASS} onClick={onInstall}>
           <Plus className="size-3.5" /> Install on another account
         </button>
