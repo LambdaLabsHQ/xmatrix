@@ -106,10 +106,8 @@ const liquidGlassCss = fs.readFileSync(path.join(sourceRoot, "app/liquid-glass.c
 const materialsCss = fs.readFileSync(path.join(sourceRoot, "app/themes/materials.css"), "utf8");
 const woodThemeCss = fs.readFileSync(path.join(sourceRoot, "app/themes/wood.css"), "utf8");
 const landingCardSources = [
-  "architecture.tsx",
   "desktop-download.tsx",
   "pricing.tsx",
-  "problem-statement.tsx",
 ].map((file) => fs.readFileSync(path.join(sourceRoot, "components/landing", file), "utf8"));
 
 module.exports = {
