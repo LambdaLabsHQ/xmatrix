@@ -62,10 +62,10 @@ use runtime_channel_activity::{
 };
 use runtime_channel_history_bootstrap::with_channel_history_bootstrap;
 mod runtime_channel_history_cache;
-#[cfg(unix)]
-mod runtime_daemon_fd_limit;
 mod runtime_daemon_message_send;
 mod runtime_daemon_quota_probe;
+#[cfg(unix)]
+mod runtime_daemon_fd_limit;
 #[cfg(unix)]
 mod runtime_daemon_socket;
 mod runtime_execution_outbox;
