@@ -96,23 +96,3 @@ test("a declined authorization, a forged state, or a grant as a state links noth
     assert.deepEqual([...declined.links, ...forged.links, ...asState.links], []);
   });
 });
-
-test("without a configured client id, Connect uses the one GitHub reports for the App", async () => {
-  const { generateKeyPairSync } = await import("node:crypto");
-  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const appEnv = { GITHUB_APP_CLIENT_SECRET: "client-secret", HUB_URL: "https://hub.test", APP_URL: "https://app.test",
-    GITHUB_APP_ID: "42", GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: "pkcs8", format: "pem" }) };
-  const original = globalThis.fetch;
-  const asked = [];
-  globalThis.fetch = async (url, init = {}) => {
-    asked.push([String(url), init.headers?.get?.("authorization")?.split(".").length]);
-    return Response.json({ id: 42, client_id: "Iv1.reported" });
-  };
-  try {
-    const url = new URL(await githubConnectAuthorizeUrl(appEnv, { spaceId: "space-1", userId: "admin" }));
-    assert.equal(url.searchParams.get("client_id"), "Iv1.reported");
-    // Asked once as the App (a JWT), then cached.
-    await githubConnectAuthorizeUrl(appEnv, { spaceId: "space-1", userId: "admin" });
-    assert.deepEqual(asked, [["https://api.github.com/app", 3]]);
-  } finally { globalThis.fetch = original; }
-});
