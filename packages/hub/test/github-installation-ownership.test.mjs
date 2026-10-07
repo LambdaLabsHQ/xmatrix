@@ -210,3 +210,13 @@ test("the user's installations are paged and read as accounts, dropping malforme
     ]);
   } finally { globalThis.fetch = original; }
 });
+
+test("Connect names every GitHub App setting a deployment left unset", async () => {
+  const f = fixture();
+  const response = await f.app.request("/api/apps/github/install?spaceId=space-1&mode=add", {},
+    { GITHUB_APP_ID: "42", GITHUB_APP_CLIENT_SECRET: "secret", GITHUB_APP_PRIVATE_KEY: "key", GITHUB_APP_SLUG: " " });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(),
+    { error: "GitHub App is not configured: GITHUB_APP_CLIENT_ID, GITHUB_APP_SLUG unset" });
+  assert.deepEqual(f.authorizations, []);
+});
