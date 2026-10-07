@@ -358,7 +358,7 @@ In the xMatrix Apps view, configure GitHub for each space that should use it:
 
 - Click `Connect` on the GitHub connector and complete GitHub App installation in GitHub.
 - The GitHub callback returns directly to the Space `Apps` view. If organization-owner approval is required, the view reports the installation as pending instead of silently returning without a connection.
-- `Disconnect` disables the Space connection while retaining its bounded installation reference and xMatrix routing configuration. `Reconnect` first verifies that retained installation by requesting a short-lived installation token; only an invalid or revoked installation returns to GitHub authorization.
+- `Disconnect` disables the Space connection and forgets its linked installations; xMatrix routing configuration and scopes are kept. `Connect` then authorizes on GitHub again, and the installation it returns replaces the old ones. Only a connection in error recovers by a check of its retained installations.
 - After connecting, click `Configure` to select the default agent that should be added to issue work channels.
 - The first successful `@github:subscribe` in a channel creates that channel's GitHub binding. `@github:unsubscribe` removes selected source features and removes the binding when the final subscription is gone. Channel details displays this derived subscription state and opens Composer `@` completion; Space-wide connection management remains in `Apps`.
 - Set the default repository as `owner/repo` when users should be able to type short issue refs such as `#42`.
@@ -366,7 +366,7 @@ In the xMatrix Apps view, configure GitHub for each space that should use it:
   - `comment`, `create_issue`, `close_issue`, `reopen_issue`, `review`, `rerun_failed_jobs` and `dispatch_workflow` are off by default. They run in a channel only after a Space admin allows them there, either under Apps → GitHub → Channel action policy or with `@github:policy:<action> allow` in that channel.
   - `merge` runs from a Human's own command, and from an Agent's command only where allowed.
   - Migration `0127` converted the retired `*WriteChannelId` metadata into `allow` rows. Those keys are no longer read.
-- In `Configure`, use `Manage access on GitHub` to reconfigure repository selection for an existing User/Org installation, or `Add account or organization` to install the App on another account without replacing the first. xMatrix retains a bounded list of installation ids per Space; webhook delivery and org/repo completion match any retained installation. That path keeps xMatrix-owned channel/agent/write settings.
+- A GitHub App installation belongs to exactly one User or Organization; a Space links up to 32 of them, and its repositories, webhook delivery and org/repo completion cover every linked installation. `Configure` → `GitHub accounts` lists each linked account with `Manage on GitHub` (repository selection for that installation) and `Unlink` (forgets it here; unlinking the last one disconnects). Installations of the App that the admin's linked GitHub account can reach but the Space has not linked are listed with `Link`, which links them directly after the same reachability check as the install callback, since GitHub does not return to xMatrix for an account whose installation is unchanged. `Install on another account` installs the App on a new account. None of these change xMatrix-owned channel/agent/write settings.
 - Use full issue URLs or `owner/repo#42` when no default repository is configured.
 
 After setup, a channel message such as:
