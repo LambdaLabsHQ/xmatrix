@@ -25,6 +25,9 @@ const USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const DEVICE_START_RATE_LIMIT = 20;
 const DEVICE_TOKEN_RATE_LIMIT = 120;
+const SETUP_INTENT_TTL_MS = 30 * 60 * 1000;
+const SETUP_INTENT_RATE_LIMIT = 20;
+const HOSTNAME_MAX = 120;
 
 type DeviceAuthStatus = "pending" | "approved";
 
@@ -41,6 +44,41 @@ interface DeviceAuthSession {
   lastPolledAt?: string;
   issuedSession?: AuthSession;
   issuedAt?: string;
+  /** The setup intent the terminal named when it started; a link, never a grant. */
+  setupIntentId?: string;
+  /** What the terminal says it runs on, shown beside the code for comparison. */
+  hostname?: string;
+  platform?: string;
+}
+
+/**
+ * A person's request, from a page they are signed in on, to connect a machine
+ * to a Space. Its id travels in the install command. It authorizes nothing:
+ * a terminal naming it only asks to be approved, and only the intent's owner,
+ * signed in, approves that terminal with an explicit click.
+ */
+export interface SetupIntent {
+  intentId: string;
+  ownerUserId: string;
+  spaceId: string;
+  createdAt: string;
+  expiresAt: string;
+  /** The terminal currently attached, if any. */
+  deviceCode?: string;
+  /** The Machine the approved terminal reported it registered. */
+  machineId?: string;
+}
+
+/** What the owner's page reads: the intent and the terminal attached to it. */
+export interface SetupIntentRead {
+  intent: Omit<SetupIntent, "deviceCode">;
+  terminal?: {
+    userCode: string;
+    hostname?: string;
+    platform?: string;
+    approved: boolean;
+    signedIn: boolean;
+  };
 }
 
 interface StartDeviceAuthResponse {
@@ -69,7 +107,20 @@ export class DeviceAuthBroker extends DurableObject<Env> {
           await logAuthMetric({ routeGroup: "device_start", status: 429, outcome: "rate_limited" });
           return Response.json({ error: "Too many device login requests" }, { status: 429 });
         }
-        return this.handleStart();
+        return this.handleStart(request);
+      case "/internal/setup-intent/create":
+        if (await this.isRateLimited("setup-intent", clientKey(request), SETUP_INTENT_RATE_LIMIT)) {
+          return Response.json({ error: "Too many setup requests" }, { status: 429 });
+        }
+        return this.handleIntentCreate(request);
+      case "/internal/setup-intent/read":
+        return this.handleIntentRead(request);
+      case "/internal/setup-intent/approve":
+        return this.handleIntentApprove(request);
+      case "/internal/setup-intent/decline":
+        return this.handleIntentDecline(request);
+      case "/internal/setup-intent/machine":
+        return this.handleIntentMachine(request);
       case "/internal/device-auth/approve":
         return this.handleApprove(request);
       case "/internal/device-auth/token":
@@ -79,7 +130,10 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     }
   }
 
-  private async handleStart(): Promise<Response> {
+  private async handleStart(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as {
+      setupIntentId?: unknown; hostname?: unknown; platform?: unknown;
+    };
     const deviceCode = this.generateDeviceCode();
     const userCode = this.generateUserCode();
     const now = Date.now();
@@ -90,7 +144,31 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + DEVICE_AUTH_TTL_MS).toISOString(),
       interval: DEVICE_AUTH_POLL_INTERVAL_SECONDS,
+      ...boundedText("hostname", body.hostname),
+      ...boundedText("platform", body.platform),
     };
+
+    if (body.setupIntentId !== undefined) {
+      const intent = typeof body.setupIntentId === "string"
+        ? await this.loadIntent(body.setupIntentId) : null;
+      if (!intent) {
+        await logAuthMetric({ routeGroup: "device_start", status: 404, outcome: "unknown_setup_intent" });
+        return Response.json({
+          error: "This setup command has expired. Copy a fresh one from xMatrix.",
+          code: "setup_intent_expired",
+        }, { status: 404 });
+      }
+      const attached = intent.deviceCode ? await this.loadSession(intent.deviceCode) : null;
+      if (attached && !this.isExpired(attached) && attached.status === "pending") {
+        await logAuthMetric({ routeGroup: "device_start", status: 409, outcome: "setup_intent_busy" });
+        return Response.json({
+          error: "Another terminal is already waiting for approval with this command.",
+          code: "setup_intent_busy",
+        }, { status: 409 });
+      }
+      session.setupIntentId = intent.intentId;
+      await this.ctx.storage.put(this.intentKey(intent.intentId), { ...intent, deviceCode });
+    }
 
     await this.ctx.storage.put(this.sessionKey(deviceCode), session);
     await logAuthMetric({ routeGroup: "device_start", status: 200, outcome: "created" });
@@ -132,7 +210,16 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       await logAuthMetric({ routeGroup: "device_approve", status: 400, outcome: "bad_request" });
       return Response.json({ error: "deviceCode and userCode are required" }, { status: 400 });
     }
+    return this.approveDevice(token, deviceCode, userCode);
+  }
 
+  /** Approves one terminal's sign-in as the account behind `token`, once its code matches. */
+  private async approveDevice(
+    token: string,
+    deviceCode: string,
+    userCode: string,
+    requiredUserId?: string,
+  ): Promise<Response> {
     const pending = await this.pendingSession(deviceCode, "device_approve");
     if (pending instanceof Response) return pending;
     const { session } = pending;
@@ -164,6 +251,11 @@ export class DeviceAuthBroker extends DurableObject<Env> {
         { error: (error as Error).message || "Invalid or expired auth token" },
         { status: 401 }
       );
+    }
+
+    if (requiredUserId && user.id !== requiredUserId) {
+      await logAuthMetric({ routeGroup: "device_approve", status: 404, outcome: "setup_intent_owner_mismatch" });
+      return Response.json({ error: "Setup request not found" }, { status: 404 });
     }
 
     if (session.status === "approved" && session.user && session.user.id !== user.id) {
@@ -346,6 +438,115 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     );
   }
 
+  private async handleIntentCreate(request: Request): Promise<Response> {
+    const { ownerUserId, spaceId } = (await request.json().catch(() => ({}))) as {
+      ownerUserId?: unknown; spaceId?: unknown;
+    };
+    if (typeof ownerUserId !== "string" || !ownerUserId || typeof spaceId !== "string" || !spaceId) {
+      return Response.json({ error: "ownerUserId and spaceId are required" }, { status: 400 });
+    }
+    const now = Date.now();
+    const intent: SetupIntent = {
+      intentId: crypto.randomUUID().replace(/-/g, ""),
+      ownerUserId,
+      spaceId,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + SETUP_INTENT_TTL_MS).toISOString(),
+    };
+    await this.ctx.storage.put(this.intentKey(intent.intentId), intent);
+    return Response.json({ intent: publicIntent(intent) }, { headers: { "cache-control": "no-store" } });
+  }
+
+  private async handleIntentRead(request: Request): Promise<Response> {
+    const owned = await this.ownedIntent(request);
+    if (owned instanceof Response) return owned;
+    const { intent, terminal } = owned;
+    const read: SetupIntentRead = {
+      intent: publicIntent(intent),
+      ...(terminal && !this.isExpired(terminal) ? {
+        terminal: {
+          userCode: terminal.userCode,
+          ...(terminal.hostname ? { hostname: terminal.hostname } : {}),
+          ...(terminal.platform ? { platform: terminal.platform } : {}),
+          approved: terminal.status === "approved",
+          signedIn: Boolean(terminal.issuedSession),
+        },
+      } : {}),
+    };
+    return Response.json(read, { headers: { "cache-control": "no-store" } });
+  }
+
+  private async handleIntentApprove(request: Request): Promise<Response> {
+    const token = readBearerToken(request.headers.get("authorization"));
+    if (!token) return Response.json({ error: "Missing bearer token" }, { status: 401 });
+    const owned = await this.ownedIntent(request);
+    if (owned instanceof Response) return owned;
+    const { intent, body } = owned;
+    if (!intent.deviceCode) {
+      return Response.json({ error: "No terminal is waiting for approval" }, { status: 409 });
+    }
+    if (typeof body.userCode !== "string" || !body.userCode) {
+      return Response.json({ error: "userCode is required" }, { status: 400 });
+    }
+    return this.approveDevice(token, intent.deviceCode, body.userCode, intent.ownerUserId);
+  }
+
+  private async handleIntentDecline(request: Request): Promise<Response> {
+    const owned = await this.ownedIntent(request);
+    if (owned instanceof Response) return owned;
+    const { intent, terminal } = owned;
+    // A terminal already signed in keeps its session; declining only stops a pending one.
+    if (intent.deviceCode && terminal?.status === "pending") {
+      await this.ctx.storage.delete(this.sessionKey(intent.deviceCode));
+      await this.ctx.storage.put(this.intentKey(intent.intentId), publicIntent(intent));
+    }
+    return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
+  }
+
+  private async handleIntentMachine(request: Request): Promise<Response> {
+    const owned = await this.ownedIntent(request);
+    if (owned instanceof Response) return owned;
+    const { intent, body, terminal } = owned;
+    if (typeof body.machineId !== "string" || !body.machineId || body.machineId.length > 200) {
+      return Response.json({ error: "machineId is required" }, { status: 400 });
+    }
+    if (terminal?.status !== "approved") {
+      return Response.json({ error: "This setup request has no approved terminal" }, { status: 409 });
+    }
+    const next = { ...intent, machineId: body.machineId };
+    await this.ctx.storage.put(this.intentKey(intent.intentId), next);
+    return Response.json({ intent: publicIntent(next) }, { headers: { "cache-control": "no-store" } });
+  }
+
+  /** The intent the body names, if it belongs to the owner the Hub authenticated, with its terminal. */
+  private async ownedIntent(request: Request): Promise<Response | {
+    intent: SetupIntent; body: Record<string, unknown>; terminal: DeviceAuthSession | null;
+  }> {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const intent = typeof body.intentId === "string" ? await this.loadIntent(body.intentId) : null;
+    // Another owner's intent and an expired one read the same: not found.
+    if (!intent || intent.ownerUserId !== body.ownerUserId) {
+      return Response.json({ error: "Setup request not found", code: "setup_intent_not_found" }, { status: 404 });
+    }
+    const terminal = intent.deviceCode ? await this.loadSession(intent.deviceCode) : null;
+    return { intent, body, terminal };
+  }
+
+  private async loadIntent(intentId: string): Promise<SetupIntent | null> {
+    if (!/^[a-f0-9]{32}$/u.test(intentId)) return null;
+    const intent = await this.ctx.storage.get<SetupIntent>(this.intentKey(intentId));
+    if (!intent) return null;
+    if (Date.parse(intent.expiresAt) <= Date.now()) {
+      await this.ctx.storage.delete(this.intentKey(intentId));
+      return null;
+    }
+    return intent;
+  }
+
+  private intentKey(intentId: string): string {
+    return `setup-intent:${intentId}`;
+  }
+
   /** The session a device code names; an expired one is deleted before it is reported. */
   private async pendingSession(
     deviceCode: string,
@@ -378,6 +579,11 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       if (Date.parse(session.expiresAt) <= now) {
         expiredKeys.push(key);
       }
+    }
+
+    const intents = await this.ctx.storage.list<SetupIntent>({ prefix: "setup-intent:" });
+    for (const [key, intent] of intents.entries()) {
+      if (Date.parse(intent.expiresAt) <= now) expiredKeys.push(key);
     }
 
     if (expiredKeys.length > 0) {
@@ -455,4 +661,17 @@ function clientKey(request: Request): string {
 
 function normalizeUserCode(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
+function publicIntent(intent: SetupIntent): Omit<SetupIntent, "deviceCode"> {
+  const { deviceCode: _deviceCode, ...rest } = intent;
+  return rest;
+}
+
+/** A terminal's own description of itself, kept short and printable. */
+function boundedText(field: "hostname" | "platform", value: unknown): Partial<Record<"hostname" | "platform", string>> {
+  if (typeof value !== "string") return {};
+  // eslint-disable-next-line no-control-regex
+  const text = value.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, HOSTNAME_MAX);
+  return text ? { [field]: text } : {};
 }

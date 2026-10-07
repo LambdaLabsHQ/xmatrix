@@ -87,7 +87,7 @@ async function deviceAuthResponse(c: Context<{ Bindings: Env }>, action: "start"
   const internalUrl = new URL(`/internal/device-auth/${action}`, c.req.url);
   const response = await getDeviceAuthBroker(c.env).fetch(new Request(internalUrl.toString(), {
     method: "POST", headers: internalClientHeaders(c.req.raw, authorization ? { authorization } : undefined),
-    ...(action === "start" ? {} : { body: await c.req.text() }),
+    body: await c.req.text(),
   }));
   return relayResponse(response, { "cache-control": "no-store" });
 }

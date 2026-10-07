@@ -126,6 +126,12 @@ daemon port can replace the polling later without changing the page.
 1. Explicit device approval (#41, merged).
 2. Setup intents, the device start carrying them, the approve and decline
    routes, the intent read, and the CLI and installer `--connect`.
+   Implemented: the intent lives beside the device sign-ins in the
+   `DeviceAuthBroker` Durable Object (`setup-intent:<id>`, pruned with them).
+   `packages/hub/src/index-routes-setup-intents.ts` derives the status from
+   the broker, `listOwnerMachineDaemons` and the Space's registrations.
+   `xmatrix login --connect <id>` (also `XMATRIX_CONNECT`) and the installers
+   forward it.
 3. The Web live narration on the Space's empty screen and in the Agents view,
    escalating hints, and "Bring them in".
 4. Replace polling with a push event from the Machine daemon port.
