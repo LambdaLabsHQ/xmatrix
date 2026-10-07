@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { QueryClient, QueryClientContext } from "@tanstack/react-query";
 import type { AgentRegistrationSummary, ChannelMessage, MessageSender, SerializedChannel, SerializedSpace } from "@xmatrix/protocol";
-import { ChannelSidebar, Composer, MessageTimeline, TopWorkspaceBar, WorkspaceRail } from "@/components/dashboard/workspace-shell-modules";
+import { ChannelSidebar, Composer, MessageTimeline, WorkspaceRail } from "@/components/dashboard/workspace-shell-modules";
 import { ChannelHeader } from "@/components/dashboard/workspace-shell-chrome";
 import { buildTimeline } from "@/components/dashboard/workspace-shell-recovered";
 import { humanProfileFromSpaceMember } from "@/components/dashboard/human-profile-summary";
@@ -178,7 +178,7 @@ export function AppWindowPreview() {
 
   return (
     <QueryClientContext.Provider value={queryClient}>
-    <div className="xmatrix-app xmatrix-app-shell xmatrix-desktop-macos site-app-window-app flex h-full min-h-0 w-full bg-background text-foreground">
+    <div className="xmatrix-app xmatrix-desktop-macos site-app-window-app flex h-full min-h-0 w-full bg-background text-foreground">
       <WorkspaceRail
         activeView="messages"
         profile={humanProfileFromSpaceMember(viewer, space.members[1])}
@@ -216,15 +216,6 @@ export function AppWindowPreview() {
           />
         </aside>
         <main className="app-main relative flex min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-card/80">
-          <TopWorkspaceBar
-            channel={selected}
-            spaces={[space]}
-            currentSpaceId={space.id}
-            view="messages"
-            onBack={noop}
-            onOpenMore={noop}
-            onSelectSpace={noop}
-          />
           <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <section className="app-message-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
               <ChannelHeader

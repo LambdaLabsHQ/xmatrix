@@ -296,11 +296,6 @@ html:has(.site-page) {
   height: 100%;
 }
 
-.site-app-window .xmatrix-app.xmatrix-app-shell.site-app-window-app {
-  height: 100%;
-  max-height: 100%;
-}
-
 .site-app-window-lights {
   position: absolute;
   top: 16px;
@@ -321,19 +316,6 @@ html:has(.site-page) {
 .site-app-window-lights > span:nth-child(2) { background: #febc2e; }
 .site-app-window-lights > span:nth-child(3) { background: #28c840; }
 
-/* A phone shows the app's phone layout, which has no rail for the traffic
-   lights to sit on, so the window gets a title bar for them. */
-@media (max-width: 767px) {
-  .site-app-window {
-    height: 36rem;
-    padding-top: 2.25rem;
-    background: var(--site-paper-soft);
-  }
-
-  .site-app-window-lights {
-    top: 12px;
-  }
-}
 
 .site-login {
   background:

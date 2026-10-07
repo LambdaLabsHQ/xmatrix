@@ -15,7 +15,7 @@ export function QuickStart() {
           </p>
         </div>
 
-        <div className="mt-10">
+        <div className="mt-10 hidden md:block">
           <AppWindow />
         </div>
 
