@@ -3369,10 +3369,13 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 
 /* In the dock the capsule itself grows up into the panel, as the composer
    grows into its completions: the layer's bottom edge is the capsule's, and
-   the one glass starts clipped to the capsule's own shape (the vars come from
-   morphPanelPosition) and opens upward on the space switcher's curve. Its
-   bottom row is a seat the island shows through: while the panel is out the
-   island drops its own glass and rides above it, so there is one surface. */
+   the one glass starts at the capsule's own box (the vars come from
+   morphPanelPosition) and grows to the panel's on the space switcher's curve.
+   The box itself grows, not a clip over it, so the rim and shadow follow its
+   edge every frame. The content keeps its final layout, pinned to the bottom
+   left, and is revealed as the glass grows. Its bottom row is a seat the
+   island shows through: while the panel is out the island drops its own
+   glass and rides above it, so there is one surface. */
 .xmatrix-app .app-agent-work-item > .app-agent-work-actions {
   padding-bottom: 0;
   transform: translateY(-100%);
@@ -3387,33 +3390,46 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 }
 
 .xmatrix-app .app-agent-work-morph.app-agent-work-morph.app-liquid-glass-surface {
+  /* The content sits on the bottom edge, so a glass smaller than it cuts
+     off the top and the right, never the island's row. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  width: var(--app-agent-work-capsule-w, 0px);
+  height: var(--app-agent-work-capsule-h, 0px);
+  margin-left: var(--app-agent-work-capsule-x, 0px);
+  border-radius: calc(var(--app-agent-work-capsule-h, 2.75rem) / 2) !important;
+  transition:
+    width 240ms cubic-bezier(0.4, 0, 0.2, 1),
+    height 240ms cubic-bezier(0.4, 0, 0.2, 1),
+    margin-left 240ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions > .app-agent-work-morph.app-agent-work-morph {
+  width: var(--app-agent-work-panel-w, max-content);
+  height: var(--app-agent-work-panel-h, auto);
+  margin-left: 0;
+  transition:
+    width 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    margin-left 360ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.xmatrix-app .app-agent-work-morph > .app-agent-work-morph-content {
+  flex: none;
   display: flex;
   flex-direction: column;
   width: max-content;
   min-width: var(--app-agent-work-capsule-w, 0px);
-  border-radius: calc(var(--app-agent-work-capsule-h, 2.75rem) / 2) !important;
-  clip-path: inset(
-    calc(100% - var(--app-agent-work-capsule-h, 100%))
-    calc(100% - var(--app-agent-work-capsule-x, 0px) - var(--app-agent-work-capsule-w, 100%))
-    0
-    var(--app-agent-work-capsule-x, 0px)
-    round calc(var(--app-agent-work-capsule-h, 2.75rem) / 2)
-  );
-  transition: clip-path 240ms cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions > .app-agent-work-morph.app-agent-work-morph {
-  /* Open, the clip stands off the edge so the glass keeps its rim and shadow. */
-  clip-path: inset(-1.5rem -1.5rem -1.5rem -1.5rem round calc(var(--app-agent-work-capsule-h, 2.75rem) / 2 + 1.5rem));
-  transition: clip-path 360ms cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
-
-.xmatrix-app .app-agent-work-morph > .app-agent-work-hover-stack {
+.xmatrix-app .app-agent-work-morph-content > .app-agent-work-hover-stack {
   align-items: stretch;
   padding: 0.375rem 0.375rem 0;
 }
 
-.xmatrix-app .app-agent-work-morph > .app-agent-work-morph-seat {
+.xmatrix-app .app-agent-work-morph-content > .app-agent-work-morph-seat {
   display: block;
   flex: none;
   height: var(--app-agent-work-capsule-h, 2.75rem);

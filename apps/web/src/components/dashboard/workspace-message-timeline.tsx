@@ -3308,6 +3308,7 @@ export function AgentWorkAvatar({
   const actionPopupRef = useRef<HTMLDivElement | null>(null);
   const actionToolbarRef = useRef<HTMLDivElement | null>(null);
   const hoverStackRef = useRef<HTMLDivElement | null>(null);
+  const morphContentRef = useRef<HTMLDivElement | null>(null);
   // Which part of the item the pointer is on picks the card above it: the
   // island's words have their own (what it waits on), the face the Instance's.
   const [hoverPart, setHoverPart] = useState<"instance" | "intent">("instance");
@@ -3383,11 +3384,15 @@ export function AgentWorkAvatar({
     const avatar = avatarButtonRef.current;
     const popup = actionPopupRef.current;
     const stack = hoverStackRef.current;
-    if (!avatar || !popup || !stack) return;
+    const content = morphContentRef.current;
+    if (!avatar || !popup || !stack || !content) return;
     // The panel grows up out of the capsule the pointer is on: the island,
     // or the bare disc when there is none.
     const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
-    const morph = morphPanelPosition(capsule, popup.getBoundingClientRect().width);
+    // The content keeps its final layout whatever size the glass is at, so
+    // it measures the panel the glass grows into.
+    const contentRect = content.getBoundingClientRect();
+    const morph = morphPanelPosition(capsule, contentRect.width);
     // The panel sits outside the glass island. Its backdrop filter contains
     // the avatar, but does not contain this sibling popup.
     const containingBlockRect = fixedContainingBlockRect(popup);
@@ -3397,6 +3402,8 @@ export function AgentWorkAvatar({
       "--app-agent-work-capsule-x": `${morph.capsuleLeft}px`,
       "--app-agent-work-capsule-w": `${morph.capsuleWidth}px`,
       "--app-agent-work-capsule-h": `${morph.capsuleHeight}px`,
+      "--app-agent-work-panel-w": `${Math.max(contentRect.width, morph.capsuleWidth)}px`,
+      "--app-agent-work-panel-h": `${contentRect.height}px`,
     } as CSSProperties;
     setActionToolbarPosition((currentPosition) => {
       const current = currentPosition as Record<string, unknown>;
@@ -3580,8 +3587,10 @@ export function AgentWorkAvatar({
         // seat), with the card the pointer asked for above it.
         <div ref={actionPopupRef} className="app-agent-work-actions" style={actionToolbarPosition}>
           <LiquidGlassPill className="app-agent-work-morph">
-            <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
-            <span className="app-agent-work-morph-seat" aria-hidden="true" />
+            <div ref={morphContentRef} className="app-agent-work-morph-content">
+              <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
+              <span className="app-agent-work-morph-seat" aria-hidden="true" />
+            </div>
           </LiquidGlassPill>
         </div>
       ) : null}
