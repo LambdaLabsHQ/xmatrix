@@ -1,4 +1,4 @@
-import { publicMachineStartupFailure, sha256Hex } from "@xmatrix/protocol";
+import { sha256Hex } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
 import { humanizeMachineRunFailureDetail, machineStopFailureCode } from "./machine-run-failure";
 import { XMATRIX_MANAGEMENT_AVATAR_URL, XMATRIX_MANAGEMENT_LABEL } from "./management-identity";
@@ -39,8 +39,7 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
     messageKind: "xmatrix.system.runtime-failure", ...systemNoticeAuthor(input),
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
       source: "machine_run_failure", runId: input.runId, machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
-      failureCode: humanized.code, failureDetail: publicMachineStartupFailure(detail)
-        ? humanized.summary : detail.slice(0, 1_000),
+      failureCode: humanized.code, failureDetail: humanized.summary,
       ...(input.phase ? { statusPhase: input.phase } : {}) } },
   };
 }

@@ -1,3 +1,5 @@
+import { sanitizeMachineFailureDetail } from "./machine-failure-detail.js";
+
 export interface PublicMachineStartupFailure {
   code: string;
   summary: string;
@@ -19,35 +21,18 @@ export function repositoryAccessUnavailableDetail(repository: string, reason: st
   return `${REPOSITORY_ACCESS_UNAVAILABLE}: the Space's GitHub connection cannot access ${named} (${reason.slice(0, 120)})`;
 }
 
-function repositoryAccessFailure(detail: string): PublicMachineStartupFailure {
-  const named = /\brepository_access_unavailable: the Space's GitHub connection cannot access ([A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}) /u
-    .exec(detail)?.[1];
-  const repository = named ?? "the selected repository";
-  return { code: REPOSITORY_ACCESS_UNAVAILABLE,
-    summary: `The Space's GitHub connection can't access ${repository}.`,
-    action: `Check that the Space's GitHub app installation includes ${repository} and that GitHub is connected in the Space's Apps, then summon again.` };
-}
-
-/** Classify known daemon preparation errors without copying paths, commands or
- * credentials into Channel messages or public invocation diagnostics. */
+/** Preserve the originating diagnostic. Codes remain stable for consumers;
+ * summaries are no longer substituted with a guessed cause or recovery step. */
 export function publicMachineStartupFailure(detail: unknown): PublicMachineStartupFailure | undefined {
-  if (typeof detail !== "string") return undefined;
-  const text = detail.slice(0, 2_000).toLowerCase();
-  if (/\brepository_access_unavailable\b/u.test(text)) return repositoryAccessFailure(detail.slice(0, 2_000));
-  if (/\bbase_ref_unresolved\b/u.test(text) || text.includes("could not resolve origin default branch")) {
-    return {
-      code: "repository_base_unresolved",
-      summary: "The selected repository has no usable default branch for the working directory. It may be empty.",
-      action: "Push an initial commit and set its default branch, or summon again with repo:owner/repository pointing to an existing repository.",
-    };
-  }
-  if (/\bdisk_exhausted\b/u.test(text) || text.includes("no space left on device")) {
-    return { code: "machine_disk_full", summary: "The machine has insufficient disk space to prepare the working directory.",
-      action: "Free disk space on the selected machine, then summon again." };
-  }
-  if (/\bfetch_required_failed\b/u.test(text)) {
-    return { code: "repository_fetch_failed", summary: "The machine could not fetch the selected repository.",
-      action: "Check the machine's network and repository access, then summon again." };
-  }
-  return undefined;
+  if (typeof detail !== "string" || !detail.trim()) return undefined;
+  const text = detail.toLowerCase();
+  let code = "startup_failed";
+  if (/\brepository_access_unavailable\b/u.test(text)) code = REPOSITORY_ACCESS_UNAVAILABLE;
+  else if (/\bbase_ref_unresolved\b/u.test(text) || text.includes("could not resolve origin default branch")) code = "repository_base_unresolved";
+  else if (/\bdisk_exhausted\b/u.test(text) || text.includes("no space left on device")) code = "machine_disk_full";
+  else if (/\bfetch_required_failed\b/u.test(text)) code = "repository_fetch_failed";
+  else if (text.includes("remote repo worktree unavailable") || text.includes("exceeded max fetch time") ||
+    (text.includes("git fetch") && /stalled|timed out|timeout/u.test(text))) code = "remote_repo_fetch";
+  else if (text.includes("is not accessible") || (text.includes("remote repository") && text.includes("not accessible"))) code = "remote_repo_access";
+  return { code, summary: sanitizeMachineFailureDetail(detail), action: "" };
 }
