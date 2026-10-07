@@ -36,13 +36,14 @@ test("hero image can extend under the fixed public navbar", () => {
   assert.match(heroSource, /md:absolute md:inset-0/);
 });
 
-test("public actions use shared liquid glass and the Hero has one CTA", () => {
+test("public actions use shared materials and the Hero has one wood CTA", () => {
   assert.match(layoutSource, /LiquidGlassFilter/);
   assert.match(navbarSource, /WoodPanel/);
   assert.match(navbarSource, /LiquidGlassPill/);
   assert.doesNotMatch(navbarSource, /x-glass-button/);
   assert.doesNotMatch(navbarSource, /bg-\[#68462f\]|bg-\[#513522\]/);
-  assert.match(heroSource, /LiquidGlassPill[\s\S]*as=\{Link\}[\s\S]*href="\/login"/);
+  assert.match(heroSource, /WoodPanel[\s\S]*as=\{Link\}[\s\S]*href="\/login"/);
+  assert.match(siteCss, /\.site-page \.app-material-wood-panel\.site-wood-pill \{\s*border-radius: 999px;/);
   assert.doesNotMatch(heroSource, /landing-liquid-button/);
   assert.match(heroSource, /Start Free/);
   assert.doesNotMatch(heroSource, /Set up with your agent|See How It Works|Shared space|clear handoffs/);
