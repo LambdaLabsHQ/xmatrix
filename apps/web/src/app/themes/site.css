@@ -299,14 +299,17 @@ html:has(.site-page) {
     transform: none;
   }
 
+  /* Below lg the bar holds only the menu button, so it wraps just that
+     instead of stretching an empty wood slab across the row. */
   .site-navbar-bar {
-    width: auto;
-    flex: 1 1 auto;
+    width: 3.5rem;
+    flex: none;
     margin-inline: 0;
   }
 
   .site-navbar-content {
-    justify-content: flex-end;
+    justify-content: center;
+    padding-inline: 0;
   }
 }
 
@@ -322,10 +325,6 @@ html:has(.site-page) {
   .site-navbar-bar,
   .site-navbar .site-navbar-inner {
     border-radius: 0.9rem;
-  }
-
-  .site-navbar-content {
-    padding-inline: 0.8rem;
   }
 
   .site-page .x-section {
