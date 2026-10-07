@@ -1,6 +1,8 @@
 import { Cpu, Download, MonitorDown, Package, Smartphone } from "lucide-react";
 import { LiquidGlassCard, LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 
+import { DownloadRecommendation } from "./download-recommendation";
+
 const channels = [
   {
     title: "Stable",
@@ -25,6 +27,8 @@ export function DesktopDownload() {
     <section id="download" className="x-section py-24">
       <div className="absolute inset-0 matrix-grid opacity-10" />
       <div className="x-container">
+        <DownloadRecommendation />
+        <div id="all-downloads" className="scroll-mt-24" />
         <div className="grid min-w-0 gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
           <div className="min-w-0">
             <span className="x-eyebrow">Apps</span>
