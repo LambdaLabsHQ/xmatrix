@@ -335,11 +335,15 @@ Configure these Cloudflare Worker secrets for the Hub Worker:
 
 ```bash
 wrangler secret put GITHUB_APP_ID
-wrangler secret put GITHUB_APP_CLIENT_ID
 wrangler secret put GITHUB_APP_CLIENT_SECRET
 wrangler secret put GITHUB_APP_PRIVATE_KEY
 wrangler secret put GITHUB_WEBHOOK_SECRET
 ```
+
+`GITHUB_APP_CLIENT_ID` is the App's public OAuth client id. It is a var in the
+deployment profile (`deploy/profiles/production.json` → `hub.vars`) and ships
+with each release. Connect answers 503 and names every `GITHUB_APP_*` value a
+deployment left unset; it does not look any of them up at runtime.
 
 The page claim check (`xmatrix/claim`, see
 [`pages-and-conversations.md`](../design/pages-and-conversations.md) §5.6)

@@ -211,11 +211,15 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     if (!spaceId) {
       return c.json({ error: "spaceId is required" }, 400);
     }
-    const clientSecret = c.env.GITHUB_APP_CLIENT_SECRET?.trim();
-    const appSlug = c.env.GITHUB_APP_SLUG?.trim();
-    if (!clientSecret || !appSlug) {
-      return c.json({ error: "GitHub App install is not configured" }, 503);
+    // Connect needs the App's whole identity; a partial one is a deployment
+    // error named here, never one worked around.
+    const missing = (["GITHUB_APP_ID", "GITHUB_APP_CLIENT_ID", "GITHUB_APP_CLIENT_SECRET",
+      "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_SLUG"] as const).filter((key) => !c.env[key]?.trim());
+    if (missing.length > 0) {
+      return c.json({ error: `GitHub App is not configured: ${missing.join(", ")} unset` }, 503);
     }
+    const clientSecret = c.env.GITHUB_APP_CLIENT_SECRET!.trim();
+    const appSlug = c.env.GITHUB_APP_SLUG!.trim();
 
     await getSpace(c.env, { spaceId, principal: { kind: "user", id: authUser.id } });
 
