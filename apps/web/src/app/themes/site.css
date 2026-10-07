@@ -3,6 +3,9 @@
    matches the product app instead of a second blur/paper recipe. */
 
 .site-canvas {
+  /* One corner for every site slab, wood or glass: the 20px a liquid glass
+     card already has. Pill-shaped controls stay pills. */
+  --site-surface-radius: 1.25rem;
   color: var(--foreground);
   background:
     radial-gradient(circle at 15% -8%, oklch(1 0.018 92 / 0.95), transparent 34rem),
@@ -47,22 +50,13 @@ html:has(.site-page) {
 .site-page .x-section {
   padding-block: clamp(5.5rem, 9vw, 8.5rem);
   border-top: 0;
-  background:
-    radial-gradient(circle at 8% 0%, oklch(1 0.014 90 / 0.84), transparent 28rem),
-    linear-gradient(180deg, var(--background), oklch(0.957 0.02 80));
+  background: none;
 }
 
-.site-page .x-section:nth-of-type(even) {
-  background:
-    radial-gradient(circle at 92% 12%, oklch(1 0.014 90 / 0.86), transparent 30rem),
-    linear-gradient(180deg, oklch(0.95 0.025 78), var(--background));
-}
-
+/* The page is one sheet of paper: no tinted bands or ruled margins between
+   sections; spacing alone separates them. */
 .site-page .x-section::before {
-  background:
-    linear-gradient(90deg, transparent 7%, var(--site-wood-line) 7%, var(--site-wood-line) calc(7% + 1px), transparent calc(7% + 1px)),
-    linear-gradient(90deg, transparent 93%, var(--site-wood-line) 93%, var(--site-wood-line) calc(93% + 1px), transparent calc(93% + 1px));
-  opacity: 0.48;
+  content: none;
 }
 
 .site-page .x-container {
@@ -82,20 +76,12 @@ html:has(.site-page) {
   letter-spacing: 0.19em;
 }
 
-.site-page .x-eyebrow::before {
-  content: "";
-  width: 1.8rem;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--site-wood-deep), var(--site-wood));
-}
-
 .site-page .app-material-wood-panel,
 .site-nav-sheet.app-material-wood-panel {
   --site-wood-ink: oklch(0.12 0.015 55);
   overflow: hidden;
   border: 0;
-  border-radius: 1.35rem;
+  border-radius: var(--site-surface-radius);
   color: var(--site-wood-ink);
   font-weight: 700;
   box-shadow:
@@ -164,43 +150,48 @@ html:has(.site-page) {
 }
 
 .site-navbar {
-  --site-navbar-brand-slot: 10.75rem;
   --navbar-wood-reveal: 0;
   padding: 0.75rem;
   pointer-events: none;
   background: transparent;
 }
 
+/* Logo glass and wood bar are one row, centered as a whole. */
 .site-navbar-layout {
   pointer-events: auto;
   position: relative;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
   max-width: 76rem;
   min-height: 3.5rem;
 }
 
 .site-navbar-brand {
-  position: absolute;
-  left: 0;
-  top: 50%;
+  position: relative;
   z-index: 2;
-  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  height: 3.5rem;
+  padding-inline: 0.75rem 1rem;
 }
 
 .site-navbar-brand-glass {
   position: absolute;
-  inset: -0.625rem -0.75rem;
+  inset: 0;
   pointer-events: none;
   opacity: var(--navbar-wood-reveal);
 }
 
 .site-navbar-bar {
   position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 3.5rem;
-  width: calc(100% - (2 * var(--site-navbar-brand-slot)));
-  max-width: 100%;
-  margin-inline: auto;
-  border-radius: 1rem;
+  /* Capsule, like the logo glass beside it. */
+  border-radius: 999px;
 }
 
 .site-navbar .site-navbar-inner {
@@ -213,7 +204,7 @@ html:has(.site-page) {
 }
 
 .site-navbar-content {
-  padding-inline: 1rem;
+  padding-inline: 1.75rem 0.5rem;
 }
 
 .site-navbar a:not(.app-material-liquid-pill) {
@@ -262,6 +253,70 @@ html:has(.site-page) {
   background: oklch(0.985 0.01 88);
 }
 
+/* Paper as a surface: a hairline and no shadow, so it reads as the same
+   sheet as the page, just bounded. */
+.site-paper-sheet {
+  border: 1px solid var(--site-wood-line);
+  border-radius: var(--site-surface-radius);
+  background: var(--site-paper);
+  color: var(--site-ink);
+}
+
+/* The homepage's app window: the real app (AppWindowPreview) in a macOS
+   window frame with a macOS window shadow. The content box's `contain` and
+   transform keep the app's position: fixed layers inside it. */
+.site-app-window {
+  position: relative;
+  height: 40rem;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--background);
+  box-shadow:
+    0 0 0 0.5px oklch(0 0 0 / 0.22),
+    0 22px 70px 4px oklch(0.25 0.03 60 / 0.32),
+    0 6px 16px oklch(0.25 0.03 60 / 0.12);
+}
+
+.site-app-window-content {
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  contain: layout paint;
+  transform: translateZ(0);
+}
+
+/* The app sizes itself to the browser window (100dvh); in the frame it is
+   the frame's height instead. */
+.site-app-window .xmatrix-app.xmatrix-app > .app-rail {
+  height: 100% !important;
+}
+
+.site-app-window .xmatrix-app .app-workspace-panel.app-workspace-panel {
+  height: 100%;
+}
+
+.site-app-window-lights {
+  position: absolute;
+  top: 16px;
+  left: 14px;
+  z-index: 10;
+  display: flex;
+  gap: 8px;
+}
+
+.site-app-window-lights > span {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 0.5px oklch(0 0 0 / 0.18);
+}
+
+.site-app-window-lights > span:nth-child(1) { background: #ff5f57; }
+.site-app-window-lights > span:nth-child(2) { background: #febc2e; }
+.site-app-window-lights > span:nth-child(3) { background: #28c840; }
+
+
 .site-login {
   background:
     radial-gradient(circle at 50% 8%, oklch(1 0.02 90 / 0.95), transparent 30rem),
@@ -295,32 +350,8 @@ html:has(.site-page) {
 }
 
 @media (max-width: 1023px) {
-  .site-navbar {
-    --site-navbar-brand-slot: 0px;
-  }
-
   .site-navbar-layout {
-    display: flex;
-    align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
-  }
-
-  .site-navbar-brand {
-    position: relative;
-    transform: none;
-    display: flex;
-    align-items: center;
-    height: 3.5rem;
-    padding-inline: 0.75rem 1rem;
-  }
-
-  .site-navbar-brand-glass {
-    inset: 0;
-  }
-
-  .site-navbar-brand-glass > * {
-    border-radius: 0.9rem;
   }
 
   /* Below lg the bar holds only the menu button, so it wraps just that
@@ -328,7 +359,6 @@ html:has(.site-page) {
   .site-navbar-bar {
     width: 3.5rem;
     flex: none;
-    margin-inline: 0;
   }
 
   .site-navbar-content {
@@ -346,18 +376,10 @@ html:has(.site-page) {
     padding: 0.5rem;
   }
 
-  .site-navbar-bar,
-  .site-navbar .site-navbar-inner {
-    border-radius: 0.9rem;
-  }
-
   .site-page .x-section {
     padding-block: 5rem;
   }
 
-  .site-page .x-mobile-card-scroller > * {
-    border-radius: 1.15rem;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

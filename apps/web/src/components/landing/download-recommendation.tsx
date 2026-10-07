@@ -30,8 +30,7 @@ export function DownloadRecommendation() {
 
   return (
     <WoodPanel className="mb-10 min-w-0 p-5 sm:p-7" data-testid="download-recommendation">
-      <p className="x-eyebrow">{platform === "unknown" ? "Choose your platform" : `For your device · ${platform}`}</p>
-      <h3 className="mt-3 text-2xl font-semibold tracking-tight">
+      <h3 className="text-2xl font-semibold tracking-tight">
         {download ? download.label : platform === "unknown" ? "Get xMatrix" : "Use xMatrix on the web"}
       </h3>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">

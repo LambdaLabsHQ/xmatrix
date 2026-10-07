@@ -25,7 +25,6 @@ const channels = [
 export function DesktopDownload() {
   return (
     <section id="download" className="x-section py-24">
-      <div className="absolute inset-0 matrix-grid opacity-10" />
       <div className="x-container">
         <DownloadRecommendation />
         <div id="all-downloads" className="scroll-mt-24" />
