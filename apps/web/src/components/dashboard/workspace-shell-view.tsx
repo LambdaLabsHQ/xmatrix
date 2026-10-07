@@ -632,21 +632,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const canCreateChannel = Boolean(user && currentSpace);
   const canMovePages = Boolean(currentSpace && user &&
     ["owner", "admin"].includes(transferSpaceRole(currentSpace, user.id) || ""));
-  // On a phone each dock tab's + sits beside the tab bar, on the tab's own screen.
-  const mobileCreate: CreateAction | null = !nativeMobileTabVisible || agentConfigDialog
-    ? null
-    : view === "messages" && canCreateChannel
-    ? { label: "New conversation", onCreate: openNewConversation }
-    : view === "pages"
-      ? { label: "New page", onCreate: () => void pageCreation.create(null),
-        disabled: pageCreation.creating || !currentSpaceId }
-      : view === "agents" && user
-        ? { label: "Manage machines", onCreate: () => changeAppView("machines") }
-        : null;
-  // On a desktop each list leads with its +, and Ctrl/⌘+N makes what the list shows.
-  const desktopCreate: CreateAction | null = isMobileViewport || agentConfigDialog
-    ? null
-    : view === "messages" && canCreateChannel
+  // Both clients lead to the same action; each controls where it is visible.
+  const listCreate: CreateAction | null = view === "messages" && canCreateChannel
     ? { label: "New conversation", onCreate: openNewConversation, active: composingConversation }
     : view === "pages"
       ? { label: "New page", onCreate: () => void pageCreation.create(null),
@@ -654,6 +641,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       : view === "agents" && user
         ? { label: "Manage machines", onCreate: () => changeAppView("machines") }
         : null;
+  const mobileCreate = !nativeMobileTabVisible || agentConfigDialog ? null : listCreate;
+  const desktopCreate = isMobileViewport || agentConfigDialog ? null : listCreate;
   // Elsewhere Ctrl/⌘+N starts a new conversation (browsers that reserve it for a new window keep it).
   const shortcutCreate = desktopCreate && !desktopCreate.disabled ? desktopCreate.onCreate
     : canCreateChannel ? openNewConversation : null;
