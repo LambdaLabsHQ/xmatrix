@@ -218,7 +218,7 @@ test.describe("desktop automatic update status", () => {
     expect(order.indexOf("divider")).toBeLessThan(order.indexOf("Claude Code"));
     expect(order.indexOf("Cursor")).toBeLessThan(order.indexOf("GitHub Copilot CLI"));
     expect(await panel.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
-    await expect(row("Codex").getByRole("switch", { name: "In this Space: Codex" })).toHaveAttribute("aria-checked", "false");
+    await expect(row("Codex").getByRole("switch", { name: "Enabled: Codex" })).toHaveAttribute("aria-checked", "false");
     await panel.screenshot({ path: test.info().outputPath("auto-update-status.png") });
   });
 });
@@ -235,10 +235,10 @@ const catalogOf = (registrations: ReturnType<typeof spaceRegistration>[]) => ({ 
 test("an installed harness is summoned in this Space once its owner turns it on", async ({ page }) => {
   await openMachine(page);
   const panel = page.getByTestId("machine-harness-panel");
-  const codex = panel.getByRole("switch", { name: "In this Space: Codex" });
+  const codex = panel.getByRole("switch", { name: "Enabled: Codex" });
   await expect(codex).toHaveAttribute("aria-checked", "false");
   // Not installed, nothing to summon.
-  await expect(panel.getByRole("switch", { name: "In this Space: Claude Code" })).toHaveCount(0);
+  await expect(panel.getByRole("switch", { name: "Enabled: Claude Code" })).toHaveCount(0);
   await fixtureJson(page, "space-command", COMMANDS, { key: spaceKey("codex"), version: 1 }, { method: "POST" });
   await fixtureJson(page, "registration-catalog-on", CATALOG, catalogOf([spaceRegistration("codex")]));
   await codex.click();
@@ -254,7 +254,7 @@ test("turning it off disables it in this Space only", async ({ page }) => {
   await fixtureJson(page, "space-query", "**/api/xmatrix/spaces/*/agent-registrations/query", {
     ...spaceRegistration("codex"), access: { grant: { revision: 3, limits: {} }, policy: { revision: 4 } } }, { method: "POST" });
   await fixtureJson(page, "space-command", COMMANDS, { key: spaceKey("codex"), version: 1 }, { method: "POST" });
-  const codex = page.getByTestId("machine-harness-panel").getByRole("switch", { name: "In this Space: Codex" });
+  const codex = page.getByTestId("machine-harness-panel").getByRole("switch", { name: "Enabled: Codex" });
   await expect(codex).toHaveAttribute("aria-checked", "true");
   await fixtureJson(page, "registration-catalog-off", CATALOG, catalogOf([spaceRegistration("codex", "disabled")]));
   await codex.click();
@@ -288,7 +288,7 @@ test("restoring a successful install from machine history does not enable it in 
   }] });
   await fixtureJson(page, "space-command", COMMANDS, { version: 1 }, { method: "POST" });
   const panel = page.getByTestId("machine-harness-panel");
-  await expect(panel.getByRole("switch", { name: "In this Space: Codex" })).toHaveAttribute("aria-checked", "false");
+  await expect(panel.getByRole("switch", { name: "Enabled: Codex" })).toHaveAttribute("aria-checked", "false");
   await expect(panel.getByText("Install · Codex: Done")).toBeVisible();
   expect(await fixtureRequestBodies(page, "space-command")).toEqual([]);
 });

@@ -153,7 +153,7 @@ export function MachineHarnessPanel({ daemon, token, spaceId }: {
     <div><table className="block w-full text-left text-xs sm:table">
       <thead className="hidden sm:table-header-group"><tr className="border-b text-muted-foreground"><th className="py-2 pr-3">Harness</th><th className="pr-3">Installed version</th>
         <th className="pr-3">Latest</th><th className="pr-3">Automatic updates</th>
-        {spaceSwitches.owner && <th className="pr-3">In this Space</th>}<th>Actions</th></tr></thead>
+        {spaceSwitches.owner && <th className="pr-3">Enabled</th>}<th>Actions</th></tr></thead>
       <tbody className="block sm:table-row-group">{state.rows.map((row, index) => {
         const beforeDivider = Boolean(row.item?.installed) && index + 1 < state.rows.length && !state.rows[index + 1]?.item?.installed;
         return <Fragment key={row.preset.id}>
@@ -211,11 +211,11 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
           {autoState === "unknown" && <span className="text-muted-foreground">Unknown</span>}
         </span>
         : null}</td>
-    {spaceSwitches.owner && <td className="col-span-2 min-w-0 pr-3"><span className="block text-muted-foreground sm:hidden">In this Space</span>
+    {spaceSwitches.owner && <td className="col-span-2 min-w-0 pr-3"><span className="block text-muted-foreground sm:hidden">Enabled</span>
       {spaceSwitch && <span className="inline-flex items-center gap-2"
-        title={spaceSwitch.on ? "It can be summoned in this Space. Turning it off stops its running work here." : "Let it be summoned in this Space"}>
+        title={spaceSwitch.on ? "Turning it off stops its running work" : "Let it take work"}>
         <Switch checked={spacePending ? spacePending.on : spaceSwitch.on} disabled={Boolean(spaceSwitches.pending)}
-          label={`In this Space: ${preset.displayName}`} onChange={(on) => void spaceSwitches.set(preset, on)} />
+          label={`Enabled: ${preset.displayName}`} onChange={(on) => void spaceSwitches.set(preset, on)} />
         {spacePending && <span className="text-muted-foreground">{spacePending.on ? "Turning on…" : "Turning off…"}</span>}
       </span>}</td>}
     <td className="col-span-2 min-w-0"><div className="flex flex-wrap gap-1">
