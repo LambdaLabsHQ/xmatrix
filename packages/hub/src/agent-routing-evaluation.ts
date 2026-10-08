@@ -48,7 +48,7 @@ export type RoutingDecisionEvent = { decisionId: string; at: string } & (
   { status: "succeeded"; answers: Record<string, RoutingChoice>; model?: string } |
   { status: "failed"; reason: "provider_error" | "invalid_answer" | "timeout";
     code: RoutingEvaluationFailureCode; answerFailure?: DecisionAnswerFailure });
-export type RoutingEvaluator = ((input: JevInput, options?: { signal?: AbortSignal }) => Promise<{ answers: unknown; model?: string }>) & {
+export type RoutingEvaluator = ((input: JevInput, options?: { signal?: AbortSignal }) => Promise<{ answers: unknown; model?: string; rounding?: EvaluationRounding }>) & {
   recordDecision?: (event: RoutingDecisionEvent) => Promise<void>;
 };
 export type RoutingChoice = { choice: string; probabilities: Record<string, number> };
@@ -58,7 +58,19 @@ function record(value: unknown, issue: DecisionAnswerIssue, questionKey?: string
   return value as Record<string, unknown>;
 }
 
-export function validateRoutingChoice(value: unknown, options: string[], questionKey?: string): RoutingChoice {
+/** The SDK's own allowance: a probability may be off by half its last
+ *  declared decimal, and a sum by that much per option. */
+const DISTRIBUTION_TOLERANCE = 1e-6;
+export type EvaluationRounding = { probabilityDecimals?: number };
+function probabilityRoundingError(rounding: EvaluationRounding | undefined): number {
+  const decimals = rounding?.probabilityDecimals;
+  return Number.isInteger(decimals) && decimals! >= 0 && decimals! <= 15 ? 0.5 * 10 ** -decimals! : 0;
+}
+
+/** Checks one answer exactly as the SDK that returned it did, so an answer
+ *  the model was allowed to give is never refused here. */
+export function validateRoutingChoice(value: unknown, options: string[], questionKey?: string,
+  rounding?: EvaluationRounding): RoutingChoice {
   const answer = record(value, "answer_missing", questionKey);
   if (typeof answer.choice !== "string") throw new InvalidDecisionAnswer("choice_missing", questionKey);
   if (!options.includes(answer.choice)) throw new InvalidDecisionAnswer("choice_not_offered", questionKey);
@@ -69,10 +81,12 @@ export function validateRoutingChoice(value: unknown, options: string[], questio
   }
   if (!options.every(key => typeof probabilities[key] === "number" &&
       Number.isFinite(probabilities[key]) && Number(probabilities[key]) >= 0 && Number(probabilities[key]) <= 1) ||
-      Math.abs(Object.values(probabilities).reduce<number>((sum, item) => sum + Number(item), 0) - 1) > .02) {
+      Math.abs(Object.values(probabilities).reduce<number>((sum, item) => sum + Number(item), 0) - 1) >
+        DISTRIBUTION_TOLERANCE + options.length * probabilityRoundingError(rounding)) {
     throw new InvalidDecisionAnswer("distribution_invalid", questionKey);
   }
-  if (probabilities[answer.choice] !== Math.max(...Object.values(probabilities).map(Number))) {
+  const selected = Number(probabilities[answer.choice]);
+  if (Object.values(probabilities).some(probability => Number(probability) > selected + DISTRIBUTION_TOLERANCE)) {
     throw new InvalidDecisionAnswer("choice_distribution_conflict", questionKey);
   }
   return { choice: answer.choice, probabilities: probabilities as Record<string, number> };
@@ -149,7 +163,7 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
     // Every question is required. Never return a partially usable launch configuration.
     validated = Object.fromEntries(questions.map(([key, question]) => {
       if (question.type !== "choice") throw new Error("Invalid routing question");
-      return [key, validateRoutingChoice(answers[key], Object.keys(question.criteria), key)];
+      return [key, validateRoutingChoice(answers[key], Object.keys(question.criteria), key, result?.rounding)];
     }));
   } catch (error) {
     const providerCode = error && typeof error === "object" && "code" in error &&
