@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getDesktopBridge, type ApplePurchaseTransaction } from "@/lib/desktop/bridge";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { actionClass } from "@/components/ui/action-tone";
@@ -35,7 +36,7 @@ export function AppleSpaceBillingSection({ userId, space }: { userId: string; sp
           const apple = loaded.find((item) => item.id === product.id);
           return apple ? [{ ...product, displayName: apple.displayName, displayPrice: apple.displayPrice }] : [];
         }));
-      } catch (error) { if (current) setMessage(error instanceof Error ? error.message : "App Store products are unavailable."); }
+      } catch (error) { if (current) setMessage(userErrorMessage(error, "Couldn't load App Store products") ?? ""); }
     })();
     return () => { current = false; };
   }, [available, base, bridge]);
@@ -89,7 +90,7 @@ export function AppleSpaceBillingSection({ userId, space }: { userId: string; sp
         await reconcile(result.transaction);
         setMessage(`Purchase verified. The plan for ${space.name} has been refreshed.`);
       } else setMessage(result.status === "pending" ? "Apple is awaiting purchase approval. Your plan updates after confirmation." : "Purchase cancelled. No plan change was made.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "The purchase could not be completed."); }
+    } catch (error) { setMessage(userErrorMessage(error, "Couldn't complete the purchase") ?? ""); }
     finally { setBusy(false); }
   }
 
@@ -100,7 +101,7 @@ export function AppleSpaceBillingSection({ userId, space }: { userId: string; sp
       const transactions = await bridge!.applePurchases!({ productIds: products.map((item) => item.id), restore: true });
       for (const transaction of transactions) await reconcile(transaction);
       setMessage(transactions.length ? "Purchases checked. The original Space binding is unchanged." : "No current App Store subscription was found.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "The purchase could not be restored."); }
+    } catch (error) { setMessage(userErrorMessage(error, "Couldn't restore the purchase") ?? ""); }
     finally { setBusy(false); }
   }
 
