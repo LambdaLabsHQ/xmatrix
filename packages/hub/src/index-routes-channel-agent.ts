@@ -1,5 +1,5 @@
 import { registerChannelMetadataRoutes } from "./index-routes-channel-metadata.js";
-import { AgentChannelAccessError, ControlError, PostgresAgentChannelAccessRepository } from "@xmatrix/db";
+import { ControlError, PostgresAgentChannelAccessRepository } from "@xmatrix/db";
 import { stopChannelAboutSessions } from "./channel-about-session-stop";
 import { channelAboutTextRefusal } from "./channel-about-text";
 import { acceptSpaceInvite, changeMembership, configureChannel, createChannel, getChannel, getSpaceInvite, listSpaces, readVisibleLiveAgentPresence } from "./spaces";
@@ -662,8 +662,6 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       const current = await getChannel(c.env, { channelId, principal });
       return c.json({ ok: true, channel: await channelWithLiveHumanPresence(current, sessions) });
     } catch (error) {
-      if (error instanceof AgentChannelAccessError) return c.json({ error: error.message, code: error.code, retryable: error.retryable },
-        error.status as 400 | 403 | 404 | 409 | 500 | 503);
       return requestErrorResponse(c, error);
     }
   });

@@ -3,9 +3,8 @@ import type { Hono } from "hono";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { requireAuth, requireHumanAuth } from "./index-shared";
 import { authorityFailure, runPrincipalOf } from "./run-principal";
-import { domainErrorResponse } from "./error-contract";
 import { launchTargetRepos } from "./launch-target-repositories";
-import { PageImportError, startPageImport } from "./page-import";
+import { startPageImport } from "./page-import";
 import { jsonBody, NO_STORE } from "./route-json";
 import type { Env } from "./types";
 
@@ -67,7 +66,6 @@ export function registerPageMigrationRoutes(app: Hono<{ Bindings: Env }>): void 
       return c.json(await startPageImport(c.env, { spaceId, userId: user.id,
         repository: typeof input.repository === "string" ? input.repository.trim() : "" }), 200, NO_STORE);
     } catch (error) {
-      if (error instanceof PageImportError) return domainErrorResponse(error);
       return authorityFailure(c, error);
     }
   });

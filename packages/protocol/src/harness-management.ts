@@ -44,6 +44,8 @@ export interface HarnessLogin {
   codeRegex?: string;
   /** Output after a pasted code meaning the harness refused it and waits for another. */
   rejectedRegex?: string;
+  /** Run the sign-in in a pseudo-terminal: its prompt refuses to read from a pipe. */
+  terminal?: boolean;
   /** Exit status 0 means signed in, unless `signedInRegex` must also match its output. */
   status?: HarnessCommand & { signedInRegex?: string };
   notes?: string;

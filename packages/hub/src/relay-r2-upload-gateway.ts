@@ -1,3 +1,4 @@
+import { ControlError } from "@xmatrix/db";
 import { immutableContentObjectKey } from "@xmatrix/protocol";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const INTENT_ID_PATTERN = /^[A-Za-z0-9:_-]{1,160}$/u;
@@ -12,18 +13,11 @@ export type RelayR2UploadGatewayErrorCode =
   | "object_conflict"
   | "storage_unavailable";
 
-export class RelayR2UploadGatewayError extends Error {
-  readonly code: RelayR2UploadGatewayErrorCode;
-  readonly status: number;
-  /** Private object storage failed in passing; a replay can succeed. */
-  readonly retryable: boolean;
-
+export class RelayR2UploadGatewayError extends ControlError {
+  declare readonly code: RelayR2UploadGatewayErrorCode;
+  override name = "RelayR2UploadGatewayError";
   constructor(code: RelayR2UploadGatewayErrorCode, status: number, message: string, retryable = false) {
-    super(message);
-    this.name = "RelayR2UploadGatewayError";
-    this.code = code;
-    this.status = status;
-    this.retryable = retryable;
+    super(code, status, message, retryable);
   }
 }
 

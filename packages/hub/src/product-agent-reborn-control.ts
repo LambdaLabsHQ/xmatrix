@@ -1,9 +1,10 @@
+import { ControlError } from "@xmatrix/db";
 import { hasControlCharacter, parseNaturalRunId } from "@xmatrix/protocol";
 import type { ProductAgentMentionPort } from "./product-agent-mention";
 
-export class AgentRebornControlError extends Error {
-  constructor(readonly code: string, readonly status: 400 | 403 | 404 | 409 | 503, message: string) {
-    super(message);
+export class AgentRebornControlError extends ControlError {
+  constructor(code: string, status: 400 | 403 | 404 | 409 | 503, message: string) {
+    super(code, status, message, status === 503);
   }
 }
 

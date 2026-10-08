@@ -20,10 +20,11 @@ Human user ID and then add the domain scope. JWTs never appear in keys. A token
 rotation for the same Human preserves memory cache; logout or a different Human
 clears it. No Query cache is persisted and there is no SSR prefetch.
 
-The shared transport returns `XMatrixApiError`. Queries retry at most twice and
-only for network failures, 408, 429, or a 5xx response explicitly marked
-`retryable` (the Hub side of that contract is
-[hub-error-contract.md](hub-error-contract.md)). Mutations do not retry by default. Window focus does not refetch,
+The shared transport returns `XMatrixApiError`. Queries retry at most twice,
+only for failures `isTransientFailure` calls transient (network failures, 408,
+429, a 5xx the Hub marked `retryable`, or a gateway 502/503/504), waiting the
+server's `Retry-After` or jittered backoff; see
+[client-resilience.md](client-resilience.md). Mutations do not retry by default. Window focus does not refetch,
 reconnect does, and unused data is collected after ten minutes. Each polling
 domain supplies its own visible/terminal-state interval.
 
@@ -76,11 +77,10 @@ catalog queries that already contain that Channel; structural events retain
 the broader Space-scoped invalidation. This prevents one busy Channel from
 refetching every expanded Tree branch.
 
-ESLint rejects the browser `fetch` global in React pages, components, and
-hooks. The reviewed exceptions are transport/protocol code for login/Auth,
-attachments, ordered message send, and the legacy API-fetcher module. Adding
-ordinary UI server state to that list is not an
-acceptable workaround.
+ESLint rejects the browser `fetch` global in all client code. Only the
+transport (`src/lib/query/api-client.ts`) and server code (route handlers and
+the Worker's Hub proxy) may call it; every other request goes through the
+transport so its failures are classified the same way.
 
 ## Rollout and rollback
 

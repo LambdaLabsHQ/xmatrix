@@ -3,7 +3,7 @@ import { immutableContentObjectKey, lowercaseHex , utf8ByteLength } from "@xmatr
 // PostgreSQL content stores intent/ref metadata; this module owns only bounded
 // request parsing and R2 I/O.
 import { ControlError, PostgresContentRepository } from "@xmatrix/db";
-import { domainErrorResponse, transientError } from "./error-contract";
+import { transientError } from "./error-contract";
 import { createPostgresAuthorityDatabase, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import {
   POSTGRES_AUTHORITY_TIMEOUTS,
@@ -12,13 +12,11 @@ import {
 } from "./postgres-authority-http";
 import {
   RELAY_R2_UPLOAD_CHECKSUM_HEADER,
-  RelayR2UploadGatewayError,
   executeRelayR2UploadGatewayRequest,
   type RelayPrivateR2UploadPort,
   type RelayR2LiveUploadIntentContext,
   type RelayR2StoredUploadMetadata,
 } from "./relay-r2-upload-gateway";
-import { PRIVATE_JSON_HEADERS } from "./private-json-response";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ID = /^[A-Za-z0-9:_-]{1,160}$/u;
@@ -46,11 +44,8 @@ export interface RelayR2UploadPrincipal {
   id: string;
 }
 
-export class RelayR2UploadPrivateApiError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string, readonly retryable = false) {
-    super(message);
-    this.name = "RelayR2UploadPrivateApiError";
-  }
+export class RelayR2UploadPrivateApiError extends ControlError {
+  override name = "RelayR2UploadPrivateApiError";
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -420,11 +415,4 @@ export async function handleRelayR2BlobRefRelease(input: {
     principal: principal(input.principal),
   }));
   return Response.json(released, { headers: { "cache-control": "private, no-store" } });
-}
-
-export function relayR2UploadPrivateApiErrorResponse(error: unknown): Response | undefined {
-  if (error instanceof RelayR2UploadPrivateApiError || error instanceof RelayR2UploadGatewayError) {
-    return domainErrorResponse(error, PRIVATE_JSON_HEADERS);
-  }
-  return undefined;
 }

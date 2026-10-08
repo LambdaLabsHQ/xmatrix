@@ -11,7 +11,8 @@ import {
   verifyAuthToken,
 } from "./auth";
 import { logAuthMetric } from "./auth-observability";
-import { domainErrorResponse, transientError } from "./error-contract";
+import { postgresControlErrorResponse } from "./postgres-authority-http";
+import { transientError } from "./error-contract";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
 import { createBetterAuthSessionForUser } from "./better-auth";
 import {
@@ -243,9 +244,9 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       if (!(error instanceof InvalidAuthTokenError)) {
         await logAuthMetric({ routeGroup: "device_approve", status: 503, outcome: "verification_unavailable" });
         // The token was never judged: a key set or database outage is retryable, a defect is not.
-        return domainErrorResponse({ message: "Sign-in could not be checked right now. Try again.",
-          code: "auth_verification_unavailable", status: 503,
-          retryable: error instanceof ControlError ? error.retryable : transientError(error) });
+        return postgresControlErrorResponse(new ControlError("auth_verification_unavailable", 503,
+          "Sign-in could not be checked right now. Try again.",
+          error instanceof ControlError ? error.retryable : transientError(error)));
       }
       await logAuthMetric({
         routeGroup: "device_approve",

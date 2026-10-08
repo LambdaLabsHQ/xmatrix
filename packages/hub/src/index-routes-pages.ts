@@ -2,11 +2,10 @@ import { MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, readP
   type PagePrincipal } from "@xmatrix/db";
 import { DURABLE_OBJECT_RETRY_AFTER_SECONDS } from "./durable-object-failure";
 import { relayResponse } from "./private-response";
-import { domainErrorResponse } from "./error-contract";
 import type { Context, Hono } from "hono";
 import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-principal";
 import { requireAuth } from "./index-shared";
-import { PreReviewError, publishPreReviewVerdict } from "./github-pre-review";
+import { publishPreReviewVerdict } from "./github-pre-review";
 import { gitHubFileReferenceHref, gitHubFileReferences, pageLineDiff, parseGitHubFileReference, type PageAwareness,
   type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
@@ -19,7 +18,7 @@ import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database
 import { requireMachineDaemonAuth } from "./index-shared";
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { fireOwedAutomationTriggers } from "./automation-triggers";
-import { GitHubFileError, readGitHubFile, type GitHubFileContent } from "./app-connectors";
+import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
 import type { Env } from "./types";
 
@@ -361,7 +360,6 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       return c.json(await publishPreReviewVerdict(c.env, { channelId, actorUserId: run.ownerUserId,
         runId: run.runId, verdict: body.verdict, summary }), 200, NO_STORE);
     } catch (error) {
-      if (error instanceof PreReviewError) return domainErrorResponse(error);
       return failure(c, error);
     }
   });
@@ -513,7 +511,6 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
         : await read();
       return c.json(file as unknown as Record<string, unknown>, 200, NO_STORE);
     } catch (error) {
-      if (error instanceof GitHubFileError) return domainErrorResponse(error);
       return failure(c, error);
     }
   });

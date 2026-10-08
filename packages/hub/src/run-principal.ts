@@ -1,7 +1,7 @@
-import { MessageAuthorityError, type AgentChannelRunProof } from "@xmatrix/db";
+import { ControlError, type AgentChannelRunProof } from "@xmatrix/db";
+import { postgresControlErrorResponse } from "./postgres-authority-http";
 import type { Context } from "hono";
 import type { AuthUser } from "./auth";
-import { domainFailure, failureResponse } from "./error-contract";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import type { Env } from "./types";
 
@@ -28,6 +28,6 @@ export async function requestPrincipal(c: Context<{ Bindings: Env }>): Promise<R
 /** A repository's typed refusal as JSON with its status; anything else by request status. */
 export function authorityFailure(c: Context<{ Bindings: Env }>, error: unknown,
   detail?: Record<string, unknown>): Response {
-  if (error instanceof MessageAuthorityError) return failureResponse(domainFailure(error, detail ? { detail } : {}));
+  if (error instanceof ControlError) return postgresControlErrorResponse(error, detail ? { detail } : {});
   return requestErrorResponse(c, error);
 }

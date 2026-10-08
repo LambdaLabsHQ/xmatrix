@@ -46,12 +46,10 @@ import {
   RELAY_R2_BLOB_REF_PATH,
   RELAY_R2_BLOB_REF_RELEASE_PATH,
   RELAY_R2_UPLOAD_INTENT_PATH,
-  relayR2UploadPrivateApiErrorResponse,
   type RelayR2UploadPrincipal,
 } from "./relay-r2-upload-private-api";
 import {
   RELAY_V2_MESSAGE_ATTACHMENT_PRODUCT_MEDIA_PATH,
-  relayR2PrivateApiErrorResponse,
 } from "./relay-r2-private-api";
 import { agentRunUploadScopeId } from "./agent-run-upload-scope";
 import { automationDatumFromPayload } from "./relay-authority-schedule-occurrence";
@@ -799,10 +797,6 @@ export function relayR2PrivateErrorResponse(error: unknown): Response {
       409,
     );
   }
-  const privateApiError = relayR2PrivateApiErrorResponse(error);
-  if (privateApiError) return privateApiError;
-  const uploadError = relayR2UploadPrivateApiErrorResponse(error);
-  if (uploadError) return uploadError;
   const failure = requestFailure(error);
   // A domain rejection keeps its own status and code; only an outage is the storage being unavailable.
   if (error instanceof ControlError) return failureResponse(failure, PRIVATE_JSON_HEADERS);

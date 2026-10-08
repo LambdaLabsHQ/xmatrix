@@ -1,3 +1,4 @@
+import { ControlError } from "@xmatrix/db";
 import { base64DecodeBytes } from "./relay-v2-primitives";
 import {
   APP_CONNECTOR_PROVIDER_MANIFESTS,
@@ -592,13 +593,13 @@ export async function readGitHubRepositoryForImport(
 /** What a page's embed shows of one repository file (docs/design/pages-live-document.md §6.5). */
 export type GitHubFileContent = PageGitHubFile;
 
-export class GitHubFileError extends Error {
+export class GitHubFileError extends ControlError {
   constructor(
-    readonly code: "github_repository_not_covered" | "github_file_not_found" | "github_file_not_a_file"
+    code: "github_repository_not_covered" | "github_file_not_found" | "github_file_not_a_file"
       | "github_read_failed",
-    readonly status: 403 | 404 | 422 | 502,
+    status: 403 | 404 | 422 | 502,
   ) {
-    super(code);
+    super(code, status, code);
   }
 }
 

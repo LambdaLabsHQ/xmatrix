@@ -6,7 +6,7 @@ import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { ControlError, SpaceControlError, SpaceSecretError } from "@xmatrix/db";
 
 import { AuthVerificationUnavailable, InvalidAuthTokenError, verifyAuthToken } from "../src/auth.ts";
-import { domainErrorResponse } from "../src/error-contract.ts";
+import { postgresControlErrorResponse } from "../src/postgres-authority-http.ts";
 import { relayR2PrivateErrorResponse, requestErrorResponse } from "../src/index-shared.ts";
 import { registerAgentRegistrationRoutes } from "../src/index-routes-agent-registration.ts";
 import { postgresMessageErrorResponse } from "../src/postgres-message-authority.ts";
@@ -75,10 +75,10 @@ test("a Space moving shards stays a retryable 503 through the message authority"
 });
 
 test("typed domain errors carry their retry policy", async () => {
-  const refused = await answer(domainErrorResponse(new SpaceSecretError("secret_not_found", 404, "No such secret")));
+  const refused = await answer(postgresControlErrorResponse(new SpaceSecretError("secret_not_found", 404, "No such secret")));
   assert.deepEqual(refused, { status: 404, retryAfter: null,
     body: { error: "No such secret", code: "secret_not_found", retryable: false } });
-  assertTransient(await answer(domainErrorResponse(
+  assertTransient(await answer(postgresControlErrorResponse(
     new SpaceSecretError("secret_request_failed", 503, "Space placement is unavailable", true))), "secret_request_failed");
 });
 

@@ -1,5 +1,6 @@
 #![deny(warnings)]
 
+mod about_input;
 mod cross_space_access;
 pub use cross_space_access::cmd_access;
 mod invocation_diagnostics;
@@ -1906,7 +1907,10 @@ fn about_text_input(
     file_flag: &str,
 ) -> error::Result<Option<String>> {
     let (text, source) = match (argument, file) {
-        (_, Some(path)) => (text_input::read_text_file(&path)?, TextSource::File),
+        (_, Some(path)) => {
+            about_input::ensure_written_by_this_run(&path, file_flag)?;
+            (text_input::read_text_file(&path)?, TextSource::File)
+        }
         (Some(text), None) => (text, TextSource::Argument),
         (None, None) => return Ok(None),
     };

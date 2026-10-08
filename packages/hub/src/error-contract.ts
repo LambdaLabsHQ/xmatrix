@@ -4,7 +4,7 @@ import { DURABLE_OBJECT_RETRY_AFTER_SECONDS, transientDurableObjectFailure } fro
 import { postgresRetryAfterSeconds, retryablePostgresFailure } from "./postgres-error-classification";
 
 /**
- * The Hub's one contract for answering a failure (docs/architecture/hub-error-contract.md):
+ * The Hub's one contract for answering a failure (docs/architecture/client-resilience.md):
  * a transient failure is `503 { error, code, retryable: true }` with `Retry-After`;
  * anything else keeps its own status and says `retryable: false`.
  */
@@ -58,8 +58,4 @@ export function transientFailure(error: unknown): RequestFailure | null {
 
 export function failureResponse(failure: RequestFailure, headers: Record<string, string> = {}): Response {
   return Response.json(failure.body, { status: failure.status, headers: { ...failure.headers, ...headers } });
-}
-
-export function domainErrorResponse(error: DomainError, headers: Record<string, string> = {}): Response {
-  return failureResponse(domainFailure(error), headers);
 }

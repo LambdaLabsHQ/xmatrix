@@ -3,7 +3,6 @@ import { HUB_ROUTES, parseSecretRequestCard } from "@xmatrix/protocol";
 import type { Context, Hono } from "hono";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
 import { appendChannelMessage } from "./channel-messages";
-import { domainErrorResponse } from "./error-contract";
 import { readBoundedRequestBody, requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { secretRequestAppend } from "./secret-request-card";
@@ -52,7 +51,6 @@ function route(kind: "human" | "agent", handler: (c: Context<{ Bindings: Env }>,
         code: "human_required" }, 403);
       return c.json(await handler(c, user, user.agentRun!), 200, NO_STORE);
     } catch (error) {
-      if (error instanceof SpaceSecretError) return domainErrorResponse(error);
       return requestErrorResponse(c, error);
     }
   };

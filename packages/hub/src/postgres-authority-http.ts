@@ -1,4 +1,5 @@
 import { utf8ByteLength } from "@xmatrix/protocol";
+import { PRIVATE_JSON_HEADERS } from "./private-json-response";
 import { ControlError, createAuthorityDatabase, type AuthorityDatabase } from "@xmatrix/db";
 
 import { domainFailure, failureResponse, type DomainError } from "./error-contract";
@@ -34,7 +35,7 @@ export function postgresAuthorityJson(value: unknown, status?: number): Response
 
 /** A domain control error already carries its public status, retry policy and any details. */
 export function postgresControlErrorResponse(error: DomainError, extra: Record<string, unknown> = {}): Response {
-  return failureResponse(domainFailure(error, extra));
+  return failureResponse(domainFailure(error, extra), PRIVATE_JSON_HEADERS);
 }
 
 /** A domain rejection answered with its own status; anything else is rethrown as unexpected. */

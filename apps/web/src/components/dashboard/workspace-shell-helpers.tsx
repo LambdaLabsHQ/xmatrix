@@ -95,6 +95,7 @@ import type {
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 // Split from workspace-shell-helpers.tsx (size guard)
 
@@ -916,7 +917,7 @@ export async function loadAttachmentImageBlob(
   } else if (source.startsWith("data:")) {
     blob = dataUrlToBlob(source);
   } else {
-    blob = await fetch(source, { cache: "no-store" }).then(async (response) => {
+    blob = await xmatrixRawResponse(source, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) {
         throw new Error("Image attachment request failed");
       }
