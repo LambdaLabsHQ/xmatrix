@@ -25,6 +25,10 @@ export interface LaunchParameterEvidence {
     selected: string; probabilities: Record<string, number> }>;
 }
 
+/** The Hub accepts a distribution the routing model rounded to two decimals:
+ *  each probability may be off by half a hundredth, so its sum by that per option. */
+const ROUNDED_PROBABILITY_ERROR = .005 + 1e-9;
+
 /** A distribution over handles matching `handle` that sums to one, in which
  * `selected` is listed and the most probable. */
 function distribution(value: unknown, handle: RegExp, selected: unknown, limit = 100): Record<string, number> | undefined {
@@ -33,7 +37,8 @@ function distribution(value: unknown, handle: RegExp, selected: unknown, limit =
   if (!entries.length || entries.length > limit || !entries.some(([key]) => key === selected) ||
       entries.some(([key, probability]) => !handle.test(key) || typeof probability !== "number" ||
         !Number.isFinite(probability) || probability < 0 || probability > 1) ||
-      Math.abs(entries.reduce((sum, [, probability]) => sum + Number(probability), 0) - 1) > .02 ||
+      Math.abs(entries.reduce((sum, [, probability]) => sum + Number(probability), 0) - 1) >
+        Math.max(.02, entries.length * ROUNDED_PROBABILITY_ERROR) ||
       Number((value as Record<string, number>)[selected]) !== Math.max(...entries.map(([, p]) => Number(p)))) return undefined;
   return Object.fromEntries(entries) as Record<string, number>;
 }

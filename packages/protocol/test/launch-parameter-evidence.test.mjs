@@ -89,3 +89,13 @@ test('the harness Jev read as suited is kept by harness name; a malformed one is
     assert.equal(parseLaunchParameterEvidence({ ...input, harness: bad }), undefined);
   }
 });
+
+test('a many-option choice rounded to two decimals still parses, as the Hub accepted it', () => {
+  const input = evidence();
+  // Ten harnesses at two decimals may sum to .96; the Hub allows .005 per option.
+  const probabilities = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`h${index}`, index === 0 ? .15 : .09]));
+  input.harness = { inputDigest: 'b'.repeat(64), selected: 'h0', probabilities: { ...probabilities, h9: .08 } };
+  assert.equal(parseLaunchParameterEvidence(input).harness.selected, 'h0');
+  input.harness.probabilities.h9 = .02;
+  assert.equal(parseLaunchParameterEvidence(input), undefined, 'a sum off by more than rounding still fails');
+});
