@@ -337,7 +337,7 @@ use super::{
     acp_cancel_notification, acp_initialize_params, acp_message_id_matches,
     acp_model_catalog_from_value, acp_select_permission_option_id, acp_session_new_params,
     agent_presentation_adapter_for_acp_runtime, agent_presentation_adapter_for_runtime,
-    agent_type_for_preset_or_runtime, append_windows_utf8_env, utf8_env_key_configured, windows_utf8_env_defaults, apply_spawn_workspace_env,
+    agent_type_for_preset_or_runtime, append_windows_utf8_env, WINDOWS_UTF8_CHILD_ENV, apply_spawn_workspace_env,
     cached_attachment_fetch_path, claim_daemon_spawn, claude_stream_boundaries_from_line,
     codex_app_agent_env, codex_app_error_is_transient_transport, codex_app_error_message,
     codex_app_spawn_args, codex_auth_failure_requires_exit, codex_config_model_from_str,
