@@ -58,16 +58,6 @@ test("ambiguous live display names cannot route scheduled work or interrupt both
   assert.equal(agentChannelMessageDeliveryIntent({ ...scheduled, body: "@agent:owner:first:2 inspect" }, recipient), "work");
 });
 
-test("a connected app's post is work that waits behind the active turn", () => {
-  const recipient = { agentName: "claude", channelInstanceId: "1" };
-  const verdict = framed({ body: "CI failed on [acme/app#7](https://github.com/acme/app/pull/7) at abc1234: test.",
-    from: { kind: "app", appId: "github", label: "GitHub" } });
-  assert.equal(agentChannelMessageDeliveryIntent(verdict, recipient), "work");
-  assert.equal(agentChannelMessageRequestsInterrupt(verdict, recipient), false);
-  assert.equal(agentChannelMessageRequestsInterrupt(framed({ body: "stop and look" }), recipient), true,
-    "a person's message still steers");
-});
-
 test("a system fact is context, whoever is receiving it", () => {
   const notice = framed({
     messageId: "system:msg-1:9f2a",

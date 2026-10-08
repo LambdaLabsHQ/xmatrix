@@ -152,10 +152,9 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   with the failed checks. Two suites reporting the same settling post one
   message; a rerun that settles again posts a new one. The author's own
   pushes, comments, reviews and merge are not said: the Agent did them.
-- **Delivery.** These are GitHub's posts in the conversation (sender kind
-  `app`). They are work for live Instances but never interrupt a running
-  turn, and they wake resting Instances like any message would
-  ([`instance-sleep.md`](../instance-sleep.md) §3). An Agent may therefore end
+- **Delivery.** These are GitHub's posts in the conversation, delivered like
+  any other message: live Instances receive them, and resting Instances
+  wake ([`instance-sleep.md`](../instance-sleep.md) §3). An Agent may therefore end
   its turn once its pull request's CI has started and continue when the
   verdict arrives.
 - **End.** The subscription is removed when the pull request closes,

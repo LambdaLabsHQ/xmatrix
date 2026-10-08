@@ -114,16 +114,13 @@ export function agentChannelMessageDeliveryIntent(
  * peer that is still producing its answer makes a multi-Agent summon converge
  * on whichever provider finishes first. Peer replies remain work deliveries,
  * but wait behind the active turn. An exact `@agent:N` address is deliberate
- * steering, so it may still interrupt that one Instance. A connected app's
- * post (a pull request's CI verdict, a review) is news, not steering: it
- * waits behind the turn, which may be the very one that merged it.
+ * steering, so it may still interrupt that one Instance.
  */
 export function agentChannelMessageRequestsInterrupt(
   message: ChannelMessage,
   recipient: { agentName: string; agentId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
 ): boolean {
   if (agentChannelMessageDeliveryIntent(message, recipient) === "context") return false;
-  if (message.from.kind === "app") return false;
   if (message.from.kind !== "agent") return true;
 
   const ordinal = recipient.channelInstanceId?.trim();
