@@ -6,7 +6,7 @@ export function QuickStart() {
     <section id="quick-start" className="x-section">
       <div className="x-container">
         <div className="flex flex-col gap-4 lg:max-w-3xl">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-5xl lg:text-4xl xl:text-5xl">
+          <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl lg:text-4xl xl:text-5xl">
             Bring your agents into xMatrix.
           </h2>
           <p className="max-w-2xl text-base leading-7 text-muted-foreground">

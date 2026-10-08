@@ -31,7 +31,7 @@ export function DesktopDownload() {
         <div className="grid min-w-0 gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
           <div className="min-w-0">
             <span className="x-eyebrow">Apps</span>
-            <h2 className="mt-5 max-w-xl text-3xl font-semibold tracking-tight text-foreground sm:text-5xl">
+            <h2 className="site-display mt-5 max-w-xl text-3xl font-semibold text-foreground sm:text-5xl">
               Stay close to the work, wherever it runs.
             </h2>
             <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
