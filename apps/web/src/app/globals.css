@@ -4024,7 +4024,7 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block code {
 /* date separators: little wood plaques */
 
 /* search pill: honey glass (the rail's search is a rail icon, not a pill) */
-html[data-app-theme="wood"] .xmatrix-app button:not(.app-rail button):has(> svg.lucide-search) {
+html[data-app-theme="wood"] .xmatrix-app button:not(.app-rail button):not(.app-channel-search):has(> svg.lucide-search) {
   background: oklch(1 0.02 88 / 0.55) !important;
   border-color: transparent !important;
   box-shadow:
@@ -4433,7 +4433,8 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 }
 
 /* The conversation's search action is ink beside its title, including on hover. */
-.xmatrix-app .app-panel-header .app-channel-search {
+.xmatrix-app .app-panel-header button.app-channel-search,
+.xmatrix-app .app-panel-header button.app-channel-search:hover {
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
