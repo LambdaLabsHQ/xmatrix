@@ -58,23 +58,17 @@ function record(value: unknown, issue: DecisionAnswerIssue, questionKey?: string
   return value as Record<string, unknown>;
 }
 
+/** The model picks one listed option; that pick is the answer. The SDK has
+ *  already checked the reply, so the Hub only makes sure the pick is one it
+ *  offered (it indexes by it). Probabilities are kept as given, for display. */
 export function validateRoutingChoice(value: unknown, options: string[], questionKey?: string): RoutingChoice {
   const answer = record(value, "answer_missing", questionKey);
   if (typeof answer.choice !== "string") throw new InvalidDecisionAnswer("choice_missing", questionKey);
   if (!options.includes(answer.choice)) throw new InvalidDecisionAnswer("choice_not_offered", questionKey);
-  const probabilities = record(answer.probabilities, "distribution_missing", questionKey);
-  if (Object.keys(probabilities).length !== options.length ||
-      !options.every(key => Object.hasOwn(probabilities, key))) {
-    throw new InvalidDecisionAnswer("distribution_mismatch", questionKey);
-  }
-  if (!options.every(key => typeof probabilities[key] === "number" &&
-      Number.isFinite(probabilities[key]) && Number(probabilities[key]) >= 0 && Number(probabilities[key]) <= 1) ||
-      Math.abs(Object.values(probabilities).reduce<number>((sum, item) => sum + Number(item), 0) - 1) > .02) {
-    throw new InvalidDecisionAnswer("distribution_invalid", questionKey);
-  }
-  if (probabilities[answer.choice] !== Math.max(...Object.values(probabilities).map(Number))) {
-    throw new InvalidDecisionAnswer("choice_distribution_conflict", questionKey);
-  }
+  const given = answer.probabilities && typeof answer.probabilities === "object" && !Array.isArray(answer.probabilities)
+    ? answer.probabilities as Record<string, unknown> : {};
+  const probabilities = Object.fromEntries(options.flatMap(key =>
+    typeof given[key] === "number" && Number.isFinite(given[key]) ? [[key, given[key]]] : []));
   return { choice: answer.choice, probabilities: probabilities as Record<string, number> };
 }
 
