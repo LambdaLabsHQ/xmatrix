@@ -88,6 +88,7 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
       document.fonts?.removeEventListener("loadingdone", sync);
     };
   }, [textareaRef, value, spans]);
+  useSoftCaret(textareaRef, mirrorRef, layerRef, value, hint);
   let offset = 0;
   const pieces = spans.flatMap((span, index) => {
     const plain = value.slice(offset, span.start);
@@ -111,6 +112,125 @@ function ComposerHint({ hint }: { hint: string }) {
     data-summon={parts.trigger === "@" ? "true" : undefined}>
     <span className="app-composer-hint-trigger">{parts.trigger}</span>{parts.rest}
   </span>;
+}
+
+/**
+ * Draw the textarea's caret in the mirror as a soft bar (globals.css,
+ * .app-composer-caret) and hide the native one. It stands where the native
+ * caret would, over the font's box like the hint chip, and restarts its fade
+ * on every move. IME composition and touch screens keep the native caret:
+ * the composition's own underline and the system's handles follow it.
+ */
+function useSoftCaret(textareaRef: RefObject<HTMLTextAreaElement | null>, mirrorRef: RefObject<HTMLDivElement | null>,
+  layerRef: RefObject<HTMLDivElement | null>, value: string, hint: string | undefined) {
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    const mirror = mirrorRef.current;
+    const layer = layerRef.current;
+    if (!input || !mirror || !layer || !window.matchMedia("(pointer: fine)").matches) return;
+    const caret = document.createElement("span");
+    caret.className = "app-composer-caret";
+    caret.hidden = true;
+    layer.appendChild(caret);
+    let composing = false;
+    let at = "";
+    const place = () => {
+      const show = document.activeElement === input && !composing && !input.disabled &&
+        input.selectionStart === input.selectionEnd;
+      input.dataset.softCaret = composing ? "false" : "true";
+      const box = show ? caretBox(mirror, layer, input.selectionStart ?? 0) : undefined;
+      caret.hidden = !box;
+      if (!box) return;
+      const dpr = window.devicePixelRatio || 1;
+      const height = box.bottom - box.top;
+      const left = Math.round((box.x - 1) * dpr) / dpr;
+      const top = Math.round(box.top * dpr) / dpr;
+      const next = `${left}:${top}:${height}`;
+      if (next === at) return;
+      // A caret that just moved is solid; it starts fading only once it rests.
+      if (at) for (const animation of caret.getAnimations()) if (animation instanceof CSSAnimation) animation.currentTime = 0;
+      at = next;
+      caret.style.height = `${height}px`;
+      caret.style.transform = `translate(${left}px, ${top}px)`;
+    };
+    const compose = (event: CompositionEvent) => {
+      composing = event.type === "compositionstart";
+      place();
+    };
+    place();
+    document.addEventListener("selectionchange", place);
+    input.addEventListener("selectionchange", place);
+    input.addEventListener("focus", place);
+    input.addEventListener("blur", place);
+    input.addEventListener("input", place);
+    input.addEventListener("scroll", place);
+    input.addEventListener("compositionstart", compose);
+    input.addEventListener("compositionend", compose);
+    const observer = new ResizeObserver(place);
+    observer.observe(input);
+    return () => {
+      document.removeEventListener("selectionchange", place);
+      input.removeEventListener("selectionchange", place);
+      input.removeEventListener("focus", place);
+      input.removeEventListener("blur", place);
+      input.removeEventListener("input", place);
+      input.removeEventListener("scroll", place);
+      input.removeEventListener("compositionstart", compose);
+      input.removeEventListener("compositionend", compose);
+      observer.disconnect();
+      caret.remove();
+      delete input.dataset.softCaret;
+    };
+  }, [textareaRef, mirrorRef, layerRef, value, hint]);
+}
+
+/**
+ * Where the native caret stands before draft character `index`, in the
+ * layer's layout pixels: its x and the font's box on that line. The hint and
+ * the closing newline are not draft text; with a hint showing, the caret
+ * stands just before it.
+ */
+function caretBox(mirror: HTMLElement, layer: HTMLElement, index: number): { x: number; top: number; bottom: number } | undefined {
+  const draft: Text[] = [];
+  let hint: HTMLElement | undefined;
+  const children = [...mirror.childNodes].slice(0, -1);
+  for (const child of children) {
+    if (child === layer) continue;
+    if (child instanceof HTMLElement && child.dataset.testid === "composer-hint") hint = child;
+    else if (child instanceof Text) draft.push(child);
+    else if (child.firstChild instanceof Text) draft.push(child.firstChild);
+  }
+  // The box of the character after the caret, so a caret where the text
+  // wraps stands at the start of the next line as the native one does.
+  const rectAt = (node: Text, offset: number) => {
+    const range = document.createRange();
+    range.setStart(node, offset);
+    if (offset < node.data.length && node.data[offset] !== "\n") range.setEnd(node, offset + 1);
+    const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
+    return rect.height ? rect : undefined;
+  };
+  let rect: DOMRect | undefined;
+  let position = 0;
+  for (const node of draft) {
+    if (index < position + node.data.length) {
+      rect = rectAt(node, index - position);
+      break;
+    }
+    position += node.data.length;
+  }
+  let x = rect?.left;
+  // The draft's end is where the closing newline starts: on the line a
+  // trailing newline opens, and just after the hint when one shows.
+  const closing = mirror.lastChild;
+  if (!rect && closing instanceof Text) {
+    rect = rectAt(closing, 0);
+    x = hint ? hint.getBoundingClientRect().left - (parseFloat(getComputedStyle(hint).marginLeft) || 0) : rect?.left;
+  }
+  if (!rect || x === undefined) return undefined;
+  const layerBox = layer.getBoundingClientRect();
+  const layoutWidth = parseFloat(mirror.style.width) || mirror.offsetWidth;
+  const scale = layoutWidth ? mirror.getBoundingClientRect().width / layoutWidth || 1 : 1;
+  return { x: (x - layerBox.left) / scale, top: (rect.top - layerBox.top) / scale, bottom: (rect.bottom - layerBox.top) / scale };
 }
 
 /**
