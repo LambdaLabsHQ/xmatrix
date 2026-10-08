@@ -34,7 +34,7 @@ mod tests {
         };
         let dir = root.join(format!(
             "{}-{}",
-            &label.chars().take(3).collect::<String>(),
+            label.chars().take(3).collect::<String>(),
             &id[..8]
         ));
         std::fs::create_dir_all(&dir).unwrap();
@@ -3361,12 +3361,55 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
         // branch back to its ancestor must fail without any forced ref update.
         run_git(&base, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-qm", "local-only"]);
         run_git(&base, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
-        let error = required_origin_fetch(&base).await.unwrap_err();
+        // Deliberately request an unforced fetch to keep real-Git diagnostic coverage.
+        let failure = git(&base, &["fetch", "--no-tags", "origin",
+            "refs/heads/main:refs/remotes/origin/main"], GIT_FETCH_TIMEOUT).await.unwrap_err();
+        let error = required_fetch_error(failure, false);
         assert_eq!(error.code, PoolErrorCode::FetchRequiredFailed);
         assert!(error.message.contains("[rejected]"), "{error}");
         assert!(error.message.contains("non-fast-forward"), "{error}");
         assert!(!error.message.contains("git command failed"), "{error}");
         cleanup_test_dirs(&[&base, &remote]);
+    }
+
+    #[tokio::test]
+    async fn lease_follows_rewritten_origin_without_changing_local_work() {
+        if !git_available() { return; }
+        for unrelated in [false, true] {
+            let identity = "https://github.com/acme/rewritten-origin";
+            let (base, remote) = setup_base_with_local_fetch(identity);
+            let pools = unique_temp("rewrite");
+            let layout = layout_for(identity, &pools);
+            let original = git(&base, &["rev-parse", "HEAD"], GIT_LOCAL_TIMEOUT).await.unwrap();
+            let active = lease_available_or_create_at(&layout, &base, identity, &req("active"))
+                .await.unwrap();
+            std::fs::write(active.worktree_path.join("README.md"), "active work\n").unwrap();
+            run_git(&base, &["commit", "--allow-empty", "-qm", "local-only"]);
+            let local = git(&base, &["rev-parse", "HEAD"], GIT_LOCAL_TIMEOUT).await.unwrap();
+            run_git(&base, &["update-ref", "refs/remotes/origin/main", &local]);
+            std::fs::write(base.join("README.md"), "local work\n").unwrap();
+            let target = if unrelated {
+                git(&remote, &["-c", "user.name=Test", "-c", "user.email=t@t",
+                    "commit-tree", "main^{tree}", "-m", "replacement root"], GIT_LOCAL_TIMEOUT)
+                    .await.unwrap()
+            } else { original.clone() };
+            run_git(&remote, &["update-ref", "refs/heads/main", &target]);
+            // Expire the successful pre-rewrite fetch so this lease must contact origin.
+            fetch_repo_states().lock().unwrap().remove(&fetch_coordinator_key(&base));
+            let fresh = lease_available_or_create_at(&layout, &base, identity, &req("fresh"))
+                .await.unwrap();
+            for (path, reference, expected) in [
+                (&base, "origin/main", &target), (&base, "HEAD", &local),
+                (&active.worktree_path, "HEAD", &original),
+                (&fresh.worktree_path, "HEAD", &target),
+            ] {
+                assert_eq!(git(path, &["rev-parse", reference], GIT_LOCAL_TIMEOUT).await.unwrap(), *expected);
+            }
+            assert_eq!(std::fs::read_to_string(base.join("README.md")).unwrap(), "local work\n");
+            assert_eq!(std::fs::read_to_string(active.worktree_path.join("README.md")).unwrap(), "active work\n");
+            assert_eq!(std::fs::read_to_string(fresh.worktree_path.join("README.md")).unwrap(), "v1\n");
+            cleanup_test_dirs(&[&pools, &base, &remote]);
+        }
     }
 
     #[test]
