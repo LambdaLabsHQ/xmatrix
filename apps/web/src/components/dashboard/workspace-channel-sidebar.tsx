@@ -110,7 +110,6 @@ import {
   Pin,
   PinOff,
   Settings2,
-  Users,
   } from "lucide-react";
 
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
@@ -579,70 +578,67 @@ export function SidebarSpaceHeader({
   function renderSpaceRow(space: SerializedSpace) {
     const selected = space.id === currentSpaceId;
     const duplicateName = normalizedNameCounts[space.name.trim().toLowerCase()] > 1;
-    const currentUserRole = spaceRoleFor(space, currentUserId);
-    const ownerLabel = spaceOwnerLabel(space);
     const memberLabel = `${space.members.length} member${space.members.length === 1 ? "" : "s"}`;
     const disambiguator = duplicateName ? ` · ${spaceDisambiguatorId(space.id)}` : "";
-    const subtitle = `${memberLabel} · ${currentUserRole}${disambiguator} · owner ${ownerLabel}`;
+    const detail = `${memberLabel} · ${spaceRoleFor(space, currentUserId)} · owner ${spaceOwnerLabel(space)}`;
+    const windowHint = openSpaceInOwnWindow
+      ? ` · ${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}-click opens it in a new window`
+      : "";
 
     const openInOwnWindow = () => {
       setOpen(false);
       void openSpaceInOwnWindow?.(`${spaceAppPath(space.id, spaces)}/channels`);
     };
 
-    /* The new-window control stays a sibling of the option button: nesting a
-       button is invalid markup. The hover fill is on the row, so the bar still
-       runs edge to edge behind both hit targets. */
+    /* One line per Space: who it is and how many are in it. The rest of what
+       a Space is — your role, its owner — is in the tooltip; Manage has it in
+       full. On the desktop a modifier-click or a middle-click opens the Space
+       in its own window. */
     return (
-      <div key={space.id} className="app-space-switcher-row flex w-full min-w-0 items-center">
-        <LiquidGlassPill
-          as="button"
-          type="button"
-          role="option"
-          aria-selected={selected}
-          enabled={false}
-          className={cn(
-            "app-space-switcher-option flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sidebar-foreground",
-            selected && "app-space-switcher-option-active"
-          )}
-          title={`${space.name} · ${subtitle}`}
-          onClick={(event: ReactMouseEvent<HTMLElement>) => {
-            if (openSpaceInOwnWindow && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              openInOwnWindow();
-              return;
-            }
-            setOpen(false);
-            onSelectSpace(space.id);
-          }}
-          onAuxClick={(event: ReactMouseEvent<HTMLElement>) => {
-            if (!openSpaceInOwnWindow || event.button !== 1) return;
+      <button
+        key={space.id}
+        type="button"
+        role="option"
+        aria-selected={selected}
+        className="app-space-switcher-option flex w-full min-w-0 items-center gap-3 text-left"
+        title={`${space.name} · ${detail}${windowHint}`}
+        onClick={(event: ReactMouseEvent<HTMLElement>) => {
+          if (openSpaceInOwnWindow && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
             openInOwnWindow();
-          }}
-        >
-          <SpaceAvatar space={space} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-black leading-5">{space.name}</span>
-            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] font-semibold leading-4 text-sidebar-foreground/50">
-              <Users className="size-3 shrink-0" />
-              <span className="truncate">{subtitle}</span>
-            </span>
-          </span>
-          {selected && <Check className="size-4 shrink-0" />}
+            return;
+          }
+          setOpen(false);
+          onSelectSpace(space.id);
+        }}
+        onAuxClick={(event: ReactMouseEvent<HTMLElement>) => {
+          if (!openSpaceInOwnWindow || event.button !== 1) return;
+          event.preventDefault();
+          openInOwnWindow();
+        }}
+      >
+        <SpaceAvatar space={space} />
+        <span className="app-space-switcher-option-name min-w-0 flex-1 truncate">{space.name}</span>
+        <span className="app-space-switcher-option-meta shrink-0">{memberLabel}{disambiguator}</span>
+        <span className="flex w-4 shrink-0 justify-end">{selected && <Check className="size-4" />}</span>
+      </button>
+    );
+  }
+
+  /* The panel's actions: round glass buttons, each labelled under it. */
+  function renderAction(label: string, icon: ReactNode, onClick: () => void, disabled = false) {
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClick}
+        className="app-space-switcher-action flex min-w-0 flex-1 flex-col items-center gap-1 disabled:opacity-50"
+      >
+        <LiquidGlassPill as="span" className="app-space-switcher-action-disc flex size-10 items-center justify-center rounded-full">
+          {icon}
         </LiquidGlassPill>
-        {openSpaceInOwnWindow ? (
-          <button
-            type="button"
-            title={`Open ${space.name} in a new window`}
-            aria-label={`Open ${space.name} in a new window`}
-            className="app-space-switcher-open-window flex size-8 shrink-0 items-center justify-center text-sidebar-foreground"
-            onClick={openInOwnWindow}
-          >
-            <ExternalLink className="size-4" />
-          </button>
-        ) : null}
-      </div>
+        <span className="truncate">{label}</span>
+      </button>
     );
   }
 
@@ -659,6 +655,7 @@ export function SidebarSpaceHeader({
           <SpaceAvatar space={currentSpace} />
           <input
             autoFocus
+            aria-label="Workspace name"
             value={draftName}
             disabled={renamingCurrentSpace}
             onChange={(event) => setDraftName(event.target.value)}
@@ -682,14 +679,20 @@ export function SidebarSpaceHeader({
           </button>
         </form>
       ) : (
-        <div className={cn("app-space-switcher-shell group relative", open && "app-space-switcher-shell-open")}>
+        /* At rest the header is the Space's name and a chevron at the row's
+           end, printed on the list. Opening grows the header row itself into
+           one glass panel — the composer's glass — with the Spaces and the
+           panel's actions inside it. It pushes the list down rather than
+           floating over it: through glass this clear, list text under the
+           panel would read through the Spaces. */
+        <div className={cn("app-space-switcher-shell relative", open && "app-space-switcher-shell-open")}>
           <button
             type="button"
             aria-haspopup="listbox"
             aria-expanded={open}
             aria-busy={currentSpacePending || undefined}
             aria-label={currentSpacePending ? "Loading workspace" : undefined}
-            className="app-space-switcher-trigger flex w-full min-w-0 items-center gap-3 rounded-md px-3 text-left text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            className="app-space-switcher-trigger flex w-full min-w-0 items-center gap-3 text-left text-sidebar-foreground"
             onClick={() => setOpen((current) => !current)}
           >
             {!currentSpace && !currentSpacePending && (
@@ -697,66 +700,42 @@ export function SidebarSpaceHeader({
                 <Building className="size-5 text-sidebar-foreground/70" />
               </span>
             )}
-            {/* The chevron belongs to the name it switches, so the labels do
-                not stretch to push it across the row. */}
-            <span className="app-space-switcher-labels min-w-0 flex flex-initial flex-col">
-              {currentSpacePending ? (
-                <span
-                  aria-hidden
-                  className="app-space-switcher-name-pending"
-                />
-              ) : (
-                /* The rename control is an overlay pinned to the right of
-                   this row, so a long name stops short of it. */
-                <span className={cn("app-space-switcher-name min-w-0 truncate font-black", currentSpace && "mr-7")}>
-                  {currentSpace?.name || "xMatrix"}
-                </span>
-              )}
-            </span>
-            <ChevronDown className={cn("size-4 shrink-0 text-sidebar-foreground/60 transition-transform", open && "rotate-180")} />
+            {currentSpacePending ? (
+              <span aria-hidden className="app-space-switcher-name-pending" />
+            ) : (
+              <span className="app-space-switcher-name min-w-0 truncate font-black">
+                {currentSpace?.name || "xMatrix"}
+              </span>
+            )}
+            <ChevronDown className={cn("app-space-switcher-chevron ml-auto size-4 shrink-0 transition-transform", open && "rotate-180")} />
           </button>
-          {currentSpace && (
-            <button
-              type="button"
-              title={`Rename ${currentSpace.name}`}
-              onClick={() => {
-                setOpen(false);
-                setDraftName(currentSpace.name);
-                setEditingName(true);
-              }}
-              disabled={renamingCurrentSpace}
-              className="app-space-switcher-rename absolute right-10 top-1/2 z-[3] flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-sidebar-foreground/60 opacity-100 hover:text-sidebar-foreground disabled:pointer-events-none disabled:opacity-50 md:opacity-0 md:group-hover:opacity-100"
-            >
-              {renamingCurrentSpace ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
-            </button>
-          )}
           <div
             className="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
             style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none" }}
             aria-hidden={!open}
           >
             <div className="min-h-0 overflow-hidden">
-            <div className="app-space-switcher-menu relative z-10 mt-0 rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg" role="listbox">
-              {spaces.length > 0 && (
-                <div className="py-1">{spaces.map((space) => renderSpaceRow(space))}</div>
-              )}
-              {spaces.length === 0 && (
-                <div className="px-2 py-2 text-sm text-muted-foreground">No workspaces</div>
-              )}
-              <div className="mt-1 border-t border-border/70 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    onManageSpaces();
-                  }}
-                  className="flex h-9 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-sm font-black text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                >
-                  <Settings2 className="size-4 shrink-0" />
-                  <span className="truncate">Manage workspaces</span>
-                </button>
+              <div className="app-space-switcher-menu" role="listbox">
+                {spaces.map((space) => renderSpaceRow(space))}
+                {spaces.length === 0 && (
+                  <div className="app-space-switcher-empty">No workspaces</div>
+                )}
               </div>
-            </div>
+              <div className="app-space-switcher-actions flex">
+                {currentSpace && renderAction("Rename", <Pencil className="size-4" />, () => {
+                  setOpen(false);
+                  setDraftName(currentSpace.name);
+                  setEditingName(true);
+                }, renamingCurrentSpace)}
+                {currentSpace && openSpaceInOwnWindow && renderAction("New window", <ExternalLink className="size-4" />, () => {
+                  setOpen(false);
+                  void openSpaceInOwnWindow(`${spaceAppPath(currentSpace.id, spaces)}/channels`);
+                })}
+                {renderAction("Manage", <Settings2 className="size-4" />, () => {
+                  setOpen(false);
+                  onManageSpaces();
+                })}
+              </div>
             </div>
           </div>
         </div>
