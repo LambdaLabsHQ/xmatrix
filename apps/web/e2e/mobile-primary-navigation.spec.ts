@@ -780,6 +780,11 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(page.locator(".app-topbar")).toContainText(E2E_SPACE.name);
   await expect(page.locator(".app-mobile-create-fab")).toHaveAccessibleName("Manage machines");
 
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(usageGlance).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("agents-list-desktop.png") });
+  await page.setViewportSize({ width: 393, height: 852 });
+
   /* Roles are retired: the list holds only the Space's agents. */
   await expect(page.getByRole("region", { name: "Roles" })).toHaveCount(0);
   await expect(row("Discover")).toHaveCount(0);
