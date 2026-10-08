@@ -4,8 +4,9 @@ import { useState, type ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
+  Check,
+  HardDrive,
   Loader2,
-  Plus,
   RotateCcw,
   Settings,
 } from "lucide-react";
@@ -22,7 +23,8 @@ import {
 
 import { harnessSpaceSwitch } from "./harness-space-switch";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
-import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
+import { BringAgentsIn } from "./bring-agents-in";
+import { listNames } from "./connect-machine";
 import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
 import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
@@ -151,7 +153,7 @@ export function MyAgentsView({
     <ToolList title="Agents" createLead="avatar" create={{ label: "Manage machines", onCreate: onOpenMachines }}>
       {error && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{error}</p>}
       {!ready ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents and installed harnesses.</p>
+        <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents.</p>
       ) : catalog.isError ? (
         <div className="space-y-2 px-4 md:px-5">
           <p role="alert" className="text-sm text-destructive">{registrationCatalogErrorText(catalog.error)}</p>
@@ -160,7 +162,7 @@ export function MyAgentsView({
       ) : !catalog.data ? (
         <ListSkeleton label="Loading agents" rows={4} className="px-4 md:px-5" />
       ) : rows.length === 0 ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
+        <p className="px-4 text-sm text-muted-foreground md:px-5">No agents in this Space yet.</p>
       ) : groups.map((group) => (
         <ToolListGroup key={group.harness} title={group.harness} count={group.rows.length} identity
           icon={<IdentityAvatar kind="agent" label={group.harness}
@@ -181,9 +183,6 @@ export function MyAgentsView({
           ))}
         </ToolListGroup>
       ))}
-      {ready && (newCandidates.length > 0 || fleet.daemons.isError) && <ToolListGroup title="Installed on your machines" count={newCandidates.length}>
-        <div className="px-4 md:px-5"><InstalledHarnessSwitchList fleet={fleet} onlyNew /></div>
-      </ToolListGroup>}
     </ToolList>
   );
 
@@ -323,10 +322,23 @@ export function MyAgentsView({
       </ToolDetail>
     );
   } else if (catalog.data && rows.length === 0) {
-    detail = (
-      <ToolDetailEmpty icon={<Bot />} title={newCandidates.length ? "Enable an installed harness" : "Connect your agents"}>
-        <p>Turn on an installed harness in the list, or install one from Machines.</p>
-        <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> Manage machines</Button>
+    /* An empty Agents page is the first-run step, the same as the Space's empty
+       screen: agents already installed on the reader's machines come in with
+       one click, and a machine not yet connected is connected right here. */
+    detail = newCandidates.length > 0 ? (
+      <ToolDetailEmpty icon={<Bot />} title="Bring your agents into xMatrix">
+        <p>Found {listNames(newCandidates.map((candidate) => `${candidate.preset.displayName} on ${candidate.machineName}`))}.</p>
+        <Button size="sm" disabled={!fleet.ready || Boolean(fleet.pending) || fleet.enablingAll}
+          onClick={() => void fleet.enableAll()}>
+          {fleet.enablingAll ? <Loader2 className="animate-spin" /> : <Check />}
+          {fleet.enablingAll ? "Enabling…" : newCandidates.length === 1 ? "Bring it in" : "Bring them in"}
+        </Button>
+        {fleet.error && <p role="alert" className="text-destructive">{fleet.error}</p>}
+      </ToolDetailEmpty>
+    ) : (
+      <ToolDetailEmpty icon={<HardDrive />} title="Bring your agents into xMatrix">
+        <p>Your agents run on your own computer, and xMatrix connects them with the people they work with.</p>
+        <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} centered />
       </ToolDetailEmpty>
     );
   }

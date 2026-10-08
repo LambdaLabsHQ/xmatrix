@@ -5,12 +5,10 @@ import { Button } from "@/components/ui/button";
 import { harnessSpaceSwitch } from "./harness-space-switch";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
 
-/** Installed candidates which have no active registration yet. Existing
- * registrations keep their activity and configuration rows in Agents. */
-export function InstalledHarnessSwitchList({ fleet, onlyNew = false }: {
-  fleet: ReturnType<typeof useInstalledHarnesses>; onlyNew?: boolean;
-}) {
-  const candidates = fleet.candidates.filter((candidate) => !onlyNew || !candidate.registration);
+/** The first-run card's switches: every harness installed on the owner's
+ * machines, on or off in this Space. Afterwards they live in Machines. */
+export function InstalledHarnessSwitchList({ fleet }: { fleet: ReturnType<typeof useInstalledHarnesses> }) {
+  const { candidates } = fleet;
   return <div className="space-y-3" data-testid="installed-harness-switches">
     {fleet.error && <div className="space-y-2">
       <p role="alert" className="text-sm text-destructive">{fleet.error}</p>

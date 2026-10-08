@@ -749,12 +749,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     );
   }
 
-  const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && installedFleet.ready &&
-    installedFleet.candidates.length > 0;
+  // A phone shows the first-run card in place of its list too, once there is something to do there.
+  const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && ((installedFleet.ready &&
+    installedFleet.candidates.length > 0) || spaceAgentSetup.kind === "no-local-machine");
   const spaceAgentSetupSurface = (
         <div className={cn("min-h-0 flex-1 overflow-y-auto",
           showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
           <SpaceAgentSetupCard
+            spaceId={currentSpaceId ?? null}
+            token={token ?? undefined}
+            userId={user?.id}
             state={spaceAgentSetup}
             hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
             busy={bringingLocal ? "enabling" : localActionBusy}
