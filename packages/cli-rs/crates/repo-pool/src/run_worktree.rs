@@ -770,19 +770,15 @@ async fn lock_run_worktree(base_cwd: &Path, path: &Path, key: &str) {
     .await;
 }
 
-/// Pick the freshest sensible base. Local repo summons use the remote default
-/// branch when known and fall back to HEAD; remote repo summons require a
-/// successful progress-streaming fetch of the remote default branch before the
-/// worktree is created. A slow-but-progressing download is not treated as
-/// stuck: only a stall (no progress) or the absolute max wall clock fails.
+/// Pick the freshest sensible base. Remote repo summons ask origin which
+/// branch is its default and require a successful progress-streaming fetch of
+/// exactly that branch before the worktree is created. A slow-but-progressing
+/// download is not treated as stuck: only a stall (no progress) or the
+/// absolute max wall clock fails. Local repo summons use the remote default
+/// branch when known and fall back to HEAD.
 async fn resolve_base_ref(base_cwd: &Path, freshness: BaseRefFreshness) -> Result<String, String> {
     if matches!(freshness, BaseRefFreshness::RequireRemoteFetch) {
-        let _ = git(
-            base_cwd,
-            &["remote", "set-head", "origin", "--auto"],
-            GIT_FETCH_TIMEOUT,
-        )
-        .await;
+        return fetch_confirmed_remote_default(base_cwd).await;
     }
     let remote_branch = match git(
         base_cwd,
@@ -816,40 +812,50 @@ async fn resolve_base_ref(base_cwd: &Path, freshness: BaseRefFreshness) -> Resul
     };
 
     let Some(remote_branch) = remote_branch else {
-        return match freshness {
-            BaseRefFreshness::BestEffort => Ok("HEAD".to_string()),
-            BaseRefFreshness::RequireRemoteFetch => {
-                Err("could not resolve origin default branch for remote repo".to_string())
-            }
-        };
+        return Ok("HEAD".to_string());
     };
     if let Some(branch) = remote_branch.strip_prefix("origin/") {
         let refspec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
-        let fetch_label = format!("origin/{branch}");
-        let fetch_args = [
-            "fetch",
-            "--progress",
-            "--no-tags",
-            "origin",
-            refspec.as_str(),
-        ];
-        let fetch = if matches!(freshness, BaseRefFreshness::RequireRemoteFetch) {
-            // Remote-repo summons must prove the fetch is alive (streamed
-            // progress) rather than sitting dark until a short hard timeout.
-            git_fetch_with_progress(base_cwd, &fetch_args, &fetch_label).await
-        } else {
-            git(
-                base_cwd,
-                &["fetch", "--quiet", "--no-tags", "origin", &refspec],
-                GIT_FETCH_TIMEOUT,
-            )
-            .await
-        };
-        if matches!(freshness, BaseRefFreshness::RequireRemoteFetch) {
-            fetch?;
-        }
+        let _ = git(
+            base_cwd,
+            &["fetch", "--quiet", "--no-tags", "origin", &refspec],
+            GIT_FETCH_TIMEOUT,
+        )
+        .await;
     }
     Ok(remote_branch)
+}
+
+/// A local `origin/HEAD` may name a branch origin has since renamed or
+/// deleted, so origin names the branch here, and the base is the
+/// remote-tracking ref this fetch just updated.
+async fn fetch_confirmed_remote_default(base_cwd: &Path) -> Result<String, String> {
+    let advertised = git(
+        base_cwd,
+        &["ls-remote", "--symref", "origin", "HEAD"],
+        GIT_FETCH_TIMEOUT,
+    )
+    .await?;
+    let (branch, _) = crate::repo_pool::parse_ls_remote_head(&advertised).ok_or_else(|| {
+        "could not resolve origin default branch: origin advertises none with a commit".to_string()
+    })?;
+    let tracking = format!("refs/remotes/origin/{branch}");
+    let refspec = format!("+refs/heads/{branch}:{tracking}");
+    let fetch_label = format!("origin/{branch}");
+    git_fetch_with_progress(
+        base_cwd,
+        &["fetch", "--progress", "--no-tags", "origin", &refspec],
+        &fetch_label,
+    )
+    .await?;
+    // Keep the local default-branch note in step for later local summons.
+    let _ = git(
+        base_cwd,
+        &["symbolic-ref", "refs/remotes/origin/HEAD", &tracking],
+        GIT_LOCAL_TIMEOUT,
+    )
+    .await;
+    Ok(fetch_label)
 }
 
 /// Outcome of one GC sweep, for logging.
@@ -1966,19 +1972,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    fn remote_materialization_fixture() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let remote = unique_temp_dir("remote-bare");
+        let seed = unique_temp_dir("remote-seed");
+        let base = unique_temp_dir("remote-base");
+        let root = unique_temp_dir("remote-root");
+        let remote_arg = seed_remote(&remote, &seed);
+        clone_remote(&remote_arg, &base);
+        (remote, seed, base, root)
+    }
+
     #[tokio::test]
     async fn remote_repo_materialization_fetches_latest_origin_branch() {
         if !git_available() {
             return;
         }
-        let remote = unique_temp_dir("remote-bare");
-        let seed = unique_temp_dir("remote-seed");
-        let base = unique_temp_dir("remote-base");
-        let root = unique_temp_dir("remote-root");
-
-        let remote_arg = seed_remote(&remote, &seed);
-
-        clone_remote(&remote_arg, &base);
+        let (remote, seed, base, root) = remote_materialization_fixture();
 
         update_remote_readme(&seed, "latest\n");
         assert_eq!(
@@ -2004,6 +2013,42 @@ mod tests {
                 .unwrap()
                 .trim_end(),
             "latest"
+        );
+
+        cleanup_test_dirs(&[&root, &base, &seed, &remote]);
+    }
+
+    #[tokio::test]
+    async fn remote_repo_materialization_follows_a_renamed_default_branch() {
+        if !git_available() {
+            return;
+        }
+        let (remote, seed, base, root) = remote_materialization_fixture();
+
+        // Origin renames main to trunk; the checkout still notes origin/HEAD -> origin/main.
+        run_git(&seed, &["checkout", "--quiet", "-b", "trunk"]);
+        std::fs::write(seed.join("README.md"), "trunk\n").unwrap();
+        run_git(&seed, &["commit", "--quiet", "-am", "trunk"]);
+        run_git(&seed, &["push", "--quiet", "origin", "trunk"]);
+        run_git(&remote, &["symbolic-ref", "HEAD", "refs/heads/trunk"]);
+        run_git(&remote, &["update-ref", "-d", "refs/heads/main"]);
+
+        let materialized = materialize_run_worktree_at_with_freshness(
+            &root,
+            &base,
+            "remote-renamed-run",
+            false,
+            BaseRefFreshness::RequireRemoteFetch,
+        )
+        .await
+        .expect("remote materialization should follow origin's default branch");
+
+        assert_eq!(materialized.base_ref, "origin/trunk");
+        assert_eq!(
+            std::fs::read_to_string(materialized.path.join("README.md"))
+                .unwrap()
+                .trim_end(),
+            "trunk"
         );
 
         cleanup_test_dirs(&[&root, &base, &seed, &remote]);
