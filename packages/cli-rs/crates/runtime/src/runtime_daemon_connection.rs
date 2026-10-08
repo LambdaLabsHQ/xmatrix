@@ -3409,6 +3409,17 @@ struct RepositoryTokenResponse {
     token: String,
 }
 
+/// The Run a repository token is for, so the Hub mints only for the repository
+/// it admitted that Run into on this machine.
+fn repository_token_request(grant: &DaemonGitCredentialGrantState) -> serde_json::Value {
+    serde_json::json!({
+        "channelId": grant.channel_id,
+        "repository": grant.repository,
+        "runId": grant.run_id,
+        "executionKey": grant.execution_key,
+    })
+}
+
 async fn mint_repository_token(
     hub_url: &str,
     relay: &SharedMachineDaemonConnection,
@@ -3419,10 +3430,7 @@ async fn mint_repository_token(
         &with_route(hub_url, HubRoutes::MACHINE_DAEMON_GITHUB_REPOSITORY_TOKEN),
         "POST",
         Some(&machine_credential),
-        Some(serde_json::json!({
-            "channelId": grant.channel_id,
-            "repository": grant.repository,
-        })),
+        Some(repository_token_request(grant)),
     )
     .await?;
     Ok(response.token)
@@ -3492,4 +3500,28 @@ async fn write_daemon_auth_broker_response<
     );
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.flush().await;
+}
+
+#[cfg(test)]
+mod repository_token_request_tests {
+    use super::*;
+
+    #[test]
+    fn a_repository_token_request_names_its_run() {
+        let grant = DaemonGitCredentialGrantState {
+            channel_id: "channel-1".to_string(),
+            run_id: "run-1".to_string(),
+            execution_key: "execution-1".to_string(),
+            repository: "owner/repo".to_string(),
+        };
+        assert_eq!(
+            repository_token_request(&grant),
+            serde_json::json!({
+                "channelId": "channel-1",
+                "repository": "owner/repo",
+                "runId": "run-1",
+                "executionKey": "execution-1",
+            })
+        );
+    }
 }
