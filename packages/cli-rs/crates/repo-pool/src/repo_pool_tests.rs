@@ -1011,7 +1011,6 @@ mod tests {
                 identity_url,
             ],
         );
-        invalidate_required_fetch_cache(&base);
         let err = return_abandoned_slot_at(&layout, &base, &req("ff1"))
             .await
             .unwrap_err();
@@ -3173,34 +3172,50 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
     }
 
     #[test]
-    fn ls_remote_symref_names_the_default_branch() {
+    fn ls_remote_symref_names_the_default_branch_and_its_tip() {
+        let oid = "0123456789abcdef0123456789abcdef01234567";
         assert_eq!(
-            parse_ls_remote_head_branch(
-                "ref: refs/heads/main\tHEAD\n0123456789abcdef0123456789abcdef01234567\tHEAD\n"
-            )
-            .as_deref(),
-            Some("main")
+            parse_ls_remote_head(&format!("ref: refs/heads/main\tHEAD\n{oid}\tHEAD\n")),
+            Some(("main".to_string(), oid.to_string()))
         );
         assert_eq!(
-            parse_ls_remote_head_branch("ref: refs/heads/release/1.2  HEAD\n").as_deref(),
-            Some("release/1.2")
+            parse_ls_remote_head(&format!("ref: refs/heads/release/1.2  HEAD\n{oid}\tHEAD\n"))
+                .map(|(branch, _)| branch),
+            Some("release/1.2".to_string())
         );
+        // Detached remote HEAD, a symref without a tip, and unsafe names name nothing.
+        assert_eq!(parse_ls_remote_head(&format!("{oid}\tHEAD\n")), None);
+        assert_eq!(parse_ls_remote_head("ref: refs/heads/main\tHEAD\n"), None);
         assert_eq!(
-            parse_ls_remote_head_branch("0123456789abcdef0123456789abcdef01234567\tHEAD\n"),
-            None
-        );
-        assert_eq!(
-            parse_ls_remote_head_branch("ref: refs/heads/../../etc/passwd\tHEAD\n"),
+            parse_ls_remote_head(&format!("ref: refs/heads/../../etc/passwd\tHEAD\n{oid}\tHEAD\n")),
             None
         );
     }
 
+    fn commit_on_remote(remote: &Path, parent: &str, message: &str) -> String {
+        let out = git_cmd()
+            .arg("-C")
+            .arg(remote)
+            .args(["-c", "user.name=Test", "-c", "user.email=t@t", "commit-tree",
+                &format!("{parent}^{{tree}}"), "-p", parent, "-m", message])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn rev(path: &Path, reference: &str) -> String {
+        let out = git_cmd().arg("-C").arg(path).args(["rev-parse", reference]).output().unwrap();
+        assert!(out.status.success(), "rev-parse {reference}");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
     #[tokio::test]
-    async fn required_fetch_is_shared_across_back_to_back_leases() {
+    async fn every_lease_confirms_origin_again() {
         if !git_available() {
             return;
         }
-        let identity_url = "https://github.com/acme/fetch-share.git";
+        let identity_url = "https://github.com/acme/fetch-confirm.git";
         let (base, remote) = setup_base_with_local_fetch(identity_url);
         let pools = unique_temp("fs");
         let layout = layout_for(identity_url, &pools);
@@ -3208,19 +3223,70 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
         let first = lease_available_or_create_at(&layout, &base, identity_url, &req("fs1"))
             .await
             .unwrap();
-        mark_retained_at(&layout, &req("fs1")).await.unwrap();
-        return_abandoned_slot_at(&layout, &base, &req("fs1"))
-            .await
-            .unwrap();
+        // Merged right after the first lease: the very next lease must see it.
+        let merged = commit_on_remote(&remote, "main", "merged");
+        run_git(&remote, &["update-ref", "refs/heads/main", &merged]);
         let second = lease_available_or_create_at(&layout, &base, identity_url, &req("fs2"))
             .await
             .unwrap();
-        assert_eq!(
-            take_required_fetch_perform_count(&base),
-            1,
-            "return and the next :new must reuse the first origin snapshot"
-        );
-        assert_eq!(first.base_ref, second.base_ref);
+        assert_eq!(take_required_fetch_perform_count(&base), 2, "each lease asks origin");
+        assert_eq!(rev(&second.worktree_path, "HEAD"), merged);
+        assert_ne!(rev(&first.worktree_path, "HEAD"), merged);
+        cleanup_test_dirs(&[&pools, &base, &remote]);
+    }
+
+    /// Origin renames its default branch from `main` to `trunk`; the checkout
+    /// still notes `origin/HEAD -> origin/main`.
+    #[tokio::test]
+    async fn lease_follows_origin_default_branch_switch() {
+        if !git_available() {
+            return;
+        }
+        // (old branch deleted, stale origin/trunk already known)
+        for (delete_old, stale_new) in [(false, false), (true, false), (false, true)] {
+            let identity_url = "https://github.com/acme/default-switch.git";
+            let (base, remote) = setup_base_with_local_fetch(identity_url);
+            let pools = unique_temp("ds");
+            let layout = layout_for(identity_url, &pools);
+            let first = rev(&remote, "main");
+            if stale_new {
+                run_git(&remote, &["update-ref", "refs/heads/trunk", &first]);
+                run_git(&base, &["fetch", "-q", "origin", "+refs/heads/trunk:refs/remotes/origin/trunk"]);
+            }
+            let trunk = commit_on_remote(&remote, &first, "trunk tip");
+            run_git(&remote, &["update-ref", "refs/heads/trunk", &trunk]);
+            let main_tip = commit_on_remote(&remote, &first, "main moved on");
+            run_git(&remote, &["update-ref", "refs/heads/main", &main_tip]);
+            run_git(&remote, &["symbolic-ref", "HEAD", "refs/heads/trunk"]);
+            if delete_old {
+                run_git(&remote, &["update-ref", "-d", "refs/heads/main"]);
+            }
+            assert_eq!(rev(&base, "origin/HEAD"), first, "local note is stale");
+            let lease = lease_available_or_create_at(&layout, &base, identity_url, &req("ds1"))
+                .await
+                .unwrap_or_else(|error| panic!("delete_old={delete_old} stale_new={stale_new}: {error}"));
+            assert_eq!(lease.base_ref, "origin/trunk");
+            assert_eq!(rev(&lease.worktree_path, "HEAD"), trunk);
+            assert_eq!(rev(&base, "origin/HEAD"), trunk, "local note follows origin");
+            cleanup_test_dirs(&[&pools, &base, &remote]);
+        }
+    }
+
+    #[tokio::test]
+    async fn origin_without_a_default_branch_fails_without_a_stale_base() {
+        if !git_available() {
+            return;
+        }
+        let identity_url = "https://github.com/acme/no-default.git";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("nd");
+        let layout = layout_for(identity_url, &pools);
+        // Origin's HEAD names a branch that does not exist; origin/main is still cached locally.
+        run_git(&remote, &["symbolic-ref", "HEAD", "refs/heads/gone"]);
+        let error = lease_available_or_create_at(&layout, &base, identity_url, &req("nd1"))
+            .await
+            .expect_err("no confirmed default branch, no lease");
+        assert_eq!(error.code, PoolErrorCode::BaseRefUnresolved, "{error}");
         cleanup_test_dirs(&[&pools, &base, &remote]);
     }
 
@@ -3231,7 +3297,6 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
         }
         let identity_url = "https://github.com/acme/fetch-join.git";
         let (base, remote) = setup_base_with_local_fetch(identity_url);
-        invalidate_required_fetch_cache(&base);
         let _ = take_required_fetch_perform_count(&base);
         let left = required_fetch_and_resolve(&base);
         let right = required_fetch_and_resolve(&base);
@@ -3395,8 +3460,6 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
                     .await.unwrap()
             } else { original.clone() };
             run_git(&remote, &["update-ref", "refs/heads/main", &target]);
-            // Expire the successful pre-rewrite fetch so this lease must contact origin.
-            fetch_repo_states().lock().unwrap().remove(&fetch_coordinator_key(&base));
             let fresh = lease_available_or_create_at(&layout, &base, identity, &req("fresh"))
                 .await.unwrap();
             for (path, reference, expected) in [
