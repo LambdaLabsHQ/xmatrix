@@ -2017,7 +2017,7 @@ export const MessageRow = memo(function MessageRow({
               title="Reply"
               aria-label="Reply"
               onClick={() => onReply(message)}
-              className="hidden size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
+              className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
             >
               <Reply className="size-3.5" />
             </button>
@@ -2034,7 +2034,7 @@ export const MessageRow = memo(function MessageRow({
                 aria-expanded={reactionPickerOpen}
                 onClick={() => setReactionPickerOpen((open) => !open)}
                 className={cn(
-                  "flex size-7 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                  "flex size-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
                   reactionPickerOpen ? "opacity-100" : "opacity-0"
                 )}
               >
@@ -2062,7 +2062,7 @@ export const MessageRow = memo(function MessageRow({
                 title="Edit message"
                 aria-label="Edit message"
                 onClick={requestEdit}
-                className="hidden size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
+                className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
               >
                 <Pencil className="size-3.5" />
               </button>
@@ -2071,7 +2071,7 @@ export const MessageRow = memo(function MessageRow({
                 title="Recall message"
                 aria-label="Recall message"
                 onClick={requestRecall}
-                className="hidden size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 md:flex"
+                className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 md:flex"
               >
                 <Trash2 className="size-3.5" />
               </button>
@@ -2714,7 +2714,7 @@ function MessageCopyButton({
       aria-label={copied ? "Copied" : "Copy message"}
       onClick={onCopy}
       className={cn(
-        "ml-auto flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+        "ml-auto flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
         className
       )}
     >
