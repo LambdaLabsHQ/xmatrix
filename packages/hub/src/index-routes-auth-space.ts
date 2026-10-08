@@ -343,6 +343,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
           error: transient
             ? "Authentication service is temporarily unavailable."
             : (error as Error).message || "Failed to refresh session",
+          ...(transient ? { retryable: true } : {}),
         },
         status,
       );
