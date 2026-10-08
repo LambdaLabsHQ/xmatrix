@@ -16,6 +16,10 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import {
+  createHumanSocketSuspensionTracker,
+  listenForHumanSocketResume,
+} from "@/components/dashboard/human-socket-heartbeat";
 
 /** How an open project is run (docs/design/open-project-governance.md). */
 export interface SpaceGovernance {
@@ -177,6 +181,8 @@ function hubSocketUrl(socketPath: string): string {
  * kept in sync with the page's session object over a ticketed WebSocket,
  * reconnecting with backoff until closed or refused.
  */
+const PAGE_TICKET_TIMEOUT_MS = 15_000;
+
 export class PageLiveSession {
   readonly doc = new Y.Doc();
   /** The page's document (docs/design/pages-live-document.md §4.1), which the editor binds. */
@@ -188,10 +194,15 @@ export class PageLiveSession {
   private closed = false;
   private attempt = 0;
   private retry: ReturnType<typeof setTimeout> | undefined;
+  private connecting = false;
+  private token: string;
+  private readonly suspension = createHumanSocketSuspensionTracker();
+  private readonly stopResume: () => void;
   private readonly listeners = new Set<(notice: PageSessionNotice | { type: "status"; connected: boolean }) => void>();
 
   constructor(private readonly input: { spaceId: string; pageId: string; token: string;
     user: { name: string; color: string } }) {
+    this.token = input.token;
     this.awareness.setLocalStateField("user", { ...input.user, kind: "user" });
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === this) return;
@@ -205,7 +216,54 @@ export class PageLiveSession {
       const changed = [...added, ...updated, ...removed];
       this.send(encodePageAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed)));
     });
+    // The OS can drop the socket during sleep without a close event; edits
+    // would then go nowhere until TCP gives up. Redial on wake instead.
+    this.stopResume = listenForHumanSocketResume(() => this.resume(), () => this.suspension.markSuspended());
     void this.connect();
+  }
+
+  /**
+   * A renewed token only matters for the next ticket. The document stays: it
+   * holds edits the Hub may not have yet, and sync sends them on reconnect.
+   */
+  setToken(token: string): void {
+    this.token = token;
+  }
+
+  private resume(): void {
+    if (this.closed) return;
+    const suspended = this.suspension.consume(document.hidden);
+    if (document.hidden || navigator.onLine === false) return;
+    if (suspended && this.socket) {
+      this.replaceSocket();
+      return;
+    }
+    // Waiting out a backoff while the network is back only delays the edits.
+    if (!this.socket && !this.connecting && this.retry) {
+      clearTimeout(this.retry);
+      this.retry = undefined;
+      this.attempt = 0;
+      void this.connect();
+    }
+  }
+
+  private replaceSocket(): void {
+    const socket = this.socket;
+    if (!socket) return;
+    this.socket = null;
+    socket.close(1000);
+    this.dropped();
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = undefined;
+    this.attempt = 0;
+    void this.connect();
+  }
+
+  private dropped(): void {
+    this.synced = false;
+    awarenessProtocol.removeAwarenessStates(this.awareness,
+      [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID), this);
+    this.emit({ type: "status", connected: false });
   }
 
   on(listener: (notice: PageSessionNotice | { type: "status"; connected: boolean }) => void): () => void {
@@ -222,11 +280,14 @@ export class PageLiveSession {
   }
 
   private async connect(): Promise<void> {
-    if (this.closed) return;
+    if (this.closed || this.connecting) return;
+    this.connecting = true;
     try {
       const session = await xmatrixApiRequest<{ protocol: string; socketPath: string; canEdit: boolean }>({
-        url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.input.pageId), token: this.input.token,
+        url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.input.pageId), token: this.token,
         method: "POST", body: { document: PAGE_DOCUMENT_FRAGMENT },
+        // A ticket request stuck on a dead connection must not stop every later attempt.
+        signal: AbortSignal.timeout(PAGE_TICKET_TIMEOUT_MS),
       });
       if (this.closed) return;
       // A Hub from before pages were documents keeps markdown text; joining it
@@ -242,7 +303,6 @@ export class PageLiveSession {
       this.socket = socket;
       socket.addEventListener("open", () => {
         if (this.socket !== socket) return;
-        this.attempt = 0;
         socket.send(encodePageSync(encoder => syncProtocol.writeSyncStep1(encoder, this.doc)));
         socket.send(encodePageAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID])));
         this.emit({ type: "status", connected: true });
@@ -254,10 +314,7 @@ export class PageLiveSession {
       socket.addEventListener("close", (event) => {
         if (this.socket !== socket) return;
         this.socket = null;
-        this.synced = false;
-        awarenessProtocol.removeAwarenessStates(this.awareness,
-          [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID), this);
-        this.emit({ type: "status", connected: false });
+        this.dropped();
         // Access revoked (4003) or the page removed (4004): there is nothing to reconnect to.
         if (event.code === 4003 || event.code === 4004) {
           this.emit({ type: "access", canRead: false });
@@ -267,12 +324,15 @@ export class PageLiveSession {
       });
     } catch {
       this.schedule();
+    } finally {
+      this.connecting = false;
     }
   }
 
   private schedule(): void {
     if (this.closed) return;
-    const delay = Math.min(30_000, 500 * 2 ** this.attempt++);
+    // Jitter keeps every editor from redialling together after a Hub deploy.
+    const delay = Math.min(30_000, 500 * 2 ** this.attempt++) * (0.5 + Math.random() / 2);
     this.retry = setTimeout(() => void this.connect(), delay);
   }
 
@@ -283,6 +343,9 @@ export class PageLiveSession {
       const { kind, reply } = readPageSyncReply(decoder, this.doc, this);
       if (kind === syncProtocol.messageYjsSyncStep2 && !this.synced) {
         this.synced = true;
+        // Backoff resets once the session really works, not when a socket
+        // opens: a restarting Durable Object accepts and then closes at once.
+        this.attempt = 0;
         this.emit({ type: "synced" });
       }
       if (reply) this.send(reply);
@@ -298,6 +361,7 @@ export class PageLiveSession {
 
   destroy(): void {
     this.closed = true;
+    this.stopResume();
     if (this.retry) clearTimeout(this.retry);
     awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], "local");
     this.socket?.close(1000);

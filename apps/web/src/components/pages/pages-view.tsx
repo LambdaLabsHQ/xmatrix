@@ -67,6 +67,8 @@ function documentOpensWithTitle(title: string, blocks: PageDocBlock[], markdown:
  * people and Agents, with who is on each section shown beside it.
  */
 
+const PAGE_SERVER_OUTDATED_NOTICE = "Live editing is being updated; the page will open for editing in a moment.";
+
 export function usePageTree(spaceId: string | null, token: string) {
   const { user } = useAuth();
   return useQuery({
@@ -577,10 +579,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
     setFocused(null);
   }, [pageId]);
 
+  // A token renewal (hourly) must not rebuild the session: that would drop
+  // the document and any edit the Hub has not received yet.
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const hasToken = Boolean(token);
   useEffect(() => {
-    if (!spaceId || !pageId || !userId || !token) return;
+    if (token) session?.setToken(token);
+  }, [session, token]);
+
+  useEffect(() => {
+    if (!spaceId || !pageId || !userId || !hasToken) return;
     // One session per page; it must not churn when the auth context re-renders.
-    const live = new PageLiveSession({ spaceId, pageId, token,
+    const live = new PageLiveSession({ spaceId, pageId, token: tokenRef.current,
       user: { name: userName, color: pageAuthorColor({ kind: "user", id: userId }) } });
     setSession(live);
     setNotice(null);
@@ -597,7 +608,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
         // The edit is sent as it is made; the session keeps it as it arrives.
         saveTimer.current = window.setTimeout(() => setSaveState(connectedRef.current ? "saved" : "offline"), 700);
       }
-      if (event.type === "synced") setSynced(true);
+      if (event.type === "synced") {
+        setSynced(true);
+        setNotice((current) => current === PAGE_SERVER_OUTDATED_NOTICE ? null : current);
+      }
       if (event.type === "session") { setCanEdit(event.canEdit); setHeadRevision(event.headRevision); }
       if (event.type === "access") {
         if (event.canRead === false) setNotice("You no longer have access to this page.");
@@ -615,12 +629,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
       }
       if (event.type === "error" && event.code === "page_body_too_large") setNotice("This page is over 256 KiB.");
       if (event.type === "error" && event.code === "page_server_outdated") {
-        setNotice("Live editing is being updated; the page will open for editing in a moment.");
+        setNotice(PAGE_SERVER_OUTDATED_NOTICE);
       }
     });
     return () => { off(); live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false);
       setSaveState("idle"); };
-  }, [spaceId, pageId, token, userId, userName, queryClient]);
+  }, [spaceId, pageId, hasToken, userId, userName, queryClient]);
 
   // The editor reads the page's sections from its document as it changes.
   const [blocks, setBlocks] = useState<PageDocBlock[]>([]);
