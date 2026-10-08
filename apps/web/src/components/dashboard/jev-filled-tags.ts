@@ -44,7 +44,9 @@ export function formatDecisionTag(field: string, value: string): string {
  *
  * Jev fills the work: harness first, then the model and effort that harness
  * offers, then the repository. Routing then fills the Machine it bound, as
- * `machine:`. The chip reveals them one by one in this order. Whether that machine is a laptop is its own
+ * `machine:`. From `registration-parameters-v10` the harness is chosen with
+ * the Machine, from Jev's fit scores and measured headroom together, so
+ * routing fills it beside `machine:`. The chip reveals them one by one in this order. Whether that machine is a laptop is its own
  * property, not a Jev choice and not a tag. Only a gap is filled. A field the
  * author already wrote stays their text, even when a decision disagrees — that
  * disagreement belongs in the decision record, not as a second copy of the same
@@ -68,6 +70,8 @@ export function jevFilledTags(mention: AutoLaunchMention, parameters: LaunchPara
   if (selections.repo && written.repo === undefined && written.pwd === undefined) {
     tags.push({ field: "repo", value: selections.repo });
   }
+  const placed = parameters.fit ? parameters.placement?.ranking[0]?.harness : undefined;
+  if (placed && written.harness === undefined) tags.push({ field: "harness", value: placed, source: "routing" });
   if (machine && written.machine === undefined) tags.push({ field: "machine", value: machine, source: "routing" });
   return tags;
 }

@@ -92,3 +92,18 @@ test("each step names the routing model that answered it, when the record says",
   ]));
   assert.deepEqual(decision.questions.map(question => [question.key, question.model]), [["harness", "vendor/router-a"], ["modelEffort", undefined]]);
 });
+
+test("a fit score reads as its harness and levels, the scored level selected", () => {
+  const input = { state: { message: "fix it" }, questions: { fit_0: { type: "score",
+    instructions: `Rate how well. Harness: ${JSON.stringify({ harness: "codex", descriptions: [], models: [] })}`,
+    criteria: ["Unsuitable: lacks it.", "Capable: nothing specific.", "Strong fit: a reason.", "Asked for: named."] } } };
+  const [reading] = jevReadings([
+    { refId: "decision:f:started", payload: { decisionId: "f", status: "started", at: "2026-10-08T14:00:00Z", input } },
+    { refId: "decision:f:succeeded", payload: { decisionId: "f", status: "succeeded", at: "2026-10-08T14:00:01Z",
+      answers: { fit_0: { score: 1.2, probabilities: { 0: 0, 1: 0.8, 2: 0.2, 3: 0 } } } } }]);
+  const [question] = reading.questions;
+  assert.equal(question.label, "Fit · codex");
+  assert.deepEqual(question.options.map(option => [option.title, option.selected, option.probability]),
+    [["Unsuitable", false, 0], ["Capable", true, 0.8], ["Strong fit", false, 0.2], ["Asked for", false, 0]]);
+  assert.equal(question.options[1].detail, "nothing specific.");
+});
