@@ -3702,8 +3702,7 @@ html[data-app-theme] .xmatrix-app input.page-title:focus-visible {
 /* Keep legacy sidebar pill pseudos at full strength. The final normalization
    block later in this file supplies the shared caustic geometry after all the
    older theme-specific sidebar recipes. */
-.xmatrix-app.xmatrix-app .app-sidebar :is(.app-channel-row:hover, .app-channel-row.app-channel-row-active, .app-channel-row:focus-within, .app-sidebar-glass-item:not(.app-sidebar-shortcut))::before,
-.xmatrix-app.xmatrix-app .app-space-switcher-trigger::before {
+.xmatrix-app.xmatrix-app .app-sidebar :is(.app-channel-row:hover, .app-channel-row.app-channel-row-active, .app-channel-row:focus-within, .app-sidebar-glass-item:not(.app-sidebar-shortcut))::before {
   opacity: 1 !important;
 }
 
@@ -4121,8 +4120,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-sender-kind-badge {
 
 @media (prefers-reduced-motion: reduce) {
   .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-trigger,
-  .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open,
-  .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-menu.bg-popover {
+  .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open {
     animation: none !important;
     transition: none !important;
   }
@@ -4294,7 +4292,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 
   /* The 44px switcher starts 4px down, so it is centred in the band; when
-     open, its menu grows the header downward. */
+     open, its panel grows the header downward. */
   .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-sidebar-space-header {
     display: flex;
     align-items: flex-start;
@@ -4486,15 +4484,14 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 }
 
-/* The space switcher owns no material of its own. Its three glass surfaces —
-   the hovered trigger, the expanded shell, the rename form — are all listed in
-   the shared unification rule further down, so fill, rim and caustics resolve
-   to the one glass recipe (--app-liquid-shared-surface-bg + --app-glass-edge +
-   --app-glass-caustics) that every other panel uses. Everything below is
-   geometry, type and motion. Do not reintroduce a private
-   --app-space-switcher-* material recipe: the last one stacked a bright top
-   edge, a rim glow and white radial caustics on top of the shared rim, and the
-   expanded panel read as over-lit next to every other glass panel. */
+/* The space switcher owns no material of its own. At rest it is a name on
+   the list; its two glass surfaces — the expanded shell and the rename form —
+   are listed in the shared unification rule further down, so fill, rim and
+   caustics resolve to the one glass recipe the composer and every other panel
+   use. Everything below is geometry, type and motion. Do not reintroduce a
+   private --app-space-switcher-* material recipe: the last one stacked a
+   bright top edge, a rim glow and white radial caustics on top of the shared
+   rim, and the expanded panel read as over-lit next to every other panel. */
 .xmatrix-app.xmatrix-app .app-sidebar .app-sidebar-space-header {
   padding: 12px 12px 16px !important;
 }
@@ -4503,21 +4500,12 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   color: var(--sidebar-foreground) !important;
   position: relative !important;
   z-index: 2 !important;
-  isolation: isolate !important;
-  overflow: hidden !important;
   min-height: 58px !important;
   padding: 8px 12px !important;
   background: transparent !important;
   border-color: transparent !important;
   border-radius: 26px !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
   box-shadow: none !important;
-  transition:
-    background-color 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-radius 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    box-shadow 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1) !important;
 }
 
 .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-icon {
@@ -4751,36 +4739,11 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 }
 
-/* The rename pencil is a sibling of the trigger, not a child of it, so it has
-   to climb above the trigger's own layer (z-index 2) by hand: left at the
-   default layer it sits *behind* the hover panel and the panel's backdrop
-   filter blurs the glyph, while the chevron inside the trigger stays sharp.
-   The selector carries the shell so the open-state `> *` rule below cannot
-   push it back down. It is a bare glyph — the panel is the only material
-   under it, in every state. */
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell .app-space-switcher-rename {
-  z-index: 3 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell .app-space-switcher-rename:is(:hover, :focus-visible) {
-  background: transparent !important;
-  box-shadow: none !important;
-  color: var(--sidebar-foreground) !important;
-}
-
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-edit-form {
-  min-height: 66px !important;
-  border-radius: 26px !important;
-}
-
-/* Geometry and the open transition only. The expanded shell IS a liquid glass
-   panel, so its fill, rim and caustics come from the shared unification rule
-   below (it is in that rule's :is() list) — never from a private recipe here.
-   An earlier private recipe stacked a bright `inset 0 1px 0 oklch(1 0 0/0.72)`
-   top edge, a rim glow, a bottom edge and white radial caustics on top of the
-   shared rim; that is the extra highlight no other panel has. */
+/* The open switcher is one glass panel grown out of the header row: the
+   composer's glass (the shared recipe — the shell is in the unification rule
+   below), never a private one. The name row, the Spaces and the actions are
+   printed on it; none of them carries glass of its own except the action
+   discs. */
 .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open {
   position: relative !important;
   isolation: isolate !important;
@@ -4795,113 +4758,82 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   z-index: 1 !important;
 }
 
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open .app-space-switcher-trigger {
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-chevron {
+  color: var(--app-panel-ink-muted);
+  transition: color 120ms ease, transform 200ms ease;
+}
+
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-trigger:is(:hover, :focus-visible) .app-space-switcher-chevron {
+  color: var(--app-panel-ink);
+}
+
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-menu {
+  padding: 0 2px;
+}
+
+/* A Space is one line. Under the pointer it takes the menu's inset highlight,
+   the way a row of an iOS menu does; the current Space carries the check. */
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell .app-space-switcher-option {
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 14px;
   background: transparent !important;
-  border-radius: 26px 26px 14px 14px !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
+  transition: background-color 120ms ease;
 }
 
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open button.app-space-switcher-trigger[aria-expanded] {
-  background: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open .app-space-switcher-trigger::before {
-  content: none !important;
-}
-
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-trigger > *,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-menu.bg-popover > * {
-  position: relative !important;
-  z-index: 1 !important;
-}
-
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-menu.bg-popover {
-  color: var(--sidebar-foreground) !important;
-  isolation: auto !important;
-  overflow: visible !important;
-  background: transparent !important;
-  border-color: transparent !important;
-  border-radius: 0 0 26px 26px !important;
-  min-height: 0 !important;
-  margin-top: -4px !important;
-  padding: 0 0 4px !important;
-  box-shadow: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  animation: none !important;
-  clip-path: none !important;
-}
-
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-menu.bg-popover::before,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-menu.bg-popover::after {
-  content: none !important;
-}
-
-/* Hover is one flat bar across the shell. The row is the only fill: sidebar
-   button:hover would otherwise paint glass on whichever control is under the
-   pointer, so the name and the new-window icon read as two colors. */
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-row {
-  border-radius: 0 !important;
-  background: transparent !important;
-}
-
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-row:hover,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-row:focus-within {
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell .app-space-switcher-option:is(:hover, :focus-visible) {
   background: var(--app-glass-fill-active) !important;
-  -webkit-backdrop-filter: var(--app-glass-filter) !important;
-  backdrop-filter: var(--app-glass-filter) !important;
-}
-
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-row :is(.app-space-switcher-option, .app-space-switcher-open-window),
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-row :is(.app-space-switcher-option, .app-space-switcher-open-window):hover,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-row :is(.app-space-switcher-option, .app-space-switcher-open-window):focus-visible {
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-  border-color: transparent !important;
   box-shadow: none !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
 
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option.app-material-liquid-pill {
-  color: var(--sidebar-foreground) !important;
-  background: transparent !important;
-  border-color: transparent !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  min-height: 44px !important;
-  padding-inline: 14px !important;
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-avatar {
+  border-radius: 7px;
 }
 
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-open-window,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-open-window:hover,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-open-window:focus-visible {
-  color: var(--sidebar-foreground) !important;
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option-name {
+  font-size: 14.5px;
+  font-weight: 600;
 }
 
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option:hover,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option:focus-visible,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option.app-material-liquid-pill:hover,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option.app-material-liquid-pill:focus-visible {
-  background: transparent !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option[aria-selected="true"] .app-space-switcher-option-name {
+  font-weight: 750;
 }
 
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option-active,
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option[aria-selected="true"],
-.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-menu.bg-popover button.app-space-switcher-option.app-space-switcher-option-active {
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-option-meta {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--app-panel-ink-muted);
+}
+
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-empty {
+  padding: 10px;
+  font-size: 13px;
+  color: var(--app-panel-ink-muted);
+}
+
+/* The actions sit under a hairline, each a glass disc labelled beneath it. */
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-actions {
+  gap: 4px;
+  margin: 6px 16px 0;
+  padding: 10px 0 12px;
+  border-top: 1px solid color-mix(in oklch, var(--app-panel-ink) 10%, transparent);
+}
+
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell .app-space-switcher-action {
+  color: var(--app-panel-ink-muted) !important;
+  font-size: 11.5px;
+  font-weight: 600;
   background: transparent !important;
-  border-color: transparent !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
+}
+
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell .app-space-switcher-action-disc {
+  color: var(--app-panel-ink);
+}
+
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell .app-space-switcher-action:is(:hover, :focus-visible) {
+  color: var(--app-panel-ink) !important;
 }
 
 /* App connectors view: themed material pass. The JSX exposes explicit
@@ -5120,7 +5052,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app :is(
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(
   .app-liquid-glass-fill,
   .app-sidebar .app-sidebar-glass-item,
-  .app-space-switcher-trigger,
   .app-space-switcher-shell-open,
   .app-space-switcher-edit-form,
   .app-ability-button,
@@ -5138,14 +5069,14 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(
   background-image: none !important;
   @apply app-liquid-material-recipe;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-liquid-glass-fill, .app-sidebar .app-sidebar-glass-item, .app-space-switcher-trigger, .app-space-switcher-shell-open, .app-space-switcher-edit-form, .app-ability-button, .app-composer-box, .app-search, .bg-popover):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex)::before {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-liquid-glass-fill, .app-sidebar .app-sidebar-glass-item, .app-space-switcher-shell-open, .app-space-switcher-edit-form, .app-ability-button, .app-composer-box, .app-search, .bg-popover):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex)::before {
   @apply app-glass-caustic-recipe;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   box-shadow: none !important;
   opacity: 1 !important;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-liquid-glass-fill, .app-sidebar .app-sidebar-glass-item, .app-space-switcher-trigger, .app-space-switcher-shell-open, .app-space-switcher-edit-form, .app-ability-button, .app-composer-box, .app-search, .bg-popover):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex) > :not(.app-usage-meter-fill) {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-liquid-glass-fill, .app-sidebar .app-sidebar-glass-item, .app-space-switcher-shell-open, .app-space-switcher-edit-form, .app-ability-button, .app-composer-box, .app-search, .bg-popover):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex) > :not(.app-usage-meter-fill) {
   position: relative !important;
   z-index: 1 !important;
 }
@@ -5158,48 +5089,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-liquid-glass-
    opaque with the theme's popover tone, adds a hairline ring in the foreground
    ink, and casts a real drop shadow. The open space switcher is excluded: it
    merges into its shell on purpose (next rules). */
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .bg-popover.bg-popover:not(.app-space-switcher-menu):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex) {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .bg-popover.bg-popover:not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex) {
   --app-liquid-surface-bg: color-mix(in oklch, var(--popover) 94%, transparent);
   box-shadow:
     var(--app-glass-edge),
     0 0 0 1px color-mix(in oklch, var(--foreground) 14%, transparent),
     0 12px 32px -8px oklch(0 0 0 / 0.28) !important;
-}
-
-/* The workspace switcher is flat at rest — no rim, no fill, no refraction.
-   It only becomes liquid glass on hover/focus (the unification override still
-   governs that). The override targets the trigger at ALL states at (0,15,1)
-   specificity (its 8 :not() exclusions each count), so this rest-only reset
-   mirrors that exclusion chain plus .app-sidebar to land at (0,16,1) and win —
-   but only when NOT interacting, leaving hover/focus glass intact. */
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-trigger:not(:hover):not(:focus-visible):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex) {
-  background: transparent !important;
-  background-color: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
-/* When the switcher is OPEN the shell IS the single panel. The header (trigger)
-   and the options list (menu) must merge into it — no inner pills/box-in-box.
-   The shell's own flatten rules above lose to the unification override (0,15,1)
-   because .bg-popover/.app-space-switcher-trigger are in its :is() list, so
-   re-flatten here at (0,16,1) by mirroring the same :not() exclusion chain. */
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open .app-space-switcher-trigger[aria-expanded]:not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex),
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open .app-space-switcher-menu.bg-popover:not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex) {
-  background: transparent !important;
-  background-color: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
-/* The generic glass recipe also installs a caustic pseudo-element. In the
-   expanded switcher it would give the name row its own rim inside the shell.
-   The shell is the sole glass surface in this state. */
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open .app-space-switcher-trigger[aria-expanded]:not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex)::before,
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open .app-space-switcher-menu.bg-popover:not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex)::before {
-  content: none !important;
 }
 
 .xmatrix-app.xmatrix-app .app-sidebar .app-channel-row > *,
