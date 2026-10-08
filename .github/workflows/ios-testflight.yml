@@ -10,11 +10,13 @@ concurrency:
 jobs:
   upload:
     environment: production
-    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
+    timeout-minutes: 60
+    runs-on: ${{ github.event.repository.private && vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
     permissions:
-      actions: write
+      actions: read
       contents: read
     env:
+      IOS_BUILD_NUMBER: ${{ github.run_id }}
       IOS_DEVELOPMENT_TEAM: ${{ secrets.IOS_DEVELOPMENT_TEAM }}
       IOS_MARKETING_VERSION: ${{ vars.IOS_MARKETING_VERSION || '' }}
       IOS_USE_ASC_XCODE_AUTH: "1"
@@ -69,12 +71,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          umask 077
+          [[ "$ASC_API_KEY_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "Invalid Apple API key identifier." >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/appstoreconnect"
           echo "$ASC_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/appstoreconnect/AuthKey_${ASC_API_KEY_ID}.p8"
           chmod 600 "$RUNNER_TEMP/appstoreconnect/AuthKey_${ASC_API_KEY_ID}.p8"
           echo "ASC_P8_PATH=$RUNNER_TEMP/appstoreconnect/AuthKey_${ASC_API_KEY_ID}.p8" >> "$GITHUB_ENV"
 
+      - name: Reconcile exact Apple build
+        id: apple-build
+        run: node scripts/ios-app-store.mjs check-upload
+
       - name: Prepare signing keychain
+        if: steps.apple-build.outputs.upload_required == 'true'
         env:
           IOS_SIGNING_P12_BASE64: ${{ secrets.IOS_SIGNING_P12_BASE64 }}
           IOS_SIGNING_P12_PASSWORD: ${{ secrets.IOS_SIGNING_P12_PASSWORD }}
@@ -135,7 +144,23 @@ jobs:
           fi
 
       - name: Upload to TestFlight
+        if: steps.apple-build.outputs.upload_required == 'true'
         run: bash scripts/ios-testflight.sh
+
+      - name: Submit exact build to App Review
+        env:
+          ASC_REVIEW_NOTES: ${{ secrets.ASC_REVIEW_NOTES }}
+        run: node scripts/ios-app-store.mjs submit
+
+      - name: Remove temporary Apple API key
+        if: always()
+        run: |
+          set -euo pipefail
+          [[ "$ASC_API_KEY_ID" =~ ^[A-Z0-9]{10}$ ]] || exit 0
+          KEY_PATH="$RUNNER_TEMP/appstoreconnect/AuthKey_${ASC_API_KEY_ID}.p8"
+          if [[ -f "$KEY_PATH" ]]; then
+            unlink "$KEY_PATH"
+          fi
 
       - name: Restore signing keychain search
         if: always()
