@@ -36,19 +36,6 @@
   opacity: 0.52;
 }
 
-@utility app-command-input-recipe {
-  border: 0 !important;
-  border-radius: 9999px !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  color: var(--foreground) !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
 @utility app-wood-panel-recipe {
   background-color: var(--app-wood-panel-base) !important;
   background-image: var(--app-wood-texture) !important;
@@ -232,17 +219,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar.app-sideb
     0 22px 46px rgb(0 0 0 / 0.24),
     0 8px 18px rgb(0 0 0 / 0.16),
     0 0 0 1px rgb(0 0 0 / 0.04) !important;
-}
-
-@utility app-command-panel-recipe {
-  background: oklch(1 0 0 / 0.92) !important;
-  background-color: oklch(1 0 0 / 0.92) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(1.18) !important;
-  backdrop-filter: blur(24px) saturate(1.18) !important;
-  box-shadow:
-    inset 0 1px 0 var(--app-specular),
-    inset 0 -1px 0 var(--app-specular-soft),
-    0 18px 48px var(--app-ink-shadow) !important;
 }
 
 @utility app-glass-filter-recipe {
