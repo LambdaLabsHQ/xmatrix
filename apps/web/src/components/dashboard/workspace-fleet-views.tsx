@@ -51,6 +51,7 @@ import {
 import { daemonPresenceLabel } from "./machine-daemon-presence";
 import { MachineLoadGlance, MachineLoadPanel } from "./machine-load-panel";
 import { MachineHarnessPanel } from "./machine-harness-panel";
+import { MachineWorktreesPanel } from "./machine-worktrees-panel";
 import { MachineGlyph } from "./machine-glyph";
 import { machineOs } from "./machine-os";
 import {
@@ -398,6 +399,7 @@ export function LocalMacView({
   machineName,
   onNameMachine,
   harnesses,
+  worktrees,
   hubRecord,
   onStartDaemon,
   onRestartDaemon,
@@ -430,6 +432,8 @@ export function LocalMacView({
   onNameMachine: (name: string) => void;
   /** The machine's harness inventory, shown after its daemon as on every Machine's page. */
   harnesses?: React.ReactNode;
+  /** The Machine's git worktrees; renders its own section. */
+  worktrees?: React.ReactNode;
   /** The Hub's record of this machine: more daemon facts and its load. */
   hubRecord?: { facts: React.ReactNode; load: React.ReactNode } | null;
   onStartDaemon: () => void;
@@ -545,6 +549,7 @@ export function LocalMacView({
       </ToolDetailSection>
 
       {harnesses && <ToolDetailSection title="Harnesses">{harnesses}</ToolDetailSection>}
+      {worktrees}
 
       <ToolDetailSection
         title={`Agents · ${agents.length}`}
@@ -1047,6 +1052,7 @@ export function MachinesView({
             <ToolDetailSection title="Harnesses">
               <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId} />
             </ToolDetailSection>
+            <MachineWorktreesPanel key={`worktrees:${machine.id}`} daemon={machine.daemon} token={token} />
             <ToolDetailSection title={`Directories · ${machine.workspaces.length}`}>
               {machine.workspaces.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No directories registered on this machine.</p>
