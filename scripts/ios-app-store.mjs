@@ -94,9 +94,6 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   if (items.length > 1 || items.some((item) => !target || item.relationships?.appStoreVersion?.data?.id !== target.id)) {
     throw new Error("Review submission contains unrelated items; refusing changes.");
   }
-  if (submission?.attributes.state === "UNRESOLVED_ISSUES") {
-    return { outcome: "deferred-review-response-required", version, buildNumber };
-  }
   // Contact/login facts stay at Apple. Never read them from public metadata.
   // New-version creation requires an existing review configuration to inherit.
   const candidates = [target, ...versions.filter((row) => row.id !== target?.id && SUBMITTED.has(state(row)))
@@ -157,6 +154,9 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   // Read the relationship back before submitting; never use Apple's latest build.
   const bound = (await api.request(`/v1/appStoreVersions/${target.id}/relationships/build`)).data;
   if (bound?.id !== build.id) throw new Error("App Store build binding verification failed.");
+  if (submission?.attributes.state === "UNRESOLVED_ISSUES") {
+    return { outcome: "deferred-review-response-required", version, buildNumber };
+  }
   if (!submission) {
     submission = (await api.request("/v1/reviewSubmissions", "POST", { type: "reviewSubmissions", attributes: { platform: "IOS" }, relationships: { app: relation("apps", appId) } })).data;
   }

@@ -84,7 +84,7 @@ test("rerun verifies same submitted version's build and does no writes", async (
   assert.deepEqual(wrong.writes, []);
 });
 
-test("existing review and rejection are deferred without withdrawing or resolving anything", async () => {
+test("existing review stays untouched; a rejected draft is refreshed without resolving issues", async () => {
   for (const versionState of ["WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE"]) {
     const { api, writes } = fixture({ version: { appVersionState: versionState } });
     assert.equal((await submitRelease(api, args)).outcome, "deferred-existing-review");
@@ -92,7 +92,8 @@ test("existing review and rejection are deferred without withdrawing or resolvin
   }
   const { api, writes } = fixture({ version: { appVersionState: "REJECTED" }, submission: { id: "submission", attributes: { state: "UNRESOLVED_ISSUES" } }, items: [{ relationships: { appStoreVersion: { data: { id: "version" } } } }] });
   assert.equal((await submitRelease(api, args)).outcome, "deferred-review-response-required");
-  assert.deepEqual(writes, []);
+  assert.ok(writes.some((row) => row.path === "/v1/appStoreVersions/version"));
+  assert.equal(writes.some((row) => row.path.startsWith("/v1/reviewSubmission")), false);
 });
 
 test("refuses unrelated submission items, downgrades and incomplete review credentials before mutation", async () => {

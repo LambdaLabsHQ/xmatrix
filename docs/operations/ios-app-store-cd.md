@@ -63,7 +63,9 @@ Outcomes in the Actions job summary:
 - `deferred-existing-review`: another review/release is in progress. The current build
   is available in TestFlight; no existing review is canceled or replaced.
 - `deferred-review-response-required`: Apple has unresolved rejection issues. The build
-  remains in TestFlight. Complete the requested evidence and response at Apple first;
+  remains in TestFlight, and the editable draft receives the current public metadata
+  and exact build (including its icon). Complete the requested evidence and response
+  at Apple first;
   the script does not declare issues resolved or fabricate a reviewer demonstration.
 
 Deferred outcomes do not turn a successful binary upload into a failed production
