@@ -844,7 +844,7 @@ export function requestFailure(error: unknown, context?: () => ErrorReportContex
 /** What a route was doing: its template and the opaque ids in its path, never its body. */
 export function routeReportContext(c: Context): ErrorReportContext {
   const ids = Object.fromEntries(Object.entries(c.req.param() as Record<string, string>)
-    .filter(([name, value]) => /Id$/u.test(name) && typeof value === "string" && value.length <= 200));
+    .filter(([name, value]) => name.endsWith("Id") && typeof value === "string" && value.length <= 200));
   return { operation: `${c.req.method} ${c.req.routePath}`, ids };
 }
 
