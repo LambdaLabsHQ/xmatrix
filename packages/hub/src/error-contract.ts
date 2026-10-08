@@ -1,4 +1,4 @@
-import { DetailedControlError } from "@xmatrix/db";
+import { ControlError, DetailedControlError } from "@xmatrix/db";
 
 import { DURABLE_OBJECT_RETRY_AFTER_SECONDS, transientDurableObjectFailure } from "./durable-object-failure";
 import { postgresRetryAfterSeconds, retryablePostgresFailure } from "./postgres-error-classification";
@@ -23,6 +23,18 @@ export interface DomainError {
 }
 
 const NO_STORE = { "cache-control": "private, no-store" } as const;
+
+/**
+ * A part of the Hub that is briefly unavailable (a coordinator, a session, a
+ * clock or a deadline met in passing): a retryable 503 whose `Retry-After` is
+ * `retryAfterMs`. Throw it; `domainFailure` answers it on every route and socket.
+ */
+export class ServiceUnavailable extends ControlError {
+  constructor(code: string, message: string,
+    readonly retryAfterMs = DURABLE_OBJECT_RETRY_AFTER_SECONDS * 1_000) {
+    super(code, 503, message, true);
+  }
+}
 
 /** A domain rejection under its own status and code; a retryable 503 also says when to replay. */
 export function domainFailure(error: DomainError, extra: Record<string, unknown> = {}): RequestFailure {
