@@ -1,8 +1,9 @@
 "use client";
 
-import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { useEffect, useMemo, type ReactNode } from "react";
 
+import { subscribeResume } from "@/lib/connectivity/connectivity";
 import { shouldRetryXMatrixQuery } from "./api-client";
 
 function createClient(): QueryClient {
@@ -26,6 +27,21 @@ function createClient(): QueryClient {
     },
   });
 }
+
+// Query's reconnect refetch follows the same signal as every socket and sync
+// loop (src/lib/connectivity), not a listener set of its own.
+onlineManager.setEventListener((setOnline) => {
+  if (typeof window === "undefined") return undefined;
+  const offline = () => setOnline(false);
+  window.addEventListener("offline", offline);
+  const stopResume = subscribeResume((signal) => {
+    if (signal.online) setOnline(true);
+  });
+  return () => {
+    window.removeEventListener("offline", offline);
+    stopResume();
+  };
+});
 
 export function XMatrixQueryProvider(props: { userId: string | null; children: ReactNode }) {
   const client = useMemo(createClient, [props.userId]);

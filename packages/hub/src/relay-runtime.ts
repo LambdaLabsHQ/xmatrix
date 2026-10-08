@@ -1,4 +1,5 @@
 import { plainDeliveryRecord as plainObject } from "./runtime-transport/delivery-record";
+import { HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG } from "@xmatrix/protocol";
 import { parseChannelTombstoneDelivery } from "./runtime-transport/channel-tombstone-delivery";
 import { DurableObject } from "cloudflare:workers";
 import { relayRuntimeRouteDirectory } from "./relay-authority-locator";
@@ -291,6 +292,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    // The web heartbeat is answered without waking this object (and without
+    // ending its hibernation), so the web can find a dead socket in seconds.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG));
     const productFactory = relayRuntimeProductFactoryFromEnv(
       env,
       (task) => ctx.waitUntil(task),
