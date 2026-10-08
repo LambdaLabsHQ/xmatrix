@@ -8,6 +8,7 @@ import {
   xmatrixQueryRawResponse,
   xmatrixRawResponse,
 } from "./api-client";
+import { untilCallerAborts } from "./caller-abort";
 import { xmatrixQueryKeys } from "./query-keys";
 
 type RequestInput = string | URL | Request;
@@ -16,10 +17,6 @@ function requestUrl(input: RequestInput): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
   return input.url;
-}
-
-function linkedSignal(left: AbortSignal, right?: AbortSignal | null): AbortSignal {
-  return right ? AbortSignal.any([left, right]) : left;
 }
 
 /**
@@ -44,15 +41,13 @@ export function useXMatrixQueryFetch(userId: string | null | undefined) {
     if (method !== "GET" && method !== "HEAD") {
       return mutateCommand({ request, init });
     }
+    const { signal: callerSignal, ...sharedInit } = init ?? {};
     try {
-      const response = await queryClient.fetchQuery({
+      const response = await untilCallerAborts(queryClient.fetchQuery({
         queryKey: xmatrixQueryKeys.domain(identity, "http-query", [method, requestUrl(request)]),
-        queryFn: ({ signal }) => xmatrixQueryRawResponse(request, {
-          ...init,
-          signal: linkedSignal(signal, init?.signal),
-        }),
+        queryFn: ({ signal }) => xmatrixQueryRawResponse(request, { ...sharedInit, signal }),
         staleTime: 0,
-      });
+      }), callerSignal);
       return response.clone();
     } catch (error) {
       if (error instanceof XMatrixRawResponseError) return error.response.clone();
