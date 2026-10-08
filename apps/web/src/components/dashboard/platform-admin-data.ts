@@ -65,8 +65,9 @@ export function isForbidden(error: unknown): boolean {
 
 export function usePlatformOverview(token: string | undefined, activityDays = ADMIN_OVERVIEW_DEFAULT_ACTIVITY_DAYS) {
   const { user } = useAuth();
-  return useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "platform-overview", [activityDays]),
+  const queryKey = xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "platform-overview", [activityDays]);
+  return useQuery<AdminPlatformOverview | null>({
+    queryKey,
     queryFn: ({ signal }) => {
       const params = new URLSearchParams({
         activityDays: String(activityDays), spaceLimit: "200", userLimit: "10000",
@@ -77,6 +78,11 @@ export function usePlatformOverview(token: string | undefined, activityDays = AD
     },
     enabled: Boolean(token && user?.id),
     staleTime: 60_000,
+    // Keep the current operator's data while another activity range loads.
+    // Never carry placeholder data across an account or Hub change.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === queryKey[1] && previousQuery.queryKey[2] === queryKey[2]
+        ? previous : undefined,
   });
 }
 

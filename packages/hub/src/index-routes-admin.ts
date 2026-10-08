@@ -36,7 +36,7 @@ import {
   jsonErrors,
 } from "./index-shared";
 import type { Env } from "./types";
-import { authDirectoryAdminUser, authDirectoryAdminUsers, authDirectoryEmails } from "./auth-authority";
+import { type AuthDirectoryAdminUsers, authDirectoryAdminUser, authDirectoryAdminUsers, authDirectoryEmails } from "./auth-authority";
 import { listAdminAudit, recordAdminAudit } from "./admin-audit";
 import { readPostgresAdminUserDetail } from "./postgres-admin-user-detail";
 import {
@@ -176,13 +176,16 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
       userLimit: adminOverviewUserLimit(c.req.query("userLimit")),
       activityDays: adminOverviewActivityDays(c.req.query("activityDays")),
     };
-    const overview = await readPostgresAdminOverview(c.env, input);
+    const [overview, directory] = await Promise.all([
+      readPostgresAdminOverview(c.env, input),
+      authDirectoryAdminUsers(c.env, input.now, input.userLimit).catch(() => null),
+    ]);
     if (!overview) {
       return c.json({ error: "Platform overview is unavailable" }, 502);
     }
 
     return c.json(
-      { overview: await withDirectoryUsers(overview, c.env, input.userLimit) },
+      { overview: await withDirectoryUsers(overview, c.env, directory) },
       200,
       { "cache-control": "private, no-store" },
     );
@@ -262,13 +265,8 @@ async function withDirectoryLabels(
 async function withDirectoryUsers(
   overview: AdminPlatformOverview,
   env: Env,
-  userLimit: number,
+  directory: AuthDirectoryAdminUsers | null,
 ): Promise<AdminPlatformOverview> {
-  const directory = await authDirectoryAdminUsers(
-    env,
-    overview.generatedAt,
-    userLimit,
-  ).catch(() => null);
   if (!directory ||
       (directory.access.registeredUsers === 0 && overview.totals.users > 0)) {
     return withDirectoryLabels(overview, env);

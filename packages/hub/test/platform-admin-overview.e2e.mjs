@@ -55,6 +55,17 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "first admin overview message");
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "second admin overview message");
 
+    const client = new Client({ connectionString: worker.postgresUrl });
+    await client.connect();
+    try {
+      await client.query(`INSERT INTO data.machine_daemons
+        (daemon_id, owner_user_id, owner_email, machine_id, hostname, status,
+         capabilities_json, metadata_json, connection_epoch, version, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, 'private-admin-machine-host', 'online',
+         '[]', '{"private":"must-not-appear"}', 1, 1, now(), now())`,
+      [`daemon:${userId}`, userId, ADMIN_EMAIL, `machine:${userId}`]);
+    } finally { await client.end(); }
+
     const me = await json(await worker.fetch("/api/auth/me", { headers: auth }));
     assert.equal(me.capabilities.platformAdmin, true);
 
@@ -70,6 +81,8 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     assert.ok(overview.totals.activeChannels >= 1);
     assert.ok(overview.totals.messages >= 2);
     assert.ok(overview.totals.humanMessages >= 2);
+    assert.equal(overview.totals.machines, 1);
+    assert.equal(overview.totals.onlineMachines, 1);
 
     const summary = overview.spaces.find((entry) => entry.id === space.id);
     assert.equal(summary?.name, spaceName);
@@ -83,6 +96,7 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     const user = overview.users.find((entry) => entry.userId === userId);
     assert.ok(user, "the Space member appears in the user table");
     assert.equal(user.messages, 2);
+    assert.equal(user.machines, 1);
     assert.ok(user.spaces >= 1);
 
     // Daily volume is a dense oldest-first series that sums to the window total.
@@ -98,6 +112,8 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     const serialized = JSON.stringify(overview);
     assert.equal(serialized.includes("first admin overview message"), false);
     assert.equal(serialized.includes(channel.name), false);
+    assert.equal(serialized.includes("private-admin-machine-host"), false);
+    assert.equal(serialized.includes("must-not-appear"), false);
   } finally {
     await worker.stop();
   }
