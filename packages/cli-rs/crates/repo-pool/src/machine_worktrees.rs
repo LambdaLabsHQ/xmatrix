@@ -21,7 +21,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::repo_pool;
 use crate::run_worktree::{self, GIT_LOCAL_TIMEOUT, git};
@@ -327,20 +326,7 @@ fn write_foreign_auto_reclaim(path: &Path, enabled: bool) -> Result<(), String> 
         FOREIGN_AUTO_RECLAIM_KEY.to_string(),
         serde_json::Value::Bool(enabled),
     );
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("{}: {error}", parent.display()))?;
-    }
-    let mut bytes = serde_json::to_vec_pretty(&document).map_err(|error| error.to_string())?;
-    bytes.push(b'\n');
-    let temporary = xmatrix_cli_core::config::unique_temporary_path(path);
-    let written = std::fs::write(&temporary, &bytes)
-        .and_then(|()| xmatrix_cli_core::config::replace_file_atomically(&temporary, path));
-    if let Err(error) = written {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(format!("{}: {error}", path.display()));
-    }
-    Ok(())
+    xmatrix_cli_core::config::write_json_atomically(path, &document)
 }
 
 #[derive(Debug, Default)]
@@ -419,12 +405,8 @@ fn snapshot_name(tree: &MachineWorktree) -> String {
             }
         })
         .collect();
-    let digest = Sha256::digest(tree.path.to_string_lossy().as_bytes());
-    let hex: String = digest[..4]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    format!("foreign/{}/{safe}-{hex}", tree.origin.label())
+    let digest = xmatrix_cli_core::hex::sha256_hex(tree.path.to_string_lossy().as_bytes());
+    format!("foreign/{}/{safe}-{}", tree.origin.label(), &digest[..8])
 }
 
 /// Working directories of every process on this machine. Harness sessions
@@ -487,63 +469,14 @@ mod tests {
     use super::*;
     include!("../../core/tests/support/fs_cleanup.rs");
 
-    fn unique_temp_dir(label: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "xmatrix-machine-worktrees-{label}-{}-{nanos}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        canonical(&dir)
-    }
-
-    fn git_available() -> bool {
-        std::process::Command::new("git")
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
-    // Hooks export these; they would point fixture commands at the real repo.
-    fn run_git(cwd: &Path, args: &[&str]) {
-        let status = std::process::Command::new("git")
-            .arg("-C")
-            .arg(cwd)
-            .args(args)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .env_remove("GIT_OBJECT_DIRECTORY")
-            .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed in {}", cwd.display());
-    }
+    use crate::test_support::{git_available, run_git, seed_remote, unique_temp_dir};
 
     /// A repository whose commit a remote already has, so only real WIP
     /// needs a snapshot.
-    fn init_repo_with_commit(dir: &Path) {
-        run_git(dir, &["init", "--quiet", "--initial-branch=main"]);
-        run_git(dir, &["config", "user.email", "test@example.com"]);
-        run_git(dir, &["config", "user.name", "Test"]);
-        std::fs::write(dir.join("README.md"), "hello").unwrap();
-        run_git(dir, &["add", "."]);
-        run_git(dir, &["commit", "--quiet", "-m", "init"]);
+    fn published_repo(dir: &Path) {
         let remote = dir.with_extension("remote.git");
         std::fs::create_dir_all(&remote).unwrap();
-        run_git(
-            &remote,
-            &["init", "--bare", "--quiet", "--initial-branch=main"],
-        );
-        run_git(
-            dir,
-            &["remote", "add", "origin", &remote.display().to_string()],
-        );
-        run_git(dir, &["push", "--quiet", "-u", "origin", "main"]);
+        seed_remote(&remote, dir);
     }
 
     fn add_worktree(base: &Path, path: &Path) {
@@ -644,7 +577,7 @@ mod tests {
         let roots = roots_under(&scratch);
         let base = roots.managed_repos_root.join("owner-repo");
         std::fs::create_dir_all(&base).unwrap();
-        init_repo_with_commit(&base);
+        published_repo(&base);
         let run_tree = roots.run_worktrees_root.join("run-abc");
         let claude_tree = base.join(".claude/worktrees/agent-1");
         let manual_tree = scratch.join("tmp").join("fix");
@@ -658,7 +591,7 @@ mod tests {
         // A Codex tree of a repository xMatrix never launched in.
         let outside = scratch.join("outside-repo");
         std::fs::create_dir_all(&outside).unwrap();
-        init_repo_with_commit(&outside);
+        published_repo(&outside);
         let codex_tree = roots
             .codex_worktrees_root
             .as_ref()
@@ -685,13 +618,15 @@ mod tests {
             "a main worktree is not a linked tree"
         );
 
-        let live: HashSet<PathBuf> = [busy_tree.join("sub")].into_iter().collect();
+        let live: HashSet<PathBuf> = [busy_tree.clone()].into_iter().collect();
         let dry = reclaim_foreign_worktrees(&trees, &live, None, Duration::ZERO, false).await;
         assert_eq!(dry.reclaimed.len(), 3, "{dry:?}");
         assert!(manual_tree.exists());
 
         let outcome = reclaim_foreign_worktrees(&trees, &live, None, Duration::ZERO, true).await;
-        assert_eq!(outcome.in_use, vec![busy_tree.clone()]);
+        let canonical_all =
+            |paths: &[PathBuf]| paths.iter().map(|path| canonical(path)).collect::<Vec<_>>();
+        assert_eq!(canonical_all(&outcome.in_use), vec![canonical(&busy_tree)]);
         assert!(
             run_tree.exists(),
             "xMatrix's own trees keep their own reclaim"
@@ -700,7 +635,10 @@ mod tests {
         assert!(!claude_tree.exists());
         assert!(!manual_tree.exists());
         assert!(!codex_tree.exists());
-        assert_eq!(outcome.snapshotted, vec![manual_tree.clone()]);
+        assert_eq!(
+            canonical_all(&outcome.snapshotted),
+            vec![canonical(&manual_tree)]
+        );
         let refs = std::process::Command::new("git")
             .arg("-C")
             .arg(&base)
