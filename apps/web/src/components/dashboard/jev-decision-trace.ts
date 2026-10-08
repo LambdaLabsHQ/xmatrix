@@ -181,7 +181,6 @@ const FIT_LEVELS = ["Unsuitable", "Capable", "Strong fit", "Asked for"];
 export const fitLevel = (fit: number) => FIT_LEVELS[Math.max(0, Math.min(3, Math.round(fit * 3)))]!;
 export const roomText = (headroom: number | undefined) => headroom === undefined ? "room unknown"
   : headroom <= 0 ? "overloaded" : `${Math.round(headroom * 100)}% room`;
-export const placementWhere = (item: LaunchPlacementCandidate) => `${item.harness} · ${item.machineName || "unnamed machine"}`;
 
 /** One sentence on why the first-ranked environment won. */
 export function placementReason(ranking: readonly LaunchPlacementCandidate[], compared: boolean): string {
