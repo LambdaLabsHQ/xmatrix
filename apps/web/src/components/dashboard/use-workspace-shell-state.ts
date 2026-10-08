@@ -40,6 +40,7 @@ import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { AUTH_TOKEN_REJECTED_EVENT, useAuth } from "@/lib/auth-context";
+import { untilCallerAborts } from "@/lib/query/caller-abort";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { applyChannelReadStateToCatalog } from "./channel-catalog-read-state";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
@@ -326,7 +327,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   ) => {
     const knownHead = channelsRef.current.find((channel) => channel.id === channelId)
       ?.historyHeadSequence ?? 0;
-    const data = await queryClient.fetchInfiniteQuery({
+    const { signal: callerSignal, ...sharedOptions } = options;
+    const data = await untilCallerAborts(queryClient.fetchInfiniteQuery({
       queryKey: xmatrixQueryKeys.domain(
         { userId: authenticatedUserId || "anonymous" },
         "message-history",
@@ -342,14 +344,14 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           if (preloaded) return preloaded;
         }
         return fetchChannelHistory(accessToken, channelId, {
-          ...options,
-          signal: options.signal ? AbortSignal.any([signal, options.signal]) : signal,
+          ...sharedOptions,
+          signal,
         });
       },
       initialPageParam: null,
       getNextPageParam: () => undefined,
       staleTime: 1_000,
-    });
+    }), callerSignal);
     const page = data.pages[0];
     if (!page) throw new Error("Channel history query returned no page");
     return page;
