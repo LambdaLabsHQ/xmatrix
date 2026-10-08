@@ -24,8 +24,10 @@ const saved = { oauthToken: grant.token, oauthRefreshToken: grant.refreshToken,
   organization: "attacker-org", baseUrl: "https://attacker.example", authToken: "stale-manual" };
 const url = `https://sentry.io/api/0/sentry-app-installations/${selected.installationId}/`;
 
+const jsonBody = body => typeof body === "string" ? JSON.parse(body) : body;
+
 async function withProvider(responses, operation) {
-  const stub = stubFetchResponses(responses, { decodeBody: body => typeof body === "string" ? JSON.parse(body) : body });
+  const stub = stubFetchResponses(responses, { decodeBody: jsonBody });
   try { return { value: await operation(), calls: stub.calls }; }
   finally { stub.restore(); }
 }
@@ -148,14 +150,15 @@ async function refreshedWrite({ conflict = false, status = 200, response } = {})
   const nextGrant = response ?? { ...grant, token: "rotated-access", refreshToken: "rotated-refresh",
     expiresAt: new Date(actualNow + 8 * 3_600_000).toISOString() };
   return runRefreshedAction({ env: settings, providerId: "sentry", credentials: { ...saved, oauthExpiresAt: "1" },
-    response: nextGrant, conflict, status, decodeBody: body => JSON.parse(body),
+    conflict, decodeBody: jsonBody,
+    responses: [{ body: nextGrant }, { body: installed }, { body: {}, status }],
     action: current => SENTRY_ACTIONS.resolve.execute({ credentials: current }, { issue: "456" }) });
 }
 
 test("complete rotated pair is persisted before action, with version CAS and no retry after conflict or uncertain write", async () => {
   const run = await refreshedWrite();
-  assertSavedRotation(run, "rotated-access", "rotated-refresh");
-  assert.deepEqual(run.calls.map(call => call.method), ["POST", "PUT"]);
+  assertSavedRotation(run, "rotated-access", "rotated-refresh", ["fetch", "persist", "fetch", "fetch"]);
+  assert.deepEqual(run.calls.map(call => call.method), ["POST", "GET", "PUT"]);
   assert.equal(run.calls[0].url, `${url}authorizations/`);
   // The manual JWT grant needs no saved refresh token, so a rotation lost in transit cannot strand the grant.
   assert.deepEqual(run.calls[0].body, { grant_type: "urn:sentry:params:oauth:grant-type:jwt-bearer" });
@@ -168,10 +171,11 @@ test("complete rotated pair is persisted before action, with version CAS and no 
   assert.match(payload.jti, /^[0-9a-f-]{36}$/u);
   assert.ok(payload.exp - payload.iat <= 60);
   assert.equal(run.calls[1].headers.get("authorization"), "Bearer rotated-access");
+  assert.equal(run.calls[2].headers.get("authorization"), "Bearer rotated-access");
   for (const options of [{ conflict: true }, { status: 401 }, { status: 503 }]) {
     const rejected = await refreshedWrite(options);
     assert.ok(rejected.error);
-    assert.equal(rejected.calls.length, options.conflict ? 1 : 2);
+    assert.equal(rejected.calls.length, options.conflict ? 1 : 3, "a rejected write is never retried");
   }
   const malformed = await refreshedWrite({ response: { ...grant, refreshToken: "" } });
   assert.ok(malformed.error);
@@ -201,4 +205,28 @@ test("provider errors and redirects never expose authorization codes, refresh to
     assert.rejects(refreshOAuthFields(settings, "sentry", { ...saved, oauthExpiresAt: "1" }, now),
       error => !error.message.includes("private-refresh")));
   assert.equal(error.calls.length, 1);
+});
+
+test("a saved token Sentry rejects before expiry is replaced once, then verified, before the action", async () => {
+  const unexpired = { ...saved, oauthExpiresAt: String(Date.now() + 8 * 3_600_000) };
+  const rotated = { ...grant, token: "recovered-access", refreshToken: "recovered-refresh",
+    expiresAt: new Date(Date.now() + 8 * 3_600_000).toISOString() };
+  const action = current => SENTRY_ACTIONS.resolve.execute({ credentials: current }, { issue: "456" });
+  const run = await runRefreshedAction({ env: settings, providerId: "sentry", credentials: unexpired, action,
+    decodeBody: jsonBody,
+    responses: [{ status: 401, body: {} }, { body: rotated }, { body: installed }, { body: {} }] });
+  assertSavedRotation(run, "recovered-access", "recovered-refresh", ["fetch", "fetch", "persist", "fetch", "fetch"]);
+  assert.deepEqual(run.calls.map(call => call.method), ["GET", "POST", "GET", "PUT"]);
+  assert.equal(run.calls[1].body.grant_type, "urn:sentry:params:oauth:grant-type:jwt-bearer");
+  assert.equal(run.calls[3].headers.get("authorization"), "Bearer recovered-access");
+
+  const stillRejected = await runRefreshedAction({ env: settings, providerId: "sentry", credentials: unexpired, action,
+    decodeBody: jsonBody,
+    responses: [{ status: 401, body: {} }, { body: rotated }, { status: 401, body: {} }] });
+  assert.ok(stillRejected.error);
+  assert.equal(stillRejected.calls.length, 3, "one recovery rotation, and the action never runs");
+  const forbidden = await runRefreshedAction({ env: settings, providerId: "sentry", credentials: unexpired, action,
+    decodeBody: jsonBody, responses: [{ status: 403, body: {} }] });
+  assert.ok(forbidden.error);
+  assert.equal(forbidden.calls.length, 1, "only a 401 rotates the grant");
 });

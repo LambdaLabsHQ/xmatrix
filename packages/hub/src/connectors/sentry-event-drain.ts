@@ -32,10 +32,16 @@ export async function drainSentryEvents(env: Env, dependencies: SentryDrainDepen
   if (!client) return;
   const receipts = dependencies.receipts(env);
   const jobs = await receipts.claim({ requestId: crypto.randomUUID(), appClientId: client.clientId, appUuid: client.appUuid });
+  // A refresh replaces the installation's only token, so parallel jobs share one refresh per Space.
+  const refreshes = new Map<string, ReturnType<typeof connectionCredentials>>();
+  const shared: SentryDrainDependencies = { ...dependencies, refresh: (refreshEnv, spaceId, providerId) => {
+    if (!refreshes.has(spaceId)) refreshes.set(spaceId, dependencies.refresh(refreshEnv, spaceId, providerId));
+    return refreshes.get(spaceId)!;
+  } };
   await Promise.all(jobs.map(async job => {
     let outcome: "done" | "obsolete" | "retry" = "retry";
     try {
-      outcome = await deliverSentryJob(env, job, dependencies) ? "done" : "obsolete";
+      outcome = await deliverSentryJob(env, job, shared) ? "done" : "obsolete";
     } catch {
       // Never log provider error strings, private responses, identities or credentials.
       console.error("Sentry event attempt failed");
