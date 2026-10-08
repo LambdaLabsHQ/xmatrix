@@ -3383,6 +3383,7 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
             let original = git(&base, &["rev-parse", "HEAD"], GIT_LOCAL_TIMEOUT).await.unwrap();
             let active = lease_available_or_create_at(&layout, &base, identity, &req("active"))
                 .await.unwrap();
+            let original_content = std::fs::read_to_string(active.worktree_path.join("README.md")).unwrap();
             std::fs::write(active.worktree_path.join("README.md"), "active work\n").unwrap();
             run_git(&base, &["commit", "--allow-empty", "-qm", "local-only"]);
             let local = git(&base, &["rev-parse", "HEAD"], GIT_LOCAL_TIMEOUT).await.unwrap();
@@ -3407,7 +3408,7 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
             }
             assert_eq!(std::fs::read_to_string(base.join("README.md")).unwrap(), "local work\n");
             assert_eq!(std::fs::read_to_string(active.worktree_path.join("README.md")).unwrap(), "active work\n");
-            assert_eq!(std::fs::read_to_string(fresh.worktree_path.join("README.md")).unwrap(), "v1\n");
+            assert_eq!(std::fs::read_to_string(fresh.worktree_path.join("README.md")).unwrap(), original_content);
             cleanup_test_dirs(&[&pools, &base, &remote]);
         }
     }
