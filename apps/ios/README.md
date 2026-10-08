@@ -20,6 +20,18 @@ The app loads `https://xmatrix.sh/app` by default. For local development, edit `
 
 When running on a physical device, use the Mac LAN IP instead of `localhost`.
 
+## App Store continuous delivery
+
+Production Release Intent with `release_components=ios` runs the existing immutable
+release train, simulator gate, signing, and TestFlight upload, followed by App Store
+version metadata and review submission. The app icon is bundled by Xcode; selecting
+the exact uploaded build updates the store icon as part of that version.
+
+Public listing text lives in `app-store/metadata.json`. Contact information, review
+credentials, and evidence remain in App Store Connect; never commit them here.
+See [the App Store CD runbook](../../docs/operations/ios-app-store-cd.md) for first-time
+setup, deferred review states, private notes, and recovery.
+
 ## TestFlight
 
 The release helper archives, exports, and uploads the app:
