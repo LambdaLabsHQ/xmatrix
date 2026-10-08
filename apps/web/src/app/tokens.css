@@ -113,20 +113,13 @@
      attention  brass — a person has to do something
      settled    plain plank ink — nothing to do, this is the resting state
      secondary  stepped back — true but not what you are here for
-     alert      the Space/record cannot proceed
-     The Space plan mark is the original of this pattern and now reads from it
-     rather than carrying its own values. */
+     alert      the Space/record cannot proceed */
   --m-ink-attention: oklch(0.42 0.11 66);
   --m-ink-settled: oklch(0.44 0.015 60);
   --m-ink-secondary: oklch(0.5 0.03 62);
   --m-ink-alert: var(--destructive);
 
-  /* Space plan mark: brass says the Space is spending, plain ink says it is on
-     Free, and the alert ink says it cannot send at all. `ending` is Pro without
-     its brass — still Pro, but no longer renewing. */
-  --m-plan-pro-ink: var(--m-ink-attention);
-  --m-plan-free-ink: var(--m-ink-settled);
-  --m-plan-ending-ink: var(--m-ink-secondary);
+  /* A plan that cannot send: its card's meter fills in the alert ink. */
   --m-plan-blocked-ink: var(--m-ink-alert);
 
   /* Plan card. Paid is a pane of glass on the wood plank, black text with
