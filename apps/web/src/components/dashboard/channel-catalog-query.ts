@@ -9,7 +9,7 @@ import {
   type SerializedChannel,
 } from "@xmatrix/protocol";
 
-import { XMatrixApiError } from "@/lib/query/api-client";
+import { XMatrixApiError, xmatrixRawResponse } from "@/lib/query/api-client";
 import { fetchChannelCatalog } from "./workspace-admin-views";
 
 export interface NormalizedChannelCatalogQuery {
@@ -69,7 +69,9 @@ async function requestCatalogPage(input: {
   legacyQuery: NormalizedChannelCatalogQuery;
   signal?: AbortSignal;
 }): Promise<ChannelCatalogPage> {
-  const response = await fetch(`${WEB_PROXY_ROUTES.channel_catalog_page}?${input.params}`, {
+  // The shared transport turns a dropped connection into a retryable error, so
+  // Query retries it instead of showing the browser's "Failed to fetch".
+  const response = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_catalog_page}?${input.params}`, {
     headers: { Authorization: `Bearer ${input.token}` },
     signal: input.signal,
     cache: "no-store",
@@ -135,7 +137,7 @@ export async function fetchChannelCatalogResolve(input: {
   includeParticipants?: boolean;
   signal?: AbortSignal;
 }): Promise<ChannelCatalogResolveResult> {
-  const response = await fetch(WEB_PROXY_ROUTES.channel_catalog_resolve, {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_catalog_resolve, {
     method: "POST",
     headers: { Authorization: `Bearer ${input.token}`, "content-type": "application/json" },
     body: JSON.stringify({
