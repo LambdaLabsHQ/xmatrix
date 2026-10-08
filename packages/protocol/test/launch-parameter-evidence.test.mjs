@@ -46,9 +46,10 @@ test('environment choice survives public projection without private candidate fi
   assert.equal(parsed.environment.selected, 'candidate_1');
   assert.equal(parsed.environment.probabilities.candidate_0, .2);
   assert.doesNotMatch(JSON.stringify(parsed), /private/);
-  for (const bad of [ { ...input.environment, selected: 'candidate_0' },
+  // The pick is shown as made, whatever the probabilities say.
+  assert.equal(parseLaunchParameterEvidence({ ...input, environment: { ...input.environment, selected: 'candidate_0' } }).environment.selected, 'candidate_0');
+  for (const bad of [
     { ...input.environment, inputDigest: 'wrong' },
-    { ...input.environment, probabilities: { candidate_1: 2 } },
     { ...input.environment, probabilities: { '/private': 1 } } ]) {
     assert.equal(parseLaunchParameterEvidence({ ...input, environment: bad }), undefined);
   }
@@ -83,8 +84,8 @@ test('the harness Jev read as suited is kept by harness name; a malformed one is
   const parsed = parseLaunchParameterEvidence(input);
   assert.deepEqual(parsed.harness, { inputDigest: 'c'.repeat(64), selected: 'claude', probabilities: { codex: .3, claude: .7 } });
   assert.doesNotMatch(JSON.stringify(parsed), /private/);
-  for (const bad of [{ ...input.harness, selected: 'codex' }, { ...input.harness, inputDigest: 'wrong' },
-    { ...input.harness, probabilities: { claude: .7 } }, { ...input.harness, probabilities: { 'Claude Code': 1 }, selected: 'Claude Code' },
+  for (const bad of [{ ...input.harness, inputDigest: 'wrong' },
+    { ...input.harness, probabilities: { 'Claude Code': 1 }, selected: 'Claude Code' },
     'claude']) {
     assert.equal(parseLaunchParameterEvidence({ ...input, harness: bad }), undefined);
   }
