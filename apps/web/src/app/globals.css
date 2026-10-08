@@ -3958,8 +3958,9 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block code {
 
 /* date separators: little wood plaques */
 
-/* search pill: honey glass (the rail's search is a rail icon, not a pill) */
-html[data-app-theme="wood"] .xmatrix-app button:not(.app-rail button):not(.app-channel-search):not(.app-search-panel-row):has(> svg.lucide-search) {
+/* search pill: honey glass (the rail's search is a rail icon, not a pill;
+   the phone bar's search is a bare glyph on paper beside the Space sign) */
+html[data-app-theme="wood"] .xmatrix-app button:not(.app-rail button):not(.app-channel-search):not(.app-search-panel-row):not(.app-mobile-search-icon):has(> svg.lucide-search) {
   background: oklch(1 0.02 88 / 0.55) !important;
   border-color: transparent !important;
   box-shadow:
@@ -6098,12 +6099,13 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     box-shadow: none !important;
   }
 
-  /* Pushed screens use a continuous wood board. Dock roots override its
-     fill below and confine the wood to the Space name panel. */
+  /* Every phone bar is paper; its wood is confined to the sign naming the
+     Space or the pushed screen. A pushed bar stays opaque so scrolling
+     messages never paint under its title (bugs #1975 / #485). */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar,
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar:has(.app-mobile-search-icon) {
     --muted-foreground: oklch(0.38 0.04 60);
-    @apply app-wood-panel-recipe;
+    background: var(--background) !important;
     color: oklch(0.2 0.04 58) !important;
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
@@ -6147,7 +6149,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     padding-inline: 0;
   }
 
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-mobile-tab-root-bar .app-mobile-bar-title {
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar .app-mobile-bar-title {
     font-size: 1.0625rem !important;
     font-weight: 800;
     line-height: 1.2 !important;
@@ -6175,17 +6177,33 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     stroke-width: 2.25;
   }
 
-  /* Dock roots keep the search geometry, with wood confined to the Space sign. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-mobile-tab-root-bar :is(.app-mobile-space-trigger, .app-mobile-title) {
+  /* The sign: wood confined to the name, the bar's glyphs left on paper. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-topbar.app-topbar :is(.app-mobile-space-trigger, .app-mobile-title) {
     @apply app-wood-panel-recipe;
     width: fit-content;
     max-width: 100%;
     min-height: 3.25rem;
-    margin-inline-start: -0.875rem;
+    margin-left: -0.875rem;
     padding: 0.75rem 1.25rem 0.75rem 0.875rem !important;
     gap: 0.625rem;
     border-radius: 0.875rem;
     box-shadow: var(--app-wood-chrome-shadow);
+  }
+
+  /* After a back chevron the sign starts beside it, not on the content line. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-topbar.app-topbar:has(.app-mobile-topbar-back) .app-mobile-title {
+    margin-left: 0.25rem;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-detail-bar > div:has(.app-mobile-channel-heading) {
+    display: flex;
+    align-items: center;
+    align-self: center;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-heading.app-mobile-title {
+    height: auto;
+    justify-content: center;
   }
 
   /* The Space glyph is cut into the sign like its name: same ink, same lip. */
@@ -6321,9 +6339,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-heading .app-mobile-bar-title {
-    font-size: 1.25rem;
-    font-weight: 900;
-    line-height: 1.15;
+    font-size: 1.0625rem;
+    font-weight: 800;
+    line-height: 1.2;
     letter-spacing: -0.01em;
     color: oklch(0.24 0.05 55);
     text-shadow: 0 1px 0 oklch(0.97 0.03 85 / 0.55);
