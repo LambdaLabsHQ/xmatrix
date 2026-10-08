@@ -5,7 +5,7 @@ import { XMatrixApiError } from "../../lib/query/api-client";
  * A Space's plan is not part of its Core record — `SerializedSpace` carries
  * identity and membership only — so the mark is derived from a billing read
  * rather than from the Space the shell already holds. Deriving it here keeps
- * the rule in one place: the badge, the billing page and any later surface all
+ * the rule in one place: the billing page and any later surface all
  * answer "what plan is this Space on, and is that plan still spending?" the
  * same way.
  */
