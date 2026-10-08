@@ -117,7 +117,7 @@ export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
     let due: StepDue;
     try { due = await this.service.nextDue(route); }
     catch { return { plan: { includeParked: true } }; }
-    const stalls = { ...((await this.state.storage.get<StepStalls>("stalls")) ?? {}) };
+    const stalls: StepStalls = { ...(await this.state.storage.get<StepStalls>("stalls")) };
     for (const step of named) delete stalls[step];
     await this.state.storage.put("stalls", stalls);
     return { due, plan: { steps: stepsToRun(effectiveDue(due, stalls), named, now),
