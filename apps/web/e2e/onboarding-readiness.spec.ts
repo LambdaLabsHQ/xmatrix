@@ -45,7 +45,7 @@ for (const [name, viewport] of [
       });
     }
 
-    test("a failed agents read is on paper, not the setup wood", async ({ page }) => {
+    test("a failed agents read is on paper", async ({ page }) => {
       await installWorkspaceStubs(page, { spaces: [E2E_SPACE] });
       await fixtureRule(page, {
         id: "failed-agents", pattern: "**/api/xmatrix/spaces/*/agent-registrations",
