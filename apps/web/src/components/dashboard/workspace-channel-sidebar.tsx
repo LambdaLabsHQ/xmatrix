@@ -63,6 +63,7 @@ import {
   channelHasUnreadMention,
   channelUnreadCount,
   channelUnreadMentionJumpId,
+  rankCatalogChannels,
 } from "./workspace-shell-helpers-extra";
 
 import { ChannelRowPreview } from "./channel-row-preview";
@@ -223,9 +224,9 @@ export const ChannelSidebar = memo(function ChannelSidebar({
     [maintainer, intakeCatalogPage.rows],
   );
   const liveChannels = useMemo(
-    () => rootCatalogPage.rows.map((row) => row.channel)
-      .filter((channel) => !currentSpaceId || channel.spaceId === currentSpaceId),
-    [rootCatalogPage.rows, currentSpaceId]
+    () => rankCatalogChannels(rootCatalogPage.rows.map((row) => row.channel)
+      .filter((channel) => !currentSpaceId || channel.spaceId === currentSpaceId), pinState.pinnedChannelIds),
+    [rootCatalogPage.rows, currentSpaceId, pinState.pinnedChannelIds]
   );
   const paintedChannels = usePaintedChannelRows(
     currentSpaceId, rootCatalogPage.loaded, liveChannels, fallbackChannels,
@@ -1348,9 +1349,9 @@ export function MobileChannelChatList({
     void catalogPaging.load(CONVERSATION_QUERY);
   }, [catalogPaging]);
   const liveConversations = useMemo(
-    () => page.rows.map((row) => row.channel)
-      .filter((channel) => !currentSpaceId || channel.spaceId === currentSpaceId),
-    [currentSpaceId, page.rows]
+    () => rankCatalogChannels(page.rows.map((row) => row.channel)
+      .filter((channel) => !currentSpaceId || channel.spaceId === currentSpaceId), pinState.pinnedChannelIds),
+    [currentSpaceId, page.rows, pinState.pinnedChannelIds]
   );
   const paintedConversations = usePaintedChannelRows(
     currentSpaceId, page.loaded, liveConversations, fallbackChannels,
