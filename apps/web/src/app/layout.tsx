@@ -6,6 +6,8 @@ import "./themes/site.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
+import { OverlayScrollbars } from "@/components/ui/overlay-scrollbars";
+import { OVERLAY_SCROLLBARS_MODE_SCRIPT } from "@/components/ui/overlay-scrollbars-mode";
 import { siteUrl } from "@/lib/site-url";
 
 export const metadata: Metadata = {
@@ -65,6 +67,7 @@ export default function RootLayout(props: { children: React.ReactNode }) {
         document.documentElement.style.colorScheme = "light";
       }
     })();
+    ${OVERLAY_SCROLLBARS_MODE_SCRIPT}
   `;
 
   return (
@@ -81,6 +84,7 @@ export default function RootLayout(props: { children: React.ReactNode }) {
       <body className="site-canvas antialiased">
         <LiquidGlassFilter />
         <LiquidGlassLensDefs />
+        <OverlayScrollbars />
         <AuthProvider>{props.children}</AuthProvider>
       </body>
     </html>
