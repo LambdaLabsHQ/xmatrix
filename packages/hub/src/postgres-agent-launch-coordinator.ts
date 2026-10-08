@@ -218,7 +218,7 @@ async function settleMany(database: AuthorityDatabase, shardId: string,
   const owner = `agent-launch:${shardId}`;
   await database.transaction({ requestId: `${owner}:settle`,
     operation: "launch.coordinator.settle-many" }, (tx) => tx.query({
-      name: "agent_launch_coordinator_settle_many_v2", text: `WITH input AS (
+      name: "agent_launch_coordinator_settle_many_v3", text: `WITH input AS (
           SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(
             launch_id text,state text,retryable boolean,daemon_offline boolean,
             command_durable_at timestamptz,spawned_at timestamptz,error_stage text,
@@ -231,7 +231,14 @@ async function settleMany(database: AuthorityDatabase, shardId: string,
             WHEN input.state='failed' AND launch.state IN ('spawned','connected') THEN launch.state
             ELSE input.state END,
           attempt=launch.attempt+CASE WHEN input.increment_attempt THEN 1 ELSE 0 END,
-          next_attempt_at=clock_timestamp()+(input.delay_seconds::text||' seconds')::interval,
+          -- A Launch queued on an offline Machine waits on the Machine, whose
+          -- reconnect wakes this Channel: re-reading it backs off with its age
+          -- (a tenth of it, up to 15 minutes) instead of every 30 seconds for
+          -- days. On 2026-10-08 49 such Launches kept 34 Channels spinning.
+          next_attempt_at=clock_timestamp()+CASE WHEN input.daemon_offline AND input.state='queued'
+            THEN GREATEST((input.delay_seconds::text||' seconds')::interval,
+              LEAST(interval '15 minutes',(clock_timestamp()-launch.created_at)/10))
+            ELSE (input.delay_seconds::text||' seconds')::interval END,
           lease_owner=NULL,lease_until=NULL,
           command_durable_at=COALESCE(launch.command_durable_at,input.command_durable_at),
           spawned_at=COALESCE(launch.spawned_at,input.spawned_at),
@@ -508,9 +515,15 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
     operation: "launch.coordinator.next-due" }, async (tx) => {
     const rows = await tx.query<Record<"launch_due" | "reborn_due" | "report_due" | "preparation_due" | "stop_due",
       string | Date | null>>({ name: "agent_launch_channel_step_due_v1",
-      text: `SELECT
+      text: `SELECT LEAST(
         (SELECT MIN(${attemptAt("launch")}) FROM data.agent_launches launch
-          WHERE launch.channel_id=$1 AND ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$2")}) AS launch_due,
+          WHERE launch.channel_id=$1 AND ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$2")}),
+        -- A Launch whose Run is gone or ended is settled by the runless and
+        -- ended-run steps, which a timed pass runs as Launch work.
+        (SELECT MIN(COALESCE(launch.lease_until, launch.next_attempt_at)) FROM data.agent_launches launch
+          WHERE launch.channel_id=$1 AND launch.state IN ('prepared','queued','admitted','spawned')
+            AND NOT EXISTS (SELECT 1 FROM data.runs run WHERE run.run_id=launch.run_id
+              AND run.status NOT IN (${TERMINAL_RUN_STATUS_SQL})))) AS launch_due,
         (SELECT MIN(CASE WHEN intent.state IN ('waiting','prepared')
             THEN LEAST(intent.expires_at, ${attemptAt("intent")}) ELSE ${attemptAt("intent")} END)
           FROM data.agent_reborn_intents intent WHERE intent.channel_id=$1

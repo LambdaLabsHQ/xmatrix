@@ -575,6 +575,40 @@ test("connect binds the credential's Machine and records the current hostname ob
   assert.equal(calls.length, 1, "another Machine never reaches the authority mutation");
 });
 
+// 2026-10-08: Launches queued on a Machine offline for days were re-read every
+// 30 seconds. They now back off while it is away; its reconnect is the event
+// that moves them, so the connect wakes its Channels — without waiting on it.
+test("a daemon connect wakes the Machine's Channels and never waits on or fails with that wake", async () => {
+  const woken = [], kept = [];
+  let finishWake;
+  const connected = () => ({ daemon: { id: "daemon-1", userId: "user-1", email: "owner@example.test", name: "Laptop",
+    machineId: "machine-1", hostname: "host", status: "online", metadata: {}, lastSeenAt: new Date().toISOString() },
+  connectionEpoch: 9 });
+  const port = authorityPort({
+    async authenticate() { return session.principal; },
+    commands: recordingCommands([], connected),
+    machineConnected: (route) => { woken.push(route); return new Promise((resolve) => { finishWake = resolve; }); },
+    keepAlive: (task) => kept.push(task),
+  });
+  const message = { type: "machine_daemon_connect", token: "credential", machineId: "machine-1",
+    hostname: "host", displayName: "daemon" };
+  const result = await port.authenticate(message);
+  assert.equal(result.connected.connectionEpoch, 9, "the connect answers before the wake settles");
+  assert.deepEqual(woken, [{ ownerUserId: session.principal.ownerUserId, machineId: "machine-1" }]);
+  assert.equal(kept.length, 1, "the wake outlives the connect frame");
+  finishWake();
+  await kept[0];
+
+  const warn = console.warn; console.warn = () => {};
+  try {
+    const failing = authorityPort({ async authenticate() { return session.principal; },
+      commands: recordingCommands([], connected),
+      machineConnected: async () => { throw new Error("wake refused"); }, keepAlive: (task) => kept.push(task) });
+    assert.equal((await failing.authenticate(message)).connected.connectionEpoch, 9);
+    await kept.at(-1);
+  } finally { console.warn = warn; }
+});
+
 function lifecycleRecordingPort(order, result = {}, options = {}) {
   return authorityPort({ commands: { async command(_name, input) {
     order.push(input.runLifecycleReplica ? "lifecycle" : "report");
