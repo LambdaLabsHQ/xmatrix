@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
-import { hmacHex, timingSafeEqual, type AppConnectorCompletionDynamicSource, type UpsertAppConnectorConnectionRequest } from "@xmatrix/protocol";
+import { type AppConnectorCompletionDynamicSource, type UpsertAppConnectorConnectionRequest } from "@xmatrix/protocol";
+import { deliveryProven, GITHUB_SIGNATURE } from "./connectors/delivery-proof";
 import type { Env } from "./types";
 import { daemonStopTargets, issueDaemonStopsForArchivedChannelTree } from "./product-agent-intervention-authority-adapter";
 import { armSpaceDeletionClock } from "./space-deletion-clock";
@@ -325,9 +326,7 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       return c.json({ error: "GitHub webhook is not configured" }, 503);
     }
     const body = await c.req.text();
-    const expected = `sha256=${await hmacHex("SHA-256", secret, body)}`;
-    const received = c.req.header("x-hub-signature-256") || "";
-    if (!timingSafeEqual(received, expected)) {
+    if (!await deliveryProven(GITHUB_SIGNATURE, c.req.raw.headers, body, secret)) {
       return c.json({ error: "Invalid GitHub webhook signature" }, 401);
     }
     const event = c.req.header("x-github-event") || "unknown";

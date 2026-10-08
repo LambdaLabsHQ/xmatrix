@@ -31,9 +31,9 @@ test("Telegram delivery authentication is bot/token-bound and independent of the
   assert.notEqual(native.secret, native.app.eventKeyDigest);
   assert.notEqual(native.secret, env.CONNECTOR_TELEGRAM_WEBHOOK_SECRET);
   const staleHeader = new Headers({ "x-telegram-bot-api-secret-token": native.secret });
-  assert.throws(() => verifyTelegramAppRequest(replacement.secret, staleHeader), { status: 401 });
-  assert.throws(() => verifyTelegramAppRequest(native.secret, new Headers({ "x-telegram-bot-api-secret-token": env.CONNECTOR_TELEGRAM_WEBHOOK_SECRET })), { status: 401 });
-  verifyTelegramAppRequest(replacement.secret, new Headers({ "x-telegram-bot-api-secret-token": replacement.secret }));
+  await assert.rejects(verifyTelegramAppRequest(replacement.secret, staleHeader), { status: 401 });
+  await assert.rejects(verifyTelegramAppRequest(native.secret, new Headers({ "x-telegram-bot-api-secret-token": env.CONNECTOR_TELEGRAM_WEBHOOK_SECRET })), { status: 401 });
+  await verifyTelegramAppRequest(replacement.secret, new Headers({ "x-telegram-bot-api-secret-token": replacement.secret }));
   const refreshedToken = await telegramNativeApp({ ...env, CONNECTOR_TELEGRAM_BOT_TOKEN: `123456:${"b".repeat(35)}` });
   assert.notEqual(refreshedToken.secret, native.secret);
 });
@@ -66,9 +66,9 @@ test("Telegram Check requires deployed webhook; manual credentials stay separate
 });
 const update = (changes = {}) => ({ update_id: 12, message: { chat: { id: Number(chatSpace), type: "supergroup" }, date: Math.floor(Date.now()/1000), message_id: 44, from: { id: 888, is_bot: false }, text: "hello", ...changes } });
 const normalize = payload => telegramAppInteraction(JSON.stringify(payload), native.app.botId);
-test("Telegram header authentication and private commands never expose a nonce in Channel content", () => {
-  assert.throws(() => verifyTelegramAppRequest(native.secret, new Headers()), { status: 401 });
-  verifyTelegramAppRequest(native.secret, new Headers({ "X-Telegram-Bot-Api-Secret-Token": native.secret }));
+test("Telegram header authentication and private commands never expose a nonce in Channel content", async () => {
+  await assert.rejects(verifyTelegramAppRequest(native.secret, new Headers()), { status: 401 });
+  await verifyTelegramAppRequest(native.secret, new Headers({ "X-Telegram-Bot-Api-Secret-Token": native.secret }));
   const command = `/xmatrix_link@xMatrixFixtureBot ${"n".repeat(32)}`; assert.equal(normalize(update({ text: command })).kind, "link");
   for (const text of [`copied ${command}`, "/xmatrix_link invalid", `/xmatrix_link@other ${"n".repeat(31)}`]) assert.equal(normalize(update({ text })), undefined);
   for (const change of [{ from: { id: 888, is_bot: true } }, { sender_chat: { id: -222 } }, { date: 1 }, { chat: { id: 888, type: "private" } }, { chat: { id: Number(chatSpace), type: "channel" } }]) assert.equal(normalize(update(change)), undefined);

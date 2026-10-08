@@ -5,7 +5,7 @@ import type { Env } from "../types";
 import { readBoundedRequestBody } from "../index-shared";
 import { connectorCredentialRepository, connectorSentryEventRepository } from "./credentials";
 import { sentryInstallationClient } from "./sentry-installation";
-import { hmacMatches } from "./hmac";
+import { deliveryProven } from "./delivery-proof";
 import { parseJsonObject } from "./event-format";
 
 /** Lifecycle identity comes entirely from the signed body; resource/timestamp headers are unsigned. */
@@ -15,7 +15,7 @@ export async function handleSentryInstallationDelivery(env: Env, request: Reques
   const bytes = await readBoundedRequestBody(request, 256 * 1024);
   if (!bytes) return Response.json({ error: "Sentry delivery is too large" }, { status: 413 });
   const raw = new TextDecoder().decode(bytes);
-  if (!await hmacMatches("SHA-256", client.clientSecret, raw, request.headers.get("sentry-hook-signature") ?? "")) {
+  if (!await deliveryProven({ header: "sentry-hook-signature" }, request.headers, raw, client.clientSecret)) {
     return Response.json({ error: "Invalid Sentry signature" }, { status: 401 });
   }
   const body = parseJsonObject(raw);
