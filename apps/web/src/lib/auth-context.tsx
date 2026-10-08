@@ -187,11 +187,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         if (isTransientSessionLoadError(error)) {
           setState((prev) => (prev.session ? { ...prev, loading: false } : { ...prev, loading: true }));
-          if (!stateRef.current.session && transientRetries < 3) {
+          // Without a session the app waits on this read, so it keeps
+          // trying, backing off, rather than spin until the next focus.
+          if (!stateRef.current.session) {
             transientRetries += 1;
+            if (transientRetryTimer !== undefined) window.clearTimeout(transientRetryTimer);
             transientRetryTimer = window.setTimeout(() => {
               if (!cancelled) void refreshSessionState();
-            }, 1_500 * transientRetries);
+            }, Math.min(30_000, 1_500 * 2 ** (transientRetries - 1)));
           }
           return;
         }
@@ -210,8 +213,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void refreshSessionState();
     }
 
+    /* The network is back: a pending backoff would only keep the spinner up. */
+    function refreshWhenOnline() {
+      transientRetries = 0;
+      refreshWhenVisible();
+    }
+
     refreshWhenVisible();
     window.addEventListener("focus", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenOnline);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener(AUTH_TOKEN_REJECTED_EVENT, refreshAfterRejection);
     const interval = window.setInterval(refreshWhenVisible, 5 * 60 * 1000);
@@ -221,6 +231,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (transientRetryTimer !== undefined) window.clearTimeout(transientRetryTimer);
       window.removeEventListener(AUTH_TOKEN_REJECTED_EVENT, refreshAfterRejection);
       window.removeEventListener("focus", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenOnline);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       window.clearInterval(interval);
     };
