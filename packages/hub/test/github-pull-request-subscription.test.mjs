@@ -101,7 +101,7 @@ function harness({ routes, verdict = { state: "passed", failed: [], settledAt: "
   };
 }
 
-const issueRoute = { installationId: "42", sourceRef: "github:issue:acme/app#7", sourceKind: "issue",
+const issueRoute = { relationId: "imported-pull-request-relation", installationId: "42", sourceRef: "github:issue:acme/app#7", sourceKind: "issue",
   createdAt: "2026-10-08T22:00:00.000Z",
   spaceId: "space-1", channelId: "channel-1", connectionId: "connection-1", authorityRootUserId: "user-1" };
 const base = { installation: { id: 42 }, repository: { name: "app", owner: { login: "acme" }, private: true } };
@@ -144,7 +144,7 @@ test("closing the pull request is said and ends its subscription, even its autho
       action: "closed", pull_request: { ...pull, merged: true }, sender: { login: sender } } }, h.dependencies);
     assert.equal(h.appended.length, said, sender);
     assert.deepEqual(h.commands.map(({ kind, input }) => [kind, input.relationId, input.principal.id]),
-      [["remove-relation", "connection-1:channel-1:issue:github:issue:acme/app#7", "user-1"]], sender);
+      [["remove-relation", "imported-pull-request-relation", "user-1"]], sender);
   }
 });
 
