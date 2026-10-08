@@ -75,7 +75,7 @@ test("a renewed token is used for the next ticket and keeps the document", async
   fire("visibilitychange");
   await settle();
 
-  assert.equal(sockets[0].closedWith, 1000, "the possibly dead socket is replaced");
+  assert.equal(sockets[0].closedWith, 4000, "the possibly dead socket is replaced");
   assert.equal(sockets.length, 2);
   assert.deepEqual(tickets, ["Bearer old", "Bearer new"]);
   assert.equal(live.doc.getText("t").toString(), "unsent edit");
