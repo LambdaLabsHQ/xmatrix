@@ -59,7 +59,7 @@ function attach(): () => void {
   const emit = (online = false) => {
     const signal = tracker.resume({ hidden: document.hidden, offline: navigator.onLine === false, online });
     if (!signal) return;
-    for (const listener of [...listeners]) listener(signal);
+    for (const listener of listeners) listener(signal);
   };
   const onResume = () => emit();
   const onOnline = () => emit(true);

@@ -82,7 +82,7 @@ test("backoff is jittered, capped, and grows until the session works", () => {
 });
 
 test("a close redials after backoff, and never opens a second socket", async (t) => {
-  const { connection, sockets } = await opened(t);
+  const { sockets } = await opened(t);
   sockets[0].drop();
   await flush();
   t.mock.timers.tick(1_000);
@@ -121,7 +121,7 @@ test("a socket that stops answering is replaced; our own probes cannot keep it a
 });
 
 test("any frame counts as an answer", async (t) => {
-  const { connection, sockets } = await opened(t);
+  const { sockets } = await opened(t);
   t.mock.timers.tick(25_000);
   sockets[0].receive("pong");
   t.mock.timers.tick(10_000);
@@ -129,7 +129,7 @@ test("any frame counts as an answer", async (t) => {
 });
 
 test("a server that does not answer pings is never timed out", async (t) => {
-  const { connection, sockets } = await opened(t, {
+  const { sockets } = await opened(t, {
     heartbeat: { intervalMs: 25_000, timeoutMs: 10_000, ping: (socket) => socket.send("ping"), supported: () => false },
   });
   t.mock.timers.tick(60_000);
@@ -138,7 +138,7 @@ test("a server that does not answer pings is never timed out", async (t) => {
 });
 
 test("a resume after a suspension replaces a socket that still says OPEN", async (t) => {
-  const { connection, sockets } = await opened(t);
+  const { sockets } = await opened(t);
   win.dispatchEvent(new Event("xmatrix:native-resume"));
   await flush();
   assert.equal(sockets[0].closedWith, 4000);
