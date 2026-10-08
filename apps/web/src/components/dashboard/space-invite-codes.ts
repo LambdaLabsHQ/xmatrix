@@ -7,8 +7,8 @@
  */
 import { WEB_PROXY_ROUTES, type SerializedSpace } from "@xmatrix/protocol";
 import { canInviteToSpace } from "@/components/dashboard/workspace-shell-recovered";
-import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
-import { UserFacingProblem, unexpectedResponse } from "../../lib/user-facing-error";
+import { xmatrixRawResponse, unexpectedResponse, requireField } from "@/lib/query/api-client";
+import { UserFacingProblem } from "../../lib/user-facing-error";
 
 export type SpaceInviteCodeOptions = {
   /** `"unlimited"` is a standing secret; callers must choose it deliberately. */
@@ -45,8 +45,7 @@ export async function createSpaceInviteCodeRequest(input: {
     }),
     cache: "no-store",
   });
-  if (!response.ok) throw await errorFromResponse(response);
-  const payload = (await response.json().catch(() => ({}))) as { invite?: { token?: string } };
-  if (!payload.invite?.token) throw unexpectedResponse("The invite code");
-  return { token: payload.invite.token };
+  const invite = await requireField<{ token?: string }>(response, "invite", "The invite code");
+  if (!invite.token) throw unexpectedResponse("The invite code");
+  return { token: invite.token };
 }

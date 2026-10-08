@@ -33,8 +33,8 @@ import {
   normalizeNativeLoginClient,
   type NativeLoginClient,
 } from "@/lib/native-login-client";
-import { errorFromResponse, isTransientFailure, xmatrixRawResponse, XMatrixApiError } from "@/lib/query/api-client";
-import { isAbort, unexpectedResponse, userErrorMessage } from "@/lib/user-facing-error";
+import { errorFromResponse, isTransientFailure, xmatrixRawResponse, XMatrixApiError, unexpectedResponse } from "@/lib/query/api-client";
+import { isAbort, userErrorMessage } from "@/lib/user-facing-error";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;

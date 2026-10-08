@@ -1,6 +1,6 @@
 import { WEB_PROXY_ROUTES, type SerializedChannel } from "@xmatrix/protocol";
-import { errorFromResponse, xmatrixRawResponse } from "../../lib/query/api-client";
-import { UserFacingProblem, unexpectedResponse } from "../../lib/user-facing-error";
+import { errorFromResponse, xmatrixRawResponse, requireField } from "../../lib/query/api-client";
+import { UserFacingProblem } from "../../lib/user-facing-error";
 
 /**
  * A conversation's name until xMatrix names it from what it is about: the
@@ -46,10 +46,7 @@ export async function createConversation(input: {
     }),
     cache: "no-store",
   });
-  if (!response.ok) throw await errorFromResponse(response);
-  const payload = (await response.json().catch(() => ({}))) as { channel?: SerializedChannel };
-  if (!payload.channel) throw unexpectedResponse("The conversation");
-  return payload.channel;
+  return requireField<SerializedChannel>(response, "channel", "The conversation");
 }
 
 /** Starts a conversation with a plain first message, for flows that compose it themselves. */

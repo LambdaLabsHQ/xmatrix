@@ -3,8 +3,8 @@ const test = require("node:test");
 
 require("../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
 
-const { XMatrixApiError } = require("./query/api-client.ts");
-const { UserFacingProblem, describeError, unexpectedResponse, userErrorMessage } = require("./user-facing-error.ts");
+const { XMatrixApiError, unexpectedResponse } = require("./query/api-client.ts");
+const { UserFacingProblem, describeError, userErrorMessage } = require("./user-facing-error.ts");
 
 const action = "Couldn't load transfer proposals";
 const api = (input) => new XMatrixApiError({ message: "Request failed (500)", status: 500, ...input });
@@ -21,7 +21,7 @@ test("browser and runtime errors never reach the screen", (t) => {
   for (const raw of [new TypeError("Failed to fetch"), new SyntaxError("Unexpected token '<'"), new Error("Invalid invocation page")]) {
     const shown = describeError(raw, action);
     assert.doesNotMatch(shown.message, new RegExp(raw.message.replace(/[()']/g, ".")));
-    assert.equal(shown.message, "Couldn't load transfer proposals. Something went wrong on our side. Try again, and report it if it keeps happening.");
+    assert.equal(shown.message, "Couldn't load transfer proposals. Something went wrong. Try again, and report it if it keeps happening.");
   }
 });
 

@@ -1,7 +1,6 @@
 import { WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
 import type { DesktopCliSessionPayload } from "./bridge";
-import { errorFromResponse, xmatrixRawResponse } from "../query/api-client";
-import { unexpectedResponse } from "../user-facing-error";
+import { errorFromResponse, xmatrixRawResponse, unexpectedResponse } from "../query/api-client";
 
 export async function requestCliSessionExchange(token: string) {
   const exchangeResponse = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_exchange_session, {

@@ -1,8 +1,9 @@
+import { UserFacingProblem } from "../../lib/user-facing-error";
 export function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Failed to read image"));
+    image.onerror = () => reject(new UserFacingProblem("This image couldn't be read."));
     image.src = src;
   });
 }
@@ -14,7 +15,7 @@ export function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: n
         if (blob) {
           resolve(blob);
         } else {
-          reject(new Error("Failed to compress image"));
+          reject(new UserFacingProblem("This image couldn't be compressed."));
         }
       },
       type,

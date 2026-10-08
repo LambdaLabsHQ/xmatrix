@@ -69,7 +69,7 @@ function useHarnessOperation({ token, userId, daemonKey, current, canManage, onN
       setOperation({ controlId: result.controlId, action: input.action, requestedHere: true, label: `${HARNESS_ACTION_LABELS[input.action]}${input.action === "refresh" ? "" : ` · ${displayName || input.presetId}`}`, startedAt: Date.now() });
       onNotice(null);
     },
-    onError: (error) => onNotice(userErrorMessage(error, "Couldn't request that")),
+    onError: (error) => onNotice(userErrorMessage(error, "Couldn't send that to the machine")),
   });
   return { operation, status, busy: pending || action.isPending, run: action.mutate };
 }

@@ -15,8 +15,8 @@ import {
 import { HumanAvatarPicker } from "@/components/dashboard/human-avatar-picker";
 import { HumanLocalTime } from "@/components/dashboard/human-local-time";
 import { useHumanTimeZoneSync } from "@/components/dashboard/use-human-time-zone-sync";
-import { unexpectedResponse, userErrorMessage } from "@/lib/user-facing-error";
-import { xmatrixApiRequest, XMatrixApiError } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
+import { xmatrixApiRequest, XMatrixApiError, unexpectedResponse } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { PrivateSignInEmail } from "./private-sign-in-email";
 import { ToolDetailEmpty, ToolDetailSection, ToolPaperScroll } from "./tool-split";
@@ -202,7 +202,7 @@ export function HumanProfileView({
   /** Sign-in email, viewer's own only. Never shown for another member. */
   email?: string;
   saving?: boolean;
-  saveError?: { code?: string; message?: string } | null;
+  saveError?: { message: string } | null;
   onSave?: (edit: HumanProfileEdit) => Promise<void> | void;
   onUploadAvatar?: (blob: Blob, mimeType: string) => Promise<void> | void;
   onRemoveAvatar?: () => Promise<void> | void;

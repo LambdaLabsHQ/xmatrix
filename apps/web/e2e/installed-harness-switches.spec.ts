@@ -69,7 +69,7 @@ test("a refused owner switch stays off and reports the server failure", async ({
   const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
   const codex = list.getByRole("switch", { name: "Enabled: Codex on Remote server" });
   await codex.click();
-  await expect(list.getByRole("alert")).toHaveText("Machine owner access was revoked");
+  await expect(list.getByRole("alert")).toHaveText("Couldn't save the harness switch. Machine owner access was revoked.");
   await expect(codex).toHaveAttribute("aria-checked", "false");
 });
 
@@ -88,7 +88,7 @@ test("bulk failure stays visible and retry continues with the remaining pair", a
     responses: [{ json: { version: 1 } }, { status: 409, json: { error: "Space policy changed. Try again." } }] } });
   await fixtureJson(page, "partial-catalog", CATALOG, catalog(["claude"]));
   await bring.click();
-  await expect(page.getByTestId("installed-harness-switches").getByRole("alert")).toHaveText("Space policy changed. Try again.");
+  await expect(page.getByTestId("installed-harness-switches").getByRole("alert")).toHaveText("Couldn't save the harness switch. Space policy changed. Try again.");
   await expect(bring).toBeVisible();
   await fixtureJson(page, "retry-enable", COMMANDS, { version: 1 }, { method: "POST" });
   await fixtureJson(page, "retry-catalog", CATALOG, catalog(["claude", "codex"]));

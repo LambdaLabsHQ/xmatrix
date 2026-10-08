@@ -167,8 +167,8 @@ import {
 import { shareTimelineItems } from "./workspace-shell-message-model";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
-import { errorFromResponse, xmatrixApiRequest, requireResponseOk } from "@/lib/query/api-client";
-import { UserFacingProblem, unexpectedResponse, userErrorMessage } from "../../lib/user-facing-error";
+import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResponse } from "@/lib/query/api-client";
+import { UserFacingProblem, userErrorMessage } from "../../lib/user-facing-error";
 import type { WorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";

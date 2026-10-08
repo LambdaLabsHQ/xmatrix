@@ -132,8 +132,8 @@ import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCred
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 
 import { useAuth } from "@/lib/auth-context";
-import { xmatrixApiRequest } from "@/lib/query/api-client";
-import { unexpectedResponse, userErrorMessage } from "@/lib/user-facing-error";
+import { xmatrixApiRequest, unexpectedResponse } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { GoogleDocFileSelection } from "./google-doc-file-selection";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 

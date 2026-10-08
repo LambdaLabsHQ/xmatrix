@@ -45,6 +45,7 @@ const DESKTOP_IPC_ERROR = /^Error invoking remote method '[^']+': (?:[A-Za-z]*Er
 const OFFLINE = "Check your connection and try again.";
 const BUSY = "xMatrix is busy right now. Try again in a moment.";
 const DEFECT = "Something went wrong on our side. Try again, and report it if it keeps happening.";
+const CLIENT_DEFECT = "Something went wrong. Try again, and report it if it keeps happening.";
 
 /** Whether the failure is the caller ending its own request: not a failure to show. */
 export function isAbort(error: unknown): boolean {
@@ -102,15 +103,10 @@ export function describeError(error: unknown, action: string): UserFacingError |
   const desktop = error instanceof Error ? DESKTOP_IPC_ERROR.exec(error.message) : null;
   if (desktop?.[1]) return { message: `${headline} ${sentence(desktop[1])}`, retryable: true };
   console.error(`[xmatrix] ${action}`, error);
-  return { message: `${headline} ${DEFECT}`, retryable: true };
+  return { message: `${headline} ${CLIENT_DEFECT}`, retryable: true };
 }
 
 /** `describeError` as the one string a component keeps in state; null when nothing should show. */
 export function userErrorMessage(error: unknown, action: string): string | null {
   return describeError(error, action)?.message ?? null;
-}
-
-/** A failure a caller raises itself, such as a response missing the record it promised. */
-export function unexpectedResponse(what: string): XMatrixApiError {
-  return new XMatrixApiError({ message: `${what} was missing from the response`, status: 500, code: "unexpected_response" });
 }

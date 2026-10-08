@@ -196,6 +196,7 @@ import type {
   SerializedSpace,
 } from "@xmatrix/protocol";
 import { xmatrixRawResponse, XMatrixApiError } from "@/lib/query/api-client";
+import { UserFacingProblem } from "@/lib/user-facing-error";
 
 // Recovered monofile top-level declarations missing from split modules
 // (inMemoryRelayClientProfileId lives in workspace-shell-helpers.tsx)
@@ -467,7 +468,7 @@ export async function readVideoAttachmentMetadata(file: File): Promise<VideoAtta
     video.preload = "metadata";
     await new Promise<void>((resolve, reject) => {
       video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("Failed to read video metadata"));
+      video.onerror = () => reject(new UserFacingProblem("This video couldn't be read."));
       video.src = objectUrl;
     });
 

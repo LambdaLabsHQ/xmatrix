@@ -176,8 +176,8 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
-import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse } from "@/lib/query/api-client";
-import { unexpectedResponse, userErrorMessage } from "@/lib/user-facing-error";
+import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
@@ -1854,10 +1854,7 @@ export async function patchAutomation(
     body: JSON.stringify(input),
     cache: "no-store",
   });
-  if (!res.ok) throw await errorFromResponse(res);
-  const payload = (await res.json().catch(() => ({}))) as { automation?: SerializedAutomation };
-  if (!payload.automation) throw unexpectedResponse("The Automation");
-  return payload.automation;
+  return requireField<SerializedAutomation>(res, "automation", "The Automation");
 }
 
 export async function setAutomationPaused(
@@ -1874,10 +1871,7 @@ export async function setAutomationPaused(
     body: JSON.stringify({ expectedVersion: automation.version }),
     cache: "no-store",
   });
-  if (!res.ok) throw await errorFromResponse(res);
-  const payload = (await res.json().catch(() => ({}))) as { automation?: SerializedAutomation };
-  if (!payload.automation) throw unexpectedResponse("The Automation");
-  return payload.automation;
+  return requireField<SerializedAutomation>(res, "automation", "The Automation");
 }
 
 export async function removeAutomation(token: string, automation: SerializedAutomation): Promise<void> {
