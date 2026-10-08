@@ -11,6 +11,16 @@ const packages: Readonly<Record<string, readonly string[]>> = {
   qwen: ["@qwen-code/qwen-code"],
   junie: ["@jetbrains/junie"],
   openclaw: ["openclaw"],
+  qoder: ["@qoder-ai/qodercli"],
+  codebuddy: ["@tencent-ai/codebuddy-code"],
+  auggie: ["@augmentcode/auggie"],
+  cline: ["cline"],
+  kilo: ["@kilocode/cli"],
+  droid: ["droid"],
+  commandcode: ["command-code"],
+  autohand: ["autohand-cli", "@autohandai/autohand-acp"],
+  reasonix: ["reasonix"],
+  dimcode: ["dimcode"],
 };
 
 export function agentPresetInstallCommand(presetId: unknown, platform: string) {
