@@ -67,6 +67,11 @@ uncaught failures through it so no route answers a plain-text `500`.
 - **Mutations** are never replayed by Query. A mutation is retried only through
   `runIdempotentMutationFetchWithRetry`, and only when every attempt carries the
   same server-enforced idempotency key.
+- **Channel pins.** Saves for one person and Space run in click order. Each
+  click cancels the pending preference read before updating the displayed pins;
+  only the last queued save refreshes preferences and the Channel catalog. This
+  keeps an earlier pin or read from undoing a later unpin. PostgreSQL remains
+  the source of truth, with the existing version-conflict re-read.
 
 ### Web proxy
 
