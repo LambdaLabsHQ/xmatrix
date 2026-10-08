@@ -8,6 +8,7 @@
 mod tests {
     use super::*;
     include!("../../core/tests/support/fs_cleanup.rs");
+    include!("repo_pool_baseline_tests.rs");
 
     #[test]
     fn default_pool_root_tracks_the_local_config_root() {
@@ -3518,6 +3519,8 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
         let fetched = ResolvedBase {
             base_ref: "main".to_string(),
             oid,
+            confirmed_at: now_rfc3339(),
+            history_rewritten: None,
         };
         // Occupy the target path with a plain directory so `git worktree add` refuses it.
         let occupied = base.join("occupied");

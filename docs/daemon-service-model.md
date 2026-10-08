@@ -219,6 +219,39 @@ worktrees remain unchanged, and existing retained Runs keep their checkout on
 resume. Legacy remote-repo run worktrees confirm the default branch the same
 way.
 
+Invocation details show the actual checkout base branch and full commit OID,
+with its confirmation time in UTC. A reused object store is not a reused
+confirmation. The observation is a remote snapshot at that time, not a claim
+that the branch cannot move before the Agent starts. History replacement is
+reported only when the same branch had a known previous tip, both objects and
+complete ancestry are available, and that tip is not an ancestor of the new
+tip. First observations, default-branch changes and shallow/missing history do
+not prove a rewrite; Git stderr is not used for this decision.
+
+A continued repo-pool task keeps its recorded base and checkout. During its
+launch the daemon confirms the current remote default once, outside the pool
+manifest lock, and tests the recorded base rather than the Run's HEAD. Normal
+unmerged commits are not divergence. Failed confirmation, missing objects,
+shallow history and ancestry command errors produce unknown evidence, without
+resetting or preventing the old task from continuing. Only a proven negative
+ancestry result produces a continuity warning: once in the Channel per
+checkout/base, and once in the Agent's durably admitted initial input.
+Report/spawn replays preserve those identities. This adds no Run page polling.
+Original confirmation times missing from older tasks remain unavailable.
+
+Baseline evidence and notification receipts are bounded private records beside
+the v1 pool manifest; the manifest and Git ownership rules are unchanged. Older
+daemons ignore the new evidence and older Hubs ignore the optional spawn
+metadata. Deploy the Hub and Web support before the CLI to make the evidence
+and warning visible. Presentation evidence grants no repository or Run authority.
+
+The shared Git object store, remote-tracking reflogs and retained tasks may
+keep commits removed from origin. Following a rewritten branch does not purge
+those objects or remove secrets from the local machine. Rotate exposed
+credentials and use an explicit owner-controlled cleanup when necessary; this
+feature supplies no secret-removal operation and performs no automatic GC or
+old-task cleanup.
+
 ## Startup failure diagnostics
 
 The daemon preserves the originating failure text through the Channel startup
