@@ -635,10 +635,14 @@ mod tests {
         assert!(!claude_tree.exists());
         assert!(!manual_tree.exists());
         assert!(!codex_tree.exists());
-        assert_eq!(
-            canonical_all(&outcome.snapshotted),
-            vec![canonical(&manual_tree)]
-        );
+        // Removed trees no longer canonicalize, and git spells Windows paths
+        // with forward slashes; the directory name is enough here.
+        let snapshotted: Vec<_> = outcome
+            .snapshotted
+            .iter()
+            .filter_map(|path| path.file_name())
+            .collect();
+        assert_eq!(snapshotted, vec![std::ffi::OsStr::new("fix")]);
         let refs = std::process::Command::new("git")
             .arg("-C")
             .arg(&base)
