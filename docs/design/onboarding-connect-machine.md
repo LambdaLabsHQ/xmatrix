@@ -1,6 +1,6 @@
 # Onboarding: connect a machine from the Web
 
-Status: design, 2026-10-07. Product context: the Space page "Onboarding" (P1),
+Status: Web connection flow implemented, 2026-10-08. Product context: the Space page "Onboarding" (P1),
 whose first-ten-minutes path this implements. Decision recorded there: the
 command carries a setup intent id, never a credential, and the device sign-in
 is approved on the page that showed the command.
@@ -37,8 +37,8 @@ The same screen then narrates what happens, live, without a refresh:
 | Found Claude Code and Codex [Bring them in] | that Machine reported its harness inventory |
 | Claude Code and Codex are in this Space | registrations exist for (owner, machine, harness) |
 
-A slow step escalates its hint over time: after about 30 seconds "Still
-waiting; check the terminal for an error", after 2 minutes "Prefer the desktop
+A slow step escalates its hint over time: after 45 seconds "Still
+waiting; check the terminal for an error", after 3 minutes "Prefer the desktop
 app? Download xMatrix".
 
 The terminal needs no browser tab and asks no question: the machine name
@@ -132,13 +132,23 @@ daemon port can replace the polling later without changing the page.
    the broker, `listOwnerMachineDaemons` and the Space's registrations.
    `xmatrix login --connect <id>` (also `XMATRIX_CONNECT`) and the installers
    forward it.
-3. The Web live narration on the Space's empty screen and in the Agents view,
-   escalating hints, and "Bring them in".
+3. Implemented: the Web live narration on the Space's empty screen and in the
+   empty Agents view, escalating hints, same-page approval/decline, and "Bring
+   them in". Machines provides the same flow for connecting another computer,
+   including on phones. Commands are shared between setup surfaces within a
+   tab, scoped to the signed-in owner and Space, resumed after reload, and
+   replaced after expiry. Failed requests expose a retry action; a connected
+   machine with no installed agents keeps checking inventory. After success,
+   another machine can be connected with a fresh command.
+   Agents lists Space registrations only. Installation and Space switches for
+   other installed tools live in Machines; existing Agent details retain their
+   enabled switch. The initial Space card retains detected-tool switches and
+   bulk enablement.
 4. Replace polling with a push event from the Machine daemon port.
 
 ## Open questions
 
 - Desktop app: it already finds local runtimes. Should it create the intent
-  itself, so the same narration covers it? Proposed: yes, in phase 3.
+  itself, so the same narration covers it? Still deferred: the existing local discovery and daemon controls remain in use.
 - Headless servers with no browser on the same network still work: the page
   that approves can be on any device the owner is signed in on.

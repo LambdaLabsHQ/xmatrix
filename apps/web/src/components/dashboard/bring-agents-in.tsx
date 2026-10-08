@@ -67,7 +67,13 @@ export function ConnectMachine({ spaceId, token, userId, centered = false }: {
       {step && <ConnectStepLine step={step} busy={intent.busy} centered={centered}
         onApprove={(code) => void intent.approve(code)} onDecline={() => void intent.decline()}
         onBringIn={(ids) => void intent.bringIn(ids)} />}
-      {intent.error && <p role="alert" className="mt-2 text-sm text-destructive">{intent.error}</p>}
+      {step?.kind === "done" && <button type="button" onClick={intent.startAnother}
+        className={actionClass({ variant: "secondary", size: "sm" }, "mt-3")}>Connect another machine</button>}
+      {intent.error && <div className="mt-2 space-y-2">
+        <p role="alert" className="text-sm text-destructive">{intent.error}</p>
+        <button type="button" onClick={intent.retry}
+          className={actionClass({ variant: "secondary", size: "sm" })}>Try again</button>
+      </div>}
     </div>
   );
 }

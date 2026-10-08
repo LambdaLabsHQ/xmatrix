@@ -910,6 +910,8 @@ export function MachinesView({
         Update xMatrix to identify this computer and show its controls on the registered Machine.
       </p>}
       <ul>
+        {token && spaceId && <ToolListRow phoneOnly selected={connecting}
+          onSelect={() => select(CONNECT_MACHINE_ITEM)} leading={<Plus />} title="Connect a machine" />}
         {loading && ordered.length === 0 ? (
           <li className="list-none px-5 md:px-6"><ListSkeleton label="Loading machines" rows={4} /></li>
         ) : ordered.length === 0 ? (
@@ -949,10 +951,10 @@ export function MachinesView({
   let detail: React.ReactNode = null;
   if (connecting || (!loading && ordered.length === 0 && token && spaceId)) {
     detail = (
-      <ToolDetailEmpty icon={<Terminal />} title="Connect a machine">
-        <p>Agents run on your own machines. Connect one and the agents installed there come into this Space.</p>
-        <BringAgentsIn spaceId={spaceId ?? null} token={token ?? undefined} userId={user?.id} centered />
-      </ToolDetailEmpty>
+      <ToolDetail title="Connect a machine" onBack={() => select(null)} backLabel="Machines">
+        <p className="text-sm text-muted-foreground">Agents run on your own machines. Connect one, then bring its installed agents into this Space.</p>
+        <BringAgentsIn spaceId={spaceId ?? null} token={token ?? undefined} userId={user?.id} />
+      </ToolDetail>
     );
   } else if (pageMachine || local) {
     const machine = pageMachine;
@@ -1083,7 +1085,9 @@ export function MachinesView({
     );
   }
 
-  return <ToolSplit label="Machines" open={Boolean(item)} list={list} detail={detail} />;
+  // With no machine yet, a phone opens on connecting one.
+  const noMachines = !loading && ordered.length === 0 && Boolean(token && spaceId);
+  return <ToolSplit label="Machines" open={Boolean(item) || noMachines} list={list} detail={detail} />;
 }
 
 /** The address key of the desktop app's own machine in the Machines list. */

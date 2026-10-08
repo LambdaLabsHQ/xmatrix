@@ -1,102 +1,95 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AGENT_PRESETS, WEB_PROXY_ROUTES, type SetupIntentStatus } from "@xmatrix/protocol";
 import { XMatrixApiError, xmatrixApiRequest } from "@/lib/query/api-client";
+import { connectStep } from "./connect-machine";
 import { harnessSpaceKey } from "./harness-space-switch";
 import { useHarnessSpaceControl } from "./use-harness-space-control";
 
 const POLL_MS = 2_000;
 
-function storageKey(spaceId: string): string {
-  return `xmatrix:setup-intent:${spaceId}`;
+function storageKey(userId: string, spaceId: string): string {
+  return `xmatrix:setup-intent:${userId}:${spaceId}`;
 }
 
-function rememberedIntent(spaceId: string): string | null {
+function rememberedIntent(key: string): string | null {
   try {
-    return window.sessionStorage.getItem(storageKey(spaceId));
+    const id = window.sessionStorage.getItem(key);
+    return id && /^[a-f0-9]{32}$/u.test(id) ? id : null;
   } catch {
     return null;
   }
 }
 
-function remember(spaceId: string, intentId: string | null): void {
+function remember(key: string, intentId: string | null): void {
   try {
-    if (intentId) window.sessionStorage.setItem(storageKey(spaceId), intentId);
-    else window.sessionStorage.removeItem(storageKey(spaceId));
+    if (intentId) window.sessionStorage.setItem(key, intentId);
+    else window.sessionStorage.removeItem(key);
   } catch {
     /* A page without storage simply makes a new command after a reload. */
   }
 }
 
-/**
- * The setup command this page shows for a Space and what has happened since:
- * one intent per Space and tab, kept across a reload, replaced once expired.
- * It is read every two seconds while the page waits, and not once it is done.
- */
+/** One owner-scoped command per Space and tab, shared by all setup surfaces.
+ * The Hub supplies progress; an expired command is replaced, failures can be
+ * retried, and polling ends only when the agents have come into the Space. */
 export function useSetupIntent(spaceId: string | null, token: string | undefined, userId: string | undefined) {
-  const [intentId, setIntentId] = useState<string | null>(() => (spaceId ? rememberedIntent(spaceId) : null));
-  const [shownAt, setShownAt] = useState(() => Date.now());
+  const key = storageKey(userId ?? "", spaceId ?? "");
+  const ready = Boolean(spaceId && token && userId);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setIntentId(spaceId ? rememberedIntent(spaceId) : null);
-  }, [spaceId]);
-
-  useEffect(() => {
-    if (!spaceId || !token || intentId) return;
-    let cancelled = false;
-    void xmatrixApiRequest<SetupIntentStatus>({
-      url: WEB_PROXY_ROUTES.setup_intents, token, method: "POST", body: { spaceId },
-    }).then((created) => {
-      if (cancelled) return;
-      remember(spaceId, created.intentId);
-      setIntentId(created.intentId);
-      setShownAt(Date.now());
-    }).catch((reason: unknown) => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : "Could not prepare a setup command");
-    });
-    return () => { cancelled = true; };
-  }, [spaceId, token, intentId]);
-
+  const locked = useRef(false);
+  const command = useQuery({
+    queryKey: ["setup-intent-command", userId, spaceId],
+    queryFn: async ({ signal }) => {
+      const remembered = rememberedIntent(key);
+      if (remembered) return remembered;
+      const created = await xmatrixApiRequest<SetupIntentStatus>({
+        url: WEB_PROXY_ROUTES.setup_intents, token, method: "POST", body: { spaceId }, signal,
+      });
+      if (!/^[a-f0-9]{32}$/u.test(created.intentId ?? "")) throw new Error("Could not prepare a setup command. Try again.");
+      remember(key, created.intentId);
+      return created.intentId;
+    },
+    enabled: ready,
+    staleTime: Infinity,
+  });
+  const intentId = ready ? command.data ?? null : null;
   const status = useQuery({
-    queryKey: ["setup-intent", intentId],
+    queryKey: ["setup-intent", userId, spaceId, intentId],
     queryFn: ({ signal }) => xmatrixApiRequest<SetupIntentStatus>({
       url: WEB_PROXY_ROUTES.setup_intent(intentId!), token, signal,
     }),
-    enabled: Boolean(intentId && token),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      const settled = data?.phase === "connected" && data.machine?.harnesses &&
-        data.machine.harnesses.filter((harness) => harness.installed)
-          .every((harness) => data.registeredHarnesses.includes(harness.id));
-      return settled ? false : POLL_MS;
-    },
-    retry: (count, reason) => !(reason instanceof XMatrixApiError && reason.status === 404) && count < 3,
+    enabled: Boolean(intentId),
+    refetchInterval: (query) => query.state.data && connectStep(query.state.data, 0).kind === "done" ? false : POLL_MS,
   });
 
-  // An expired or unknown command is replaced by a fresh one.
+  const { refetch: refetchCommand } = command;
   const expired = status.error instanceof XMatrixApiError && status.error.status === 404;
   useEffect(() => {
-    if (!expired || !spaceId) return;
-    remember(spaceId, null);
-    setIntentId(null);
-  }, [expired, spaceId]);
+    if (!expired) return;
+    remember(key, null);
+    void refetchCommand();
+  }, [expired, key, refetchCommand]);
 
   const act = useCallback(async (work: () => Promise<unknown>) => {
+    if (locked.current || !intentId) return;
+    locked.current = true;
     setBusy(true);
     setError(null);
     try {
       await work();
-      await status.refetch();
+      const fresh = await status.refetch();
+      if (fresh.isError) throw fresh.error;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "That did not work. Try again.");
     } finally {
+      locked.current = false;
       setBusy(false);
     }
-  }, [status]);
+  }, [intentId, status]);
 
   const approve = (userCode: string) => act(() => xmatrixApiRequest({
     url: WEB_PROXY_ROUTES.setup_intent_approve(intentId!), token, method: "POST", body: { userCode },
@@ -104,8 +97,8 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   const decline = () => act(() => xmatrixApiRequest({
     url: WEB_PROXY_ROUTES.setup_intent_decline(intentId!), token, method: "POST",
   }));
-  /* Each detected harness is switched on for this owner on that machine,
-     through the same command as every other Space switch. */
+  /* Reuse the owner switches and their server-authorized catalog, including
+     partial success: a retry only enables pairs that are still off. */
   const control = useHarnessSpaceControl(spaceId, token, userId);
   const bringIn = (harnessIds: string[]) => act(async () => {
     const machineId = status.data?.machine?.machineId;
@@ -118,6 +111,23 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       }
     }
   });
-
-  return { intentId, status: status.data, shownAt, error: control.error ?? error, busy: busy || Boolean(control.pending), approve, decline, bringIn };
+  const retry = () => {
+    setError(null);
+    if (command.isError || !intentId) void command.refetch();
+    else void status.refetch();
+  };
+  const startAnother = () => {
+    remember(key, null);
+    setError(null);
+    void command.refetch();
+  };
+  const readError = command.error ?? (expired ? null : status.error);
+  return {
+    intentId: expired || command.isFetching ? null : intentId,
+    status: expired || command.isFetching ? undefined : status.data,
+    shownAt: command.dataUpdatedAt,
+    error: control.error ?? error ?? readError?.message,
+    busy: busy || Boolean(control.pending) || command.isFetching || status.isError,
+    approve, decline, bringIn, retry, startAnother,
+  };
 }

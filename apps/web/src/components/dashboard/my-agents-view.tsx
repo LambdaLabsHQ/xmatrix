@@ -334,18 +334,23 @@ export function MyAgentsView({
           {fleet.enablingAll ? "Enabling…" : newCandidates.length === 1 ? "Bring it in" : "Bring them in"}
         </Button>
         {fleet.error && <p role="alert" className="text-destructive">{fleet.error}</p>}
+        <Button size="sm" variant="outline" onClick={onOpenMachines}>Manage machines</Button>
       </ToolDetailEmpty>
     ) : (
       <ToolDetailEmpty icon={<HardDrive />} title="Bring your agents into xMatrix">
         <p>Your agents run on your own computer, and xMatrix connects them with the people they work with.</p>
-        <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} centered />
+        {fleet.ready ? <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} centered />
+          : fleet.error ? <p role="alert" className="text-destructive">{fleet.error}</p>
+          : <p role="status">Looking for your installed agents…</p>}
+        <Button size="sm" variant="outline" onClick={onOpenMachines}>Manage machines</Button>
       </ToolDetailEmpty>
     );
   }
 
   return (
     <div className="app-agents-view flex min-h-0 min-w-0 flex-1">
-      <ToolSplit label="Agents" open={Boolean(item)} list={list} detail={detail} />
+      {/* A phone opens an empty Space's Agents on the way to bring them in; its list would say only that it is empty. */}
+      <ToolSplit label="Agents" open={Boolean(item) || Boolean(catalog.data && rows.length === 0)} list={list} detail={detail} />
     </div>
   );
 }

@@ -58,6 +58,13 @@ export function SpaceAgentSetupCard({
   onBringAll: () => void;
   onManageMachines: () => void;
 }) {
+  if (state.kind !== "hidden" && state.kind !== "unreachable" && fleet && !fleet.ready) return <SetupCardShell>
+    <SetupCardHeader title="Looking for your installed agents" body="Checking the machines connected to your Space." />
+    {fleet.error && <p role="alert" className="mt-3 text-sm text-destructive">{fleet.error}</p>}
+    {fleet.error && <button type="button" onClick={() => {
+      void fleet.daemons.refetch(); void fleet.catalog.refetch();
+    }} className={actionClass({ variant: "secondary", size: "md" }, "mt-3")}>Try again</button>}
+  </SetupCardShell>;
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
     <SetupCardHeader title="Your installed agents" body="Turn them on to summon them. Choose a working folder when you send the first task." />
     <InstalledHarnessSwitchList fleet={fleet} />
