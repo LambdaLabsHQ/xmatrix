@@ -66,6 +66,15 @@ function harness(t, overrides = {}) {
   return { connection, sockets, downs };
 }
 
+/** A connection whose first socket is open. */
+async function opened(t, overrides) {
+  const parts = harness(t, overrides);
+  parts.connection.start();
+  await flush();
+  parts.sockets[0].open();
+  return parts;
+}
+
 test("backoff is jittered, capped, and grows until the session works", () => {
   assert.equal(reconnectDelayMs(0, { baseMs: 1_000, maxMs: 30_000 }, () => 0), 500);
   assert.equal(reconnectDelayMs(0, { baseMs: 1_000, maxMs: 30_000 }, () => 1), 1_000);
@@ -73,10 +82,7 @@ test("backoff is jittered, capped, and grows until the session works", () => {
 });
 
 test("a close redials after backoff, and never opens a second socket", async (t) => {
-  const { connection, sockets } = harness(t);
-  connection.start();
-  await flush();
-  sockets[0].open();
+  const { connection, sockets } = await opened(t);
   sockets[0].drop();
   await flush();
   t.mock.timers.tick(1_000);
@@ -90,10 +96,7 @@ test("a close redials after backoff, and never opens a second socket", async (t)
 
 test("the backoff resets only when the owner says the session works", async (t) => {
   const attempts = { current: 0 };
-  const { connection, sockets } = harness(t, { attempts });
-  connection.start();
-  await flush();
-  sockets[0].open();
+  const { connection, sockets } = await opened(t, { attempts });
   sockets[0].drop();
   await flush();
   assert.equal(attempts.current, 1, "opening alone is not proof");
@@ -105,10 +108,7 @@ test("the backoff resets only when the owner says the session works", async (t) 
 });
 
 test("a socket that stops answering is replaced; our own probes cannot keep it alive", async (t) => {
-  const { connection, sockets } = harness(t);
-  connection.start();
-  await flush();
-  sockets[0].open();
+  const { connection, sockets } = await opened(t);
   t.mock.timers.tick(25_000);
   assert.deepEqual(sockets[0].sent, ["ping"]);
   connection.probe();
@@ -121,10 +121,7 @@ test("a socket that stops answering is replaced; our own probes cannot keep it a
 });
 
 test("any frame counts as an answer", async (t) => {
-  const { connection, sockets } = harness(t);
-  connection.start();
-  await flush();
-  sockets[0].open();
+  const { connection, sockets } = await opened(t);
   t.mock.timers.tick(25_000);
   sockets[0].receive("pong");
   t.mock.timers.tick(10_000);
@@ -132,22 +129,16 @@ test("any frame counts as an answer", async (t) => {
 });
 
 test("a server that does not answer pings is never timed out", async (t) => {
-  const { connection, sockets } = harness(t, {
+  const { connection, sockets } = await opened(t, {
     heartbeat: { intervalMs: 25_000, timeoutMs: 10_000, ping: (socket) => socket.send("ping"), supported: () => false },
   });
-  connection.start();
-  await flush();
-  sockets[0].open();
   t.mock.timers.tick(60_000);
   assert.deepEqual(sockets[0].sent, []);
   assert.equal(sockets[0].closedWith, null);
 });
 
 test("a resume after a suspension replaces a socket that still says OPEN", async (t) => {
-  const { connection, sockets } = harness(t);
-  connection.start();
-  await flush();
-  sockets[0].open();
+  const { connection, sockets } = await opened(t);
   win.dispatchEvent(new Event("xmatrix:native-resume"));
   await flush();
   assert.equal(sockets[0].closedWith, 4000);
@@ -177,10 +168,7 @@ test("a dial that hangs is abandoned", async (t) => {
 });
 
 test("a close the owner decides is final does not redial", async (t) => {
-  const { connection, sockets } = harness(t, { onClose: async () => "stop" });
-  connection.start();
-  await flush();
-  sockets[0].open();
+  const { sockets } = await opened(t, { onClose: async () => "stop" });
   sockets[0].drop(4004);
   await flush();
   t.mock.timers.tick(60_000);
