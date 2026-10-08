@@ -888,7 +888,7 @@ const autoParameters = { rubricVersion: "registration-parameters-v10", evaluated
   intent: { source: "jev", selected: "summon", probabilities: { summon: 0.96, explanation: 0.04 } },
   selections: { workspaceKind: "repo", repo: "LambdaLabsHQ/xmatrix" },
   choices: [{ key: "workspace", selected: "workspace_0", probabilities: { workspace_0: 1 } }] };
-const autoLaunch = { launchId: "launch:auto", channelId: E2E_CHANNEL.id, sourceMessageId: autoMessageId: autoMessageId, targetName: "codex",
+const autoLaunch = { launchId: "launch:auto", channelId: E2E_CHANNEL.id, sourceMessageId: autoMessageId, targetName: "codex",
   runId: "run:auto", instanceId: "instance:auto", launchKind: "registration", state: "connected", attempt: 0, retryable: false,
   createdAt: E2E_NOW, updatedAt: E2E_NOW, preparedAt: E2E_NOW, commandDurableAt: E2E_NOW, admittedAt: E2E_NOW,
   spawnedAt: E2E_NOW, connectedAt: E2E_NOW, firstReplyAt: E2E_NOW, sourceMention: "@auto",
@@ -920,11 +920,11 @@ test("@auto shows the Agent and machine routing chose, and why, in one row", asy
   await dialog.getByRole("region", { name: /Routing decision/ }).waitFor();
   const jev = dialog.getByRole("region", { name: /Routing decision/ });
   const agent = jev.getByRole("listitem").filter({ hasText: "Agent" }).first();
-  await expect(agent).toContainText("codex · build-idle");
+  await expect(agent.locator("summary")).toContainText("codex on build-idle");
   await expect(agent).toContainText("claude fits better, but build-busy is overloaded");
   await expect(jev.getByText(/^Fit/)).toHaveCount(0);
   await expect(dialog.getByRole("list", { name: "Invocation progress" })).not.toContainText("Machine selected");
-  await agent.getByText("codex · build-idle").first().click();
+  await agent.locator("summary").click();
   const weighed = agent.getByRole("list", { name: "Environments weighed" });
   await expect(weighed.locator("li[data-selected]")).toContainText("Capable · 85% room");
   await expect(weighed.getByRole("listitem").nth(1)).toContainText("claude · build-busy");

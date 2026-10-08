@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronRight, X } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
@@ -88,13 +88,14 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
 
 const percent = (value: number | undefined) => value === undefined ? "" : `${Math.round(value * 100)}%`;
 
-/** A done or failed mark, drawn like the startup steps' marks below it. */
-function Mark({ failed }: { failed?: boolean }) {
-  return <span aria-hidden="true" className={`flex size-4 items-center justify-center rounded-full ${failed
-    ? "border border-destructive text-destructive" : "bg-accent"}`}>{failed ? <X size={11} /> : <Check size={11} />}</span>;
-}
+/** A routing choice, unlike a startup step, is no tick on a timeline: its
+ *  label, then the option chosen in the tag a filled mention parameter wears. */
+const CHOICE = "grid grid-cols-[4.75rem_minmax(0,1fr)_auto_12px] items-center gap-x-2 py-[5px]";
+const OPTIONS = "m-0 mb-2 ml-[5.25rem] grid list-none gap-0.5 p-0 text-xs";
 
-const ROW = "grid grid-cols-[16px_4.75rem_minmax(0,1fr)_auto_12px] items-center gap-x-2 py-[5px]";
+function ChosenTag({ children, routing }: { children: ReactNode; routing?: boolean }) {
+  return <span className="app-summon-condition" data-jev={routing ? undefined : "true"} data-routing={routing ? "true" : undefined}>{children}</span>;
+}
 
 /** What Jev decided, one row per question in the order it answered them: the
  *  question, its answer and how sure it was. A row opens to the options it
@@ -119,7 +120,7 @@ export function JevDecisionSection({ decisions, parameters }: { decisions: JevRe
       <ol className="m-0 mt-1 list-none p-0" aria-label="Routing answers">
         {rows.map(question => <JevAnswer key={question.key} question={question} />)}
         {placed && <PlacementAnswer ranking={placed} compared={fits.length > 0} />}
-        {decision.failure && <li className={ROW}><Mark failed /><span className="text-muted-foreground">Failed</span>
+        {decision.failure && <li className={CHOICE}><span className="text-muted-foreground">Failed</span>
           <span className="truncate text-destructive">{decision.failure}</span></li>}
       </ol>
     </section>;
@@ -131,16 +132,16 @@ function PlacementAnswer({ ranking, compared }: { ranking: readonly LaunchPlacem
   const chosen = ranking[0]!;
   return <li>
     <details className="group/answer">
-      <summary className={`${ROW} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
-        <Mark />
+      <summary className={`${CHOICE} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
         <span className="text-muted-foreground">Agent</span>
-        <span className="truncate font-semibold" title={where(chosen)}>{where(chosen)}</span>
+        <span className="truncate" title={where(chosen)}><ChosenTag routing>{chosen.harness}</ChosenTag>
+          <span className="text-muted-foreground"> on </span><ChosenTag routing>{chosen.machineName || "unnamed machine"}</ChosenTag></span>
         <span />
         <ChevronRight size={12} aria-hidden="true" className="text-muted-foreground transition-transform group-open/answer:rotate-90" />
-        <span /><span />
-        <span className="col-span-3 -mt-1 truncate text-[11px] text-muted-foreground">{placementReason(ranking, compared)}</span>
+        <span />
+        <span className="col-span-3 truncate text-[11px] text-muted-foreground">{placementReason(ranking, compared)}</span>
       </summary>
-      <ol className="m-0 mb-2 ml-6 grid list-none gap-0.5 p-0 text-xs" aria-label="Environments weighed">
+      <ol className={OPTIONS} aria-label="Environments weighed">
         {ranking.map((item, index) => <li key={`${item.harness}:${item.machineId}`} data-selected={index === 0 || undefined}
           className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-md px-2 py-1 text-muted-foreground data-[selected]:bg-foreground/[0.05] data-[selected]:text-foreground">
           <span className={`truncate ${index === 0 ? "font-semibold" : ""}`}>{where(item)}</span>
@@ -170,14 +171,14 @@ function JevAnswer({ question }: { question: JevQuestion }) {
   const chosen = question.options.find(option => option.selected);
   return <li>
     <details className="group/answer">
-      <summary className={`${ROW} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
-        <Mark />
+      <summary className={`${CHOICE} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
         <span className="text-muted-foreground">{question.label}</span>
-        <span className="truncate font-semibold" title={chosen?.title}>{chosen?.title ?? "No answer"}</span>
+        <span className="truncate" title={chosen?.title}>{chosen ? <ChosenTag>{chosen.title}</ChosenTag>
+          : <span className="text-muted-foreground">No answer</span>}</span>
         <span className="text-[11px] tabular-nums text-muted-foreground">{percent(chosen?.probability)}</span>
         <ChevronRight size={12} aria-hidden="true" className="text-muted-foreground transition-transform group-open/answer:rotate-90" />
       </summary>
-      <div className="mb-2 ml-6 grid gap-1 text-xs">
+      <div className="mb-2 ml-[5.25rem] grid gap-1 text-xs">
         <ol className="m-0 grid list-none gap-0.5 p-0" aria-label={`${question.label} options`}>
           {question.options.map(option => <li key={option.handle} data-selected={option.selected || undefined}
             className="grid grid-cols-[minmax(0,1fr)_3rem_2.25rem] items-center gap-x-2 rounded-md px-2 py-1 text-muted-foreground data-[selected]:bg-foreground/[0.05] data-[selected]:text-foreground">
