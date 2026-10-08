@@ -1,5 +1,5 @@
 import { formatZonedDateTime } from "./time-display";
-import { parsePresentedRoutingDecision, routingChoiceIdentity, routingDecisionCopy, routingExclusionText,
+import { parsePresentedRoutingDecision, routingChoiceIdentity, type LaunchParameterEvidence, routingDecisionCopy, routingExclusionText,
   routingQuotaText, routingHarnessLabel, visibleRoutingChoiceRows, type LaunchDecisionStage, type PresentedRoutingDecision,
   type RoutingChoiceRow } from "@xmatrix/protocol";
 
@@ -12,6 +12,26 @@ function DecisionStage({ label, stage }: { label: string; stage: LaunchDecisionS
       {Object.entries(stage.probabilities).map(([option, probability]) =>
         <span key={option}> · {option}: {(probability * 100).toFixed(1)}%</span>)}</p>
     <code>{label} input digest: {stage.inputDigest}</code>
+  </div>;
+}
+
+const FIT_LEVELS = ["unsuitable", "capable", "strong fit", "asked for"];
+
+/** Jev's fit for each harness and the environments weighed on fit and headroom together. */
+function JointPlacement({ parameters }: { parameters: LaunchParameterEvidence }) {
+  const percent = (value: number) => `${Math.round(value * 100)}%`;
+  return <div>
+    {parameters.fit && <>
+      <p>Harness fit{Object.entries(parameters.fit.scores).map(([harness, fit]) =>
+        <span key={harness}> · {routingHarnessLabel(harness)}: {FIT_LEVELS[Math.round(fit.score)]} ({fit.score.toFixed(2)})</span>)}</p>
+      <code>Fit input digest: {parameters.fit.inputDigest}</code>
+    </>}
+    {parameters.placement && <ol aria-label="Environments weighed on fit and headroom">
+      {parameters.placement.ranking.map((item, index) => <li key={`${index}:${item.harness}:${item.machineId}`}>
+        {routingHarnessLabel(item.harness)} on {item.machineName || "Unnamed machine"} · fit {percent(item.fit)} ·
+        headroom {item.headroom === undefined ? "unmeasured" : percent(item.headroom)}
+        {item.frontier ? "" : " · outweighed on both"}</li>)}
+    </ol>}
   </div>;
 }
 
@@ -103,6 +123,7 @@ export function RoutingDecisionBoard({ decision, compact = false, evidenceOnly =
       <p>Workspace: {decision.parameters.selections.workspaceKind}{decision.parameters.selections.repo ? ` · ${decision.parameters.selections.repo}` : ""}</p>
       <p>Evaluated {formatZonedDateTime(decision.parameters.evaluatedAt)} · {decision.parameters.rubricVersion}</p>
       {decision.parameters.harness && <DecisionStage label="Harness" stage={decision.parameters.harness} />}
+      {(decision.parameters.fit || decision.parameters.placement) && <JointPlacement parameters={decision.parameters} />}
       {decision.parameters.environment && <DecisionStage label="Environment" stage={decision.parameters.environment} />}
       {decision.parameters.choices.map(choice => <p key={choice.key}>{choice.key}: {choice.selected}
         {Object.entries(choice.probabilities).map(([option, probability]) => <span key={option}> · {option}: {(probability * 100).toFixed(1)}%</span>)}

@@ -142,16 +142,20 @@ budget. Only an explicit `models` field replaces that observation. The presence
 writer carries an explicit empty report as `models: []`, clearing both the
 catalog and its observation timestamp without changing hibernation limits.
 
-Jev judges only semantic fit:
+Jev judges only semantic fit, in one call:
 1. Whether the author asks for work.
-2. Which harness suits the work. Each harness is listed once, with its owners'
-   descriptions and its models.
-3. Which model, effort and location to use, among the chosen harness's environments.
+2. Which location the work is about, among every eligible environment's.
+3. How well each harness suits the work, one `score` question per harness on
+   four levels: unsuitable, capable, strong fit, asked for. Each question holds
+   only that harness's owners' descriptions and models, so no harness is first
+   in a list. A harness known only by its name is capable. A call holds at most
+   eight questions; further fit questions go out in parallel calls. With one
+   harness there is nothing to compare and no fit is asked.
 
-Jev never sees machine load, provider quota or allocation counts. A named harness
-with no intent to read skips the first Jev call. Explicit machine, workspace and
-parameter constraints still narrow the candidates first, and a measured exhausted
-quota still excludes an environment.
+Jev never sees machine load, provider quota or allocation counts. Explicit
+machine, workspace and parameter constraints still narrow the candidates first,
+and a measured exhausted quota still excludes an environment. When the chosen
+environment declares models, a second call chooses its model and effort.
 
 An owner can keep a Machine out of automatic assignment (`data.machines.auto_assign`
 false; the Machine page switch or `xmatrix machine auto-assign off`). Its
@@ -162,10 +166,9 @@ one of its registrations. When nothing else remains the launch is refused with
 matches more than one person (`registration_machine_ambiguous`), is a hint on
 the mention's card: the Channel is not told. Running Instances there are unaffected.
 
-Which environment runs the work is measured, not judged
-(`leastLoadedEnvironment`). Among the chosen harness's environments that offer the
-chosen model/effort and location, the one with the most headroom wins. Headroom is
-the scarcest of three shares:
+Harness and machine are chosen together (`jointRanking`), over every environment
+that offers the chosen location. Each has a fit (Jev's score for its harness ÷ 3;
+⅓ when only one harness is eligible) and a headroom, the scarcest of three shares:
 
 - **CPU:** `1 − 1-minute load ÷ logical CPUs` or `1 − CPU usage`, whichever is
   smaller. Windows reports no load average. An overloaded machine goes below zero.
@@ -176,16 +179,28 @@ the scarcest of three shares:
   on credits keeps 1%, eligible but after every account with window headroom.
   Whether to spend credits is the provider account's setting, not xMatrix's.
 
-A machine without a current sample has unknown headroom and ranks after every
-measured one. Ties go to the fewest outstanding Runs on the machine, whose load
-may not show yet, and then to candidate order. Evidence from
-`registration-parameters-v6` on records Jev's harness distribution by harness name
-in place of the earlier per-environment choice.
+A machine without a current sample has unknown headroom, counted as none.
+Environments another one beats on both fit and headroom drop out (the Pareto
+frontier). Of the rest, the one whose weaker side is strongest wins:
+`min(fit, headroom) + 0.001 × (fit + headroom)`, the "balanced" profile, where
+either side satisfies at 1. A weighted sum is not used: it cannot reach every
+point of a non-convex frontier. Ties go to the fewest outstanding Runs on the
+machine, whose load may not show yet, and then to candidate order. When the
+chosen model's quota is exhausted there (Cursor's per-model pools), the
+next-ranked environment of the same harness offering it runs the work.
+
+Evidence from `registration-parameters-v10` records `fit` (each harness's score
+and level distribution) and `placement` (the eight best-ranked environments with
+fit, headroom, frontier membership and utility) instead of a harness choice.
+From `registration-parameters-v6` to `v9`, Jev chose the harness first and
+headroom chose a machine of that harness only, so load could not move work to
+another harness; `harness` records that choice. The design and its research are
+in the Space page "Agent 路由：语义适合度与量化余量联合选择".
 
 A daemon on a host with a built-in battery reports `formFactor: "laptop"` in its
 machine resources. That is a property of the machine, not a choice about the
-work, so Jev's parameter request does not ask it. Headroom picks among every
-environment that offers the chosen model, effort and location, laptop or not.
+work, so Jev's parameter request does not ask it. The joint ranking weighs every
+environment that offers the chosen location, laptop or not.
 An owner who does not want that machine to take automatic work turns its
 auto-assign switch off; naming the machine, or a directory registered on it,
 still selects it. Evidence from `registration-parameters-v7` may record a
