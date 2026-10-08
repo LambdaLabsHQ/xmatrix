@@ -25,6 +25,8 @@ import { registerGooglePickerRoutes } from "./index-routes-google-picker";
 import { redirectInsecureRequest } from "./https-redirect";
 import { retryablePostgresFailure } from "./postgres-error-classification";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { requestErrorResponse } from "./index-shared";
 import type { Env } from "./types";
 export { RelaySummonDecisionClock } from "./summon-decision-clock-do";
 export { RelaySpaceDeletionClock } from "./space-deletion-clock-do";
@@ -73,6 +75,10 @@ import { registerRequestRateLimit } from "./request-rate-limit";
 import { registerIndexRoutesPostgresReadiness } from "./postgres-readiness";
 
 const app = new Hono<{ Bindings: Env }>();
+// A failure no route answered still gets the one error contract: a transient
+// outage as a retryable 503, anything else as a reported JSON 500. Hono's
+// default is a plain-text 500 that no client can tell from a defect.
+app.onError((error, c) => error instanceof HTTPException ? error.getResponse() : requestErrorResponse(c, error));
 registerRequestRateLimit(app);
 registerRequestBodyLimit(app);
 registerClientCompatibilityGate(app);
