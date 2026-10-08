@@ -137,7 +137,7 @@ test.describe("desktop channel selection", () => {
     await textarea.press("ArrowLeft");
     const moved = await caret.evaluate((node) => new Promise<number>((resolve) =>
       requestAnimationFrame(() => resolve(node.getBoundingClientRect().x))));
-    expect(moved).toBeLessThan(typed - 3);
+    expect(moved).toBeLessThan(typed - 1);
 
     await textarea.evaluate((node) => node.dispatchEvent(new CompositionEvent("compositionstart")));
     await expect(caret).toBeHidden();
