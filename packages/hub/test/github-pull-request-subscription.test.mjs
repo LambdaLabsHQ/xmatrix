@@ -102,6 +102,7 @@ function harness({ routes, verdict = { state: "passed", failed: [], settledAt: "
 }
 
 const issueRoute = { installationId: "42", sourceRef: "github:issue:acme/app#7", sourceKind: "issue",
+  createdAt: "2026-10-08T22:00:00.000Z",
   spaceId: "space-1", channelId: "channel-1", connectionId: "connection-1", authorityRootUserId: "user-1" };
 const base = { installation: { id: 42 }, repository: { name: "app", owner: { login: "acme" }, private: true } };
 
@@ -182,4 +183,17 @@ test("a pull request is subscribed only through the Space's connection that reac
   assert.equal(await subscribeConversationToPullRequest({}, input, deps({
     installationFor: async () => { throw new Error("github_installation_not_linked_to_space"); } })), false);
   assert.equal(commands.length, 1);
+});
+
+test("a subscription made before its issue existed named an earlier issue and hears nothing", async () => {
+  const stale = { ...issueRoute, createdAt: "2026-06-19T08:36:35.989Z" };
+  const h = harness({ routes: [stale] });
+  const payload = { ...base, action: "created", sender: { login: "yiming" },
+    issue: { ...pull, created_at: "2026-10-08T21:00:00Z" }, comment: { body: "hi", user: { login: "yiming" } } };
+  await dispatchProductGitHubWebhook({ env: {}, event: "issue_comment", delivery: "d-5", payload }, h.dependencies);
+  assert.equal(h.appended.length, 0);
+  const current = harness({ routes: [issueRoute] });
+  await dispatchProductGitHubWebhook({ env: {}, event: "issue_comment", delivery: "d-5", payload },
+    current.dependencies);
+  assert.equal(current.appended.length, 1);
 });

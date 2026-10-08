@@ -39,6 +39,20 @@ export function githubWebhookIssueNumbers(event: string, payload: Record<string,
   return number === undefined ? [] : [number];
 }
 
+/**
+ * Whether an issue subscription can be about the issue this event names.
+ * Numbers are only unique within one repository's history: a subscription
+ * made before the issue existed named an earlier issue with that number (the
+ * repository's history was replaced since), and must not hear this one.
+ */
+export function githubIssueSubscriptionCurrent(event: string, payload: Record<string, unknown>,
+  subscribedAt: string): boolean {
+  const subject = record(event.startsWith("pull_request") ? payload.pull_request : payload.issue);
+  const opened = Date.parse(text(subject.created_at));
+  const subscribed = Date.parse(subscribedAt);
+  return !Number.isFinite(opened) || !Number.isFinite(subscribed) || subscribed >= opened;
+}
+
 /** Whether this event closed the pull request, which ends its subscription. */
 export function githubPullRequestClosed(event: string, payload: Record<string, unknown>): boolean {
   return event === "pull_request" && payload.action === "closed";
