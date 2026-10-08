@@ -46,11 +46,12 @@ export function draftSummonRanges(body: string,
   return [...ranges.values()].sort((left, right) => left.start - right.start);
 }
 
-/** The faint words after the draft that say what sending will do with one summon. */
-export function draftSummonHint(reading: DraftSummonIntent): string {
-  const address = reading.mention.split(/\s/u)[0];
-  if (reading.choice === "summon") return `${address} starts on send`;
-  return `${address} won't start, read as ${DECLINED[reading.choice].reading} · launch:force starts it`;
+/** The author's override is written into just this exact summon, so the
+ * sent message carries the same instruction on every client and launch path. */
+export function forceDraftSummon(body: string, reading: DraftSummonIntent): { body: string; caret: number } | undefined {
+  if (reading.start < 0 || reading.end > body.length || body.slice(reading.start, reading.end) !== reading.mention) return undefined;
+  const insert = " launch:force";
+  return { body: body.slice(0, reading.end) + insert + body.slice(reading.end), caret: reading.end + insert.length };
 }
 
 /** Picked page/channel labels expand to id tokens when sent. Project preview

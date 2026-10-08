@@ -16,7 +16,7 @@ English is the default language for repository documentation, guardrails, releas
 ## Current behavior
 
 The Web composer previews Jev's summon intent while typing, with mention bands
-and an inline hint. Human-confirmed readings travel with the exact message;
+and a declined-mention explanation and Start anyway option at the address. Human-confirmed readings travel with the exact message;
 launch authorization remains server-owned, and unread or unavailable previews
 retain post-send checks. See [invocation status](../design/mention-invocation/README.md).
 

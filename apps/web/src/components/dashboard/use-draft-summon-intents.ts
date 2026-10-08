@@ -18,14 +18,13 @@ type Request = { key: string; controller: AbortController; promise: Promise<Draf
 export function useDraftSummonIntents(input: {
   token: string | null; channelId: string | undefined; body: string;
   selections?: ReadonlyArray<{ start: number; end: number; text: string }>;
-}): { readings: DraftSummonIntent[]; fresh: boolean; reading: boolean; unavailable: boolean;
+}): { readings: DraftSummonIntent[]; fresh: boolean; reading: boolean;
   readBeforeSend: () => Promise<DraftSummonIntent[]> } {
   const { token, channelId, body, selections } = input;
   const ranges = useMemo(() => draftSummonRanges(body, selections).slice(0, MAX_READ), [body, selections]);
   const key = JSON.stringify([token, channelId, body, ranges]);
   const [last, setLast] = useState<Reading | null>(null);
   const [pending, setPending] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
   const request = useRef<Request | null>(null);
   const readBeforeSend = useCallback(async () => {
     if (!token || !channelId || !ranges.length) return [];
@@ -49,10 +48,8 @@ export function useDraftSummonIntents(input: {
           item.start !== ranges[index]?.start || item.end !== ranges[index]?.end)) throw new Error("Invalid preview");
         if (controller.signal.aborted) return [];
         setLast({ key, readings });
-        setFailed(null);
         return readings;
       } catch {
-        if (!controller.signal.aborted || request.current?.key === key) setFailed(key);
         return [];
       } finally {
         clearTimeout(timer);
@@ -78,5 +75,5 @@ export function useDraftSummonIntents(input: {
   const enabled = !!token && !!channelId && ranges.length > 0;
   const fresh = enabled && last?.key === key;
   return { readings: fresh ? last.readings : [], fresh, reading: enabled && pending === key,
-    unavailable: enabled && failed === key, readBeforeSend };
+    readBeforeSend };
 }
