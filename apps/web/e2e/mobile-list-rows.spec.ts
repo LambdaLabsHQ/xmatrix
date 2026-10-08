@@ -201,10 +201,11 @@ test.describe("a phone's list rows", () => {
     await expect(back).toBeVisible();
     await expect(page.locator(".app-tool-list-row").first()).toBeVisible();
     await settled(page);
-    const [plank, chevron, search, dock] = await Promise.all([edges(bar), edges(back.locator("svg")),
+    const [plank, sign, search, dock] = await Promise.all([edges(bar), edges(bar.locator(".app-mobile-back-sign")),
       edges(bar.locator(".app-mobile-search-icon svg")), dockEdges(page)]);
-    // The chevron's 20px box moves out by a quarter, so its point, a third in, sits on the line.
-    expect(chevron.left - dock.left).toBeCloseTo(15, 0);
+    // The chevron is cut into the title's sign, which starts where the Space sign does.
+    await expect(bar.locator(".app-mobile-back-sign").getByRole("button", { name: "Back to More" })).toBeVisible();
+    expect(sign.left - dock.left).toBeCloseTo(6, 0);
     expect(dock.right - search.right).toBeCloseTo(20, 0);
     const setting = page.locator(".app-tool-list-row").first();
     await expect(setting).toBeVisible();

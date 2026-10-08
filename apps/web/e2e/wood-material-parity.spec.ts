@@ -13,7 +13,7 @@ for (const mobile of [false, true]) {
       return [style.backgroundColor, style.backgroundImage, style.backgroundSize, style.backgroundPosition, style.backgroundBlendMode];
     });
     expect(paint[1]).toContain('/textures/wood.webp');
-    const selectors = mobile ? ['.app-topbar', '.app-detail-plank'] : ['.app-rail', '.app-detail-plank'];
+    const selectors = mobile ? ['.app-topbar .app-mobile-back-sign', '.app-detail-plank'] : ['.app-rail', '.app-detail-plank'];
     for (const selector of selectors) {
       for (const element of await page.locator(selector).all()) {
         expect(await element.evaluate((node) => {
@@ -46,8 +46,8 @@ for (const view of ['profile', 'activity', 'more']) {
           ? [element.className.toString()] : [];
       }));
     expect(surfaces).toEqual([]);
-    // A dock root's bar carries its wood on the Space sign; a pushed screen's bar is the board.
-    const wood = page.locator('.app-topbar.app-mobile-tab-root-bar :is(.app-mobile-space-trigger, .app-mobile-title), .app-topbar:not(.app-mobile-tab-root-bar)');
+    // The bar is paper; its wood is the sign: the Space's on a dock root, the chevron and title's on a pushed screen.
+    const wood = page.locator('.app-topbar.app-mobile-tab-root-bar :is(.app-mobile-space-trigger, .app-mobile-title), .app-topbar .app-mobile-back-sign');
     expect(await wood.first().evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('wood.webp');
   });
 }
