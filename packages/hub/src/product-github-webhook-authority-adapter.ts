@@ -92,7 +92,7 @@ export async function dispatchProductGitHubWebhook(input: {
   const repositoryName = `${repository.owner}/${repository.repo}`;
   const issues = new Map(githubWebhookIssueNumbers(input.event, input.payload)
     .map((number) => [githubIssueSourceRef(repositoryName, number), number]));
-  const routes = await resolveRoutes(input.env, installationId, [repository.sourceRef, ...issues.keys()]);
+  const routes = await resolveRoutes(input.env, installationId, [repository.sourceRef, ...issues.keys()], feature);
   const repositoryBody = githubWebhookMessageBody(input.event, input.payload, repository);
   /* One settled verdict per commit, read once for every subscribed pull request. */
   const settledSha = githubSettledCheckSuiteSha(input.event, input.payload);
