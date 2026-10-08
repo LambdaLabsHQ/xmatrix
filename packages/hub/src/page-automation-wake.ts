@@ -13,7 +13,7 @@ export async function tellPageAutomationChannels(env: Pick<Env, "RELAY_POSTGRES_
   await Promise.all((channelIds ?? []).map(async (channelId) => {
     for (let attempt = 1; ; attempt++) {
       try {
-        await wakeAgentLaunchCoordinator(env, channelId);
+        await wakeAgentLaunchCoordinator(env, channelId, ["automation"]);
         return;
       } catch (error) {
         if (attempt >= 3) {

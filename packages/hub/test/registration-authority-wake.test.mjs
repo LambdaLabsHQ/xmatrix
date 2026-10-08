@@ -20,3 +20,17 @@ test("every affected Channel is told, and a Channel that cannot be told is a ret
     error => error.status === 503 && error.retryable === true && error.code === "agent_launch_handover_unavailable");
   }
 });
+
+// A wake names the work it may have moved, so the Channel's pass runs that and
+// whatever is due — not every step (2026-10-08: woken passes ran ~15
+// transactions each).
+test("an authority change names the registration re-check; a returning Machine also names its Launches", async () => {
+  const bodies = [];
+  const namespace = { idFromName: name => name, get: () => ({ fetch: async (_url, init) => {
+    bodies.push(JSON.parse(init.body)); return new Response(null, { status: 202 }); } }) };
+  await wakeRegistrationChannels({ RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL: namespace }, database(["c1"]), { spaceId: "space" });
+  await wakeRegistrationChannels({ RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL: namespace }, database(["c2"]),
+    { ownerUserId: "owner", machineId: "machine" }, ["registrationStop", "launch"]);
+  assert.deepEqual(bodies.map(body => [body.channelId, body.work]),
+    [["c1", ["registrationStop"]], ["c2", ["registrationStop", "launch"]]]);
+});

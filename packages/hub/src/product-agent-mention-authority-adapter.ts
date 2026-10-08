@@ -34,7 +34,7 @@ export async function dispatchPreparedAgentLaunchWake(input: {
   // A fully rejected batch is a valid prepare result. There is no durable work
   // to wake, and the coordinator intentionally rejects an empty launch set.
   if (input.launchIds.length === 0) return "skipped";
-  const wake = await wakeAgentLaunchChannel(input.channels, input)
+  const wake = await wakeAgentLaunchChannel(input.channels, { ...input, work: ["launch"] })
     .catch(() => { throw new AgentLaunchHandoverUnavailable(); });
   if (!wake.ok) throw new AgentLaunchHandoverUnavailable(wake.status);
   return "woken";
@@ -200,7 +200,7 @@ export function createProductAgentMentionAuthorityPort(input: {
         actorUserId: input.actorUserId, channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt,
       }) as { intentId?: unknown; state?: unknown };
       if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_reborn_failed", 502);
-      await wakeAgentLaunchCoordinator(input.env, channelId);
+      await wakeAgentLaunchCoordinator(input.env, channelId, ["reborn"]);
       return { intentId: result.intentId, state: String(result.state) };
     },
 
@@ -208,7 +208,7 @@ export function createProductAgentMentionAuthorityPort(input: {
       const result = await handoffPrepare({ channelId, sourceInstanceId, sourceMessageId, sourceMention,
         successorHarness, prompt });
       if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_handoff_failed", 502);
-      await wakeAgentLaunchCoordinator(input.env, channelId);
+      await wakeAgentLaunchCoordinator(input.env, channelId, ["reborn"]);
       return { intentId: result.intentId, state: String(result.state) };
     },
 
