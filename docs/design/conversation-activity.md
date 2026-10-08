@@ -158,7 +158,9 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   its turn once its pull request's CI has started and continue when the
   verdict arrives.
 - **End.** The subscription is removed when the pull request closes,
-  whether or not the close was said.
+  whether or not the close was said. Routing carries the stored relation ID
+  through to removal; imported subscriptions retain their opaque IDs when
+  updated, rather than deriving an identity from connection or source names.
 - **Privacy.** A private repository's events reach only conversations people
   outside the Space cannot read, as for repository subscriptions.
 

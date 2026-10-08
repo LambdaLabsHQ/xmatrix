@@ -856,3 +856,40 @@ integration("a GitHub install appends its installation and keeps every other ins
   });
 });
 
+
+
+integration("an imported PR subscription keeps its identity through update, routing and removal", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    const apps = new PostgresAppRepository(database);
+    await addConnection(sql, space, "github");
+    await sql("UPDATE data.app_connector_connections SET metadata_json=$2::jsonb WHERE connection_id=$1",
+      [`${space}:github`, JSON.stringify({ installationId: "42" })]);
+    const channelId = `${space}:pr`;
+    const relationId = `${space}:imports-source:opaque-pr`;
+    const sourceRef = "github:issue:acme/app#7";
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      created_at,updated_at) VALUES ($2,$3,'pr','pr','open',$3||':rank-pr',1,$1,$1)`, [at, channelId, space]);
+    await sql(`INSERT INTO data.app_source_relations (relation_id,connection_id,space_id,channel_id,source_kind,
+      source_ref,features_json,version,created_by,created_at,updated_at) VALUES
+      ($2,$3||':github',$3,$4,'issue',$5,'["pulls"]',1,'owner',$1,$1)`,
+      [at, relationId, space, channelId, sourceRef]);
+    const updated = await apps.command({ commandId: `resubscribe-${space}`, connectionId: `${space}:github`,
+      channelId, sourceKind: "issue", sourceRef, features: ["pulls", "checks"],
+      principal: { kind: "user", id: "owner" }, at }, "put-relation");
+    assert.equal(updated.relation.id, relationId);
+    assert.equal(updated.relation.version, 2);
+    const routes = await apps.githubSubscriptionRoutes({ requestId: `route-${space}`, installationId: "42",
+      sourceRefs: [sourceRef], feature: "pulls", limit: 100 });
+    const route = routes.find(value => value.channelId === channelId);
+    assert.equal(route?.relationId, relationId);
+    await assert.rejects(apps.command({ commandId: `unauthorized-remove-${space}`, relationId,
+      principal: { kind: "user", id: "outsider" }, at }, "remove-relation"),
+      error => error.code === "channel_not_found");
+    const input = { commandId: `remove-${space}`, relationId: route.relationId,
+      principal: { kind: "user", id: "owner" }, at };
+    assert.equal((await apps.command(input, "remove-relation")).ok, true);
+    assert.equal((await apps.command(input, "remove-relation")).reused, true);
+    assert.equal((await sql("SELECT relation_id FROM data.app_source_relations WHERE channel_id=$1", [channelId]))
+      .rows.length, 0);
+  });
+});

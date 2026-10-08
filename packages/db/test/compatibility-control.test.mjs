@@ -54,9 +54,9 @@ test("Slack approval keeps its token encrypted on the session until it is consum
 
 test("GitHub webhook routes are derived from PostgreSQL connector relations", async () => {
   const db = database((query) => query.name === "app_github_subscription_routes_v4"
-    ? [{ space_id: "space-1", channel_id: "channel-1", connection_id: "connection-1",
+    ? [{ relation_id: "imported-repository", space_id: "space-1", channel_id: "channel-1", connection_id: "connection-1",
         created_by: "user-1", source_kind: "repository", source_ref: "github:repo:lambdalabshq/xmatrix" },
-      { space_id: "space-1", channel_id: "channel-2", connection_id: "connection-1",
+      { relation_id: "imported-pull-request", space_id: "space-1", channel_id: "channel-2", connection_id: "connection-1",
         created_by: "user-2", source_kind: "issue", source_ref: "github:issue:lambdalabshq/xmatrix#7" }]
     : []);
   const routes = await new PostgresAppRepository(db).githubSubscriptionRoutes({
@@ -64,9 +64,9 @@ test("GitHub webhook routes are derived from PostgreSQL connector relations", as
     sourceRefs: ["github:repo:LambdaLabsHQ/XMatrix", "github:issue:LambdaLabsHQ/XMatrix#7"], feature: "pulls", limit: 1001,
   });
 
-  assert.deepEqual(routes, [{ installationId: "42", sourceRef: "github:repo:lambdalabshq/xmatrix",
+  assert.deepEqual(routes, [{ relationId: "imported-repository", installationId: "42", sourceRef: "github:repo:lambdalabshq/xmatrix",
     sourceKind: "repository", spaceId: "space-1", channelId: "channel-1", connectionId: "connection-1",
-    authorityRootUserId: "user-1" }, { installationId: "42", sourceRef: "github:issue:lambdalabshq/xmatrix#7",
+    authorityRootUserId: "user-1" }, { relationId: "imported-pull-request", installationId: "42", sourceRef: "github:issue:lambdalabshq/xmatrix#7",
     sourceKind: "issue", spaceId: "space-1", channelId: "channel-2", connectionId: "connection-1",
     authorityRootUserId: "user-2" }]);
   const query = db.calls.find((call) => call.name === "app_github_subscription_routes_v4");

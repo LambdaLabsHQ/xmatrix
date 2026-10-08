@@ -2,6 +2,7 @@ import { PostgresAppRepository } from "@xmatrix/db";
 import { createPostgresAuthorityFleet, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 
 export interface GitHubSubscriptionRoute {
+  relationId: string;
   installationId: string;
   sourceRef: string;
   sourceKind: "repository" | "issue";

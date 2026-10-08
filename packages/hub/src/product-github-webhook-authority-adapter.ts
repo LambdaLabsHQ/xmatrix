@@ -119,7 +119,7 @@ export async function dispatchProductGitHubWebhook(input: {
       const end = number !== undefined && closed
         ? () => command(input.env, "remove-relation", {
           commandId: `product:github-pull-request:${input.delivery}:${route.channelId}:remove`.slice(0, 200),
-          relationId: `${route.connectionId}:${route.channelId}:issue:${route.sourceRef}`, principal,
+          relationId: route.relationId, principal,
         }).catch((error: unknown) => {
           console.error("Pull request subscription end failed", { channelId: route.channelId,
             error: error instanceof Error ? error.message : String(error) });
