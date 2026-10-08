@@ -123,3 +123,14 @@ test("public connector list shows only connected services with checked-in icons"
   assert.match(source("page.tsx"), /<HowItWorks \/>\s*<Connectors \/>/);
   assert.match(source("docs/page.tsx"), /<ConnectorList /);
 });
+
+test("homepage display headings use the self-hosted Manrope face", () => {
+  const globalsCss = source("globals.css");
+  assert.match(globalsCss, /font-family: "Manrope Variable";[\s\S]*?url\("\/fonts\/manrope-latin-wght-normal\.woff2"\)/);
+  assert.ok(fs.existsSync(path.join(appRoot, "../../public/fonts/manrope-latin-wght-normal.woff2")));
+  assert.ok(fs.existsSync(path.join(appRoot, "../../public/fonts/manrope-latin-ext-wght-normal.woff2")));
+  assert.match(tokensCss, /--font-site-display-family: "Manrope Variable", var\(--font-sans-family\);/);
+  assert.match(siteCss, /\.site-display \{\s*font-family: var\(--font-site-display-family\);/);
+  assert.match(heroSource, /<h1 className="site-display /);
+  assert.doesNotMatch(heroSource, /tracking-\[-0\.055em\]/);
+});

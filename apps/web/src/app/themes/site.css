@@ -32,6 +32,13 @@ html:has(.site-page) {
   text-wrap: balance;
 }
 
+/* Display headings: Manrope's open letterforms at a slight negative track.
+   Inter pulled tight enough to look "designed" at this size crowds instead. */
+.site-display {
+  font-family: var(--font-site-display-family);
+  letter-spacing: -0.02em;
+}
+
 .site-page :is(p, li) {
   text-wrap: pretty;
 }

@@ -59,7 +59,7 @@ export function Connectors() {
     <section id="connectors" className="x-section">
       <div className="x-container">
         <div className="max-w-3xl">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-5xl">
+          <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl">
             Bring your tools into the conversation.
           </h2>
           <p className="mt-5 text-lg leading-8 text-muted-foreground">
