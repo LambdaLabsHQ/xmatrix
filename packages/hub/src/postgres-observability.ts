@@ -35,10 +35,10 @@ const OPERATION_FAMILIES = new Set([
   "governance", "human-profile", "launch", "machine",
   "machine-control", "machine-lifecycle", "machine-request",
   "membership", "message", "page", "postgres", "preference-canary",
-  "projection-recovery", "registration", "reply-recovery", "role", "runtime", "scheduler",
+  "projection-recovery", "reborn", "registration", "reply-recovery", "role", "runtime", "scheduler",
   "secret-broker", "secret-value", "shared-memory", "slack-oauth", "space", "space-invite",
-  "space-join", "space-join-request", "space-placement", "trace-access", "transfer",
-  "user-preference", "workspace",
+  "space-join", "space-join-request", "space-placement", "summon-intent", "trace-access", "transfer",
+  "user-preference", "wake", "workspace",
 ]);
 
 const OUTCOMES = new Set(["ok", "error", "row_limit"]);
