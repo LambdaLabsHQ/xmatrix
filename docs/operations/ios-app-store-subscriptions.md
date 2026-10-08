@@ -32,3 +32,7 @@ After the gated Hub release, configure App Store Server Notifications V2 for pro
 Migration 0170 is expand-only; nullable provider columns default to Stripe and old rows continue to be interpreted as Stripe. Apply through the normal release migration gate. Deploy Hub/Web before the native StoreKit build through Production Release Intent. Older native clients show an update message instead of a web checkout inside iOS.
 
 An Apple outage fails closed for new grants. Existing access lasts through the verified expiry. Reconcile from the original owner's billing settings after recovery; do not manually move a transaction or rewrite provider ownership. Removing the configuration disables new Apple API operations but does not cancel a customer's subscription. Existing subscribers still need Apple's renewal controls.
+
+## Local runtime verification
+
+The repository's Wrangler 4.79.0 simulator cannot extract the Apple Root G3 EC public key (`id-ecPublicKey`). A successful bundle or Node unit test does not exercise this boundary. The same certificate verifies its self-signature in the current official Wrangler 4.149.0 runtime with the unchanged compatibility date. Use a current official runtime for certificate-chain integration checks; do not work around the old simulator by skipping signature or chain validation. Root self-signature verification alone is not proof of a completed StoreKit purchase.
