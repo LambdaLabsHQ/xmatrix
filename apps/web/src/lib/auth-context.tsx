@@ -1,5 +1,7 @@
 "use client";
 
+import { AUTH_TOKEN_REJECTED_EVENT } from "@/lib/auth-events";
+import { subscribeResume } from "@/lib/connectivity/connectivity";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { WEB_PROXY_ROUTES, type AuthResponse, type AuthUser } from "@xmatrix/protocol";
@@ -22,8 +24,7 @@ import { getDesktopBridge } from "./desktop/bridge";
 import { XMatrixQueryProvider } from "./query/query-provider";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 
-/** Dispatched when the Hub refuses the session token; the auth provider renews it. */
-export const AUTH_TOKEN_REJECTED_EVENT = "xmatrix:auth-token-rejected";
+export { AUTH_TOKEN_REJECTED_EVENT };
 
 export type { AuthUser };
 
@@ -209,21 +210,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void refreshSessionState();
     }
 
-    /* The Hub refused the current token: renew it now, visible or not. */
+    /* The Hub refused the current token: renew it now, visible or not. Many
+       requests can be refused at once; one renewal answers all of them. */
+    let lastRejectionRefresh = -Infinity;
     function refreshAfterRejection() {
+      const now = Date.now();
+      if (now - lastRejectionRefresh < 10_000) return;
+      lastRejectionRefresh = now;
       void refreshSessionState();
     }
 
-    /* The network is back: a pending backoff would only keep the spinner up. */
-    function refreshWhenOnline() {
-      transientRetries = 0;
-      refreshWhenVisible();
-    }
-
     refreshWhenVisible();
-    window.addEventListener("focus", refreshWhenVisible);
-    window.addEventListener("online", refreshWhenOnline);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
+    const stopResume = subscribeResume((signal) => {
+      // The network is back: a pending backoff would only keep the spinner up.
+      if (signal.online) transientRetries = 0;
+      refreshWhenVisible();
+    });
     window.addEventListener(AUTH_TOKEN_REJECTED_EVENT, refreshAfterRejection);
     const interval = window.setInterval(refreshWhenVisible, 5 * 60 * 1000);
 
@@ -231,9 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       if (transientRetryTimer !== undefined) window.clearTimeout(transientRetryTimer);
       window.removeEventListener(AUTH_TOKEN_REJECTED_EVENT, refreshAfterRejection);
-      window.removeEventListener("focus", refreshWhenVisible);
-      window.removeEventListener("online", refreshWhenOnline);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      stopResume();
       window.clearInterval(interval);
     };
   }, [applySessionState, loadSessionStateOnce, mockAuthState]);

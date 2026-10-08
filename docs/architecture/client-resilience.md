@@ -73,3 +73,57 @@ uncaught failures through it so no route answers a plain-text `500`.
 The web Worker's hop to the Hub (`src/lib/xmatrix-proxy.ts`) answers a dropped
 Hub connection as a retryable `503`. A hop timeout and a failed session refresh
 are not retryable: repeating them only adds load or delays the real error.
+
+## Coming back: one connectivity signal
+
+`apps/web/src/lib/connectivity/connectivity.ts` is the only place that listens
+to `focus`, `visibilitychange`, `online`, `pageshow` and the iOS app's
+`xmatrix:native-resume`. It emits one resume signal per return to the
+foreground, carrying whether the page was **suspended** (hidden for more than
+20 seconds, restored from the back-forward cache, or resumed by the native app)
+and whether the network just came back. Every subscriber sees the same answer.
+
+Subscribers: both live sockets (below), the foreground refresh of the
+conversation list and workspace, the session read in `auth-context.tsx`, and
+TanStack Query's `onlineManager`. New code that needs to react to the page
+coming back subscribes here; it does not add its own window listeners.
+
+## Live connections: one reconnecting socket
+
+`apps/web/src/lib/connectivity/reconnecting-socket.ts` keeps every WebSocket
+up: the Human socket (`use-workspace-shell-state.ts`) and the page editor's
+session (`lib/pages/page-client.ts`). It guarantees:
+
+- one dial at a time, so a delayed redial never opens a second socket;
+- jittered exponential backoff, reset only when the owner reports the session
+  works (`markHealthy`: `human_connected`, a page's first sync), never on a
+  bare `open`;
+- a dial still connecting after 15 seconds is abandoned;
+- a heartbeat: any inbound frame counts as an answer, a socket silent past the
+  pong timeout is replaced, and repeated probes never extend the deadline;
+- on resume: a suspended page replaces its socket, a page with no socket dials
+  at once, a live socket is probed.
+
+### Heartbeats cost nothing
+
+The Hub answers both heartbeats with a Durable Object WebSocket auto-response,
+so a ping neither wakes the object nor ends its hibernation:
+
+| Socket | Ping frame | Answer | Interval / timeout |
+| --- | --- | --- | --- |
+| Human | `HUMAN_HEARTBEAT_PING` (`@xmatrix/protocol`) | `HUMAN_HEARTBEAT_PONG` | 25 s / 10 s |
+| Page | `"ping"` text frame | `"pong"` | 25 s / 10 s |
+
+The frames are compared byte for byte, so both sides import the same constant.
+A page session pings only when its ticket names the heartbeat
+(`heartbeat: "ping"`), so an editor never times out a Hub that predates it.
+
+### Tokens
+
+A token renewal does not tear a connection down. The Human socket reads the
+current token when it dials, and the Hub decides when a new one is needed by
+closing with `4401`; the page session takes a renewed token for its next
+ticket and keeps its document, which may hold edits the Hub has not received.
+An HTTP `401` to a request that carried the bearer token raises the same
+renewal event as a socket `4401` (`lib/auth-events.ts`); the auth provider
+renews at most once every ten seconds however many requests were refused.

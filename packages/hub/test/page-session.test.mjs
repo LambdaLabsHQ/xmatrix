@@ -569,3 +569,4 @@ test("pages written by hand and Agent edits in any markdown style merge as the s
   await h.session.submitEdit(agent, { baseRevision: 1, body: "# Project\n* zero\n* one\n* two\n", conversationIds: [] });
   assert.equal(h.session.markdown(), "# Project\n\n- zero\n- one\n- two and a half\n");
 });
+

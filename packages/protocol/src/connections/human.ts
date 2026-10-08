@@ -66,6 +66,15 @@ export interface HumanFocusChannelMessage {
   historyLimit?: number;
 }
 
+/**
+ * The web client's heartbeat. The Hub answers this exact frame with
+ * `HUMAN_HEARTBEAT_PONG` itself (a WebSocket auto-response) without waking the
+ * Durable Object that holds the socket, so the web can probe often for free.
+ * Both are compared byte for byte: never build them any other way.
+ */
+export const HUMAN_HEARTBEAT_PING = '{"type":"ping","requestId":"web-heartbeat"}';
+export const HUMAN_HEARTBEAT_PONG = '{"type":"pong","requestId":"web-heartbeat"}';
+
 export type HumanClientMessage =
   | HumanConnectMessage
   | HumanFocusChannelMessage
@@ -103,7 +112,8 @@ export type HumanTraceAccessServerMessage =
 
 export type HumanServerMessage =
   | { type: "error"; requestId?: string; message: string; failure?: import("../runtime-operation-failure.js").RuntimeOperationFailure }
-  | { type: "pong"; requestId?: string; ts: string }
+  /** `ts` is absent on the auto-response to `HUMAN_HEARTBEAT_PING`. */
+  | { type: "pong"; requestId?: string; ts?: string }
   | { type: "auth_refreshed"; requestId?: string; ts: string }
   | { type: "user_subscribed"; requestId?: string; user: AuthUser }
   | { type: "human_connected"; requestId?: string; user: AuthUser }
