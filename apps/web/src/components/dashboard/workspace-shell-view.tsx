@@ -680,11 +680,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         visible: nativeMobileTabVisible,
         activeView: view,
         spaceId: currentSpaceId,
+        statusLive,
         // Omit identity while auth is unresolved; null explicitly means signed out.
         ...(!loading ? { userId: user?.id ?? null } : {}),
       })
       .catch(() => undefined);
-  }, [desktopBridge, isIOSNativeShell, nativeMobileTabVisible, view, currentSpaceId, loading, user?.id]);
+  }, [desktopBridge, isIOSNativeShell, nativeMobileTabVisible, view, currentSpaceId, statusLive, loading, user?.id]);
 
   useEffect(() => {
     if (!isIOSNativeShell || !desktopBridge?.onMobileTabChange) return;

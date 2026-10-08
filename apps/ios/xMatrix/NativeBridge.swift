@@ -174,7 +174,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
     func updateMobileTabState(from payload: [String: Any]?) {
         let visible = boolValue(payload?["visible"])
         let activeView = payload?["activeView"] as? String ?? "pages"
-        let state = MobileTabState(visible: visible, activeView: activeView)
+        let statusLive = boolValue(payload?["statusLive"])
+        let state = MobileTabState(visible: visible, activeView: activeView, statusLive: statusLive)
         onMobileTabStateChanged?(state)
     }
 
