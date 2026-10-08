@@ -24,7 +24,7 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
   const credentials: Record<string, string> = { ...resolved?.values };
   const verify = grantVerifier(providerId, credentials);
   let refreshed = await refreshOAuthFields(env, providerId, credentials).catch(error => {
-    if (verify || ["google", "googlesearchconsole", "bitbucket", "pagerduty", "sentry", "discord"].includes(providerId)) throw error;
+    if (verify || ["google", "googlesearchconsole", "googleadsense", "bitbucket", "pagerduty", "sentry", "discord"].includes(providerId)) throw error;
     return undefined;
   });
   const persist = async (fields: Record<string, string | null>) => {

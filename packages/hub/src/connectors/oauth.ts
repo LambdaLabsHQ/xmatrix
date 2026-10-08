@@ -25,10 +25,11 @@ const REFRESH_MARGIN_MS = 2 * 60_000;
 const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   google: { scope: "https://www.googleapis.com/auth/drive.file", name: "per-file" },
   googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
+  googleadsense: { scope: "https://www.googleapis.com/auth/adsense.readonly", name: "AdSense" },
 };
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
