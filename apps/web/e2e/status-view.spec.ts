@@ -108,7 +108,7 @@ test("the desktop rail opens Status, where each machine row shows its load", asy
   await page.setViewportSize({ width: 1400, height: 900 });
   await openStatus(page);
   await expect(page.locator(".app-rail").getByRole("button", { name: "Status", exact: true })).toBeVisible();
-  const busy = page.getByTestId("status-machine-row").filter({ hasText: "busy-box" });
+  const busy = page.getByTestId("status-machine-row").filter({ visible: true, hasText: "busy-box" });
   await expect(busy.getByTestId("machine-load-glance")).toBeVisible();
   await page.getByRole("button", { name: "All agents" }).click();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/agents$/u);
