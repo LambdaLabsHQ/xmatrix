@@ -25,16 +25,13 @@ export interface LaunchParameterEvidence {
     selected: string; probabilities: Record<string, number> }>;
 }
 
-/** A distribution over handles matching `handle` that sums to one, in which
- * `selected` is listed and the most probable. */
+/** The model's probabilities as recorded, over handles matching `handle`.
+ * They are shown, never judged: the pick is `selected`, whatever they say. */
 function distribution(value: unknown, handle: RegExp, selected: unknown, limit = 100): Record<string, number> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value) || typeof selected !== "string") return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof selected !== "string" || !handle.test(selected)) return undefined;
   const entries = Object.entries(value);
-  if (!entries.length || entries.length > limit || !entries.some(([key]) => key === selected) ||
-      entries.some(([key, probability]) => !handle.test(key) || typeof probability !== "number" ||
-        !Number.isFinite(probability) || probability < 0 || probability > 1) ||
-      Math.abs(entries.reduce((sum, [, probability]) => sum + Number(probability), 0) - 1) > .02 ||
-      Number((value as Record<string, number>)[selected]) !== Math.max(...entries.map(([, p]) => Number(p)))) return undefined;
+  if (entries.length > limit || entries.some(([key, probability]) => !handle.test(key) ||
+    typeof probability !== "number" || !Number.isFinite(probability))) return undefined;
   return Object.fromEntries(entries) as Record<string, number>;
 }
 

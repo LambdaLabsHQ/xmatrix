@@ -1,8 +1,9 @@
 import { WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
 import type { DesktopCliSessionPayload } from "./bridge";
+import { xmatrixRawResponse } from "../query/api-client";
 
 export async function requestCliSessionExchange(token: string) {
-  const exchangeResponse = await fetch(WEB_PROXY_ROUTES.cli_exchange_session, {
+  const exchangeResponse = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_exchange_session, {
     method: "POST",
     headers: { authorization: `Bearer ${token}` },
   });

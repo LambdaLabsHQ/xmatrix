@@ -199,7 +199,9 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
   stored command once the daemon answers. They are issued and leased only to
   daemons advertising `machine_harness_login_v1`.
 - **On the daemon.** `login_start` replaces any sign-in waiting for that preset,
-  runs `start` with piped stdin from the home directory and answers within 45
+  runs `start` from the home directory with piped stdin, or in a pseudo-terminal
+  when the recipe sets `terminal` (its prompt refuses a pipe; a pasted code is
+  typed in as a line), and answers within 45
   seconds with `login: { state: "awaiting_user", flow, verificationUri,
   userCode? }`; only `https://` URLs are offered. The process stays waiting for
   at most 15 minutes. `login_finish` writes the pasted code (paste flows) and
@@ -212,14 +214,15 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
   (`signed_in`, `signed_out`, `unknown`) on their inventory item; each sign-in
   action re-probes the preset.
 
-Presets with a sign-in today: codex, claude, cline, copilot, cursor, grok,
-hermes, jcode, kilo, kimi, kiro, opencode, qoder and zcode. gemini, goose and openclaw sign in only inside an
-interactive terminal; pi, vibe, junie and qwen have no official headless sign-in
-(API keys or their TUI). auggie and omp sign in through a localhost browser
-callback, devin and commandcode need a terminal for their prompt, dimcode prints
-no link without one, and codebuddy, droid, prime, trae, antigravity, autohand,
-amp and reasonix have no CLI sign-in (in-app, ACP `authenticate`, API keys or
-enterprise tokens).
+Presets with a sign-in today: codex, claude, cline, copilot, cursor, devin
+(in a pseudo-terminal), grok, hermes, jcode, kilo, kimi, kiro, omp (paste the
+code or the address the browser ends on), opencode, qoder and zcode. gemini,
+goose and openclaw sign in only inside an interactive terminal; pi, vibe, junie
+and qwen have no official headless sign-in (API keys or their TUI). auggie and
+commandcode accept only a localhost browser callback (commandcode also takes a
+pasted API key), dimcode prints no link even in a terminal, and codebuddy,
+droid, prime, trae, antigravity, autohand, amp and reasonix have no CLI sign-in
+(in-app, ACP `authenticate`, API keys or enterprise tokens).
 
 See [Machines and CLI management](harness-management-cli.md) for user commands and confirmation behavior.
 

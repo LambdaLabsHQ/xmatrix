@@ -6,6 +6,7 @@ import {
   RELAY_V2_BLOB_UPLOAD_PREFIX,
 } from "@xmatrix/protocol/relay-v2/message-attachment";
 import { lowercaseHex } from "@xmatrix/protocol";
+import { xmatrixRawResponse } from "../query/api-client";
 const HASH_CHUNK_BYTES = 4 * 1024 * 1024;
 const UPLOAD_INTENT_TTL_MS = 60 * 60 * 1_000;
 
@@ -146,7 +147,7 @@ export async function prepareMessageAttachmentUpload(input: {
     // The deadline has to stay armed across reading the body, not just until
     // headers arrive: a response whose JSON never finishes streaming is the
     // same permanent hang as one that never answers at all.
-    const intentResponse = await fetch(webProxyPath(RELAY_V2_BLOB_UPLOAD_INTENT_PATH), {
+    const intentResponse = await xmatrixRawResponse(webProxyPath(RELAY_V2_BLOB_UPLOAD_INTENT_PATH), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${input.token}`,
@@ -294,7 +295,7 @@ export async function commitMessageAttachmentRefs(input: {
     const deadline = deadlineSignal(input.controlDeadlineMs ?? UPLOAD_CONTROL_DEADLINE_MS);
     try {
       // Armed across the body read too — see the intent hop above.
-      const response = await fetch(webProxyPath(RELAY_V2_BLOB_REF_PATH), {
+      const response = await xmatrixRawResponse(webProxyPath(RELAY_V2_BLOB_REF_PATH), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${input.token}`,

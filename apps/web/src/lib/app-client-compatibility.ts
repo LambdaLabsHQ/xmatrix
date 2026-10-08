@@ -14,6 +14,7 @@ import canonicalVersion from "../../../../version.json" with { type: "json" };
 import { getDesktopBridge } from "./desktop/bridge";
 import { xmatrixHubOrigin } from "./query/api-client";
 import { ClientAdmissionCache } from "./client-admission-cache";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 type CompatibilityResult = { identity: ClientCompatibilityIdentity; decision: ClientCompatibilityDecision };
 const admissionCache = new ClientAdmissionCache<CompatibilityResult>();
@@ -60,7 +61,7 @@ export async function checkAppCompatibility(): Promise<CompatibilityResult> {
 }
 
 async function requestAppCompatibility(identity: ClientCompatibilityIdentity): Promise<CompatibilityResult> {
-  const response = await fetch("/api/client-compatibility", {
+  const response = await xmatrixRawResponse("/api/client-compatibility", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(identity),

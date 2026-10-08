@@ -51,9 +51,6 @@ function route(kind: "human" | "agent", handler: (c: Context<{ Bindings: Env }>,
         code: "human_required" }, 403);
       return c.json(await handler(c, user, user.agentRun!), 200, NO_STORE);
     } catch (error) {
-      if (error instanceof SpaceSecretError) {
-        return c.json({ error: error.message, code: error.code }, error.status as 400, NO_STORE);
-      }
       return requestErrorResponse(c, error);
     }
   };

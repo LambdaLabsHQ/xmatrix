@@ -1,3 +1,4 @@
+import { ControlError } from "@xmatrix/db";
 import { readGitHubRepositoryForImport, type GitHubRepositoryForImport } from "./app-connectors";
 import { deterministicConversationId, launchConversationAgent, openConversation } from "./system-conversation";
 import type { Env } from "./types";
@@ -10,9 +11,7 @@ import { findAppConnection } from "./apps";
  * first page tree from it in an import conversation. The owner reviews and
  * applies the draft like any move to pages.
  */
-export class PageImportError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) { super(message); }
-}
+export class PageImportError extends ControlError {}
 
 export function pageImportPrompt(source: GitHubRepositoryForImport): string {
   const issues = source.openIssues.length

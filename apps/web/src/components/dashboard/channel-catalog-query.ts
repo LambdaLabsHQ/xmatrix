@@ -9,7 +9,7 @@ import {
   type SerializedChannel,
 } from "@xmatrix/protocol";
 
-import { XMatrixApiError, xmatrixRawResponse } from "@/lib/query/api-client";
+import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 import { fetchChannelCatalog } from "./workspace-admin-views";
 
 export interface NormalizedChannelCatalogQuery {
@@ -45,19 +45,6 @@ function legacyRows(
   }));
 }
 
-async function responseError(response: Response): Promise<XMatrixApiError> {
-  const body = await response.clone().json().catch(() => ({})) as {
-    error?: string; code?: string; retryable?: boolean; details?: unknown;
-  };
-  return new XMatrixApiError({
-    message: body.error || `Request failed (${response.status})`,
-    status: response.status,
-    code: body.code,
-    retryable: body.retryable,
-    details: body.details,
-  });
-}
-
 /**
  * Requests one catalog page. A Hub too old to serve pages answers from the
  * legacy channel list, read as `legacyQuery`, with only an active count.
@@ -84,7 +71,7 @@ async function requestCatalogPage(input: {
       counts: { active: rows.length, unread: 0, mentions: 0 },
     };
   }
-  if (!response.ok) throw await responseError(response);
+  if (!response.ok) throw await errorFromResponse(response);
   return response.json() as Promise<ChannelCatalogPage>;
 }
 
@@ -149,7 +136,7 @@ export async function fetchChannelCatalogResolve(input: {
     cache: "no-store",
   });
   if (response.status !== 404 && response.status !== 426) {
-    if (!response.ok) throw await responseError(response);
+    if (!response.ok) throw await errorFromResponse(response);
     return response.json() as Promise<ChannelCatalogResolveResult>;
   }
   const legacy = await fetchChannelCatalog(input.token, { spaceId: input.spaceId });
