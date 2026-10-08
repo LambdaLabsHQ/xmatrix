@@ -14,7 +14,8 @@ import { cn } from "@/lib/utils";
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { MessageReferenceCatalogProvider, type MessageReferenceCatalog } from "./message-reference-catalog";
 import { MachineLinkProvider, type MachineLinks } from "./machine-link";
-import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
+import { channelsInSpace, machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
+import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useAndroidBackHandler } from "./use-android-back";
 import { Loader2, Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
@@ -611,6 +612,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       : spaces.find((space) => space.id === spaceId)?.pendingJoinRequestCount ?? 0;
     return total + count;
   }, 0);
+  // Status pulses while any conversation in this Space has an Agent at work,
+  // the same "in progress" the conversation list shows.
+  const statusLive = useMemo(
+    () => channelsInSpace(channels, currentSpaceId).some((channel) => channelHasWorkInHand(channel, events)),
+    [channels, currentSpaceId, events],
+  );
 
   /* Stable identities. These are handed down through memoised subtrees, so a
      fresh closure on every render would re-render them for changes that have
@@ -673,11 +680,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         visible: nativeMobileTabVisible,
         activeView: view,
         spaceId: currentSpaceId,
+        statusLive,
         // Omit identity while auth is unresolved; null explicitly means signed out.
         ...(!loading ? { userId: user?.id ?? null } : {}),
       })
       .catch(() => undefined);
-  }, [desktopBridge, isIOSNativeShell, nativeMobileTabVisible, view, currentSpaceId, loading, user?.id]);
+  }, [desktopBridge, isIOSNativeShell, nativeMobileTabVisible, view, currentSpaceId, statusLive, loading, user?.id]);
 
   useEffect(() => {
     if (!isIOSNativeShell || !desktopBridge?.onMobileTabChange) return;
@@ -1285,6 +1293,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onLogout={() => void logoutAndClearDeviceData().catch(() => undefined)}
           onReportIssue={openIssueReport}
           pendingJoinRequestCount={pendingJoinRequestCount}
+          statusLive={statusLive}
           updateControl={desktopBridge ? (
             <DesktopUpdateRailButton
               status={desktopUpdateStatus}
@@ -1302,6 +1311,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           <MobileTabDock
             activeView={view}
             hidden={!nativeMobileTabVisible}
+            statusLive={statusLive}
             onChangeView={changeAppView}
           />
         )}

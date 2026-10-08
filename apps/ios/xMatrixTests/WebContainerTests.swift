@@ -123,18 +123,21 @@ final class WebContainerTests: XCTestCase {
         let bridge = NativeBridge()
         var received = MobileTabState()
         bridge.onMobileTabStateChanged = { received = $0 }
-        bridge.updateMobileTabState(from: ["visible": true, "activeView": "agents", "userId": "alice"])
+        bridge.updateMobileTabState(from: ["visible": true, "activeView": "agents", "userId": "alice", "statusLive": true])
         XCTAssertTrue(received.visible)
         XCTAssertEqual(received.activeView, "agents")
+        XCTAssertTrue(received.statusLive)
         bridge.updateMobileTabState(from: [:])
         XCTAssertFalse(received.visible)
         XCTAssertEqual(received.activeView, "pages")
+        XCTAssertFalse(received.statusLive)
     }
 
     func testStatusTabNamesTheCanonicalWebView() {
         XCTAssertEqual(MobileTabView.status.rawValue, "status")
         XCTAssertEqual(MobileTabView.status.label, "Status")
         XCTAssertEqual(AppConfiguration.mobileTabURL(.status).query?.contains("view=status"), true)
+        XCTAssertNotNil(UIImage(systemName: MobileTabView.status.icon))
     }
 
     func testDockMarginIsConcentricWithTheDeviceCorner() {
@@ -172,22 +175,50 @@ final class WebContainerTests: XCTestCase {
     }
 
     func testDockEndsAreHalfCircles() throws {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        let controller = NativeMobileTabBarController()
-        window.rootViewController = controller
-        window.isHidden = false
+        let (window, controller) = makeWindowedDock()
         defer { window.isHidden = true }
-        controller.apply(MobileTabState(visible: true))
-        for _ in 0..<8 {
-            controller.view.setNeedsLayout()
-            controller.view.layoutIfNeeded()
-        }
+        settle(controller, MobileTabState(visible: true))
         guard DisplayCorner.radius > 1 else {
             throw XCTSkip("This simulator reports square display corners.")
         }
         let bar = try XCTUnwrap(controller.view.subviews.compactMap { $0 as? UITabBar }.first)
         let dock = dockCapsule(in: bar)
         XCTAssertEqual(dock.effectiveRadius(corner: .bottomLeft), dock.bounds.height / 2, accuracy: 0.5)
+    }
+
+    func testStatusPulseRunsOnlyWhileAnAgentWorks() throws {
+        let (window, controller) = makeWindowedDock()
+        defer { window.isHidden = true }
+        func pulsing() -> Int {
+            var count = 0
+            func walk(_ view: UIView) {
+                if view is UIImageView, view.layer.mask?.name == "xmatrix.statusPulse" { count += 1 }
+                view.subviews.forEach(walk)
+            }
+            walk(controller.view)
+            return count
+        }
+        settle(controller, MobileTabState(visible: true, activeView: "pages", statusLive: true))
+        XCTAssertGreaterThan(pulsing(), 0)
+        settle(controller, MobileTabState(visible: true, activeView: "pages", statusLive: false))
+        XCTAssertEqual(pulsing(), 0)
+    }
+
+    /// A dock in a shown window, so the device corner resolves.
+    private func makeWindowedDock() -> (UIWindow, NativeMobileTabBarController) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = NativeMobileTabBarController()
+        window.rootViewController = controller
+        window.isHidden = false
+        return (window, controller)
+    }
+
+    private func settle(_ controller: NativeMobileTabBarController, _ state: MobileTabState) {
+        controller.apply(state)
+        for _ in 0..<8 {
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+        }
     }
 
     /// The visible capsule: the widest system platter, or the bar itself.
