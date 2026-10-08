@@ -711,8 +711,11 @@ export function SidebarSpaceHeader({
             )}
             <ChevronDown className={cn("app-space-switcher-chevron ml-auto size-4 shrink-0 transition-transform", open && "rotate-180")} />
           </button>
+          {/* Opening grows the glass down with its content; closing is
+              immediate, because the glass leaves with the open state and
+              rows still fading out would show bare over the list. */}
           <div
-            className="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
+            className={cn("grid", open && "transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none")}
             style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none" }}
             aria-hidden={!open}
           >
