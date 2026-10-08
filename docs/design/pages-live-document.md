@@ -425,7 +425,11 @@ section it keeps true, and it is written there:
   not deleted. Putting the reference back, by undo or by restoring a
   revision, resumes one that was paused only for that reason. A heading's
   *Attach* offers the page's detached Automations with *Put back here*; the
-  Space's Schedules list every Automation, with *Delete*.
+  Space's Schedules list every Automation, with *Delete*. The edit says so
+  when it happens: its result names each Automation it detached or resumed
+  and each top section it removed, `page edit` prints a line for each, and
+  people on the page see a notice. A resumed Automation that never ran gets
+  its first delay again, at most one interval.
 - **Each Automation works in a conversation of its own**, created with it and
   linked to its section. Each occurrence is a fresh Run in that conversation
   and writes back to the section (§5.2). The conversation is where it runs,

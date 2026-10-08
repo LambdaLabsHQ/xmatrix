@@ -41,6 +41,25 @@ export interface PageRevision {
   createdAt: string;
 }
 
+/** An Automation a page edit detached or attached (docs/design/pages-live-document.md §6.1). */
+export interface PageAutomationAnchorChange { automationId: string; name: string }
+
+/**
+ * A whole-document page edit as committed, and what it did besides its text:
+ * the Automations whose reference it removed (now paused) or brought back
+ * (resumed), and the top sections it removed. The writer is told at once, as
+ * an edit that drops sections is otherwise silent.
+ */
+export interface PageEditResult {
+  revision: number;
+  kind: PageRevision["kind"];
+  headRevision: number;
+  detachedAutomations: PageAutomationAnchorChange[];
+  attachedAutomations: PageAutomationAnchorChange[];
+  /** Titles of the depth 1 and 2 headings the edit removed or renamed. */
+  removedSections: string[];
+}
+
 /**
  * What anyone reading a section should know besides its text
  * (docs/design/pages-live-document.md §3): when and where it last changed,

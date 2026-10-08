@@ -73,6 +73,17 @@ export function pageBlocks(markdown: string): PageBlock[] {
   return blocks;
 }
 
+/**
+ * The titles of the top sections (heading depth 1 or 2) in `before` that
+ * `after` no longer has, in page order: what a whole-document edit removed,
+ * or renamed, at the level a reader would miss.
+ */
+export function pageRemovedSections(before: string, after: string): string[] {
+  const top = (markdown: string) => pageBlocks(markdown).filter((block) => block.depth === 1 || block.depth === 2);
+  const kept = new Set(top(after).map((block) => block.title.trim()));
+  return [...new Set(top(before).map((block) => block.title.trim()).filter((title) => !kept.has(title)))];
+}
+
 /** The block containing a character offset, or '' before the first heading. */
 export function pageBlockAt(markdown: string, offset: number): string {
   let id = "";

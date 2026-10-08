@@ -433,7 +433,7 @@ export {
   automationReferences, GITHUB_FILE_REFERENCE_SCHEME, gitHubFileReferenceFrom, gitHubFileReferenceHref,
   gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageHeadingSlug, pageLineDiff,
-  pageReferencesIn, pageReferenceSpans, pageReferenceToken, parseGitHubFileReference,
+  pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, parseGitHubFileReference,
   removeAutomationReference, replaceAutomationReference,
 } from "./page-markdown.js";
 export type {
@@ -450,7 +450,7 @@ export {
   PAGE_DOCUMENT_FRAGMENT, pageAuthorColor,
 } from "./pages.js";
 export type {
-  PageAuthor, PageAwareness, PageBlockAwareness, PageChanges, PageClaim, PageConversation,
+  PageAuthor, PageAutomationAnchorChange, PageAwareness, PageBlockAwareness, PageChanges, PageEditResult, PageClaim, PageConversation,
   PageDocument, PageGitHubFile, PageLink, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
   PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PageOwedUpdate, PagePresent,
   PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
