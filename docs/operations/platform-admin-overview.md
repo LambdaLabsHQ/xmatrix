@@ -106,12 +106,25 @@ back in.
 
 ## Cost and bounds
 
-`message_heads` has no `created_at` index, so the message aggregates are table
-scans: one pass each for totals, per-day, per-Space, and per-user. This is an
-on-demand operator read and never sits on a product request path. Space and user
-tables are bounded by `spaceLimit`/`userLimit` (default 50, max 200) and the
-activity window by `activityDays` (default 14, max 90); the response reports
-`truncated` when a table was cut off.
+The PostgreSQL overview executes one metadata-only SQL statement per physical
+shard; shards are read concurrently. A materialized CTE reads the live message
+metadata (`space_id`, `author_id`, `author_kind`, `created_at`) once and shares
+it between totals, per-Space, per-user, and daily aggregates. It does not read
+message content. This avoids four base-table scans and six serial SQL round
+trips on the directory shard (five on other shards). All aggregates in a shard
+also share one statement snapshot.
+
+After operator authorization and the required audit write, the auth directory
+inventory and physical-shard aggregates run concurrently. Each read still
+checks current authority, records its audit row, and returns `private,
+no-store`; no server response cache substitutes for either check. The Web's
+existing 60-second query cache is scoped to account and Hub. Changing the
+activity range retains that account's current result while the next request
+loads; a forbidden response hides it.
+
+Space rows are capped at 200 and user rows at 10,000; activity windows are at
+most 90 days. The response reports `truncated` when a table is cut off. Nested
+JSON inventories retain explicit overflow checks as well as SQL limits.
 
 Activity windows are exact UTC calendar days, including the current UTC day.
 Each PostgreSQL aggregate uses the same inclusive start and exclusive end as
@@ -121,19 +134,10 @@ Queries below the database driver's 10,000-row ceiling use one extra sentinel
 row; queries at that ceiling carry `COUNT(*) OVER ()` alongside their bounded
 rows, so the total still proves whether more rows exist.
 
-Post-retirement message metrics fan out from each Space authority to its
-authoritative Channel families. That scan is bounded to 1,000 Channels per
-Space so the operator read cannot exhaust the Cloudflare-service subrequest
-budget. A larger Space still returns the overview, with
-`truncated.messageMetrics=true`; message totals, activity, and per-Space/user
-message counts are then partial, while all non-message totals remain complete.
-The Web view displays that distinction instead of presenting partial message
-counts as exact or failing the entire admin surface.
-
-Owner and member emails come from the Machine Daemon enrollment record when one
-exists, otherwise from the auth database (`AUTH_DB`), capped at 200 lookups per
-read. A missing or mid-migration directory degrades to bare user ids instead of
-failing the read.
+Machine totals are read only on the directory shard. Registered-user identities
+and access summaries come from the current auth authority. A missing or
+mid-migration auth directory degrades to product user ids and bounded email
+lookups rather than failing the entire read.
 
 ## Related code
 
