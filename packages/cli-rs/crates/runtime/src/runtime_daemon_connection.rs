@@ -1794,7 +1794,7 @@ async fn register_long_lived_relay(
     refresh_daemon_auth: bool,
 ) -> error::Result<(protocol::SerializedAgent, Vec<protocol::SerializedAgent>)> {
     let mut attempt: u32 = 0;
-    let mut delay_ms = LONG_LIVED_REGISTER_RETRY_BASE_MS;
+    let mut backoff = long_lived_register_backoff();
     let mut next_daemon_auth_refresh = refresh_daemon_auth
         .then(|| Instant::now() + Duration::from_secs(AGENT_RUN_TOKEN_REFRESH_INTERVAL_SECS));
     loop {
@@ -1830,7 +1830,7 @@ async fn register_long_lived_relay(
                 attempt = attempt.saturating_add(1);
                 write_current_run_error_status("relay_register_retrying", false, &err);
                 wait_long_lived_register_retry(
-                    &mut delay_ms,
+                    &mut backoff,
                     attempt,
                     &format!("{label} relay registration failed ({err})"),
                     true,
@@ -1846,7 +1846,7 @@ async fn register_long_lived_machine_daemon(
     connection: &mut MachineDaemonConnectionClient,
 ) -> error::Result<SerializedMachineDaemon> {
     let mut attempt: u32 = 0;
-    let mut delay_ms = LONG_LIVED_REGISTER_RETRY_BASE_MS;
+    let mut backoff = long_lived_register_backoff();
 
     loop {
         match connection.register().await {
@@ -1854,7 +1854,7 @@ async fn register_long_lived_machine_daemon(
             Err(err) if is_retryable_initial_register_error(&err) => {
                 attempt = attempt.saturating_add(1);
                 wait_long_lived_register_retry(
-                    &mut delay_ms,
+                    &mut backoff,
                     attempt,
                     &format!("machine daemon connection failed ({err})"),
                     false,
@@ -1875,7 +1875,10 @@ fn operation_retryable_or(err: &CliError, fallback: impl FnOnce(&CliError, &str)
 
 fn is_retryable_initial_register_error(err: &CliError) -> bool {
     operation_retryable_or(err, |err, message| {
-        matches!(err, CliError::RelayTransient(_) | CliError::Request(_))
+        // The Hub's `retryable` verdict or a network failure; the text
+        // matches below cover errors that reach here only as strings.
+        err.is_transient()
+            || matches!(err, CliError::RelayTransient(_) | CliError::Request(_))
             || message.contains("error sending request")
             || message.contains("websocket handshake failed")
             || message.contains("websocket handshake timed out")
@@ -1908,7 +1911,7 @@ async fn join_long_lived_initial_channel(
     history_limit: u32,
 ) -> error::Result<()> {
     let mut attempt: u32 = 0;
-    let mut delay_ms = LONG_LIVED_REGISTER_RETRY_BASE_MS;
+    let mut backoff = long_lived_register_backoff();
 
     loop {
         match relay.join_channel(channel_id.clone(), history_limit).await {
@@ -1924,7 +1927,7 @@ async fn join_long_lived_initial_channel(
                 attempt = attempt.saturating_add(1);
                 write_current_run_error_status("channel_join_retrying", false, &err);
                 wait_long_lived_register_retry(
-                    &mut delay_ms,
+                    &mut backoff,
                     attempt,
                     &format!("initial channel join failed ({err})"),
                     true,
@@ -1944,14 +1947,21 @@ fn is_retryable_relay_operation_error(err: &CliError) -> bool {
     })
 }
 
+fn long_lived_register_backoff() -> xmatrix_cli_core::backoff::Backoff {
+    xmatrix_cli_core::backoff::Backoff::new(
+        LONG_LIVED_REGISTER_RETRY_BASE,
+        LONG_LIVED_REGISTER_RETRY_MAX,
+    )
+}
+
 async fn wait_long_lived_register_retry(
-    delay_ms: &mut u64,
+    backoff: &mut xmatrix_cli_core::backoff::Backoff,
     attempt: u32,
     failure: &str,
     record_connection_retry: bool,
 ) {
-    let jitter_ms = current_time_millis().unwrap_or_default() % LONG_LIVED_REGISTER_RETRY_JITTER_MS;
-    let sleep_ms = delay_ms.saturating_add(jitter_ms);
+    let delay = backoff.next_delay();
+    let sleep_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX);
     if record_connection_retry {
         write_current_connection_retry(attempt, sleep_ms);
     }
@@ -1961,14 +1971,7 @@ async fn wait_long_lived_register_retry(
         sleep_ms,
         attempt
     );
-    tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-    *delay_ms = next_long_lived_register_retry_delay_ms(*delay_ms);
-}
-
-fn next_long_lived_register_retry_delay_ms(current_ms: u64) -> u64 {
-    current_ms
-        .saturating_mul(2)
-        .min(LONG_LIVED_REGISTER_RETRY_MAX_MS)
+    tokio::time::sleep(delay).await;
 }
 
 fn current_time_millis() -> Option<u64> {

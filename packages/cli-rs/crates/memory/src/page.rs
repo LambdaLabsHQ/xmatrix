@@ -704,7 +704,12 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                     );
                     Ok(())
                 }
-                Err(CliError::Http(message)) if message.contains("changed since you read it") => {
+                Err(error)
+                    if error
+                        .http_message()
+                        .is_some_and(|message| message.contains("changed since you read it")) =>
+                {
+                    let message = error.to_string();
                     // Hand the Agent the current head so it can merge and retry.
                     let current: PageResponse = http::request_json(
                         &with_route(hub_url, &format!("{}?", page_route(&space, &page))),
@@ -720,7 +725,7 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                         current.page.summary.head_revision
                     );
                     print!("{}", render_page_document(&current.page));
-                    Err(CliError::Http(message))
+                    Err(error)
                 }
                 Err(error) => Err(error),
             }

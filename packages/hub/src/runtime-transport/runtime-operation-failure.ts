@@ -1,5 +1,6 @@
 import { ControlError } from "@xmatrix/db";
 
+import { transientDurableObjectFailure } from "../durable-object-failure";
 import { retryablePostgresFailure } from "../postgres-error-classification";
 import { safeServerDiagnosticId } from "../server-error-diagnostic";
 
@@ -69,6 +70,15 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
   if (error instanceof RuntimeClientOperationError) return error.failure;
   const rejected = authorityOperationError(error);
   if (rejected) return rejected.failure;
+  // A Durable Object the Hub was redeploying, lost or overloaded: the same
+  // retryable `service_restarting` the HTTP routes answer, so a client redials
+  // instead of treating a deploy as its own failure.
+  if (transientDurableObjectFailure(error)) {
+    const failure = { code: "service_restarting", diagnosticId: `diag_${crypto.randomUUID()}`,
+      retryable: true, stage: "runtime.session" };
+    console.warn("xMatrix runtime session met a restarting Durable Object", { ...failure, ...runtimeFailureOrigin(error) });
+    return failure;
+  }
   const failure = { code: "runtime.session_failed", diagnosticId: `diag_${crypto.randomUUID()}`,
     retryable: false, stage: "runtime.session" };
   // Where it was thrown, never what it said: an unclassified error's message
