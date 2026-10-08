@@ -520,6 +520,19 @@ export function TopWorkspaceBar({
   // title alone: the Space is the one the list just showed, and a member count
   // under it says nothing about the conversation.
   const mobileSubtitle = showBack || tabRoot ? null : spaceName;
+  // A pushed screen's back chevron is cut into the same wood sign as its title.
+  const backButton = (showBack || showMoreBack) ? (
+    <button
+      title={conversationOverPage ? "Back to page" : pageOpen ? "Back to pages" : showBack ? "Back to channels" : "Back to More"}
+      aria-label={conversationOverPage ? "Back to page" : pageOpen ? "Back to pages" : showBack ? "Back to channels"
+        : "Back to More"}
+      className="app-mobile-topbar-back flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card/10 md:hidden"
+      onClick={composingOpen ? onCloseComposing : conversationOverPage ? onClosePageConversation
+        : pageOpen ? onClosePage : showBack ? onBack : onOpenMore}
+    >
+      <ChevronLeft className="size-5" />
+    </button>
+  ) : null;
   return (
     <>
     <header
@@ -529,19 +542,8 @@ export function TopWorkspaceBar({
         tabRoot && "app-mobile-tab-root-bar"
       )}
     >
-      {(showBack || showMoreBack) && (
-        <button
-          title={conversationOverPage ? "Back to page" : pageOpen ? "Back to pages" : showBack ? "Back to channels" : "Back to More"}
-          aria-label={conversationOverPage ? "Back to page" : pageOpen ? "Back to pages" : showBack ? "Back to channels"
-            : "Back to More"}
-          className="app-mobile-topbar-back flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card/10 md:hidden"
-          onClick={composingOpen ? onCloseComposing : conversationOverPage ? onClosePageConversation
-            : pageOpen ? onClosePage : showBack ? onBack : onOpenMore}
-        >
-          <ChevronLeft className="size-5" />
-        </button>
-      )}
       <div className="relative min-w-0 flex-1 md:hidden">
+        <SignWithBack back={backButton}>
         {spaces.length > 1 && !showBack ? (
           <>
             <button
@@ -593,6 +595,7 @@ export function TopWorkspaceBar({
             )}
           </div>
         )}
+        </SignWithBack>
       </div>
       {onOpenSearch && !showBack && (
         // Desktop search is the window's search bar and ⌘F; this icon is the phone's, and the
@@ -1464,6 +1467,11 @@ export function channelWorkInHandInstanceIds(channel: SerializedChannel, events:
 
 export function channelHasWorkInHand(channel: SerializedChannel, events: ObservabilityEvent[]): boolean {
   return channelWorkInHandInstanceIds(channel, events).length > 0;
+}
+
+function SignWithBack({ back, children }: { back: React.ReactNode; children: React.ReactNode }) {
+  if (!back) return <>{children}</>;
+  return <div className="app-mobile-back-sign">{back}{children}</div>;
 }
 
 export function SpaceAvatar({ space }: { space: SerializedSpace }) {
