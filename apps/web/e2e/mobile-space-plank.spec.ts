@@ -34,7 +34,7 @@ for (const tab of ["channels", "status", "pages"]) {
     const searchBox = (await bar.locator(".app-mobile-search-icon svg").boundingBox())!;
     expect(panelBox.x).toBeGreaterThan(0);
     expect(panelBox.x + panelBox.width).toBeLessThan(searchBox.x);
-    await expect(panel).toHaveCSS("border-radius", "12px");
+    await expect(panel).toHaveCSS("border-radius", "14px");
     await page.locator(".xmatrix-app-shell").evaluate((shell) => {
       (shell as HTMLElement).style.setProperty("--mobile-topbar-safe-top", "59px");
     });
