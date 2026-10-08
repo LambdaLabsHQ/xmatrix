@@ -8,7 +8,8 @@
  * conversation, ⌘F starts with `in:` that conversation; Backspace takes it off.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, AtSign, Clock, FileText, Hash, MessageSquare, Search, X } from "lucide-react";
+import { ArrowRight, AtSign, Clock, FileText, Hash, MessageSquare, X } from "lucide-react";
+import { SearchGlyph } from "@/components/ui/search-glyph";
 import type {
   MessageSearchHit,
   ObservabilityEvent,
@@ -426,7 +427,7 @@ export function WorkspaceSearchDialog({
               onSelect: () => choose(row),
             };
             if (row.kind === "all") {
-              return <SearchResultRow key={row.key} {...common} icon={Search}
+              return <SearchResultRow key={row.key} {...common} icon={SearchGlyph}
                 title={searchText ? `Search for “${searchText}”` : `Everything ${scopeLabel}`}
                 subtitle={scoped ? scopeLabel : `Every message and page in ${space?.name ?? "this Space"}`}
                 hint="↵" />;

@@ -1302,7 +1302,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           ) : undefined}
         />
         {!(view === "messages" && selectedChannel && !composingConversation) && <GlobalSearchBar
-          spaceName={currentSpace?.name ?? "this Space"}
           searching={workspaceSearchOpen}
           onOpenSearch={openWorkspaceSearch}
         />}

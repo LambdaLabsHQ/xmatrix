@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { GitPullRequest, Link2, Plus, Search, Unlink } from "lucide-react";
+import { GitPullRequest, Link2, Plus, Unlink } from "lucide-react";
+import { SearchGlyph } from "@/components/ui/search-glyph";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { readGitHubGrant } from "@/lib/github-connect-return";
@@ -141,7 +142,7 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthori
       <div className="mt-3 flex flex-wrap gap-2">
         {installations && !installations.authorized ? (
           <button type="button" className={ACTION_CLASS} onClick={onAuthorize}>
-            <Search className="size-3.5" /> Find my GitHub accounts
+            <SearchGlyph className="size-3.5" /> Find my GitHub accounts
           </button>
         ) : null}
         <button type="button" className={ACTION_CLASS} onClick={onInstall}>

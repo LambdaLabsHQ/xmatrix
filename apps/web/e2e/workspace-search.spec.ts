@@ -63,6 +63,13 @@ test("search is the window's, not the rail's: the top bar opens it in every view
     await page.goto(`/app/${E2E_SPACE.id}/${path}`, { waitUntil: "domcontentloaded" });
     await expect(page.locator(".app-global-bar").getByRole("button", { name: "Search" })).toBeVisible();
   }
+  // A bare magnifier like the conversation header's: no fill, border or shadow, even on hover.
+  const icon = page.locator(".app-global-bar").getByRole("button", { name: "Search" });
+  await icon.hover();
+  expect(await icon.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return [style.backgroundColor, style.borderWidth, style.boxShadow, node.getBoundingClientRect().width];
+  })).toEqual(["rgba(0, 0, 0, 0)", "0px", "none", 32]);
   await page.getByRole("button", { name: "Search", exact: true }).filter({ visible: true }).click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
 });
@@ -139,15 +146,15 @@ test("conversation actions sit beside its name and borderless search aligns righ
   await expect(page.locator(".app-search-panel-field").getByText("in #general")).toHaveCount(0);
 });
 
-test("a page's controls end before the search capsule", async ({ page }) => {
+test("a page's controls end before the search icon", async ({ page }) => {
   await installPageTreeStubs(page, ["Home"]);
   await page.goto(`/app/${encodeURIComponent(E2E_SPACE.id)}/pages`, { waitUntil: "domcontentloaded" });
   await page.locator(".app-sidebar").getByText("Home", { exact: true }).click();
   const controls = page.getByTestId("page-controls");
   await expect(controls.getByRole("button", { name: /Share/u })).toBeVisible();
-  const capsule = await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).boundingBox();
+  const icon = await page.locator(".app-global-bar").getByRole("button", { name: "Search" }).boundingBox();
   const share = await controls.getByRole("button", { name: /Share/u }).boundingBox();
-  expect(share!.x + share!.width).toBeLessThanOrEqual(capsule!.x);
+  expect(share!.x + share!.width).toBeLessThanOrEqual(icon!.x);
 });
 
 test("a long conversation name keeps its search and actions visible without a details column", async ({ page }) => {
