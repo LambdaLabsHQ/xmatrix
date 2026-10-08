@@ -164,22 +164,30 @@ test("a long conversation name keeps its search and actions visible without a de
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
 });
 
+/**
+ * Opens search from the visible search control, types a query and waits for
+ * the drop-down to settle; returns where the control was and the panel.
+ */
+async function openSearchFromControl(page: Page) {
+  const anchor = page.locator("[data-search-anchor]").filter({ visible: true }).first();
+  await expect.poll(() => anchor.boundingBox()).not.toBeNull();
+  const control = (await anchor.boundingBox())!;
+  await anchor.click();
+  const panel = page.getByRole("dialog", { name: "Search workspace" });
+  await expect(page.locator("[data-workspace-search-input]")).toBeFocused();
+  await page.keyboard.type("deploy");
+  await expect(panel.getByText("deploy the hub (1)")).toBeVisible();
+  await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+  await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/u);
+  return { control, panel };
+}
+
 test("the search panel drops from the control that opened it, one glass with nothing glass inside", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, RELEASE] });
   await stubMessageSearch(page);
   for (const path of [`channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, "pages"]) {
     await page.goto(`/app/${E2E_SPACE.id}/${path}`, { waitUntil: "domcontentloaded" });
-    const anchor = page.locator("[data-search-anchor]").filter({ visible: true }).first();
-    await expect.poll(() => anchor.boundingBox()).not.toBeNull();
-    const control = (await anchor.boundingBox())!;
-    await anchor.click();
-    const panel = page.getByRole("dialog", { name: "Search workspace" });
-    await expect(panel).toBeVisible();
-    await page.keyboard.type("deploy");
-    await expect(panel.getByText("deploy the hub (1)")).toBeVisible();
-    // Let the drop-down animation settle before measuring.
-    await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
-    await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/u);
+    const { control, panel } = await openSearchFromControl(page);
     const field = (await page.locator(".app-search-panel-field").boundingBox())!;
     const close = (await panel.getByRole("button", { name: "Close search" }).boundingBox())!;
     expect(field.y + field.height / 2).toBeCloseTo(control.y + control.height / 2, 0);
@@ -203,16 +211,8 @@ test.describe("on a phone", () => {
     await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
     await stubMessageSearch(page);
     await page.goto(`/app/${E2E_SPACE.id}/channels`, { waitUntil: "domcontentloaded" });
-    const anchor = page.locator("[data-search-anchor]").filter({ visible: true }).first();
-    await expect.poll(() => anchor.boundingBox()).not.toBeNull();
-    const control = (await anchor.boundingBox())!;
-    await anchor.click();
-    const panel = page.getByRole("dialog", { name: "Search workspace" });
+    const { control, panel } = await openSearchFromControl(page);
     const input = page.locator("[data-workspace-search-input]");
-    await expect(input).toBeFocused();
-    await page.keyboard.type("deploy");
-    await expect(panel.getByText("deploy the hub (1)")).toBeVisible();
-    await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/u);
     const box = (await panel.boundingBox())!;
     const viewport = page.viewportSize()!;
     const centre = (b: { x: number; width: number }) => b.x + b.width / 2;
