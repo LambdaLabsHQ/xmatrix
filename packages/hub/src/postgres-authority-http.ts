@@ -1,6 +1,7 @@
 import { utf8ByteLength } from "@xmatrix/protocol";
-import { ControlError, DetailedControlError, createAuthorityDatabase, type AuthorityDatabase } from "@xmatrix/db";
+import { ControlError, createAuthorityDatabase, type AuthorityDatabase } from "@xmatrix/db";
 
+import { domainFailure, failureResponse, type DomainError } from "./error-contract";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { postgresDatabaseObservers } from "./postgres-observability";
 
@@ -24,13 +25,6 @@ export interface PostgresAuthorityBindingEnv {
   RELAY_POSTGRES_SHARD_ID?: string;
 }
 
-interface PostgresControlFailure {
-  message: string;
-  code: string;
-  retryable: boolean;
-  status: number;
-}
-
 export function postgresAuthorityJson(value: unknown, status?: number): Response {
   return Response.json(value, {
     ...(status === undefined ? {} : { status }),
@@ -39,14 +33,8 @@ export function postgresAuthorityJson(value: unknown, status?: number): Response
 }
 
 /** A domain control error already carries its public status, retry policy and any details. */
-export function postgresControlErrorResponse(
-  error: PostgresControlFailure,
-  extra: Record<string, unknown> = {},
-): Response {
-  const details = error instanceof DetailedControlError && error.details ? { details: error.details } : {};
-  return postgresAuthorityJson({
-    error: error.message, code: error.code, retryable: error.retryable, ...details, ...extra,
-  }, error.status);
+export function postgresControlErrorResponse(error: DomainError, extra: Record<string, unknown> = {}): Response {
+  return failureResponse(domainFailure(error, extra));
 }
 
 /** A domain rejection answered with its own status; anything else is rethrown as unexpected. */

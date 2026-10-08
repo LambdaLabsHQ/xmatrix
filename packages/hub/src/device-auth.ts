@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { ControlError } from "@xmatrix/db";
 import { deriveHumanConnectionUrl, type AuthUser } from "@xmatrix/protocol";
 import { appOrigin } from "./deployment-origins";
 import type { Env } from "./types";
@@ -10,6 +11,7 @@ import {
   verifyAuthToken,
 } from "./auth";
 import { logAuthMetric } from "./auth-observability";
+import { domainErrorResponse, transientError } from "./error-contract";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
 import { createBetterAuthSessionForUser } from "./better-auth";
 import {
@@ -240,7 +242,10 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     } catch (error) {
       if (!(error instanceof InvalidAuthTokenError)) {
         await logAuthMetric({ routeGroup: "device_approve", status: 503, outcome: "verification_unavailable" });
-        return Response.json({ error: "Sign-in could not be checked right now. Try again." }, { status: 503 });
+        // The token was never judged: a key set or database outage is retryable, a defect is not.
+        return domainErrorResponse({ message: "Sign-in could not be checked right now. Try again.",
+          code: "auth_verification_unavailable", status: 503,
+          retryable: error instanceof ControlError ? error.retryable : transientError(error) });
       }
       await logAuthMetric({
         routeGroup: "device_approve",

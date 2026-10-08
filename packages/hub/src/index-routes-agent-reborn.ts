@@ -4,6 +4,7 @@ import type { Env } from "./types";
 import { createProductAgentMentionAuthorityPort } from "./product-agent-mention-authority-adapter";
 import { AgentRebornControlError, parseAgentRebornControlBody, requestOwnedInstanceReborn } from "./product-agent-reborn-control";
 import { requireAuth, requireHumanAuth, requestErrorResponse } from "./index-shared";
+import { domainErrorResponse } from "./error-contract";
 import { hasControlCharacter, sha256Hex } from "@xmatrix/protocol";
 
 export function registerAgentRebornRoutes(app: Hono<{ Bindings: Env }>): void {
@@ -23,7 +24,7 @@ export function registerAgentRebornRoutes(app: Hono<{ Bindings: Env }>): void {
         instance: instance as Record<string, unknown>, port });
       return c.json(queued, 202, { "cache-control": "private, no-store" });
     } catch (error) {
-      if (error instanceof AgentRebornControlError) return c.json({ code: error.code, error: error.message }, error.status);
+      if (error instanceof AgentRebornControlError) return domainErrorResponse(error);
       return requestErrorResponse(c, error);
     }
   });

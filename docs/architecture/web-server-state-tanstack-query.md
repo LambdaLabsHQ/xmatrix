@@ -22,7 +22,8 @@ clears it. No Query cache is persisted and there is no SSR prefetch.
 
 The shared transport returns `XMatrixApiError`. Queries retry at most twice and
 only for network failures, 408, 429, or a 5xx response explicitly marked
-`retryable`. Mutations do not retry by default. Window focus does not refetch,
+`retryable` (the Hub side of that contract is
+[hub-error-contract.md](hub-error-contract.md)). Mutations do not retry by default. Window focus does not refetch,
 reconnect does, and unused data is collected after ten minutes. Each polling
 domain supplies its own visible/terminal-state interval.
 

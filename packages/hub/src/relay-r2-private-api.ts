@@ -1,4 +1,5 @@
-import { privateJsonResponse as noStoreJson } from "./private-json-response";
+import { domainErrorResponse } from "./error-contract";
+import { PRIVATE_JSON_HEADERS } from "./private-json-response";
 import { readBoundedStream } from "./read-bounded-stream";
 import { plainRecord } from "@xmatrix/protocol";
 import {
@@ -28,12 +29,15 @@ export type RelayR2PrivateApiErrorCode =
 export class RelayR2PrivateApiError extends Error {
   readonly code: RelayR2PrivateApiErrorCode;
   readonly status: number;
+  /** A transient failure of storage or the attachment authority a replay can survive. */
+  readonly retryable: boolean;
 
-  constructor(code: RelayR2PrivateApiErrorCode, status: number, message: string) {
+  constructor(code: RelayR2PrivateApiErrorCode, status: number, message: string, retryable = false) {
     super(message);
     this.name = "RelayR2PrivateApiError";
     this.code = code;
     this.status = status;
+    this.retryable = retryable;
   }
 }
 
@@ -49,8 +53,9 @@ function apiError(
   code: RelayR2PrivateApiErrorCode,
   status: number,
   message: string,
+  retryable = false,
 ): RelayR2PrivateApiError {
-  return new RelayR2PrivateApiError(code, status, message);
+  return new RelayR2PrivateApiError(code, status, message, retryable);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -159,11 +164,8 @@ function hasRequiredOptionalFields(
 }
 
 export function relayR2PrivateApiErrorResponse(error: unknown): Response | undefined {
-  if (error instanceof RelayR2PrivateApiError) {
-    return noStoreJson({ error: error.message, code: error.code }, error.status);
-  }
-  if (error instanceof RelayR2DownloadGatewayError) {
-    return noStoreJson({ error: error.message, code: error.code }, error.status);
+  if (error instanceof RelayR2PrivateApiError || error instanceof RelayR2DownloadGatewayError) {
+    return domainErrorResponse(error, PRIVATE_JSON_HEADERS);
   }
   return undefined;
 }
@@ -189,6 +191,7 @@ async function readAuthoritativeMessageAttachment(input: {
       "capability_security_unavailable",
       503,
       "message attachment authority is temporarily unavailable",
+      true,
     );
   }
   const payload = await readBoundedInternalJson(
@@ -202,6 +205,7 @@ async function readAuthoritativeMessageAttachment(input: {
       response.status >= 500
         ? "message attachment authority is temporarily unavailable"
         : "message attachment is not available to this principal",
+      response.status >= 500 && isRecord(payload) && payload.retryable === true,
     );
   }
   if (
@@ -336,6 +340,7 @@ export async function handleRelayV2MessageAttachmentProductMedia(input: {
       "private_storage_unavailable",
       503,
       "message attachment failed immutable storage verification",
+      true,
     );
   }
   if (!object) {

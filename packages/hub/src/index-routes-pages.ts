@@ -2,6 +2,7 @@ import { MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, readP
   type PagePrincipal } from "@xmatrix/db";
 import { DURABLE_OBJECT_RETRY_AFTER_SECONDS } from "./durable-object-failure";
 import { relayResponse } from "./private-response";
+import { domainErrorResponse } from "./error-contract";
 import type { Context, Hono } from "hono";
 import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-principal";
 import { requireAuth } from "./index-shared";
@@ -360,7 +361,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       return c.json(await publishPreReviewVerdict(c.env, { channelId, actorUserId: run.ownerUserId,
         runId: run.runId, verdict: body.verdict, summary }), 200, NO_STORE);
     } catch (error) {
-      if (error instanceof PreReviewError) return c.json({ error: error.message, code: error.code }, error.status as 403);
+      if (error instanceof PreReviewError) return domainErrorResponse(error);
       return failure(c, error);
     }
   });
@@ -420,7 +421,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       }
       const headers = new Headers(c.req.raw.headers);
       headers.set("x-xmatrix-page-ticket", protocol.slice(PAGE_SESSION_SUBPROTOCOL_PREFIX.length));
-      return pageSession(c.env, c.req.param("spaceId"), c.req.param("pageId"))
+      return await pageSession(c.env, c.req.param("spaceId"), c.req.param("pageId"))
         .fetch(new Request("https://page-session/ws", { headers }));
     } catch (error) {
       return failure(c, error);
@@ -512,7 +513,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
         : await read();
       return c.json(file as unknown as Record<string, unknown>, 200, NO_STORE);
     } catch (error) {
-      if (error instanceof GitHubFileError) return c.json({ error: error.message, code: error.code }, error.status);
+      if (error instanceof GitHubFileError) return domainErrorResponse(error);
       return failure(c, error);
     }
   });

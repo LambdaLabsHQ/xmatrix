@@ -1,5 +1,6 @@
 import { AgentChannelAccessError, PostgresAgentChannelAccessRepository } from "@xmatrix/db";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
+import { domainErrorResponse } from "./error-contract";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 
@@ -50,8 +51,7 @@ export function agentRunCreatedByMetadata(run: AgentRunPrincipal): Record<string
 
 export function agentRunDelegationFailure(error: unknown): Response | null {
   if (error instanceof AgentRunDelegationError || error instanceof AgentChannelAccessError) {
-    return Response.json({ error: error.message, code: error.code,
-      ...(error instanceof AgentChannelAccessError ? { retryable: error.retryable } : {}) }, { status: error.status });
+    return domainErrorResponse(error);
   }
   return null;
 }

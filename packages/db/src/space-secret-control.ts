@@ -16,7 +16,7 @@ const MAX_VALUE_BYTES = 64 * 1024;
 const SECRET_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u;
 
 export class SpaceSecretError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string = code) {
+  constructor(readonly code: string, readonly status: number, message: string = code, readonly retryable = false) {
     super(message);
     this.name = "SpaceSecretError";
   }
