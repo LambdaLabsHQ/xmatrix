@@ -707,7 +707,7 @@ test('a historical parameter failure shows its retained cause before raw records
   await page.goto('/app/personal-sspaceperso/channels/general-cchannelgen', { waitUntil: 'domcontentloaded' });
   await page.locator('.app-mention-invocation').first().click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog).toContainText('Cause: Jev\'s "workspace" answer selected an option that was not offered.');
+  await expect(dialog).toContainText('Cause: xMatrix\'s "workspace" answer selected an option that was not offered.');
   await expect(dialog).toContainText('Selected environment: claude · Claude Code · Legend Mac');
   await expect(dialog).not.toContainText('Process startup is confirmed separately');
   await expect(dialog.getByText('Candidate observations')).toBeVisible();
