@@ -1400,6 +1400,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     // Survives a token renewal re-running this effect, so a renewed token the Hub
     // still refuses backs off too; only an accepted connect resets it.
     const reconnectAttempt = relayReconnectAttemptRef;
+    let connectedBefore = false;
 
     function relayUrl() {
       const hubUrl = normalizeHubUrl(
@@ -1409,7 +1410,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }
 
     function scheduleReconnect() {
-      if (cancelled) return;
+      // A resume may already have dialled while a compatibility check was
+      // pending; a second socket would stay open, unowned, until the tab closes.
+      if (cancelled || socket) return;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       const delay = Math.min(30000, 1000 * 2 ** Math.min(reconnectAttempt.current, 5));
       reconnectAttempt.current += 1;
       reconnectTimer = window.setTimeout(connect, delay);
@@ -1523,6 +1527,16 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           relayPushConnectedRef.current = true;
           setHumanPushConnected(true);
           reconnectAttempt.current = 0;
+          if (connectedBefore) {
+            // Frames pushed while the socket was down are gone, and polling
+            // stays off while it is up: read what they would have changed.
+            const identity = { userId };
+            void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.spaces(identity) });
+            void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(identity, "workspace-projects") });
+            void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(identity, "workspace-events") });
+            invalidateWorkspaceResources(queryClient);
+          }
+          connectedBefore = true;
           reconcileUnconfirmedOnReconnectRef.current?.();
           sendHumanChannelFocus({
             channelId: conversationViewOpen(viewRef.current) ? selectedChannelIdRef.current : null,
@@ -1949,7 +1963,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }
 
     function connect() {
-      if (cancelled) return;
+      if (cancelled || socket) return;
+      reconnectTimer = undefined;
       const live = new WebSocket(relayUrl());
       socket = live;
       relaySocketRef.current = live;
