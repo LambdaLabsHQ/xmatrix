@@ -1,6 +1,6 @@
 import { parseAppleSubscriptionConfig, type AppleSubscriptionConfig } from "@xmatrix/protocol";
 import { Buffer } from "node:buffer";
-import { Environment, SignedDataVerifier, type JWSTransactionDecodedPayload } from "@apple/app-store-server-library";
+import type { JWSTransactionDecodedPayload } from "@apple/app-store-server-library";
 import { importPKCS8, SignJWT } from "jose";
 import type { BillingSubscriptionFact } from "@xmatrix/db";
 import { APPLE_ROOT_G3 } from "./root-certificate";
@@ -17,7 +17,9 @@ export function appleSubscriptionConfig(raw: string | undefined): AppleSubscript
   catch { throw new AppleBillingError("apple_billing_unavailable", "App Store subscriptions are not configured"); }
 }
 
-function verifier(config: AppleSubscriptionConfig, environment: AppleEnvironment) {
+async function verifier(config: AppleSubscriptionConfig, environment: AppleEnvironment) {
+  // Load inside the request: the SDK initializes its random source on import.
+  const { Environment, SignedDataVerifier } = await import("@apple/app-store-server-library");
   // Incoming messages are only triggers; entitlement facts are always fetched
   // afresh from Apple's authenticated API below. Offline certificate validation
   // avoids SDK OCSP networking outside our bounded fetch policy.
@@ -34,7 +36,7 @@ export async function verifyAppleNotification(config: AppleSubscriptionConfig, s
   if (typeof signedPayload !== "string" || signedPayload.length > 64_000) throw new AppleBillingError("invalid_apple_notification", "Invalid Apple notification");
   for (const realm of ["Production", "Sandbox"] as const) {
     try {
-      const check = verifier(config, realm);
+      const check = await verifier(config, realm);
       const note = await check.verifyAndDecodeNotification(signedPayload);
       if (!note.data?.signedTransactionInfo) return null;
       const transaction = await check.verifyAndDecodeTransaction(note.data.signedTransactionInfo);
@@ -100,7 +102,7 @@ export async function retrieveAppleSubscription(config: AppleSubscriptionConfig,
   if (data.bundleId !== APPLE_BUNDLE_ID || data.environment !== realm || !Array.isArray(data.data) || data.data.length > 20) throw new AppleBillingError("apple_response_invalid", "Invalid Apple subscription response");
   const records = data.data.flatMap((group) => group.lastTransactions ?? []);
   if (records.length > 20) throw new AppleBillingError("apple_response_invalid", "Apple subscription response is too large");
-  const check = verifier(config, realm);
+  const check = await verifier(config, realm);
   const matches: VerifiedAppleSubscription[] = [];
   try {
     for (const record of records) {
