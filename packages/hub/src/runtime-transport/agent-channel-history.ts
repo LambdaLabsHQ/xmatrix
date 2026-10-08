@@ -3,7 +3,7 @@ import type {
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
 import { crossChannelReplyRelay, type ChannelMessage, type SerializedAgent, utf8ByteLength } from "@xmatrix/protocol";
-import { channelMessage, channelMessageDeliveryIntent } from "./channel-message-frame";
+import { agentChannelMessageDeliveryIntent, channelMessage } from "./channel-message-frame";
 import type { AgentInstanceRuntimeSession } from "./agent-instance-port";
 import type { AgentChannelHistoryPort } from "./postgres-agent-instance-port";
 
@@ -298,6 +298,11 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
       limit: query.limit,
       ...(query.afterSequence !== undefined ? { afterSequence: query.afterSequence } : {}),
     });
+    const recipient = {
+      agentName: session.principal.agentName,
+      agentId: session.principal.agentId,
+      channelInstanceId: session.run.channelInstanceId,
+    };
     const frames = page.messages.flatMap((entry) => {
       if (entry.from.kind === "agent" &&
           (entry.from.identityId === session.principal.agentId ||
@@ -317,9 +322,12 @@ export class AgentChannelHistory implements AgentChannelHistoryPort {
       // newcomer to this channel and nothing here was ever addressed to it as
       // work. Catch-up is the opposite — it is exactly the work the cursor
       // says this principal never received. A system fact is context in either.
+      // Catch-up classifies exactly as live delivery does: a stop, `/kill all`,
+      // handoff or reborn was carried out by the Hub when it was committed, so
+      // replaying it as work hands a stale control command to the runtime.
       const deliveryIntent = metric.mode === "join_birth" || answerIsAnothers
         ? "context" as const
-        : channelMessageDeliveryIntent(message);
+        : agentChannelMessageDeliveryIntent(message, recipient);
       return [{
         type: "channel_history_replay" as const,
         message,
