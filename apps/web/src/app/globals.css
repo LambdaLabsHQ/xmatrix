@@ -5370,9 +5370,14 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
        it, as it does on the board of the desktop rail. */
     --mobile-topbar-offset: var(--mobile-topbar-safe-top);
     --mobile-topbar-space: calc(var(--mobile-topbar-offset) + var(--mobile-topbar-height));
-    /* Only floating wood controls cast onto the paper. The continuous
-       navigation board meets the content directly, without a shadow. */
-    --app-wood-plank-cast: 0 8px 20px -10px oklch(0.35 0.07 60 / 0.45);
+    /* Wood that floats on the paper (the bar's sign, the +) has one look: a
+       lit top and left rim, a dark bottom and right rim, and a shadow cast
+       evenly around it rather than down. */
+    --app-wood-plank-cast: inset 0 1px 0 oklch(1 0 0 / 0.45),
+      inset 1px 0 0 oklch(1 0 0 / 0.18),
+      inset 0 -1px 0 oklch(0 0 0 / 0.3),
+      inset -1px 0 0 oklch(0 0 0 / 0.18),
+      0 0 16px -2px oklch(0 0 0 / 0.3);
     /* How much of the bottom of a mobile surface the tab bar covers. Every
        mobile scroller reserves this one value instead of restating a height,
        because which bar is down there depends on the client: mobile web draws
@@ -6187,16 +6192,49 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     padding: 0.75rem 1.25rem 0.75rem 0.875rem !important;
     gap: 0.625rem;
     border-radius: 0.875rem;
-    box-shadow: var(--app-wood-chrome-shadow);
+    box-shadow: var(--app-wood-plank-cast) !important;
   }
 
-  /* After a back chevron the sign starts beside it, not on the content line. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-topbar.app-topbar:has(.app-mobile-topbar-back) .app-mobile-title {
-    margin-left: 0.25rem;
+  /* A pushed screen's sign carries its back chevron too: one board, chevron
+     then title, starting on the content line like the Space sign. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar .app-mobile-back-sign {
+    @apply app-wood-panel-recipe;
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 3.25rem;
+    align-items: center;
+    margin-left: -0.875rem;
+    padding: 0 1.25rem 0 0.25rem;
+    border-radius: 0.875rem;
+    box-shadow: var(--app-wood-plank-cast) !important;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-topbar.app-topbar .app-mobile-back-sign :is(.app-mobile-space-trigger, .app-mobile-title) {
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+  }
+
+  /* The conversation bar is inset by the horizontal padding, not the content
+     line; start its sign where the list bar's does. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-detail-bar .app-mobile-back-sign {
+    margin-left: calc(var(--mobile-content-inset) - var(--mobile-horizontal-padding) - 0.875rem);
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar .app-mobile-back-sign > .app-mobile-topbar-back {
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+    margin: 0 !important;
+    color: oklch(0.24 0.05 55) !important;
+    filter: drop-shadow(0 1px 0 oklch(0.97 0.03 85 / 0.55));
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-detail-bar > div:has(.app-mobile-channel-heading) {
     display: flex;
+    grid-column: 1 / 3;
     align-items: center;
     align-self: center;
   }
@@ -6214,12 +6252,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     filter: drop-shadow(0 1px 0 oklch(0.97 0.03 85 / 0.55));
   }
 
-  /* Summary and linked pages are about the conversation, not part of it: a
-     band of slightly darker paper under the wood board, closed by a hairline,
-     so the message stream visibly starts below it. No card frame, glass or
-     shadow, and it cannot extend the wood header. */
+  /* Summary and linked pages are about the conversation, not part of it:
+     quiet prose on the bar's paper under the sign, closed by a hairline so
+     the message stream visibly starts below it. No band, card frame, glass
+     or shadow. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-about {
-    background: color-mix(in oklch, var(--foreground) 4.5%, var(--background)) !important;
+    background: var(--background) !important;
     color: var(--foreground) !important;
     border: 0 !important;
     border-bottom: 1px solid var(--border) !important;
