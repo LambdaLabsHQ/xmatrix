@@ -5,7 +5,6 @@ use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::backoff::Backoff;
 use crate::connection_error::frame_hub_restarting;
 use crate::error::{CliError, Result};
 use crate::http::{self, CLIENT_COMPATIBILITY_PROTOCOL_VERSION, ClientComponent};
@@ -137,7 +136,7 @@ async fn handle_human_connection_failure(
     events: &mpsc::UnboundedSender<HumanConnectionEvent>,
     reason: String,
     fatal: bool,
-    backoff: &mut Backoff,
+    backoff: &mut crate::backoff::Backoff,
 ) -> bool {
     crate::websocket::handle_connection_failure(
         ready,
@@ -162,7 +161,7 @@ async fn run_human_connection(
     let mut ready_tx = Some(ready_tx);
     let mut focused_channel_id: Option<String> = None;
     let mut connected_once = false;
-    let mut backoff = Backoff::new(RECONNECT_BASE, RECONNECT_MAX);
+    let mut backoff = crate::backoff::Backoff::new(RECONNECT_BASE, RECONNECT_MAX);
     let connection_url = derive_connection_url_for_owner(&hub_url, &owner_user_id);
 
     loop {
