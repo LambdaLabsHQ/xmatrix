@@ -59,7 +59,7 @@ export function registerSummonDecisionRoutes(app: Hono<{ Bindings: Env }>): void
 }
 
 function decisionFailure(c: Context<{ Bindings: Env }>, error: unknown): Response | null {
-  if (error instanceof ContentControlError || error instanceof AgentChannelAccessError) return c.json({ error: error.message, code: error.code },
+  if (error instanceof ContentControlError || error instanceof AgentChannelAccessError) return c.json({ error: error.message, code: error.code, retryable: error.retryable },
     error.status as 400 | 403 | 404 | 409 | 503, { "cache-control": "private, no-store" });
   return crossSpaceReadErrorResponse(error);
 }
