@@ -4,16 +4,27 @@ import { connectorCredentialRepository } from "./credentials";
 import { verifyNotion } from "./actions/notion";
 import { ProviderRequestError } from "./http";
 import { refreshOAuthFields } from "./oauth";
+import { isSentryInstallationGrant, verifySentryInstallation } from "./sentry-installation";
 
-/** Refresh and verify Notion OAuth before any action, without replaying writes. */
+/**
+ * Grants whose saved token can be lost while still unexpired: Notion revokes on reauthorization, and a
+ * Sentry installation keeps one token, so a concurrent or lost refresh leaves the saved one deleted.
+ */
+function grantVerifier(providerId: string, credentials: Readonly<Record<string, string>>):
+  ((values: Readonly<Record<string, string>>) => Promise<void>) | undefined {
+  if (providerId === "notion" && credentials.oauthRefreshToken) return verifyNotion;
+  if (providerId === "sentry" && isSentryInstallationGrant(credentials)) return verifySentryInstallation;
+}
+
+/** Refresh and verify Notion OAuth and Sentry installations before any action, without replaying writes. */
 export async function connectionCredentials(env: Env, spaceId: string, providerId: string):
   Promise<Record<string, string>> {
   const repository = connectorCredentialRepository(env);
   const resolved = await repository.resolve({ requestId: crypto.randomUUID(), spaceId, providerId });
   const credentials: Record<string, string> = { ...resolved?.values };
-  const notionOAuth = providerId === "notion" && !!credentials.oauthRefreshToken;
+  const verify = grantVerifier(providerId, credentials);
   let refreshed = await refreshOAuthFields(env, providerId, credentials).catch(error => {
-    if (notionOAuth || ["google", "googlesearchconsole", "bitbucket", "pagerduty", "sentry", "discord"].includes(providerId)) throw error;
+    if (verify || ["google", "googlesearchconsole", "bitbucket", "pagerduty", "sentry", "discord"].includes(providerId)) throw error;
     return undefined;
   });
   const persist = async (fields: Record<string, string | null>) => {
@@ -28,16 +39,16 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
   };
   // Save a complete rotated pair before another provider call can time out.
   if (refreshed) await persist(refreshed);
-  if (notionOAuth) {
+  if (verify) {
     try {
-      await verifyNotion(credentials);
+      await verify(credentials);
     } catch (error) {
       // Only an authenticated read's 401 warrants one rotation. Writes are never retried.
       if (refreshed || !(error instanceof ProviderRequestError) || error.status !== 401) throw error;
-      refreshed = await refreshOAuthFields(env, providerId, credentials, Date.now(), { notionUnauthorized: true });
+      refreshed = await refreshOAuthFields(env, providerId, credentials, Date.now(), { unauthorized: true });
       if (!refreshed) throw error;
       await persist(refreshed);
-      await verifyNotion(credentials);
+      await verify(credentials);
     }
   }
   return credentials;
