@@ -182,7 +182,7 @@ export type AppView =
 // The mobile dock's tabs, in its order: each one's own screen is named by the
 // dock, so its top bar carries only the Space.
 /** Destinations that show their own list beside the chosen item, in the conversation list's place. */
-export const SPLIT_TOOL_VIEWS: readonly AppView[] = ["automation", "settings", "admin", "machines", "local", "apps", "agents", "team"];
+export const SPLIT_TOOL_VIEWS: readonly AppView[] = ["status", "automation", "settings", "admin", "machines", "local", "apps", "agents", "team"];
 
 export const DOCK_TAB_VIEWS: readonly AppView[] = ["pages", "messages", "status", "more"];
 

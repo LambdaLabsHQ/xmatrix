@@ -1458,13 +1458,18 @@ export function channelAgentAvatarStatus(
 }
 
 /** The conversation's Instances with work in hand, as its row's avatars show: busy, or waiting on something. */
-export function channelWorkInHandInstanceIds(channel: SerializedChannel, events: ObservabilityEvent[]): string[] {
+export function channelWorkInHand(channel: SerializedChannel, events: readonly ObservabilityEvent[]) {
   return channelOnlineAgentAvatarItems(channel).flatMap((item) => {
     const presence = memberPresence(channel, item.member);
     if (presence.kind !== "agent" || !item.instance) return [];
     const status = channelAgentAvatarStatus(channel, item.member, presence, events, item.instance);
-    return status === "busy" || status === "waiting" ? [item.instance.id] : [];
+    return status === "busy" || status === "waiting"
+      ? [{ member: item.member, instance: item.instance, presence, status }] : [];
   });
+}
+
+export function channelWorkInHandInstanceIds(channel: SerializedChannel, events: ObservabilityEvent[]): string[] {
+  return channelWorkInHand(channel, events).map((item) => item.instance.id);
 }
 
 export function channelHasWorkInHand(channel: SerializedChannel, events: ObservabilityEvent[]): boolean {
