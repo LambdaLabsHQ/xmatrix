@@ -7,6 +7,7 @@
  */
 import { WEB_PROXY_ROUTES, type SerializedSpace } from "@xmatrix/protocol";
 import { canInviteToSpace } from "@/components/dashboard/workspace-shell-recovered";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 export type SpaceInviteCodeOptions = {
   /** `"unlimited"` is a standing secret; callers must choose it deliberately. */
@@ -32,7 +33,7 @@ export async function createSpaceInviteCodeRequest(input: {
   if (!space || !canInviteToSpace(space, userId)) {
     throw new Error("Only workspace owners and admins can create invite codes");
   }
-  const response = await fetch(WEB_PROXY_ROUTES.space_invites(spaceId), {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.space_invites(spaceId), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({

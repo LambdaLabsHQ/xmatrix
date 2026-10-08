@@ -34,6 +34,7 @@ import {
   normalizeNativeLoginClient,
   type NativeLoginClient,
 } from "@/lib/native-login-client";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;
@@ -259,7 +260,7 @@ function LoginContent() {
       }
 
       try {
-        const tokenResponse = await fetch(WEB_PROXY_ROUTES.cli_device_token, {
+        const tokenResponse = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_token, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ deviceCode: pendingLogin.deviceCode }),
@@ -351,7 +352,7 @@ function LoginContent() {
     setDesktopLogin({ status: "opening" });
 
     try {
-      const startResponse = await fetch(WEB_PROXY_ROUTES.cli_device_start, {
+      const startResponse = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_start, {
         method: "POST",
       });
 
@@ -445,7 +446,7 @@ function LoginContent() {
         }
 
         const callbackUrl = new URL(cliCallbackContext.callbackUrl);
-        const response = await fetch(callbackUrl.toString(), {
+        const response = await xmatrixRawResponse(callbackUrl.toString(), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -991,7 +992,7 @@ async function approveDeviceLogin(
   deviceCode: string,
   userCode: string
 ): Promise<void> {
-  const response = await fetch("/api/xmatrix/cli/device/approve", {
+  const response = await xmatrixRawResponse("/api/xmatrix/cli/device/approve", {
     method: "POST",
     headers: {
       "content-type": "application/json",

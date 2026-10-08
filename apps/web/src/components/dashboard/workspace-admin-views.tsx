@@ -177,7 +177,7 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
-import { xmatrixApiRequest, requireResponseOk } from "@/lib/query/api-client";
+import { xmatrixApiRequest, requireResponseOk, xmatrixRawResponse } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
@@ -1675,7 +1675,7 @@ export async function fetchChannelCatalog(
   let res: Response;
   try {
     res = await runWorkspaceFetchWithRetry(() =>
-      fetch(route, {
+      xmatrixRawResponse(route, {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
         signal: workspaceAttemptSignal(sequenceSignal),
@@ -1848,7 +1848,7 @@ export async function patchAutomation(
   automationId: string,
   input: AutomationUpdateRequest
 ): Promise<SerializedAutomation> {
-  const res = await fetch(WEB_PROXY_ROUTES.automation(automationId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automationId), {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1875,7 +1875,7 @@ export async function setAutomationPaused(
   const route = paused
     ? WEB_PROXY_ROUTES.automation_pause(automation.id)
     : WEB_PROXY_ROUTES.automation_resume(automation.id);
-  const res = await fetch(route, {
+  const res = await xmatrixRawResponse(route, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ expectedVersion: automation.version }),
@@ -1887,7 +1887,7 @@ export async function setAutomationPaused(
 }
 
 export async function removeAutomation(token: string, automation: SerializedAutomation): Promise<void> {
-  const res = await fetch(WEB_PROXY_ROUTES.automation(automation.id), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automation.id), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ expectedVersion: automation.version }),
@@ -1900,7 +1900,7 @@ export async function registerWorkspace(
   token: string,
   candidate: DesktopWorkspaceCandidate
 ): Promise<SerializedWorkspace> {
-  const res = await fetch(WEB_PROXY_ROUTES.workspaces, {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.workspaces, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1929,7 +1929,7 @@ export async function registerWorkspace(
 }
 
 export async function deleteWorkspace(token: string, workspace: SerializedWorkspace): Promise<void> {
-  const res = await fetch(WEB_PROXY_ROUTES.workspaces, {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.workspaces, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ machineId: workspace.machineId, canonicalCwd: workspace.canonicalCwd }),
@@ -1967,7 +1967,7 @@ export async function fetchChannelHistory(
   if (options.afterSequence !== undefined) {
     params.set("afterSequence", String(options.afterSequence));
   }
-  const res = await fetch(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
+  const res = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
     signal: options.signal
@@ -2036,7 +2036,7 @@ export async function syncChannelReadCursor(
   channelId: string,
   sequence: number
 ): Promise<ChannelReadStateUpdate | undefined> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_read(channelId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_read(channelId), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2062,7 +2062,7 @@ export async function reactToChannelMessage(
   messageId: string,
   emoji: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message_reactions(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_reactions(channelId, messageId), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2081,7 +2081,7 @@ export async function updateChannelMessage(
   messageId: string,
   body: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2099,7 +2099,7 @@ export async function recallChannelMessage(
   channelId: string,
   messageId: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",

@@ -240,7 +240,7 @@ import { APP_CONNECTORS } from "@/lib/app-connectors";
 
 import { spaceMemberCanCreate } from "./space-member-permissions";
 
-import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { xmatrixApiRequest, xmatrixRawResponse } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { cn } from "@/lib/utils";
@@ -926,7 +926,7 @@ export function Composer({
         setAttachmentError("Only PNG, JPEG, WebP, and GIF images are supported.");
         continue;
       }
-      const blob = await fetch(image.dataUrl).then((response) => response.blob()).catch(() => null);
+      const blob = await xmatrixRawResponse(image.dataUrl).then((response) => response.blob()).catch(() => null);
       if (!blob || blob.size <= 0) {
         setAttachmentError("Failed to read the pasted image.");
         continue;

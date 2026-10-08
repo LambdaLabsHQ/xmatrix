@@ -195,6 +195,7 @@ import type {
   SerializedChannel,
   SerializedSpace,
 } from "@xmatrix/protocol";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 // Recovered monofile top-level declarations missing from split modules
 // (inMemoryRelayClientProfileId lives in workspace-shell-helpers.tsx)
@@ -380,7 +381,7 @@ async function appendChannelMessageWithAttachments(input: {
     deadlineMs: input.deadlineMs,
     withRetry: (attempt, options) => runIdempotentMutationFetchWithRetry(attempt, options),
     send: (signal) =>
-      fetch(WEB_PROXY_ROUTES.channel_messages(input.channel.id), {
+      xmatrixRawResponse(WEB_PROXY_ROUTES.channel_messages(input.channel.id), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${input.token}`,

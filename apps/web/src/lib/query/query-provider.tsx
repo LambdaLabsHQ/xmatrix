@@ -3,7 +3,7 @@
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo, type ReactNode } from "react";
 
-import { shouldRetryXMatrixQuery } from "./api-client";
+import { shouldRetryXMatrixQuery, xmatrixRetryDelayMs } from "./api-client";
 
 function createClient(): QueryClient {
   return new QueryClient({
@@ -18,6 +18,7 @@ function createClient(): QueryClient {
     defaultOptions: {
       queries: {
         retry: shouldRetryXMatrixQuery,
+        retryDelay: xmatrixRetryDelayMs,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
         gcTime: 10 * 60 * 1_000,

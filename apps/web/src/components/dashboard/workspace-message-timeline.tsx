@@ -366,7 +366,7 @@ function useChannelAgentLaunches(channel: SerializedChannel | null, token: strin
     },
     queryFn: ({ signal }) => loadInvocationPages({ channelId: channel!.id, sourceMessageIds, signal,
       fetchPage: async (request, pageSignal) => {
-        const response = await fetch(WEB_PROXY_ROUTES.channel_agent_launches(channel!.id), {
+        const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_agent_launches(channel!.id), {
           method: "POST", signal: pageSignal, cache: "no-store",
           headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
           body: JSON.stringify(request),
@@ -540,7 +540,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   [launchChoicesByMessage, launchOptions]);
   const chooseFirstLaunch = useCallback(async (messageId: string, body: string, harness: string | null | "shown") => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.channel_message_launch_choice(channel.id, messageId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_choice(channel.id, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, ...(harness === "shown" ? { shown: true } : harness ? { harness } : {}) }),
@@ -559,7 +559,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   }, [invocationQueryData]);
   const retryAgentLaunch = useCallback(async (launch: SerializedAgentLaunch) => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.agent_launch_retry(launch.launchId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.agent_launch_retry(launch.launchId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ channelId: channel.id }),
@@ -571,7 +571,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   // rechecks the body against the stored message and the caller's authorship.
   const launchAnyway = useCallback(async (messageId: string, body: string, sourceMention: string) => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.channel_message_launch_anyway(channel.id, messageId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_anyway(channel.id, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, sourceMention }),
@@ -2808,7 +2808,7 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
         if (!source) throw new Error("Markdown attachment is unavailable");
         const text = source.startsWith("data:")
           ? await dataUrlToBlob(source).text()
-          : await fetch(source, { cache: "no-store" }).then(async (response) => {
+          : await xmatrixRawResponse(source, { cache: "no-store" }).then(async (response) => {
               if (!response.ok) throw new Error("Markdown attachment request failed");
               return response.text();
             });
@@ -3102,6 +3102,7 @@ function QuickReactionPicker({
 
 export type { AgentWorkItem } from "./workspace-shell-message-model";
 import type { AgentWorkItem } from "./workspace-shell-message-model";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 
 

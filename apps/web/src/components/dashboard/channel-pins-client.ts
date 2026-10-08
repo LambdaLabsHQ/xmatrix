@@ -1,9 +1,10 @@
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { xmatrixRawResponse } from "../../lib/query/api-client";
 
 export type PinRecord = { pinnedChannelIds: string[]; version: number };
 
 export async function readPins(input: { token: string; spaceId: string; fetchImpl?: typeof fetch }): Promise<PinRecord> {
-  const response = await (input.fetchImpl ?? fetch)(WEB_PROXY_ROUTES.space_channel_view_preference(input.spaceId), {
+  const response = await (input.fetchImpl ?? xmatrixRawResponse)(WEB_PROXY_ROUTES.space_channel_view_preference(input.spaceId), {
     headers: { Authorization: `Bearer ${input.token}` },
     cache: "no-store",
   });
@@ -28,7 +29,7 @@ export async function savePin(input: {
   for (let attempt = 0; ; attempt += 1) {
     const latest = await readPins(input);
     const rest = latest.pinnedChannelIds.filter((id) => id !== change.channelId);
-    const response = await (input.fetchImpl ?? fetch)(WEB_PROXY_ROUTES.space_channel_view_preference(input.spaceId), {
+    const response = await (input.fetchImpl ?? xmatrixRawResponse)(WEB_PROXY_ROUTES.space_channel_view_preference(input.spaceId), {
       method: "PATCH",
       headers: { Authorization: `Bearer ${input.token}`, "content-type": "application/json" },
       body: JSON.stringify({ expectedVersion: latest.version,
