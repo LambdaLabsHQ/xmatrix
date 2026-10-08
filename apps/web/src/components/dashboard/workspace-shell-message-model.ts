@@ -13,6 +13,7 @@ import type {
 import type {
   AgentGoalStatus,
   AgentInvocationSelections,
+  DraftSummonIntent,
   AgentRuntimeState,
   ChannelAttachment,
   ChannelMessage,
@@ -29,6 +30,8 @@ import type {
 export type ComposerSendSnapshot = {
   body: string;
   invocationSelections?: AgentInvocationSelections;
+  /** Jev's reading of each summon while the author typed this exact body. */
+  summonIntents?: DraftSummonIntent[];
   attachments: ChannelAttachment[];
 };
 

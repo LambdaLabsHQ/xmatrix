@@ -7481,28 +7481,6 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-intent-launch[data-state="launching"] svg { animation: intent-zap 700ms ease-in-out infinite alternate; }
 @keyframes intent-zap { to { transform: scale(1.25); filter: drop-shadow(0 0 4px oklch(0.72 0.16 70)); } }
 
-.app-composer-summon-intent { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 6px; }
-.app-composer-summon-pill {
-  --summon-color: oklch(0.62 0.16 285);
-  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 9px;
-  border-radius: 999px; font-size: 12px; color: var(--muted-foreground);
-  background: color-mix(in oklab, var(--summon-color) 9%, transparent);
-  animation: intent-pill-in 220ms ease-out both;
-  transition: background-color 220ms ease, color 220ms ease;
-}
-.app-composer-summon-pill > svg { flex: none; color: var(--summon-color); }
-.app-composer-summon-pill strong { color: var(--foreground); font-weight: 600; }
-.app-composer-summon-pill[data-forced="true"] { --summon-color: oklch(0.7 0.16 70); }
-.app-composer-summon-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-composer-summon-toggle {
-  display: inline-flex; align-items: center; gap: 3px; flex: none; padding: 2px 8px; border: 0; border-radius: 999px;
-  background: transparent; color: var(--foreground); font: inherit; font-weight: 600; cursor: pointer;
-  transition: background-color 160ms ease;
-}
-.app-composer-summon-toggle:hover { background: color-mix(in oklab, var(--summon-color) 18%, transparent); }
-.app-composer-summon-toggle[aria-pressed="true"] { background: color-mix(in oklab, var(--summon-color) 26%, transparent); }
-.app-composer-summon-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-@keyframes intent-pill-in { from { opacity: 0; transform: translateY(3px); } }
 /* The draft's mention bands (composer-mention-bands.ts places them). They sit
    in the mirror behind the textarea's own glyphs, one per line of a mention,
    in the sent chip's ink. */
@@ -7518,6 +7496,10 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 }
 .app-composer-mention-band[data-self="true"] { --band-fill: color-mix(in oklab, var(--band-ink) 20%, transparent); }
 .app-composer-mention-band[data-forced="true"] { --band-ink: oklch(0.72 0.16 70); --band-fill: color-mix(in oklab, var(--band-ink) 24%, transparent); }
+.app-composer-mention-band[data-intent="summon"] { --band-ink: oklch(0.62 0.16 285); --band-fill: color-mix(in oklab, var(--band-ink) 18%, transparent); }
+.app-composer-mention-band[data-intent="declined"] { --band-ink: var(--muted-foreground); --band-fill: color-mix(in oklab, var(--band-ink) 7%, transparent); }
+.app-composer-mention-band[data-intent="reading"] { opacity: 0.55; }
+.app-composer-summon-hint { padding: 2px 0 0; font-size: 11px; line-height: 1.4; color: var(--muted-foreground); }
 .app-composer-mention-band[data-invalid="true"] { --band-ink: var(--destructive); --band-fill: color-mix(in oklab, var(--band-ink) 14%, transparent); }
 .app-composer-mention-band[data-entering="true"] { animation: composer-mention-band-in 160ms ease-out; }
 @keyframes composer-mention-band-in { from { opacity: 0; } }
@@ -7562,7 +7544,6 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   .xmatrix-app .app-mention-intent-declined[data-launching="true"],
   .app-intent-confidence-bar > span,
   .app-intent-launch[data-state="launching"] svg,
-  .app-composer-summon-pill,
   .xmatrix-app .app-summon-condition[data-jev-arriving="true"] { animation: none; }
 }
 

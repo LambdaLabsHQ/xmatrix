@@ -21,6 +21,31 @@ export const SUMMON_INTENT_CATEGORIES = {
   example: "The mention is syntax, documentation, a quotation or an example of how to write a mention.",
 } as const;
 export type SummonIntentCategory = keyof typeof SUMMON_INTENT_CATEGORIES;
+/** Jev's reading of one summon while its author typed it, keyed by the
+ * summon's text through its last condition. Sending the message with it is
+ * the author's answer to the intent question, as `launch:force` is. */
+export type DraftSummonIntent = { start: number; end: number; mention: string; choice: SummonIntentCategory };
+
+/** A send's draft readings, or undefined when there are none; throws on a malformed list. */
+export function parseDraftSummonIntents(value: unknown, body: string): DraftSummonIntent[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 16) throw new Error("Draft summon intents must be a list of at most 16");
+  const starts = new Set<number>();
+  return value.map(item => {
+    const entry = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+    if (Object.keys(entry).some(key => !["start", "end", "mention", "choice"].includes(key)) ||
+        !Number.isSafeInteger(entry.start) || !Number.isSafeInteger(entry.end) || Number(entry.start) < 0 ||
+        Number(entry.end) <= Number(entry.start) || Number(entry.end) > body.length || starts.has(Number(entry.start)) ||
+        typeof entry.mention !== "string" || !entry.mention || entry.mention.length > 2_000 ||
+        body.slice(Number(entry.start), Number(entry.end)) !== entry.mention ||
+        typeof entry.choice !== "string" || !Object.hasOwn(SUMMON_INTENT_CATEGORIES, entry.choice)) {
+      throw new Error("Draft summon intent must name a summon in the body and one reading");
+    }
+    starts.add(Number(entry.start));
+    return { start: Number(entry.start), end: Number(entry.end), mention: entry.mention, choice: entry.choice as SummonIntentCategory };
+  });
+}
+
 /** Jev reads one mention at a time; the author kind is context, not identity. */
 export const SUMMON_INTENT_INSTRUCTIONS = "Decide what the author of the message is doing with the mention at state.summon (its exact text and UTF-16 offsets in state.message). " +
   "Read the whole message and channel context: an Agent name inside an explanation, correction, report, heading, quotation or example is not a request. " +

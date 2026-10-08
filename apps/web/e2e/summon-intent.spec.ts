@@ -1,7 +1,7 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, E2E_USER_SENDER,
-  fixtureJson, fixtureRequestBodies, installWorkspaceStubs } from "./workspace-fixtures";
+  fixtureJson, fixtureRequestBodies, fixtureRule, installWorkspaceStubs } from "./workspace-fixtures";
 
 const messageId = "message-intent";
 test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 2 });
@@ -76,19 +76,81 @@ test("a just-sent summon shows Jev reading it, and the shimmer ends on its own",
   await expect(pending).not.toContainText("xMatrix is reading");
 });
 
-test("the composer says who decides and Force writes launch:force into the draft", async ({ page }) => {
+test("the composer previews summon intent inline and sends the exact reading", async ({ page }) => {
   await install(page, "hello", {});
+  const mention = "@claude repo:owner/xmatrix";
+  const reading = { start: 0, end: mention.length, mention, choice: "summon" };
+  await fixtureJson(page, "draft-intent", "**/api/xmatrix/channels/channel-general/summon-intent", { readings: [reading] });
+  await fixtureJson(page, "preview-send", "**/api/xmatrix/channels/channel-general/messages", {});
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const input = page.locator("textarea.composer-textarea").first();
-  await input.fill("@claude repo:owner/xmatrix fix the flaky test");
-  const pill = page.locator(".app-composer-summon-pill");
-  await expect(pill).toContainText("xMatrix decides whether @claude starts");
+  const draft = `${mention} fix the flaky test`;
+  await input.fill(draft);
+  await expect(page.locator(".app-composer-summon-pill")).toHaveCount(0);
+  const hint = page.getByTestId("composer-summon-hint");
+  await expect(hint).toHaveText("@claude starts on send");
+  await expect(page.locator('.app-composer-mention-band[data-intent="summon"]').first()).toBeVisible();
   await page.screenshot({ path: "test-results/summon-intent-composer.png", clip: { x: 0, y: 500, width: 1280, height: 400 } });
-  await pill.getByRole("button", { name: /Force/ }).click();
-  await expect(input).toHaveValue("@claude repo:owner/xmatrix launch:force fix the flaky test");
-  await expect(pill).toHaveAttribute("data-forced", "true");
-  await expect(pill).toContainText("@claude starts directly");
-  await page.screenshot({ path: "test-results/summon-intent-composer-forced.png", clip: { x: 0, y: 500, width: 1280, height: 400 } });
-  await pill.getByRole("button", { name: /Forced/ }).click();
-  await expect(input).toHaveValue("@claude repo:owner/xmatrix fix the flaky test");
+  await input.press("Enter");
+  await expect.poll(async () => (await fixtureRequestBodies(page, "preview-send")).length).toBe(1);
+  const [sent] = await fixtureRequestBodies(page, "preview-send") as Array<{ body: string; summonIntents: unknown[] }>;
+  expect(sent.body).toBe(draft);
+  expect(sent.summonIntents).toEqual([reading]);
+  expect((await fixtureRequestBodies(page, "draft-intent")).length).toBe(1);
+});
+
+test("changed drafts discard the old reading and forced summons skip preview", async ({ page }) => {
+  await install(page, "hello", {});
+  await fixtureJson(page, "draft-start", "**/api/xmatrix/channels/channel-general/summon-intent", {
+    readings: [{ start: 0, end: 7, mention: "@claude", choice: "summon" }],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const input = page.locator("textarea.composer-textarea").first();
+  const hint = page.getByTestId("composer-summon-hint");
+  await input.fill("@claude fix it");
+  await expect(hint).toHaveText("@claude starts on send");
+  await fixtureRule(page, { id: "draft-decline", pattern: "**/api/xmatrix/channels/channel-general/summon-intent",
+    responder: { kind: "static", delayMs: 500, json: {
+      readings: [{ start: 0, end: 7, mention: "@claude", choice: "explanation" }],
+    } } });
+  await input.fill("@claude was the heading");
+  await expect(hint).not.toContainText("starts on send");
+  await expect(hint).toContainText("won't start");
+  await expect(page.locator('.app-composer-mention-band[data-intent="declined"]').first()).toBeVisible();
+  await page.screenshot({ path: "test-results/summon-intent-composer-declined.png", clip: { x: 0, y: 500, width: 1280, height: 400 } });
+  await input.fill("@claude launch:force fix it");
+  await expect(hint).toHaveCount(0);
+  await expect(page.locator('.app-composer-mention-band[data-forced="true"]').first()).toBeVisible();
+  expect((await fixtureRequestBodies(page, "draft-decline")).length).toBe(1);
+});
+
+test("Enter finishes the draft preview before publishing and reuses an in-flight request", async ({ page }) => {
+  await install(page, "hello", {});
+  const reading = { start: 0, end: 7, mention: "@claude", choice: "reference" };
+  await fixtureRule(page, { id: "slow-preview", pattern: "**/api/xmatrix/channels/channel-general/summon-intent",
+    responder: { kind: "static", delayMs: 500, json: { readings: [reading] } } });
+  await fixtureJson(page, "quick-send", "**/api/xmatrix/channels/channel-general/messages", {});
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const input = page.locator("textarea.composer-textarea").first();
+  await input.fill("@claude is the Agent name");
+  await input.press("Enter");
+  await expect.poll(async () => (await fixtureRequestBodies(page, "quick-send")).length).toBe(1);
+  const [sent] = await fixtureRequestBodies(page, "quick-send") as Array<{ summonIntents: unknown[] }>;
+  expect(sent.summonIntents).toEqual([reading]);
+  expect((await fixtureRequestBodies(page, "slow-preview")).length).toBe(1);
+});
+
+test("an unavailable preview leaves sending usable with the ordinary intent check", async ({ page }) => {
+  await install(page, "hello", {});
+  await fixtureRule(page, { id: "failed-preview", pattern: "**/api/xmatrix/channels/channel-general/summon-intent",
+    responder: { kind: "static", status: 503, json: { error: "unavailable" } } });
+  await fixtureJson(page, "fallback-send", "**/api/xmatrix/channels/channel-general/messages", {});
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const input = page.locator("textarea.composer-textarea").first();
+  await input.fill("@claude fix it");
+  await expect(page.getByTestId("composer-summon-hint")).toContainText("Preview unavailable");
+  await input.press("Enter");
+  await expect.poll(async () => (await fixtureRequestBodies(page, "fallback-send")).length).toBe(1);
+  const [sent] = await fixtureRequestBodies(page, "fallback-send") as Array<{ summonIntents?: unknown[] }>;
+  expect(sent.summonIntents).toBeUndefined();
 });
