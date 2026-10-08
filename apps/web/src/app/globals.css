@@ -4292,7 +4292,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 
   /* The 44px switcher starts 4px down, so it is centred in the band; when
-     open, its panel grows the header downward. */
+     open, its panel floats over the list below. */
   .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-sidebar-space-header {
     display: flex;
     align-items: flex-start;
@@ -4300,9 +4300,10 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     padding: 4px 12px 0 !important;
   }
 
-  .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell {
+  .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-anchor {
     flex: 1 1 auto;
     min-width: 0;
+    height: 44px;
   }
 
   .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-trigger {
@@ -4737,6 +4738,20 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   .app-media-skeleton {
     animation: none;
   }
+}
+
+/* The header's row stays in the flow at the trigger's height; the switcher
+   floats above the list from there. */
+.xmatrix-app.xmatrix-app .app-sidebar .app-sidebar-space-header {
+  z-index: 30;
+}
+
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-anchor {
+  height: 58px;
+}
+
+.xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-float {
+  z-index: 30;
 }
 
 /* The open switcher is one glass panel grown out of the header row: the

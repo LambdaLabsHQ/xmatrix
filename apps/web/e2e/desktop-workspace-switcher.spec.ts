@@ -3,7 +3,7 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, openWorkspaceWithStubs } f
 
 test.use(E2E_DESKTOP_CONTEXT);
 
-test("expanded desktop workspace switcher is one glass panel with its Spaces and actions", async ({ page }) => {
+test("expanded desktop workspace switcher is one glass panel floating over the list", async ({ page }) => {
   const otherSpace = {
     ...E2E_SPACE,
     id: "space-team",
@@ -32,10 +32,14 @@ test("expanded desktop workspace switcher is one glass panel with its Spaces and
   expect(rest.backdrop).toBe("none");
   expect(rest.shadow).toBe("none");
 
+  // Opening floats the panel over the list; the list does not move.
+  const list = page.locator(".app-sidebar-pane-body");
+  const listTop = (await list.boundingBox())!.y;
   await trigger.click();
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
   const menu = page.locator(".app-space-switcher-menu");
   await expect(menu).toBeVisible();
+  expect((await list.boundingBox())!.y).toBe(listTop);
 
   /* The expanded shell carries the shared liquid glass recipe — the
      composer's — and nothing more. Comparing it against a live probe of the

@@ -682,9 +682,11 @@ export function SidebarSpaceHeader({
         /* At rest the header is the Space's name and a chevron at the row's
            end, printed on the list. Opening grows the header row itself into
            one glass panel — the composer's glass — with the Spaces and the
-           panel's actions inside it. It pushes the list down rather than
-           floating over it: through glass this clear, list text under the
-           panel would read through the Spaces. */
+           panel's actions inside it, floating over the list. The anchor keeps
+           the row's height in the flow; the panel floats in a plain frame
+           because glass forces its own position to relative. */
+        <div className="app-space-switcher-anchor relative">
+        <div className="app-space-switcher-float absolute inset-x-0 top-0">
         <div className={cn("app-space-switcher-shell relative", open && "app-space-switcher-shell-open")}>
           <button
             type="button"
@@ -738,6 +740,8 @@ export function SidebarSpaceHeader({
               </div>
             </div>
           </div>
+        </div>
+        </div>
         </div>
       )}
       {error && (
