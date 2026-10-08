@@ -82,3 +82,13 @@ test("a failed call is not merged with a later retry of the same mention", () =>
 test("a record that is not an object adds nothing", () => {
   assert.deepEqual(jevReadings([{ refId: "decision:x:started", payload: null }, { refId: "decision:y:started", payload: "text" }]), []);
 });
+
+test("each step names the routing model that answered it, when the record says", () => {
+  const harness = { harness: { criteria: { harness_0: JSON.stringify({ harness: "codex" }) } } };
+  const model = { modelEffort: { criteria: { model_0: JSON.stringify({ model: "gpt-5.5" }) } } };
+  const [decision] = jevDecisions(jevReadings([
+    started("h", NOW, harness), finished("h", NOW, { harness: { choice: "harness_0", probabilities: { harness_0: 1 } } }, "succeeded", { model: "vendor/router-a" }),
+    started("m", LATER, model), finished("m", LATER, { modelEffort: { choice: "model_0", probabilities: { model_0: 1 } } }),
+  ]));
+  assert.deepEqual(decision.questions.map(question => [question.key, question.model]), [["harness", "vendor/router-a"], ["modelEffort", undefined]]);
+});
