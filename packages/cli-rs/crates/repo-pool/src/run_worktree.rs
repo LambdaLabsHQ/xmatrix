@@ -73,7 +73,7 @@ thread_local! {
 const LOCK_REASON_PREFIX: &str = "xmatrix-run:";
 const BINDINGS_FILE_NAME: &str = ".xmatrix-run-worktree-bindings.json";
 
-const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(20);
 /// Legacy hard wall-clock used by quiet/non-progress git helpers that must
 /// still bound network ops (for example `remote set-head --auto`).
 const GIT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -982,7 +982,8 @@ pub async fn gc_run_worktrees(
     .await
 }
 
-/// Reclaim ended trees, and sweep the repo-pool slots (L1) alongside them.
+/// Reclaim ended trees, and sweep the repo-pool slots (L1) alongside them,
+/// then any other linked tree on the machine when the owner allowed it.
 /// The pool sweep is not gated on the watermark: one slot carries a whole
 /// checkout plus its build output, so waiting for the volume to fall under the
 /// warn mark reclaims far too late. Pressure only lowers the warm-cache budget.
@@ -1007,6 +1008,19 @@ pub async fn reclaim_worktree_storage_if_needed(
     repo_pool::log_pool_reclaim_outcome(
         &repo_pool::reclaim_pool_slots(pool_liveness, keep_idle).await,
     );
+    // Trees xMatrix did not create wait the same named-tree floor, and only
+    // once the owner turned their reclaim on.
+    let foreign_min_idle = if under_pressure {
+        PRESSURE_NAMED_TTL.min(named_orphan_min_age())
+    } else {
+        named_orphan_min_age()
+    };
+    if let Some(foreign) =
+        crate::machine_worktrees::reclaim_foreign_worktrees_if_enabled(live_cwds, foreign_min_idle)
+            .await
+    {
+        crate::machine_worktrees::log_foreign_reclaim_outcome(&foreign);
+    }
     outcome
 }
 
@@ -1141,6 +1155,21 @@ fn prune_stale_bindings(root: &Path, apply: bool) -> Result<Vec<String>, String>
 /// `refs/xmatrix/snapshot/<dir>` before removal, so no un-landed work is ever
 /// lost. Any git failure skips the tree conservatively.
 pub async fn reclaim_run_worktree(path: &Path, apply: bool) -> Result<bool, String> {
+    let dir_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .ok_or_else(|| "worktree path has no directory name".to_string())?;
+    reclaim_linked_worktree(path, apply, &dir_name).await
+}
+
+/// [`reclaim_run_worktree`] with the snapshot pinned to
+/// `refs/xmatrix/snapshot/<snapshot_name>`. Trees the daemon did not create
+/// can share a directory name, so they pass a name that cannot collide.
+pub(crate) async fn reclaim_linked_worktree(
+    path: &Path,
+    apply: bool,
+    snapshot_name: &str,
+) -> Result<bool, String> {
     if let Some(reason) = worktree_lock_reason(path).await?
         && !reason.starts_with(LOCK_REASON_PREFIX)
     {
@@ -1184,11 +1213,7 @@ pub async fn reclaim_run_worktree(path: &Path, apply: bool) -> Result<bool, Stri
             )
             .await?;
         }
-        let dir_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .ok_or_else(|| "worktree path has no directory name".to_string())?;
-        let snapshot_ref = format!("refs/xmatrix/snapshot/{dir_name}");
+        let snapshot_ref = format!("refs/xmatrix/snapshot/{snapshot_name}");
         git(
             path,
             &["update-ref", &snapshot_ref, "HEAD"],
@@ -1273,7 +1298,7 @@ pub fn log_gc_outcome(outcome: &RunWorktreeGcOutcome) {
     );
 }
 
-async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+pub(crate) async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     command_output("git", args, repo_pool::git_command(cwd, args), timeout).await
 }
 
@@ -1704,83 +1729,7 @@ mod tests {
     use super::*;
     include!("../../core/tests/support/fs_cleanup.rs");
 
-    fn unique_temp_dir(label: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "xmatrix-run-worktree-{label}-{}-{nanos}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn git_available() -> bool {
-        std::process::Command::new("git")
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
-    // When these tests run under a git hook (pre-commit CI), git exports
-    // GIT_DIR/GIT_INDEX_FILE/GIT_WORK_TREE into the environment. Those
-    // override -C/cwd, so a fixture "git commit" would land in the REAL
-    // repository mid-commit. Always scrub them.
-    fn git_command() -> std::process::Command {
-        let mut command = std::process::Command::new("git");
-        command
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_INDEX_FILE")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_OBJECT_DIRECTORY")
-            .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES");
-        command
-    }
-
-    fn run_git(cwd: &Path, args: &[&str]) {
-        let status = git_command()
-            .arg("-C")
-            .arg(cwd)
-            .args(args)
-            // Git exports these variables to hooks. Without clearing them,
-            // fixture commands run by the tracked pre-commit hook mutate the
-            // caller's real worktree instead of the temporary test repo.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed in {}", cwd.display());
-    }
-
-    fn run_git_no_cwd(args: &[&str]) {
-        let status = git_command().args(args).status().unwrap();
-        assert!(status.success(), "git {args:?} failed");
-    }
-
-    fn init_repo_with_commit(dir: &Path) {
-        run_git(dir, &["init", "--quiet", "--initial-branch=main"]);
-        run_git(dir, &["config", "user.email", "test@example.com"]);
-        run_git(dir, &["config", "user.name", "Test"]);
-        std::fs::write(dir.join("README.md"), "hello").unwrap();
-        run_git(dir, &["add", "."]);
-        run_git(dir, &["commit", "--quiet", "-m", "init"]);
-    }
-
-    fn seed_remote(remote: &Path, seed: &Path) -> String {
-        run_git(
-            remote,
-            &["init", "--bare", "--quiet", "--initial-branch=main"],
-        );
-        init_repo_with_commit(seed);
-        let remote_arg = remote.display().to_string();
-        run_git(seed, &["remote", "add", "origin", &remote_arg]);
-        run_git(seed, &["push", "--quiet", "-u", "origin", "main"]);
-        remote_arg
-    }
+    use crate::test_support::*;
 
     fn update_remote_readme(seed: &Path, contents: &str) {
         std::fs::write(seed.join("README.md"), contents).unwrap();
