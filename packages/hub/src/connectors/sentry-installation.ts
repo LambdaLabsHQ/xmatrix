@@ -140,14 +140,15 @@ export async function verifySentryInstallation(values: Readonly<Record<string, s
   if (identity.status !== "installed") invalidGrant();
 }
 
+/** `unauthorized` refreshes an unexpired grant after Sentry rejected its token. */
 export async function refreshSentryInstallation(env: Env, values: Readonly<Record<string, string>>,
-  now = Date.now()): Promise<Record<string, string> | undefined> {
+  now = Date.now(), unauthorized = false): Promise<Record<string, string> | undefined> {
   validateSentryInstallationCredentials(values);
   const client = sentryInstallationClient(env);
   if (!client) throw new ProviderRequestError(503, "Sentry Public Integration is unavailable; reconnect");
   validateSentryInstallationCredentials(values, client);
   if (Number(values.oauthExpiresAt) - now > 86_400_000) invalidGrant();
-  if (Number(values.oauthExpiresAt) - now > 120_000) return undefined;
+  if (!unauthorized && Number(values.oauthExpiresAt) - now > 120_000) return undefined;
   // Sentry's recommended manual refresh: a JWT signed with the client secret replaces the
   // installation's current token. Unlike a refresh_token grant it does not depend on the
   // last rotated pair having been saved, so a rotation lost in transit cannot strand the grant.

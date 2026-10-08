@@ -255,8 +255,10 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
  * when nothing needs refreshing. The caller stores the returned fields.
  */
 export async function refreshOAuthFields(env: Env, providerId: string, values: Readonly<Record<string, string>>,
-  now = Date.now(), options: { notionUnauthorized?: boolean } = {}): Promise<Record<string, string | null> | undefined> {
-  if (providerId === "sentry" && isSentryInstallationGrant(values)) return refreshSentryInstallation(env, values, now);
+  now = Date.now(), options: { unauthorized?: boolean } = {}): Promise<Record<string, string | null> | undefined> {
+  if (providerId === "sentry" && isSentryInstallationGrant(values)) {
+    return refreshSentryInstallation(env, values, now, options.unauthorized === true);
+  }
   const expiresAt = Number(values.oauthExpiresAt);
   if (providerId === "discord" && isDiscordInstallationGrant(values)) {
     const configured = discordCompanyApp(env);
@@ -270,7 +272,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
       throw new ProviderRequestError(503, "PagerDuty OAuth application changed or is unavailable; reconnect");
     }
   }
-  const afterNotionUnauthorized = providerId === "notion" && options.notionUnauthorized === true;
+  const afterNotionUnauthorized = providerId === "notion" && options.unauthorized === true;
   if (providerId === "bitbucket" && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
     throw new ProviderRequestError(401, "Bitbucket OAuth requires a complete expiring grant; reconnect");
