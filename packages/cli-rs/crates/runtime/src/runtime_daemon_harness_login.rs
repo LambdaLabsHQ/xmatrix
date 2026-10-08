@@ -1,9 +1,11 @@
 //! The owner's remote sign-in to a harness (`login_*` harness actions). The
-//! daemon runs the preset's official sign-in command without a terminal, reads
-//! the verification URL and one-time code from its output, and keeps the
-//! process waiting until the owner finishes on that page. The argv, the output
-//! patterns and the status command come from the compiled registry only.
+//! daemon runs the preset's official sign-in command with piped I/O, or in a
+//! pseudo-terminal when its prompt refuses a pipe, reads the verification URL
+//! and one-time code from its output, and keeps the process waiting until the
+//! owner finishes on that page. The argv, the output patterns and the status
+//! command come from the compiled registry only.
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
 use std::process::Stdio;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
@@ -12,8 +14,8 @@ use regex::Regex;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::ChildStdin;
 use tokio::sync::{oneshot, watch};
-use xmatrix_cli_agent::management::{HarnessLogin, LoginFlow};
 use xmatrix_cli_agent::AgentPreset;
+use xmatrix_cli_agent::management::{HarnessLogin, LoginFlow};
 use xmatrix_cli_core::machine_daemon_connection::{
     HarnessAction, HarnessActionResult, HarnessActionStatus, HarnessLoginProgress,
     HarnessLoginState,
@@ -36,13 +38,42 @@ const OUTPUT_KEEP: usize = 16 * 1024;
 const URL_MAX: usize = 2048;
 const USER_CODE_MAX: usize = 64;
 const POLL: Duration = Duration::from_millis(200);
+/// Wide enough that a sign-in link is never wrapped by the terminal size.
+const TERMINAL_COLS: u16 = 1000;
+const TERMINAL_ROWS: u16 = 50;
+
+/// Where a pasted code goes: the sign-in's stdin pipe, or its terminal.
+enum Input {
+    Pipe(ChildStdin),
+    /// Behind a lock so a waiting `Session` can be shared while it waits.
+    Terminal(Mutex<Box<dyn Write + Send>>),
+}
+
+impl Input {
+    async fn send_line(&mut self, code: &str) -> std::io::Result<()> {
+        match self {
+            Self::Pipe(stdin) => {
+                stdin.write_all(format!("{code}\n").as_bytes()).await?;
+                stdin.flush().await
+            }
+            // A terminal submits a line on Enter, which is a carriage return.
+            Self::Terminal(writer) => {
+                let writer = writer
+                    .get_mut()
+                    .map_err(|_| std::io::Error::other("the sign-in terminal is unavailable"))?;
+                writer.write_all(format!("{code}\r").as_bytes())?;
+                writer.flush()
+            }
+        }
+    }
+}
 
 /// One waiting sign-in per preset; starting again replaces it.
 struct Session {
     flow: LoginFlow,
     /// The URL and code it printed, offered again after a refused code.
     prompt: (String, Option<String>),
-    stdin: Option<ChildStdin>,
+    input: Option<Input>,
     output: Arc<Mutex<Vec<u8>>>,
     /// `Some(exit code)` once the process ended.
     exited: watch::Receiver<Option<Option<i32>>>,
@@ -118,6 +149,23 @@ fn answer(
 async fn pump(mut reader: impl AsyncRead + Unpin, output: Arc<Mutex<Vec<u8>>>) {
     let mut chunk = [0u8; 4096];
     while let Ok(read) = reader.read(&mut chunk).await {
+        if read == 0 {
+            return;
+        }
+        if let Ok(mut output) = output.lock() {
+            output.extend_from_slice(&chunk[..read]);
+            if output.len() > 2 * OUTPUT_KEEP {
+                let excess = output.len() - OUTPUT_KEEP;
+                output.drain(..excess);
+            }
+        }
+    }
+}
+
+/// `pump` for a terminal's blocking reader; it ends when the terminal closes.
+fn pump_blocking(mut reader: Box<dyn Read + Send>, output: Arc<Mutex<Vec<u8>>>) {
+    let mut chunk = [0u8; 4096];
+    while let Ok(read) = reader.read(&mut chunk) {
         if read == 0 {
             return;
         }
@@ -219,45 +267,22 @@ async fn start(preset: &AgentPreset, login: &HarnessLogin) -> HarnessActionResul
             login.start.command
         ));
     };
-    let mut command = harness_command(&program, &login.start.args);
-    command.stdin(Stdio::piped()).envs(&login.start.env);
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => return failed(&format!("could not start {}: {error}", login.start.command)),
-    };
-    let mut tree = match crate::process_tree::ProcessTreeGuard::bind_tokio_child(&child) {
-        Ok(tree) => tree,
-        Err(error) => {
-            let _ = child.kill().await;
-            return failed(&format!("could not guard {}: {error}", login.start.command));
-        }
-    };
     let output = Arc::new(Mutex::new(Vec::new()));
-    if let Some(stdout) = child.stdout.take() {
-        tokio::spawn(pump(stdout, output.clone()));
-    }
-    if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(pump(stderr, output.clone()));
-    }
-    let stdin = child.stdin.take();
     let (exit_tx, exited) = watch::channel(None);
-    let (stop, mut stopped) = oneshot::channel::<()>();
-    // The supervisor owns the process: it ends with the process, on a cancel,
-    // or when the code would have expired.
-    tokio::spawn(async move {
-        let code = tokio::select! {
-            status = child.wait() => status.ok().and_then(|status| status.code()),
-            _ = &mut stopped => None,
-            () = tokio::time::sleep(SESSION_TTL) => None,
-        };
-        let _ = tree.terminate();
-        let _ = child.kill().await;
-        let _ = exit_tx.send(Some(code));
-    });
+    let (stop, stopped) = oneshot::channel::<()>();
+    let spawned = if login.terminal {
+        spawn_in_terminal(&program, login, output.clone(), exit_tx, stopped)
+    } else {
+        spawn_piped(&program, login, output.clone(), exit_tx, stopped)
+    };
+    let input = match spawned {
+        Ok(input) => input,
+        Err(error) => return failed(&error),
+    };
     let mut session = Session {
         flow: login.flow,
         prompt: (String::new(), None),
-        stdin,
+        input: Some(input),
         output: output.clone(),
         exited: exited.clone(),
         stop: Some(stop),
@@ -297,6 +322,131 @@ async fn start(preset: &AgentPreset, login: &HarnessLogin) -> HarnessActionResul
     }
 }
 
+/// Start the sign-in with piped I/O. Its supervisor owns the process: it ends
+/// with the process, on a cancel, or when the code would have expired.
+fn spawn_piped(
+    program: &std::path::Path,
+    login: &HarnessLogin,
+    output: Arc<Mutex<Vec<u8>>>,
+    exit_tx: watch::Sender<Option<Option<i32>>>,
+    mut stopped: oneshot::Receiver<()>,
+) -> Result<Input, String> {
+    let name = &login.start.command;
+    let mut command = harness_command(program, &login.start.args);
+    command.stdin(Stdio::piped()).envs(&login.start.env);
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("could not start {name}: {error}"))?;
+    let mut tree = match crate::process_tree::ProcessTreeGuard::bind_tokio_child(&child) {
+        Ok(tree) => tree,
+        Err(error) => {
+            let _ = child.start_kill();
+            return Err(format!("could not guard {name}: {error}"));
+        }
+    };
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(pump(stdout, output.clone()));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(pump(stderr, output));
+    }
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| format!("{name} has no stdin"))?;
+    tokio::spawn(async move {
+        let code = tokio::select! {
+            status = child.wait() => status.ok().and_then(|status| status.code()),
+            _ = &mut stopped => None,
+            () = tokio::time::sleep(SESSION_TTL) => None,
+        };
+        let _ = tree.terminate();
+        let _ = child.kill().await;
+        let _ = exit_tx.send(Some(code));
+    });
+    Ok(Input::Pipe(stdin))
+}
+
+/// Start the sign-in in a pseudo-terminal, for prompts that refuse a pipe.
+/// The supervisor ends it exactly as `spawn_piped` does.
+fn spawn_in_terminal(
+    program: &std::path::Path,
+    login: &HarnessLogin,
+    output: Arc<Mutex<Vec<u8>>>,
+    exit_tx: watch::Sender<Option<Option<i32>>>,
+    mut stopped: oneshot::Receiver<()>,
+) -> Result<Input, String> {
+    let name = &login.start.command;
+    let home = dirs::home_dir().map(|home| home.to_string_lossy().into_owned());
+    let env: Vec<(String, String)> = login
+        .start
+        .env
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let program = program.to_string_lossy().into_owned();
+    let args = login.start.args.clone();
+    let name_owned = name.clone();
+    // The terminal's slave end is not `Send` and must outlive the process
+    // (on Windows it is the pseudo-console), so one thread owns the terminal
+    // from spawn to exit and hands back only what the supervisor needs.
+    let (ready_tx, ready) = std::sync::mpsc::channel();
+    let (wait_tx, waited) = oneshot::channel();
+    std::thread::spawn(move || {
+        let terminal = match xmatrix_cli_terminal::pty::PtyWrapper::spawn(
+            &program,
+            &args,
+            home.as_deref(),
+            &env,
+            TERMINAL_COLS,
+            TERMINAL_ROWS,
+        ) {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                let _ = ready_tx.send(Err(format!(
+                    "could not start {name_owned} in a terminal: {error}"
+                )));
+                return;
+            }
+        };
+        let (reader, writer, master, mut child, slave) = terminal.take_reader();
+        let tree = match crate::process_tree::guard_portable_pty_child(child.as_mut()) {
+            Ok(tree) => tree,
+            Err(error) => {
+                let _ = ready_tx.send(Err(format!("could not guard {name_owned}: {error}")));
+                return;
+            }
+        };
+        let killer = child.clone_killer();
+        std::thread::spawn(move || pump_blocking(reader, output));
+        if ready_tx.send(Ok((writer, killer, tree))).is_err() {
+            let _ = child.kill();
+            return;
+        }
+        let code = child
+            .wait()
+            .ok()
+            .and_then(|status| i32::try_from(status.exit_code()).ok());
+        // The terminal closes only after its process is gone.
+        drop((master, slave));
+        let _ = wait_tx.send(code);
+    });
+    let (writer, mut killer, mut tree) = ready
+        .recv()
+        .map_err(|_| format!("could not start {name} in a terminal"))??;
+    tokio::spawn(async move {
+        let code = tokio::select! {
+            code = waited => code.ok().flatten(),
+            _ = &mut stopped => None,
+            () = tokio::time::sleep(SESSION_TTL) => None,
+        };
+        let _ = tree.terminate();
+        let _ = killer.kill();
+        let _ = exit_tx.send(Some(code));
+    });
+    Ok(Input::Terminal(Mutex::new(writer)))
+}
+
 async fn finish(
     preset: &AgentPreset,
     login: &HarnessLogin,
@@ -316,14 +466,8 @@ async fn finish(
             return failed("paste the code the sign-in page showed");
         };
         let mark = snapshot(&session.output).len();
-        let written = match session.stdin.as_mut() {
-            Some(stdin) => {
-                let line = format!("{code}\n");
-                stdin
-                    .write_all(line.as_bytes())
-                    .await
-                    .and(stdin.flush().await)
-            }
+        let written = match session.input.as_mut() {
+            Some(input) => input.send_line(code).await,
             None => Err(std::io::Error::other("the sign-in no longer reads input")),
         };
         if let Err(error) = written {
@@ -550,6 +694,83 @@ mod tests {
     }
 
     #[test]
+    fn paste_code_sign_ins_are_read_from_their_real_output() {
+        // Devin's prompt reads only from a terminal; omp reads the code or the
+        // full redirect URL from stdin.
+        let devin = plain_output(
+            "Visit https://app.devin.ai/auth/cli/continue?state=ef17&code_challenge=VHQS to sign in, then copy the code and paste it below.\n\nCode:\n\u{276d} Paste the code from the sign-in page\n".as_bytes(),
+        );
+        assert_eq!(
+            prompt(login("devin"), &devin),
+            Some((
+                "https://app.devin.ai/auth/cli/continue?state=ef17&code_challenge=VHQS".to_string(),
+                None
+            ))
+        );
+        assert!(login("devin").terminal);
+        let omp = plain_output(
+            "Open this URL in your browser:\nhttps://auth.openai.com/oauth/authorize?client_id=app_E&response_type=code\nLocal shortcut (this machine only): http://localhost:1455/launch\nPaste the authorization code (or full redirect URL): ".as_bytes(),
+        );
+        assert_eq!(
+            prompt(login("omp"), &omp),
+            Some((
+                "https://auth.openai.com/oauth/authorize?client_id=app_E&response_type=code"
+                    .to_string(),
+                None
+            ))
+        );
+        assert!(!login("omp").terminal);
+        for id in ["devin", "omp"] {
+            assert_eq!(login(id).flow, LoginFlow::UrlPasteCode, "{id}");
+        }
+    }
+
+    /// A sign-in whose prompt refuses a pipe runs in a terminal: it sees one,
+    /// prints its link, and reads the pasted code as a typed line.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_terminal_sign_in_reads_the_pasted_code_as_a_typed_line() {
+        let login: HarnessLogin = serde_json::from_value(serde_json::json!({
+            "flow": "url_paste_code",
+            "terminal": true,
+            "start": { "command": "sh", "args": [
+                "-c",
+                "test -t 0 || exit 3; echo 'Visit https://sign.example/in to sign in'; read code; echo \"got:$code\"; exit 0"
+            ] },
+            "urlRegex": "Visit (https://\\S+)"
+        }))
+        .unwrap();
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (exit_tx, mut exited) = watch::channel(None);
+        let (_stop, stopped) = oneshot::channel::<()>();
+        let mut input = spawn_in_terminal(
+            std::path::Path::new("/bin/sh"),
+            &login,
+            output.clone(),
+            exit_tx,
+            stopped,
+        )
+        .unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while prompt(&login, &plain_output(&snapshot(&output))).is_none() {
+            assert!(tokio::time::Instant::now() < deadline, "no link printed");
+            tokio::time::sleep(POLL).await;
+        }
+        input.send_line("abc-123").await.unwrap();
+        let code = tokio::time::timeout(Duration::from_secs(10), exited.wait_for(Option::is_some))
+            .await
+            .unwrap()
+            .map(|value| *value)
+            .unwrap();
+        assert_eq!(code, Some(Some(0)));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !plain_output(&snapshot(&output)).contains("got:abc-123") {
+            assert!(tokio::time::Instant::now() < deadline, "code not read");
+            tokio::time::sleep(POLL).await;
+        }
+    }
+
+    #[test]
     fn only_https_urls_are_offered() {
         let mut login = login("claude").clone();
         login.url_regex = r"visit: (\S+)".into();
@@ -582,10 +803,15 @@ mod tests {
             let wrong = execute(&id, HarnessAction::LoginFinish, Some("not-a-real-code")).await;
             eprintln!("{wrong:#?}");
             assert_eq!(wrong.status, HarnessActionStatus::Failed);
-            // A harness that reports the refusal keeps its sign-in waiting.
-            assert_eq!(wrong.login.unwrap().state, HarnessLoginState::AwaitingUser);
-            let cancelled = execute(&id, HarnessAction::LoginCancel, None).await;
-            assert_eq!(cancelled.login.unwrap().state, HarnessLoginState::Cancelled);
+            // A harness that reports the refusal keeps its sign-in waiting;
+            // one that exits on it (devin, omp) ends it as failed.
+            let state = wrong.login.unwrap().state;
+            if state == HarnessLoginState::AwaitingUser {
+                let cancelled = execute(&id, HarnessAction::LoginCancel, None).await;
+                assert_eq!(cancelled.login.unwrap().state, HarnessLoginState::Cancelled);
+            } else {
+                assert_eq!(state, HarnessLoginState::Failed);
+            }
             return;
         }
         let cancelled = execute(&id, HarnessAction::LoginCancel, None).await;

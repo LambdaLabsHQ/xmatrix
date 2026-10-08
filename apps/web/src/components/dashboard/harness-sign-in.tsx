@@ -146,7 +146,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
           <div className="space-y-2 rounded-lg border p-3">
             <p>
               Open this link{prompt.userCode ? " and enter the code" : ""}
-              {prompt.flow === "url_paste_code" ? ", then paste the code the page shows below." : "."}
+              {prompt.flow === "url_paste_code" ? ", then paste below the code the page shows, or the full address your browser ends on." : "."}
             </p>
             <a href={prompt.verificationUri} target="_blank" rel="noopener noreferrer"
               className="inline-flex max-w-full items-center gap-1 break-all font-semibold underline">
