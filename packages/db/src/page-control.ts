@@ -11,7 +11,7 @@ import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-ch
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
 import { reconcilePageAutomations, removePageAutomations } from "./automation-page-anchor.js";
 import type {
-  PageAuthor, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageOwedUpdate, PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
+  PageAuthor, PageAutomationAnchorChange, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageOwedUpdate, PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
 } from "@xmatrix/protocol";
 
 export type { PageAuthor, PageClaim, PageDocument, PageLink, PageRevision, PageSummary, PublicPage };
@@ -210,9 +210,13 @@ type Actor = PageActor;
 /**
  * A committed revision. When it moved the head, `automationChannels` are the
  * conversations whose Automations it paused or resumed; their coordinators
- * must hear of it (docs/design/pages-live-document.md §6.4).
+ * must hear of it (docs/design/pages-live-document.md §6.4). The detached and
+ * attached Automations are told to whoever wrote the edit.
  */
-export interface PageCommit { page: PageSummary; revision: PageRevision; automationChannels: string[] }
+export interface PageCommit {
+  page: PageSummary; revision: PageRevision; automationChannels: string[];
+  detachedAutomations: PageAutomationAnchorChange[]; attachedAutomations: PageAutomationAnchorChange[];
+}
 
 interface AccessView { canRead: boolean; canEdit: boolean }
 
@@ -649,7 +653,7 @@ export class PostgresPageRepository {
     }
     await this.insertRevision(tx, spaceId, pageId, revision, text, authors, conversationIds,
       suggestion ? "suggestion" : input.kind, input.baseRevision, now);
-    const automationChannels = suggestion ? [] : await (async () => {
+    const anchoring = suggestion ? { channels: [], detached: [], attached: [] } : await (async () => {
       await tx.query({
         name: "page_head_advance_v1",
         text: `UPDATE data.pages SET head_revision=$3, version=version+1, updated_at=$4
@@ -668,7 +672,8 @@ export class PostgresPageRepository {
     return { page: this.summary(updated), revision: {
       revision, kind: suggestion ? "suggestion" : input.kind, authors, conversationIds,
       basedOnRevision: input.baseRevision, createdAt: now,
-    }, automationChannels };
+    }, automationChannels: anchoring.channels, detachedAutomations: anchoring.detached,
+    attachedAutomations: anchoring.attached };
   }
 
   /** Accepts a suggestion, or restores an earlier revision, as a new head. */

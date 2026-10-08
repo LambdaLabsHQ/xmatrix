@@ -12,6 +12,14 @@ export class AutomationControlError extends ControlError {
   override name = "AutomationControlError";
 }
 
+/** A stored name, or the first line of what the Automation does, bounded like an authored name. */
+export function automationName(stored: unknown, body: string): string {
+  const own = typeof stored === "string" ? stored.trim() : "";
+  if (own) return own;
+  const firstLine = body.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
+  return firstLine ? firstLine.slice(0, 80) : "Automation";
+}
+
 /**
  * Commits one Automation change on its Space's control head: the outbox fact
  * projections read, and the command's replay record.

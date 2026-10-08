@@ -90,7 +90,8 @@ export class RelayPageSession extends DurableObject<Env> {
           const result = await pages(this.env).edit({ requestId: crypto.randomUUID(), spaceId: this.need("space"),
             pageId: this.need("page"), principal: pagePrincipalFromSession(principal), ...input });
           await tellPageAutomationChannels(this.env, result.automationChannels);
-          return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision };
+          return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision,
+            detachedAutomations: result.detachedAutomations, attachedAutomations: result.attachedAutomations };
         } catch (error) {
           if (error instanceof PageControlError && error.code === "page_revision_conflict") {
             throw new PageSessionConflict(Number(error.detail?.headRevision ?? 0), String(error.detail?.body ?? ""));

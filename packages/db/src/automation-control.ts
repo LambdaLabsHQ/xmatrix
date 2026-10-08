@@ -30,7 +30,9 @@ import {
 } from "./placement.js";
 import { reserveNaturalKey } from "./natural-keys.js";
 import { pageAccess, pageAccessMap } from "./page-control.js";
-import { AutomationControlError, commitAutomationChange as commit } from "./automation-commit.js";
+import { AutomationControlError, automationName, commitAutomationChange as commit } from "./automation-commit.js";
+
+export { automationName };
 import { commandFields } from "./command-fields.js";
 
 export { AutomationControlError };
@@ -348,14 +350,6 @@ function automationFromRow(row: QueryResultRow): Record<string, unknown> {
     ...(lastMessageId ? { lastMessageId } : {}),
     version: Number(row.version), deliveryCount: runCount, payload,
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
-}
-
-/** A stored name, or the first line of what the Automation does, bounded like an authored name. */
-export function automationName(stored: unknown, body: string): string {
-  const own = typeof stored === "string" ? stored.trim() : "";
-  if (own) return own;
-  const firstLine = body.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
-  return firstLine ? firstLine.slice(0, 80) : "Automation";
 }
 
 /** A command's digest, and the digest a pre-rename Hub's body for it had. */

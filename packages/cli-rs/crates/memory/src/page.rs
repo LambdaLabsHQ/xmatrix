@@ -151,13 +151,54 @@ struct RemoveResponse {
     removed: bool,
 }
 
-/// An edit is merged and committed by the page's live session.
+/// An edit is merged and committed by the page's live session, which says
+/// what it did besides its text.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EditResponse {
     revision: u64,
     kind: String,
     head_revision: u64,
+    // Absent from a Hub before these were reported.
+    #[serde(default)]
+    detached_automations: Vec<PageAutomationAnchorChange>,
+    #[serde(default)]
+    attached_automations: Vec<PageAutomationAnchorChange>,
+    #[serde(default)]
+    removed_sections: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageAutomationAnchorChange {
+    automation_id: String,
+    name: String,
+}
+
+/// What an edit did besides its text, one line each, so a writer whose edit
+/// dropped sections or paused Automations sees it at once.
+fn render_edit_effects(page: &str, base: u64, edited: &EditResponse) -> String {
+    let mut out = String::new();
+    for section in &edited.removed_sections {
+        out.push_str(&format!(
+            "⚠ Removed section \"{section}\" and everything under it. If that was not meant, \
+             see it with: xmatrix page read {page} --revision {base}\n"
+        ));
+    }
+    for automation in &edited.detached_automations {
+        out.push_str(&format!(
+            "⚠ Detached Automation \"{}\" ({}): its reference left the page, so it is paused. \
+             Put the reference back to resume it.\n",
+            automation.name, automation.automation_id
+        ));
+    }
+    for automation in &edited.attached_automations {
+        out.push_str(&format!(
+            "Resumed Automation \"{}\" ({}): its reference is on the page again.\n",
+            automation.name, automation.automation_id
+        ));
+    }
+    out
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -702,6 +743,7 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                         page,
                         edited.head_revision
                     );
+                    print!("{}", render_edit_effects(&page, base, &edited));
                     Ok(())
                 }
                 Err(error)
@@ -1166,6 +1208,31 @@ fn render_linked_pages(pages: &[PageDocument]) -> String {
 #[cfg(test)]
 mod page_tests {
     use super::*;
+
+    #[test]
+    fn edit_reports_removed_sections_and_the_automations_it_moved() {
+        let edited: EditResponse = serde_json::from_value(json!({
+            "revision": 225, "kind": "edit", "headRevision": 225,
+            "removedSections": ["Releases"],
+            "detachedAutomations": [{ "automationId": "a-1", "name": "Dependency sweep" }],
+            "attachedAutomations": [{ "automationId": "a-2", "name": "CI watch" }],
+        }))
+        .unwrap();
+        assert_eq!(
+            render_edit_effects("roadmap", 224, &edited),
+            "⚠ Removed section \"Releases\" and everything under it. If that was not meant, see it with: xmatrix page read roadmap --revision 224\n\
+             ⚠ Detached Automation \"Dependency sweep\" (a-1): its reference left the page, so it is paused. Put the reference back to resume it.\n\
+             Resumed Automation \"CI watch\" (a-2): its reference is on the page again.\n"
+        );
+    }
+
+    #[test]
+    fn edit_from_an_older_hub_reports_nothing_more() {
+        let edited: EditResponse =
+            serde_json::from_value(json!({ "revision": 2, "kind": "edit", "headRevision": 2 }))
+                .unwrap();
+        assert_eq!(render_edit_effects("p", 1, &edited), "");
+    }
 
     fn page(id: &str, parent: Option<&str>, position: &str) -> PageSummary {
         PageSummary {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { automationReferences, gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, parseGitHubFileReference, removeAutomationReference, replaceAutomationReference } from "../dist/index.js";
+import { automationReferences, gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, insertAutomationReference, mergePageText, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, pageRemovedSections, parseGitHubFileReference, removeAutomationReference, replaceAutomationReference } from "../dist/index.js";
 
 const page = `Intro line
 # Relay Storage
@@ -33,6 +33,13 @@ test("changed blocks name only the sections whose text differs", () => {
   const after = page.replace("- ship", "- shipped");
   assert.deepEqual(pageChangedBlocks(page, after), ["goals"]);
   assert.deepEqual(pageChangedBlocks(page, page.replace("## Goals\nagain\n", "")), ["goals-1"]);
+});
+
+test("removed sections are the top headings an edit took out, not deeper ones or ones it kept", () => {
+  const before = "# Plan\n\n## Goals\n\n### Detail\n\nx\n\n## Risks\n\n## Owners\n";
+  assert.deepEqual(pageRemovedSections(before, "# Plan\n\n## Goals\n"), ["Risks", "Owners"]);
+  assert.deepEqual(pageRemovedSections(before, before.replace("### Detail\n\nx\n\n", "")), []);
+  assert.deepEqual(pageRemovedSections(before, `${before}\n## New\n`), []);
 });
 
 test("three-way merge combines separate edits and refuses overlapping ones", () => {

@@ -171,6 +171,23 @@ test("an Agent edit merges with human edits, streams in under its cursor and com
   assert.notEqual(h.session.doc.clientID, agentClient, "the session writes as itself again afterwards");
 });
 
+test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  const original = h.ports.commit;
+  const detached = [{ automationId: "a-1", name: "Dependency sweep" }];
+  h.ports.commit = async (principal, input) => ({ ...await original(principal, input),
+    detachedAutomations: detached, attachedAutomations: [] });
+  const result = await h.session.submitEdit(agent, { baseRevision: 1, body: "# Project\n\n## Status\n\nIn progress\n",
+    conversationIds: [] });
+  assert.deepEqual(result.removedSections, ["Notes"]);
+  assert.deepEqual(result.detachedAutomations, detached);
+  assert.deepEqual(result.attachedAutomations, []);
+  assert.deepEqual(h.notices.find((notice) => notice.type === "committed").detachedAutomations, detached,
+    "people on the page see it too");
+  assert.doesNotMatch(ann.text.toString(), /## Notes/u);
+});
+
 test("an Agent edit that overlaps a newer change is refused with the current text", async () => {
   const h = harness();
   const ann = await annConnected(h);
