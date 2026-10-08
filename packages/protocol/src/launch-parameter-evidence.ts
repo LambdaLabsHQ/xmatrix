@@ -30,7 +30,9 @@ export interface LaunchParameterEvidence {
   /** Before `registration-parameters-v6`: Jev's choice among whole environments. */
   environment?: LaunchDecisionStage;
   /** How the launch mention was read as a request: Jev's answer, or the author's `launch:force`. */
-  intent?: { source: "jev"; selected: "summon"; probabilities: Record<string, number> } | { source: "author" };
+  intent?: { source: "jev"; selected: "summon"; probabilities: Record<string, number> } | { source: "author" }
+    /** Jev read it as a request while the author typed, and the author sent it. */
+    | { source: "draft" };
   /** `repo` names the chosen repository; a directory is never named. */
   selections: { model?: string; effort?: string; workspaceKind: "repo" | "local-path" | "managed"; repo?: string };
   /** `placement` is a `registration-parameters-v7` choice about the work.
@@ -142,6 +144,7 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
     if (!row.intent || typeof row.intent !== "object" || Array.isArray(row.intent)) return undefined;
     const reading = row.intent as Record<string, unknown>;
     if (reading.source === "author") intent = { source: "author" };
+    else if (reading.source === "draft") intent = { source: "draft" };
     else {
       const probabilities = reading.source === "jev" && reading.selected === "summon"
         ? distribution(reading.probabilities, /^[a-z]{1,20}$/u, "summon", 8) : undefined;

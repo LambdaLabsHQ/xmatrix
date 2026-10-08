@@ -1,5 +1,5 @@
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
-import type { ChannelAttachment } from "@xmatrix/protocol";
+import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import { parseMessageInteraction, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES } from "@xmatrix/protocol";
@@ -61,6 +61,8 @@ export interface ProductMessagePostCommitInput {
   scheduleBackground?: (task: Promise<unknown>) => void;
   /** Set by the append when this message replies to a cross-Channel link. */
   replyOrigin?: CrossChannelReplyOrigin;
+  /** Jev's reading of each summon while its Human author typed it. */
+  draftIntents?: DraftSummonIntent[];
 }
 
 /**

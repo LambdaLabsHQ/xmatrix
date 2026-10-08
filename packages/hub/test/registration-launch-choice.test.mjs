@@ -585,3 +585,14 @@ test("a laptop is the machine's own form; Jev is not asked and headroom still pi
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(selected.parameterEvidence), selected.parameterEvidence);
 });
+
+
+test('a Human-confirmed draft reading skips only intent and keeps the remaining launch selection', async () => {
+  const calls = [];
+  const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@codex inspect', tags: {}, candidates, summon: { ...summon, readInDraft: true } });
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace'], ['modelEffort']]);
+  assert.deepEqual(result.parameterEvidence.intent, { source: 'draft' });
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
+});
