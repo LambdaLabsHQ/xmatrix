@@ -1,4 +1,5 @@
 import { SENTRY_PUBLIC_INTEGRATION_SCOPES } from "@xmatrix/protocol";
+import { SignJWT } from "jose";
 import type { Env } from "../types";
 import { providerJson, ProviderRequestError } from "./http";
 
@@ -147,11 +148,16 @@ export async function refreshSentryInstallation(env: Env, values: Readonly<Recor
   validateSentryInstallationCredentials(values, client);
   if (Number(values.oauthExpiresAt) - now > 86_400_000) invalidGrant();
   if (Number(values.oauthExpiresAt) - now > 120_000) return undefined;
-  const payload = await request(`${installationUrl(values.oauthInstallationId!)}authorizations/`, { method: "POST", json: {
-    grant_type: "refresh_token", refresh_token: values.oauthRefreshToken,
-    client_id: client.clientId, client_secret: client.clientSecret } });
+  // Sentry's recommended manual refresh: a JWT signed with the client secret replaces the
+  // installation's current token. Unlike a refresh_token grant it does not depend on the
+  // last rotated pair having been saved, so a rotation lost in transit cannot strand the grant.
+  // https://docs.sentry.io/integrations/integration-platform/public-integration/#refreshing-tokens-manually-for-integrators
+  const assertion = await new SignJWT({}).setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer(client.clientId).setSubject(client.clientId).setJti(crypto.randomUUID())
+    .setIssuedAt().setExpirationTime("1m").sign(new TextEncoder().encode(client.clientSecret));
+  const payload = await request(`${installationUrl(values.oauthInstallationId!)}authorizations/`, { method: "POST",
+    headers: { authorization: `Bearer ${assertion}` }, json: { grant_type: "urn:sentry:params:oauth:grant-type:jwt-bearer" } });
   // Save this complete pair with credential-version CAS before any other provider request.
-  // The installation-specific authorization endpoint authenticates the same installation.
   const fields = grantFields(payload, now);
   if (fields.oauthToken === values.oauthToken || fields.oauthRefreshToken === values.oauthRefreshToken) invalidGrant();
   return fields;
