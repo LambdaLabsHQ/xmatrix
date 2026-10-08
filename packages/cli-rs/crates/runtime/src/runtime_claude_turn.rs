@@ -15,6 +15,7 @@ use crate::runtime_agent_goal_status::claude_goal_status_from_result_text;
 use crate::runtime_agent_goal_status::goal_status_represents_absence;
 use crate::runtime_claude_stream_session::ClaudeStreamSession;
 use crate::runtime_claude_stream_session::ClaudeTurnStatus;
+use crate::runtime_harness_questions::{ack_questionnaire_reply, questionnaire_reply};
 use crate::{
     GoalCommand, ImageBlockShape, LocalImageFiles, PresencePatch, agent_instance_connection,
     await_turn_with_events, clean_run_effort, clean_run_model, config, error,
@@ -157,17 +158,27 @@ pub(crate) async fn run_claude_stream_turn(
             }) {
                 return true;
             }
+            // A card answer goes to the question Claude waits on, and the
+            // turn carries on.
+            if let Some(reply) = questionnaire_reply(event)
+                && interrupter.answer_question(&reply).await
+            {
+                ack_questionnaire_reply(relay, &reply);
+                return true;
+            }
             if event_requests_active_turn_interrupt_with_replay(
                 event,
                 Some(&channel_id),
                 Some(agent.id.as_str()),
                 interrupt_history_replay,
-            ) && let Err(err) = interrupter.interrupt_active_turn().await
-            {
-                eprintln!(
-                    "{} claude stream interrupt failed: {err}",
-                    "⚠".yellow().bold()
-                );
+            ) {
+                interrupter.cancel_questions().await;
+                if let Err(err) = interrupter.interrupt_active_turn().await {
+                    eprintln!(
+                        "{} claude stream interrupt failed: {err}",
+                        "⚠".yellow().bold()
+                    );
+                }
             }
             false
         })
@@ -676,6 +687,66 @@ pub(crate) fn claude_liveness_probe_control_request(request_id: &str) -> Value {
             "subtype": "status",
         },
     })
+}
+
+/// A `can_use_tool` request: with `--dangerously-skip-permissions` Claude asks
+/// only for tools that need a person (AskUserQuestion), and an
+/// AskUserQuestion is parked for its card. Every other tool is allowed as is,
+/// so the permission prompt tool changes nothing else.
+pub(crate) enum ClaudeToolPermission {
+    Ask {
+        request_id: String,
+        tool_use_id: String,
+        input: Value,
+    },
+    Allow(Value),
+}
+
+pub(crate) fn claude_tool_permission(value: &Value) -> Option<ClaudeToolPermission> {
+    if value.get("type").and_then(Value::as_str) != Some("control_request")
+        || value.pointer("/request/subtype").and_then(Value::as_str) != Some("can_use_tool")
+    {
+        return None;
+    }
+    let request_id = value.get("request_id").and_then(Value::as_str)?.to_string();
+    let request = value.get("request")?;
+    let input = request.get("input").cloned().unwrap_or(Value::Null);
+    if request.get("tool_name").and_then(Value::as_str) == Some("AskUserQuestion") {
+        let tool_use_id = request
+            .get("tool_use_id")
+            .and_then(Value::as_str)
+            .unwrap_or(&request_id)
+            .to_string();
+        return Some(ClaudeToolPermission::Ask {
+            request_id,
+            tool_use_id,
+            input,
+        });
+    }
+    Some(ClaudeToolPermission::Allow(claude_permission_response(
+        &request_id,
+        Ok(input),
+    )))
+}
+
+/// The answer to a `can_use_tool` request: run with `input`, or refuse with
+/// a message the model reads.
+pub(crate) fn claude_permission_response(request_id: &str, decision: Result<Value, &str>) -> Value {
+    let decision = match decision {
+        Ok(input) => serde_json::json!({ "behavior": "allow", "updatedInput": input }),
+        Err(message) => serde_json::json!({ "behavior": "deny", "message": message }),
+    };
+    serde_json::json!({
+        "type": "control_response",
+        "response": { "subtype": "success", "request_id": request_id, "response": decision },
+    })
+}
+
+/// The request a `control_cancel_request` withdraws (Claude gave up waiting).
+pub(crate) fn claude_cancelled_control_request(value: &Value) -> Option<&str> {
+    (value.get("type").and_then(Value::as_str) == Some("control_cancel_request"))
+        .then(|| value.get("request_id").and_then(Value::as_str))
+        .flatten()
 }
 
 /// The answer to a `control_request` the CLI sends *us* on stdout, matching

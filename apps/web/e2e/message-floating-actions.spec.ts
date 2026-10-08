@@ -49,6 +49,10 @@ test("hover actions on a header-less message sit on glass, and the reaction pick
   expect(glassBox!.y).toBeLessThan(textBox!.y + textBox!.height);
   expect(replyBox!.x).toBeGreaterThanOrEqual(glassBox!.x);
   expect(replyBox!.x + replyBox!.width).toBeLessThanOrEqual(glassBox!.x + glassBox!.width);
+  // The hover fill shares the capsule's centres: a 4px square inside a full
+  // round pill read as misaligned corners (user 2026-10-08).
+  const replyRadius = await reply.evaluate((el) => parseFloat(getComputedStyle(el).borderTopLeftRadius));
+  expect(replyRadius).toBeGreaterThanOrEqual(replyBox!.height / 2);
 
   await page.screenshot({ path: test.info().outputPath("message-floating-actions.png"), clip: await row.boundingBox() ?? undefined });
 

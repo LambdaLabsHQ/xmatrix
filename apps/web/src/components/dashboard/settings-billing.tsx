@@ -59,8 +59,6 @@ function useCheckoutReturn() {
 }
 
 function spaceBillingKey(userId: string, spaceId: string) {
-  // The plan badge reads under this same key, so a checkout that writes the
-  // fresher summary here updates the badge beside the Space name with it.
   return xmatrixQueryKeys.domain({ userId }, "billing", [spaceId]);
 }
 

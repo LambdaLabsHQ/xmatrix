@@ -30,7 +30,8 @@ function JointPlacement({ parameters }: { parameters: LaunchParameterEvidence })
       {parameters.placement.ranking.map((item, index) => <li key={`${index}:${item.harness}:${item.machineId}`}>
         {routingHarnessLabel(item.harness)} on {item.machineName || "Unnamed machine"} · fit {percent(item.fit)} ·
         headroom {item.headroom === undefined ? "unmeasured" : percent(item.headroom)}
-        {item.frontier ? "" : " · outweighed on both"}</li>)}
+        {item.quotaPace === undefined ? "" : ` · quota pace ${item.quotaPace.toFixed(2)}×`}
+        {item.frontier ? "" : " · outweighed"}</li>)}
     </ol>}
   </div>;
 }
@@ -123,7 +124,7 @@ export function RoutingDecisionBoard({ decision, compact = false, evidenceOnly =
       <p>Workspace: {decision.parameters.selections.workspaceKind}{decision.parameters.selections.repo ? ` · ${decision.parameters.selections.repo}` : ""}</p>
       <p>Evaluated {formatZonedDateTime(decision.parameters.evaluatedAt)} · {decision.parameters.rubricVersion}</p>
       {decision.parameters.harness && <DecisionStage label="Harness" stage={decision.parameters.harness} />}
-      {(decision.parameters.fit || decision.parameters.placement) && <JointPlacement parameters={decision.parameters} />}
+      {!evidenceOnly && (decision.parameters.fit || decision.parameters.placement) && <JointPlacement parameters={decision.parameters} />}
       {decision.parameters.environment && <DecisionStage label="Environment" stage={decision.parameters.environment} />}
       {decision.parameters.choices.map(choice => <p key={choice.key}>{choice.key}: {choice.selected}
         {Object.entries(choice.probabilities).map(([option, probability]) => <span key={option}> · {option}: {(probability * 100).toFixed(1)}%</span>)}

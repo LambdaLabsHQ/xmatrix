@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { createAuthorityDatabase } from "../../db/src/index.ts";
-import { claim, nextChannelDueAt } from "../src/postgres-agent-launch-coordinator.ts";
+import { claim, earliestDue, nextChannelStepDue } from "../src/postgres-agent-launch-coordinator.ts";
+
+const nextChannelDueAt = async (database, shardId, channelId) =>
+  earliestDue(await nextChannelStepDue(database, shardId, channelId));
 
 const url = process.env.XMATRIX_TEST_POSTGRES_URL;
 const integration = url || process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true" ? test : test.skip;
@@ -47,6 +50,10 @@ integration("a spawned Launch whose spawn is recorded is not due, so it no longe
     await launch("unrecorded", "spawned", false, true);
     await launch("undurable", "spawned", true, false);
     assert.ok(await nextChannelDueAt(database, "shard-0", channel) <= Date.now());
+    // Only Launch work is due, so a timed pass runs only the Launch steps.
+    const due = await nextChannelStepDue(database, "shard-0", channel);
+    assert.deepEqual(Object.keys(due), ["launch"]);
+    assert.ok(due.launch <= Date.now());
     const claimed = await claim(database, "shard-0", `owner-${id}`, { channelId: channel, launchIds: [] });
     assert.deepEqual(claimed.map(row => row.launch_id).sort(),
       [`launch-undurable-${id}`, `launch-unrecorded-${id}`].sort());

@@ -1128,7 +1128,7 @@ export function Composer({
           localContext={localContext}
           enabled={writable}
           instanceTargetScope={instanceTargetScope}
-          disabled={!writable || sending || preparingSend}
+          disabled={!writable}
           sending={sending || preparingSend}
           canSend={canSend}
           onSend={() => void submitComposer()}

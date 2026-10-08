@@ -1,15 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 
 import { RelayPostgresAgentLaunchCoordinatorService } from "./postgres-agent-launch-coordinator";
+import { MIN_RECHECK_MS, dueSteps, nextAlarm, type StepDue } from "./postgres-agent-launch-schedule";
 import { AgentLaunchCoordinatorLanes } from "./postgres-agent-launch-coordinator-lanes";
 import { backgroundAdmissionFor } from "./postgres-background-admission-do";
 import { recordAgentLaunchCoordinator } from "./postgres-coordination-observability";
 import type { Env } from "./types";
 
-/** The soonest a Channel re-checks work that is already due. */
-const MIN_RECHECK_MS = 1_000;
-/** The longest a due item that made no progress waits before the next try. */
-const MAX_STALLED_BACKOFF_MS = 60_000;
 /** How long a pass waits when the shard's permits cannot be asked at all. */
 const ADMISSION_UNAVAILABLE_RETRY_MS = 5_000;
 
@@ -19,15 +16,18 @@ const ADMISSION_UNAVAILABLE_RETRY_MS = 5_000;
  * retries. The writer of such work wakes this object before answering; the
  * alarm is only ever the Channel's next due item, never a period.
  *
- * Storage holds only the routing key the alarm needs — which Channel and shard
- * this object serves. Every business fact stays in PostgreSQL.
+ * Storage holds only what the alarm needs: which Channel and shard this object
+ * serves, when each kind of its work is due, and how many timed passes in a
+ * row found work due without moving it. The count lives in storage because an
+ * evicted object that forgot it went back to re-checking every second.
+ * Every business fact stays in PostgreSQL.
  */
 export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
   private readonly lanes: AgentLaunchCoordinatorLanes;
   private readonly service: RelayPostgresAgentLaunchCoordinatorService;
   private route: { channelId: string; shardId?: string } | undefined;
-  /** Consecutive passes after which the earliest item was still already due. */
-  private stalled = 0;
+  /** Consecutive passes after which the earliest item was still already due; persisted as "stalled". */
+  private stalled: number | undefined;
   /** A writer woke this Channel since its last pass began. */
   private woken = false;
   /** Set when the shard refused this Channel a pass permit: retry then. */
@@ -62,7 +62,8 @@ export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
         }
         const startedAt = performance.now();
         try {
-          return await this.service.runChannel(route, woken).catch((error: unknown) => {
+          const due = woken ? undefined : dueSteps(await this.state.storage.get<StepDue>("due"), Date.now());
+          return await this.service.runChannel(route, woken, due).catch((error: unknown) => {
             recordAgentLaunchCoordinator({
               env: this.env, outcome: "error", preparedToWakeMs: 0, wakeToClaimMs: 0,
               claimBatchSize: 0, eligibleCount: 0, oldestEligibleAgeMs: 0,
@@ -100,19 +101,23 @@ export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
       await this.state.storage.setAlarm(Math.max(admissionRetryAt, now + MIN_RECHECK_MS));
       return;
     }
-    let due: number | undefined;
-    try { due = route ? await this.service.nextDueAt(route) : undefined; }
-    catch { due = now; }
-    if (due === undefined) {
-      this.stalled = 0;
-      await this.state.storage.deleteAlarm();
-      return;
-    }
-    if (due <= now) this.stalled++; else this.stalled = 0;
-    const backoff = this.stalled > 0
-      ? Math.min(MAX_STALLED_BACKOFF_MS, MIN_RECHECK_MS * 2 ** (this.stalled - 1)) : 0;
-    await this.state.storage.setAlarm(Math.max(due, now + MIN_RECHECK_MS, now + backoff));
+    let due: StepDue | undefined;
+    try { due = route ? await this.service.nextDue(route) : {}; }
+    catch { due = undefined; }
+    const next = nextAlarm({ now, due, stalled: await this.stalledPasses() });
+    this.stalled = next.stalled;
+    // An unreadable due time runs every step next time.
+    await this.state.storage.put(due ? { stalled: next.stalled, due } : { stalled: next.stalled });
+    if (!due) await this.state.storage.delete("due");
+    if (next.alarmAt === null) await this.state.storage.deleteAlarm();
+    else await this.state.storage.setAlarm(next.alarmAt);
   }
+
+  private async stalledPasses(): Promise<number> {
+    this.stalled ??= (await this.state.storage.get<number>("stalled")) ?? 0;
+    return this.stalled;
+  }
+
 
   private async routeKey(): Promise<{ channelId: string; shardId?: string } | undefined> {
     this.route ??= await this.state.storage.get<{ channelId: string; shardId?: string }>("route");
@@ -145,6 +150,11 @@ export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
     // A durable alarm shortly after, so a pass lost with this isolate still
     // runs; the pass itself replaces it with the Channel's next due time.
     await this.state.storage.setAlarm(Date.now() + 5_000);
+    // An event is progress worth looking at now: forget the stall backoff, and
+    // the due steps too, so the fallback alarm of a lost pass runs every step.
+    this.stalled = 0;
+    await this.state.storage.put("stalled", 0);
+    await this.state.storage.delete("due");
     this.woken = true;
     void this.lanes.claim();
     return Response.json({ ok: true });
