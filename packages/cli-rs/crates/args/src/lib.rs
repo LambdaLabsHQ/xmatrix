@@ -1355,52 +1355,39 @@ mod tests {
     }
 
     #[test]
-    fn channel_about_reads_summary_and_name_from_files() {
-        let cli = Cli::try_parse_from([
-            "xmatrix",
-            "channel",
-            "about",
-            "channel-1",
-            "--summary-file",
-            "about.md",
-            "--name-file",
-            "name.txt",
-            "--through",
-            "m-9",
-        ])
-        .expect("about should accept file inputs");
+    fn channel_about_accepts_direct_text_or_one_json_stdin_input() {
+        let about = |extra: &[&str]| {
+            let mut argv = vec!["xmatrix", "channel", "about", "channel-1"];
+            argv.extend_from_slice(extra);
+            Cli::try_parse_from(argv)
+        };
+        let cli = about(&["--stdin", "--through", "m-9", "--expected-revision", "2"])
+            .expect("about should accept JSON stdin");
         let Some(Commands::Channel {
             command:
                 ChannelCommand::About {
                     summary,
-                    summary_file,
                     name,
-                    name_file,
+                    stdin,
                     through,
+                    expected_revision,
                     ..
                 },
         }) = cli.command
         else {
             panic!("expected channel about command");
         };
+        assert!(stdin);
         assert_eq!(summary, None);
-        assert_eq!(summary_file, Some(PathBuf::from("about.md")));
         assert_eq!(name, None);
-        assert_eq!(name_file, Some(PathBuf::from("name.txt")));
         assert_eq!(through.as_deref(), Some("m-9"));
-    }
-
-    #[test]
-    fn channel_about_needs_exactly_one_source_per_field() {
-        let about = |extra: &[&str]| {
-            let mut argv = vec!["xmatrix", "channel", "about", "channel-1"];
-            argv.extend_from_slice(extra);
-            Cli::try_parse_from(argv)
-        };
-        assert!(about(&["--summary", "text"]).is_ok());
+        assert_eq!(expected_revision, Some(2));
+        assert!(about(&["--summary", "中文摘要", "--name", "频道标题"]).is_ok());
         assert!(about(&[]).is_err());
-        assert!(about(&["--summary", "text", "--summary-file", "a.md"]).is_err());
-        assert!(about(&["--summary", "text", "--name", "n", "--name-file", "n.txt"]).is_err());
+        assert!(about(&["--stdin", "--summary", "text"]).is_err());
+        assert!(about(&["--stdin", "--name", "name"]).is_err());
+        assert!(about(&["--summary-file", "a.md"]).is_err());
+        assert!(about(&["--summary", "text", "--name-file", "n.txt"]).is_err());
     }
 }
 
@@ -1817,27 +1804,20 @@ pub enum ChannelCommand {
         name: Vec<String>,
     },
     /// Replace a channel's About summary (the channel's own About session only).
-    /// For non-ASCII text on Windows, prefer --summary-file and --name-file:
-    /// UTF-8 files never pass through the shell's code page.
+    /// Submit text directly, or pipe a JSON object with summary and optional name
+    /// to --stdin. No intermediate files are read.
     About {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
         /// The new About summary
-        #[arg(
-            long,
-            required_unless_present = "summary_file",
-            conflicts_with = "summary_file"
-        )]
+        #[arg(long, required_unless_present = "stdin", conflicts_with = "stdin")]
         summary: Option<String>,
-        /// Read the new About summary from a UTF-8 file
-        #[arg(long, value_name = "PATH")]
-        summary_file: Option<PathBuf>,
         /// Name a channel nobody has named yet
-        #[arg(long, conflicts_with = "name_file")]
+        #[arg(long, conflicts_with = "stdin")]
         name: Option<String>,
-        /// Read the name for a channel nobody has named yet from a UTF-8 file
-        #[arg(long, value_name = "PATH")]
-        name_file: Option<PathBuf>,
+        /// Read a UTF-8 JSON object containing summary and optional name from stdin
+        #[arg(long)]
+        stdin: bool,
         /// The newest message the summary covers
         #[arg(long)]
         through: Option<String>,

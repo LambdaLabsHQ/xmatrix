@@ -233,11 +233,6 @@ function metadataString(metadata: Record<string, unknown> | undefined, key: stri
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-/** A file name for one About field that no other request uses. */
-function aboutFile(field: "about" | "name", requestId: unknown): string {
-  return `xmatrix-${field}-${String(requestId).replace(/[^A-Za-z0-9-]+/gu, "-").slice(0, 80)}.txt`;
-}
-
 function channelAboutPrompt(
   channelId: string,
   preferredLanguage: ProductSpacePreferredLanguage,
@@ -259,10 +254,10 @@ function channelAboutPrompt(
     "A root message listed under Opened threads, or marked [thread=...] in the transcript, has been picked up in its thread. Never describe such a message as unclaimed, unanswered, or without a thread.",
     ...(automaticName ? ["Nobody has named this Channel yet: in the same operation, also set its name to what the conversation is about, in at most 40 characters, in the same language."] : []),
     "Always recompute and apply the About, whether it is empty or already populated.",
-    // Files keep non-ASCII text away from the shell's code page on every
-    // platform. Names unique to this request, written before they are applied,
-    // keep a file an earlier session left behind from becoming this About.
-    `Write the About to a new UTF-8 file named ${aboutFile("about", context.triggerRequestId)} in your working directory${automaticName ? `, and the name to ${aboutFile("name", context.triggerRequestId)}` : ""}. Only after that write has succeeded, apply ${automaticName ? "them" : "it"} with \`xmatrix channel about ${channelId} --summary-file ${aboutFile("about", context.triggerRequestId)}${automaticName ? ` --name-file ${aboutFile("name", context.triggerRequestId)}` : ""} --through <id of the newest message you read> --expected-revision <revision printed by authoritative history>\`; never run the write and the apply at the same time. Then read \`xmatrix channel history ${channelId} --authoritative\` again to verify the saved summary.`,
+    `Submit the About directly with \`xmatrix channel about ${channelId} --summary "<summary>"${automaticName ? ' --name "<name>"' : ""} --through <id of the newest message you read> --expected-revision <revision printed by authoritative history>\`. Pass the generated text itself, never a file path; do not write or read any intermediate file. This command updates the Channel's database-backed metadata through the Hub.`,
+    `If this CLI's help advertises --stdin, you may instead pipe one JSON object containing "summary"${automaticName ? ' and "name"' : ""} to \`xmatrix channel about ${channelId} --stdin --through <id of the newest message you read> --expected-revision <revision printed by authoritative history>\`.`,
+    "On Windows, use ASCII-only PowerShell command source with JSON Unicode escapes (for example \\u4e2d), decode it with ConvertFrom-Json, then pass the decoded summary and name as native command arguments. For JSON stdin, set $OutputEncoding = [System.Text.UTF8Encoding]::new($false) before piping, or keep the JSON ASCII-only with Unicode escapes.",
+    `Then read \`xmatrix channel history ${channelId} --authoritative\` again to verify the saved summary.`,
     `Channel: ${channelId}`,
   ].join("\n");
 }

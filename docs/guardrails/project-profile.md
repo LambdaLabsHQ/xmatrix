@@ -47,3 +47,8 @@ launch, sharing only simultaneous checks. Invocation details retain actual
 baseline evidence; continued tasks preserve their recorded checkout and warn
 only on proven base divergence. Local shared Git objects are not purged by this
 feature. See [repository preparation](../daemon-service-model.md#repository-snapshot-preparation).
+
+Channel About sessions submit summary/title text directly through Hub using
+CLI arguments or bounded JSON stdin; they do not stage local files. Their
+own-Channel authorization and immutable database revision/input evidence are
+unchanged. See [Channel metadata revisions](../design/channel-metadata-revisions.md).
