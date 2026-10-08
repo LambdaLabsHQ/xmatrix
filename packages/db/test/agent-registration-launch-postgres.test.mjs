@@ -287,9 +287,19 @@ integration("launch survives a hostname change with stale Workspace metadata and
         supportedReasoningEfforts: [{ reasoningEffort: "high", description: "Thorough" }] }],
     }, parameterLaunch.instanceId]);
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["machine_routing_effort_v1"]'::jsonb`);
+    await source("preview-declined");
+    const declined = await launches.dispatchFromMessage({ commandId: "preview-declined", actorUserId: "caller",
+      channelId: "channel", sourceMessageId: "preview-declined", body,
+      draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "explanation" }] },
+      async () => assert.fail("a confirmed non-request allocates no launch and asks no question"));
+    assert.equal(declined.selectionCount, 1);
+    assert.deepEqual(declined.prepared, []);
+    assert.equal(declined.rejected[0].code, "summon_intent_explanation");
     await source("dispatch-source");
     const dispatched = await launches.dispatchFromMessage({ commandId: "dispatch", actorUserId: "caller",
-      channelId: "channel", sourceMessageId: "dispatch-source", body }, async ({ candidates, sourceSequence }) => {
+      channelId: "channel", sourceMessageId: "dispatch-source", body,
+      draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "summon" }] }, async ({ candidates, sourceSequence, summon }) => {
+        assert.equal(summon.readInDraft, true);
         const boundary = await sql("SELECT timeline_sequence FROM data.messages WHERE message_id=$1", ["dispatch-source"]);
         assert.equal(sourceSequence, Number(boundary.rows[0].timeline_sequence));
         assert.deepEqual(candidates[0].observations.quota, { remainingPercent: 100, assumed: true });

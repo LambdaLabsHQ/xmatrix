@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import { runtimeRepository } from "./runtime";
-import { AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, agentSendSubmissionCanonical, callerMessageMetadata, messagePublicationEvidence, sha256Hex } from "@xmatrix/protocol";
-import type { ChannelAppMention, ChannelAttachment } from "@xmatrix/protocol";
+import { AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, agentSendSubmissionCanonical, callerMessageMetadata, messagePublicationEvidence, parseDraftSummonIntents, sha256Hex } from "@xmatrix/protocol";
+import type { ChannelAppMention, ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { LIVE_RUN_LAUNCH_FIELDS, liveRunIsAdmitted, snapshotLiveRunFromProductGateway } from "./live-run-admission";
 import { type AuthUser } from "./auth";
@@ -80,6 +80,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         "senderAgentName",
         "senderExecutionKey",
         "senderRunId",
+        "summonIntents",
       ]);
       const unexpectedMessageFields = Object.keys(rawBody).filter(
         (field) => !allowedMessageFields.has(field),
@@ -104,6 +105,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         senderAgentInstanceId?: string;
         senderRunId?: string;
         senderExecutionKey?: string;
+        summonIntents?: unknown;
       };
       const message = channelAppMentionsForPublicMessage(body.body, body.appMentions);
       const principal = authUser.agentRun;
@@ -111,6 +113,16 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         if (principal || body.senderAgentId || body.senderAgentInstanceId) return c.json({
           error: "Agent invocation selections require a Human caller", code: "invocation_selection_forbidden",
         }, 403);
+      }
+      // Jev's reading while a Human typed: sending it answers the intent
+      // question for that author, as `launch:force` in the text would.
+      let draftIntents: DraftSummonIntent[] | undefined;
+      if (body.summonIntents !== undefined) {
+        if (principal || body.senderAgentId || body.senderAgentInstanceId) return c.json({
+          error: "Draft summon intents require a Human caller", code: "summon_intent_forbidden",
+        }, 403);
+        try { draftIntents = parseDraftSummonIntents(body.summonIntents, typeof body.body === "string" ? body.body : ""); }
+        catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid draft summon intents" }, 400); }
       }
       if (body.finalReplyExecutionId !== undefined) {
         if (!principal) return c.json({ error: "Final reply requires an authenticated Agent Run" }, 403);
@@ -390,6 +402,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             ...(committedAttachments?.length ? { attachments: committedAttachments } : {}),
             ...(crossChannelReplyOrigin(committed.replyOrigin)
               ? { replyOrigin: crossChannelReplyOrigin(committed.replyOrigin) } : {}),
+            ...(draftIntents?.length ? { draftIntents } : {}),
           });
           // waitUntil is cancelled after the response and the summon then vanishes.
           if (productMessageControlFinishesBeforeResponse(message.body)) {

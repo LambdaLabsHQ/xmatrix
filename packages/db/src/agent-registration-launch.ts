@@ -37,6 +37,7 @@ import { ACTIVE_RUN_STATUS_SQL,
   type AutoLaunchTags,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
+  type DraftSummonIntent,
   type AgentRegistrationLaunch, utf8ByteLength, hasControlCharacter,
   currentRoutingQuotaWindows,
 } from "@xmatrix/protocol";
@@ -156,7 +157,9 @@ export type RegistrationLaunchChooser = (input: {
   managedWorkspace?: boolean;
   /** The mention being decided, when a message launches: Jev first reads
    * whether its author is asking an Agent to start, unless `launch:force`. */
-  summon?: { text: string; start: number; end: number; authorKind: "user" | "agent" };
+  summon?: { text: string; start: number; end: number; authorKind: "user" | "agent";
+    /** Jev read it as a request while the author typed, and the author sent it. */
+    readInDraft?: true };
   /** A message that summons nobody: Jev first reads whether its author wants
    * an Agent to start now. */
   askToStart?: true;
@@ -623,6 +626,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     /** The author's "launch anyway" for one mention Jev read as a non-request:
      * only that summon is prepared, as if it carried `launch:force`. */
     forceMention?: string;
+    /** Jev's reading of each summon while the author typed, by its text; the
+     * author sent the message knowing it, so it answers the intent question. */
+    draftIntents?: ReadonlyArray<DraftSummonIntent>;
   }, choose?: RegistrationLaunchChooser) {
     const actorUserId = text(input.actorUserId), channelId = text(input.channelId),
       sourceMessageId = text(input.sourceMessageId), commandId = text(input.commandId, 200);
@@ -647,6 +653,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (recovered) { prepared.push(recovered); continue; }
         const options = selectionLaunchConditions(input.body, selection);
         if (options.error) throw new RegistrationAccessError("invalid_registration_launch", 400);
+        const draftRead = input.forceMention === undefined && source.authorKind === "user"
+          ? input.draftIntents?.find(item => item.start === selection.start && item.end === options.end &&
+            item.mention === summonText(selection))?.choice : undefined;
+        if (draftRead !== undefined && draftRead !== "summon" && options.tags.launch !== "force") {
+          rejected.push({ selectionIndex, code: `summon_intent_${draftRead}`, sourceMention: summonText(selection) });
+          continue;
+        }
         // Read alongside the candidates: the repository list comes from GitHub.
         const repositoryCatalog = summonRepositoryCatalog(this.repositoryReader, actorUserId, options.tags.repo);
         const listed = await this.candidatesFor(selection.target.kind === "registration"
@@ -670,7 +683,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates,
             blocked: listed.blocked,
             tags: input.forceMention !== undefined ? { ...options.tags, launch: "force" } : options.tags,
-            summon: { text: summonText(selection), start: selection.start, end: options.end, authorKind: source.authorKind } });
+            summon: { text: summonText(selection), start: selection.start, end: options.end, authorKind: source.authorKind,
+              ...(draftRead === "summon" ? { readInDraft: true as const } : {}) } });
         }
         catch (error) {
           // A model or its input read failed before any launch allocation. Do not

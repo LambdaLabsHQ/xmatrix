@@ -95,6 +95,7 @@ export function summonIntentNote(decision: PresentedRoutingDecision | undefined)
   const intent = decision?.parameters?.intent;
   if (!intent) return undefined;
   if (intent.source === "author") return "launch:force";
+  if (intent.source === "draft") return "Previewed before send";
   const probability = intent.probabilities.summon;
   return Number.isFinite(probability) ? `xMatrix · ${Math.round(probability * 100)}%` : "xMatrix";
 }
