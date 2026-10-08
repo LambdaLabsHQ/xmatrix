@@ -17,12 +17,15 @@ export function useGlobalSearchClearance(capsuleRef: RefObject<HTMLElement | nul
     const capsuleElement = capsuleRef.current;
     if (!capsuleElement) return undefined;
     let frame = 0;
-    const update = () => {
-      frame = 0;
+    const clear = () => {
       for (const header of Array.from(document.querySelectorAll<HTMLElement>(`[${CLEARED}]`))) {
         header.style.paddingRight = "";
         header.removeAttribute(CLEARED);
       }
+    };
+    const update = () => {
+      frame = 0;
+      clear();
       const capsule = capsuleElement.getBoundingClientRect();
       if (!capsule.width) return;
       for (const header of Array.from(document.querySelectorAll<HTMLElement>(BAND_HEADERS))) {
@@ -51,6 +54,7 @@ export function useGlobalSearchClearance(capsuleRef: RefObject<HTMLElement | nul
       resize.disconnect();
       mutations.disconnect();
       window.removeEventListener("resize", schedule);
+      clear();
     };
   }, [capsuleRef]);
 }
