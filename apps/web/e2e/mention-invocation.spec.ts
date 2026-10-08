@@ -683,13 +683,9 @@ for (const denied of [false, true]) test(`the panel ${denied ? 'says Jev decisio
   }
   // Jev's answers come first, one row each, then the startup measured after them.
   const jev = dialog.getByRole('region', { name: "Routing decision" });
-  const answer = jev.getByRole('listitem').filter({ hasText: 'Model' }).first();
-  await expect(answer).toContainText('gpt-5.5 · high');
-  await expect(answer).toContainText('82%');
-  await expect(jev.getByText('Select a supported model and effort pair.')).toBeHidden();
-  await answer.getByText('gpt-5.5 · high').first().click();
-  await expect(answer.getByText('Select a supported model and effort pair.')).toBeVisible();
+  const answer = jev.getByRole('list', { name: 'Model options' });
   await expect(answer.locator('li[data-selected]')).toContainText('gpt-5.5 · high');
+  await expect(answer.locator('li[data-selected]')).toContainText('82%');
   await expect(answer.locator('li:not([data-selected])', { hasText: 'Harness default' })).toContainText('18%');
   await jev.getByText('Input', { exact: true }).click();
   await expect(jev).toContainText(source);
@@ -866,4 +862,70 @@ test("Jev's choices enter the mention one by one, taking no space before they ar
   await expect(status).toHaveText(/Connecting$/);
   await expect(status).not.toContainText("Joined channel");
   await expect(chip).not.toContainText("xMatrix chose");
+});
+
+const autoMessageId = "message-auto";
+const autoBody = "@auto fix the flaky login test";
+const fitLevels = ["Unsuitable: it lacks a capability this work needs, or its description says to avoid this kind of work.",
+  "Capable: nothing specific makes it a better fit for this work than another agent. A harness known only by its name is here.",
+  "Strong fit: its description, its models or the discussion give a concrete reason it suits this work.",
+  "Asked for: the message or the discussion explicitly wants this agent to do the work."];
+const fitQuestion = (harness: string) => ({ type: "score", instructions: `Rate how well the one harness below suits the work. Harness: ${JSON.stringify({ harness, descriptions: [], models: [] })}`, criteria: fitLevels });
+const autoParameters = { rubricVersion: "registration-parameters-v10", evaluatedAt: E2E_NOW, inputDigest: "a".repeat(64),
+  fit: { inputDigest: "b".repeat(64), scores: {
+    codex: { score: 0.97, probabilities: { 0: 0.2, 1: 0.71, 2: 0.02, 3: 0.07 } },
+    claude: { score: 2.05, probabilities: { 0: 0.1, 1: 0.32, 2: 0.01, 3: 0.57 } },
+    opencode: { score: 0.77, probabilities: { 0: 0.34, 1: 0.59, 2: 0.02, 3: 0.05 } } } },
+  placement: { profile: "balanced", ranking: [
+    { harness: "codex", machineId: "m-idle", machineName: "build-idle", fit: 0.323, headroom: 0.85, frontier: true, utility: 0.324 },
+    { harness: "claude", machineId: "m-busy", machineName: "build-busy", fit: 0.683, headroom: -0.045, frontier: true, utility: -0.044 },
+    { harness: "opencode", machineId: "m-grok", machineName: "grok-box", fit: 0.257, headroom: 0.411, frontier: false, utility: 0.258 },
+    { harness: "codex", machineId: "m-busy", machineName: "build-busy", fit: 0.323, headroom: -0.045, frontier: false, utility: -0.044 }] },
+  intent: { source: "jev", selected: "summon", probabilities: { summon: 0.96, explanation: 0.04 } },
+  selections: { workspaceKind: "repo", repo: "LambdaLabsHQ/xmatrix" },
+  choices: [{ key: "workspace", selected: "workspace_0", probabilities: { workspace_0: 1 } }] };
+const autoLaunch = { launchId: "launch:auto", channelId: E2E_CHANNEL.id, sourceMessageId: autoMessageId, targetName: "codex",
+  runId: "run:auto", instanceId: "instance:auto", launchKind: "registration", state: "connected", attempt: 0, retryable: false,
+  createdAt: E2E_NOW, updatedAt: E2E_NOW, preparedAt: E2E_NOW, commandDurableAt: E2E_NOW, admittedAt: E2E_NOW,
+  spawnedAt: E2E_NOW, connectedAt: E2E_NOW, firstReplyAt: E2E_NOW, sourceMention: "@auto",
+  activity: { runStatus: "running", phase: "turn_running", updatedAt: E2E_NOW, hostName: "build-idle" },
+  routingDecision: { source: "jev", parameters: autoParameters, rows: [], machine: { id: "m-idle", name: "build-idle" } } };
+
+test("@auto shows the Agent and machine routing chose, and why, in one row", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL, messageCount: 1, historyHeadSequence: 1 }] });
+  await fixtureJson(page, "h", "**/api/xmatrix/channels/channel-general/history**", { messages: [{ messageId: autoMessageId, channelId: E2E_CHANNEL.id,
+    sequence: 1, body: autoBody, sentAt: E2E_NOW, from: E2E_USER_SENDER }], hasMore: false });
+  await fixtureJson(page, "l", "**/api/xmatrix/channels/channel-general/agent-launches/query", { launches: [autoLaunch], rejections: [], continuations: [] });
+  const pattern = `**/api/xmatrix/channels/channel-general/messages/${autoMessageId}/decision-evidence**`;
+  await fixtureJson(page, "d", pattern, { records: [{ refId: "decision:one:started", createdAt: E2E_NOW, encodedBytes: 900 },
+    { refId: "decision:one:succeeded", createdAt: E2E_NOW, encodedBytes: 300 }], nextCursor: null, retentionDays: 30 });
+  await fixtureJson(page, "di", `${pattern}?refId=decision%3Aone%3Astarted`, { version: 1, decisionId: "one", status: "started", at: E2E_NOW,
+    input: { state: { message: autoBody, summon: { text: "@auto", start: 0, end: 5, authorKind: "user" } }, questions: {
+      intent: { type: "choice", instructions: "Is the author asking?", criteria: { summon: "Asks for work", explanation: "Explains" } },
+      workspace: { type: "choice", instructions: "Choose a location", criteria: { workspace_0: JSON.stringify({ reference: "repo:x", repo: "LambdaLabsHQ/xmatrix", description: "" }) } },
+      fit_0: fitQuestion("claude"), fit_1: fitQuestion("codex"), fit_2: fitQuestion("opencode") } } });
+  await fixtureJson(page, "da", `${pattern}?refId=decision%3Aone%3Asucceeded`, { version: 1, decisionId: "one", status: "succeeded", at: E2E_NOW,
+    model: "typesafe-ai/jev", answers: { intent: { choice: "summon", probabilities: { summon: 0.96, explanation: 0.04 } },
+      workspace: { choice: "workspace_0", probabilities: { workspace_0: 1 } },
+      fit_0: { score: 2.05, probabilities: autoParameters.fit.scores.claude.probabilities },
+      fit_1: { score: 0.97, probabilities: autoParameters.fit.scores.codex.probabilities },
+      fit_2: { score: 0.77, probabilities: autoParameters.fit.scores.opencode.probabilities } } });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await page.locator(".app-mention-invocation").first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("region", { name: /Routing decision/ }).waitFor();
+  const jev = dialog.getByRole("region", { name: /Routing decision/ });
+  const agent = jev.getByRole("list", { name: "Agent options" });
+  await expect(agent.locator("li[data-selected]")).toContainText("codex · build-idle");
+  await expect(agent.locator("li[data-selected]")).toContainText("Capable · 85% room");
+  await expect(agent.getByRole("listitem").nth(1)).toContainText("claude · build-busy");
+  await expect(agent.getByRole("listitem").nth(1)).toContainText("Strong fit · overloaded");
+  await expect(jev).toContainText("claude fits better, but build-busy is overloaded");
+  await expect(jev.getByText(/^Fit/)).toHaveCount(0);
+  await expect(dialog.getByRole("list", { name: "Invocation progress" })).not.toContainText("Machine selected");
+  // Three are shown; the rest are one click away.
+  const chips = agent.locator("li:not(.contents)");
+  await expect(chips).toHaveCount(3);
+  await jev.getByRole("button", { name: "+1" }).click();
+  await expect(chips).toHaveCount(4);
 });

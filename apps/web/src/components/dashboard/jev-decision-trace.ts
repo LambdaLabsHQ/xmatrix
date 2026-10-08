@@ -5,6 +5,8 @@
  * decision id, so a reading is the pair.
  */
 
+import type { LaunchPlacementCandidate } from "@xmatrix/protocol";
+
 type Json = Record<string, unknown>;
 
 export type JevOption = {
@@ -86,7 +88,11 @@ function scoreQuestion(key: string, question: Json, levels: unknown[], answer: J
   try { rated = object(JSON.parse(instructions?.slice(instructions.indexOf("{")) ?? "")); } catch { rated = undefined; }
   const harness = text(rated?.harness);
   const probabilities = object(answer?.probabilities) ?? {};
-  const score = typeof answer?.score === "number" && Number.isFinite(answer.score) ? Math.round(answer.score) : undefined;
+  // The level drawn as the answer is the one Jev weighed most, so its share is the one shown beside it.
+  const weighed = Object.entries(probabilities).filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+    .sort((left, right) => (right[1] as number) - (left[1] as number))[0];
+  const score = weighed ? Number(weighed[0]) : typeof answer?.score === "number" && Number.isFinite(answer.score)
+    ? Math.round(answer.score) : undefined;
   const options = levels.map((level, index) => {
     const [title, ...detail] = (text(level) ?? `Level ${index}`).split(": ");
     const probability = probabilities[String(index)];
@@ -169,3 +175,23 @@ export function jevDecisions(readings: JevReading[]): JevReading[] {
   }
   return decisions;
 }
+
+/** How routing's joint choice of Agent and machine reads: a fit level, the room left, and why the first one won. */
+const FIT_LEVELS = ["Unsuitable", "Capable", "Strong fit", "Asked for"];
+export const fitLevel = (fit: number) => FIT_LEVELS[Math.max(0, Math.min(3, Math.round(fit * 3)))]!;
+export const roomText = (headroom: number | undefined) => headroom === undefined ? "room unknown"
+  : headroom <= 0 ? "overloaded" : `${Math.round(headroom * 100)}% room`;
+
+/** One sentence on why the first-ranked environment won. */
+export function placementReason(ranking: readonly LaunchPlacementCandidate[], compared: boolean): string {
+  const [chosen] = ranking;
+  if (!chosen) return "";
+  const fitter = ranking.filter(item => item.fit > chosen.fit + 0.05).sort((left, right) => right.fit - left.fit)[0];
+  if (!compared) return `Most room for ${chosen.harness}: ${roomText(chosen.headroom)}`;
+  if (fitter) return `${fitter.harness} fits better, but ${fitter.machineName || "its machine"} is ${
+    fitter.headroom !== undefined && fitter.headroom > 0 ? `at ${roomText(fitter.headroom)}` : roomText(fitter.headroom)}`;
+  const even = ranking.every(item => Math.abs(item.fit - chosen.fit) <= 0.05);
+  return even ? `All equally suited; most room here (${roomText(chosen.headroom)})`
+    : `Best suited, with ${roomText(chosen.headroom)}`;
+}
+
