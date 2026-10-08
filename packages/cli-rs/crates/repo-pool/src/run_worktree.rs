@@ -836,8 +836,9 @@ async fn fetch_confirmed_remote_default(base_cwd: &Path) -> Result<String, Strin
         GIT_FETCH_TIMEOUT,
     )
     .await?;
-    let (branch, _) = crate::repo_pool::parse_ls_remote_head(&advertised)
-        .ok_or_else(|| "could not resolve origin default branch: origin advertises none with a commit".to_string())?;
+    let (branch, _) = crate::repo_pool::parse_ls_remote_head(&advertised).ok_or_else(|| {
+        "could not resolve origin default branch: origin advertises none with a commit".to_string()
+    })?;
     let tracking = format!("refs/remotes/origin/{branch}");
     let refspec = format!("+refs/heads/{branch}:{tracking}");
     let fetch_label = format!("origin/{branch}");
@@ -1971,19 +1972,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    fn remote_materialization_fixture() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let remote = unique_temp_dir("remote-bare");
+        let seed = unique_temp_dir("remote-seed");
+        let base = unique_temp_dir("remote-base");
+        let root = unique_temp_dir("remote-root");
+        let remote_arg = seed_remote(&remote, &seed);
+        clone_remote(&remote_arg, &base);
+        (remote, seed, base, root)
+    }
+
     #[tokio::test]
     async fn remote_repo_materialization_fetches_latest_origin_branch() {
         if !git_available() {
             return;
         }
-        let remote = unique_temp_dir("remote-bare");
-        let seed = unique_temp_dir("remote-seed");
-        let base = unique_temp_dir("remote-base");
-        let root = unique_temp_dir("remote-root");
-
-        let remote_arg = seed_remote(&remote, &seed);
-
-        clone_remote(&remote_arg, &base);
+        let (remote, seed, base, root) = remote_materialization_fixture();
 
         update_remote_readme(&seed, "latest\n");
         assert_eq!(
@@ -2019,13 +2023,7 @@ mod tests {
         if !git_available() {
             return;
         }
-        let remote = unique_temp_dir("remote-bare");
-        let seed = unique_temp_dir("remote-seed");
-        let base = unique_temp_dir("remote-base");
-        let root = unique_temp_dir("remote-root");
-
-        let remote_arg = seed_remote(&remote, &seed);
-        clone_remote(&remote_arg, &base);
+        let (remote, seed, base, root) = remote_materialization_fixture();
 
         // Origin renames main to trunk; the checkout still notes origin/HEAD -> origin/main.
         run_git(&seed, &["checkout", "--quiet", "-b", "trunk"]);
