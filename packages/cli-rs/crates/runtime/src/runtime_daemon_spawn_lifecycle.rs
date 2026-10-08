@@ -821,12 +821,6 @@ async fn handle_daemon_spawn_request(
             return Err(error);
         }
     };
-    if repo_pool_binding.as_ref().and_then(|binding| binding.baseline.as_ref())
-        .is_some_and(|baseline| baseline.warn_agent)
-        && let (Some(layout), Some(request)) = (repo_pool_layout.as_ref(), repo_pool_request.as_ref())
-        && let Err(error) = repo_pool::acknowledge_baseline_warning_at(layout, request).await {
-        eprintln!("repo pool: warning receipt unavailable ({error})");
-    }
     child.instance_id = intent.instance_id.clone();
     child.resume_session_key = intent.resume_session_key.clone();
     child.repo_pool_binding = repo_pool_binding;
@@ -1029,6 +1023,14 @@ async fn record_daemon_spawn_result(
                 );
             }
             let metadata = (!metadata.is_empty()).then_some(Value::Object(metadata));
+            let warning_receipt = child.repo_pool_binding.as_ref()
+                .filter(|binding| binding.baseline.as_ref().is_some_and(|baseline| baseline.warn_agent))
+                .and_then(|binding| Some((binding.repo_key_id.clone(), repo_pool::LeaseRequest {
+                    session_key: child.resume_session_key.clone()?,
+                    instance_id: child.instance_id.clone()?,
+                    run_id: child.run_id.clone()?,
+                    execution_key: child.execution_key.clone()?,
+                })));
             if let Err(error) = register_daemon_child(run_registry, child, identity_id, None).await
             {
                 return DaemonSpawnResultParts {
@@ -1044,6 +1046,16 @@ async fn record_daemon_spawn_result(
                     // authority safely idempotent when rollback did finish.
                     metadata,
                 };
+            }
+            if let Some((repo_key, request)) = warning_receipt {
+                let receipt = async {
+                    let pools_root = repo_pool::default_repo_pools_root()?;
+                    let layout = repo_pool::RepoPoolLayout::from_persisted(&pools_root, &repo_key)?;
+                    repo_pool::acknowledge_baseline_warning_at(&layout, &request).await
+                }.await;
+                if let Err(error) = receipt {
+                    eprintln!("repo pool: warning receipt unavailable ({error})");
+                }
             }
             if let Some(log) = log {
                 println!(

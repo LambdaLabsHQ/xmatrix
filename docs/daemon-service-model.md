@@ -235,7 +235,7 @@ unmerged commits are not divergence. Failed confirmation, missing objects,
 shallow history and ancestry command errors produce unknown evidence, without
 resetting or preventing the old task from continuing. Only a proven negative
 ancestry result produces a continuity warning: once in the Channel per
-checkout/base, and once in the Agent's successfully spawned initial input.
+checkout/base, and once in the Agent's durably admitted initial input.
 Report/spawn replays preserve those identities. This adds no Run page polling.
 Original confirmation times missing from older tasks remain unavailable.
 

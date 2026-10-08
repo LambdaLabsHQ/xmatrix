@@ -1,5 +1,3 @@
-use sha2::Digest;
-
 /// Presentation evidence for the recorded checkout base. Never execution authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -223,21 +221,16 @@ pub async fn observe_lease_baseline_at(
     });
     result.relationship = relationship;
     if relationship == Some(BaseRelationship::Diverged) {
-        result.notice_key = Some(
-            sha2::Sha256::digest(
-                format!(
-                    "{}:{}:{slot_id}:{}:{}",
-                    layout.repo_key.as_str(),
-                    receipt.task_key,
-                    result.base_ref,
-                    result.base_oid
-                )
-                .as_bytes(),
+        result.notice_key = Some(xmatrix_cli_core::hex::sha256_hex(
+            format!(
+                "{}:{}:{slot_id}:{}:{}",
+                layout.repo_key.as_str(),
+                receipt.task_key,
+                result.base_ref,
+                result.base_oid
             )
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect(),
-        );
+            .as_bytes(),
+        ));
         // Replays of the same spawn keep its prompt; later Runs get no repeat.
         result.warn_agent = receipt
             .warning_run_id
@@ -318,7 +311,7 @@ async fn proven_ancestor(repo: &Path, base: &str, tip: &str) -> Option<bool> {
     }
 }
 
-/// Record agent notification only after OS spawn succeeded; failed attempts
+/// Record agent notification only after durable process admission; failed attempts
 /// must leave the notification available to a later retry.
 pub async fn acknowledge_baseline_warning_at(
     layout: &RepoPoolLayout,
