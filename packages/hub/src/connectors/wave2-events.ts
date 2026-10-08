@@ -1,7 +1,6 @@
-import { hmacBytes, hmacHex, sha256Hex, timingSafeEqual } from "@xmatrix/protocol";
-import type { ConnectorDelivery, ConnectorDeliveryResult } from "./provider";
-import { createSignedJsonReceiver } from "./hmac";
-import { connectorEvent, excerpt, lowerHeader, parseJsonObject, record, safeUrl, sourceToken, text } from "./event-format";
+import { hmacBytes, sha256Hex, timingSafeEqual } from "@xmatrix/protocol";
+import { createSignedJsonReceiver, STRIPE_SIGNATURE, TELEGRAM_SECRET_TOKEN } from "./delivery-proof";
+import { connectorEvent, excerpt, lowerHeader, record, safeUrl, sourceToken, text } from "./event-format";
 
 /*
  * Second-wave event providers (docs/design/connector-platform.md §4). Each
@@ -9,12 +8,8 @@ import { connectorEvent, excerpt, lowerHeader, parseJsonObject, record, safeUrl,
  * connection's encrypted credentials before reading the body.
  */
 
-function notJson(name: string): ConnectorDeliveryResult {
-  return { ok: false, status: 400, error: `${name} body must be JSON` };
-}
-
 export const receiveBitbucketDelivery = createSignedJsonReceiver({
-  name: "Bitbucket", secretField: "webhookSecret", signatureHeader: "x-hub-signature", stripSha256Prefix: true,
+  name: "Bitbucket", secretField: "webhookSecret", proof: { header: "x-hub-signature", prefix: "sha256=" },
 }, (delivery, payload) => {
   const key = lowerHeader(delivery.headers, "x-event-key");
   const repository = text(record(payload.repository).full_name);
@@ -48,15 +43,7 @@ export const receiveBitbucketDelivery = createSignedJsonReceiver({
   return { ok: true, events: [] };
 });
 
-export async function receiveCircleCiDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  const signatures = lowerHeader(delivery.headers, "circleci-signature").split(",").map((part) => part.trim());
-  const secret = delivery.credentials.webhookSecret;
-  const expected = secret ? `v1=${await hmacHex("SHA-256", secret, delivery.rawBody)}` : "";
-  if (!expected || !signatures.some((signature) => timingSafeEqual(signature.toLowerCase(), expected))) {
-    return { ok: false, status: 401, error: "Invalid CircleCI signature" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return notJson("CircleCI");
+export const receiveCircleCiDelivery = createSignedJsonReceiver({ name: "CircleCI", secretField: "webhookSecret", proof: { header: "circleci-signature", prefix: "v1=" } }, (_, payload) => {
   const type = text(payload.type);
   const project = record(payload.project);
   const workflow = record(payload.workflow);
@@ -73,15 +60,9 @@ export async function receiveCircleCiDelivery(delivery: ConnectorDelivery): Prom
     provider: `CircleCI · ${text(project.name) || "project"}`,
     title: `${type === "job-completed" ? "Job" : "Workflow"} ${text(subject.name)} ${status}${branch ? ` on ${branch}` : ""}`, url,
   })] };
-}
+});
 
-export async function receiveBuildkiteDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  const token = delivery.credentials.webhookToken;
-  if (!token || !timingSafeEqual(lowerHeader(delivery.headers, "x-buildkite-token"), token)) {
-    return { ok: false, status: 401, error: "Invalid Buildkite token" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return notJson("Buildkite");
+export const receiveBuildkiteDelivery = createSignedJsonReceiver({ name: "Buildkite", secretField: "webhookToken", proof: { header: "x-buildkite-token", token: true } }, (_, payload) => {
   if (text(payload.event) !== "build.finished") return { ok: true, events: [] };
   const build = record(payload.build);
   const pipeline = record(payload.pipeline);
@@ -95,24 +76,9 @@ export async function receiveBuildkiteDelivery(delivery: ConnectorDelivery): Pro
     provider: `Buildkite · ${text(pipeline.name) || "pipeline"}`,
     title: `Build #${text(build.number)} ${state} on ${text(build.branch)}`, url, details: [excerpt(build.message, 300)],
   })] };
-}
+});
 
-export async function receiveStripeDelivery(delivery: ConnectorDelivery, now: number = Date.now()): Promise<ConnectorDeliveryResult> {
-  const parts = Object.fromEntries(lowerHeader(delivery.headers, "stripe-signature").split(",")
-    .map((part) => part.trim().split("=") as [string, string]).filter(([key]) => key === "t"));
-  const signatures = lowerHeader(delivery.headers, "stripe-signature").split(",").map((part) => part.trim())
-    .filter((part) => part.startsWith("v1=")).map((part) => part.slice(3));
-  const timestamp = Number(parts.t);
-  const secret = delivery.credentials.signingSecret;
-  if (!secret || !Number.isFinite(timestamp) || Math.abs(now / 1_000 - timestamp) > 300) {
-    return { ok: false, status: 401, error: "Invalid Stripe signature timestamp" };
-  }
-  const expected = await hmacHex("SHA-256", secret, `${parts.t}.${delivery.rawBody}`);
-  if (!signatures.some((signature) => timingSafeEqual(signature.toLowerCase(), expected))) {
-    return { ok: false, status: 401, error: "Invalid Stripe signature" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return notJson("Stripe");
+export const receiveStripeDelivery = createSignedJsonReceiver({ name: "Stripe", secretField: "signingSecret", proof: STRIPE_SIGNATURE }, (_, payload) => {
   const type = text(payload.type);
   const object = record(record(payload.data).object);
   return { ok: true, events: [connectorEvent({
@@ -124,15 +90,9 @@ export async function receiveStripeDelivery(delivery: ConnectorDelivery, now: nu
     details: [text(object.amount) ? `Amount: ${text(object.amount)} ${text(object.currency).toUpperCase()}` : undefined,
       text(object.status) ? `Status: ${text(object.status)}` : undefined],
   })] };
-}
+});
 
-export async function receiveGrafanaDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  const token = delivery.credentials.webhookToken;
-  if (!token || !timingSafeEqual(lowerHeader(delivery.headers, "authorization"), `Bearer ${token}`)) {
-    return { ok: false, status: 401, error: "Invalid Grafana credentials" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return notJson("Grafana");
+export const receiveGrafanaDelivery = createSignedJsonReceiver({ name: "Grafana", secretField: "webhookToken", proof: { header: "authorization", token: true, bearer: true } }, async (_, payload) => {
   const status = text(payload.status);
   const url = safeUrl(payload.externalURL);
   const allAlerts = Array.isArray(payload.alerts) ? payload.alerts.map(record) : [];
@@ -150,15 +110,9 @@ export async function receiveGrafanaDelivery(delivery: ConnectorDelivery): Promi
     provider: "Grafana", title: text(payload.title) || `Alert ${status}`, url,
     details: alerts.map((alert) => `- ${text(record(alert.labels).alertname)}: ${text(record(alert.annotations).summary)}`.slice(0, 200)),
   })] };
-}
+});
 
-export async function receiveOpsgenieDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  const token = delivery.credentials.webhookToken;
-  if (!token || !timingSafeEqual(lowerHeader(delivery.headers, "x-xmatrix-token"), token)) {
-    return { ok: false, status: 401, error: "Invalid Opsgenie token" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return notJson("Opsgenie");
+export const receiveOpsgenieDelivery = createSignedJsonReceiver({ name: "Opsgenie", secretField: "webhookToken", proof: { header: "x-xmatrix-token", token: true } }, (_, payload) => {
   const action = text(payload.action);
   const alert = record(payload.alert);
   const feature = action === "Create" ? "created" : action === "Acknowledge" ? "acknowledged" : action === "Close" ? "closed" : "updated";
@@ -169,7 +123,7 @@ export async function receiveOpsgenieDelivery(delivery: ConnectorDelivery): Prom
     summary: `Alert ${text(alert.tinyId)} ${feature}: ${text(alert.message)}`,
     provider: "Opsgenie", title: `Alert ${text(alert.tinyId)} ${feature} — ${text(alert.message)}`,
   })] };
-}
+});
 
 /* Netlify signs with a JWS (HS256) whose payload carries the body's SHA-256. */
 async function netlifySignatureValid(secret: string | undefined, token: string, rawBody: string): Promise<boolean> {
@@ -186,13 +140,7 @@ async function netlifySignatureValid(secret: string | undefined, token: string, 
   }
 }
 
-export async function receiveNetlifyDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  if (!await netlifySignatureValid(delivery.credentials.webhookSecret, lowerHeader(delivery.headers, "x-webhook-signature"),
-    delivery.rawBody)) {
-    return { ok: false, status: 401, error: "Invalid Netlify signature" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return notJson("Netlify");
+export const receiveNetlifyDelivery = createSignedJsonReceiver({ name: "Netlify", secretField: "webhookSecret", proof: (delivery, secret) => netlifySignatureValid(secret, lowerHeader(delivery.headers, "x-webhook-signature"), delivery.rawBody) }, (_, payload) => {
   const state = text(payload.state);
   const url = safeUrl(payload.deploy_ssl_url) ?? safeUrl(payload.admin_url);
   return { ok: true, events: [connectorEvent({
@@ -203,15 +151,9 @@ export async function receiveNetlifyDelivery(delivery: ConnectorDelivery): Promi
     provider: `Netlify · ${text(payload.name) || "site"}`, title: `Deploy ${state}${text(payload.branch) ? ` on ${text(payload.branch)}` : ""}`,
     url, details: [excerpt(payload.error_message, 400)],
   })] };
-}
+});
 
-export async function receiveTelegramDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  const secret = delivery.credentials.webhookSecret;
-  if (!secret || !timingSafeEqual(lowerHeader(delivery.headers, "x-telegram-bot-api-secret-token"), secret)) {
-    return { ok: false, status: 401, error: "Invalid Telegram secret token" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return notJson("Telegram");
+export const receiveTelegramDelivery = createSignedJsonReceiver({ name: "Telegram", secretField: "webhookSecret", proof: TELEGRAM_SECRET_TOKEN }, (_, payload) => {
   const message = record(payload.message);
   const chat = record(message.chat);
   const from = record(message.from);
@@ -224,4 +166,4 @@ export async function receiveTelegramDelivery(delivery: ConnectorDelivery): Prom
     provider: "Telegram", title: `${text(from.username) || text(from.first_name) || "Someone"} in ${text(chat.title) || text(chat.id)}`,
     details: [excerpt(message.text, 1_500)],
   })] };
-}
+});
