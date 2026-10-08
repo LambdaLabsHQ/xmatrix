@@ -2041,9 +2041,9 @@ export {
 
 function MachineVersionFacts({ machine }: { machine: MachineSummary }) {
   return <>
-    <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} /></ToolFact>
-    <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} /></ToolFact>
-    <ToolFact label="App version"><MachineVersionValue version={machine.appVersion} /></ToolFact>
+    <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} component="cli" /></ToolFact>
+    <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} component="cli" /></ToolFact>
+    <ToolFact label="App version"><MachineVersionValue version={machine.appVersion} component="desktop" /></ToolFact>
     <ToolFact label="Last seen">{machine.lastSeenAt ? relativeTime(machine.lastSeenAt) : "-"}</ToolFact>
   </>;
 }
