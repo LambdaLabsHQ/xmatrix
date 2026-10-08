@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
-import { openWorkspaceAs } from "./platform-admin-fixtures";
+import { fixtureRequests, fixtureRule, releaseFixture } from "./in-page-api-fixtures";
+import { OVERVIEW, openWorkspaceAs } from "./platform-admin-fixtures";
 
 // The operator rail entry is desktop-only (md:flex), so this spec runs wide.
 test.use({ viewport: { width: 1280, height: 900 } });
@@ -90,4 +91,27 @@ test("a non-admin account is offered no operator entry and the view fails closed
   await expect(page.getByRole("button", { name: "Platform admin" })).toHaveCount(0);
   await expect(page.getByText("Platform admin only")).toBeVisible();
   await expect(page.getByRole("region", { name: "Platform", exact: true })).toHaveCount(0);
+});
+
+
+test("changing the activity range keeps the overview visible while the new read waits", async ({ page }) => {
+  await openWorkspaceAs(page, true);
+  await page.goto("/app/personal-sspaceperso/admin");
+  const platform = page.getByRole("region", { name: "Platform", exact: true });
+  await expect(platform.getByText("4.2k", { exact: true })).toBeVisible();
+  await fixtureRule(page, {
+    id: "admin-range-pending",
+    pattern: /\/api\/xmatrix\/admin\/overview.*activityDays=30/,
+    responder: { kind: "deferred", json: { overview: { ...OVERVIEW, activityDays: 30 } } },
+  });
+  try {
+    await page.getByRole("button", { name: "30d", exact: true }).click();
+    await expect.poll(() => fixtureRequests(page, "admin-range-pending")).toHaveLength(1);
+    await expect(platform.getByText("4.2k", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeDisabled();
+    await expect(page.getByText("Loading platform data")).toHaveCount(0);
+  } finally {
+    await releaseFixture(page, "admin-range-pending");
+  }
+  await expect(page.getByRole("img", { name: "Daily message volume for the last 30 days, peaking at 130" })).toBeVisible();
 });
