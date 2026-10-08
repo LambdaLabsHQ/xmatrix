@@ -115,6 +115,26 @@ the reason comes from the failure's class, never from raw exception text:
 The Hub's messages for transient failures name no internal component
 (`postgres_unavailable` says "xMatrix is briefly unavailable; try again").
 
+### Finding a failure again
+
+An answer is for a person and a machine; a report is for whoever debugs it.
+
+- **Hub.** Every route failure is answered through `requestFailure`, and a `500`
+  is reported with what the route was doing: its method and template
+  (`GET /api/spaces/:spaceId/channels/:channelId`) and the opaque ids in its
+  path, never its body or query. The answer quotes the report's id as
+  `reference`; `<ErrorNotice>` shows it ("Report: …"), so one id finds the log.
+  A cron task is reported under its task name.
+- **Retry policy.** When Query's bounded retries give up on a transient failure
+  the error is marked `persistent`, and the person reads that xMatrix is still
+  unavailable after several tries rather than "try again in a moment".
+- **Browser.** A failure `describeError` can only call "something went wrong"
+  is a client defect: `reportClientDefect` sends the action, the error's name,
+  its message with quoted text redacted, and its stack to `/api/client-defects`
+  (same origin, 8 KB), which reports it like a Worker failure. Ten distinct
+  defects per page at most; cancellations and transient failures are never
+  sent.
+
 ### Web proxy
 
 The web Worker's hop to the Hub (`src/lib/xmatrix-proxy.ts`) answers a dropped

@@ -8,6 +8,8 @@ export interface XMatrixErrorPayload {
   code?: string;
   retryable?: boolean;
   details?: unknown;
+  /** The Hub's error report for an internal failure. */
+  reference?: string;
 }
 
 export class XMatrixApiError extends Error {
@@ -17,6 +19,10 @@ export class XMatrixApiError extends Error {
   /** The server's Retry-After, when it named one. */
   readonly retryAfterMs?: number;
   readonly details?: unknown;
+  /** Set once the shared retry policy gave up on a transient failure: it is no longer passing. */
+  persistent = false;
+  /** The Hub's report of this failure, when it filed one, for a person to quote. */
+  readonly reference?: string;
 
   constructor(input: {
     message: string;
@@ -25,6 +31,7 @@ export class XMatrixApiError extends Error {
     retryable?: boolean;
     retryAfterMs?: number;
     details?: unknown;
+    reference?: string;
   }) {
     super(input.message);
     this.name = "XMatrixApiError";
@@ -33,6 +40,7 @@ export class XMatrixApiError extends Error {
     this.retryable = input.retryable === true;
     this.retryAfterMs = input.retryAfterMs;
     this.details = input.details;
+    this.reference = input.reference;
   }
 }
 
@@ -47,6 +55,7 @@ export class XMatrixRawResponseError extends XMatrixApiError {
       retryable: error.retryable,
       retryAfterMs: error.retryAfterMs,
       details: error.details,
+      reference: error.reference,
     });
     this.name = "XMatrixRawResponseError";
     this.response = response;
@@ -90,6 +99,7 @@ export async function errorFromResponse(response: Response): Promise<XMatrixApiE
     retryable: fromHub ? payload.retryable : GATEWAY_STATUSES.has(response.status),
     retryAfterMs: retryAfterMs(response.headers.get("retry-after")),
     details: payload.details,
+    reference: typeof payload.reference === "string" ? payload.reference : undefined,
   });
 }
 
@@ -194,7 +204,10 @@ export function isTransientFailure(error: unknown): boolean {
 }
 
 export function shouldRetryXMatrixQuery(failureCount: number, error: unknown): boolean {
-  return failureCount < 2 && isTransientFailure(error);
+  if (!isTransientFailure(error)) return false;
+  if (failureCount < 2) return true;
+  (error as XMatrixApiError).persistent = true;
+  return false;
 }
 
 /** The server's Retry-After when it named one, else jittered exponential backoff. */

@@ -68,3 +68,31 @@ test("a response missing what it promised is a reported defect", () => {
   assert.equal(shown.reference, "unexpected_response");
   assert.match(shown.message, /Something went wrong on our side/);
 });
+
+test("a transient failure the retry policy gave up on says it is no longer passing", () => {
+  const { shouldRetryXMatrixQuery } = require("./query/api-client.ts");
+  const outage = api({ status: 503, code: "postgres_unavailable", message: "x", retryable: true });
+  assert.equal(shouldRetryXMatrixQuery(0, outage), true);
+  assert.equal(shouldRetryXMatrixQuery(2, outage), false);
+  assert.match(describeError(outage, action).message, /still unavailable after several tries/);
+  const offline = api({ status: 0, code: "network_error", message: "Failed to fetch", retryable: true });
+  shouldRetryXMatrixQuery(2, offline);
+  assert.match(describeError(offline, action).message, /still can't be reached/);
+});
+
+test("an internal failure carries the Hub's report so a person can quote it", async () => {
+  const { errorFromResponse } = require("./query/api-client.ts");
+  const failure = await errorFromResponse(Response.json(
+    { error: "Internal error", code: "internal_error", retryable: false, reference: "0123456789abcdef0123456789abcdef" },
+    { status: 500 }));
+  assert.deepEqual(describeError(failure, action), {
+    message: "Couldn't load transfer proposals. Something went wrong on our side. Try again, and report it if it keeps happening.",
+    retryable: true, reference: "internal_error", report: "0123456789abcdef0123456789abcdef",
+  });
+});
+
+test("a browser defect report keeps the message shape but not what it quoted", () => {
+  const { redactDefectMessage } = require("./client-defect-report.ts");
+  assert.equal(redactDefectMessage(`Unexpected token 'h', "hello secret" is not valid JSON`),
+    "Unexpected token '…', \"…\" is not valid JSON");
+});

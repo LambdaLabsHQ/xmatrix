@@ -139,3 +139,20 @@ test('a Space-scope upload is referenced into a Channel, which sets who sees it'
     await assert.rejects(commit(intentScope, refScope), error => error.code === 'not_authorized');
   }
 });
+
+test('a storage outage while creating an intent is a retryable 503 that names no internal authority', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const create = (createIntent) => handleRelayR2UploadIntentCreate({
+    request: new Request('https://internal/intent', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requestId: 'request', intentId: 'intent', visibilityScopeId: 'channel-user:channel:user',
+        contentHash: HASH, encodedSize: 3, expiresAt: new Date(Date.now() + 60000).toISOString() }) }),
+    principal: { kind: 'user', id: 'user' }, now: Date.now(),
+    content: { createIntent },
+  });
+  const outage = Object.assign(new Error('Connection terminated unexpectedly'), { code: 'ECONNRESET' });
+  await assert.rejects(create(async () => { throw outage; }), (error) =>
+    error.code === 'authority_unavailable' && error.status === 503 && error.retryable === true &&
+    !/blob authority/u.test(error.message));
+  const defect = new Error('relation "content_intents" does not exist');
+  await assert.rejects(create(async () => { throw defect; }), (error) => error === defect);
+});
