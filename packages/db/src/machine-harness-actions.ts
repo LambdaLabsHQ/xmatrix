@@ -49,7 +49,7 @@ export async function recordHarnessActionInventory(tx: DatabaseTransaction, inpu
  * be running it, so it reads as expired instead of running forever. A late
  * result still completes the command and replaces this reading.
  */
-function statusColumns(settleParameter: number): string {
+export function statusColumns(settleParameter: number): string {
   return `payload_json,status,result_json,created_at,completed_at,expires_at<=clock_timestamp() AS expired,
     (status='leased' AND lease_until<=clock_timestamp()
       AND created_at<=clock_timestamp()-($${settleParameter}::integer*interval '1 millisecond')) AS abandoned`;

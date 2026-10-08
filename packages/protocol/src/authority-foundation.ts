@@ -151,6 +151,10 @@ export const HUB_ROUTES = {
   machine_harness_actions: "/api/machine-daemons/harness-actions",
   machine_harness_action: (controlId: string) =>
     `/api/machine-daemons/harness-actions/${encodeURIComponent(controlId)}`,
+  /** The owner lists and reclaims the git worktrees on one of their Machines. */
+  machine_worktree_actions: "/api/machine-daemons/worktree-actions",
+  machine_worktree_action: (controlId: string) =>
+    `/api/machine-daemons/worktree-actions/${encodeURIComponent(controlId)}`,
   machine_daemon_credentials: "/api/machine-daemon-credentials",
   machine_daemon_migration_fence: "/api/machine-daemon/migration-fence",
   machine_daemon_workspaces: "/api/machine-daemon/workspaces",
