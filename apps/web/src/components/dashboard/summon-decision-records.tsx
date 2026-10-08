@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
-  type LaunchParameterEvidence, type LaunchPlacementCandidate } from "@xmatrix/protocol";
+  type LaunchParameterEvidence } from "@xmatrix/protocol";
 import { formatZonedDateTime } from "./time-display";
-import { fitLevel, jevDecisions, jevReadings, placementReason, placementWhere as where, roomText, type JevQuestion, type JevReading } from "./jev-decision-trace";
+import { fitLevel, jevDecisions, jevReadings, placementReason, placementWhere as where, roomText, type JevReading } from "./jev-decision-trace";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
@@ -88,18 +88,42 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
 
 const percent = (value: number | undefined) => value === undefined ? "" : `${Math.round(value * 100)}%`;
 
-/** A routing choice, unlike a startup step, is no tick on a timeline: its
- *  label, then the option chosen in the tag a filled mention parameter wears. */
-const CHOICE = "grid grid-cols-[4.75rem_minmax(0,1fr)_auto_12px] items-center gap-x-2 py-[5px]";
-const OPTIONS = "m-0 mb-2 ml-[5.25rem] grid list-none gap-0.5 p-0 text-xs";
+/** A routing question is a choice, not a step: its options are listed with
+ *  radio marks, the chosen one filled, so it never reads like the ticked
+ *  startup timeline below it. */
+type ChoiceOption = { key: string; title: string; meta?: string; chosen: boolean };
+const SHOWN_OPTIONS = 3;
 
-function ChosenTag({ children, routing }: { children: ReactNode; routing?: boolean }) {
-  return <span className="app-summon-condition" data-jev={routing ? undefined : "true"} data-routing={routing ? "true" : undefined}>{children}</span>;
+function Radio({ chosen }: { chosen: boolean }) {
+  return <span aria-hidden="true" className={`flex size-3 items-center justify-center rounded-full border ${chosen
+    ? "border-foreground" : "border-muted-foreground/40"}`}>{chosen && <span className="size-1.5 rounded-full bg-foreground" />}</span>;
 }
 
-/** What Jev decided, one row per question in the order it answered them: the
- *  question, its answer and how sure it was. A row opens to the options it
- *  weighed; "Input" opens what it read. Jev's per-Agent fit scores are not
+function RoutingChoice({ label, options, note, hint }: { label: string; options: readonly ChoiceOption[]; note?: string; hint?: string }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? options : options.slice(0, SHOWN_OPTIONS);
+  const hidden = options.length - shown.length;
+  return <li className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-2 py-1.5" aria-label={label}>
+    <span className="pt-px text-muted-foreground" title={hint}>{label}</span>
+    <div className="min-w-0">
+      <ul className="m-0 grid list-none gap-1 p-0" aria-label={`${label} options`}>
+        {shown.map(option => <li key={option.key} data-selected={option.chosen || undefined}
+          className={`grid grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-x-2 ${option.chosen ? "text-foreground" : "text-muted-foreground"}`}>
+          <Radio chosen={option.chosen} />
+          <span className={`truncate ${option.chosen ? "font-semibold" : ""}`} title={option.title}>{option.title}</span>
+          <span className="text-[11px] tabular-nums">{option.meta}</span>
+        </li>)}
+      </ul>
+      {note && <p className="m-0 mt-1 text-[11px] leading-snug text-muted-foreground">{note}</p>}
+      {hidden > 0 && <button type="button" className="mt-1 cursor-pointer text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+        onClick={() => setAll(true)}>{hidden} more</button>}
+    </div>
+  </li>;
+}
+
+/** What routing chose, one choice per question in the order it was answered:
+ *  the options weighed, the chosen one marked, with how sure Jev was or how
+ *  each environment measured. "Input" opens what Jev read. Its per-Agent fit scores are not
  *  rows of their own: with the launch's recorded placement they become one
  *  "Agent" row, the Agent and machine chosen from fit and room together. */
 export function JevDecisionSection({ decisions, parameters }: { decisions: JevReading[]; parameters?: LaunchParameterEvidence }) {
@@ -118,38 +142,16 @@ export function JevDecisionSection({ decisions, parameters }: { decisions: JevRe
         <JevInput decision={decision} />
       </details>
       <ol className="m-0 mt-1 list-none p-0" aria-label="Routing answers">
-        {rows.map(question => <JevAnswer key={question.key} question={question} />)}
-        {placed && <PlacementAnswer ranking={placed} compared={fits.length > 0} />}
-        {decision.failure && <li className={CHOICE}><span className="text-muted-foreground">Failed</span>
+        {rows.map(question => <RoutingChoice key={question.key} label={question.label} hint={question.instructions}
+          options={question.options.map(option => ({ key: option.handle, title: option.title, meta: percent(option.probability), chosen: option.selected }))} />)}
+        {placed && <RoutingChoice label="Agent" note={placementReason(placed, fits.length > 0)}
+          options={placed.map((item, index) => ({ key: `${item.harness}:${item.machineId}`, title: where(item), chosen: index === 0,
+            meta: `${fits.length > 0 ? `${fitLevel(item.fit)} · ` : ""}${roomText(item.headroom)}` }))} />}
+        {decision.failure && <li className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-2 py-1.5"><span className="text-muted-foreground">Failed</span>
           <span className="truncate text-destructive">{decision.failure}</span></li>}
       </ol>
     </section>;
   })}</>;
-}
-
-/** The Agent and machine routing chose, with the environments it weighed. */
-function PlacementAnswer({ ranking, compared }: { ranking: readonly LaunchPlacementCandidate[]; compared: boolean }) {
-  const chosen = ranking[0]!;
-  return <li>
-    <details className="group/answer">
-      <summary className={`${CHOICE} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
-        <span className="text-muted-foreground">Agent</span>
-        <span className="truncate" title={where(chosen)}><ChosenTag routing>{chosen.harness}</ChosenTag>
-          <span className="text-muted-foreground"> on </span><ChosenTag routing>{chosen.machineName || "unnamed machine"}</ChosenTag></span>
-        <span />
-        <ChevronRight size={12} aria-hidden="true" className="text-muted-foreground transition-transform group-open/answer:rotate-90" />
-        <span />
-        <span className="col-span-3 truncate text-[11px] text-muted-foreground">{placementReason(ranking, compared)}</span>
-      </summary>
-      <ol className={OPTIONS} aria-label="Environments weighed">
-        {ranking.map((item, index) => <li key={`${item.harness}:${item.machineId}`} data-selected={index === 0 || undefined}
-          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-md px-2 py-1 text-muted-foreground data-[selected]:bg-foreground/[0.05] data-[selected]:text-foreground">
-          <span className={`truncate ${index === 0 ? "font-semibold" : ""}`}>{where(item)}</span>
-          <span className="tabular-nums">{compared ? `${fitLevel(item.fit)} · ` : ""}{roomText(item.headroom)}</span>
-        </li>)}
-      </ol>
-    </details>
-  </li>;
 }
 
 function JevInput({ decision }: { decision: JevReading }) {
@@ -165,38 +167,6 @@ function JevInput({ decision }: { decision: JevReading }) {
       </ol>
     </div>}
   </div>;
-}
-
-function JevAnswer({ question }: { question: JevQuestion }) {
-  const chosen = question.options.find(option => option.selected);
-  return <li>
-    <details className="group/answer">
-      <summary className={`${CHOICE} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
-        <span className="text-muted-foreground">{question.label}</span>
-        <span className="truncate" title={chosen?.title}>{chosen ? <ChosenTag>{chosen.title}</ChosenTag>
-          : <span className="text-muted-foreground">No answer</span>}</span>
-        <span className="text-[11px] tabular-nums text-muted-foreground">{percent(chosen?.probability)}</span>
-        <ChevronRight size={12} aria-hidden="true" className="text-muted-foreground transition-transform group-open/answer:rotate-90" />
-      </summary>
-      <div className="mb-2 ml-[5.25rem] grid gap-1 text-xs">
-        <ol className="m-0 grid list-none gap-0.5 p-0" aria-label={`${question.label} options`}>
-          {question.options.map(option => <li key={option.handle} data-selected={option.selected || undefined}
-            className="grid grid-cols-[minmax(0,1fr)_3rem_2.25rem] items-center gap-x-2 rounded-md px-2 py-1 text-muted-foreground data-[selected]:bg-foreground/[0.05] data-[selected]:text-foreground">
-            <span className={`break-words ${option.selected ? "font-semibold" : ""}`}>{option.title}</span>
-            <span className="h-1 overflow-hidden rounded-full bg-foreground/10" aria-hidden="true">
-              <span className="block h-full rounded-full bg-foreground/50" style={{ width: percent(option.probability ?? 0) }} />
-            </span>
-            <span className="text-right tabular-nums">{percent(option.probability) || "—"}</span>
-            {option.detail && <span className="col-span-3 line-clamp-2 break-words text-[11px] text-muted-foreground">{option.detail}</span>}
-          </li>)}
-        </ol>
-        {question.model && <p className="m-0 px-2 text-[11px] leading-snug text-muted-foreground">
-          <span className="font-semibold">Decided by: </span>{question.model}</p>}
-        {question.instructions && <p className="m-0 px-2 text-[11px] leading-snug text-muted-foreground" title={question.instructions}>
-          <span className="font-semibold">Asked: </span><span className="line-clamp-2 inline">{question.instructions}</span></p>}
-      </div>
-    </details>
-  </li>;
 }
 
 /** The raw records behind the timeline, folded into the panel's Details. */
