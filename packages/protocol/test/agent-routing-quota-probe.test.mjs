@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { currentRoutingQuotaWindows, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
-  routingQuotaProbeObservations } from '../dist/agent-routing-quota-probe.js';
+  routingQuotaPace, routingQuotaProbeObservations } from '../dist/agent-routing-quota-probe.js';
 
 const now = Date.parse('2026-09-21T20:00:00Z');
 const target = { targetId: 'registration:a', configurationDigest: 'a'.repeat(64) };
@@ -130,4 +130,28 @@ test('the account verdict travels only on a probe that asked for it', () => {
   const [reading] = routingQuotaProbeObservations(response(fresh), asked, now);
   assert.deepEqual(reading.account, account);
   assert.equal(reading.observation.value, 1, 'a used-up window the provider still serves is not a hold');
+});
+
+test('quota pace is the remaining share over the share of the window still to run', () => {
+  const at = hours => new Date(now + hours * 3_600_000).toISOString();
+  const pace = (remainingPercent, windows) => Math.round(routingQuotaPace({ remainingPercent, windows }, now) * 1000) / 1000;
+  // Half of a 5h window left with an hour to its reset is lost unless spent;
+  // 80% of a week left with six days to go is a little behind the pace.
+  assert.equal(pace(50, [{ label: '5h', usedPercent: 50, resetAt: at(1) }]), 2.5);
+  assert.equal(pace(80, [{ label: '1w', usedPercent: 20, resetAt: at(6 * 24) }]), 0.933);
+  // Every window caps spending: the tightest counts.
+  assert.equal(pace(40, [{ label: '5h', usedPercent: 10, resetAt: at(1) },
+    { label: '1w', usedPercent: 60, resetAt: at(84) }]), 0.8);
+  // No length or no reset: the remaining share alone; no windows: the reading.
+  assert.equal(pace(70, [{ usedPercent: 30, resetAt: at(1) }]), 0.7);
+  assert.equal(pace(70, [{ label: '5h', usedPercent: 30 }]), 0.7);
+  assert.equal(pace(70, []), 0.7);
+  // Cursor's Auto and API pools take the 1mo cycle's length; the better pool counts.
+  assert.equal(pace(90, [{ label: '1mo', usedPercent: 50, resetAt: at(360) },
+    { label: 'Auto', usedPercent: 10, resetAt: at(360) }, { label: 'API', usedPercent: 100, resetAt: at(360) }]), 1.8);
+  // The provider's verdict: refused is none, served on credits past a full window is its small share.
+  assert.equal(pace(0, [{ label: '5h', usedPercent: 10, resetAt: at(1) }]), 0);
+  assert.equal(pace(1, [{ label: '1w', usedPercent: 100, resetAt: at(24) }]), 0.01);
+  // A window whose reset has passed no longer counts.
+  assert.equal(pace(60, [{ label: '5h', usedPercent: 100, resetAt: at(-1) }, { label: '1w', usedPercent: 40, resetAt: at(84) }]), 1.2);
 });
