@@ -119,7 +119,7 @@ export async function proxyXMatrixRequest(input: {
       cause,
     });
     return NextResponse.json(
-      { error: failure.error, reason: failure.reason },
+      { error: failure.error, reason: failure.reason, retryable: failure.retryable },
       { status: failure.status }
     );
   } finally {
