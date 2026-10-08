@@ -343,6 +343,7 @@ mod tests {
         assert!(policy.contains("without waking anyone"));
         assert!(policy.contains("Do not end a turn on a promise"));
         assert!(policy.contains("merge conflicts runs no CI"));
+        assert!(policy.contains("is subscribed to this channel"));
         for retired in [
             "MUST first send a short channel update",
             "all channel progress must be sent",

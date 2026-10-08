@@ -469,6 +469,44 @@ export async function githubPullRequestPaths(env: AppConnectorEnv, installationI
   return paths;
 }
 
+/** Where a commit's checks stand: still running, or every check finished and which of them failed. */
+export type GitHubCommitCheckVerdict =
+  | { state: "pending" }
+  | { state: "passed" | "failed"; failed: Array<{ name: string; url?: string }>; settledAt: string };
+
+const FAILED_CHECK_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"]);
+
+/**
+ * A commit's checks as one verdict, read with one installation's token. A
+ * suite with no check runs is an app that never ran here (GitHub opens a
+ * suite for every app with checks access); it neither holds nor fails the
+ * verdict. `settledAt` is when the last suite finished, so a rerun that
+ * settles again reads as a new verdict.
+ */
+export async function githubCommitCheckVerdict(env: AppConnectorEnv, installationId: string, owner: string,
+  repo: string, sha: string): Promise<GitHubCommitCheckVerdict> {
+  const auth = await githubInstallationAuthForId(env, installationId, { repositories: [repo] });
+  const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(sha)}`;
+  const suites = githubObject(await fetchGitHubJson(env, `${path}/check-suites?per_page=100`, auth.token)).check_suites;
+  let settledAt = "";
+  for (const suite of Array.isArray(suites) ? suites.map(githubObject) : []) {
+    if (Number(suite.latest_check_runs_count) === 0) continue;
+    if (suite.status !== "completed") return { state: "pending" };
+    const updated = githubString(suite.updated_at) ?? "";
+    if (updated > settledAt) settledAt = updated;
+  }
+  const runs = githubObject(await fetchGitHubJson(env, `${path}/check-runs?filter=latest&per_page=100`,
+    auth.token)).check_runs;
+  const failed: Array<{ name: string; url?: string }> = [];
+  for (const run of Array.isArray(runs) ? runs.map(githubObject) : []) {
+    if (run.status !== "completed") return { state: "pending" };
+    if (!FAILED_CHECK_CONCLUSIONS.has(githubString(run.conclusion) ?? "")) continue;
+    const url = githubString(run.html_url);
+    failed.push({ name: githubString(run.name) ?? "check", ...(url ? { url } : {}) });
+  }
+  return { state: failed.length > 0 ? "failed" : "passed", failed, settledAt };
+}
+
 export interface GitHubRepositoryTokenGrant {
   token: string;
   expiresAt?: string;

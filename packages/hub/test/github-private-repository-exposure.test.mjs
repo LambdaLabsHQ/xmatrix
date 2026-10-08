@@ -69,7 +69,7 @@ test("a subscription is the Channel's policy to deny, without needing an Agent a
 
 function webhookHarness(exposure) {
   const appended = [];
-  const route = { installationId: "42", sourceRef: "github:repo:acme/app", spaceId: "space-1",
+  const route = { installationId: "42", sourceRef: "github:repo:acme/app", sourceKind: "repository", spaceId: "space-1",
     channelId: "channel-1", connectionId: "connection-1", authorityRootUserId: "user-1" };
   return {
     appended,
