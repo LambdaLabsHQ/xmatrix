@@ -2414,280 +2414,6 @@
   border-radius: inherit !important;
 }
 
-.xmatrix-app.app-topbar-search-frame {
-  position: fixed !important;
-  left: 50% !important;
-  right: auto !important;
-  top: 0.5rem !important;
-  z-index: var(--z-nav) !important;
-  display: none !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: var(--app-topbar-search-width) !important;
-  max-width: var(--app-topbar-search-max-width) !important;
-  height: 2.25rem !important;
-  pointer-events: auto !important;
-  transform: translateX(-50%) !important;
-  -webkit-app-region: no-drag !important;
-}
-
-.xmatrix-app.app-topbar-search-frame::before {
-  content: "" !important;
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
-  z-index: 0 !important;
-  width: 100% !important;
-  height: 2.25rem !important;
-  border-radius: 9999px !important;
-  pointer-events: none !important;
-  transform: none !important;
-  box-shadow:
-    0 16px 34px oklch(0.24 0.014 238 / 0.2),
-    0 5px 12px oklch(0.24 0.014 238 / 0.14) !important;
-}
-
-.xmatrix-app.app-topbar-search-frame.app-topbar-search-frame-open {
-  z-index: var(--z-popover) !important;
-}
-
-.xmatrix-app .app-topbar-search {
-  position: relative !important;
-  left: auto !important;
-  right: auto !important;
-  top: auto !important;
-  z-index: auto !important;
-  margin-left: 0 !important;
-  margin-right: 0 !important;
-  transform: none !important;
-  z-index: 1 !important;
-  border-radius: 9999px !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  pointer-events: auto !important;
-  -webkit-app-region: no-drag !important;
-  box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 0.18),
-    inset 0 0 0 1px oklch(1 0 0 / 0.065),
-    inset 0 -1px 0 oklch(1 0 0 / 0.1),
-    inset 0 -2px 0 oklch(0 0 0 / 0.22),
-    0 18px 42px oklch(0.24 0.014 238 / 0.24),
-    0 6px 16px oklch(0.24 0.014 238 / 0.18) !important;
-}
-
-.xmatrix-app .app-topbar-search-input input {
-  background: transparent !important;
-}
-
-/* Open search input: the outer portal frame positions the control only. The
-   inner command input pill owns the visible capsule so the top bar does not
-   render as two nested search boxes. */
-.xmatrix-app .app-topbar-search.app-topbar-search-input {
-  --app-liquid-surface-bg: oklch(1 0 0 / 0.86) !important;
-  --app-liquid-backdrop-filter: blur(20px) saturate(1.12) !important;
-  border-color: transparent !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  padding: 0 !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
-.xmatrix-app .app-topbar-search.app-topbar-search-input::before,
-.xmatrix-app .app-topbar-search.app-topbar-search-input::after {
-  content: none !important;
-  display: none !important;
-}
-
-@media (min-width: 640px) {
-  .xmatrix-app.app-topbar-search-frame {
-    display: flex !important;
-  }
-}
-
-.xmatrix-app .app-topbar-search::before,
-.xmatrix-app .app-topbar-search::after {
-  border-radius: 9999px !important;
-}
-
-.app-command-overlay {
-  align-items: flex-start !important;
-  background: transparent !important;
-  padding-top: 2.875rem !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
-
-.xmatrix-app.app-command-panel {
-  width: var(--app-topbar-search-width) !important;
-  max-width: var(--app-topbar-search-max-width) !important;
-  border-radius: 1.75rem !important;
-  border-color: transparent !important;
-  /* Readable frosted dropdown. Was oklch(.../0.55) with a stray
-     blur(1px) !important that overrode the intended frost, so the panel was
-     half-transparent AND unblurred — channel content read straight through
-     "Start typing to search". Solid fill + real blur keeps it glassy and legible. */
-  @apply app-command-panel-recipe;
-  transform-origin: 50% 0 !important;
-  animation: app-command-dropdown 150ms ease-out both;
-}
-
-.xmatrix-app.app-command-panel .app-command-input-row {
-  border-color: transparent !important;
-  padding: 0.875rem 0.875rem 0.75rem !important;
-}
-
-.xmatrix-app.app-command-panel .app-command-input-pill {
-  min-height: 3.625rem !important;
-  width: 100% !important;
-  border-radius: 9999px !important;
-  border: 1px solid oklch(1 0 0 / 0.58) !important;
-  background: oklch(1 0 0 / 0.72) !important;
-  background-color: oklch(1 0 0 / 0.72) !important;
-  color: var(--foreground) !important;
-  padding: 0 1.125rem !important;
-  -webkit-backdrop-filter: url("#xm-liquid-lens") blur(14px) saturate(1.14) contrast(1.02) !important;
-  backdrop-filter: url("#xm-liquid-lens") blur(14px) saturate(1.14) contrast(1.02) !important;
-  box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 0.9),
-    inset 0 0 0 1px oklch(1 0 0 / 0.24),
-    inset 0 -1px 0 oklch(0.22 0.012 238 / 0.06),
-    0 10px 24px oklch(0.24 0.014 238 / 0.1) !important;
-}
-
-.xmatrix-app .app-topbar-search-input .app-command-input-pill {
-  min-height: 2.25rem !important;
-  width: 100% !important;
-  border-radius: 9999px !important;
-  border: 1px solid oklch(1 0 0 / 0.5) !important;
-  background: oklch(1 0 0 / 0.86) !important;
-  background-color: oklch(1 0 0 / 0.86) !important;
-  color: var(--foreground) !important;
-  padding: 0 0.875rem !important;
-  -webkit-backdrop-filter: blur(20px) saturate(1.12) !important;
-  backdrop-filter: blur(20px) saturate(1.12) !important;
-  box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 0.84),
-    inset 0 0 0 1px oklch(1 0 0 / 0.2),
-    inset 0 -1px 0 oklch(0.22 0.012 238 / 0.06),
-    0 8px 22px oklch(0.24 0.014 238 / 0.1) !important;
-}
-
-.xmatrix-app.app-command-panel .app-command-input-pill > svg,
-.xmatrix-app .app-topbar-search-input .app-command-input-pill > svg {
-  color: oklch(0.42 0.012 238 / 0.74) !important;
-}
-
-.xmatrix-app.app-command-panel .app-command-input-pill input {
-  height: 3.375rem !important;
-  @apply app-command-input-recipe;
-}
-
-.xmatrix-app .app-topbar-search-input .app-command-input-pill input {
-  height: 2.125rem !important;
-  @apply app-command-input-recipe;
-}
-
-.xmatrix-app.app-command-panel .app-command-input-pill input::placeholder,
-.xmatrix-app .app-topbar-search-input .app-command-input-pill input::placeholder {
-  color: oklch(0.42 0.012 238 / 0.68) !important;
-}
-
-.xmatrix-app.app-command-panel .app-command-input-pill .app-command-input[data-slot="input"],
-.xmatrix-app .app-topbar-search-input .app-command-input-pill .app-command-input[data-slot="input"] {
-  border: 0 !important;
-  border-radius: 0 !important;
-  outline: 0 !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-  color: inherit !important;
-  filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
-.xmatrix-app.app-command-panel .app-command-input-pill:focus-within,
-.xmatrix-app .app-topbar-search-input .app-command-input-pill:focus-within {
-  box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 0.9),
-    inset 0 0 0 1px oklch(1 0 0 / 0.26),
-    inset 0 -1px 0 oklch(0.22 0.012 238 / 0.06),
-    0 0 0 3px oklch(0.82 0.04 210 / 0.12),
-    0 10px 24px oklch(0.24 0.014 238 / 0.1) !important;
-}
-
-.xmatrix-app.app-command-panel .app-command-results {
-  min-height: 3.5rem !important;
-}
-
-@media (max-width: 639px) {
-  .app-command-overlay {
-    background: oklch(0.18 0.012 238 / 0.18) !important;
-    -webkit-backdrop-filter: blur(2px) !important;
-    backdrop-filter: blur(2px) !important;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
-    padding-top: calc(var(--app-safe-area-top, 0px) + 0.75rem) !important;
-  }
-
-  .xmatrix-app.app-command-panel {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 0.75rem !important;
-    width: calc(100vw - 2rem) !important;
-    max-width: calc(100vw - 2rem) !important;
-    max-height: calc(100dvh - var(--app-safe-area-top, 0px) - 1.5rem) !important;
-    border-color: transparent !important;
-    background: transparent !important;
-    background-color: transparent !important;
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-    box-shadow: none !important;
-    overflow: visible !important;
-  }
-
-  .xmatrix-app.app-command-panel .app-command-input-row {
-    padding: 0 !important;
-  }
-
-  .xmatrix-app.app-command-panel .app-command-input-pill {
-    min-height: 3.25rem !important;
-    padding: 0 1rem !important;
-  }
-
-  .xmatrix-app.app-command-panel .app-command-input-pill input {
-    min-width: 0 !important;
-    height: 3rem !important;
-  }
-
-  .xmatrix-app.app-command-panel .app-command-results {
-    flex: 1 1 auto !important;
-    border-radius: 1.5rem !important;
-    @apply app-command-panel-recipe;
-    max-height: calc(100dvh - var(--app-safe-area-top, 0px) - 7.25rem) !important;
-  }
-}
-
-.xmatrix-app.app-command-panel .app-command-result {
-  border-radius: 0.75rem !important;
-}
-
-.xmatrix-app.app-command-panel .app-command-result-active {
-  background: oklch(0.94 0.004 245 / 0.72) !important;
-}
-
-.xmatrix-app.app-command-panel .app-command-result-icon,
-.xmatrix-app.app-command-panel .app-command-result-badge {
-  border-color: transparent !important;
-  background: var(--app-glass-fill) !important;
-  box-shadow: inset 0 1px 0 var(--app-specular-soft) !important;
-}
-
 /* Search: the matched text is marked with ink, not a new colour; a filter
    sits in the field as quiet ink too, so the field stays one glass. */
 .xmatrix-app mark.app-search-match {
@@ -2718,14 +2444,122 @@
   }
 }
 
-@keyframes app-command-dropdown {
+/* The search panel drops from the control that opened it (placed by
+   SearchPanel): one glass sheet, its field row a capsule as tall as the
+   composer's, the results under it. Rows, chips and the close button are ink
+   on that glass, never glass of their own. The overlay is a portaled
+   .xmatrix-app wrapper, so it drops the app's own paper and safe-area
+   padding. */
+.xmatrix-app.app-search-overlay {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+/* The control the panel dropped from is under its field row: the panel's
+   magnifier and close button take its place, so it is not drawn twice. */
+body:has(.app-search-overlay) [data-search-anchor] {
+  visibility: hidden;
+}
+
+/* A global rule makes every child of a portaled .xmatrix-app relative. */
+.xmatrix-app .app-search-panel-frame {
+  position: fixed !important;
+}
+
+.xmatrix-app .app-search-panel {
+  --app-search-panel-row: 2.75rem;
+  border-radius: calc(var(--app-search-panel-row) / 2);
+  animation: app-search-panel-in 260ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.xmatrix-app .app-search-panel-field {
+  height: var(--app-search-panel-row);
+  padding: 0 0.375rem 0 0.875rem;
+}
+
+/* Not an input well: the glass is the field. Doubled class beats the wood
+   theme's focused-well rule. */
+html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-search-panel-input {
+  height: 100%;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  color: var(--foreground);
+  font-size: 0.9375rem;
+}
+
+.xmatrix-app .app-search-panel-input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.xmatrix-app .app-search-panel-close {
+  border-radius: 9999px;
+}
+
+.xmatrix-app .app-search-panel-results {
+  padding: 0.25rem 0.375rem 0.375rem;
+  box-shadow: inset 0 1px 0 oklch(0.42 0.012 238 / 0.08);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.xmatrix-app .app-search-panel-section {
+  padding: 0.625rem 0.625rem 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.xmatrix-app .app-search-panel-row {
+  min-height: var(--app-search-panel-row);
+  padding: 0.25rem 0.625rem;
+  border-radius: calc(var(--app-search-panel-row) / 2 - 0.375rem);
+}
+
+.xmatrix-app .app-search-panel-row.app-search-panel-row-active {
+  background: oklch(0.42 0.012 238 / 0.07);
+}
+
+.xmatrix-app .app-search-panel-hint {
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
+.xmatrix-app .app-search-panel-empty {
+  padding: 0.75rem 0.625rem 0.625rem;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+.xmatrix-app .app-search-panel-status {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+}
+
+@media (hover: hover) {
+  .xmatrix-app .app-search-panel-close:hover {
+    background: oklch(0.42 0.012 238 / 0.07);
+    color: var(--foreground);
+  }
+}
+
+@keyframes app-search-panel-in {
   from {
     opacity: 0;
-    transform: translateY(-0.375rem) scaleY(0.96);
+    transform: scale(0.9);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scaleY(1);
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xmatrix-app .app-search-panel {
+    animation: none;
   }
 }
 
@@ -3843,13 +3677,6 @@ html[data-app-theme] .xmatrix-app input.page-title:focus-visible {
   opacity: 1 !important;
 }
 
-/* portaled .xmatrix-app wrappers never carry their own surface */
-.xmatrix-app.app-topbar-search-frame {
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
 /* ============================================================
    punch-list pass: monochrome sweep + machined details
    ============================================================ */
@@ -4105,7 +3932,7 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block code {
 /* date separators: little wood plaques */
 
 /* search pill: honey glass (the rail's search is a rail icon, not a pill) */
-html[data-app-theme="wood"] .xmatrix-app button:not(.app-rail button):not(.app-channel-search):has(> svg.lucide-search) {
+html[data-app-theme="wood"] .xmatrix-app button:not(.app-rail button):not(.app-channel-search):not(.app-search-panel-row):has(> svg.lucide-search) {
   background: oklch(1 0.02 88 / 0.55) !important;
   border-color: transparent !important;
   box-shadow:
@@ -4559,22 +4386,6 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   .xmatrix-app .app-global-search-shortcut {
     font-size: 0.75rem;
     opacity: 0.7;
-  }
-
-  /* Open search writes where the resting capsule was: the field grows left
-     from the capsule's right edge, and the results hang under it. */
-  .xmatrix-app.app-topbar-search-frame.app-topbar-search-frame {
-    top: calc(var(--app-edge-top) + (var(--app-band) - 2.25rem) / 2) !important;
-    left: auto !important;
-    right: var(--app-global-search-inset) !important;
-    transform: none !important;
-  }
-
-  /* The overlay is portaled outside .xmatrix-app, so it reads the Windows
-     caption band from env() directly; elsewhere that width is 0. */
-  .app-command-overlay.app-command-overlay {
-    justify-content: flex-end !important;
-    padding-right: max(1rem, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 0.5rem)) !important;
   }
 
   /* Windows draws its caption buttons in that corner: the capsule stands just

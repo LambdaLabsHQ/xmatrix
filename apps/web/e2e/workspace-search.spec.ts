@@ -41,7 +41,7 @@ test("⌘F inside a conversation searches only it, and Backspace widens it to th
   await page.keyboard.press("Control+f");
   const dialog = page.getByRole("dialog", { name: "Search workspace" });
   await expect(dialog).toBeVisible();
-  const field = page.locator(".app-topbar-search-input");
+  const field = page.locator(".app-search-panel-field");
   await expect(field.getByText("in #general")).toBeVisible();
   await page.keyboard.type("deploy");
   await expect(dialog.getByText("deploy the hub (1)")).toBeVisible();
@@ -135,7 +135,7 @@ test("conversation actions sit beside its name and borderless search aligns righ
   await page.keyboard.press("Escape");
   await search.click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
-  await expect(page.locator(".app-topbar-search-input").getByText("in #general")).toHaveCount(0);
+  await expect(page.locator(".app-search-panel-field").getByText("in #general")).toHaveCount(0);
 });
 
 test("a page's controls end before the search capsule", async ({ page }) => {
@@ -161,4 +161,36 @@ test("a long conversation name keeps its search and actions visible without a de
   await expect(header.getByRole("button", { name: "Channel details" })).toBeInViewport();
   await search.click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
+});
+
+test("the search panel drops from the control that opened it, one glass with nothing glass inside", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, RELEASE] });
+  await stubMessageSearch(page);
+  for (const path of [`channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, "pages"]) {
+    await page.goto(`/app/${E2E_SPACE.id}/${path}`, { waitUntil: "domcontentloaded" });
+    const anchor = page.locator("[data-search-anchor]").filter({ visible: true }).first();
+    await expect.poll(() => anchor.boundingBox()).not.toBeNull();
+    const control = (await anchor.boundingBox())!;
+    await anchor.click();
+    const panel = page.getByRole("dialog", { name: "Search workspace" });
+    await expect(panel).toBeVisible();
+    await page.keyboard.type("deploy");
+    await expect(panel.getByText("deploy the hub (1)")).toBeVisible();
+    // Let the drop-down animation settle before measuring.
+    await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+    await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/u);
+    const field = (await page.locator(".app-search-panel-field").boundingBox())!;
+    const close = (await panel.getByRole("button", { name: "Close search" }).boundingBox())!;
+    expect(field.y + field.height / 2).toBeCloseTo(control.y + control.height / 2, 0);
+    expect(close.x + close.width).toBeGreaterThan(control.x);
+    expect(close.x).toBeLessThan(control.x + control.width);
+    // The control is under the field row; the panel takes its place.
+    await expect(page.locator("[data-search-anchor]").filter({ visible: true })).toHaveCount(0);
+    expect(await panel.evaluate((node) => getComputedStyle(node).backdropFilter)).not.toBe("none");
+    const nestedGlass = await panel.evaluate((node) => Array.from(node.querySelectorAll("*"))
+      .filter((child) => getComputedStyle(child).backdropFilter !== "none").length);
+    expect(nestedGlass).toBe(0);
+    await panel.getByRole("button", { name: "Close search" }).click();
+    await expect(panel).toHaveCount(0);
+  }
 });
