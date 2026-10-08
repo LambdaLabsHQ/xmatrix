@@ -1370,27 +1370,19 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
         ChannelCommand::About {
             channel_id,
             summary,
-            summary_file,
             name,
-            name_file,
+            stdin,
             through,
             expected_revision,
         } => {
-            let summary = about_text_input(
-                "channel About summary",
-                summary,
-                summary_file,
-                "--summary-file",
-            )?
-            .unwrap_or_default();
-            let name = about_text_input("channel name", name, name_file, "--name-file")?;
+            let input = about_input::read(summary, name, stdin).await?;
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
             cmd_channel_about(
                 hub_url,
                 token,
                 &channel_id,
-                summary,
-                name,
+                input.summary,
+                input.name,
                 through,
                 expected_revision,
             )
@@ -1896,30 +1888,6 @@ async fn cmd_channel_rename(
         channel_label(&response.channel)
     );
     Ok(())
-}
-
-/// One About text field from its argument or its UTF-8 file, refused when the
-/// shell's code page already mangled it.
-fn about_text_input(
-    field: &str,
-    argument: Option<String>,
-    file: Option<PathBuf>,
-    file_flag: &str,
-) -> error::Result<Option<String>> {
-    let (text, source) = match (argument, file) {
-        (_, Some(path)) => {
-            about_input::ensure_written_by_this_run(&path, file_flag)?;
-            (text_input::read_text_file(&path)?, TextSource::File)
-        }
-        (Some(text), None) => (text, TextSource::Argument),
-        (None, None) => return Ok(None),
-    };
-    let routes = TextRoutes {
-        stdin: false,
-        file_flag: Some(file_flag),
-    };
-    text_input::ensure_text_intact(field, &text, source, routes)?;
-    Ok(Some(text))
 }
 
 /// The channel's own About session saves its summary, and may name a channel

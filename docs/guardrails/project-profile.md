@@ -41,3 +41,8 @@ repository preparation error; subsequent stop cleanup
 preserves the failed-startup outcome. See [invocation status](../design/mention-invocation/README.md).
 
 Teams native integration uses a company home-tenant Bot, Human admin confirmation and primary PostgreSQL room grants, alongside explicit outbound-only manual webhooks. Its supported scope, canonical release configuration and evidence requirements are documented in [Teams native contract](../connectors/teams-native.md). Company identity and native acceptance remain external prerequisites.
+
+Channel About sessions submit summary/title text directly through Hub using
+CLI arguments or bounded JSON stdin; they do not stage local files. Their
+own-Channel authorization and immutable database revision/input evidence are
+unchanged. See [Channel metadata revisions](../design/channel-metadata-revisions.md).
