@@ -43,6 +43,7 @@ import { isRecoverableLaunchFailure } from "../live-run-admission";
 import { boundedOccurrenceAt } from "../bounded-occurrence-time";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { wakeMachineChannels } from "../registration-authority-wake";
+import type { ScheduledStep } from "../postgres-agent-launch-schedule";
 import { machineDaemonCommand } from "../machines";
 import { machineRunLifecycleReport } from "../machine-run-lifecycle-report";
 import { updateAgentLaunch } from "../runtime";
@@ -91,7 +92,7 @@ export interface PostgresMachineDaemonPortDependencies {
    * Hand committed work to its Channel's coordinator before answering.
    * Best-effort: finalization and reborn also advance on the coordinator's alarm.
    */
-  wakeCoordinator?(channelId: string): Promise<void>;
+  wakeCoordinator?(channelId: string, work: readonly ScheduledStep[]): Promise<void>;
   /** Deliver this machine's pending commands on its socket, behind that socket's frames. */
   deliverPending?(identity: MachineDaemonRouteIdentity): Promise<unknown>;
   /** Retain work that outlives the frame that started it. */
@@ -129,7 +130,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       observeAgentLaunchStage: (stage, outcome, durationMs) => recordAgentLaunchStage({
         env: input.env, stage, outcome, durationMs,
       }),
-      wakeCoordinator: (channelId) => wakeAgentLaunchCoordinator(input.env, channelId),
+      wakeCoordinator: (channelId, work) => wakeAgentLaunchCoordinator(input.env, channelId, work),
       ...(input.deliverPending ? { deliverPending: input.deliverPending } : {}),
       ...(input.keepAlive ? { keepAlive: input.keepAlive } : {}),
     });
@@ -309,7 +310,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     // socket's order through those round trips.
     const terminalRecorded = result.runTerminalReportRecorded === true;
     if (terminalRecorded) {
-      if (runLifecycleChannelId) await this.dependencies.wakeCoordinator?.(runLifecycleChannelId);
+      if (runLifecycleChannelId) await this.dependencies.wakeCoordinator?.(runLifecycleChannelId, ["runTerminal", "reborn"]);
       if (runId) this.activeRunChannels.delete(runId);
     } else if (runLifecycleChannelId && runId) {
       const lifecycleResult = await this.dependencies.runLifecycleReport({
@@ -327,7 +328,11 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       });
       // The stopped predecessor unblocks its durable reborn successor.
       if (message.type === "machine_stop_result" && result.runLifecycleStopPurpose === "reborn-predecessor") {
-        await this.dependencies.wakeCoordinator?.(runLifecycleChannelId);
+        await this.dependencies.wakeCoordinator?.(runLifecycleChannelId, ["reborn"]);
+      } else if (message.type === "machine_stop_result") {
+        // A host answered a stop: a registration stop parked on it can settle
+        // now. Best effort — the parked stop is also re-checked on its own.
+        await this.dependencies.wakeCoordinator?.(runLifecycleChannelId, ["registrationStop"])?.catch(() => undefined);
       }
       await this.dispatchChannelAboutFollowUps(lifecycleResult);
       this.closeCommittedTerminalInstances(lifecycleResult);

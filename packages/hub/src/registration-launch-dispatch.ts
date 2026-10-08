@@ -190,7 +190,7 @@ export async function wakeRestingInstances(env: Env, input: {
   commandId: string; channelId: string; sourceMessageId: string; prompt: string;
 }) {
   const value = await executeRestingInstanceWake({ ...runtimePlacement(env), ...input });
-  if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId);
+  if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
   return value;
 }
 
@@ -219,7 +219,7 @@ export async function prepareRegistrationHandoff(env: Env, input: {
   const placed = { ...runtimePlacement(env), ...input };
   if (!isAutoHandoffSuccessor(input.successorHarness)) return executeRegistrationHandoffPrepare(placed);
   const result = await executeRegistrationAutoHandoff(placed);
-  if (result.outcome === "handed_off") await wakeAgentLaunchCoordinator(env, input.channelId);
+  if (result.outcome === "handed_off") await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
   return result;
 }
 

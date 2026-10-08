@@ -8,7 +8,8 @@ import type { Env } from "./types";
 
 type AutomationChannelEnv = Pick<Env, "RELAY_AUTOMATION_EXECUTION_ENABLED">;
 
-function automationRuns(env: AutomationChannelEnv): boolean {
+/** Whether this deployment runs Automations at all. */
+export function channelAutomationEnabled(env: AutomationChannelEnv): boolean {
   return env.RELAY_AUTOMATION_EXECUTION_ENABLED === "true";
 }
 
@@ -16,9 +17,9 @@ function automationRuns(env: AutomationChannelEnv): boolean {
  * The Channel's earliest Automation wake: cadence, retry, lease, execution
  * deadline, cleanup and orphan convergence. Undefined when it has none.
  */
-export async function channelAutomationDueAt(env: AutomationChannelEnv, database: AuthorityDatabase,
+async function channelAutomationDueAt(env: AutomationChannelEnv, database: AuthorityDatabase,
   channelId: string): Promise<number | undefined> {
-  if (!automationRuns(env)) return undefined;
+  if (!channelAutomationEnabled(env)) return undefined;
   const wakeAt = await new PostgresAutomationRepository(database).nextChannelAutomationWakeAt({
     requestId: `automation:due:${channelId}`.slice(0, 200), channelId });
   const parsed = wakeAt ? Date.parse(wakeAt) : Number.NaN;
@@ -34,8 +35,10 @@ export async function channelAutomationDueAt(env: AutomationChannelEnv, database
  */
 export async function runChannelAutomation(env: Env, databases: {
   shard: AuthorityDatabase; directory: AuthorityDatabase;
-}, channelId: string, waitUntil: (task: Promise<unknown>) => void, nowDate = new Date()): Promise<void> {
-  const due = await channelAutomationDueAt(env, databases.shard, channelId);
+}, channelId: string, waitUntil: (task: Promise<unknown>) => void, nowDate = new Date(),
+  /** The due time the caller already read in its own statement, if it did. */
+  knownDue?: number): Promise<void> {
+  const due = knownDue ?? await channelAutomationDueAt(env, databases.shard, channelId);
   if (due === undefined || due > nowDate.getTime()) return;
   const route = await new PostgresChannelSpaceDirectory(databases.directory).resolve({
     requestId: `automation:route:${channelId}`.slice(0, 200), operation: "automation.channel.route",
@@ -70,7 +73,8 @@ export async function handOverAutomationChannels(env: Env, cursor: {
     requestId: `automation:handover:${shard.shardId}`.slice(0, 200),
     ...(cursor.afterChannelId ? { afterChannelId: cursor.afterChannelId } : {}), limit: HANDOVER_PAGE });
   const woken = await Promise.allSettled(channelIds.map((channelId) =>
-    wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId, shardId: shard.shardId })));
+    wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId, shardId: shard.shardId,
+      work: ["automation"] })));
   const failed = woken.filter((result) => result.status === "rejected" || !result.value.ok).length;
   const last = channelIds.at(-1);
   if (last && channelIds.length === HANDOVER_PAGE) {

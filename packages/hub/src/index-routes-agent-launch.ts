@@ -134,7 +134,7 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
     const retried = await runtimeRepository(c.env).retryAgentLaunch({ requestId: crypto.randomUUID(),
       launchId: c.req.param("launchId"), channelId, actorUserId: actorUserId(authUser), at: new Date().toISOString() });
     const wake = await wakeAgentLaunchChannel(c.env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL,
-      { channelId, launchIds: [c.req.param("launchId")] }).catch(() => undefined);
+      { channelId, launchIds: [c.req.param("launchId")], work: ["launch"] }).catch(() => undefined);
     if (!wake?.ok) throw new AgentLaunchHandoverUnavailable(wake?.status);
     return c.json(retried, 200, NO_STORE);
   }));
