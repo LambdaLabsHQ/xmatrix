@@ -4759,13 +4759,17 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
    below), never a private one. The name row, the Spaces and the actions are
    printed on it; none of them carries glass of its own except the action
    discs. */
+/* It floats over the list, so it casts a floating surface's shadow: the
+   shared rim with the popovers' drop shadow, not the composer's faint lift,
+   which reads as no shadow at all over the light list. */
 .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open {
+  --app-glass-edge: var(--app-liquid-rim-layers), 0 2px 6px oklch(0 0 0 / 0.08), 0 14px 36px -8px oklch(0 0 0 / 0.3);
   position: relative !important;
   isolation: isolate !important;
   overflow: hidden !important;
   border-radius: 26px !important;
-  animation: app-space-switcher-liquid-shell-open 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  will-change: clip-path, filter !important;
+  /* Not `both`: a clip-path held after the animation clips the shadow. */
+  animation: app-space-switcher-liquid-shell-open 360ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
 .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell-open > * {

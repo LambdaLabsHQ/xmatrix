@@ -42,10 +42,11 @@ test("expanded desktop workspace switcher is one glass panel floating over the l
   expect((await list.boundingBox())!.y).toBe(listTop);
 
   /* The expanded shell carries the shared liquid glass recipe — the
-     composer's — and nothing more. Comparing it against a live probe of the
-     generic glass class stays true when that recipe is retuned: a private
-     recipe on the shell (an extra rim, a top edge highlight, caustic
-     gradients, its own backdrop filter) makes one of these reads differ. */
+     composer's fill, lens and rim — and nothing more but a floating
+     surface's drop shadow. Comparing it against a live probe of the generic
+     glass class stays true when that recipe is retuned: a private recipe on
+     the shell (an extra rim, a top edge highlight, caustic gradients, its own
+     backdrop filter) makes one of these reads differ. */
   const shell = page.locator(".app-space-switcher-shell-open");
   await expect(shell).toBeVisible();
   const material = await shell.evaluate((element) => {
@@ -68,7 +69,13 @@ test("expanded desktop workspace switcher is one glass panel floating over the l
 
     return { shell: read(element), sharedRecipe };
   });
-  expect(material.shell).toEqual(material.sharedRecipe);
+  const { boxShadow: shellShadow, ...shellGlass } = material.shell;
+  const { boxShadow: sharedShadow, ...sharedGlass } = material.sharedRecipe;
+  expect(shellGlass).toEqual(sharedGlass);
+  // Same rim, and a heavier shadow than the composer's lift.
+  const rim = sharedShadow.split(/,(?![^(]*\))/u).filter((layer) => layer.includes("inset"));
+  for (const layer of rim) expect(shellShadow).toContain(layer.trim());
+  expect(shellShadow).toContain("0px 14px 36px -8px");
 
   // Nothing inside the panel is a second pane of glass but the action discs.
   for (const inner of [trigger, menu]) {
