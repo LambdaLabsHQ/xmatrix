@@ -1479,7 +1479,7 @@ function SignWithBack({ back, children }: { back: React.ReactNode; children: Rea
 export function SpaceAvatar({ space }: { space: SerializedSpace }) {
   return (
     <span
-      className="flex size-7 shrink-0 items-center justify-center rounded-md border text-[11px] font-black"
+      className="app-space-avatar flex size-7 shrink-0 items-center justify-center text-[11px] font-black"
       style={spaceAvatarStyle(space)}
       aria-hidden="true"
     >
@@ -1488,13 +1488,17 @@ export function SpaceAvatar({ space }: { space: SerializedSpace }) {
   );
 }
 
+/** A tint of the Space's hue with its initials in a deep shade of the same
+    hue: the app is light, so pale initials would vanish into the tint. The
+    edge is an inset shadow, not a border: `.rounded-md.border` is the app's
+    card selector, and its material would paint over the tint. */
 export function spaceAvatarStyle(space: SerializedSpace): CSSProperties {
   const seed = space.id || space.name;
   const hue = Array.from(seed).reduce((total, char) => total + char.charCodeAt(0), 0) % 360;
   return {
-    backgroundColor: `hsl(${hue} 70% 42% / 0.18)`,
-    borderColor: `hsl(${hue} 70% 42% / 0.38)`,
-    color: `hsl(${hue} 72% 72%)`,
+    backgroundColor: `hsl(${hue} 70% 42% / 0.16)`,
+    boxShadow: `inset 0 0 0 1px hsl(${hue} 70% 42% / 0.3)`,
+    color: `hsl(${hue} 70% 28%)`,
   };
 }
 
