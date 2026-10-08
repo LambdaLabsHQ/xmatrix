@@ -6260,8 +6260,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     box-shadow: none !important;
   }
 
-  /* Every phone bar is the same continuous wood board, a conversation's
-     too. It meets the paper directly, without an inset rim or shadow. */
+  /* Pushed screens use a continuous wood board. Dock roots override its
+     fill below and confine the wood to the Space name panel. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar,
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar:has(.app-mobile-search-icon) {
     --muted-foreground: oklch(0.38 0.04 60);
@@ -6294,6 +6294,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
 
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-mobile-tab-root-bar {
     --plank-glyph: 1.5rem;
+    background: transparent !important;
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar:not(.app-mobile-channel-detail-bar) .app-mobile-topbar-back {
@@ -6327,12 +6328,25 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     height: 1rem;
     margin-top: 0.125rem;
     stroke-width: 2.5;
+    display: none;
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-mobile-tab-root-bar .app-mobile-search-icon svg {
     width: 1.5rem;
     height: 1.5rem;
     stroke-width: 2.25;
+  }
+
+  /* Dock roots keep the search geometry, with wood confined to the Space sign. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-mobile-tab-root-bar :is(.app-mobile-space-trigger, .app-mobile-title) {
+    @apply app-wood-panel-recipe;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 2.75rem;
+    margin-inline-start: -0.75rem;
+    padding: 0.625rem 0.75rem !important;
+    border-radius: 0.75rem;
+    box-shadow: var(--app-wood-chrome-shadow);
   }
 
   /* Summary and linked pages are about the conversation, not part of it: a
