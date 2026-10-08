@@ -101,7 +101,9 @@ pub fn maybe_run_utf8_shell() -> Option<Result<i32, String>> {
         return Some((|| {
             let real = std::env::var_os(key).ok_or("UTF-8 shell target is missing")?;
             let real = std::path::PathBuf::from(real);
-            if !real.is_absolute() || real == exe {
+            if !real.is_absolute()
+                || std::fs::canonicalize(&real).ok() == std::fs::canonicalize(&exe).ok()
+            {
                 return Err("UTF-8 shell target is invalid".into());
             }
             let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -143,6 +145,16 @@ pub(crate) fn child_env(
     let root = xmatrix_cli_core::config::config_dir().join("utf8-shells");
     let directory = root.clone();
     std::fs::create_dir_all(&directory).map_err(|_| "Cannot prepare UTF-8 shell directory")?;
+    let original = path
+        .map(std::ffi::OsStr::to_os_string)
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    let original_paths = std::env::split_paths(&original)
+        .filter(|p| !p.starts_with(&root))
+        .collect::<Vec<_>>();
+    let search_path =
+        std::env::join_paths(&original_paths).map_err(|_| "Cannot resolve original shell PATH")?;
+    let cwd = std::env::current_dir().map_err(|_| "Cannot resolve shell working directory")?;
     let mut env = Vec::new();
     for (name, key) in [
         ("pwsh.exe", "XMATRIX_UTF8_PWSH_REAL"),
@@ -150,8 +162,8 @@ pub(crate) fn child_env(
     ] {
         let inherited = std::env::var_os(key)
             .map(PathBuf::from)
-            .filter(|p| p.is_absolute() && !p.starts_with(&root));
-        let real = inherited.or_else(|| which::which(name).ok().filter(|p| !p.starts_with(&root)));
+            .filter(|p| p.is_absolute() && p.is_file() && !p.starts_with(&root));
+        let real = inherited.or_else(|| which::which_in(name, Some(&search_path), &cwd).ok());
         let Some(real) = real else {
             let alias = directory.join(name);
             if alias.exists() && std::fs::remove_file(alias).is_err() {
@@ -182,12 +194,7 @@ pub(crate) fn child_env(
     if env.is_empty() {
         return Err("Windows Agent requires PowerShell on PATH for UTF-8 tools".into());
     }
-    let original = path
-        .map(std::ffi::OsStr::to_os_string)
-        .or_else(|| std::env::var_os("PATH"))
-        .unwrap_or_default();
-    let paths = std::iter::once(directory.clone())
-        .chain(std::env::split_paths(&original).filter(|p| !p.starts_with(&root)));
+    let paths = std::iter::once(directory.clone()).chain(original_paths);
     env.push((
         "PATH".into(),
         std::env::join_paths(paths).map_err(|_| "Cannot configure UTF-8 shell PATH")?,
