@@ -144,7 +144,13 @@ fn zcode_runtime_detection_handles_launchers() {
 fn codex_app_spawn_args_default_to_websocket_listen() {
     let _process_env = test_process_env_lock();
     let ws = codex_app_spawn_args(CodexTransportKind::WebSocket, Some("ws://127.0.0.1:9876"));
-    assert_eq!(ws.first().map(String::as_str), Some("app-server"));
+    // The request_user_input feature is a global override, before the subcommand.
+    let subcommand = ws.iter().position(|arg| arg == "app-server").expect("subcommand");
+    assert!(
+        ws[..subcommand]
+            .windows(2)
+            .any(|pair| pair == ["-c", "features.default_mode_request_user_input=true"])
+    );
     assert!(
         ws.windows(2)
             .any(|pair| { pair[0] == "--listen" && pair[1] == "ws://127.0.0.1:9876" })

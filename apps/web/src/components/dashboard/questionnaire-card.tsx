@@ -8,6 +8,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { ArrowUp, Check, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { actionClass } from "@/components/ui/action-tone";
 import { COUNT_CHIP_MATERIAL_CLASS } from "./workspace-shell-constants";
 import type { TimelineItem } from "./workspace-shell-message-model";
 
@@ -250,7 +251,7 @@ export function QuestionnaireMessage({
             type="button"
             disabled={!canSubmit}
             onClick={submit}
-            className="inline-flex h-8 items-center gap-1.5 rounded bg-primary px-2.5 text-xs font-bold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className={actionClass({ variant: "primary", size: "sm" })}
           >
             <ArrowUp className="size-3.5" strokeWidth={2.5} />
             Send answer

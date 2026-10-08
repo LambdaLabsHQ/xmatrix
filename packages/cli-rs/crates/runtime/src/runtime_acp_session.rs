@@ -53,19 +53,13 @@ impl AcpSession {
         } = server;
         let inbox = spawn_stdio_json_value_reader(stdout, config.display_name.clone());
 
-        Ok(Self {
-            write: AppServerWrite::Stdio(Arc::new(AsyncMutex::new(stdin))),
+        Ok(Self::from_transport(
+            AppServerWrite::Stdio(Arc::new(AsyncMutex::new(stdin))),
             inbox,
             process_tree,
             child,
-            next_id: 1,
-            session_id: None,
-            loaded_goal: None,
-            presentation: AgentPresentationFacts::default(),
             config,
-            activity: ChannelActivityReporter::default(),
-            questions: Default::default(),
-        })
+        ))
     }
 
     async fn spawn_websocket(
@@ -136,8 +130,24 @@ impl AcpSession {
             config.display_name
         );
 
-        Ok(Self {
-            write: AppServerWrite::WebSocket(Arc::new(AsyncMutex::new(write))),
+        Ok(Self::from_transport(
+            AppServerWrite::WebSocket(Arc::new(AsyncMutex::new(write))),
+            inbox,
+            process_tree,
+            child,
+            config,
+        ))
+    }
+
+    fn from_transport(
+        write: AppServerWrite,
+        inbox: ProviderInbox,
+        process_tree: process_tree::ProcessTreeGuard,
+        child: Child,
+        config: AcpVendorConfig,
+    ) -> Self {
+        Self {
+            write,
             inbox,
             process_tree,
             child,
@@ -148,7 +158,7 @@ impl AcpSession {
             config,
             activity: ChannelActivityReporter::default(),
             questions: Default::default(),
-        })
+        }
     }
 
     fn current_model(&self) -> Option<&str> {
