@@ -7,7 +7,7 @@ import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
   type LaunchParameterEvidence } from "@xmatrix/protocol";
 import { formatZonedDateTime } from "./time-display";
-import { fitLevel, jevDecisions, jevReadings, placementReason, placementWhere as where, roomText, type JevReading } from "./jev-decision-trace";
+import { fitLevel, jevDecisions, jevReadings, placementReason, roomText, type JevReading } from "./jev-decision-trace";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
@@ -91,33 +91,31 @@ const percent = (value: number | undefined) => value === undefined ? "" : `${Mat
 /** A routing question is a choice, not a step: its options are listed with
  *  radio marks, the chosen one filled, so it never reads like the ticked
  *  startup timeline below it. */
-type ChoiceOption = { key: string; title: string; meta?: string; chosen: boolean };
+type ChoiceOption = { key: string; title: string; subtitle?: string; meta?: string; chosen: boolean };
 const SHOWN_OPTIONS = 3;
+// Arbitrary radius and edge: the app-wide `.rounded-lg.border` rule would turn a card into glass.
+const CARD = "grid min-w-0 content-start gap-0.5 rounded-[10px] border-[1px] px-2.5 py-2 text-left";
 
-function Radio({ chosen }: { chosen: boolean }) {
-  return <span aria-hidden="true" className={`flex size-3 items-center justify-center rounded-full border ${chosen
-    ? "border-foreground" : "border-muted-foreground/40"}`}>{chosen && <span className="size-1.5 rounded-full bg-foreground" />}</span>;
-}
-
+/** One routing question as a set of option cards: each card is a candidate,
+ *  the chosen one drawn with a darker edge and a faint fill, the rest faint. */
 function RoutingChoice({ label, options, note, hint }: { label: string; options: readonly ChoiceOption[]; note?: string; hint?: string }) {
   const [all, setAll] = useState(false);
   const shown = all ? options : options.slice(0, SHOWN_OPTIONS);
   const hidden = options.length - shown.length;
-  return <li className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-2 py-1.5" aria-label={label}>
-    <span className="pt-px text-muted-foreground" title={hint}>{label}</span>
-    <div className="min-w-0">
-      <ul className="m-0 grid list-none gap-1 p-0" aria-label={`${label} options`}>
-        {shown.map(option => <li key={option.key} data-selected={option.chosen || undefined}
-          className={`grid grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-x-2 ${option.chosen ? "text-foreground" : "text-muted-foreground"}`}>
-          <Radio chosen={option.chosen} />
-          <span className={`truncate ${option.chosen ? "font-semibold" : ""}`} title={option.title}>{option.title}</span>
-          <span className="text-[11px] tabular-nums">{option.meta}</span>
-        </li>)}
-      </ul>
-      {note && <p className="m-0 mt-1 text-[11px] leading-snug text-muted-foreground">{note}</p>}
-      {hidden > 0 && <button type="button" className="mt-1 cursor-pointer text-[11px] text-muted-foreground underline-offset-2 hover:underline"
-        onClick={() => setAll(true)}>{hidden} more</button>}
-    </div>
+  return <li className="grid gap-1.5 py-1.5" aria-label={label}>
+    <span className="text-[11px] text-muted-foreground" title={hint}>{label}</span>
+    <ul className="m-0 grid list-none grid-cols-3 gap-1.5 p-0" aria-label={`${label} options`}>
+      {shown.map(option => <li key={option.key} data-selected={option.chosen || undefined}
+        className={`${CARD} border-solid ${shown.length === 1 && !hidden ? "col-span-3" : ""} ${option.chosen ? "border-foreground/45 bg-foreground/[0.04] text-foreground" : "border-border text-muted-foreground"}`}>
+        <span className={`truncate ${option.chosen ? "font-semibold" : "font-medium"}`} title={option.title}>{option.title}</span>
+        {option.subtitle && <span className="truncate text-[11px]" title={option.subtitle}>{option.subtitle}</span>}
+        {option.meta && <span className="truncate text-[11px] tabular-nums">{option.meta}</span>}
+      </li>)}
+      {hidden > 0 && <li className="contents"><button type="button" onClick={() => setAll(true)}
+        className={`${CARD} cursor-pointer place-content-center border-dashed border-border text-[11px] text-muted-foreground hover:text-foreground`}>
+        {hidden} more</button></li>}
+    </ul>
+    {note && <p className="m-0 text-[11px] leading-snug text-muted-foreground">{note}</p>}
   </li>;
 }
 
@@ -145,7 +143,8 @@ export function JevDecisionSection({ decisions, parameters }: { decisions: JevRe
         {rows.map(question => <RoutingChoice key={question.key} label={question.label} hint={question.instructions}
           options={question.options.map(option => ({ key: option.handle, title: option.title, meta: percent(option.probability), chosen: option.selected }))} />)}
         {placed && <RoutingChoice label="Agent" note={placementReason(placed, fits.length > 0)}
-          options={placed.map((item, index) => ({ key: `${item.harness}:${item.machineId}`, title: where(item), chosen: index === 0,
+          options={placed.map((item, index) => ({ key: `${item.harness}:${item.machineId}`, title: item.harness,
+            subtitle: item.machineName || "unnamed machine", chosen: index === 0,
             meta: `${fits.length > 0 ? `${fitLevel(item.fit)} · ` : ""}${roomText(item.headroom)}` }))} />}
         {decision.failure && <li className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-2 py-1.5"><span className="text-muted-foreground">Failed</span>
           <span className="truncate text-destructive">{decision.failure}</span></li>}
