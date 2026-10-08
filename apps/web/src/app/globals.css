@@ -1656,7 +1656,7 @@
   :root:not(.dark) .xmatrix-app .app-panel-header > div:first-child,
   :root:not(.dark) .xmatrix-app .app-panel-header .app-channel-header-actions {
     min-width: 0;
-    padding-block: 0.25rem;
+    padding-block: 0.125rem;
   }
 
   :root:not(.dark) .xmatrix-app .app-panel-header :is(button, p, span) {
@@ -4458,6 +4458,11 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
     top: calc(var(--app-edge-top) + (var(--app-band) - 2.25rem) / 2);
     z-index: var(--z-nav);
     pointer-events: none;
+  }
+
+  /* A docked conversation carries its own right-aligned search entry. */
+  .xmatrix-app:has(.app-page-conversation .app-panel-header) .app-global-bar {
+    display: none;
   }
 
   .xmatrix-app .app-global-search {
