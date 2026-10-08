@@ -176,3 +176,10 @@ Older Hubs drop these optional fields, older clients ignore them, and older
 runtimes continue their existing busy/idle behavior. ACP peers without notice
 support continue v1 without requiring a protocol migration. Generic public
 presence contains no trace text or source fingerprints.
+
+The Agents list and detail status name each exhausted provider quota window
+(e.g. `5h limit reached`, `1w limit reached`, or `5h + 1w limit reached`).
+A turn-level usage-limit report retains still-current provider window detail
+while holding the routing pool empty; expired detail is discarded. When the
+provider did not identify a window, the status says the window is unavailable.
+The usage section continues to show the separate window meters and reset times.

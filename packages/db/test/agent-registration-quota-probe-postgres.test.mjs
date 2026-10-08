@@ -185,6 +185,26 @@ integration("registration quota probe targets are the Space's authorized, singly
     assert.equal(heldProjection.get(registrationQuotaKey(key)).quotaState, "exhausted");
     assert.deepEqual(heldProjection.get(registrationQuotaKey(key)), heldProjection.get(registrationQuotaKey(shared)));
     assert.equal(heldProjection.get(registrationQuotaKey(key)).quotaUsages[0].label, undefined, "a hold does not invent a provider window");
+    const windows = [{ label: "5h", usedPercent: 100, resetAt: new Date(hours(2)).toISOString() },
+      { label: "1w", usedPercent: 30, resetAt: new Date(hours(24)).toISOString() }];
+    await sql(`UPDATE control.registration_quota_observations SET windows_json=$1::jsonb,source='provider',
+      account_json='{"allowed":true}'::jsonb WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`,
+      [JSON.stringify(windows)]);
+    await limit({ harness: "claude" });
+    const retained = await sql(`SELECT remaining,windows_json,account_json FROM control.registration_quota_observations
+      WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
+    assert.deepEqual(retained.rows[0].windows_json, windows, "a turn limit retains current provider window names");
+    assert.equal(Number(retained.rows[0].remaining), 0, "window detail cannot override the hold");
+    const retainedProjection = await readRegistrationQuotaState(database, [key], "retained-projection");
+    assert.equal(retainedProjection.get(registrationQuotaKey(key)).quotaState, "exhausted",
+      "retained window detail cannot clear an authoritative usage-limit hold");
+    assert.equal(retained.rows[0].account_json, null, "a prior allowed verdict cannot contradict the refusal");
+    await sql(`UPDATE control.registration_quota_observations SET observed_at=now()-interval '2 seconds',
+      expires_at=now()-interval '1 second' WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
+    await limit({ harness: "claude" });
+    const expiredDetail = await sql(`SELECT windows_json FROM control.registration_quota_observations
+      WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
+    assert.equal(expiredDetail.rows[0].windows_json, null, "expired detail is not revived by a limit report");
     assert.ok(near((await limit({ harness: "grok" })).limitedUntil, hours(1)), "no reset time holds for an hour");
     assert.ok(near((await limit({ harness: "grok", resetsAt: new Date(hours(-1)).toISOString() })).limitedUntil, hours(1 / 12)),
       "a reset already past still holds for five minutes");
