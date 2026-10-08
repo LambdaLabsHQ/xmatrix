@@ -71,18 +71,12 @@ test("a retried Agent Instance connect succeeds after the predecessor already cl
         autoJoinChannelId: channelId,
       },
     };
-    const attempts = await Promise.allSettled([
-      connectAgent(worker, body, runToken),
-      connectAgent(worker, body, runToken),
-    ]);
-    for (const attempt of attempts) {
-      if (attempt.status === "fulfilled") sockets.push(attempt.value);
-      else {
-        assert.doesNotMatch(String(attempt.reason), /Agent session request could not be completed/u);
-        throw attempt.reason;
-      }
-    }
-    assert.equal(attempts.filter((attempt) => attempt.status === "fulfilled").length, 2);
+    // Finish the predecessor's handshake before retrying. Concurrent handshakes
+    // can supersede the first connection before it has claimed presence, which
+    // exercises a different race from this regression.
+    sockets.push(await connectAgent(worker, body, runToken));
+    sockets.push(await connectAgent(worker, body, runToken));
+    assert.equal(sockets.length, 2);
   } finally {
     for (const socket of sockets) socket.ws.close();
     daemon?.ws.close();
