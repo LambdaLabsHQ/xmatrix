@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { jevDecisions, jevReadings } from "./jev-decision-trace.ts";
+import { jevDecisions, jevReadings, placementReason, fitLevel, roomText } from "./jev-decision-trace.ts";
 
 const NOW = "2026-10-06T08:45:00.000Z";
 const LATER = "2026-10-06T08:45:02.000Z";
@@ -106,4 +106,29 @@ test("a fit score reads as its harness and levels, the scored level selected", (
   assert.deepEqual(question.options.map(option => [option.title, option.selected, option.probability]),
     [["Unsuitable", false, 0], ["Capable", true, 0.8], ["Strong fit", false, 0.2], ["Asked for", false, 0]]);
   assert.equal(question.options[1].detail, "nothing specific.");
+});
+
+test("the placement reason names the trade-off routing made", () => {
+  const at = (harness, machineName, fit, headroom) => ({ harness, machineId: `${harness}@${machineName}`, machineName, fit, headroom, frontier: true, utility: 0 });
+  assert.equal(placementReason([at("codex", "idle", 1 / 3, 0.85), at("claude", "busy", 0.68, -0.05)], true),
+    "claude fits better, but busy is overloaded");
+  assert.equal(placementReason([at("codex", "idle", 1 / 3, 0.85), at("claude", "warm", 0.68, 0.2)], true),
+    "claude fits better, but warm is at 20% room");
+  assert.equal(placementReason([at("codex", "idle", 1 / 3, 0.85), at("claude", "busy", 0.32, 0.1)], true),
+    "All equally suited; most room here (85% room)");
+  assert.equal(placementReason([at("claude", "warm", 0.68, 0.4), at("codex", "idle", 1 / 3, 0.85)], true), "Best suited, with 40% room");
+  assert.equal(placementReason([at("codex", "idle", 1 / 3, 0.85)], false), "Most room for codex: 85% room");
+  assert.deepEqual([fitLevel(0.32), fitLevel(0.68), fitLevel(0), fitLevel(1)], ["Capable", "Strong fit", "Unsuitable", "Asked for"]);
+  assert.deepEqual([roomText(undefined), roomText(-0.2), roomText(0.414)], ["room unknown", "overloaded", "41% room"]);
+});
+
+test("a fit score's answer is the level Jev weighed most, matching the share shown", () => {
+  const input = { state: { message: "x" }, questions: { fit_0: { type: "score", instructions: `Harness: ${JSON.stringify({ harness: "claude" })}`,
+    criteria: ["Unsuitable: a", "Capable: b", "Strong fit: c", "Asked for: d"] } } };
+  const [reading] = jevReadings([
+    { refId: "decision:g:started", payload: { decisionId: "g", status: "started", at: "2026-10-08T14:00:00Z", input } },
+    { refId: "decision:g:succeeded", payload: { decisionId: "g", status: "succeeded", at: "2026-10-08T14:00:01Z",
+      answers: { fit_0: { score: 2.05, probabilities: { 0: 0.1, 1: 0.32, 2: 0.01, 3: 0.57 } } } } }]);
+  const chosen = reading.questions[0].options.find(option => option.selected);
+  assert.deepEqual([chosen.title, chosen.probability], ["Asked for", 0.57]);
 });

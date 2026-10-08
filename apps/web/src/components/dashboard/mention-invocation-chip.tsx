@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { declinedIntentCopy, type DeclinedIntent } from "./summon-intent";
 import { noteJevReading } from "./jev-filled-tags";
-import type { AgentStopInvocation, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
+import type { AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
 import { summonView, invocationChipStatus, invocationVendorIcon, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, type InvocationView, type InvocationStep } from "./mention-invocation-state";
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 import { avatarImageSrc } from "./identity-avatar";
@@ -110,7 +110,8 @@ export function MentionInvocationChip({ label, labelContent, announcement, image
       {shared && <p className="app-invocation-description">This mention shares the first invocation of this agent and lifecycle in this message.</p>}
       {execution && !unavailable && <MentionReplyRecovery key={execution.id} execution={execution} />}
     </>}
-    jev={{ channelId: launch.channelId, messageId: launch.sourceMessageId, sourceMention: launch.sourceMention || `@${label}` }}
+    jev={{ channelId: launch.channelId, messageId: launch.sourceMessageId, sourceMention: launch.sourceMention || `@${label}`,
+      ...(decision?.parameters ? { parameters: decision.parameters } : {}) }}
     details={<>
       {decision && <RoutingDecisionBoard decision={decision} evidenceOnly />}
       <InvocationRuntimeDetails activity={view.terminal ? undefined : activity} view={view} unavailable={unavailable} />
@@ -409,7 +410,9 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
   </Popover.Root>;
 }
 
-type JevSource = { channelId: string; messageId: string; sourceMention?: string; invocationId?: string; rejectedAt?: string };
+type JevSource = { channelId: string; messageId: string; sourceMention?: string; invocationId?: string; rejectedAt?: string;
+  /** The launch's recorded choice of Agent and machine, drawn as one routing row. */
+  parameters?: LaunchParameterEvidence };
 
 /** Mounted only while the panel is open, so Jev's records are read on demand.
  *  The timeline runs in the order things happened: what Jev read and each
@@ -423,14 +426,16 @@ function InvocationPanelBody({ jev, view, lead, context, details, sourceAddress,
   const decided = state.decisions.length > 0;
   // Jev's own rows above say how the request was read and what was chosen; the
   // startup then begins with what was measured, not judged: the machine.
-  const steps = decided ? view.steps.filter(step => step.label !== "Read as a request")
+  // The Agent row already names the machine routing chose, so that step is not repeated.
+  const placed = !!jev?.parameters?.placement;
+  const steps = decided ? view.steps.filter(step => step.label !== "Read as a request" && !(placed && step.label === "Environment selected"))
     .map(step => step.label === "Environment selected" ? { ...step, label: "Machine selected" } : step) : view.steps;
   return <>
     {jev?.invocationId && (state.cause ? <p role="status" className="app-invocation-description">Cause: {state.cause}</p>
       : !state.loaded && state.busy ? <p className="app-invocation-description">Checking failure reason…</p>
         : state.loaded && !state.cursor ? <p className="app-invocation-description">Detailed failure reason was not retained.</p> : null)}
     {lead}
-    {decided && <JevDecisionSection decisions={state.decisions} />}
+    {decided && <JevDecisionSection decisions={state.decisions} parameters={jev?.parameters} />}
     {steps.length > 0 && <InvocationSteps steps={steps} label="Invocation progress" />}
     {context}
     <details className="app-invocation-request"><summary>Details</summary>
