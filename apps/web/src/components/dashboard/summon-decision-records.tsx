@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronRight, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
-import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
+  type LaunchParameterEvidence, type LaunchPlacementCandidate } from "@xmatrix/protocol";
 import { formatZonedDateTime } from "./time-display";
-import { jevDecisions, jevReadings, type JevQuestion, type JevReading } from "./jev-decision-trace";
+import { fitLevel, jevDecisions, jevReadings, placementReason, placementWhere as where, roomText, type JevQuestion, type JevReading } from "./jev-decision-trace";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
@@ -97,23 +98,57 @@ const ROW = "grid grid-cols-[16px_4.75rem_minmax(0,1fr)_auto_12px] items-center 
 
 /** What Jev decided, one row per question in the order it answered them: the
  *  question, its answer and how sure it was. A row opens to the options it
- *  weighed; "Input" opens what it read. */
-export function JevDecisionSection({ decisions }: { decisions: JevReading[] }) {
-  return <>{decisions.map(decision => <section key={decision.decisionId} aria-label={`Routing decision${decision.summon ? ` for ${decision.summon}` : ""}`}
-    className="mt-3 border-t border-border pt-3">
-    <details className="group/input">
-      <summary className="flex cursor-pointer list-none items-center justify-between text-[11px] text-muted-foreground [&::-webkit-details-marker]:hidden">
-        <span className="font-semibold uppercase tracking-wide">Routing</span>
-        <span className="flex items-center gap-1">Input<ChevronRight size={12} className="transition-transform group-open/input:rotate-90" /></span>
+ *  weighed; "Input" opens what it read. Jev's per-Agent fit scores are not
+ *  rows of their own: with the launch's recorded placement they become one
+ *  "Agent" row, the Agent and machine chosen from fit and room together. */
+export function JevDecisionSection({ decisions, parameters }: { decisions: JevReading[]; parameters?: LaunchParameterEvidence }) {
+  const ranking = parameters?.placement?.ranking;
+  return <>{decisions.map(decision => {
+    const fits = decision.questions.filter(question => question.key.startsWith("fit_"));
+    const placed = ranking?.length ? ranking : undefined;
+    const rows = placed ? decision.questions.filter(question => !question.key.startsWith("fit_")) : decision.questions;
+    return <section key={decision.decisionId} aria-label={`Routing decision${decision.summon ? ` for ${decision.summon}` : ""}`}
+      className="mt-3 border-t border-border pt-3">
+      <details className="group/input">
+        <summary className="flex cursor-pointer list-none items-center justify-between text-[11px] text-muted-foreground [&::-webkit-details-marker]:hidden">
+          <span className="font-semibold uppercase tracking-wide">Routing</span>
+          <span className="flex items-center gap-1">Input<ChevronRight size={12} className="transition-transform group-open/input:rotate-90" /></span>
+        </summary>
+        <JevInput decision={decision} />
+      </details>
+      <ol className="m-0 mt-1 list-none p-0" aria-label="Routing answers">
+        {rows.map(question => <JevAnswer key={question.key} question={question} />)}
+        {placed && <PlacementAnswer ranking={placed} compared={fits.length > 0} />}
+        {decision.failure && <li className={ROW}><Mark failed /><span className="text-muted-foreground">Failed</span>
+          <span className="truncate text-destructive">{decision.failure}</span></li>}
+      </ol>
+    </section>;
+  })}</>;
+}
+
+/** The Agent and machine routing chose, with the environments it weighed. */
+function PlacementAnswer({ ranking, compared }: { ranking: readonly LaunchPlacementCandidate[]; compared: boolean }) {
+  const chosen = ranking[0]!;
+  return <li>
+    <details className="group/answer">
+      <summary className={`${ROW} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
+        <Mark />
+        <span className="text-muted-foreground">Agent</span>
+        <span className="truncate font-semibold" title={where(chosen)}>{where(chosen)}</span>
+        <span />
+        <ChevronRight size={12} aria-hidden="true" className="text-muted-foreground transition-transform group-open/answer:rotate-90" />
+        <span /><span />
+        <span className="col-span-3 -mt-1 truncate text-[11px] text-muted-foreground">{placementReason(ranking, compared)}</span>
       </summary>
-      <JevInput decision={decision} />
+      <ol className="m-0 mb-2 ml-6 grid list-none gap-0.5 p-0 text-xs" aria-label="Environments weighed">
+        {ranking.map((item, index) => <li key={`${item.harness}:${item.machineId}`} data-selected={index === 0 || undefined}
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-md px-2 py-1 text-muted-foreground data-[selected]:bg-foreground/[0.05] data-[selected]:text-foreground">
+          <span className={`truncate ${index === 0 ? "font-semibold" : ""}`}>{where(item)}</span>
+          <span className="tabular-nums">{compared ? `${fitLevel(item.fit)} · ` : ""}{roomText(item.headroom)}</span>
+        </li>)}
+      </ol>
     </details>
-    <ol className="m-0 mt-1 list-none p-0" aria-label="Routing answers">
-      {decision.questions.map(question => <JevAnswer key={question.key} question={question} />)}
-      {decision.failure && <li className={ROW}><Mark failed /><span className="text-muted-foreground">Failed</span>
-        <span className="truncate text-destructive">{decision.failure}</span></li>}
-    </ol>
-  </section>)}</>;
+  </li>;
 }
 
 function JevInput({ decision }: { decision: JevReading }) {
