@@ -280,6 +280,8 @@ export const HUB_ROUTES = {
     `/api/agent-launches/${encodeURIComponent(launchId)}/retry`,
   channel_message_launch_anyway: (channelId: string, messageId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-anyway`,
+  channel_summon_intent: (channelId: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/summon-intent`,
   channel_message_launch_choice: (channelId: string, messageId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-choice`,
   channel_message: (channelId: string, messageId: string) =>
@@ -372,6 +374,8 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/agent-launches/${encodeURIComponent(launchId)}/retry`,
   channel_message_launch_anyway: (channelId: string, messageId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-anyway`,
+  channel_summon_intent: (channelId: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/summon-intent`,
   channel_message_launch_choice: (channelId: string, messageId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-choice`,
   space_launch_targets: (spaceId: string) =>

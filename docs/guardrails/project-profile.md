@@ -15,6 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+The Web composer previews Jev's summon intent while typing, with mention bands
+and an inline hint. Human-confirmed readings travel with the exact message;
+launch authorization remains server-owned, and unread or unavailable previews
+retain post-send checks. See [invocation status](../design/mention-invocation/README.md).
+
 Windows Agent children enforce UTF-8 transport settings and use managed PowerShell
 entrypoints that initialize console and pipeline encoding for each command. See
 [Agent text encoding](../design/agent-text-encoding.md).

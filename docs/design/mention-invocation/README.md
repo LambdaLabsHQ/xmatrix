@@ -4,6 +4,24 @@ The invoking `@` owns its status. Each Agent in a message updates independently,
 
 These screenshots use local synthetic fixtures and the repository theme, not production data.
 
+The Web composer asks Jev about summon intent after a 350 ms typing pause,
+using the exact outgoing body, summon ranges and the author's authorized
+Channel context. Mention bands and a small hint inside the composer show the
+reading; the separate intent/Force pill is removed. Enter finishes or reuses
+the current bounded preview request before publishing. Any edit or Channel
+change discards the old reading. Forced mentions skip preview.
+
+A Human send carries the confirmed readings, bound to exact UTF-16 offsets and
+mention text. These are the author's intent choices, like `launch:force`,
+not credentials or proof of a model decision. The server accepts them only
+from Human message authors and still reads the stored source, current access,
+registration grants, launch fences, workspace, model and machine authority.
+A confirmed non-request allocates nothing; a confirmed request skips only the
+intent question and records its source as `draft`. The first four summons are
+previewed. Unread summons, old clients, first messages of new Channels and
+unavailable previews retain the ordinary post-send intent check. No durable
+launch or Run is created by preview.
+
 An authenticated pre-spawn failure produces an idempotent Channel notice even
 when the Launch already marked its Run failed. A hint does not: Jev reading the
 mention as not a request, or telling the author to name the machine, stays on

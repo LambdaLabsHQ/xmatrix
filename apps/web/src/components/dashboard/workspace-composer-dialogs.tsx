@@ -4,6 +4,8 @@ import { registrationMachineBusy, registrationMachineName } from "./machine-name
 import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
 import { useAndroidBackHandler } from "./use-android-back";
 import { useComposerHint } from "./composer-hints";
+import { useDraftSummonIntents } from "./use-draft-summon-intents";
+import { draftSummonReadingsForDisplay } from "./summon-intent";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
@@ -847,6 +849,13 @@ export function Composer({
     }
   }
 
+  // Jev reads each summon as the author types; the hint shows it and the send carries it.
+  const outgoingDraft = useMemo(() => composerSendDraft(invocationDraftRef.current, localDraft),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localDraft, invocationDraftRef.current]);
+  const draftIntents = useDraftSummonIntents({ token, channelId: startsConversation ? undefined : channel?.id,
+    body: outgoingDraft.body, selections: outgoingDraft.selections });
+
   async function submitComposer() {
     // Enter reaches here without the Send button's gate: a file still being
     // read would otherwise be left behind while the text goes out.
@@ -854,6 +863,7 @@ export function Composer({
     preparingSendRef.current = true;
     setPreparingSend(true);
     setAttachmentError(null);
+    const sendScope = invocationScope;
     try {
       // Picked channels and pages are shown by name and sent as their id tokens.
       const { body, selections } = composerSendDraft(invocationDraftRef.current, localDraft);
@@ -862,9 +872,12 @@ export function Composer({
         sourceRevision: 1, sourceBodyHash, selections }, {
         spaceId: space?.id ?? channel?.spaceId ?? "", body, bodyHash: sourceBodyHash, revision: 1,
       }) : undefined;
+      const summonIntents = body === outgoingDraft.body ? await draftIntents.readBeforeSend() : [];
+      if (invocationScopeRef.current !== sendScope) return;
       await onSend({
         body,
         ...(invocationSelections ? { invocationSelections } : {}),
+        ...(summonIntents.length ? { summonIntents } : {}),
         attachments,
       });
     } catch (error) {
@@ -1094,6 +1107,10 @@ export function Composer({
           onInvocationSelect={selectInvocation}
           onReferenceSelect={selectReference}
           referenceRanges={invocationDraftRef.current?.bindings.filter((binding) => !isAgentBinding(binding))}
+          summonReadings={draftSummonReadingsForDisplay(draftIntents.readings, localDraft,
+            invocationDraftRef.current?.bindings.filter(isAgentBinding))}
+          summonReadingPending={draftIntents.reading}
+          summonReadingUnavailable={draftIntents.unavailable}
           channel={channel}
           space={space}
           token={token}

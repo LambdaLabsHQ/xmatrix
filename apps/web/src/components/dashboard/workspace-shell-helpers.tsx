@@ -157,6 +157,7 @@ export type OutgoingMessage = {
   channelId: string;
   body: string;
   invocationSelections?: ComposerSendSnapshot["invocationSelections"];
+  summonIntents?: ComposerSendSnapshot["summonIntents"];
   attachments: ChannelAttachment[];
   replyToMessageId?: string;
   replyTo?: TimelineItem["replyTo"];

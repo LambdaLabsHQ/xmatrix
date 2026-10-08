@@ -1724,6 +1724,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       body: snapshot.body,
       attachments: snapshot.attachments,
       invocationSelections: snapshot.invocationSelections,
+      summonIntents: snapshot.summonIntents,
       appMentions: parseAppMentions(snapshot.body, APP_CONNECTORS),
     });
   }
@@ -2409,6 +2410,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
 
     const invocationSelections = fromComposer ? composerSnapshot?.invocationSelections : undefined;
+    const summonIntents = fromComposer ? composerSnapshot?.summonIntents : undefined;
     const appMentions = parseAppMentions(body, APP_CONNECTORS);
     const replyToMessageId = replySnapshot?.messageId;
     const replyTo = replySnapshot?.messageId
@@ -2433,15 +2435,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setReplyTarget(null);
     }
     await deliverOutgoingMessage(channel, {
-      body, invocationSelections, attachments, replyToMessageId, replyTo, appMentions,
+      body, invocationSelections, summonIntents, attachments, replyToMessageId, replyTo, appMentions,
     });
   }
 
   /** Shows the message as pending in its channel at once, then appends it. */
   async function deliverOutgoingMessage(
     channel: SerializedChannel,
-    { body, invocationSelections, attachments, replyToMessageId, replyTo, appMentions }:
-      Pick<OutgoingMessage, "body" | "invocationSelections" | "attachments" | "replyToMessageId" | "replyTo" | "appMentions">,
+    { body, invocationSelections, summonIntents, attachments, replyToMessageId, replyTo, appMentions }:
+      Pick<OutgoingMessage, "body" | "invocationSelections" | "summonIntents" | "attachments" | "replyToMessageId" | "replyTo" | "appMentions">,
   ) {
     if (!s.token) return;
     const channelId = channel.id;
@@ -2458,6 +2460,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       channelId,
       body,
       invocationSelections,
+      summonIntents,
       attachments,
       replyToMessageId,
       replyTo,
@@ -2478,6 +2481,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         clientMessageId,
         body,
         invocationSelections,
+        summonIntents,
         attachments,
         replyToMessageId,
         appMentions,

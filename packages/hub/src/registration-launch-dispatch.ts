@@ -4,7 +4,7 @@ import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
 import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1, isAutoHandoffSuccessor } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags } from "@xmatrix/protocol";
+import type { AutoLaunchTags, DraftSummonIntent } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
@@ -39,6 +39,7 @@ export async function executeRegistrationLaunchDispatch(input: {
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
   /** The author's "launch anyway" for one summon Jev read as a non-request. */
   forceMention?: string;
+  draftIntents?: DraftSummonIntent[];
 }) {
   const { placement, repository } = await channelLaunchRepository(input);
   const result = await repository.dispatchFromMessage(input, input.evaluate ? registrationLaunchChooser(input.evaluate, registrationLaunchContextReader({
@@ -322,7 +323,7 @@ export async function executeRegistrationUsageLimitHold(input: {
 
 interface MessageLaunch {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string;
-  commandId: string; forceMention?: string;
+  commandId: string; forceMention?: string; draftIntents?: DraftSummonIntent[];
 }
 
 interface MessageLaunchResult {
@@ -361,6 +362,7 @@ async function dispatchFromMessage(input: MessageLaunch, dependencies: MessageLa
 
 export async function dispatchRegistrationLaunchesAfterMessage(input: {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string;
+  draftIntents?: DraftSummonIntent[];
   scheduleBackground?: (task: Promise<unknown>) => void;
 }, dependencies: MessageLaunchDependencies = {},
 ): Promise<{ selectionCount: number; prepared: Array<{ launchId: string }>; rejected?: Array<{ code: string }> }> {
