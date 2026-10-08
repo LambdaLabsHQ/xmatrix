@@ -29,6 +29,7 @@ use crate::model_catalog_presentation_with_commands;
 use crate::runtime_agent_goal_status::ClaudeTranscriptWatcher;
 use crate::runtime_claude_stream_io::{
     ClaudeSessionState, ClaudeStreamLaunch, ClaudeStreamShared, start_claude_stream_process,
+    write_claude_control_line,
 };
 use crate::runtime_claude_turn::claude_apply_effort_control_request;
 use crate::runtime_claude_turn::claude_effort_catalog;
@@ -36,11 +37,15 @@ use crate::runtime_claude_turn::claude_initial_effort_from_args;
 use crate::runtime_claude_turn::claude_initial_model_from_args;
 use crate::runtime_claude_turn::claude_interrupt_control_request;
 use crate::runtime_claude_turn::claude_model_catalog;
+use crate::runtime_claude_turn::claude_permission_response;
 use crate::runtime_claude_turn::claude_reborn_resume_refusal;
 use crate::runtime_claude_turn::claude_set_model_control_request;
 use crate::runtime_claude_turn::clear_claude_resume_session_id;
 use crate::runtime_claude_turn::exit_status_signal_terminated;
 use crate::runtime_claude_turn::load_claude_resume_session_id;
+use crate::runtime_harness_questions::{
+    PendingQuestions, QuestionnaireReply, claude_answered_input,
+};
 use crate::runtime_trusted_role_prompt::claude_stream_user_message;
 use crate::runtime_usage_limit::UsageLimit;
 use crate::{
@@ -113,6 +118,15 @@ pub(crate) struct ClaudeSessionControls {
     native_parameters: Mutex<crate::claude_parameters::Facts>,
     parameter_request: Mutex<Option<String>>,
     selected_parameters: Mutex<std::collections::BTreeMap<String, String>>,
+    /// AskUserQuestion requests parked until their card is answered, by tool
+    /// use id.
+    pub(crate) questions: PendingQuestions<ClaudeParkedQuestion>,
+}
+
+/// The `can_use_tool` request an AskUserQuestion card answers.
+pub(crate) struct ClaudeParkedQuestion {
+    pub(crate) request_id: String,
+    pub(crate) input: Value,
 }
 
 impl ClaudeSessionControls {
@@ -126,6 +140,7 @@ impl ClaudeSessionControls {
             native_parameters: Mutex::new(crate::claude_parameters::Facts::default()),
             parameter_request: Mutex::new(None),
             selected_parameters: Mutex::new(std::collections::BTreeMap::new()),
+            questions: PendingQuestions::default(),
         }
     }
 
@@ -324,6 +339,36 @@ pub(crate) struct ClaudeStreamInterrupter {
 }
 
 impl ClaudeStreamInterrupter {
+    /// Answer the AskUserQuestion `reply` is for. False when no such question
+    /// is parked (it was cancelled, or the card outlived its turn): the reply
+    /// is then an ordinary message.
+    pub(crate) async fn answer_question(&self, reply: &QuestionnaireReply) -> bool {
+        let Some(parked) = self.controls.questions.take(&reply.request_key) else {
+            return false;
+        };
+        let input = claude_answered_input(&parked.input, &reply.answers);
+        write_claude_control_line(
+            &self.stdin,
+            &claude_permission_response(&parked.request_id, Ok(input)),
+        )
+        .await
+    }
+
+    /// Withdraw every parked question: a message the person typed instead
+    /// supersedes them, and Claude must not wait on a card any longer.
+    pub(crate) async fn cancel_questions(&self) {
+        for parked in self.controls.questions.drain() {
+            write_claude_control_line(
+                &self.stdin,
+                &claude_permission_response(
+                    &parked.request_id,
+                    Err("The person answered in the channel instead of on the question card; their message follows."),
+                ),
+            )
+            .await;
+        }
+    }
+
     pub(crate) async fn interrupt_active_turn(&self) -> error::Result<bool> {
         {
             let mut active = self.active.lock().await;

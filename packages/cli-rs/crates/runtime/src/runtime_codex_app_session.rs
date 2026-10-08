@@ -66,6 +66,9 @@ struct CodexAppSession {
     fast_tiers: HashMap<String, String>,
     active_turn: Arc<Mutex<Option<CodexActiveTurn>>>,
     graceful_interrupt: Arc<Mutex<Option<CodexGracefulInterrupt>>>,
+    /// requestUserInput requests parked until their card is answered: the
+    /// JSON-RPC id to answer, by item id.
+    questions: crate::runtime_harness_questions::PendingQuestions<Value>,
     /// The plan outlives a turn, so what it already reported does too.
     activity: ChannelActivityReporter,
 }
@@ -981,6 +984,7 @@ struct CodexAppInterrupter {
     write: AppServerWrite,
     active_turn: Arc<Mutex<Option<CodexActiveTurn>>>,
     graceful_interrupt: Arc<Mutex<Option<CodexGracefulInterrupt>>>,
+    questions: crate::runtime_harness_questions::PendingQuestions<Value>,
 }
 
 impl CodexAppSession {
@@ -1012,6 +1016,7 @@ impl CodexAppSession {
             fast_tiers: HashMap::new(),
             active_turn: Arc::new(Mutex::new(None)),
             graceful_interrupt: Arc::new(Mutex::new(None)),
+            questions: Default::default(),
             activity: ChannelActivityReporter::default(),
         }
     }
@@ -1172,6 +1177,7 @@ impl CodexAppSession {
             write: self.write.clone(),
             active_turn: self.active_turn.clone(),
             graceful_interrupt: self.graceful_interrupt.clone(),
+            questions: self.questions.clone(),
         }
     }
 
@@ -1265,6 +1271,28 @@ fn apply_codex_app_agent_env(
 }
 
 impl CodexAppInterrupter {
+    /// Answer the requestUserInput `reply` is for. False when none is parked
+    /// (the card outlived its turn): the reply is then an ordinary message.
+    pub(crate) async fn answer_question(
+        &self,
+        reply: &crate::runtime_harness_questions::QuestionnaireReply,
+    ) -> bool {
+        let Some(request_id) = self.questions.take(&reply.request_key) else {
+            return false;
+        };
+        write_codex_question_answer(&self.write, request_id, &reply.answers)
+            .await
+            .is_ok()
+    }
+
+    /// Answer every parked question with nothing: the person typed a message
+    /// instead, and Codex must not wait on a card any longer.
+    pub(crate) async fn cancel_questions(&self) {
+        for request_id in self.questions.drain() {
+            let _ = write_codex_question_answer(&self.write, request_id, &Default::default()).await;
+        }
+    }
+
     pub(crate) async fn interrupt_active_turn(&self) -> error::Result<bool> {
         let active_turn = self.active_turn.lock().ok().and_then(|guard| guard.clone());
         let Some(active_turn) = active_turn else {
@@ -1357,6 +1385,22 @@ async fn write_codex_app_message(write: &AppServerWrite, value: &Value) -> error
         .await
 }
 
+async fn write_codex_question_answer(
+    write: &AppServerWrite,
+    request_id: Value,
+    answers: &crate::runtime_harness_questions::HarnessAnswers,
+) -> error::Result<()> {
+    write_codex_app_message(
+        write,
+        &serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": crate::runtime_harness_questions::codex_answer_result(answers),
+        }),
+    )
+    .await
+}
+
 async fn write_codex_turn_interrupt(
     write: &AppServerWrite,
     request_id: &str,
@@ -1400,6 +1444,12 @@ fn codex_app_spawn_args(transport: CodexTransportKind, listen: Option<&str>) -> 
     // Global `-c` overrides go before the subcommand: the Space's connector
     // actions as an MCP server for this Run.
     let mut args = crate::runtime_connector_mcp::codex_connector_mcp_overrides();
+    // Outside Plan mode Codex withholds request_user_input unless this
+    // feature is on; with it, its questions reach the channel as cards.
+    args.extend([
+        "-c".to_string(),
+        "features.default_mode_request_user_input=true".to_string(),
+    ]);
     args.push("app-server".to_string());
     match transport {
         CodexTransportKind::Stdio => {
@@ -1630,6 +1680,40 @@ impl CodexAppSession {
     async fn pause_goal(&mut self) -> error::Result<Value> {
         self.update_goal(serde_json::json!({ "status": "paused" }))
             .await
+    }
+
+    /// Show a requestUserInput as a card and park it for the answer; with no
+    /// channel to show it in, answer it with nothing at once.
+    async fn park_codex_question(
+        &mut self,
+        message: &Value,
+        relay: Option<&agent_instance_connection::AgentInstanceConnectionClient>,
+        channel_id: Option<&str>,
+    ) {
+        let request_id = message.get("id").cloned().unwrap_or(Value::Null);
+        let params = message.get("params").unwrap_or(&Value::Null);
+        let questions = crate::runtime_harness_questions::codex_questions(params);
+        let key = params
+            .get("itemId")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| request_id.to_string());
+        match (relay, channel_id) {
+            (Some(relay), Some(channel_id)) if !questions.is_empty() => {
+                crate::runtime_harness_questions::publish_questionnaire(
+                    relay,
+                    channel_id,
+                    crate::runtime_harness_questions::questionnaire_message(
+                        "codex", "Codex", &key, &questions,
+                    ),
+                );
+                self.questions.park(key, request_id);
+            }
+            _ => {
+                let _ = write_codex_question_answer(&self.write, request_id, &Default::default())
+                    .await;
+            }
+        }
     }
 
     async fn handle_goal_dynamic_tool_call(
@@ -2385,6 +2469,11 @@ impl CodexAppSession {
                     }
                 }
                 _ => {}
+            }
+            if method == Some("item/tool/requestUserInput") {
+                self.park_codex_question(&message, trace_relay.map(Arc::as_ref), trace_channel_id)
+                    .await;
+                continue;
             }
             if method == Some("item/tool/call")
                 && let Some(outcome) = self.handle_goal_dynamic_tool_call(&message).await

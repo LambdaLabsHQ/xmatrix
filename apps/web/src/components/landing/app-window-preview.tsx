@@ -258,7 +258,7 @@ export function AppWindowPreview() {
                 onMentionSender={noop}
                 onRebornSender={noop}
                 reborningSenderKey={null}
-                onQuestionnaireAnswer={noop}
+                onQuestionnaireAnswer={async () => false}
                 onOpenInternalAppLink={() => false}
                 onOpenPage={noop}
                 onJumpToMessage={noop}
