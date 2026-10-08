@@ -97,11 +97,11 @@ for (const mobile of [false, true]) {
       await expect(avatar.locator(".app-agent-work-limit")).toHaveText("limit");
       if (mobile) await issue.getByRole("button").focus();
       else await issue.hover();
-      await expect(controls).toHaveCSS("opacity", "1");
+      await expect(controls).toHaveCSS("visibility", "visible");
       await expectToolbarAttached(avatar, toolbar);
       await expect(toolbar.getByRole("note")).toHaveText("Usage limit reached: provider refuses requests");
       await toolbar.hover();
-      await expect(controls).toHaveCSS("opacity", "1");
+      await expect(controls).toHaveCSS("visibility", "visible");
       await page.screenshot({ path: testInfo.outputPath("failed-turn-hover.png") });
       await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeEnabled();
       await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
@@ -119,10 +119,10 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
 
   await expect(avatar).toBeVisible();
   await expect(avatar).not.toHaveAttribute("title");
-  await expect(controls).toHaveCSS("opacity", "0");
+  await expect(controls).toHaveCSS("visibility", "hidden");
 
   await avatar.hover();
-  await expect(controls).toHaveCSS("opacity", "1");
+  await expect(controls).toHaveCSS("visibility", "visible");
   await expect(toolbar.locator(".app-agent-work-instance-name")).toHaveText("codex:1");
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toContainText("Reborn");
   await expect(toolbar.getByRole("button", { name: "Stop codex:1" })).toContainText("Stop");
@@ -162,10 +162,10 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   expect(actionCentersAreInteractive).toEqual([true, true]);
 
   await toolbar.hover();
-  await expect(controls).toHaveCSS("opacity", "1");
+  await expect(controls).toHaveCSS("visibility", "visible");
 
   await avatar.focus();
-  await expect(controls).toHaveCSS("opacity", "1");
+  await expect(controls).toHaveCSS("visibility", "visible");
   await page.keyboard.press("Tab");
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeFocused();
 });

@@ -3423,14 +3423,19 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 .xmatrix-app .app-agent-work-item > .app-agent-work-actions {
   padding-bottom: 0;
   transform: translateY(-100%);
-  /* Never part-transparent: under opacity the glass loses its backdrop and
-     greys out. It shows at once and hides once it has folded back. */
-  transition: opacity 0s linear 240ms;
+  /* Shown and hidden by visibility, never opacity: an element whose opacity
+     is below 1, or is transitioning at all (even a delayed jump), becomes the
+     glass's backdrop root, and the glass greys out over an empty backdrop. It
+     shows at once and hides once it has folded back. */
+  opacity: 1;
+  visibility: hidden;
+  transition: visibility 0s linear 240ms;
 }
 
 .xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions {
   transform: translateY(-100%);
-  transition: opacity 0s;
+  visibility: visible;
+  transition: none;
   /* Only the cards take the pointer. The glass around them, and the seat
      row beside the island, lie over the neighbouring items, which have to
      stay tappable while this panel is out. */
@@ -3518,6 +3523,43 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 
 .xmatrix-app .app-agent-work-morph .app-agent-work-action-menu.app-agent-work-action-menu.app-agent-work-action-menu::before {
   content: none !important;
+}
+
+/* While the panel folds back the capsule stays above it with its glass
+   handed over, and takes it back only once the panel is gone; otherwise the
+   folding glass covers the face and two glasses overlap. Opening is instant. */
+.xmatrix-app .app-agent-work-item[data-morph] > .app-agent-work-island {
+  position: relative;
+  z-index: 0;
+  transition:
+    z-index 0s linear 240ms,
+    background-color 0s linear 240ms,
+    box-shadow 0s linear 240ms,
+    backdrop-filter 0s linear 240ms,
+    -webkit-backdrop-filter 0s linear 240ms !important;
+}
+
+.xmatrix-app .app-agent-work-item[data-morph] > .app-agent-work-island::before,
+.xmatrix-app .app-agent-work-item[data-morph] > .app-agent-work-island::after {
+  transition: opacity 0s linear 240ms !important;
+}
+
+.xmatrix-app .app-agent-work-item[data-morph] > .app-agent-work-avatar.app-agent-work-avatar {
+  position: relative;
+  z-index: 0;
+  transition:
+    z-index 0s linear 240ms,
+    background-color 0s linear 240ms,
+    box-shadow 0s linear 240ms,
+    backdrop-filter 0s linear 240ms,
+    -webkit-backdrop-filter 0s linear 240ms,
+    transform 160ms ease !important;
+}
+
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > :is(.app-agent-work-island, .app-agent-work-avatar),
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island::before,
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island::after {
+  transition: none !important;
 }
 
 .xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > :is(.app-agent-work-island, .app-agent-work-avatar) {
