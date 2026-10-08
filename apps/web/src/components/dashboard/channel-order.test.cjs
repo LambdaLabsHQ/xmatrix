@@ -22,6 +22,7 @@ const ORDERING_FUNCTIONS = [
   "channelIsPinned",
   "compareChannelsByRecentActivity",
   "compareChannelsForSidebar",
+  "rankCatalogChannels",
 ];
 
 function loadOrderingModule() {
@@ -37,6 +38,7 @@ function loadOrderingModule() {
 const {
   compareChannelsForSidebar,
   compareChannelsByRecentActivity,
+  rankCatalogChannels,
 } = loadOrderingModule();
 
 const CREATED_JUST_NOW = "2026-08-06T12:00:00.000Z";
@@ -137,5 +139,34 @@ test("pinned channels still outrank a just-created empty channel", () => {
   assert.deepEqual(
     sorted.map((channel) => channel.name),
     ["pinned-chat", "brand-new"]
+  );
+});
+
+test("loaded catalog rows rank by the live time each row shows, not the Hub read's order", () => {
+  // The Hub read this page at 21:59; two Channels have had messages since,
+  // which their rows already show.
+  const hubOrder = [
+    channelWithMessage("wrap-up", "1.0 wrap-up", "2026-10-06T21:59:55.087Z"),
+    channelWithMessage("delivery", "message-delivery-delay", "2026-10-06T22:18:08.911Z"),
+    channelWithMessage("harness", "harness sign-in", "2026-10-06T22:05:14.311Z"),
+    channelWithMessage("ci", "CI speed-up", "2026-10-06T21:47:28.640Z"),
+  ];
+
+  assert.deepEqual(
+    rankCatalogChannels(hubOrder, []).map((channel) => channel.id),
+    ["delivery", "harness", "wrap-up", "ci"]
+  );
+});
+
+test("pinned catalog rows keep their pin order ahead of newer activity", () => {
+  const hubOrder = [
+    channelWithMessage("pin-b", "pinned second", "2026-10-06T20:00:00.000Z"),
+    channelWithMessage("pin-a", "pinned first", "2026-10-06T19:00:00.000Z"),
+    channelWithMessage("busy", "busy", "2026-10-06T22:00:00.000Z"),
+  ];
+
+  assert.deepEqual(
+    rankCatalogChannels(hubOrder, ["pin-a", "pin-b"]).map((channel) => channel.id),
+    ["pin-a", "pin-b", "busy"]
   );
 });
