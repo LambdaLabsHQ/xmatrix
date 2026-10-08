@@ -350,3 +350,31 @@ test("a pre-send cancellation disarms the stall watchdog", async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(requests[0].aborted, false, "no watchdog may survive the cancellation");
 });
+
+test("a brief storage outage while committing is replayed under the same request id", async () => {
+  const bodies = [];
+  fetchImpl = async (_url, init) => {
+    bodies.push(init.body);
+    return bodies.length === 1
+      ? Response.json({ error: "Attachments are briefly unavailable; try again", code: "authority_unavailable", retryable: true },
+        { status: 503, headers: { "retry-after": "0.01" } })
+      : Response.json({ ok: true });
+  };
+  await commitMessageAttachmentRefs({
+    token: "human-token", messageId: "message-1", visibilityScopeId: "channel:closed-1", attachments: [attachment],
+  });
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0], bodies[1], "a replay must carry the same requestId");
+});
+
+test("a refused commit is not replayed", async () => {
+  let calls = 0;
+  fetchImpl = async () => {
+    calls += 1;
+    return Response.json({ error: "not allowed", code: "not_authorized", retryable: false }, { status: 403 });
+  };
+  await assert.rejects(commitMessageAttachmentRefs({
+    token: "human-token", messageId: "message-1", visibilityScopeId: "channel:closed-1", attachments: [attachment],
+  }), { status: 403, code: "not_authorized" });
+  assert.equal(calls, 1);
+});

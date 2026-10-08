@@ -784,7 +784,7 @@ export class RelayV2ProductAuthorityUnavailable extends Error {
   readonly name = "RelayV2ProductAuthorityUnavailable";
 }
 
-export function relayR2PrivateErrorResponse(error: unknown): Response {
+export function relayR2PrivateErrorResponse(error: unknown, context?: () => ErrorReportContext): Response {
   if (error instanceof RelayV2MigrationDisabled) {
     return privateJsonResponse(
       { error: "Relay V2 migration routes are disabled", code: "relay_v2_migration_disabled" },
@@ -797,7 +797,7 @@ export function relayR2PrivateErrorResponse(error: unknown): Response {
       409,
     );
   }
-  const failure = requestFailure(error);
+  const failure = requestFailure(error, context);
   // A domain rejection keeps its own status and code; only an outage is the storage being unavailable.
   if (error instanceof ControlError) return failureResponse(failure, PRIVATE_JSON_HEADERS);
   if (failure.status === 401 || failure.status === 403) {
@@ -808,6 +808,7 @@ export function relayR2PrivateErrorResponse(error: unknown): Response {
   return failureResponse({ ...failure, body: {
     error: transient ? "Stored files are briefly unavailable; try again" : "Stored files could not be read",
     code: "private_storage_unavailable", retryable: transient,
+    ...(typeof failure.body.reference === "string" ? { reference: failure.body.reference } : {}),
   } }, PRIVATE_JSON_HEADERS);
 }
 
