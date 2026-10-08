@@ -197,13 +197,27 @@ Wrapper execution-phase updates cannot set `delivered=true`. The retained legacy
 
 ## Repository snapshot preparation
 
-Fresh repo-pool leases fetch origin's default branch before creating a worktree
-(successful snapshots may be shared for 120 seconds). The fetch permits a
-non-fast-forward update only to that branch's remote-tracking ref, so a remote
-history rewrite or rollback replaces the cached snapshot. Local branches,
-uncommitted files, and existing leased worktrees remain unchanged. New worktrees
-use the fetched commit; a failed fetch still aborts preparation and reports its
-original cause. Existing retained Runs keep their checkout on resume.
+Every fresh repo-pool lease confirms its base with origin before creating a
+worktree. One `git ls-remote --symref origin HEAD` names origin's default
+branch and its tip; the daemon then fetches and resolves exactly that branch
+(`+refs/heads/<branch>:refs/remotes/origin/<branch>`) and skips the download
+when the remote-tracking ref already holds the advertised tip. A local
+`origin/HEAD` never chooses the branch, so a renamed or deleted default branch
+cannot leave new leases on a stale ref; the local note is rewritten to the
+confirmed branch afterwards.
+
+Only leases that run at the same moment share one confirmation; a finished
+confirmation is never reused, so a lease started after a merge sees it. The base
+oid is origin's tip as this confirmation observed it (if origin moves between
+`ls-remote` and the fetch, the fetched tip is used), not a promise about
+anything later. If origin cannot be reached or advertises no default branch
+with a commit, preparation fails with that cause and no worktree is created.
+
+The forced refspec lets a remote history rewrite or rollback replace the
+remote-tracking ref. Local branches, uncommitted files, and existing leased
+worktrees remain unchanged, and existing retained Runs keep their checkout on
+resume. Legacy remote-repo run worktrees confirm the default branch the same
+way.
 
 ## Startup failure diagnostics
 
