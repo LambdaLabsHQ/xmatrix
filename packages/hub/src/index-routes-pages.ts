@@ -1,5 +1,6 @@
 import { MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, readPageConversations,
   type PagePrincipal } from "@xmatrix/db";
+import { DURABLE_OBJECT_RETRY_AFTER_SECONDS } from "./durable-object-failure";
 import { relayResponse } from "./private-response";
 import type { Context, Hono } from "hono";
 import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-principal";
@@ -399,7 +400,10 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       const registered = await sessionCall(c.env, spaceId, pageId, "/internal/ticket", {
         ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit,
       });
-      if (!registered.ok) return c.json({ error: "Page session is unavailable" }, 503);
+      if (!registered.ok) {
+        return c.json({ error: "Page session is unavailable", retryable: true }, 503,
+          { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) });
+      }
       return c.json({ protocol: `${PAGE_SESSION_SUBPROTOCOL_PREFIX}${ticket}`,
         socketPath: `/ws/pages/${encodeURIComponent(spaceId)}/${encodeURIComponent(pageId)}`,
         canEdit: page.canEdit, headRevision: page.headRevision }, 200, NO_STORE);

@@ -7,7 +7,10 @@ import type { Env } from "./types";
  */
 export async function wakeAgentLaunchCoordinator(env: Pick<Env, "RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL">,
   channelId: string): Promise<void> {
-  const response = await wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId });
+  // A thrown wake (the coordinator reset by a deploy) is the same handover
+  // failure as a refused one: the committed work waits for the retry.
+  const response = await wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId })
+    .catch(() => { throw new AgentLaunchHandoverUnavailable(); });
   if (!response.ok) throw new AgentLaunchHandoverUnavailable(response.status);
 }
 
