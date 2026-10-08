@@ -77,3 +77,20 @@ pages with `page read`; they no longer receive an automatically materialized pag
 mirror. This removes idle 15-second requests and file rewrites without adding push
 subscriptions or mandatory launch reads. The Machine Daemon pages endpoint remains
 compatible with older daemons; savings require the new CLI/daemon to be installed.
+
+### Workspace search
+
+The Web shell uses Cmd/Ctrl+F for search in the current Space. In a conversation,
+the shortcut starts with an `in:` filter; search buttons start across the Space.
+Desktop conversation headers place actions beside the title and a borderless
+search icon at the right edge of the same row. A docked conversation uses that
+header entry too. Other destinations retain their global search entry and mobile keeps
+its top-bar icon. Cmd/Ctrl+P quick-open is removed.
+
+The dialog combines name navigation with server-backed message and page search.
+Enter opens `/app/:spaceId/search` with the query and `in:`/`from:` filters in the
+URL. Message hits include sender, timestamp and a link to the original message;
+continued scans use the server resume token. Message-search failures are shown
+explicitly, without local cached message results. Hub accepts optional Channel
+and sender filters behind the existing authorized Space search boundary. These
+additive fields support coordinated Hub and Web deployment.

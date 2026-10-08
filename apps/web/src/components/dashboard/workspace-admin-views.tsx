@@ -2650,7 +2650,6 @@ export function channelReadSequenceFromEvent(event: ObservabilityEvent): number 
 
 export { normalizeChannelSearchText } from "./workspace-shell-search-model";
 
-export { mergeWorkspaceSearchResults } from "./workspace-shell-search-model";
 
 export { channelReadCountsStorageKey } from "./workspace-shell-search-model";
 

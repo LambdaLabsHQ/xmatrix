@@ -203,34 +203,9 @@ export type ChannelPinLookup = {
 
 export type WorkspaceMessageSearch = (
   query: string,
-  resumeToken?: string
+  resumeToken?: string,
+  filters?: { channelId?: string; from?: string },
 ) => Promise<MessageSearchPage>;
-
-export type WorkspaceMessageSearchState =
-  | { kind: "idle" }
-  | {
-      kind: "loading";
-      query: string;
-      historyRevision: number;
-      reader: WorkspaceMessageSearch;
-    }
-  | {
-      kind: "ready";
-      query: string;
-      page: MessageSearchPage;
-      historyRevision: number;
-      reader: WorkspaceMessageSearch;
-      /** Another page of older messages is still being read. */
-      scanning: boolean;
-      /** The scan stopped before the oldest readable message. */
-      incomplete: boolean;
-    }
-  | {
-      kind: "unavailable";
-      query: string;
-      historyRevision: number;
-      reader: WorkspaceMessageSearch;
-    };
 
 export type ChannelCreateMode = "open" | "closed";
 

@@ -173,6 +173,8 @@ export type AppView =
   | "profile"
   | "settings"
   | "admin"
+  /** Every result of one search; its address names the search. */
+  | "search"
   | "more";
 
 
@@ -220,6 +222,7 @@ export const viewLabels: Record<AppView, string> = {
   profile: "Profile",
   settings: "Settings",
   admin: "Platform admin",
+  search: "Search",
   more: "More",
 };
 
@@ -264,6 +267,7 @@ export function isAppView(value: string | null): value is AppView {
     value === "profile" ||
     value === "settings" ||
     value === "admin" ||
+    value === "search" ||
     value === "more"
   );
 }
