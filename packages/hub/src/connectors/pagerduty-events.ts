@@ -1,6 +1,5 @@
-import type { ConnectorDelivery, ConnectorDeliveryResult } from "./provider";
-import { hmacHex, timingSafeEqual } from "@xmatrix/protocol";
-import { connectorEvent, lowerHeader, parseJsonObject, record, safeUrl, sourceToken, text } from "./event-format";
+import { createSignedJsonReceiver } from "./delivery-proof";
+import { connectorEvent, record, safeUrl, sourceToken, text } from "./event-format";
 
 /*
  * PagerDuty v3 webhooks: `X-PagerDuty-Signature` carries one or more
@@ -8,15 +7,9 @@ import { connectorEvent, lowerHeader, parseJsonObject, record, safeUrl, sourceTo
  * rotation). A source is a service id.
  */
 
-export async function receivePagerDutyDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  const secret = delivery.credentials.webhookSecret;
-  const expected = secret ? `v1=${await hmacHex("SHA-256", secret, delivery.rawBody)}` : "";
-  const signatures = lowerHeader(delivery.headers, "x-pagerduty-signature").split(",").map((value) => value.trim().toLowerCase());
-  if (!expected || !signatures.some((signature) => timingSafeEqual(signature, expected))) {
-    return { ok: false, status: 401, error: "Invalid PagerDuty signature" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return { ok: false, status: 400, error: "PagerDuty body must be JSON" };
+export const receivePagerDutyDelivery = createSignedJsonReceiver({
+  name: "PagerDuty", secretField: "webhookSecret", proof: { header: "x-pagerduty-signature", prefix: "v1=" },
+}, (_, payload) => {
   const event = record(payload.event);
   const type = text(event.event_type);
   if (!type.startsWith("incident.")) return { ok: true, events: [] };
@@ -33,4 +26,4 @@ export async function receivePagerDutyDelivery(delivery: ConnectorDelivery): Pro
     provider: `PagerDuty · ${text(service.summary) || "incident"}`, title, url,
     details: [text(data.urgency) ? `Urgency: ${text(data.urgency)}` : undefined],
   })] };
-}
+});

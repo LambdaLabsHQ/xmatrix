@@ -1,4 +1,5 @@
-import { hmacHex, sha256Hex, timingSafeEqual, utf8ByteLength } from "@xmatrix/protocol";
+import { sha256Hex, utf8ByteLength } from "@xmatrix/protocol";
+import { deliveryProven, type DeliveryProof } from "./delivery-proof";
 import type { ConnectorDelivery, ConnectorDeliveryResult } from "./provider";
 import { connectorEvent, fenced, oneLine, safeUrl } from "./event-format";
 
@@ -9,6 +10,7 @@ import { connectorEvent, fenced, oneLine, safeUrl } from "./event-format";
  * Bodies are untrusted: they become a bounded message, never an instruction.
  */
 
+const WEBHOOK_SIGNATURE: DeliveryProof = { header: "x-xmatrix-signature", prefix: "sha256=" };
 const SOURCE_NAME = /^[a-z0-9][a-z0-9_.-]{0,63}$/u;
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_PREVIEW_CHARS = 1_500;
@@ -29,12 +31,10 @@ export async function receiveWebhookDelivery(delivery: ConnectorDelivery): Promi
   if (utf8ByteLength(delivery.rawBody) > MAX_BODY_BYTES) {
     return { ok: false, status: 400, error: "Webhook body is too large" };
   }
-  const signature = delivery.headers.get("x-xmatrix-signature")?.trim();
-  if (signature) {
+  if (delivery.headers.get("x-xmatrix-signature")?.trim()) {
     const secret = delivery.credentials.signingSecret;
     if (!secret) return { ok: false, status: 401, error: "Webhook signing secret is not configured" };
-    const expected = `sha256=${await hmacHex("SHA-256", secret, delivery.rawBody)}`;
-    if (!timingSafeEqual(signature.toLowerCase(), expected)) {
+    if (!await deliveryProven(WEBHOOK_SIGNATURE, delivery.headers, delivery.rawBody, secret)) {
       return { ok: false, status: 401, error: "Invalid webhook signature" };
     }
   }

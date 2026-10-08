@@ -1,9 +1,8 @@
 import type { StripeSubscriptionFact } from "@xmatrix/db";
-import { hmacHex, timingSafeEqual } from "@xmatrix/protocol";
+import { deliveryProven, STRIPE_SIGNATURE } from "./connectors/delivery-proof";
 
 const STRIPE_API = "https://api.stripe.com/v1";
 const STRIPE_API_VERSION = "2025-11-17.clover";
-const WEBHOOK_TOLERANCE_SECONDS = 5 * 60;
 export const STRIPE_CHECKOUT_SESSION_ID_PLACEHOLDER = "{CHECKOUT_SESSION_ID}";
 
 export function stripeCheckoutReturnUrls(publicAppOrigin: string, spaceId: string): { successUrl: string; cancelUrl: string } {
@@ -74,16 +73,8 @@ export async function verifyStripeWebhookSignature(input: {
 }): Promise<void> {
   if (!input.secret) throw new StripeBillingError("Stripe webhook is not configured", true);
   if (!input.signature) throw new StripeBillingError("Stripe signature is missing");
-  const parts = input.signature.split(",").map((part) => part.trim());
-  const timestampValue = parts.find((part) => part.startsWith("t="))?.slice(2);
-  const signatures = parts.filter((part) => part.startsWith("v1=")).map((part) => part.slice(3));
-  const timestamp = Number(timestampValue);
-  const nowSeconds = Math.floor((input.nowMs ?? Date.now()) / 1_000);
-  if (!Number.isSafeInteger(timestamp) || !signatures.length || Math.abs(nowSeconds - timestamp) > WEBHOOK_TOLERANCE_SECONDS) {
-    throw new StripeBillingError("Stripe signature is invalid");
-  }
-  const expected = await hmacHex("SHA-256", input.secret, `${timestamp}.${input.body}`);
-  if (!signatures.some((candidate) => timingSafeEqual(expected, candidate))) {
+  const headers = new Headers({ "stripe-signature": input.signature });
+  if (!await deliveryProven(STRIPE_SIGNATURE, headers, input.body, input.secret, input.nowMs)) {
     throw new StripeBillingError("Stripe signature is invalid");
   }
 }

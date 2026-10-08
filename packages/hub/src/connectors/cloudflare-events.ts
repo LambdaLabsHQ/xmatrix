@@ -1,6 +1,5 @@
-import type { ConnectorDelivery, ConnectorDeliveryResult } from "./provider";
-import { timingSafeEqual } from "@xmatrix/protocol";
-import { connectorEvent, excerpt, lowerHeader, oneLine, parseJsonObject, record, sourceToken, text } from "./event-format";
+import { createSignedJsonReceiver } from "./delivery-proof";
+import { connectorEvent, excerpt, oneLine, record, sourceToken, text } from "./event-format";
 
 /*
  * Cloudflare Notifications webhook deliveries
@@ -23,13 +22,9 @@ function dataSummary(data: unknown): string | undefined {
   return fields.length ? fields.join(" · ") : undefined;
 }
 
-export async function receiveCloudflareDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  const secret = delivery.credentials.webhookSecret;
-  if (!secret || !timingSafeEqual(lowerHeader(delivery.headers, "cf-webhook-auth"), secret)) {
-    return { ok: false, status: 401, error: "Invalid Cloudflare webhook secret" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return { ok: false, status: 400, error: "Cloudflare body must be JSON" };
+export const receiveCloudflareDelivery = createSignedJsonReceiver({
+  name: "Cloudflare", secretField: "webhookSecret", proof: { header: "cf-webhook-auth", token: true },
+}, (_, payload) => {
   const alertType = sourceToken(payload.alert_type);
   const resolved = text(payload.alert_event) === "ALERT_STATE_EVENT_END";
   const name = text(payload.name) || text(payload.policy_name) || alertType || "Cloudflare notification";
@@ -47,4 +42,4 @@ export async function receiveCloudflareDelivery(delivery: ConnectorDelivery): Pr
     url: CLOUDFLARE_ACCOUNT_ID.test(account) ? `https://dash.cloudflare.com/${account}/notifications` : undefined,
     details: [dataSummary(payload.data), excerpt(payload.text, 1_000)],
   })] };
-}
+});

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { Hono } from "hono";
 import { HUB_ROUTES, hmacHex, sha256Hex } from "@xmatrix/protocol";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
-import { hmacMatches } from "../src/connectors/hmac.ts";
+import { deliveryProven } from "../src/connectors/delivery-proof.ts";
 import { parseJsonObject } from "../src/connectors/event-format.ts";
 import { ProviderRequestError } from "../src/connectors/http.ts";
 import { sentryInstallationClient } from "../src/connectors/sentry-installation.ts";
@@ -27,7 +27,7 @@ function lifecycle() {
     "@xmatrix/protocol": { sha256Hex },
     "./sentry-event-identity": { sentryEventIdentity: () => undefined },
     "./sentry-event-drain": { drainSentryEvents: async () => {} },
-    "./hmac": { hmacMatches }, "./event-format": { parseJsonObject },
+    "./delivery-proof": { deliveryProven }, "./event-format": { parseJsonObject },
     "./credentials": { connectorCredentialRepository: () => ({ retireSentryInstallation: async input => {
       retired.push(input); if (failure) throw failure; return 1;
     } }) },
