@@ -95,7 +95,9 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     const append = await secretRequestAppend(card, !!current, { id: run.ownerUserId, email: user.email });
     const { messageId } = append;
     await appendChannelMessage(c.env, run.channelId, append).catch((error: unknown) => {
-      if (error instanceof ControlError) throw new SpaceSecretError("secret_request_failed", error.status, error.message);
+      if (error instanceof ControlError) {
+        throw new SpaceSecretError("secret_request_failed", error.status, error.message, error.retryable);
+      }
       throw error;
     });
     return { readable: false, messageId, request: card };

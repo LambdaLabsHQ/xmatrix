@@ -16,8 +16,8 @@ export type RelayR2UploadGatewayErrorCode =
 export class RelayR2UploadGatewayError extends ControlError {
   declare readonly code: RelayR2UploadGatewayErrorCode;
   override name = "RelayR2UploadGatewayError";
-  constructor(code: RelayR2UploadGatewayErrorCode, status: number, message: string) {
-    super(code, status, message);
+  constructor(code: RelayR2UploadGatewayErrorCode, status: number, message: string, retryable = false) {
+    super(code, status, message, retryable);
   }
 }
 
@@ -80,8 +80,8 @@ export interface RelayR2VerifiedUpload {
   disposition: "created" | "existing";
 }
 
-function fail(code: RelayR2UploadGatewayErrorCode, status: number, message: string): never {
-  throw new RelayR2UploadGatewayError(code, status, message);
+function fail(code: RelayR2UploadGatewayErrorCode, status: number, message: string, retryable = false): never {
+  throw new RelayR2UploadGatewayError(code, status, message, retryable);
 }
 
 function validatePath(request: Request, gatewayPath: string): void {
@@ -173,7 +173,7 @@ async function safeHead(
   try {
     return await bucket.head(key);
   } catch {
-    fail("storage_unavailable", 503, "private object storage is unavailable");
+    fail("storage_unavailable", 503, "private object storage is unavailable", true);
   }
 }
 
@@ -261,6 +261,6 @@ export async function executeRelayR2UploadGatewayRequest(input: {
     return verified(input.intent, finalized.metadata, finalized.outcome === "created" ? "created" : "existing");
   } catch (error) {
     if (error instanceof RelayR2UploadGatewayError) throw error;
-    fail("storage_unavailable", 503, "private object storage is unavailable");
+    fail("storage_unavailable", 503, "private object storage is unavailable", true);
   }
 }

@@ -333,16 +333,17 @@ async function postgresMessageQueryContextFromDependencies(
 export function postgresMessageFailure(error: unknown): {
   status: number;
   body: { error: string; code: string; retryable: boolean };
-  /** A database outage rather than a decided rejection. */
+  /** A transient outage, answered as a retryable 503 with `Retry-After`, rather than a decided rejection. */
   outage: boolean;
 } {
   // Every message operation first resolves its Channel through Space control,
   // which answers an unknown Channel with a 404 of its own. That is the
-  // caller's fact to see, not a failed request.
+  // caller's fact to see, not a failed request; a Space moving shards is a
+  // retryable 503 of its own.
   if (error instanceof MessageAuthorityError || error instanceof ContentControlError ||
-      (error instanceof SpaceControlError && error.status < 500)) {
+      (error instanceof SpaceControlError && (error.status < 500 || error.retryable))) {
     return { status: error.status, body: { error: error.message, code: error.code, retryable: error.retryable },
-      outage: false };
+      outage: error.retryable && error.status === 503 };
   }
   console.error("PostgreSQL message authority failed", error);
   const outage = retryablePostgresFailure(error);

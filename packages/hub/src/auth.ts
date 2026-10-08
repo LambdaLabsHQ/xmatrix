@@ -11,6 +11,7 @@ import {
   type AgentRunPermission,
   type AuthUser as ProtocolAuthUser,
 } from "@xmatrix/protocol";
+import { ControlError } from "@xmatrix/db";
 
 import type { Env } from "./types";
 import { authAuthority } from "./auth-authority";
@@ -29,6 +30,24 @@ export class InvalidAuthTokenError extends Error {
     super("Invalid or expired auth token");
   }
 }
+
+/**
+ * The signing keys could not be fetched (a network failure, a timeout, or an
+ * unusable answer from the JWKS endpoint), so the token was never judged. It is
+ * a transient outage, never a sign-out.
+ */
+export class AuthVerificationUnavailable extends ControlError {
+  constructor() {
+    super("auth_verification_unavailable", 503, "Sign-in could not be checked right now. Try again.", true);
+  }
+}
+
+/** jose failures that judge the token itself; any other failure is the key set being unreachable. */
+const DEFINITE_TOKEN_FAILURES = new Set([
+  "ERR_JWT_CLAIM_VALIDATION_FAILED", "ERR_JWT_EXPIRED", "ERR_JWT_INVALID", "ERR_JWS_INVALID",
+  "ERR_JWS_SIGNATURE_VERIFICATION_FAILED", "ERR_JOSE_ALG_NOT_ALLOWED", "ERR_JOSE_NOT_SUPPORTED",
+  "ERR_JWKS_MULTIPLE_MATCHING_KEYS",
+]);
 
 function authUserFromClaims(payload: JWTPayload): AuthUser | null {
   const id = stringValue(payload.sub);
@@ -115,8 +134,11 @@ export async function verifyAuthToken(token: string, env: Env): Promise<AuthUser
         const user = authUserFromClaims(payload);
         if (user) return user;
       } catch (error) {
-        if ((error as { code?: string }).code !== "ERR_JWKS_NO_MATCHING_KEY") {
-          throw new InvalidAuthTokenError();
+        const code = (error as { code?: unknown } | null)?.code;
+        if (typeof code === "string" && DEFINITE_TOKEN_FAILURES.has(code)) throw new InvalidAuthTokenError();
+        if (code !== "ERR_JWKS_NO_MATCHING_KEY") {
+          console.error("Better Auth JWKS is unavailable", error);
+          throw new AuthVerificationUnavailable();
         }
       }
     }
