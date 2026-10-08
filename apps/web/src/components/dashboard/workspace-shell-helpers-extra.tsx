@@ -8,7 +8,6 @@ import { formatRelativeAge, formatZonedDateTime } from "./time-display";
 
 import {
   channelMatchesSearch,
-  channelQuickOpenScore,
   channelReadCountsStorageKey,
   normalizeChannelSearchText,
   searchResultRank,
@@ -17,9 +16,7 @@ import {
 export type { ChannelTreeNode, WorkspaceSearchResult } from "./workspace-shell-search-model";
 export {
   channelMatchesSearch,
-  channelQuickOpenScore,
   channelReadCountsStorageKey,
-  mergeWorkspaceSearchResults,
   normalizeChannelSearchText,
   searchResultRank,
 } from "./workspace-shell-search-model";
@@ -55,7 +52,6 @@ import {
   ChannelHistoryCacheEntry,
   LocalManagedAgent,
   MachineSummary,
-  WorkspaceMessageSearchState,
 } from "./workspace-shell-helpers";
 
 // Pure helpers inlined here to avoid helpers-extra ↔ recovered import cycles.
@@ -384,73 +380,6 @@ export function isThreadChannel(channel: SerializedChannel): boolean {
 
 /* channelMatchesSearch owned by workspace-shell-search-model */
 
-export function filterChannelsForQuickOpen(
-  channels: SerializedChannel[],
-  spaces: SerializedSpace[],
-  query: string,
-  spaceId?: string | null
-): SerializedChannel[] {
-  const normalizedQuery = normalizeChannelSearchText(query);
-  const spaceById = new Map(spaces.map((space) => [space.id, space]));
-  // The quick switcher moves you around the Space you are already in, so it
-  // only offers that Space's channels — and with no cross-Space result left to
-  // disambiguate, the rows no longer have to spend a line naming a Space.
-  // Threads stay in: they are channels of this Space like any other.
-  const candidates = spaceId
-    ? channels.filter((channel) => channel.spaceId === spaceId)
-    : channels;
-  if (!normalizedQuery) return interleaveQuickOpenEmptyResults(sortChannelsForQuickOpen(candidates));
-
-  return candidates
-    .map((channel) => ({
-      channel,
-      score: channelQuickOpenScore(channel, spaceById.get(channel.spaceId), normalizedQuery),
-    }))
-    .filter((item) => item.score >= 0)
-    .sort(
-      (left, right) =>
-        left.score - right.score ||
-        compareChannelKindForQuickOpen(left.channel, right.channel) ||
-        timestampMs(right.channel.updatedAt) - timestampMs(left.channel.updatedAt) ||
-        channelTitle(left.channel).localeCompare(channelTitle(right.channel))
-    )
-    .map((item) => item.channel);
-}
-
-export function sortChannelsForQuickOpen(channels: SerializedChannel[]): SerializedChannel[] {
-  return [...channels].sort(compareChannelsForSidebar);
-}
-
-export function interleaveQuickOpenEmptyResults(channels: SerializedChannel[]): SerializedChannel[] {
-  const normalChannels = channels.filter((channel) => !isThreadChannel(channel));
-  const threadChannels = channels.filter(isThreadChannel);
-  if (normalChannels.length === 0 || threadChannels.length === 0) return channels;
-
-  const results: SerializedChannel[] = [];
-  let normalIndex = 0;
-  let threadIndex = 0;
-
-  while (normalIndex < normalChannels.length || threadIndex < threadChannels.length) {
-    for (let count = 0; count < 2 && normalIndex < normalChannels.length; count += 1) {
-      results.push(normalChannels[normalIndex]);
-      normalIndex += 1;
-    }
-    if (threadIndex < threadChannels.length) {
-      results.push(threadChannels[threadIndex]);
-      threadIndex += 1;
-    }
-  }
-
-  return results;
-}
-
-export function compareChannelKindForQuickOpen(left: SerializedChannel, right: SerializedChannel): number {
-  const leftThread = isThreadChannel(left);
-  const rightThread = isThreadChannel(right);
-  if (leftThread === rightThread) return 0;
-  return leftThread ? 1 : -1;
-}
-
 export function quickOpenChannelSubtitle(
   channel: SerializedChannel,
   spaces: SerializedSpace[],
@@ -476,63 +405,6 @@ export function quickOpenChannelSubtitle(
     channel.updatedAt ? `updated ${relativeTime(channel.updatedAt)}` : undefined,
   ].filter(Boolean);
   return parts.join(" - ");
-}
-
-/**
- * The quick switcher row's path: a thread's root channel, then the thread; any
- * other conversation stands alone.
- */
-export function channelQuickOpenPath(
-  channel: SerializedChannel,
-  channels: SerializedChannel[]
-): SerializedChannel[] {
-  const channelsById = new Map(channels.map((item) => [item.id, item]));
-  const path: SerializedChannel[] = [];
-  const seen = new Set<string>();
-  let current: SerializedChannel | undefined = channel;
-
-  while (current && !seen.has(current.id)) {
-    path.unshift(current);
-    seen.add(current.id);
-    const parentId: string | undefined = metadataString(current.metadata, "threadRootChannelId");
-    current = parentId ? channelsById.get(parentId) : undefined;
-  }
-
-  return path;
-}
-
-/**
- * Quick switcher subtitle. The row's title already carries the whole path, and
- * the switcher is scoped to one Space, so neither the Space nor the parent
- * channel is repeated down here — this line is only what the row adds.
- */
-export function channelSwitcherSubtitle(channel: SerializedChannel): string {
-  const author = metadataString(channel.metadata, "threadRootAuthor");
-  const preview = metadataString(channel.metadata, "threadRootPreview");
-  const threadPreview = isThreadChannel(channel)
-    ? [author, preview].filter(Boolean).join(": ")
-    : "";
-  const parts = [
-    threadPreview || channel.summary || channel.topic,
-    channel.updatedAt ? `updated ${relativeTime(channel.updatedAt)}` : undefined,
-  ].filter(Boolean);
-  return parts.join(" - ");
-}
-
-export function workspaceMessageSearchStatus(
-  state: WorkspaceMessageSearchState,
-  query: string
-): string | undefined {
-  if (state.kind === "idle" || state.query !== query) return undefined;
-  if (state.kind === "loading") return "Searching messages…";
-  if (state.kind === "unavailable") {
-    return "Message search is unavailable; showing recently loaded content.";
-  }
-  if (state.page.execution !== "proven") {
-    if (state.scanning) return "Still searching older messages; results may change.";
-    if (state.incomplete) return "Older messages were not fully scanned.";
-  }
-  return undefined;
 }
 
 export function buildWorkspaceSearchResults({
