@@ -2206,7 +2206,6 @@ async fn spawn_headless_agent(
             }
         };
     let mut command = std::process::Command::new(&exe);
-    apply_windows_utf8_env(&mut command);
     for key in [
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -2419,6 +2418,7 @@ async fn spawn_headless_agent(
         command.env_remove(DAEMON_REQUEST_CAPABILITY_ENV);
     }
     apply_agent_spawn_path(&mut command, &local_env);
+    apply_windows_utf8_env(&mut command)?;
     xmatrix_cli_agent::apply_agent_cli_binary(&mut command, &exe);
     match local_env.get("XMATRIX_AGENT_BACKEND").map(String::as_str) {
         Some("codex-app") => {
