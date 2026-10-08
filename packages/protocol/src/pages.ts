@@ -93,6 +93,24 @@ export interface PageTreeAgent {
   activity: "viewing" | "editing";
   /** The section it last read or edited; empty is the whole page. */
   blockId: string;
+  /** That section's heading, while the page still has it. */
+  section?: string;
+}
+
+/**
+ * A page in the tree: who is on it now, and its open discussions (their
+ * outcome not yet written into the page) as this reader sees them.
+ */
+export interface PageTreeActivity {
+  pageId: string;
+  agents: PageTreeAgent[];
+  discussions: {
+    open: number;
+    /** Open discussions with messages this reader has not read, among those they have opened. */
+    unread: number;
+    /** The newest message in any of them. */
+    latest: PageConversation["lastMessage"];
+  };
 }
 
 /** An Agent live in a conversation linked to a section: `busy` is working on a turn. */

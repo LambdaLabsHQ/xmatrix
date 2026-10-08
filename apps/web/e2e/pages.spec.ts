@@ -131,7 +131,9 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
     pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-codex", name: "codex:1", status: "idle",
       conversationId: E2E_CHANNEL.id, activity: "viewing", blockId: "notes" }, { instanceId: "i-claude", name: "claude:2",
-      status: "busy", conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "status" }], conversations: 1 }],
+      status: "busy", conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "status", section: "Status" }],
+    discussions: { open: 2, unread: 1, latest: null } }, { pageId: "p-company", agents: [], discussions: { open: 1, unread: 0,
+      latest: { from: { kind: "user", label: "Ada" }, bodyPreview: "Ship it Friday?", sentAt: NOW } } }],
   });
 
   const server = pageDocument(BODY);
@@ -171,10 +173,15 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   const tree = browser.getByTestId("page-tree");
   await expect(tree).toContainText("Company");
   await expect(tree).toContainText("Relay");
-  // A page's row counts its conversations; who is on it is its second line, not a row of faces.
-  await expect(tree.getByTestId("page-tree-conversations")).toHaveAccessibleName("1 conversation");
+  // A page's row counts its open discussions, in the count chip while one has replies not yet read;
+  // its second line says what is happening there, not a row of faces.
+  const counts = tree.getByTestId("page-tree-discussions");
+  await expect(counts.filter({ has: browser.locator(".app-count-pill") }))
+    .toHaveAccessibleName("2 open discussions, 1 with unread replies");
+  await expect(counts.filter({ hasNot: browser.locator(".app-count-pill") })).toHaveAccessibleName("1 open discussion");
   await expect(tree.locator(".identity-avatar-face")).toHaveCount(0);
-  await expect(tree).toContainText("claude:2 editing");
+  await expect(tree.getByRole("button", { name: "Relay claude:2 editing · Status" })).toBeVisible();
+  await expect(tree.getByRole("button", { name: "Company Ada: Ship it Friday?" })).toBeVisible();
   // The first page opens by default; count the sessions of the page we switch to.
   await expect.poll(() => connections).toBeGreaterThan(0);
   connections = 0;

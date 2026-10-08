@@ -7,12 +7,12 @@ import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-princi
 import { requireAuth } from "./index-shared";
 import { publishPreReviewVerdict } from "./github-pre-review";
 import { gitHubFileReferenceHref, gitHubFileReferences, pageLineDiff, parseGitHubFileReference, type PageAwareness,
-  type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor } from "@xmatrix/protocol";
+  type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
 import { PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
 import { PAGE_DOCUMENT_FRAGMENT, type PageSessionPresent, type PageSessionPrincipal } from "./page-session";
-import { pageConversation, workingBySection } from "./page-conversations";
+import { pageConversation, pageTreeDiscussions, workingBySection } from "./page-conversations";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { requireMachineDaemonAuth } from "./index-shared";
@@ -558,10 +558,20 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       : result;
   }));
 
-  // The page tree's Agents: who is reading or editing each page from a live Run.
-  app.get("/api/spaces/:spaceId/page-links/agents", async (c) => run(c, async () => repository(c.env).agentsOnPages({
-    requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), principal: await principal(c),
-  })));
+  // The page tree's activity: who is reading or editing each page from a live
+  // Run, and its open discussions, with what this reader has not read there.
+  app.get("/api/spaces/:spaceId/page-links/agents", async (c) => run(c, async () => {
+    const spaceId = c.req.param("spaceId");
+    const caller = await principal(c);
+    const { pages } = await repository(c.env).agentsOnPages({ requestId: crypto.randomUUID(), spaceId, principal: caller });
+    // Newest first, so a Space with more open discussions than are read describes the recent ones.
+    const conversationIds = [...new Set(pages.flatMap((page) => page.discussions))].slice(0, MAX_PAGE_CONVERSATIONS);
+    const conversations = new Map((conversationIds.length === 0 ? [] : await readPageConversations(database(c.env), {
+      requestId: crypto.randomUUID(), spaceId, principal: caller, conversationIds,
+    })).map((record) => [record.conversationId, pageConversation(record)]));
+    return { pages: pages.map(({ discussions, ...page }): PageTreeActivity =>
+      ({ ...page, discussions: pageTreeDiscussions(discussions, conversations) })) };
+  }));
 
   app.post("/api/spaces/:spaceId/page-links", async (c) => run(c, async () => {
     const body = await json(c);
