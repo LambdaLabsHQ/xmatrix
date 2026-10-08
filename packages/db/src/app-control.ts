@@ -214,6 +214,8 @@ export interface AppProviderPolicy {
 export interface PostgresGitHubSubscriptionRoute {
   installationId: string;
   sourceRef: string;
+  /** `repository` for a repository subscription, `issue` for one issue or pull request. */
+  sourceKind: "repository" | "issue";
   spaceId: string;
   channelId: string;
   connectionId: string;
@@ -328,38 +330,44 @@ export class PostgresAppRepository {
     });
   }
 
-  /** The Channels subscribed to `feature` of a repository: an event no
+  /** The Channels subscribed to `feature` of any of an event's sources: its
+   * repository and the issue or pull request it is about. An event no
    * subscription takes (most of a busy repository's CI traffic) finds none
    * here instead of being read out connection by connection. */
   async githubSubscriptionRoutes(input: {
     requestId: string;
     installationId: string;
-    sourceRef: string;
+    sourceRefs: string[];
     feature: string;
     limit: number;
   }): Promise<PostgresGitHubSubscriptionRoute[]> {
     const installationId = text(input.installationId, "installationId", 100);
     const feature = text(input.feature, "feature", 40);
-    const { sourceRef, limit } = routeRead(input);
+    if (!Array.isArray(input.sourceRefs) || input.sourceRefs.length < 1 || input.sourceRefs.length > 20) {
+      throw new AppControlError("invalid_app_request", 400, "sourceRefs is invalid");
+    }
+    const sourceRefs = input.sourceRefs.map((sourceRef) => routeRead({ sourceRef, limit: input.limit }).sourceRef);
+    const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v3", text: `SELECT
-        r.space_id,r.channel_id,r.connection_id,r.created_by
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v4", text: `SELECT
+        r.space_id,r.channel_id,r.connection_id,r.created_by,r.source_kind,lower(r.source_ref) AS source_ref
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
         JOIN data.channels channel ON channel.channel_id=r.channel_id
           AND channel.space_id=r.space_id
         WHERE c.provider_id='github' AND c.status='configured'
-          AND r.source_kind='repository' AND lower(r.source_ref)=$2
+          AND r.source_kind IN ('repository','issue') AND lower(r.source_ref)=ANY($2::text[])
           AND jsonb_typeof(r.features_json)='array' AND r.features_json ? $4
           AND (c.metadata_json->>'installationId'=$1 OR EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(CASE
               WHEN jsonb_typeof(c.metadata_json->'installationIds')='array'
               THEN c.metadata_json->'installationIds' ELSE '[]'::jsonb END) AS linked(value)
             WHERE linked.value=$1))
-        ORDER BY r.channel_id,r.space_id,r.connection_id LIMIT $3`,
-      values: [installationId, sourceRef, limit, feature], maxRows: limit });
-      return rows.map((row) => ({ installationId, sourceRef,
+        ORDER BY r.channel_id,r.space_id,r.connection_id,r.source_kind,lower(r.source_ref) LIMIT $3`,
+      values: [installationId, sourceRefs, limit, feature], maxRows: limit });
+      return rows.map((row) => ({ installationId, sourceRef: String(row.source_ref),
+        sourceKind: row.source_kind === "issue" ? "issue" as const : "repository" as const,
         spaceId: String(row.space_id), channelId: String(row.channel_id),
         connectionId: String(row.connection_id), authorityRootUserId: String(row.created_by) }));
     });

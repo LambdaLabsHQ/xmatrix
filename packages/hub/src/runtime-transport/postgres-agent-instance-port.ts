@@ -1,3 +1,4 @@
+import { subscribeConversationToPullRequest } from "../github-pull-request-subscription";
 import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
 import type {
   AgentInstanceClientMessage,
@@ -122,6 +123,9 @@ export interface PostgresAgentInstancePortDependencies {
   atomicInstanceConnect?: boolean;
   /** Keep work alive past the socket operation that started it. */
   runInBackground?(task: Promise<unknown>): void;
+  /** Subscribe the conversation to a pull request its Run opened (conversation-activity.md §3.6). */
+  pullRequestOpened?(input: { spaceId: string; channelId: string; ownerUserId: string; repository: string;
+    number: number; commandId: string }): Promise<unknown>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
 }
 
@@ -161,6 +165,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       signals: input.signals,
       atomicInstanceConnect: true,
       ...(input.scheduleBackground ? { runInBackground: input.scheduleBackground } : {}),
+      pullRequestOpened: (opened) => subscribeConversationToPullRequest(input.env, opened),
       observeAgentLaunchStage: (stage, outcome, durationMs) => recordAgentLaunchStage({
         env: input.env, stage, outcome, durationMs,
       }),
@@ -686,8 +691,9 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       }
       throw error;
     }
-    return this.appendAsRun(session, message.requestId, {
-      messageId: runtimeCommandId("activity", message.requestId),
+    const messageId = runtimeCommandId("activity", message.requestId);
+    const appended = await this.appendAsRun(session, message.requestId, {
+      messageId,
       commandPrefix: "agent-activity",
       channelId: message.channelId,
       body: channelActivityLine(activity),
@@ -696,6 +702,19 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         appMetadata: { xmatrixProvenance: CHANNEL_ACTIVITY_PROVENANCE, xmatrixActivity: activity },
       },
     });
+    if (activity.kind === "pull_request" && this.dependencies.pullRequestOpened) {
+      /* The entry is recorded either way; a subscription that cannot be made is logged, not refused. */
+      const subscribed = this.dependencies.pullRequestOpened({ spaceId: session.principal.spaceId,
+        channelId: message.channelId, ownerUserId: session.principal.ownerUserId,
+        repository: activity.repository, number: activity.number, commandId: messageId,
+      }).catch((error: unknown) => {
+        console.error("Pull request subscription failed", { channelId: message.channelId,
+          error: error instanceof Error ? error.message : String(error) });
+      });
+      if (this.dependencies.runInBackground) this.dependencies.runInBackground(subscribed);
+      else await subscribed;
+    }
+    return appended;
   }
 
   /** Append as this exact Run; the Authority derives identity from its proof. */

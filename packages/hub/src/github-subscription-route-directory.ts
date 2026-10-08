@@ -4,6 +4,7 @@ import { createPostgresAuthorityFleet, type PostgresAuthorityFleetEnv } from "./
 export interface GitHubSubscriptionRoute {
   installationId: string;
   sourceRef: string;
+  sourceKind: "repository" | "issue";
   spaceId: string;
   channelId: string;
   connectionId: string;
@@ -22,7 +23,7 @@ type DirectoryEnv = Pick<
 export async function resolveGitHubSubscriptionRoutes(
   env: DirectoryEnv,
   installationId: string,
-  sourceRef: string,
+  sourceRefs: string[],
   feature: string,
 ): Promise<GitHubSubscriptionRoute[]> {
   const fleet = createPostgresAuthorityFleet(env, {
@@ -34,11 +35,11 @@ export async function resolveGitHubSubscriptionRoutes(
   const partitions = await Promise.all(fleet.physicalShards.map(({ shardId, database }) =>
     new PostgresAppRepository(database).githubSubscriptionRoutes({
       requestId: `github-routes:${shardId}:${crypto.randomUUID()}`.slice(0, 200),
-      installationId, sourceRef, feature, limit: 1_001,
+      installationId, sourceRefs, feature, limit: 1_001,
     })));
   const routes = partitions.flat().sort((left, right) =>
-    [left.channelId, left.spaceId, left.connectionId].join("\u001f").localeCompare(
-      [right.channelId, right.spaceId, right.connectionId].join("\u001f"),
+    [left.channelId, left.spaceId, left.connectionId, left.sourceRef].join("\u001f").localeCompare(
+      [right.channelId, right.spaceId, right.connectionId, right.sourceRef].join("\u001f"),
     ));
   if (routes.length > 1_000) throw new Error(
     "GitHub subscription route result exceeds 1,000 entries");
