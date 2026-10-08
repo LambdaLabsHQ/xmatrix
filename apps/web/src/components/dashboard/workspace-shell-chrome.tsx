@@ -43,18 +43,16 @@ import {
 import type { SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
-  type MutableRefObject,
 } from "react";
 
 import { createPortal } from "react-dom";
 
-import { listenForOverlayDismissal, useEscapeDismiss } from "./use-overlay-dismiss";
+import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { useAndroidBackDismiss } from "./use-android-back";
 
 import {
@@ -92,8 +90,6 @@ import {
   X,
 } from "lucide-react";
 import { useConversationPages } from "@/components/pages/conversation-page-cards";
-
-import { Input } from "@/components/ui/input";
 
 import {
   CenteredDialogShell,
@@ -374,6 +370,7 @@ export function GlobalSearchBar({ spaceName, searching, onOpenSearch }: {
         title={`Search (${shortcut})`}
         aria-label="Search"
         onClick={onOpenSearch}
+        data-search-anchor=""
         className={cn("app-global-search flex items-center gap-2 text-left", searching && "invisible")}
       >
         <Search className="size-4 shrink-0" />
@@ -453,200 +450,6 @@ export function RailButton({
         </span>
       ) : null}
     </span>
-  );
-}
-
-export function CommandDialogShell({
-  open,
-  title,
-  icon: Icon,
-  query,
-  inputRef,
-  placeholder,
-  emptyLabel,
-  inputInTopbar = false,
-  activeIndex,
-  resultCount,
-  children,
-  chips,
-  onRemoveLastChip,
-  onQueryChange,
-  onActiveIndexChange,
-  onCancel,
-  onSubmit,
-}: {
-  open: boolean;
-  title: string;
-  icon: React.ComponentType<{ className?: string }>;
-  query: string;
-  inputRef: MutableRefObject<HTMLInputElement | null>;
-  placeholder: string;
-  emptyLabel: string;
-  inputInTopbar?: boolean;
-  activeIndex: number;
-  resultCount: number;
-  children: React.ReactNode;
-  /** Filters already applied, drawn in the field ahead of the text. */
-  chips?: React.ReactNode;
-  /** Backspace in an empty field takes the last filter off. */
-  onRemoveLastChip?: () => void;
-  onQueryChange: (query: string) => void;
-  onActiveIndexChange: (index: number) => void;
-  onCancel: () => void;
-  onSubmit: () => void;
-}) {
-  const defaultInputRef = useRef<HTMLInputElement | null>(null);
-  const mobileInputRef = useRef<HTMLInputElement | null>(null);
-  const desktopInputRef = useRef<HTMLInputElement | null>(null);
-
-  useAndroidBackDismiss(open, onCancel);
-
-  useEscapeDismiss(open, onCancel);
-
-  const syncVisibleInputRef = useCallback(() => {
-    if (!inputInTopbar) {
-      inputRef.current = defaultInputRef.current;
-      return;
-    }
-
-    const desktopVisible = window.matchMedia("(min-width: 640px)").matches;
-    inputRef.current = desktopVisible ? desktopInputRef.current : mobileInputRef.current;
-  }, [inputInTopbar, inputRef]);
-
-  useLayoutEffect(() => {
-    if (!open) return undefined;
-
-    syncVisibleInputRef();
-    window.addEventListener("resize", syncVisibleInputRef);
-    return () => window.removeEventListener("resize", syncVisibleInputRef);
-  }, [open, syncVisibleInputRef]);
-
-  if (!open || typeof document === "undefined") return null;
-
-  const renderInputControl = (surface: "default" | "mobile" | "desktop") => (
-    <div className="app-command-input-pill flex items-center gap-2.5">
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      {chips}
-      <Input
-        ref={surface === "desktop" ? desktopInputRef : surface === "mobile" ? mobileInputRef : defaultInputRef}
-        type="text"
-        value={query}
-        onChange={(event) => onQueryChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" && resultCount > 0) {
-            event.preventDefault();
-            onActiveIndexChange((activeIndex + 1) % resultCount);
-          } else if (event.key === "ArrowUp" && resultCount > 0) {
-            event.preventDefault();
-            onActiveIndexChange(activeIndex === 0 ? resultCount - 1 : activeIndex - 1);
-          } else if (event.key === "Enter") {
-            event.preventDefault();
-            onSubmit();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            onCancel();
-          } else if (event.key === "Backspace" && !query && onRemoveLastChip) {
-            event.preventDefault();
-            onRemoveLastChip();
-          }
-        }}
-        data-workspace-search-input={inputInTopbar ? surface : undefined}
-        placeholder={inputInTopbar && surface === "mobile" ? "Search workspace" : placeholder}
-        aria-label={title}
-        className="app-command-input h-9 border-0 px-0 text-sm shadow-none focus-visible:ring-0"
-      />
-    </div>
-  );
-
-  return createPortal(
-    <div
-      className="app-command-overlay fixed inset-0 z-50 flex items-start justify-center px-4"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="command-dialog-title"
-        className="xmatrix-app app-command-panel mt-2 overflow-hidden bg-popover/95 p-0 text-foreground"
-      >
-        <div id="command-dialog-title" className="sr-only">
-          {title}
-        </div>
-        {inputInTopbar ? (
-          <div className="app-command-input-row border-b border-border px-3 py-2 sm:hidden">
-            {renderInputControl("mobile")}
-          </div>
-        ) : (
-          <div className="app-command-input-row border-b border-border px-3 py-2">{renderInputControl("default")}</div>
-        )}
-        <div className="app-command-results max-h-[min(24rem,58vh)] overflow-y-auto p-1.5">
-          {resultCount === 0 ? (
-            <div className="px-3 py-5 text-center text-sm text-muted-foreground">{emptyLabel}</div>
-          ) : (
-            children
-          )}
-        </div>
-      </div>
-      {inputInTopbar &&
-        createPortal(
-          <div className="xmatrix-app app-topbar-search-frame app-topbar-search-frame-open fixed z-50 hidden sm:flex">
-            <div className="app-search app-topbar-search app-topbar-search-input flex h-9 min-w-0 items-center rounded-full border border-border bg-card px-4 text-left text-sm text-muted-foreground shadow-sm">
-              {renderInputControl("desktop")}
-            </div>
-          </div>,
-          document.body
-        )}
-    </div>,
-    document.body
-  );
-}
-
-export function CommandResultButton({
-  active,
-  icon: Icon,
-  title,
-  subtitle,
-  badge,
-  refCallback,
-  onMouseEnter,
-  onSelect,
-}: {
-  active: boolean;
-  icon: React.ComponentType<{ className?: string }>;
-  title: React.ReactNode;
-  subtitle: string;
-  badge?: string;
-  refCallback: (node: HTMLButtonElement | null) => void;
-  onMouseEnter: () => void;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      ref={refCallback}
-      type="button"
-      onMouseEnter={onMouseEnter}
-      onClick={onSelect}
-      className={cn(
-        "app-command-result flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm",
-        active ? "app-command-result-active bg-muted/70" : "hover:bg-muted/45"
-      )}
-    >
-      <span className="app-command-result-icon flex size-7 shrink-0 items-center justify-center rounded bg-background text-muted-foreground">
-        <Icon className="size-4" />
-      </span>
-      <span className="w-0 min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-bold leading-5">{title}</span>
-        <span className="block truncate text-[11px] leading-4 text-muted-foreground">{subtitle}</span>
-      </span>
-      {badge && (
-        <span className={cn("app-command-result-badge shrink-0 px-2 py-0.5 text-[11px] font-bold leading-4 text-muted-foreground", COUNT_CHIP_MATERIAL_CLASS)}>
-          {badge}
-        </span>
-      )}
-    </button>
   );
 }
 
@@ -798,6 +601,7 @@ export function TopWorkspaceBar({
           title="Search workspace"
           aria-label="Search workspace"
           onClick={onOpenSearch}
+          data-search-anchor=""
           className="app-mobile-search-icon flex size-11 items-center justify-center text-muted-foreground sm:hidden"
         >
           <Search className="size-5" />
@@ -1536,6 +1340,7 @@ export function ChannelHeader({
             title="Search (⌘F / Ctrl+F)"
             aria-label="Search"
             onClick={onOpenSearch}
+            data-search-anchor=""
             className="app-channel-search hidden size-8 shrink-0 items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground md:flex"
           >
             <Search className="size-4" />

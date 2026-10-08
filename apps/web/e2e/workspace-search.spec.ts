@@ -3,6 +3,7 @@ import { fixtureJson, fixtureRequests } from "./in-page-api-fixtures";
 import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
+  E2E_MOBILE_CONTEXT,
   E2E_NOW,
   E2E_SPACE,
   installPageTreeStubs,
@@ -41,7 +42,7 @@ test("⌘F inside a conversation searches only it, and Backspace widens it to th
   await page.keyboard.press("Control+f");
   const dialog = page.getByRole("dialog", { name: "Search workspace" });
   await expect(dialog).toBeVisible();
-  const field = page.locator(".app-topbar-search-input");
+  const field = page.locator(".app-search-panel-field");
   await expect(field.getByText("in #general")).toBeVisible();
   await page.keyboard.type("deploy");
   await expect(dialog.getByText("deploy the hub (1)")).toBeVisible();
@@ -135,7 +136,7 @@ test("conversation actions sit beside its name and borderless search aligns righ
   await page.keyboard.press("Escape");
   await search.click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
-  await expect(page.locator(".app-topbar-search-input").getByText("in #general")).toHaveCount(0);
+  await expect(page.locator(".app-search-panel-field").getByText("in #general")).toHaveCount(0);
 });
 
 test("a page's controls end before the search capsule", async ({ page }) => {
@@ -161,4 +162,76 @@ test("a long conversation name keeps its search and actions visible without a de
   await expect(header.getByRole("button", { name: "Channel details" })).toBeInViewport();
   await search.click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
+});
+
+/**
+ * Opens search from the visible search control, types a query and waits for
+ * the drop-down to settle; returns where the control was and the panel.
+ */
+async function openSearchFromControl(page: Page) {
+  const anchor = page.locator("[data-search-anchor]").filter({ visible: true }).first();
+  await expect.poll(() => anchor.boundingBox()).not.toBeNull();
+  const control = (await anchor.boundingBox())!;
+  await anchor.click();
+  const panel = page.getByRole("dialog", { name: "Search workspace" });
+  await expect(page.locator("[data-workspace-search-input]")).toBeFocused();
+  await page.keyboard.type("deploy");
+  await expect(panel.getByText("deploy the hub (1)")).toBeVisible();
+  await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+  await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/u);
+  return { control, panel };
+}
+
+test("the search panel drops from the control that opened it, one glass with nothing glass inside", async ({ page }) => {
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, RELEASE] });
+  await stubMessageSearch(page);
+  for (const path of [`channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, "pages"]) {
+    await page.goto(`/app/${E2E_SPACE.id}/${path}`, { waitUntil: "domcontentloaded" });
+    const { control, panel } = await openSearchFromControl(page);
+    const field = (await page.locator(".app-search-panel-field").boundingBox())!;
+    const close = (await panel.getByRole("button", { name: "Close search" }).boundingBox())!;
+    expect(field.y + field.height / 2).toBeCloseTo(control.y + control.height / 2, 0);
+    expect(close.x + close.width).toBeGreaterThan(control.x);
+    expect(close.x).toBeLessThan(control.x + control.width);
+    // The control is under the field row; the panel takes its place.
+    await expect(page.locator("[data-search-anchor]").filter({ visible: true })).toHaveCount(0);
+    expect(await panel.evaluate((node) => getComputedStyle(node).backdropFilter)).not.toBe("none");
+    const nestedGlass = await panel.evaluate((node) => Array.from(node.querySelectorAll("*"))
+      .filter((child) => getComputedStyle(child).backdropFilter !== "none").length);
+    expect(nestedGlass).toBe(0);
+    await panel.getByRole("button", { name: "Close search" }).click();
+    await expect(panel).toHaveCount(0);
+  }
+});
+
+test.describe("on a phone", () => {
+  test.use(E2E_MOBILE_CONTEXT);
+
+  test("search is the whole screen, down to its foot, its columns on the top bar's", async ({ page }) => {
+    await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+    await stubMessageSearch(page);
+    await page.goto(`/app/${E2E_SPACE.id}/channels`, { waitUntil: "domcontentloaded" });
+    const { control, panel } = await openSearchFromControl(page);
+    const input = page.locator("[data-workspace-search-input]");
+    const box = (await panel.boundingBox())!;
+    const viewport = page.viewportSize()!;
+    const centre = (b: { x: number; width: number }) => b.x + b.width / 2;
+    // Edge to edge with the phone's margin, down to the screen's foot.
+    expect(box.x).toBeCloseTo(viewport.width - (box.x + box.width), 0);
+    expect(box.y + box.height).toBeCloseTo(viewport.height - 8, 0);
+    // The close button is where the top bar's search button was.
+    const close = (await panel.getByRole("button", { name: "Close search" }).boundingBox())!;
+    expect(centre(close)).toBeCloseTo(centre(control), 0);
+    // The field's magnifier and text start on the rows' icon and text columns; ↵ sits under the close button.
+    const glyph = (await page.locator(".app-search-panel-field > svg").boundingBox())!;
+    const rowIcon = (await page.locator(".app-search-panel-row > svg").first().boundingBox())!;
+    const inputBox = (await input.boundingBox())!;
+    const rowText = (await page.locator(".app-search-panel-row > span").first().boundingBox())!;
+    const hint = (await page.locator(".app-search-panel-hint").boundingBox())!;
+    expect(glyph.x).toBeCloseTo(rowIcon.x, 0);
+    expect(inputBox.x).toBeCloseTo(rowText.x, 0);
+    expect(centre(hint)).toBeCloseTo(centre(close), 0);
+    expect(centre(glyph) - box.x).toBeCloseTo(box.x + box.width - centre(close), 0);
+    expect(await input.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+  });
 });
