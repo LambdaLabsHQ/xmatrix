@@ -1,5 +1,5 @@
 import type { AuthorityDatabase } from "@xmatrix/db";
-import { wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
+import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
 import { ACTIVE_RUN_STATUS_SQL } from "@xmatrix/protocol";
 
 /** Channels a committed authority change can affect: those holding a
@@ -29,8 +29,11 @@ export async function wakeRegistrationChannels(env: { RELAY_POSTGRES_AGENT_LAUNC
     values: bySpace ? [scope.spaceId] : [scope.ownerUserId, scope.machineId], maxRows: AFFECTED_CHANNEL_LIMIT }));
   const woken = await Promise.allSettled(rows.map(row =>
     wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId: String(row.channel_id) })));
-  if (woken.some(result => result.status === "rejected" || !result.value.ok)) {
-    throw new Error("A Channel affected by this authority change could not be told");
+  // The same retryable handover failure as any other coordinator wake: the change is committed
+  // and its idempotent retry tells the Channels again.
+  const refused = woken.find(result => result.status === "fulfilled" && !result.value.ok);
+  if (refused || woken.some(result => result.status === "rejected")) {
+    throw new AgentLaunchHandoverUnavailable(refused?.status === "fulfilled" ? refused.value.status : undefined);
   }
   return rows.length;
 }
