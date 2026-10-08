@@ -57,8 +57,8 @@ test('Jev scores each harness on its own question and never sees load, quota or 
 });
 
 test('harness and machine are chosen together: an idle capable harness beats a busy preferred one', async () => {
-  // 2026-10-08: Jev's fit put claude first, and claude ran only on srv2018194
-  // (load 5.7/8, 18% claude quota) while srv2006562 sat idle with codex at 89%.
+  // 2026-10-08: Jev's fit put claude first, and claude ran only on the busy machine
+  // (load 5.7/8, 18% claude quota) while another machine sat idle with codex at 89%.
   const sample = (load, usage, available, quota) => ({ evaluatedAt: 'now', outstandingMachineAllocations: 0,
     outstandingRegistrationAllocations: 0, quota: { remainingPercent: quota, assumed: false },
     machineResources: { observedAt: 'now', cpuLogicalCount: 8, loadAverage: [load, 0, 0], cpuUsagePercent: usage,

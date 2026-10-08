@@ -99,7 +99,7 @@ test('v10 keeps per-harness fit and the joint placement, and rejects malformed o
   input.fit = { inputDigest: 'c'.repeat(64), scores: { codex: { score: 1, probabilities: { 0: 0, 1: 1, 2: 0, 3: 0 } },
     claude: { score: 2.4, probabilities: { 2: .6, 3: .4 } } } };
   input.placement = { profile: 'balanced', ranking: [
-    { harness: 'codex', machineId: 'm-idle', machineName: 'srv2006562', fit: 1 / 3, headroom: .86, frontier: true, utility: .334 },
+    { harness: 'codex', machineId: 'm-idle', machineName: 'build-idle', fit: 1 / 3, headroom: .86, frontier: true, utility: .334 },
     { harness: 'claude', machineId: 'm-busy', fit: .8, headroom: -.2, frontier: true, utility: -.199, privatePath: '/private' },
     { harness: 'opencode', machineId: 'm-new', fit: 1 / 3, frontier: false, utility: 0 }] };
   const parsed = parseLaunchParameterEvidence(input);

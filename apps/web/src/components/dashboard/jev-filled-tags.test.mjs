@@ -126,8 +126,8 @@ test("a jointly placed harness is filled by routing beside the machine", () => {
   const parameters = evidence({ rubricVersion: "registration-parameters-v10", harness: undefined,
     fit: { inputDigest: DIGEST, scores: { codex: { score: 1, probabilities: {} }, claude: { score: 1, probabilities: {} } } },
     placement: { profile: "balanced", ranking: [{ harness: "codex", machineId: "m", fit: 1 / 3, headroom: 0.86, frontier: true, utility: 0.334 }] } });
-  assert.deepEqual(jevFilledTags(mention({}), parameters, "srv2006562").slice(-2), [
-    { field: "harness", value: "codex", source: "routing" }, { field: "machine", value: "srv2006562", source: "routing" }]);
+  assert.deepEqual(jevFilledTags(mention({}), parameters, "build-idle").slice(-2), [
+    { field: "harness", value: "codex", source: "routing" }, { field: "machine", value: "build-idle", source: "routing" }]);
   assert.equal(jevFilledTags(mention({ harness: "claude" }), parameters).some(tag => tag.field === "harness"), false);
   // One harness had no fit to compare: nothing was chosen about it.
   assert.equal(jevFilledTags(mention({}), { ...parameters, fit: undefined }).some(tag => tag.field === "harness"), false);
