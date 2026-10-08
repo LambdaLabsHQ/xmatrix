@@ -281,7 +281,10 @@ test("implicit Channel About starts a silent one-shot session through ordinary r
   assert.match(launch.body, /--expected-revision/);
   // It reads its own Channel on demand; it never mirrors the Space.
   assert.match(launch.body, /`xmatrix channel history ch-1 --authoritative`/u);
-  assert.match(launch.body, /Write the About to a UTF-8 file, then apply it with `xmatrix channel about ch-1 --summary-file <about file> --through </u);
+  // A file name only this request uses, applied only after it is written: a
+  // file another session left behind never becomes this Channel's About.
+  assert.match(launch.body, /Write the About to a new UTF-8 file named xmatrix-about-channel-about-ch-1-20\.txt in your working directory\. Only after that write has succeeded, apply it with `xmatrix channel about ch-1 --summary-file xmatrix-about-channel-about-ch-1-20\.txt --through </u);
+  assert.match(launch.body, /never run the write and the apply at the same time/u);
   assert.equal(launch.runMetadata.routedAs, "management_channel_about");
   assert.equal(launch.initialMessageId, undefined);
   assert.match(launch.body, /Always recompute and apply the About/u);
