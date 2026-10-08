@@ -35,7 +35,7 @@ const binding = (config, key, name) => config[key]?.find((entry) => (entry.bindi
 test("cloud test deployment has a complete isolated resource inventory", () => {
   const config = hub.test;
   assert.equal(config.name, "xmatrix-hub-test");
-  assert.deepEqual(config.routes, [{ pattern: "xmatrix-hub.test.xmatrix.sh", custom_domain: true }]);
+  assert.deepEqual(config.routes.map((route) => ({ ...route })), [{ pattern: "xmatrix-hub.test.xmatrix.sh", custom_domain: true }]);
   assert.equal(config.placement, undefined);
   assert.equal(config.workers_dev, false);
   assert.equal(config.preview_urls, false);
@@ -71,8 +71,8 @@ test("production configuration cannot enable mock auth or reference test resourc
   assert.equal(Object.keys(config.vars).some((key) => key.startsWith("XMATRIX_MOCK_AUTH")), false);
   assert.doesNotMatch(rendered.productionHub, /(?:^|[-._"])test(?:[-._"]|$)/u);
   assert.equal(config.vars.AUTH_COOKIE_DOMAIN, ".xmatrix.sh");
-  assert.deepEqual(config.placement, { region: "aws:ap-southeast-1" });
-  assert.deepEqual(config.routes, [{ pattern: "xmatrix-hub.xmatrix.sh", custom_domain: true }]);
+  assert.deepEqual({ ...config.placement }, { region: "aws:ap-southeast-1" });
+  assert.deepEqual(config.routes.map((route) => ({ ...route })), [{ pattern: "xmatrix-hub.xmatrix.sh", custom_domain: true }]);
   assert.equal(config.vars.APP_URL, "https://xmatrix.sh");
   assert.equal(config.vars.HUB_URL, "https://xmatrix-hub.xmatrix.sh");
 });
