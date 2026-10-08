@@ -112,7 +112,33 @@ pub(crate) fn questionnaire_reply(
     else {
         return None;
     };
-    let metadata = message.metadata.as_ref()?;
+    questionnaire_reply_in(
+        &message.message_id,
+        &message.channel_id,
+        message.sequence,
+        message.metadata.as_ref(),
+    )
+}
+
+/// The questionnaire answer a delivered message carries, if it is one.
+pub(crate) fn inbound_questionnaire_reply(
+    message: &crate::InboundChannelMessage,
+) -> Option<QuestionnaireReply> {
+    questionnaire_reply_in(
+        &message.message_id,
+        &message.channel_id,
+        message.sequence,
+        message.metadata.as_ref(),
+    )
+}
+
+fn questionnaire_reply_in(
+    message_id: &str,
+    channel_id: &str,
+    sequence: Option<u64>,
+    metadata: Option<&Value>,
+) -> Option<QuestionnaireReply> {
+    let metadata = metadata?;
     if metadata.get("kind").and_then(Value::as_str) != Some(QUESTIONNAIRE_ANSWER_KIND) {
         return None;
     }
@@ -143,9 +169,9 @@ pub(crate) fn questionnaire_reply(
     Some(QuestionnaireReply {
         request_key: request_key.to_string(),
         answers,
-        message_id: message.message_id.clone(),
-        channel_id: message.channel_id.clone(),
-        sequence: message.sequence,
+        message_id: message_id.to_string(),
+        channel_id: channel_id.to_string(),
+        sequence,
     })
 }
 
