@@ -71,6 +71,17 @@ function scrollFraction(element: Element, axis: Axis, reversed: boolean | undefi
   return reversed ? 1 + offset / max : offset / max;
 }
 
+function overflows(element: Element, axis: Axis) {
+  return axis === "y" ? element.scrollHeight - element.clientHeight >= 1 : element.scrollWidth - element.clientWidth >= 1;
+}
+
+/** The thumb's track, leaving the corner to the other thumb only when that axis overflows too. */
+function trackLength(scroller: Scroller, axis: Axis, box: ReturnType<typeof viewportBox>) {
+  const other: Axis = axis === "y" ? "x" : "y";
+  const corner = scroller.thumbs[other] && overflows(scroller.element, other) ? THICKNESS : 0;
+  return (axis === "y" ? box.height : box.width) - 2 * INSET - corner;
+}
+
 export function OverlayScrollbars() {
   const layerRef = useRef<HTMLDivElement>(null);
 
@@ -99,10 +110,9 @@ export function OverlayScrollbars() {
       const { element } = scroller;
       if (!element.isConnected) return release(scroller);
       const box = viewportBox(element);
-      const both = Boolean(scroller.thumbs.x && scroller.thumbs.y);
       for (const [axis, thumb] of Object.entries(scroller.thumbs) as [Axis, HTMLDivElement][]) {
         const vertical = axis === "y";
-        const track = (vertical ? box.height : box.width) - 2 * INSET - (both ? THICKNESS : 0);
+        const track = trackLength(scroller, axis, box);
         const geometry = overlayThumb(vertical ? element.clientHeight : element.clientWidth,
           vertical ? element.scrollHeight : element.scrollWidth,
           scrollFraction(element, axis, scroller.reversed[axis]), track);
@@ -134,9 +144,8 @@ export function OverlayScrollbars() {
       const vertical = axis === "y";
       const start = vertical ? event.clientY : event.clientX;
       const from = vertical ? element.scrollTop : element.scrollLeft;
-      const box = viewportBox(element);
       const length = vertical ? thumb.offsetHeight : thumb.offsetWidth;
-      const track = (vertical ? box.height : box.width) - 2 * INSET - (scroller.thumbs.x && scroller.thumbs.y ? THICKNESS : 0);
+      const track = trackLength(scroller, axis, viewportBox(element));
       const max = vertical ? element.scrollHeight - element.clientHeight : element.scrollWidth - element.clientWidth;
       const ratio = track > length ? max / (track - length) : 0;
       thumb.setAttribute("data-dragging", "");
