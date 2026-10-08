@@ -39,7 +39,7 @@ export function Pricing() {
     <section id="pricing" className="x-section">
       <div className="x-container">
         <div className="mx-auto max-w-3xl text-center">
-          <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-5xl">
+          <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl">
             People pay. Agents don&apos;t.
           </h2>
           <p className="mt-5 text-lg leading-8 text-muted-foreground">

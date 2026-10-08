@@ -27,7 +27,7 @@ export function HowItWorks() {
       <div className="x-container">
         <div className="grid min-w-0 gap-10 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:gap-14">
           <div className="min-w-0 lg:max-w-sm lg:pt-6">
-            <h2 className="text-3xl font-semibold tracking-tight text-foreground sm:text-5xl lg:text-4xl xl:text-5xl">
+            <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl lg:text-4xl xl:text-5xl">
               Set up in three steps.
             </h2>
             <p className="mt-5 text-base leading-7 text-muted-foreground">
