@@ -21,6 +21,15 @@ test('one choice receives all candidates and numerical facts without prerequisit
   assert.equal(result.environment.choice, 'candidate_99');
 });
 
+test('the succeeded record names the model that answered', async () => {
+  const events = [];
+  const request = input(2);
+  const evaluate = Object.assign(async received => ({ ...answer(received, 'candidate_1'), model: 'vendor/router-a' }),
+    { recordDecision: async event => { events.push(event); } });
+  await evaluateRoutingChoices(request, evaluate);
+  assert.deepEqual(events.map(event => [event.status, event.model]), [['started', undefined], ['succeeded', 'vendor/router-a']]);
+});
+
 test('an answer outside the finite candidate list is rejected', async () => {
   let calls = 0;
   await assert.rejects(evaluateRoutingChoices(input(2), async request => {

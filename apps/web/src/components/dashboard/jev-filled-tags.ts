@@ -104,7 +104,7 @@ export function jevFilledAnnouncement(tags: readonly JevFilledTag[]): string | u
   const jev = tags.filter(tag => tag.source !== "routing");
   const routing = tags.filter(tag => tag.source === "routing");
   const parts = [
-    jev.length ? `Jev filled ${spell(jev)}` : "",
+    jev.length ? `xMatrix filled ${spell(jev)}` : "",
     routing.length ? `Routing filled ${spell(routing)}` : "",
   ].filter(Boolean);
   return parts.length ? parts.join(". ") : undefined;

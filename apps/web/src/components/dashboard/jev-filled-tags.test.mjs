@@ -34,7 +34,7 @@ test("Jev's choices fill only the fields the author left blank, in the order Jev
     { field: "repo", value: "LambdaLabsHQ/xmatrix" },
   ]);
   assert.equal(jevFilledAnnouncement(tags),
-    "Jev filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix");
+    "xMatrix filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix");
 });
 
 test("a field the author wrote is not drawn again, even when Jev disagrees", () => {
@@ -52,7 +52,7 @@ test("routing's Machine is a machine tag, and a Machine the author named is not 
   assert.deepEqual(tags.map(tag => tag.field), ["harness", "model", "effort", "repo", "machine"]);
   assert.deepEqual(tags.find(tag => tag.field === "machine"), { field: "machine", value: "Workstation", source: "routing" });
   assert.equal(jevFilledAnnouncement(tags),
-    "Jev filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix. Routing filled machine:Workstation");
+    "xMatrix filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix. Routing filled machine:Workstation");
   assert.deepEqual(jevFilledTags(mention({ machine: "Laptop" }), evidence(), "Workstation").map(tag => tag.field),
     ["harness", "model", "effort", "repo"]);
 });

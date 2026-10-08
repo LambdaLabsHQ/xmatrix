@@ -78,7 +78,7 @@ export function MentionInvocationChip({ label, labelContent, announcement, image
   const decision = parsePresentedRoutingDecision(launch.routingDecision);
   const summon = summonView(launch, executions, unavailable);
   const selection = routingSelectionNote(decision);
-  const lead = summon.steps.findIndex(step => step.label === "Jev selected an environment" || step.label === "Environment selected");
+  const lead = summon.steps.findIndex(step => step.label === "Environment selected");
   const view = { ...summon, steps: summon.steps.map((step, index) => index === lead && selection ? { ...step, note: selection } : step) };
   const activity = launch.activity;
   const execution = executions.find(record => record.executionId === view.executionId && record.runId === launch.runId);
@@ -219,11 +219,11 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
   return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title="Not a summon"
     className="app-mention-intent-declined"
     launching={launching === "launching" || launching === "sent"}
-    ariaLabel={`${rejection.sourceMention}: not a summon. Jev read this as ${copy.reading}. Show details`}>
+    ariaLabel={`${rejection.sourceMention}: not a summon. xMatrix read this as ${copy.reading}. Show details`}>
     <Popover.Description className="app-intent-reading">
-      Jev read this as <strong>{copy.reading}</strong>, so no Agent was started.
+      xMatrix read this as <strong>{copy.reading}</strong>, so no Agent was started.
     </Popover.Description>
-    {confidence !== undefined && <div className="app-intent-confidence" aria-label={`Jev confidence ${Math.round(confidence * 100)}%`}>
+    {confidence !== undefined && <div className="app-intent-confidence" aria-label={`Routing confidence ${Math.round(confidence * 100)}%`}>
       <span className="app-intent-confidence-bar"><span style={{ width: `${Math.round(confidence * 100)}%` }} /></span>
       <span>{Math.round(confidence * 100)}%</span>
     </div>}
@@ -299,7 +299,7 @@ export function MentionSummonPending({ labelContent, reading, fillKey }: { label
   return <span className="app-mention-chip app-mention-invocation app-mention-summon-written" data-reading={reading ? "true" : undefined}>
     <span className="app-mention-chip-label">{labelContent}</span>
     {reading && <span className="app-mention-invocation-status" role="status">
-      <span aria-hidden="true">·</span><span className="app-intent-reading-label">Jev is reading</span>
+      <span aria-hidden="true">·</span><span className="app-intent-reading-label">xMatrix is reading</span>
     </span>}
   </span>;
 }
@@ -409,7 +409,7 @@ function InvocationPanelBody({ jev, view, lead, context, details, sourceAddress,
   // Jev's own rows above say how the request was read and what was chosen; the
   // startup then begins with what was measured, not judged: the machine.
   const steps = decided ? view.steps.filter(step => step.label !== "Read as a request")
-    .map(step => step.label === "Jev selected an environment" || step.label === "Environment selected" ? { ...step, label: "Machine selected" } : step) : view.steps;
+    .map(step => step.label === "Environment selected" ? { ...step, label: "Machine selected" } : step) : view.steps;
   return <>
     {jev?.invocationId && (state.cause ? <p role="status" className="app-invocation-description">Cause: {state.cause}</p>
       : !state.loaded && state.busy ? <p className="app-invocation-description">Checking failure reason…</p>

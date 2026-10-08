@@ -59,7 +59,7 @@ test("answer failures name the actual request key without a fixed parameter list
   const detail = { questionKey: "browserMode", issue: "choice_not_offered" };
   assert.deepEqual(parseDecisionAnswerFailure(detail), detail);
   assert.equal(preparationFailureSummary("routing_parameter_invalid_answer", detail),
-    `Jev's "browserMode" answer selected an option that was not offered.`);
+    `xMatrix's "browserMode" answer selected an option that was not offered.`);
   assert.equal(parseDecisionAnswerFailure({ questionKey: "private\ntext", issue: "choice_not_offered" }), undefined);
   assert.equal(parseDecisionAnswerFailure({ questionKey: "browserMode", issue: "private error" }), undefined);
 });
