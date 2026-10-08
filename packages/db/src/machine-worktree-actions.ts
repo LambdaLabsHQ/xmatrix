@@ -2,25 +2,19 @@ import { parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_
   type WorktreeActionStatus } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase } from "./contracts.js";
-import { statusColumns } from "./machine-harness-actions.js";
+import { actionTimes, statusColumns, unsettledActionStatus } from "./machine-harness-actions.js";
 
 function worktreeActionStatus(row: QueryResultRow): WorktreeActionStatus {
   const issued = parseWorktreeActionRequest(row.payload_json);
-  const requestedAt = row.created_at ? new Date(row.created_at as Date | string).toISOString() : undefined;
-  const completedAt = row.completed_at ? new Date(row.completed_at as Date | string).toISOString() : undefined;
-  const base = { controlId: String(row.command_id), action: issued.action, ...(requestedAt ? { requestedAt } : {}) };
-  if (row.status === "completed") {
-    const result = parseWorktreeActionResult((row.result_json as Record<string, unknown>)?.result, issued);
-    return { ...base, status: result.status, result, ...(completedAt ? { completedAt } : {}),
-      ...(result.status === "failed" ? { error: result.error ?? "The daemon could not run the action" } : {}) };
+  const times = actionTimes(row);
+  const base = { controlId: String(row.command_id), action: issued.action,
+    ...(times.requestedAt ? { requestedAt: times.requestedAt } : {}) };
+  if (row.status !== "completed") {
+    return { ...base, ...unsettledActionStatus(row, "list the worktrees again to see what changed") };
   }
-  if (row.status === "failed") return { ...base, status: "failed", error: "The daemon could not run the action",
-    ...(completedAt ? { completedAt } : {}) };
-  if (row.status === "pending" && row.expired === true) return { ...base, status: "expired",
-    error: "The machine did not pick up the action within 10 minutes, so it was not run" };
-  if (row.abandoned === true) return { ...base, status: "expired",
-    error: "The machine stopped responding before it reported a result; list the worktrees again to see what changed" };
-  return { ...base, status: row.status === "leased" ? "running" : "queued" };
+  const result = parseWorktreeActionResult((row.result_json as Record<string, unknown>)?.result, issued);
+  return { ...base, ...times, status: result.status, result,
+    ...(result.status === "failed" ? { error: result.error ?? "The daemon could not run the action" } : {}) };
 }
 
 /** The owner's view of one worktree action; anything else reads as missing. */

@@ -55,24 +55,43 @@ export function statusColumns(settleParameter: number): string {
       AND created_at<=clock_timestamp()-($${settleParameter}::integer*interval '1 millisecond')) AS abandoned`;
 }
 
+/** When a Machine action was requested and, if it was, completed. */
+export function actionTimes(row: QueryResultRow): { requestedAt?: string; completedAt?: string } {
+  const at = (value: unknown) => value ? new Date(value as Date | string).toISOString() : undefined;
+  const requestedAt = at(row.created_at), completedAt = at(row.completed_at);
+  return { ...(requestedAt ? { requestedAt } : {}), ...(completedAt ? { completedAt } : {}) };
+}
+
 function harnessActionStatus(row: QueryResultRow): HarnessActionStatus {
   const issued = parseHarnessActionRequest(row.payload_json);
-  const requestedAt = row.created_at ? new Date(row.created_at as Date | string).toISOString() : undefined;
+  const { requestedAt, completedAt } = actionTimes(row);
   const base = { controlId: String(row.command_id), presetId: issued.presetId, action: issued.action,
     ...(requestedAt ? { requestedAt } : {}) };
-  const completedAt = row.completed_at ? new Date(row.completed_at as Date | string).toISOString() : undefined;
   if (row.status === "completed") {
     const result = parseHarnessActionResult((row.result_json as Record<string, unknown>)?.result, issued);
     return { ...base, status: result.status, result, ...(completedAt ? { completedAt } : {}),
       ...(result.status === "succeeded" ? {} : { error: boundedError(result) }) };
   }
-  if (row.status === "failed") return { ...base, status: "failed", error: "The daemon could not run the action",
+  return { ...base, ...unsettledActionStatus(row, "check the inventory to see what changed") };
+}
+
+/**
+ * A Machine action that has no completed result: failed delivery, expired
+ * before a daemon claimed it, abandoned by a daemon that stopped answering,
+ * or still queued or running. `recheck` tells the owner how to see what an
+ * abandoned action changed.
+ */
+export function unsettledActionStatus(row: QueryResultRow, recheck: string): {
+  status: "failed" | "expired" | "running" | "queued"; error?: string; completedAt?: string;
+} {
+  const { completedAt } = actionTimes(row);
+  if (row.status === "failed") return { status: "failed", error: "The daemon could not run the action",
     ...(completedAt ? { completedAt } : {}) };
-  if (row.status === "pending" && row.expired === true) return { ...base, status: "expired",
+  if (row.status === "pending" && row.expired === true) return { status: "expired",
     error: "The machine did not pick up the action within 10 minutes, so it was not run" };
-  if (row.abandoned === true) return { ...base, status: "expired",
-    error: "The machine stopped responding before it reported a result; check the inventory to see what changed" };
-  return { ...base, status: row.status === "leased" ? "running" : "queued" };
+  if (row.abandoned === true) return { status: "expired",
+    error: `The machine stopped responding before it reported a result; ${recheck}` };
+  return { status: row.status === "leased" ? "running" : "queued" };
 }
 
 /** The owner's view of one harness action; anything else reads as missing. */

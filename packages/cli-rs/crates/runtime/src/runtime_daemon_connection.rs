@@ -460,6 +460,38 @@ where
     })
 }
 
+/// Renew an owner action's lease while it runs; `None` when it cannot be held.
+async fn hold_owner_action_lease(
+    hub_url: &str,
+    relay: &SharedMachineDaemonConnection,
+    request_id: &str,
+    lease: &MachineDaemonCommandLease,
+    label: &str,
+) -> Option<DaemonCommandLeaseHeartbeat> {
+    let heartbeat = match relay.machine_credential() {
+        Ok(credential) => {
+            DaemonCommandLeaseHeartbeat::start(
+                hub_url,
+                &credential,
+                relay.clone(),
+                request_id,
+                lease,
+                false,
+                DaemonSpawnDelivery::Socket,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    match heartbeat {
+        Ok(heartbeat) => Some(heartbeat),
+        Err(error) => {
+            eprintln!("{} {label} lease could not be held: {error}", "⚠".yellow().bold());
+            None
+        }
+    }
+}
+
 /// An install may outlive the short admission lease. Renew it for the whole
 /// action, or the Hub would redeliver the command and the still-`Admitted`
 /// effect would run the recipe a second time. A redelivery that arrives while
@@ -481,31 +513,7 @@ async fn execute_leased_harness_action(
     };
     let _in_flight = runtime_daemon_harness_action::claim_request(&request_id)?;
     let lease = relay_lease.as_ref()?;
-    let heartbeat = match relay.machine_credential() {
-        Ok(credential) => {
-            DaemonCommandLeaseHeartbeat::start(
-                hub_url,
-                &credential,
-                relay.clone(),
-                &request_id,
-                lease,
-                false,
-                DaemonSpawnDelivery::Socket,
-            )
-            .await
-        }
-        Err(error) => Err(error),
-    };
-    let _heartbeat = match heartbeat {
-        Ok(heartbeat) => heartbeat,
-        Err(error) => {
-            eprintln!(
-                "{} harness action lease could not be held: {error}",
-                "⚠".yellow().bold()
-            );
-            return None;
-        }
-    };
+    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "harness action").await?;
     // Re-reading inventory or a registry changes nothing a redelivery could repeat.
     let result = if matches!(
         action,
@@ -560,31 +568,7 @@ async fn execute_leased_worktree_action(
         return None;
     };
     let lease = relay_lease.as_ref()?;
-    let heartbeat = match relay.machine_credential() {
-        Ok(credential) => {
-            DaemonCommandLeaseHeartbeat::start(
-                hub_url,
-                &credential,
-                relay.clone(),
-                &request_id,
-                lease,
-                false,
-                DaemonSpawnDelivery::Socket,
-            )
-            .await
-        }
-        Err(error) => Err(error),
-    };
-    let _heartbeat = match heartbeat {
-        Ok(heartbeat) => heartbeat,
-        Err(error) => {
-            eprintln!(
-                "{} worktree action lease could not be held: {error}",
-                "⚠".yellow().bold()
-            );
-            return None;
-        }
-    };
+    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "worktree action").await?;
     use xmatrix_repo_pool::machine_worktree_actions::{WorktreeActionKind, execute_worktree_action};
     let kind = match action {
         machine_daemon_connection::WorktreeAction::List => WorktreeActionKind::List,

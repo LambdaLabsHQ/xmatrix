@@ -41,14 +41,14 @@ test("Agent runs, bad input and offline Machines are refused before anything is 
   assert.equal((await agent.get("worktree:00000000-0000-4000-8000-000000000000")).status, 403);
   assert.equal((await agent.list("?machineId=machine:a")).status, 403);
   assert.deepEqual(agent.calls, []);
+  const statusOf = async (caller, body) => (await caller.post(body)).status;
   const owner = route({ id: "owner" });
-  for (const body of [{ machineId: "machine:a", action: "purge" }, { action: "list" },
-    { machineId: "machine:a", action: "reclaim" }, { machineId: "machine:a", action: "list", paths: ["/tmp"] }]) {
-    assert.equal((await owner.post(body)).status, 400, JSON.stringify(body));
-  }
+  const invalid = [{ machineId: "machine:a", action: "purge" }, { action: "list" },
+    { machineId: "machine:a", action: "reclaim" }, { machineId: "machine:a", action: "list", paths: ["/tmp"] }];
+  assert.deepEqual(await Promise.all(invalid.map(body => statusOf(owner, body))), [400, 400, 400, 400]);
   const offline = route({ id: "owner" }, { daemons: [{ ...daemon, status: "offline" }] });
-  assert.equal((await offline.post({ machineId: "machine:a", action: "list" })).status, 409);
-  for (const caller of [owner, offline]) assert.equal(caller.calls.some(call => call.name === "issue"), false);
+  assert.equal(await statusOf(offline, { machineId: "machine:a", action: "list" }), 409);
+  assert.deepEqual([...owner.calls, ...offline.calls].filter(call => call.name === "issue"), []);
   assert.equal((await owner.get("harness:00000000-0000-4000-8000-000000000000")).status, 404);
 });
 
