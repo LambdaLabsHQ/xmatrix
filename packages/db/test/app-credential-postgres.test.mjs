@@ -122,6 +122,36 @@ integration("event routes are the configured connection's Channels subscribed to
   });
 });
 
+integration("GitHub routes require their creator's current user append capability", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await addConnection(sql, space, "github");
+    await sql(`UPDATE data.app_connector_connections SET metadata_json='{"installationId":"42"}'
+      WHERE connection_id=$1`, [`${space}:github`]);
+    await sql(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at)
+      VALUES ($1,'viewer','viewer',1,$2,$2)`, [space, at]);
+    const sourceRef = "github:issue:acme/app#7";
+    for (const [name, creator, mode] of [["owner", "owner", "closed"], ["member", "member", "open"],
+      ["legacy", "agent:retired", "open"], ["viewer", "viewer", "open"], ["private", "member", "closed"]]) {
+      await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,
+        version,created_at,updated_at) VALUES ($1,$2,$3,$3,$4,$1,1,$5,$5)`,
+      [`${space}:${name}`, space, name, mode, at]);
+      await sql(`INSERT INTO data.app_source_relations (relation_id,connection_id,space_id,channel_id,
+        source_kind,source_ref,features_json,version,created_by,created_at,updated_at)
+        VALUES ($1,$2,$3,$4,'issue',$5,'["pulls"]',1,$6,$7,$7)`,
+      [`${space}:relation:${name}`, `${space}:github`, space, `${space}:${name}`, sourceRef, creator, at]);
+    }
+    const routes = () => new PostgresAppRepository(database).githubSubscriptionRoutes({
+      requestId: crypto.randomUUID(), installationId: "42", sourceRefs: [sourceRef], feature: "pulls", limit: 20 });
+    const creators = async () => (await routes()).map(route => route.authorityRootUserId).sort();
+    assert.deepEqual(await creators(), ["member", "owner"],
+      "legacy Agent identities, viewers and ungranted closed Channels cannot act as users");
+    await sql("DELETE FROM data.space_members WHERE space_id=$1 AND user_id='member'", [space]);
+    assert.deepEqual(await creators(), ["owner"], "membership revocation invalidates existing subscriptions");
+    assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_source_relations WHERE space_id=$1",
+      [space])).rows[0].n, 5, "invalid subscriptions remain stored without being dispatched");
+  });
+});
+
 integration("a Channel's connection list reads subscriptions and credentials in batches, not per connection", async () => {
   await withDatabase(async ({ sql, database, space }) => {
     /* XMATRIX-HUB-4S: each connection's details were read one query at a time on
@@ -855,4 +885,3 @@ integration("a GitHub install appends its installation and keeps every other ins
     await assert.rejects(upsert("not-a-list", { metadataAppend: { repository: "x/y" } }), error => error.status === 400);
   });
 });
-
