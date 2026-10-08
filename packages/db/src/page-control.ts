@@ -1521,12 +1521,12 @@ export class PostgresPageRepository {
    * The Agents on each page now, for the page tree and the page itself:
    * every Agent live in a conversation whose current Run read or edited the
    * page (its link was seen after the Instance started), with the section it
-   * last touched; and how many conversations are about each page, as its
-   * margin counts them. Derived, never stored; only pages and conversations
-   * this reader may open are described.
+   * last touched; and each page's open discussions, newest first. Derived,
+   * never stored; only pages and conversations this reader may open are
+   * described.
    */
   async agentsOnPages(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
-    Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; conversations: number }> }> {
+    Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; discussions: string[] }> }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.agents", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
@@ -1550,19 +1550,24 @@ export class PostgresPageRepository {
           LIMIT ${MAX_LINKS}`,
         values: [spaceId, actor.userId], maxRows: MAX_LINKS,
       });
-      const counted = await tx.query<QueryResultRow & { page_id: string; conversations: string | number }>({
-        name: "page_conversation_counts_v1",
-        text: `SELECT pl.page_id, count(DISTINCT pl.conversation_id) AS conversations
+      // A discussion is open until its outcome is written into the page; the others wait on nobody.
+      const open = await tx.query<QueryResultRow & { page_id: string; conversation_id: string }>({
+        name: "page_open_discussions_v1",
+        text: `SELECT pl.page_id, pl.conversation_id, max(pl.last_seen_at) AS seen
           FROM data.page_links pl
           JOIN data.channels c ON c.space_id=pl.space_id AND c.channel_id=pl.conversation_id
-          WHERE pl.space_id=$1
+          WHERE pl.space_id=$1 AND pl.anchor_json IS NOT NULL AND pl.resolved_at IS NULL
             AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
               principalKindSql: "'user'", principalIdSql: "$2" })}
-          GROUP BY pl.page_id`,
-        values: [spaceId, actor.userId], maxRows: MAX_PAGES,
+          GROUP BY pl.page_id, pl.conversation_id
+          ORDER BY seen DESC
+          LIMIT ${MAX_LINKS}`,
+        values: [spaceId, actor.userId], maxRows: MAX_LINKS,
       });
-      const conversationsOf = new Map(counted.filter((row) => readable.has(row.page_id))
-        .map((row) => [row.page_id, Number(row.conversations)]));
+      const discussionsOf = new Map<string, string[]>();
+      for (const row of open.filter((item) => readable.has(item.page_id))) {
+        discussionsOf.set(row.page_id, [...(discussionsOf.get(row.page_id) ?? []), row.conversation_id]);
+      }
       const visible = rows.filter((row) => readable.has(row.page_id));
       const presence = await loadChannelAgentPresence(tx, spaceId, visible.map((row) => row.conversation_id));
       const byPage = new Map<string, PageTreeAgent[]>();
@@ -1585,9 +1590,29 @@ export class PostgresPageRepository {
           }
         }
       }
-      const pageIds = new Set([...byPage.keys(), ...conversationsOf.keys()]);
+      // The section an Agent is in, by its heading, read from the page's head.
+      const sectioned = tree.filter((row) => byPage.get(row.page_id)?.some((agent) => agent.blockId));
+      if (sectioned.length > 0) {
+        const heads = await tx.query<QueryResultRow & { page_id: string; body: string | null }>({
+          name: "page_agent_sections_v1",
+          text: `SELECT r.page_id, r.body FROM data.page_revisions r
+            JOIN unnest($2::text[], $3::bigint[]) AS head(page_id, revision)
+              ON r.page_id=head.page_id AND r.revision=head.revision
+            WHERE r.space_id=$1`,
+          values: [spaceId, sectioned.map((row) => row.page_id), sectioned.map((row) => String(row.head_revision))],
+          maxRows: sectioned.length,
+        });
+        for (const head of heads) {
+          const titles = new Map(pageBlocks(canonicalPageMarkdown(head.body ?? "")).map((block) => [block.id, block.title]));
+          for (const agent of byPage.get(head.page_id) ?? []) {
+            const section = agent.blockId ? titles.get(agent.blockId) : undefined;
+            if (section) agent.section = section;
+          }
+        }
+      }
+      const pageIds = new Set([...byPage.keys(), ...discussionsOf.keys()]);
       return { pages: [...pageIds].map((pageId) => ({ pageId, agents: byPage.get(pageId) ?? [],
-        conversations: conversationsOf.get(pageId) ?? 0 })) };
+        discussions: discussionsOf.get(pageId) ?? [] })) };
     });
   }
 }

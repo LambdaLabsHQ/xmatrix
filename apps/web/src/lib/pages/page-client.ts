@@ -2,13 +2,13 @@ import {
   DEFAULT_HUB_URL, PAGE_DOCUMENT_FRAGMENT, WEB_PROXY_ROUTES, normalizeHubUrl,
   type AutomationTrigger, type PageAwareness, type PageClaim, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
-  type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeAgent,
+  type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
 
 export type {
   PageAwareness, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
-  PageSummary, PageTreeAgent,
+  PageSummary, PageTreeActivity, PageTreeAgent,
 };
 import * as decoding from "lib0/decoding";
 import { encodePageSync, encodePageAwareness, readPageSyncReply } from "./page-sync-codec";
@@ -94,7 +94,7 @@ export const pageApi = {
       token, signal,
     }),
   agents: (spaceId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; conversations?: number }> }>({
+    xmatrixApiRequest<{ pages: PageTreeActivity[] }>({
       url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
   // A page's Automations (docs/design/pages-live-document.md §6).
   automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
