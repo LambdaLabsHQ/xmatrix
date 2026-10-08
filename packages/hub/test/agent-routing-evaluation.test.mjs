@@ -39,12 +39,36 @@ test('an answer outside the finite candidate list is rejected', async () => {
 });
 
 test('deadline aborts even an evaluator that ignores its signal', async () => {
-  let signal;
+  const signals = [];
   await assert.rejects(evaluateRoutingChoices(input(1), async (_request, options) => {
-    signal = options.signal;
+    signals.push(options.signal);
     return new Promise(() => {});
   }, { budgetMs: 20 }), error => error.code === 'jev_aborted' && error.reason === 'timeout');
-  assert.equal(signal.aborted, true);
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every(signal => signal.aborted));
+});
+
+test('a timed-out attempt retries the identical choice once with a fresh deadline', async () => {
+  const request = input(2);
+  const received = [], signals = [], events = [];
+  const evaluate = Object.assign(async (value, options) => {
+    received.push(value); signals.push(options.signal);
+    if (received.length === 1) return new Promise(() => {});
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return answer(value, 'candidate_1');
+  }, { recordDecision: async event => { events.push(event.status); } });
+  const result = await evaluateRoutingChoices(request, evaluate, { budgetMs: 40 });
+  assert.equal(result.environment.choice, 'candidate_1');
+  assert.deepEqual(received, [request, request]);
+  assert.equal(signals[0].aborted, true);
+  assert.deepEqual(events, ['started', 'succeeded']);
+  let calls = 0;
+  const reported = await evaluateRoutingChoices(request, async value => {
+    if (++calls === 1) throw Object.assign(new Error('provider timed out'), { code: 'jev_aborted' });
+    return answer(value, 'candidate_0');
+  });
+  assert.equal(reported.environment.choice, 'candidate_0');
+  assert.equal(calls, 2);
 });
 
 test('an unclassified provider failure is surfaced without another model call', async () => {

@@ -73,8 +73,9 @@ export function validateRoutingChoice(value: unknown, options: string[], questio
 }
 
 /** One read-only choice compares the complete authorized candidate set within a deadline.
- * A transient gateway failure may retry the identical finite request once;
- * no allocation, fallback launch or synthetic probability occurs. */
+ * A transient gateway failure or a timed-out attempt may retry the identical
+ * finite request once, with a fresh deadline; no allocation, fallback launch or
+ * synthetic probability occurs. */
 export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingEvaluator,
   { budgetMs = 10_000 }: { budgetMs?: number } = {}): Promise<Record<string, RoutingChoice>> {
   if (!Number.isInteger(budgetMs) || budgetMs < 1 || budgetMs > 10_000) throw new Error("Invalid routing budget");
@@ -104,20 +105,24 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
   };
   const decisionId = crypto.randomUUID();
   await persist({ decisionId, at: new Date().toISOString(), status: "started", input });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), budgetMs);
+  // Each attempt has its own deadline; the last one decides whether the failure was a timeout.
+  let controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const invoke = async (request: JevInput) => {
     assertSize(request);
-    controller.signal.throwIfAborted();
+    controller = new AbortController();
+    const { signal } = controller;
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), budgetMs);
     let onAbort!: () => void;
     const interrupted = new Promise<never>((_, reject) => {
       onAbort = () => reject(new Error("Routing evaluation interrupted"));
-      controller.signal.addEventListener("abort", onAbort, { once: true });
+      signal.addEventListener("abort", onAbort, { once: true });
     });
     try {
-      return await Promise.race([evaluate(request, { signal: controller.signal }), interrupted]);
+      return await Promise.race([evaluate(request, { signal }), interrupted]);
     } finally {
-      controller.signal.removeEventListener("abort", onAbort);
+      signal.removeEventListener("abort", onAbort);
     }
   };
   let phase: "provider_error" | "invalid_answer" = "provider_error";
@@ -128,8 +133,10 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
     try { result = await invoke(input); }
     catch (error) {
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-      if (controller.signal.aborted || code !== "jev_evaluation_failed" && code !== "jev_rate_limited") throw error;
-      await new Promise(resolve => setTimeout(resolve, 200));
+      const timedOut = controller.signal.aborted || code === "jev_aborted";
+      if (!timedOut && code !== "jev_evaluation_failed" && code !== "jev_rate_limited") throw error;
+      controller.abort();
+      if (!timedOut) await new Promise(resolve => setTimeout(resolve, 200));
       result = await invoke(input);
     }
     phase = "invalid_answer";
