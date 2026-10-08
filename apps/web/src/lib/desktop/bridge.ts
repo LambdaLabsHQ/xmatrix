@@ -53,7 +53,21 @@ export type DesktopRuntimeCheckResult = {
   error?: string;
 };
 
+export type ApplePurchaseTransaction = {
+  transactionId: string;
+  originalTransactionId: string;
+  productId: string;
+  environment: "Production" | "Sandbox";
+};
+
 export type DesktopBridge = {
+  appleProducts?: (productIds: string[]) => Promise<{ id: string; displayName: string; displayPrice: string }[]>;
+  applePurchase?: (input: { productId: string; appAccountToken: string; productIds: string[] }) => Promise<{
+    status: "purchased" | "pending" | "cancelled"; transaction?: ApplePurchaseTransaction;
+  }>;
+  applePurchases?: (input: { productIds: string[]; restore: boolean }) => Promise<ApplePurchaseTransaction[]>;
+  appleFinish?: (transactionId: string) => Promise<void>;
+  appleManage?: () => Promise<void>;
   client?: NativeBridgeClient;
   platform: NativeBridgePlatform;
   getContext: () => Promise<DesktopContext>;

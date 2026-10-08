@@ -212,6 +212,9 @@ export const HUB_ROUTES = {
   space_billing_checkout: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/checkout`,
   space_billing_portal: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/portal`,
   space_billing_reconcile: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/reconcile`,
+  space_billing_apple: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/apple`,
+  space_billing_apple_prepare: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/apple/prepare`,
+  space_billing_apple_reconcile: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/apple/reconcile`,
   stripe_billing_webhook: "/api/billing/stripe/webhook",
   /** Starts an Agent session that refreshes one Channel About. */
   space_channel_about: (spaceId: string) =>
@@ -411,6 +414,9 @@ export const WEB_PROXY_ROUTES = {
   space_billing_checkout: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/checkout`,
   space_billing_portal: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/portal`,
   space_billing_reconcile: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/reconcile`,
+  space_billing_apple: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/apple`,
+  space_billing_apple_prepare: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/apple/prepare`,
+  space_billing_apple_reconcile: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/apple/reconcile`,
   space_member_permissions: (spaceId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/member-permissions`,
   space_channel_about: (spaceId: string) =>
