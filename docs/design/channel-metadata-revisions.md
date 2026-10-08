@@ -50,10 +50,13 @@ pending trigger message rather than substituting the original one.
 ## Direct About submission
 
 The generated summary and optional automatic title are sent directly through
-`xmatrix channel about <id> --stdin --through <message-id> --expected-revision N`.
+`xmatrix channel about <id> --summary "<text>" [--name "<title>"]
+--through <message-id> --expected-revision N`.
+The new CLI also accepts the same text as JSON with `--stdin`.
 Stdin is a UTF-8 JSON object containing `summary` and optional `name` only;
-Unicode escapes preserve text across Windows shell code pages. Inline
-`--summary` and `--name` remain available. No local files are written or read:
+On Windows, ASCII-only PowerShell source can decode JSON Unicode escapes
+with `ConvertFrom-Json` and pass Unicode native arguments; ASCII-only JSON
+escapes also work with stdin. No local files are written or read:
 `--summary-file` and `--name-file` have been removed, along with the file-age
 check. Input is bounded to 64 KiB and malformed or unsupported fields are
 refused before the Hub update.
@@ -61,8 +64,9 @@ refused before the Hub update.
 The CLI forwards the text to the existing scoped Channel PATCH. The Hub's
 transaction updates the database row and appends its immutable revision and
 recorded input evidence. This changes input transport, not database or Run
-authority. Hub prompts and CLI ship together; daemons must use the updated CLI
-for the new `--stdin` command. An older prompt using file flags is rejected by
+authority. Hub prompts and CLI ship together. Prompts default to existing
+inline arguments so daemons awaiting CLI updates still work, and offer JSON
+stdin only when the CLI advertises support. An older prompt using file flags is rejected by
 the new CLI rather than reading a residual file.
 
 ## Reading and restoring

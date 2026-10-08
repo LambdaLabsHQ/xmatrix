@@ -283,7 +283,9 @@ test("implicit Channel About starts a silent one-shot session through ordinary r
   assert.match(launch.body, /`xmatrix channel history ch-1 --authoritative`/u);
   // The summary goes directly to the owning Hub; no local file can be reused.
   assert.match(launch.body, /`xmatrix channel about ch-1 --stdin --through </u);
-  assert.match(launch.body, /Pipe one JSON object containing "summary" to stdin/u);
+  assert.match(launch.body, /`xmatrix channel about ch-1 --summary "<summary>" --through </u);
+  assert.match(launch.body, /If this CLI's help advertises --stdin/u);
+  assert.match(launch.body, /pipe one JSON object containing "summary"/u);
   assert.match(launch.body, /do not write or read any intermediate file/u);
   assert.match(launch.body, /JSON Unicode escapes/u);
   assert.doesNotMatch(launch.body, /--summary-file|--name-file|xmatrix-about-/u);
@@ -315,7 +317,8 @@ test("a conversation's first message names it only while nobody has named it", a
   const automatic = await run({ autoName: true });
   assert.equal(automatic.result.spawned, 1);
   assert.match(automatic.launches[0].body, /Nobody has named this Channel yet/u);
-  assert.match(automatic.launches[0].body, /Pipe one JSON object containing "summary" and "name" to stdin/u);
+  assert.match(automatic.launches[0].body, /--summary "<summary>" --name "<name>"/u);
+  assert.match(automatic.launches[0].body, /pipe one JSON object containing "summary" and "name"/u);
   assert.doesNotMatch(automatic.launches[0].body, /--summary-file|--name-file/u);
 });
 
