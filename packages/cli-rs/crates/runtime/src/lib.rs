@@ -102,6 +102,7 @@ mod runtime_claude_stream_session;
 mod runtime_claude_turn;
 mod runtime_codex_turn_errors;
 mod runtime_connector_mcp;
+mod runtime_harness_questions;
 mod runtime_headless_runs;
 mod runtime_presence_updates;
 mod runtime_trusted_role_prompt;

@@ -90,3 +90,9 @@ apps/web/e2e/.shared-browser/
 wrangler.generated.*
 # Local full stack state (scripts/dev-stack.mjs)
 .xmatrix-dev/
+
+# Apple signing keys and private App Review material never belong in this public repository.
+*.p8
+*.p12
+*.mobileprovision
+apps/ios/app-store/private/

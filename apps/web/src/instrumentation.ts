@@ -1,5 +1,6 @@
 import type { Instrumentation } from "next";
 
+import { isClientDisconnect } from "./lib/error-noise";
 import { webErrorReporting } from "./lib/server-error-reporting";
 
 export async function register() {
@@ -8,6 +9,7 @@ export async function register() {
 
 /** A server error Next.js answers itself, sent before the Worker invocation ends. */
 export const onRequestError: Instrumentation.onRequestError = async (error) => {
+  if (isClientDisconnect(error)) return;
   const reporting = await webErrorReporting();
   if (!reporting) return;
   reporting.reportError(error);

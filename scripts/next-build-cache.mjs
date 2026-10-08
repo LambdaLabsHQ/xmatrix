@@ -26,9 +26,11 @@ export function nextBuildCacheDir(env = process.env, home = os.homedir()) {
 }
 
 function directoryBytes(directory) {
-  const result = spawnSync("du", ["-sb", directory], { encoding: "utf8" });
-  const bytes = Number(result.stdout?.split(/\s+/u)[0]);
-  return Number.isFinite(bytes) ? bytes : 0;
+  // POSIX -sk works on both the Linux CI runners and BSD/macOS du. GNU -b
+  // was rejected on macOS and silently treated an oversized cache as empty.
+  const result = spawnSync("du", ["-sk", directory], { encoding: "utf8", timeout: 10_000 });
+  const kibibytes = Number(result.stdout?.trim().split(/\s+/u)[0]);
+  return result.status === 0 && Number.isFinite(kibibytes) ? kibibytes * 1024 : Infinity;
 }
 
 function move(from, to) {

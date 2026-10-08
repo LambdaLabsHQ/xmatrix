@@ -14,8 +14,14 @@ integration("Machine resource history is owner-scoped, rolled up hourly and prun
       CREATE TABLE data.machines (owner_user_id text, machine_id text);
       INSERT INTO data.machines VALUES ('alice','machine:a'), ('bob','machine:b');`);
     await client.query(await readFile(new URL("../migrations/0165_expand_machine_resource_history.sql", import.meta.url), "utf8"));
+    // Holds each query to the Hub client's contract: at most 10000 result rows, and no more than it declared.
     const database = { transaction: async (_context, callback) =>
-      callback({ query: async ({ text, values }) => (await client.query(text, values)).rows }) };
+      callback({ query: async ({ text, values, maxRows }) => {
+        assert.ok(Number.isSafeInteger(maxRows) && maxRows >= 0 && maxRows <= 10_000, `maxRows ${maxRows} is outside the client contract`);
+        const { rows } = await client.query(text, values);
+        assert.ok(rows.length <= maxRows);
+        return rows;
+      } }) };
 
     const now = Date.parse("2026-10-07T12:30:00Z");
     const insert = (owner, machine, at, cpu, memoryAvailable) => client.query(`INSERT INTO

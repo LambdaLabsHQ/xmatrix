@@ -60,7 +60,9 @@ test("scheduled maintenance runs once an hour, at its minute", async () => {
   await maintainMachineResourceHistoryOnSchedule(ENV, Date.parse("2026-10-07T12:06:00Z"), database({}, queries));
   assert.equal(queries.length, 0);
   await maintainMachineResourceHistoryOnSchedule(ENV, Date.parse("2026-10-07T12:07:00Z"), database({}, queries));
-  assert.deepEqual(queries.map(query => query.name), ["machine_resource_history_rollup_v1",
-    "machine_resource_history_prune_samples_v1", "machine_resource_history_prune_hours_v1"]);
+  assert.deepEqual(queries.map(query => query.name), ["machine_resource_history_rollup_v2",
+    "machine_resource_history_prune_samples_v2", "machine_resource_history_prune_hours_v2"]);
+  // The Hub's database client refuses a query that may answer more than 10000 rows.
+  assert.ok(queries.every(query => query.maxRows >= 0 && query.maxRows <= 10_000));
   assert.equal(queries[0].values[0], "2026-10-07T12:07:00.000Z");
 });

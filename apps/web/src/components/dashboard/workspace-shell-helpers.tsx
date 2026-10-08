@@ -96,6 +96,7 @@ import type {
   SerializedWorkspace,
 } from "@xmatrix/protocol";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
+import type { QuestionnaireAnswer } from "./questionnaire-card";
 
 // Split from workspace-shell-helpers.tsx (size guard)
 
@@ -644,7 +645,7 @@ export type MessageRowComparableProps = {
   onMentionSender: (message: TimelineItem) => void;
   onRebornSender: (message: TimelineItem) => void;
   reborningSender: boolean;
-  onQuestionnaireAnswer: (message: TimelineItem, answer: string) => void;
+  onQuestionnaireAnswer: (message: TimelineItem, answer: QuestionnaireAnswer) => Promise<boolean>;
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
   onOpenInternalAppLink: (href: string) => boolean;
   onJumpToMessage: (messageId: string, sequence?: number) => void;

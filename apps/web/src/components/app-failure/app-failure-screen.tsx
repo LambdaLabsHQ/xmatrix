@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-
-/** A deploy replaced the scripts this page was built against; only a reload fetches the new ones. */
-function isStaleBuild(error: Error): boolean {
-  return error.name === "ChunkLoadError" || /Loading (?:CSS )?chunk [\w-]+ failed|Failed to fetch dynamically imported module/u.test(error.message);
-}
+import { isStaleBuild } from "@/lib/error-noise";
 
 /**
  * What a person sees when a screen fails to render: what happened in plain

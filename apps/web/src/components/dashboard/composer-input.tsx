@@ -324,6 +324,8 @@ function ComposerInputSurface({
             title={sendTitle ?? "Send"}
             aria-label={sendTitle ?? "Send"}
             disabled={disabled || !enabled || !readyToSend || sending}
+            // Pressing Send leaves focus in the textarea, not on the button.
+            onMouseDown={(event) => event.preventDefault()}
             onClick={
               compact
                 ? undefined

@@ -2638,17 +2638,29 @@ async fn submit_acp_turn_interruptible(
         }) {
             return true;
         }
+        // A card answer goes to the question the agent waits on, and the
+        // turn carries on.
+        if let Some(reply) = crate::runtime_harness_questions::questionnaire_reply(event)
+            && interrupter.answer_question(&reply).await
+        {
+            if let Some(relay) = relay {
+                crate::runtime_harness_questions::ack_questionnaire_reply(relay, &reply);
+            }
+            return true;
+        }
         if event_requests_active_turn_interrupt_with_replay(
             event,
             trace_channel_id,
             Some(agent.id.as_str()),
             interrupt_history_replay,
-        ) && let Err(err) = interrupter.interrupt_active_turn().await
-        {
-            eprintln!(
-                "{} {display_name} ACP interrupt failed: {err}",
-                "⚠".yellow().bold()
-            );
+        ) {
+            interrupter.cancel_questions().await;
+            if let Err(err) = interrupter.interrupt_active_turn().await {
+                eprintln!(
+                    "{} {display_name} ACP interrupt failed: {err}",
+                    "⚠".yellow().bold()
+                );
+            }
         }
         false
     })
@@ -2701,12 +2713,43 @@ enum AcpTransportKind {
 struct AcpInterrupter {
     write: AppServerWrite,
     session_id: String,
+    questions: crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,
 }
 
 impl AcpInterrupter {
+    /// Answer the elicitation `reply` is for. False when none is parked (the
+    /// card outlived its turn): the reply is then an ordinary message.
+    pub(crate) async fn answer_question(
+        &self,
+        reply: &crate::runtime_harness_questions::QuestionnaireReply,
+    ) -> bool {
+        let Some((id, params)) = self.questions.take(&reply.request_key) else {
+            return false;
+        };
+        let result = crate::runtime_harness_questions::acp_answer_content(&params, &reply.answers);
+        write_acp_message(&self.write, &acp_result(id, result))
+            .await
+            .is_ok()
+    }
+
+    /// Cancel every parked elicitation: the person typed a message instead.
+    pub(crate) async fn cancel_questions(&self) {
+        for (id, _) in self.questions.drain() {
+            let _ = write_acp_message(
+                &self.write,
+                &acp_result(id, serde_json::json!({ "action": "cancel" })),
+            )
+            .await;
+        }
+    }
+
     pub(crate) async fn interrupt_active_turn(&self) -> error::Result<()> {
         write_acp_message(&self.write, &acp_cancel_notification(&self.session_id)).await
     }
+}
+
+fn acp_result(id: Value, result: Value) -> Value {
+    serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
 fn acp_cancel_notification(session_id: &str) -> Value {
@@ -2956,6 +2999,9 @@ struct AcpSession {
     config: AcpVendorConfig,
     /// The plan outlives a turn, so what it already reported does too.
     activity: ChannelActivityReporter,
+    /// elicitation/create requests parked until their card is answered: the
+    /// JSON-RPC id and params, by request key.
+    questions: crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,
 }
 
 fn acp_session_new_params(workspace_path: &str, trusted_rules: Option<&str>) -> Value {
@@ -2981,6 +3027,8 @@ fn acp_initialize_params() -> Value {
         "protocolVersion": 1,
         "clientCapabilities": {
             "session": { "configOptions": { "boolean": {} }, "notices": {} },
+            // Form elicitations are the agent's own questions: shown as cards.
+            "elicitation": { "form": {} },
             "_meta": {
                 "parameterizedModelPicker": true
             }
