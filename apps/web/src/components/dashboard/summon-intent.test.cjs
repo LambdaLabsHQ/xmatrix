@@ -80,3 +80,14 @@ test("Start anyway writes force only after the selected declined summon and refu
   assert.equal(forceDraftSummon(`prefix ${body}`, reading), undefined);
   assert.equal(forceDraftSummon(body, { ...reading, start: -1 }), undefined);
 });
+
+test("Start anyway separates the force condition from punctuation after the address", () => {
+  const { parseAutoLaunchMentions } = require("@xmatrix/protocol");
+  for (const body of ["@claude, was the heading", "@claude; then the report"]) {
+    const next = forceDraftSummon(body, { start: 0, end: 7, mention: "@claude", choice: "explanation" });
+    const [mention] = parseAutoLaunchMentions(next.body);
+    assert.equal(mention.tags.launch, "force");
+    assert.equal(mention.error, undefined);
+    assert.equal(next.body.slice(next.caret), body.slice(7));
+  }
+});

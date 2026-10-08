@@ -50,7 +50,9 @@ export function draftSummonRanges(body: string,
  * sent message carries the same instruction on every client and launch path. */
 export function forceDraftSummon(body: string, reading: DraftSummonIntent): { body: string; caret: number } | undefined {
   if (reading.start < 0 || reading.end > body.length || body.slice(reading.start, reading.end) !== reading.mention) return undefined;
-  const insert = " launch:force";
+  // A condition ends at whitespace: punctuation immediately after the
+  // address must not become part of the new `force` value.
+  const insert = " launch:force" + (body[reading.end] && !/\s/u.test(body[reading.end]!) ? " " : "");
   return { body: body.slice(0, reading.end) + insert + body.slice(reading.end), caret: reading.end + insert.length };
 }
 
