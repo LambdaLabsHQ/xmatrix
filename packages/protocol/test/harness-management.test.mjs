@@ -134,8 +134,8 @@ test("a remote sign-in carries a pasted code only on login_finish and answers wi
 
 test("sign-in is offered exactly for presets with an official headless sign-in", () => {
   const signIn = AGENT_PRESETS.filter(preset => harnessActionAvailable(preset.management, "login_start")).map(preset => preset.id);
-  assert.deepEqual(signIn.sort(), ["claude", "codex", "copilot", "cursor", "grok", "hermes", "kimi", "kiro", "opencode",
-    "zcode"]);
+  assert.deepEqual(signIn.sort(), ["claude", "cline", "codex", "copilot", "cursor", "grok", "hermes", "jcode", "kilo", "kimi",
+    "kiro", "opencode", "qoder", "zcode"]);
   for (const preset of AGENT_PRESETS) {
     const login = preset.management.login;
     if (!login) continue;

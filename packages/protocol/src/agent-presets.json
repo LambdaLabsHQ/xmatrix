@@ -1187,6 +1187,19 @@
           "args": ["uninstall", "-g", "@qoder-ai/qodercli"]
         }
       },
+      "login": {
+        "flow": "device_code",
+        "start": {
+          "command": "qodercli",
+          "args": ["login"]
+        },
+        "urlRegex": "(https://qoder\\.com/device/\\S+)",
+        "status": {
+          "command": "qodercli",
+          "args": ["status", "-o", "json"],
+          "signedInRegex": "\"logged_in\"\\s*:\\s*true"
+        }
+      },
       "autoUpdate": {
         "behavior": "unknown",
         "controls": [],
@@ -1438,6 +1451,15 @@
           "args": ["uninstall", "-g", "cline"]
         }
       },
+      "login": {
+        "flow": "device_code",
+        "start": {
+          "command": "cline",
+          "args": ["auth", "cline"]
+        },
+        "urlRegex": "(https://authkit\\.cline\\.bot/device\\S*)",
+        "codeRegex": "Enter this code in your browser:\\s*([A-Z0-9]{4}-[A-Z0-9]{4})"
+      },
       "autoUpdate": {
         "behavior": "unknown",
         "controls": [],
@@ -1497,6 +1519,20 @@
         "windows": {
           "command": "npm",
           "args": ["uninstall", "-g", "@kilocode/cli"]
+        }
+      },
+      "login": {
+        "flow": "device_code",
+        "start": {
+          "command": "kilo",
+          "args": ["auth", "login", "-p", "kilo"]
+        },
+        "urlRegex": "Go to:\\s*(https://\\S+)",
+        "codeRegex": "enter code:\\s*([A-Z0-9]{4}-[A-Z0-9]{4})",
+        "status": {
+          "command": "kilo",
+          "args": ["auth", "list"],
+          "signedInRegex": "\\b[1-9]\\d* credentials?\\b"
         }
       },
       "autoUpdate": {
@@ -1739,6 +1775,18 @@
       "uninstall": {
         "unix": null,
         "windows": null
+      },
+      "login": {
+        "flow": "device_code",
+        "start": {
+          "command": "jcode",
+          "args": ["account", "login"]
+        },
+        "urlRegex": "(https://jcode\\.sh/account\\?flow=\\S+)",
+        "status": {
+          "command": "jcode",
+          "args": ["account", "status"]
+        }
       },
       "autoUpdate": {
         "behavior": "automatic",
