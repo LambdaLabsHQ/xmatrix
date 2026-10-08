@@ -12,8 +12,8 @@ use regex::Regex;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::ChildStdin;
 use tokio::sync::{oneshot, watch};
-use xmatrix_cli_agent::AgentPreset;
 use xmatrix_cli_agent::management::{HarnessLogin, LoginFlow};
+use xmatrix_cli_agent::AgentPreset;
 use xmatrix_cli_core::machine_daemon_connection::{
     HarnessAction, HarnessActionResult, HarnessActionStatus, HarnessLoginProgress,
     HarnessLoginState,
@@ -508,6 +508,45 @@ mod tests {
         );
         assert_eq!(code, None);
         assert_eq!(login("claude").flow, LoginFlow::UrlPasteCode);
+    }
+
+    #[test]
+    fn acp_harness_device_sign_ins_are_read_from_their_real_output() {
+        // Captured from each CLI's sign-in with no terminal and no browser.
+        for (id, output, url, code) in [
+            (
+                "qoder",
+                "Starting browser login...\n\nPlease open the following URL in your browser to sign in:\n\n  https://qoder.com/device/selectAccounts?challenge=ySHQ&challenge_method=S256\n\nWaiting for browser authorization...\n",
+                "https://qoder.com/device/selectAccounts?challenge=ySHQ&challenge_method=S256",
+                None,
+            ),
+            (
+                "cline",
+                "[auth] Enter this code in your browser: VXJH-ZKMH\n[auth] https://authkit.cline.bot/device?user_code=VXJH-ZKMH\n[auth] Could not open browser automatically; open the URL above manually.\n",
+                "https://authkit.cline.bot/device?user_code=VXJH-ZKMH",
+                Some("VXJH-ZKMH"),
+            ),
+            (
+                "kilo",
+                "\u{250c}  Add credential\n\u{2502}\n\u{25cf}  Go to: https://app.kilo.ai/device-auth?code=V2YJ-KXLA\n\u{2502}\n\u{25cf}  Open https://app.kilo.ai/device-auth?code=V2YJ-KXLA and enter code: V2YJ-KXLA\n\u{25d2}  Waiting for authorization",
+                "https://app.kilo.ai/device-auth?code=V2YJ-KXLA",
+                Some("V2YJ-KXLA"),
+            ),
+            (
+                "jcode",
+                "Jcode Account Login\n  Opening the secure account approval page:\n  https://jcode.sh/account?flow=c6578cb7-4fc5-4dff-aa1b-095c2818c5d1\n  Waiting for browser approval. Press Ctrl-C to cancel...\n",
+                "https://jcode.sh/account?flow=c6578cb7-4fc5-4dff-aa1b-095c2818c5d1",
+                None,
+            ),
+        ] {
+            let text = plain_output(output.as_bytes());
+            assert_eq!(
+                prompt(login(id), &text),
+                Some((url.to_string(), code.map(str::to_string))),
+                "{id}"
+            );
+            assert_eq!(login(id).flow, LoginFlow::DeviceCode, "{id}");
+        }
     }
 
     #[test]
