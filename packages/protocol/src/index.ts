@@ -193,7 +193,7 @@ export {
   parseLaunchParameterEvidence,
 } from "./launch-parameter-evidence.js";
 export type {
-  LaunchDecisionStage, LaunchParameterEvidence,
+  LaunchDecisionStage, LaunchHarnessFit, LaunchParameterEvidence, LaunchPlacementCandidate,
 } from "./launch-parameter-evidence.js";
 export {
   currentRoutingQuotaWindows, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,

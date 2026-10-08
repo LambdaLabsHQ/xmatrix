@@ -34,13 +34,13 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
+import { AGENT_USAGE_REFRESH_MS, agentUsageGlance, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
 import { HarnessSignInSection } from "./harness-sign-in";
 import { IdentityAvatar } from "./identity-avatar";
 import { MachineGlyph } from "./machine-glyph";
-import { MeterReadingList } from "./machine-load-panel";
+import { MachineLoadGlanceBars, MeterReadingList } from "./machine-load-panel";
 import { machineOs } from "./machine-os";
 import {
   MY_AGENT_ACTION_LABEL,
@@ -136,6 +136,7 @@ export function MyAgentsView({
     rows: group.locations.filter(registrationListed).map((registration) => ({
       registration,
       harness: group.harness,
+      usage: agentUsageGlance(registration.live?.quota, now),
       id: registrationTupleId(registration.key),
       activity: registrationActivity(registration, { conversationTitle, now }),
       ...registrationRowTitle(registration),
@@ -172,6 +173,8 @@ export function MyAgentsView({
               onSelect={() => { select(row.id); setEditingId(null); }}
               leading={<span className="app-tool-state-icon" data-state={row.activity.state} aria-hidden="true">
                 <MachineGlyph os={machineOs(row.registration.live?.machine.platform)} className="size-4" /></span>}
+              trailing={<MachineLoadGlanceBars glance={row.usage}
+                testId="agent-usage-glance" label={row.usage.map((reading) => reading.detail).join(", ")} />}
               title={row.title}
               end={row.registration.key.ownerUserId === currentUserId ? undefined : row.registration.ownerName}
               subtitle={row.machineInLine ? `${row.registration.machineName} · ${row.activity.line}` : row.activity.line} />
