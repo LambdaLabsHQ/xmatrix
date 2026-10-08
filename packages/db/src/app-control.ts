@@ -212,6 +212,7 @@ export interface AppProviderPolicy {
 }
 
 export interface PostgresGitHubSubscriptionRoute {
+  relationId: string;
   installationId: string;
   sourceRef: string;
   /** `repository` for a repository subscription, `issue` for one issue or pull request. */
@@ -353,7 +354,7 @@ export class PostgresAppRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes" }, async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v4", text: `SELECT
-        r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
+        r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
         JOIN data.channels channel ON channel.channel_id=r.channel_id
@@ -368,7 +369,7 @@ export class PostgresAppRepository {
             WHERE linked.value=$1))
         ORDER BY r.channel_id,r.space_id,r.connection_id,r.source_kind,lower(r.source_ref) LIMIT $3`,
       values: [installationId, sourceRefs, limit, feature], maxRows: limit });
-      return rows.map((row) => ({ installationId, sourceRef: String(row.source_ref),
+      return rows.map((row) => ({ relationId: String(row.relation_id), installationId, sourceRef: String(row.source_ref),
         sourceKind: row.source_kind === "issue" ? "issue" as const : "repository" as const,
         createdAt: iso(row.created_at as string | Date),
         spaceId: String(row.space_id), channelId: String(row.channel_id),
@@ -727,10 +728,15 @@ export class PostgresAppRepository {
       "app_connection_not_found", 404, "Configured app connection not found");
     const authorized = await appChannelCapability(tx, channelId, actor, "app_new_work");
     if (authorized.spaceId !== current.space_id) throw new AppControlError("channel_not_found", 404, "Channel not found");
-    const relationId = `${connectionId}:${channelId}:${sourceKind}:${sourceRef}`;
+    // Imported subscriptions keep their opaque identity when subscribed again.
+    // Keep the Channel -> relation lock order used by subscription removal.
+    const existing = await tx.query<QueryResultRow>({ name: "app_relation_lock_v2", text: `SELECT *
+      FROM data.app_source_relations WHERE connection_id=$1 AND channel_id=$2
+        AND source_kind=$3 AND source_ref=$4 FOR UPDATE`,
+    values: [connectionId, channelId, sourceKind, sourceRef], maxRows: 1 });
+    const relationId = existing[0] ? String(existing[0].relation_id)
+      : `${connectionId}:${channelId}:${sourceKind}:${sourceRef}`;
     if (relationId.length > 300) throw new AppControlError("invalid_app_request", 400, "relation identity is too large");
-    const existing = await tx.query<QueryResultRow>({ name: "app_relation_lock_v1", text: `SELECT *
-      FROM data.app_source_relations WHERE relation_id=$1 FOR UPDATE`, values: [relationId], maxRows: 1 });
     const version = Number(existing[0]?.version ?? 0) + 1;
     await tx.query({ name: "app_relation_upsert_v1", text: `INSERT INTO data.app_source_relations
       (relation_id,connection_id,space_id,channel_id,source_kind,source_ref,features_json,version,
