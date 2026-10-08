@@ -561,7 +561,7 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     const session = await this.loadSession(deviceCode);
     if (!session) {
       await logAuthMetric({ routeGroup, status: 404, outcome: "unknown_code" });
-      return Response.json({ error: "Unknown device code" }, { status: 404 });
+      return Response.json({ error: "Unknown device code", code: "unknown_device_code" }, { status: 404 });
     }
     const expired = this.isExpired(session);
     if (expired) await this.ctx.storage.delete(this.sessionKey(deviceCode));

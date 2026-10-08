@@ -15,6 +15,7 @@ import { fetchMachineDaemons } from "./workspace-admin-views";
 import { queueHarnessAction, readHarnessAction, readRecentHarnessActions, refreshHarnessInventory } from "./machine-harness-api";
 import { HARNESS_ACTION_LABELS, describeHarnessAction } from "./machine-harness-action-status";
 import { harnessAutoUpdateSupported, harnessCommandLabel, harnessUpdateAvailable, machineHarnessState } from "./machine-harness-state";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 type HarnessRowState = ReturnType<typeof machineHarnessState>["rows"][number];
 type Operation = { controlId: string; action: HarnessAction; requestedHere?: boolean; label: string; startedAt: number };
@@ -59,7 +60,7 @@ function useHarnessOperation({ token, userId, daemonKey, current, canManage, onN
   }, [settledByThisPage, operation?.controlId, queryClient, daemonKey]);
   const action = useMutation({
     mutationFn: async (input: { presetId: string; action: HarnessAction }) => {
-      if (!token || !current?.machineId || !canManage) throw new Error("This machine cannot be managed right now.");
+      if (!token || !current?.machineId || !canManage) throw new UserFacingProblem("This machine cannot be managed right now.");
       return input.action === "refresh"
         ? refreshHarnessInventory(token, current.machineId, current.hostId)
         : queueHarnessAction(token, current.machineId, current.hostId, input.presetId, input.action);
@@ -68,7 +69,7 @@ function useHarnessOperation({ token, userId, daemonKey, current, canManage, onN
       setOperation({ controlId: result.controlId, action: input.action, requestedHere: true, label: `${HARNESS_ACTION_LABELS[input.action]}${input.action === "refresh" ? "" : ` · ${displayName || input.presetId}`}`, startedAt: Date.now() });
       onNotice(null);
     },
-    onError: (error) => onNotice(error instanceof Error ? error.message : "The operation could not be requested."),
+    onError: (error) => onNotice(userErrorMessage(error, "Couldn't send that to the machine")),
   });
   return { operation, status, busy: pending || action.isPending, run: action.mutate };
 }

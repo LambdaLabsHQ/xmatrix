@@ -7,6 +7,8 @@ import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary } from "@xmatrix/protocol";
 import { formatZonedDateTime } from "./time-display";
 import { jevDecisions, jevReadings, type JevQuestion, type JevReading } from "./jev-decision-trace";
+import { errorFromResponse } from "@/lib/query/api-client";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 type DecisionRecord = { refId: string; createdAt: string; encodedBytes: number };
 type FailureRecord = { invocationId?: unknown; status?: unknown; reason?: unknown; code?: unknown;
@@ -48,8 +50,10 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
     setBusy(true); setError("");
     try {
       const response = await fetcher(`${route}${after ? `?after=${encodeURIComponent(after)}` : ""}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(response.status === 403 || response.status === 404
-        ? "Routing decisions are visible only to the summoning user." : "Routing decisions could not be loaded.");
+      if (response.status === 403 || response.status === 404) {
+        throw new UserFacingProblem("Routing decisions are visible only to the summoning user.");
+      }
+      if (!response.ok) throw await errorFromResponse(response);
       const result = await response.json() as { records: DecisionRecord[]; nextCursor: string | null };
       const read = await Promise.all(result.records.slice(0, MAX_DETAILS).map(async record => {
         const key = `${route}?refId=${encodeURIComponent(record.refId)}`;
@@ -63,7 +67,7 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
       }));
       setRecords(previous => after ? [...(previous ?? []), ...read] : read);
       setCursor(result.nextCursor);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "Routing decisions could not be loaded."); }
+    } catch (failure) { setError(userErrorMessage(failure, "Couldn't load routing decisions") ?? ""); }
     finally { setBusy(false); }
   }, [fetcher, route]);
   useEffect(() => { if (user && enabled) void load(null); }, [enabled, load, user]);

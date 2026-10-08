@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { recoverReply, replyRecoveryError, type ReplyRecoveryResult } from "./reply-recovery-client";
 import { formatZonedDateTime } from "./time-display";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 export function MentionReplyRecovery({ execution }: { execution: SerializedAgentMessageExecution }) {
   const { user, session } = useAuth();
@@ -34,7 +35,7 @@ function RecoveryState({ execution, userId, token }: { execution: SerializedAgen
       if (value.status === "committed") await queries.invalidateQueries({ queryKey: ["agent-launches", execution.channelId, `user:${userId}`] });
       else if (value.status === "unavailable") setError(replyRecoveryError(value.code));
     } catch (error) {
-      if (!controller.signal.aborted) setError(error instanceof Error ? error.message : "Recovery could not be confirmed.");
+      if (!controller.signal.aborted) setError(userErrorMessage(error, "Couldn't confirm the recovery"));
     } finally { if (!controller.signal.aborted) setBusy(false); }
   }
   return <div className="app-invocation-reply-recovery" aria-busy={busy}>

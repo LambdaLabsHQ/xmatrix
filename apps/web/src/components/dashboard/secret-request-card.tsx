@@ -7,7 +7,10 @@ import { parseSecretRequestCard, WEB_PROXY_ROUTES, type SecretRequestCard } from
 
 import { actionClass } from "@/components/ui/action-tone";
 import { statusChipClass } from "@/components/ui/status-tone";
+import { ErrorNotice } from "@/components/ui/error-notice";
+import { errorFromResponse } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /**
  * A card an Agent posts when it needs a Space secret it may not read yet. A
@@ -57,9 +60,8 @@ export function SecretRequestCardView({ request, token, userId }: {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ runId: request.runId, channelId: request.channelId, secretRef: request.secretRef }),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Secret request is unavailable");
-      return requestStatus(payload);
+      if (!response.ok) throw await errorFromResponse(response);
+      return requestStatus(await response.json());
     },
   });
   const status = statusQuery.data;
@@ -75,12 +77,12 @@ export function SecretRequestCardView({ request, token, userId }: {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ ...request, ...(value.trim() ? { value } : {}) }),
       });
+      if (!response.ok) throw await errorFromResponse(response);
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Saving the secret failed");
       setValue("");
       queryClient.setQueryData(queryKey, requestStatus(payload));
     } catch (saveError) {
-      setError((saveError as Error).message);
+      setError(userErrorMessage(saveError, "Couldn't save the secret"));
     } finally {
       setBusy(false);
     }
@@ -119,9 +121,9 @@ export function SecretRequestCardView({ request, token, userId }: {
             <p className="mt-2 text-xs text-muted-foreground">Only a Space admin can answer this.</p>
           )}
           {statusQuery.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
-          {(error || statusQuery.error) && (
-            <div role="alert" className="mt-2 text-xs text-destructive">{error || statusQuery.error?.message}</div>
-          )}
+          {error ? <div role="alert" className="mt-2 text-xs text-destructive">{error}</div>
+            : <ErrorNotice error={statusQuery.error} action="Couldn't load this secret request"
+              className="mt-2 text-xs text-destructive" onRetry={() => void statusQuery.refetch()} />}
           {status && !done && canApprove && (
             <form
               className="mt-3 space-y-2"

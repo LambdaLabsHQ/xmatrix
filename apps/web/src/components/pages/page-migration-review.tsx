@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { noticeClass } from "@/components/ui/status-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
+import { ErrorNotice } from "@/components/ui/error-notice";
 
 const migrationKey = (spaceId: string) => ["xmatrix", "page-migration", spaceId];
 
@@ -74,7 +76,7 @@ export function PageMigrationReview({ spaceId, token, onApplying, onDone }: {
         body: { version: draft.version } }));
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not move this Space to pages");
+      setError(userErrorMessage(cause, "Couldn't move this Space to pages"));
     } finally {
       setBusy(false);
     }
@@ -188,7 +190,7 @@ function NoDraft({ spaceId, token }: { spaceId: string; token: string }) {
               </Button>
             </div>
           )}
-          {start.error && <p role="alert" className="text-sm text-destructive">{start.error.message}</p>}
+          <ErrorNotice error={start.error} action="Couldn't start drafting pages" />
         </section>
       )}
     </div>

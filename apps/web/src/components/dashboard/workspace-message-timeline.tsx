@@ -10,6 +10,7 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 import { sha256 } from "@noble/hashes/sha2.js";
 
 import { nonOperationalMentionRanges, lowercaseHex } from "@xmatrix/protocol";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 export {
   replyPreviewsEqual,
@@ -372,7 +373,7 @@ function useChannelAgentLaunches(channel: SerializedChannel | null, token: strin
           body: JSON.stringify(request),
         });
         if ([401, 403, 404].includes(response.status)) throw new InvocationAccessError(response.status);
-        if (!response.ok) throw new Error(`Agent Launch query failed (${response.status})`);
+        if (!response.ok) throw await errorFromResponse(response);
         return response.json();
       },
     }),
@@ -546,7 +547,7 @@ export const MessageTimeline = memo(function MessageTimeline({
       body: JSON.stringify({ body, ...(harness === "shown" ? { shown: true } : harness ? { harness } : {}) }),
     });
     // Someone already decided: the refreshed record says what.
-    if (!response.ok && response.status !== 409) throw new Error(`Choosing the Agent failed (${response.status})`);
+    if (!response.ok && response.status !== 409) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channel, refetchAgentLaunches, token]);
   const messageTargetEvidence = useMemo(() => {
@@ -564,7 +565,7 @@ export const MessageTimeline = memo(function MessageTimeline({
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ channelId: channel.id }),
     });
-    if (!response.ok) throw new Error(`Agent Launch retry failed (${response.status})`);
+    if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channel, refetchAgentLaunches, token]);
   // The author answers Jev's intent question for one declined summon; the Hub
@@ -576,7 +577,7 @@ export const MessageTimeline = memo(function MessageTimeline({
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, sourceMention }),
     });
-    if (!response.ok) throw new Error(`Launch anyway failed (${response.status})`);
+    if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channel, refetchAgentLaunches, token]);
   // One media store per channel view. A new one is built — and the previous
@@ -1636,10 +1637,7 @@ export const MessageRow = memo(function MessageRow({
         return next;
       })().catch((error) => {
         if (!mediaStore.active || mediaStore.released) throw error;
-        mediaStore.failures.set(
-          identity,
-          error instanceof Error ? error.message : "attachment media load failed",
-        );
+        mediaStore.failures.set(identity, "attachment media load failed");
         throw error;
       }).finally(() => {
         mediaStore.loads.delete(identity);
@@ -2809,7 +2807,7 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
         const text = source.startsWith("data:")
           ? await dataUrlToBlob(source).text()
           : await xmatrixRawResponse(source, { cache: "no-store" }).then(async (response) => {
-              if (!response.ok) throw new Error("Markdown attachment request failed");
+              if (!response.ok) throw await errorFromResponse(response);
               return response.text();
             });
         if (!cancelled) {
@@ -2819,7 +2817,7 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
       } catch (err) {
         if (!cancelled) {
           setContent("");
-          setError((err as Error).message || "Failed to load Markdown attachment");
+          setError(userErrorMessage(err, "Couldn't load this file"));
         }
       }
     }
@@ -3102,7 +3100,7 @@ function QuickReactionPicker({
 
 export type { AgentWorkItem } from "./workspace-shell-message-model";
 import type { AgentWorkItem } from "./workspace-shell-message-model";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 
 
 

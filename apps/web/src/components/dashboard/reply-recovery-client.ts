@@ -1,3 +1,5 @@
+import { UserFacingProblem } from "../../lib/user-facing-error";
+
 export type ReplyRecoveryResult = { status: "committed"; messageId: string }
   | { status: "selection_required"; candidates: Array<{ messageId: string; createdAt: number }> }
   | { status: "unavailable"; code: string };
@@ -35,8 +37,8 @@ export async function recoverReply(fetcher: typeof fetch, input: {
       ...(attempt ? {} : { body: JSON.stringify(selection) }),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(replyRecoveryError(body.code));
-    if (body.requestId !== input.requestId) throw new Error("Recovery returned a different request reference.");
+    if (!response.ok) throw new UserFacingProblem(replyRecoveryError(body.code));
+    if (body.requestId !== input.requestId) throw new UserFacingProblem("Recovery returned a different request reference.", true);
     if (["completed", "failed"].includes(body.status)) {
       const result = body.result;
       const validId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9._:-]{1,160}$/u.test(value);
@@ -50,8 +52,8 @@ export async function recoverReply(fetcher: typeof fetch, input: {
       }
       return { status: "unavailable", code: typeof result?.code === "string" ? result.code : "reply_recovery_failed" };
     }
-    if (!["queued", "leased", "admitted", "pending"].includes(body.status)) throw new Error("The recovery request is no longer available.");
+    if (!["queued", "leased", "admitted", "pending"].includes(body.status)) throw new UserFacingProblem("The recovery request is no longer available.", true);
     await pause(bounded);
   }
-  throw new Error("Recovery is still waiting for the original machine. Checking again will reuse this request.");
+  throw new UserFacingProblem("Recovery is still waiting for the original machine. Checking again will reuse this request.", true);
 }

@@ -27,7 +27,7 @@ test("a forbidden page edit stays forbidden instead of a postgres outage", async
   const body = await response.json();
   assert.equal(body.code, "page_edit_forbidden");
   assert.equal(body.error, "page_edit_forbidden");
-  assert.notEqual(body.error, "PostgreSQL is unavailable");
+  assert.notEqual(body.code, "postgres_unavailable");
 });
 
 test("a page checkout timeout stays a retryable postgres outage", async () => {
@@ -36,7 +36,7 @@ test("a page checkout timeout stays a retryable postgres outage", async () => {
   assert.equal(response.status, 503);
   const body = await response.json();
   assert.deepEqual(body, {
-    error: "PostgreSQL is unavailable",
+    error: "xMatrix is briefly unavailable; try again",
     code: "postgres_unavailable",
     retryable: true,
   });

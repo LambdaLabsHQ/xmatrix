@@ -7,6 +7,7 @@ import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shel
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { readGitHubGrant } from "@/lib/github-connect-return";
 import { cn } from "@/lib/utils";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 type GitHubInstallationAccount = {
   installationId: string;
@@ -57,7 +58,7 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthori
         authorized: payload?.authorized === true,
       });
     } catch (caught) {
-      setError((caught as Error).message);
+      setError(userErrorMessage(caught, "Couldn't load GitHub accounts"));
     }
   }, [url, token]);
 
@@ -74,7 +75,7 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthori
       await request();
       await Promise.all([load(grant), onChanged()]);
     } catch (caught) {
-      setError((caught as Error).message);
+      setError(userErrorMessage(caught, "Couldn't change the GitHub account"));
     } finally {
       setBusyId(null);
     }

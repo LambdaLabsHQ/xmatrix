@@ -21,7 +21,8 @@ import { IdentityAvatar } from "./identity-avatar";
 import { MachineGlyph } from "./machine-glyph";
 import { MachineLoadGlance } from "./machine-load-panel";
 import { machineOs } from "./machine-os";
-import { registrationActivity, registrationCatalogErrorText, registrationListed } from "./my-agents-registrations";
+import { ErrorNotice } from "@/components/ui/error-notice";
+import { registrationActivity, registrationListed } from "./my-agents-registrations";
 import { scheduleRunning } from "./schedules-model";
 import { formatRelativeAge } from "./time-display";
 import { ToolDetailSection, ToolPaperScroll } from "./tool-split";
@@ -141,7 +142,7 @@ export function StatusView({
       <div className="space-y-8">
         <ToolDetailSection title="Agents" action={<SeeAll label="All agents" onClick={onOpenAgents} />}>
           {catalog.isError ? (
-            <p role="alert" className="text-sm text-destructive">{registrationCatalogErrorText(catalog.error)}</p>
+            <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()} />
           ) : !catalog.data && ready ? (
             <ListSkeleton label="Loading agents" rows={1} />
           ) : runtimes.length === 0 ? (

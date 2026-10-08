@@ -6,7 +6,7 @@ import {
   RELAY_V2_BLOB_UPLOAD_PREFIX,
 } from "@xmatrix/protocol/relay-v2/message-attachment";
 import { lowercaseHex } from "@xmatrix/protocol";
-import { xmatrixRawResponse } from "../query/api-client";
+import { XMatrixApiError, xmatrixRawResponse } from "../query/api-client";
 const HASH_CHUNK_BYTES = 4 * 1024 * 1024;
 const UPLOAD_INTENT_TTL_MS = 60 * 60 * 1_000;
 
@@ -54,12 +54,24 @@ function randomId(): string {
   return crypto.randomUUID();
 }
 
-function errorFromPayload(payload: unknown, fallback: string): Error {
-  const message = payload && typeof payload === "object" &&
-    typeof (payload as { error?: unknown }).error === "string"
-    ? (payload as { error: string }).error
-    : fallback;
-  return new Error(message);
+/** A refused hop, classified like every other xMatrix failure (docs/architecture/client-resilience.md). */
+function errorFromPayload(payload: unknown, fallback: string, status: number): XMatrixApiError {
+  const body = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  return new XMatrixApiError({
+    message: typeof body.error === "string" ? body.error : fallback,
+    status,
+    code: typeof body.code === "string" ? body.code : undefined,
+    retryable: typeof body.retryable === "boolean" ? body.retryable : status === 502 || status === 503 || status === 504,
+  });
+}
+
+/** The transfer got no answer, or stopped advancing: the network, and transient. */
+function transferLost(message: string, code: string): XMatrixApiError {
+  return new XMatrixApiError({ message, status: 0, code, retryable: true });
+}
+
+function uploadCancelled(): DOMException {
+  return new DOMException("Upload cancelled", "AbortError");
 }
 
 /**
@@ -77,7 +89,7 @@ function deadlineSignal(deadlineMs: number): { signal: AbortSignal; done: () => 
 
 function deadlineError(error: unknown, what: string): Error {
   if (error instanceof DOMException && error.name === "TimeoutError") {
-    return new Error(`${what} timed out`);
+    return new DOMException(`${what} timed out`, "TimeoutError");
   }
   return error instanceof Error ? error : new Error(`${what} failed`);
 }
@@ -98,7 +110,7 @@ async function jsonResponse(
     if (signal?.aborted) throw signal.reason ?? error;
     payload = {};
   }
-  if (!response.ok) throw errorFromPayload(payload, fallback);
+  if (!response.ok) throw errorFromPayload(payload, fallback, response.status);
   return payload;
 }
 
@@ -234,24 +246,24 @@ export async function prepareMessageAttachmentUpload(input: {
         return;
       }
       if (request.status < 200 || request.status >= 300) {
-        reject(errorFromPayload(payload, "Failed to upload attachment"));
+        reject(errorFromPayload(payload, "Failed to upload attachment", request.status));
         return;
       }
       resolve();
     };
     request.onerror = () => {
       clearStall();
-      reject(new Error("Failed to upload attachment"));
+      reject(transferLost("Failed to upload attachment", "network_error"));
     };
     request.onabort = () => {
       clearStall();
-      reject(new Error(stalled ? "Attachment upload stalled" : "Upload cancelled"));
+      reject(stalled ? transferLost("Attachment upload stalled", "upload_stalled") : uploadCancelled());
     };
     // Registered only now: before `open` and the abort handler there is nothing
     // an abort could act on, and the send below would have gone out anyway.
     if (input.onRequest?.(request) === false) {
       clearStall();
-      reject(new Error("Upload cancelled"));
+      reject(uploadCancelled());
       return;
     }
     // Armed before `send` as well: a connection that never emits a single

@@ -6,6 +6,7 @@ import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { harnessSpaceCreateCommand, harnessSpaceRegistration, harnessSpaceSwitch } from "./harness-space-switch";
 import { useRegistrationCommand } from "./use-registration-command";
+import { UserFacingProblem, userErrorMessage } from "../../lib/user-facing-error";
 
 /** All owner switches use the same server commands. Inventory supplies candidates,
  * while the authenticated catalog and command boundary supply current grants. */
@@ -25,7 +26,7 @@ export function useHarnessSpaceControl(spaceId?: string | null, token?: string |
     setError(null);
     try {
       let toggle = harnessSpaceSwitch(registrationFor(key));
-      if (!toggle) throw new Error("Answer this Space's sharing request before enabling the harness.");
+      if (!toggle) throw new UserFacingProblem("Answer this Space's sharing request before enabling the harness.");
       if (toggle.on === on) return true;
       if (toggle.create) {
         await xmatrixApiRequest({ url: WEB_PROXY_ROUTES.space_agent_registration_command(spaceId!), token: token!,
@@ -34,7 +35,7 @@ export function useHarnessSpaceControl(spaceId?: string | null, token?: string |
         const fresh = await catalog.refetch();
         if (fresh.isError) throw fresh.error;
         toggle = harnessSpaceSwitch(harnessSpaceRegistration(fresh.data?.registrations, key));
-        if (!toggle || toggle.create) throw new Error("The harness could not be enabled. Refresh and try again.");
+        if (!toggle || toggle.create) throw new UserFacingProblem("The harness could not be enabled. Refresh and try again.");
         if (toggle.on) return true;
       }
       for (const kind of toggle.changes) if (!(await command.run(key, { kind }))) return false;
@@ -42,7 +43,7 @@ export function useHarnessSpaceControl(spaceId?: string | null, token?: string |
       if (fresh.isError) throw fresh.error;
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The harness switch could not be saved.");
+      setError(userErrorMessage(cause, "Couldn't save the harness switch"));
       return false;
     } finally {
       locked.current = false;

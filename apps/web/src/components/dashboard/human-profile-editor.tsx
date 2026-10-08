@@ -38,6 +38,11 @@ export function humanProfileErrorMessage(code: string): string {
   return refusalMessages[code] ?? "Could not update your profile. Try again.";
 }
 
+/** The sentence for a profile rule the Hub refused, or undefined for any other failure. */
+export function humanProfileRefusal(code: string): string | undefined {
+  return Object.hasOwn(refusalMessages, code) ? refusalMessages[code] : undefined;
+}
+
 /**
  * The fields this form edits.
  *
@@ -65,7 +70,7 @@ export function HumanProfileEditor({
 }: {
   profile: HumanProfile;
   saving?: boolean;
-  serverError?: { code?: string; message?: string } | null;
+  serverError?: { message: string } | null;
   onCancel: () => void;
   onSave: (edit: HumanProfileEdit) => Promise<void> | void;
 }) {
@@ -104,11 +109,7 @@ export function HumanProfileEditor({
     });
   }
 
-  const serverMessage = serverError
-    ? serverError.code
-      ? humanProfileErrorMessage(serverError.code)
-      : serverError.message || humanProfileErrorMessage("")
-    : null;
+  const serverMessage = serverError?.message ?? null;
 
   return (
     <form className="mt-5 space-y-4 border-t border-border/60 pt-5" onSubmit={submit} noValidate>

@@ -1,5 +1,5 @@
 import { WEB_PROXY_ROUTES, type MessageSearchPage, type PageSearchHit } from "@xmatrix/protocol";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { requireJson, xmatrixRawResponse } from "@/lib/query/api-client";
 
 /**
  * Message search runs on the Hub: it scans the newest readable messages of the
@@ -24,8 +24,7 @@ export async function searchWorkspaceMessages(input: {
     headers: { Authorization: `Bearer ${input.token}` },
     cache: "no-store",
   });
-  if (!response.ok) throw new Error(`Message search failed (${response.status})`);
-  return await response.json() as MessageSearchPage;
+  return requireJson<MessageSearchPage>(response);
 }
 
 /** Page search runs on the Hub over every page the reader may read: title and current text. */
@@ -39,6 +38,5 @@ export async function searchWorkspacePages(input: {
     headers: { Authorization: `Bearer ${input.token}` },
     cache: "no-store",
   });
-  if (!response.ok) throw new Error(`Page search failed (${response.status})`);
-  return await response.json() as { results: PageSearchHit[] };
+  return requireJson<{ results: PageSearchHit[] }>(response);
 }

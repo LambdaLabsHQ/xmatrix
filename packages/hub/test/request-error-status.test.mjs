@@ -39,7 +39,7 @@ test("route failures never echo a database's own message", async () => {
     const response = await app.request(path);
     assert.equal(response.status, 503, path);
     assert.deepEqual(await response.json(),
-      { error: "PostgreSQL is unavailable", code: "postgres_unavailable", retryable: true });
+      { error: "xMatrix is briefly unavailable; try again", code: "postgres_unavailable", retryable: true });
   }
   const defect = await app.request("/defect");
   assert.equal(defect.status, 500);

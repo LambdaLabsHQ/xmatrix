@@ -62,7 +62,7 @@ export function transientFailure(error: unknown): RequestFailure | null {
   }
   if (retryablePostgresFailure(error)) {
     console.error("PostgreSQL is unavailable", error);
-    return { status: 503, body: { error: "PostgreSQL is unavailable", code: "postgres_unavailable", retryable: true },
+    return { status: 503, body: { error: "xMatrix is briefly unavailable; try again", code: "postgres_unavailable", retryable: true },
       headers: { "retry-after": String(postgresRetryAfterSeconds(error)) } };
   }
   return null;

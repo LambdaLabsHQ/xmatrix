@@ -86,7 +86,7 @@ test("installation uses the Windows recipe and a server refusal remains visible"
   const install = panel.getByRole("row").filter({ hasText: "Claude" }).getByRole("button", { name: "Install", exact: true });
   await expect(install).toHaveAttribute("title", /powershell.*install\.ps1/);
   await install.click();
-  await expect(panel.getByRole("alert")).toHaveText("Machine is offline");
+  await expect(panel.getByRole("alert")).toHaveText("Couldn't send that to the machine. Machine is offline.");
 });
 
 test("automatic update control and inventory refresh send closed actions", async ({ page }) => {

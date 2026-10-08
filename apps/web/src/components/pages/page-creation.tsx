@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { pageApi } from "@/lib/pages/page-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 export type PageCreation = ReturnType<typeof usePageCreation>;
 
@@ -42,7 +43,7 @@ export function usePageCreation(spaceId: string | null, token: string, onCreated
       }
     } catch (cause) {
       if (currentSpace.current === spaceId) {
-        setError(cause instanceof Error ? cause.message : "Could not create the page");
+        setError(userErrorMessage(cause, "Couldn't create the page"));
       }
     } finally {
       inFlight.current = false;
