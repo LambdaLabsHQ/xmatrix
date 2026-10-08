@@ -3492,6 +3492,18 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   height: var(--app-agent-work-capsule-h, 2.75rem);
 }
 
+/* A stretching disc pushes the items after it aside by the width it grows,
+   on the panel's own curves. Padding, not margin, so the pushed space is
+   still the item's and keeps it hovered. */
+.xmatrix-app .app-agent-work-item[data-morph="row"] {
+  transition: padding-right 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.xmatrix-app .app-agent-work-item[data-morph="row"]:is(:hover, :focus-within) {
+  padding-right: max(0px, calc(var(--app-agent-work-panel-w, 0px) - var(--app-agent-work-capsule-w, 0px)));
+  transition: padding-right 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* A bare disc stretches right: the face is the leading seat and its controls
    sit beside it, centred on the same line. */
 .xmatrix-app .app-agent-work-morph[data-shape="row"] > .app-agent-work-morph-content {

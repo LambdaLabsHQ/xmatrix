@@ -3416,6 +3416,8 @@ export function AgentWorkAvatar({
     </div>
   );
   const hoverCards = hoverPart === "intent" && intentCard ? intentCard : instanceCards;
+  const { left: actionLayerLeft, top: actionLayerTop, ...morphGeometry } = actionToolbarPosition;
+  const actionLayerPosition = { left: actionLayerLeft, top: actionLayerTop };
   const hasHoverCards = Boolean(hoverCards);
 
   useLayoutEffect(() => {
@@ -3538,7 +3540,10 @@ export function AgentWorkAvatar({
   return (
     <div
       className="app-agent-work-item group relative flex shrink-0 items-center"
-      data-morph={hoverCards ? "" : undefined}
+      data-morph={hoverCards ? (island ? "panel" : "row") : undefined}
+      // The capsule's geometry rides on the item, so a stretching disc can
+      // push the items after it aside by exactly the width it grows.
+      style={morphGeometry}
       onPointerOver={(event) => {
         // Moving onto the card itself keeps the card it is on.
         const target = event.target as Element;
@@ -3574,7 +3579,7 @@ export function AgentWorkAvatar({
         // seat), with the card the pointer asked for above it. A bare disc
         // has no words to sit under, so it just stretches right into a
         // capsule with its controls beside the face.
-        <div ref={actionPopupRef} className="app-agent-work-actions" style={actionToolbarPosition}>
+        <div ref={actionPopupRef} className="app-agent-work-actions" style={actionLayerPosition}>
           <LiquidGlassPill className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
             <div ref={morphContentRef} className="app-agent-work-morph-content">
               <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
