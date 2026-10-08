@@ -21,9 +21,6 @@ import {
   copyTextToClipboard,
 } from "./workspace-shell-helpers";
 
-import {
-  formatUnreadCount,
-} from "./workspace-shell-helpers-extra";
 
 import {
   AppView,
@@ -350,27 +347,6 @@ export function MobileTabDock({
         );
       })}
     </LiquidGlassPill>
-  );
-}
-
-/**
- * The one count chip in the app. It has no material of its own — it wears
- * COUNT_CHIP_MATERIAL_CLASS. Only its size and numerals are its own, and those
- * live in one CSS rule keyed on `app-count-pill`.
- */
-export function CountPill({
-  count,
-  title,
-  className,
-}: {
-  count: number;
-  title?: string;
-  className?: string;
-}) {
-  return (
-    <span title={title} className={cn("app-count-pill", COUNT_CHIP_MATERIAL_CLASS, className)}>
-      <span className="app-count-pill-value">{formatUnreadCount(count)}</span>
-    </span>
   );
 }
 
