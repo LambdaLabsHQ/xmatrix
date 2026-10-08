@@ -221,13 +221,14 @@ test("tagged Auto workspace launch completes daemon spawn, mock Agent registrati
         const content = new PostgresContentRepository(maintenance, "shard-0");
         const spaceId = (await evidenceDatabase.query('SELECT space_id FROM data.channels WHERE channel_id=$1', [channelId])).rows[0].space_id;
         assert.ok(await content.nextDecisionMaintenance({ requestId: randomUUID(), spaceId }) <= Date.now());
-        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 2 })).expired, 2);
-        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 2 })).expired, 2);
-        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 2 })).expired, 0);
+        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 1 })).expired, 1);
+        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 1 })).expired, 1);
+        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 1 })).expired, 0);
         assert.ok(await content.nextDecisionMaintenance({ requestId: randomUUID(), spaceId }) > Date.now());
         const nominations = await evidenceDatabase.query(`SELECT * FROM data.content_gc_candidates
           WHERE space_id=$1 AND reason='decision-expired'`, [spaceId]);
-        assert.equal(nominations.rows.length, 3);
+        // Two expired records; the first one's object is still held by the retained copies.
+        assert.equal(nominations.rows.length, 1);
         assert.equal((await evidenceDatabase.query("SELECT ref_id FROM data.content_refs WHERE ref_id='retained-other-owner'")).rows.length, 1);
         assert.ok(nominations.rows.every(row => row.status === 'pending' && new Date(row.not_before).getTime() > Date.now()));
         assert.equal((await evidenceDatabase.query("SELECT ref_id FROM data.content_refs WHERE ref_id='retained-current-decision'")).rows.length, 1);
