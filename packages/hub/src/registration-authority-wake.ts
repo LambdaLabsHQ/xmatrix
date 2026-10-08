@@ -1,5 +1,6 @@
 import type { AuthorityDatabase } from "@xmatrix/db";
 import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
+import { createPostgresAuthorityDatabase, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import { ACTIVE_RUN_STATUS_SQL } from "@xmatrix/protocol";
 
 /** Channels a committed authority change can affect: those holding a
@@ -36,4 +37,17 @@ export async function wakeRegistrationChannels(env: { RELAY_POSTGRES_AGENT_LAUNC
     throw new AgentLaunchHandoverUnavailable(refused?.status === "fulfilled" ? refused.value.status : undefined);
   }
   return rows.length;
+}
+
+/**
+ * A Machine's daemon is back: tell every Channel with a Run on it, so work
+ * that waited on the Machine (a queued Launch, a parked stop) moves now
+ * rather than at its next timed look, which backs off while the Machine is
+ * away.
+ */
+export async function wakeMachineChannels(env: PostgresAuthorityFleetEnv & {
+  RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace }, scope: { ownerUserId: string; machineId: string }): Promise<number> {
+  const session = createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-hub-machine-reconnect",
+    statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000 }).openSession();
+  try { return await wakeRegistrationChannels(env, session, scope); } finally { await session.close(); }
 }
