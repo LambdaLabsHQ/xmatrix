@@ -67,6 +67,10 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Check a page's index status or submit a sitemap without opening Search Console.",
     "Run a scheduled Automation that reports search traffic changes into the channel.",
   ],
+  googleadsense: [
+    "Read daily AdSense earnings, page views and RPM by site, country or page.",
+    "Let a scheduled Automation track each site's revenue next to its search traffic.",
+  ],
   bitbucket: [
     "Follow Bitbucket pull requests and builds alongside agents.",
   ],
