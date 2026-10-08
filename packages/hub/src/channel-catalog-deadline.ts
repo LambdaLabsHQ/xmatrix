@@ -1,3 +1,5 @@
+import { domainFailure, failureResponse, ServiceUnavailable } from "./error-contract";
+
 export const CHANNEL_CATALOG_TOTAL_TIMEOUT_MS = 12_000;
 export const CHANNEL_CATALOG_OPERATION_TIMEOUT_MS = 4_000;
 export const CHANNEL_CATALOG_RETRY_AFTER_SECONDS = 2;
@@ -10,9 +12,11 @@ export type ChannelCatalogTimeoutBoundary =
   | "projection"
   | "runtime_presence";
 
-export class ChannelCatalogTimeoutError extends Error {
+/** A catalog operation that outlived its deadline at `boundary`; a replay after a short wait can succeed. */
+export class ChannelCatalogTimeoutError extends ServiceUnavailable {
   constructor(readonly boundary: Exclude<ChannelCatalogTimeoutBoundary, "none">) {
-    super(`Channel catalog ${boundary} deadline exceeded`);
+    super("channel_catalog_timeout", "Channel catalog is temporarily unavailable",
+      CHANNEL_CATALOG_RETRY_AFTER_SECONDS * 1_000);
     this.name = "ChannelCatalogTimeoutError";
   }
 }
@@ -65,19 +69,5 @@ export function isChannelCatalogTimeoutError(error: unknown): error is ChannelCa
 }
 
 export function channelCatalogTimeoutResponse(error: ChannelCatalogTimeoutError): Response {
-  return Response.json(
-    {
-      error: "Channel catalog is temporarily unavailable",
-      code: "channel_catalog_timeout",
-      retryable: true,
-      boundary: error.boundary,
-    },
-    {
-      status: 503,
-      headers: {
-        "cache-control": "private, no-store",
-        "retry-after": String(CHANNEL_CATALOG_RETRY_AFTER_SECONDS),
-      },
-    },
-  );
+  return failureResponse(domainFailure(error, { boundary: error.boundary }));
 }
