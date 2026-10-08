@@ -4497,6 +4497,8 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   padding: 12px 12px 16px !important;
 }
 
+/* The trigger is never glass, hovered or not: the sidebar's generic
+   button:hover glass would otherwise put a second pane inside the open panel. */
 .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-trigger {
   color: var(--sidebar-foreground) !important;
   position: relative !important;
@@ -4507,6 +4509,8 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   border-color: transparent !important;
   border-radius: 26px !important;
   box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-icon {
@@ -4845,6 +4849,10 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   font-size: 11.5px;
   font-weight: 600;
   background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 .xmatrix-app.xmatrix-app .app-sidebar .app-space-switcher-shell .app-space-switcher-action-disc {

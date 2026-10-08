@@ -77,8 +77,10 @@ test("expanded desktop workspace switcher is one glass panel floating over the l
   for (const layer of rim) expect(shellShadow).toContain(layer.trim());
   expect(shellShadow).toContain("0px 14px 36px -8px");
 
-  // Nothing inside the panel is a second pane of glass but the action discs.
-  for (const inner of [trigger, menu]) {
+  // Nothing inside the panel is a second pane of glass but the action discs,
+  // even under the pointer.
+  await trigger.hover();
+  for (const inner of [trigger, menu, page.getByRole("button", { name: "Manage", exact: true })]) {
     expect(await inner.evaluate((element) => getComputedStyle(element).backdropFilter)).toBe("none");
   }
 
