@@ -13,7 +13,7 @@ import {
   nextVerifyPhase,
   preflightMovement,
 } from "../scripts/space-shard-move.mjs";
-import { checkedInMigrationRelations } from "./migration-relations.mjs";
+import { checkedInMigrationRelations } from "../scripts/migration-relations.mjs";
 
 test("blocking Space inspection is read-only and returns every present authority domain", async () => {
   const queried = [];

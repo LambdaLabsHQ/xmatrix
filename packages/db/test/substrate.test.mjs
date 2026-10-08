@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { Client } from "pg";
+
 import {
   CAPACITY_POLICY,
   AUTH_OBSERVATION_TABLES,
   OPERATIONAL_FACT_TABLES,
-  EXPECTED_SUBSTRATE_TABLES,
-  EXPECTED_SUBSTRATE_VIEWS,
   assertOperationalSnapshot,
   assertRuntimeAccessSnapshot,
   capacityLevel,
   operationalOptions,
 } from "../scripts/substrate.mjs";
-import { checkedInMigrationRelations } from "./migration-relations.mjs";
+import { checkedInMigrationRelations } from "../scripts/migration-relations.mjs";
+import { connectionString, integration } from "./postgres-database.fixture.mjs";
 
 const options = {
   shardId: "shard-0",
@@ -20,16 +21,36 @@ const options = {
   capacityClass: "shared-single-node-v1",
 };
 
-test("substrate inventory contains every table and view the checked-in migrations leave", async () => {
-  const { tables, views } = await checkedInMigrationRelations();
-  assert.deepEqual([...tables].sort(), EXPECTED_SUBSTRATE_TABLES);
-  assert.deepEqual([...views].sort(), EXPECTED_SUBSTRATE_VIEWS);
+const expected = await checkedInMigrationRelations();
+
+// The production check compares the live schema with the replayed migrations,
+// so the replay must read every relation DDL form the migrations use.
+integration("the replayed migrations name exactly the relations a migrated database has", async () => {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    const read = async (catalog) => (await client.query(`SELECT table_schema || '.' || table_name AS name
+      FROM information_schema.${catalog} WHERE table_schema IN ('control', 'data')
+      ${catalog === "tables" ? "AND table_type = 'BASE TABLE'" : ""}`)).rows.map(({ name }) => name).sort();
+    assert.deepEqual(await read("tables"), [...expected.tables].sort());
+    assert.deepEqual(await read("views"), [...expected.views].sort());
+  } finally {
+    await client.end();
+  }
+});
+
+test("the substrate check rejects a schema that differs from the replayed migrations", () => {
+  assert.ok(expected.tables.has("control.schema_migrations"));
+  assert.throws(() => assertOperationalSnapshot(snapshot({ tables: [...expected.tables].slice(1) }), options, expected),
+    /table inventory differs/u);
+  assert.throws(() => assertOperationalSnapshot(snapshot({ views: ["data.stale_view"] }), options, expected),
+    /view inventory differs/u);
 });
 
 function snapshot(overrides = {}) {
   return {
-    tables: EXPECTED_SUBSTRATE_TABLES,
-    views: EXPECTED_SUBSTRATE_VIEWS,
+    tables: [...expected.tables],
+    views: [...expected.views],
     pendingMigrations: [],
     shards: [{
       shard_id: options.shardId,
@@ -44,10 +65,10 @@ function snapshot(overrides = {}) {
 }
 
 test("operational schema accepts an explicit local shard identity and Auth target", () => {
-  assert.doesNotThrow(() => assertOperationalSnapshot(snapshot(), options));
+  assert.doesNotThrow(() => assertOperationalSnapshot(snapshot(), options, expected));
   assert.doesNotThrow(() => assertOperationalSnapshot(snapshot({
     shards: [{ ...snapshot().shards[0], state: "draining" }],
-  }), options));
+  }), options, expected));
 });
 
 test("operational schema permits business facts and rejects invalid counts or routing drift", () => {
@@ -57,14 +78,14 @@ test("operational schema permits business facts and rejects invalid counts or ro
       space_placement: "2",
       user_space_locale_preferences: "4",
     },
-  }), options));
+  }), options, expected));
   assert.throws(() => assertOperationalSnapshot(snapshot({
     factCounts: { ...snapshot().factCounts, space_placement: "-1" },
-  }), options), /outside the supported integer range/u);
+  }), options, expected), /outside the supported integer range/u);
   assert.throws(
     () => assertOperationalSnapshot(snapshot({
       shards: [{ ...snapshot().shards[0], shard_id: "shard-1" }],
-    }), options),
+    }), options, expected),
     /physical shard metadata/u,
   );
 });
@@ -72,7 +93,7 @@ test("operational schema permits business facts and rejects invalid counts or ro
 test("operational schema permits Auth shadow facts", () => {
   assert.doesNotThrow(() => assertOperationalSnapshot(snapshot({
     authCounts: { ...snapshot().authCounts, auth_users: "12", auth_shadow_runs: "1" },
-  }), options));
+  }), options, expected));
 });
 
 test("capacity policy has ordered conservative levels", () => {
@@ -87,7 +108,7 @@ test("physical shard labels are explicit and bounded", () => {
   assert.deepEqual(operationalOptions({
     POSTGRES_SHARD_ID: "shard-0",
     POSTGRES_CAPACITY_CLASS: "shared-single-node-v1",
-  }), options);
+  }), options, expected);
   assert.throws(() => operationalOptions({
     POSTGRES_SHARD_ID: "shard 0",
     POSTGRES_CAPACITY_CLASS: "shared-single-node-v1",
