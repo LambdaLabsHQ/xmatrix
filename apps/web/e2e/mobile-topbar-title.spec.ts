@@ -47,7 +47,7 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
       const paint = await fab.evaluate((button) => {
         const style = getComputedStyle(button);
         const dockStyle = getComputedStyle(document.querySelector(".app-mobile-tab-dock")!);
-        const plankStyle = getComputedStyle(document.querySelector(".app-topbar")!);
+        const plankStyle = getComputedStyle(document.querySelector(".app-topbar .app-mobile-title")!);
         const canvas = document.createElement("canvas");
         const context = canvas.getContext("2d")!;
         context.fillStyle = style.backgroundColor;

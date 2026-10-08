@@ -44,14 +44,14 @@ function dockEdges(page: Page) {
   return edges(page.getByRole("navigation", { name: "Primary" }));
 }
 
-/** The plank's content line: where its name starts and its trailing glyph ends. */
+/** The bar's content line: where the Space sign's glyph starts and its trailing search glyph ends. */
 async function contentLine(page: Page) {
   await settled(page);
   const bar = page.locator(".app-topbar");
   const [plank, name, search, dock, width] = await Promise.all([edges(bar),
-    edges(bar.locator(".app-mobile-bar-title"), { text: true }), edges(bar.locator(".app-mobile-search-icon svg")),
+    edges(bar.locator("svg.app-mobile-space-glyph")), edges(bar.locator(".app-mobile-search-icon svg")),
     dockEdges(page), page.evaluate(() => window.innerWidth)]);
-  // The plank is the board itself, not a card: screen edge to screen edge.
+  // The bar spans the screen; its wood is only the Space sign, whose glyph sits on the line.
   expect(plank.left).toBe(0);
   expect(plank.right).toBe(width);
   expect(name.left - dock.left).toBeCloseTo(20, 0);
