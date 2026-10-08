@@ -17,6 +17,7 @@ export {
   BillingControlError,
   PostgresBillingRepository,
   type StripeSubscriptionFact,
+  type BillingSubscriptionFact,
 } from "./billing-control.js";
 export {
   ContentControlError,
@@ -303,3 +304,5 @@ export type { DingTalkEffectAuthority, DingTalkEffectDestination } from "./dingt
 // No production prepared-path/native-proof issuer is exported or registered.
 export { DingTalkEffectCoordinator,type DingTalkCoordinationNativeProof } from "./dingtalk-effect-coordinator.js";
 export type { DingTalkPreparedPathCapability } from "./dingtalk-prepared-port.js";
+
+export { PostgresAppleBillingRepository, type AppleAccountBinding } from "./apple-billing-control.js";

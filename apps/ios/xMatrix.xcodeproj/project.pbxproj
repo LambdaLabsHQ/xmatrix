@@ -104,6 +104,7 @@
 		12F7A2042C00000100000001 /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1042C00000100000001 /* AppRouter.swift */; };
 		12F7A2052C00000100000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 12F7A1062C00000100000001 /* Assets.xcassets */; };
 		12F7A2062C00000100000001 /* MobileTabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1072C00000100000001 /* MobileTabBarView.swift */; };
+		CF310D587854D1B7C926F1D5 /* AppleSubscriptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04F893235851327B3AD47005 /* AppleSubscriptions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -116,6 +117,7 @@
 		12F7A1052C00000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		12F7A1062C00000100000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		12F7A1072C00000100000001 /* MobileTabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTabBarView.swift; sourceTree = "<group>"; };
+		04F893235851327B3AD47005 /* AppleSubscriptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSubscriptions.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -144,6 +146,7 @@
 				12F7A1002C00000100000001 /* XMatrixApp.swift */,
 				12F7A1012C00000100000001 /* WebContainerView.swift */,
 				12F7A1022C00000100000001 /* NativeBridge.swift */,
+				04F893235851327B3AD47005 /* AppleSubscriptions.swift */,
 				12F7A1032C00000100000001 /* AppConfiguration.swift */,
 				12F7A1042C00000100000001 /* AppRouter.swift */,
 				12F7A1072C00000100000001 /* MobileTabBarView.swift */,
@@ -235,6 +238,7 @@
 				12F7A2002C00000100000001 /* XMatrixApp.swift in Sources */,
 				12F7A2012C00000100000001 /* WebContainerView.swift in Sources */,
 				12F7A2022C00000100000001 /* NativeBridge.swift in Sources */,
+				CF310D587854D1B7C926F1D5 /* AppleSubscriptions.swift in Sources */,
 				12F7A2032C00000100000001 /* AppConfiguration.swift in Sources */,
 				12F7A2042C00000100000001 /* AppRouter.swift in Sources */,
 				12F7A2062C00000100000001 /* MobileTabBarView.swift in Sources */,

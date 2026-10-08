@@ -142,6 +142,7 @@ export const HUB_ENVIRONMENT = {
   XMATRIX_SECRET_CATALOG_KEY: { kind: "secret", scope: "required", summary: "Encrypts Space secrets (at least 32 characters). Unset: Space secrets cannot be stored or read." },
 
   // Optional integrations.
+  APPLE_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases." },
   STRIPE_SECRET_KEY: { kind: "secret", scope: "feature", summary: "Stripe API key for paid plans. Unset with the webhook secret: checkout and the billing portal answer 503." },
   STRIPE_WEBHOOK_SECRET: { kind: "secret", scope: "feature", summary: "Stripe webhook signing secret." },
   STRIPE_PRO_MONTHLY_PRICE_ID: { kind: "var", scope: "feature", summary: "Stripe price for the monthly Pro seat." },

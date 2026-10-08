@@ -18,6 +18,7 @@
     "env:doc": "tsx scripts/hub-environment-doc.ts"
   },
   "dependencies": {
+    "@apple/app-store-server-library": "3.1.0",
     "@xmatrix/billing": "workspace:*",
     "@xmatrix/db": "workspace:*",
     "@xmatrix/decision-model": "workspace:*",
