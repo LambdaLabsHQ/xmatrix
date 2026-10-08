@@ -82,4 +82,40 @@ test.describe("desktop channel selection", () => {
 
     await expectEmptyComposerCaret(textarea);
   });
+
+  test("draws a soft caret on one middle line with the hint chip and the attach button", async ({ page }) => {
+    const textarea = await openTwoChannelWorkspace(page);
+    await textarea.focus();
+    await expectEmptyComposerCaret(textarea);
+    const caret = page.locator(".app-composer-caret").first();
+    await expect(caret).toBeVisible();
+    await expect.poll(() => textarea.evaluate((node) => getComputedStyle(node).caretColor)).toBe("rgba(0, 0, 0, 0)");
+
+    const middles = await page.evaluate(() => {
+      const middle = (element: Element | null) => {
+        const box = element!.getBoundingClientRect();
+        return { middle: (box.top + box.bottom) / 2, width: box.width };
+      };
+      return {
+        row: middle(document.querySelector(".composer-input-row")),
+        attach: middle(document.querySelector(".composer-attach .app-composer-inline-icon")),
+        chip: middle(document.querySelector(".app-composer-hint-trigger")),
+        caret: middle(document.querySelector(".app-composer-caret")),
+      };
+    });
+    expect(middles.caret.width).toBe(2);
+    for (const part of [middles.attach, middles.chip, middles.caret]) {
+      expect(Math.abs(part.middle - middles.row.middle)).toBeLessThanOrEqual(0.75);
+    }
+
+    const before = await caret.boundingBox();
+    await textarea.pressSequentially("hi");
+    await expect.poll(async () => (await caret.boundingBox())!.x).toBeGreaterThan(before!.x + 5);
+
+    await textarea.evaluate((node) => node.dispatchEvent(new CompositionEvent("compositionstart")));
+    await expect(caret).toBeHidden();
+    await expect.poll(() => textarea.evaluate((node) => getComputedStyle(node).caretColor)).not.toBe("rgba(0, 0, 0, 0)");
+    await textarea.evaluate((node) => node.dispatchEvent(new CompositionEvent("compositionend")));
+    await expect(caret).toBeVisible();
+  });
 });
