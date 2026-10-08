@@ -161,6 +161,10 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   whether or not the close was said. Routing carries the stored relation ID
   through to removal; imported subscriptions retain their opaque IDs when
   updated, rather than deriving an identity from connection or source names.
+- **Numbers are per history.** An issue subscription made before the issue
+  or pull request it names was opened is about an earlier one with that
+  number (the repository's history was replaced in 2026-10) and hears
+  nothing.
 - **Privacy.** A private repository's events reach only conversations people
   outside the Space cannot read, as for repository subscriptions.
 

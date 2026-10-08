@@ -3,6 +3,7 @@ import { githubCommitCheckVerdict } from "./app-connectors";
 import { resolveGitHubSubscriptionRoutes, type GitHubSubscriptionRoute } from "./github-subscription-route-directory";
 import {
   githubIssueSourceRef,
+  githubIssueSubscriptionCurrent,
   githubPullRequestClosed,
   githubPullRequestEventMessage,
   githubSettledCheckSuiteSha,
@@ -111,7 +112,8 @@ export async function dispatchProductGitHubWebhook(input: {
     const results = await Promise.all(batch.map(async (route): Promise<number> => {
       const principal = { kind: "user" as const, id: route.authorityRootUserId };
       const number = route.sourceKind === "issue" ? issues.get(route.sourceRef) : undefined;
-      if (route.sourceKind === "issue" && number === undefined) return 0;
+      if (route.sourceKind === "issue" &&
+          (number === undefined || !githubIssueSubscriptionCurrent(input.event, input.payload, route.createdAt))) return 0;
       const body = number === undefined ? repositoryBody : githubPullRequestEventMessage({
         event: input.event, payload: input.payload, repository, number,
         ...(verdict ? { verdict } : {}) });
