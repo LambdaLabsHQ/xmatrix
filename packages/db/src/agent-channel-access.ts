@@ -8,7 +8,7 @@ export interface AgentChannelRunProof {
   runId: string; instanceId: string; executionKey: string;
 }
 export class AgentChannelAccessError extends MessageAuthorityError {
-  constructor(code: string, status: number) { super(code, status, code); }
+  constructor(code: string, status: number, retryable = false) { super(code, status, code, retryable); }
 }
 
 /** Typed broader capability: an exact active Run may collaborate only where
@@ -68,7 +68,7 @@ export class PostgresAgentChannelAccessRepository {
     const placement = await new PostgresSpacePlacementDirectory(this.database).resolve(
       { requestId: input.requestId, operation: "agent.channel.access" }, route.spaceId);
     if (placement.state !== "active" || placement.targetShardId !== null) {
-      throw new AgentChannelAccessError("space_placement_unavailable", 503);
+      throw new AgentChannelAccessError("space_placement_unavailable", 503, true);
     }
     await this.database.transaction({ requestId: input.requestId, operation: "agent.channel.access",
       placement: { spaceId: route.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } },

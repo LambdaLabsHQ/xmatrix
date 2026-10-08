@@ -28,7 +28,7 @@ export async function requestPrincipal(c: Context<{ Bindings: Env }>): Promise<R
 export function authorityFailure(c: Context<{ Bindings: Env }>, error: unknown,
   detail?: Record<string, unknown>): Response {
   if (error instanceof MessageAuthorityError) {
-    return c.json({ error: error.message, code: error.code, ...(detail ? { detail } : {}) },
+    return c.json({ error: error.message, code: error.code, retryable: error.retryable, ...(detail ? { detail } : {}) },
       error.status as 400 | 403 | 404 | 409 | 413 | 500 | 503);
   }
   return requestErrorResponse(c, error);
