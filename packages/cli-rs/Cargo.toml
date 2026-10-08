@@ -3,7 +3,7 @@ name = "xmatrix"
 # The release version lives here only. Library crates keep 0.0.0 so a release
 # bump does not invalidate their build cache; they read the running version
 # from xmatrix_cli_core::version, which main registers.
-version = "1.0.0"
+version = "1.0.65"
 edition.workspace = true
 license.workspace = true
 
