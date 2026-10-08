@@ -902,7 +902,7 @@ export function MachinesView({
   const list = (
     <ToolList title="Machines">
       {error && <p role="alert" className="px-5 pb-2 text-xs font-medium text-destructive md:px-6">{error}</p>}
-      {identityUnavailable && <p role="status" className="hidden px-5 pb-2 text-xs text-muted-foreground md:block md:px-6">
+      {identityUnavailable && <p role="status" className="px-5 pb-2 text-xs text-muted-foreground md:px-6">
         Update xMatrix to identify this computer and show its controls on the registered Machine.
       </p>}
       <ul>

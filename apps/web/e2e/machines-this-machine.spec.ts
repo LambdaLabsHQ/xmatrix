@@ -21,13 +21,13 @@ const daemon = (machineId: string, hostName: string, platform: string) => ({
   metadata: { platform },
 });
 
-async function openAsDesktop(page: Page, machineId: string | undefined, named = true) {
+async function openAsDesktop(page: Page, machineId: string | undefined, named = true, platform = "darwin") {
   await page.setViewportSize({ width: 1400, height: 900 });
-  await page.addInitScript(({ id, host, named }) => {
+  await page.addInitScript(({ id, host, named, platform }) => {
     const now = new Date().toISOString();
     (window as unknown as Record<string, unknown>).xmatrixDesktop = {
-      client: "desktop", platform: "darwin",
-      getContext: async () => ({ client: "desktop", platform: "darwin", version: "0.16.600", machineId: id,
+      client: platform === "darwin" ? "desktop" : platform, platform,
+      getContext: async () => ({ client: platform === "darwin" ? "desktop" : platform, platform, version: "0.16.600", machineId: id,
         hostId: host, hostName: host, isPackaged: true, startUrl: "" }),
       setBadge: async () => undefined, setTitle: async () => undefined, notify: async () => true,
       openExternal: async () => undefined, checkCliInstalled: async () => ({ installed: true }),
@@ -38,7 +38,7 @@ async function openAsDesktop(page: Page, machineId: string | undefined, named = 
       getSetupStatus: async () => ({ setupVersion: 1, completedAt: now }),
       discoverAgentPresets: async () => [],
     };
-  }, { id: machineId, host: HOST, named });
+  }, { id: machineId, host: HOST, named, platform });
   await openWorkspaceWithStubs(page, {
     spaces: [E2E_SPACE],
     workspaces: [workspace(MACHINE_ID, HOST, "xmatrix"), workspace("machine:other", "grok-bot", "grok")],
@@ -92,9 +92,20 @@ test("missing Machine identity never creates a duplicate desktop row from its ho
   await expect(rows.getByTestId("this-machine-tag")).toHaveCount(0);
   await expect(page.getByText("Update xMatrix to identify this computer", { exact: false })).toBeVisible();
   await page.setViewportSize({ width: 393, height: 852 });
-  await expect(page.getByText("Update xMatrix to identify this computer", { exact: false })).toBeHidden();
+  await expect(page.getByText("Update xMatrix to identify this computer", { exact: false })).toBeVisible();
   await expect(rows).toHaveCount(2);
 });
+
+for (const platform of ["ios", "android"]) {
+  test(`${platform} never presents this computer's identity hint, even in a wide viewport`, async ({ page }) => {
+    await openAsDesktop(page, undefined, true, platform);
+    const hint = page.getByText("Update xMatrix to identify this computer", { exact: false });
+    await expect(hint).toHaveCount(0);
+    await expect(page.getByTestId("machine-row")).toHaveCount(2);
+    await page.setViewportSize({ width: 393, height: 852 });
+    await expect(hint).toHaveCount(0);
+  });
+}
 
 test("a retired UUID cannot create a duplicate row beside the same computer's Laptop record", async ({ page }) => {
   await openAsDesktop(page, "machine:b0be459f-bfc0-4498-9b47-2e4c7cb8957e");
