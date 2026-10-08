@@ -45,6 +45,7 @@ import {
 import { MyAgentsView } from "./my-agents-view";
 import { StatusView } from "./status-view";
 import { MachineHarnessPanel } from "./machine-harness-panel";
+import { MachineWorktreesPanel } from "./machine-worktrees-panel";
 
 import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
 import { WoodPanel } from "@/components/ui/material-surfaces";
@@ -2549,6 +2550,8 @@ export function ToolSurface({
           machineName={localMachineName}
           onNameMachine={onNameLocalMachine}
           harnesses={<MachineHarnessPanel key={currentSpace?.id} token={token} spaceId={currentSpace?.id}
+            daemon={machines.find(machine => machine.machineId === desktopContext?.machineId)?.daemon} />}
+          worktrees={<MachineWorktreesPanel token={token}
             daemon={machines.find(machine => machine.machineId === desktopContext?.machineId)?.daemon} />}
           onStartDaemon={onStartDesktopDaemon}
           onRestartDaemon={onRestartDesktopDaemon}
