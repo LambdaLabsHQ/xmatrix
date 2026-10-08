@@ -23,6 +23,7 @@ export async function resolveGitHubSubscriptionRoutes(
   env: DirectoryEnv,
   installationId: string,
   sourceRef: string,
+  feature: string,
 ): Promise<GitHubSubscriptionRoute[]> {
   const fleet = createPostgresAuthorityFleet(env, {
     applicationName: "xmatrix-hub-github-subscription-directory",
@@ -33,7 +34,7 @@ export async function resolveGitHubSubscriptionRoutes(
   const partitions = await Promise.all(fleet.physicalShards.map(({ shardId, database }) =>
     new PostgresAppRepository(database).githubSubscriptionRoutes({
       requestId: `github-routes:${shardId}:${crypto.randomUUID()}`.slice(0, 200),
-      installationId, sourceRef, limit: 1_001,
+      installationId, sourceRef, feature, limit: 1_001,
     })));
   const routes = partitions.flat().sort((left, right) =>
     [left.channelId, left.spaceId, left.connectionId].join("\u001f").localeCompare(
