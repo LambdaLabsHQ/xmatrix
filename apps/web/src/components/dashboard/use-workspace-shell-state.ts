@@ -22,12 +22,7 @@ import {
 } from "./workspace-shell-constants";
 import { sendHumanChannelFocus } from "./send-human-channel-focus";
 import { useChannelHistoryWarmup } from "./use-channel-history-warmup";
-import {
-  bindHumanSocketHeartbeat,
-  createHumanSocketSuspensionTracker,
-  listenForHumanSocketResume,
-  shouldResumeHumanSocketNow,
-} from "./human-socket-heartbeat";
+import { ReconnectingSocket } from "@/lib/connectivity/reconnecting-socket";
 import { listenForForegroundRefresh } from "./foreground-refresh";
 import {
   channelLastMessagePreviewFromEntry,
@@ -49,7 +44,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { applyChannelReadStateToCatalog } from "./channel-catalog-read-state";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
-import { admittedHumanSocketUrl, handleHumanSocketCompatibilityClose } from "@/lib/app-client-compatibility";
+import { admittedHumanSocketUrl, humanSocketCloseDecision } from "@/lib/app-client-compatibility";
 import { applyMemberReadEvent } from "./mention-read-state";
 import {
   filterHistoryForChannel,
@@ -118,7 +113,9 @@ import {
   OLDER_HISTORY_LIMIT,
   HistoryRenderAuthority,
   OutgoingMessage,
+  HUMAN_HEARTBEAT_PING,
   RELAY_PUSH_PING_INTERVAL_MS,
+  RELAY_PUSH_PONG_TIMEOUT_MS,
   AUTOMATION_REFRESH_INTERVAL_MS,
   TRACE_EVENT_LIMIT,
   TimelineItem,
@@ -236,6 +233,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const relaySocketRef = useRef<WebSocket | null>(null);
   const relayReconnectAttemptRef = useRef(0);
+  const humanConnectionRef = useRef<ReconnectingSocket | null>(null);
+  // The Human socket reads the token when it dials: a renewal must not drop a
+  // working socket (the Hub closes it with 4401 when it needs a new token).
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const hasToken = Boolean(token);
 
   /** Pings the live Human socket now; a dead one closes after the pong timeout. */
   const relaySocketProbeRef = useRef<(() => void) | null>(null);
@@ -1391,12 +1394,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, setHistoryError, setLoadingHistory });
 
   useEffect(() => {
-    if (!token || !user) return;
+    if (!hasToken || !user) return;
     const userId = user.id;
 
-    let cancelled = false;
-    let reconnectTimer: number | undefined;
-    let socket: WebSocket | null = null;
     // Survives a token renewal re-running this effect, so a renewed token the Hub
     // still refuses backs off too; only an accepted connect resets it.
     const reconnectAttempt = relayReconnectAttemptRef;
@@ -1409,82 +1409,14 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       return admittedHumanSocketUrl(hubUrl, userId);
     }
 
-    function scheduleReconnect() {
-      // A resume may already have dialled while a compatibility check was
-      // pending; a second socket would stay open, unowned, until the tab closes.
-      if (cancelled || socket) return;
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
-      const delay = Math.min(30000, 1000 * 2 ** Math.min(reconnectAttempt.current, 5));
-      reconnectAttempt.current += 1;
-      reconnectTimer = window.setTimeout(connect, delay);
-    }
-
-    const heartbeat = bindHumanSocketHeartbeat(
-      relaySocketRef, RELAY_PUSH_PING_INTERVAL_MS, replaceSocket,
-    );
-    relaySocketProbeRef.current = () => heartbeat.probe();
-    const suspension = createHumanSocketSuspensionTracker();
-
-    /** Drops the current socket without waiting for its close event. */
-    function dropSocket() {
-      const stale = socket;
-      socket = null;
-      if (relaySocketRef.current === stale) relaySocketRef.current = null;
-      relayPushConnectedRef.current = false;
-      relaySocketGenerationRef.current += 1;
-      heartbeat.stop();
-      if (reconnectTimer !== undefined) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = undefined;
-      }
-      // Its listeners see it is no longer current and stay silent.
-      stale?.close();
-    }
-
-    /** Drops the current socket and dials a new one at once. */
-    function replaceSocket() {
-      if (cancelled) return;
-      dropSocket();
-      reconnectAttempt.current = 0;
-      connect();
-    }
-
     /**
      * The Hub refused this token. It holds the socket open before closing it, to
      * slow clients that only redial on close; this one renews the token now.
      */
     function refuseSocket() {
-      if (cancelled || !socket) return;
-      dropSocket();
+      if (!connection.current) return;
       window.dispatchEvent(new Event(AUTH_TOKEN_REJECTED_EVENT));
-      scheduleReconnect();
-    }
-
-    function resumeHumanSocket() {
-      if (cancelled) return;
-      const live = relaySocketRef.current;
-      const hidden = document.hidden;
-      const action = shouldResumeHumanSocketNow({
-        hidden,
-        online: navigator.onLine !== false,
-        socketReadyState: live ? live.readyState : null,
-        suspended: suspension.consume(hidden),
-      });
-      if (action === "probe") {
-        heartbeat.probe();
-        return;
-      }
-      if (action === "replace") {
-        replaceSocket();
-        return;
-      }
-      if (action !== "reconnect") return;
-      if (reconnectTimer !== undefined) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = undefined;
-      }
-      reconnectAttempt.current = 0;
-      connect();
+      connection.backOff();
     }
 
     // Presence and activity from many working Agents land as one commit per
@@ -1526,7 +1458,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           }
           relayPushConnectedRef.current = true;
           setHumanPushConnected(true);
-          reconnectAttempt.current = 0;
+          connection.markHealthy();
           if (connectedBefore) {
             // Frames pushed while the socket was down are gone, and polling
             // stays off while it is up: read what they would have changed.
@@ -1540,7 +1472,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           reconcileUnconfirmedOnReconnectRef.current?.();
           sendHumanChannelFocus({
             channelId: conversationViewOpen(viewRef.current) ? selectedChannelIdRef.current : null,
-            socket,
+            socket: connection.current,
             connected: true,
             selectedChannelIdRef,
             historyChannelIdRef,
@@ -1962,30 +1894,20 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       }
     }
 
-    function connect() {
-      if (cancelled || socket) return;
-      reconnectTimer = undefined;
-      const live = new WebSocket(relayUrl());
-      socket = live;
-      relaySocketRef.current = live;
-      live.addEventListener("open", () => {
-        if (cancelled || socket !== live) {
-          live.close();
-          return;
-        }
+    const connection = new ReconnectingSocket({
+      open: async () => new WebSocket(relayUrl()),
+      onOpen: (live) => {
+        relaySocketRef.current = live;
         relayPushConnectedRef.current = false;
         live.send(JSON.stringify({
           type: "human_connect",
-          token,
+          token: tokenRef.current,
           requestId: "web-subscribe",
           // Presence for conversations not on screen may come as a once-a-second digest.
           device: { ...browserDevicePresence(desktopBridgeRef.current), capabilities: [HUMAN_CLIENT_PRESENCE_DIGEST] },
         }));
-        heartbeat.start();
-      });
-      live.addEventListener("message", (event) => {
-        if (socket !== live) return;
-        heartbeat.noteInbound();
+      },
+      onMessage: (_live, event) => {
         try {
           const decoded = JSON.parse(String(event.data)) as unknown;
           const catalogChanged = parseHumanChannelCatalogChangedMessage(decoded);
@@ -1998,45 +1920,35 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         } catch {
           // Ignore malformed push payloads; REST refresh remains the fallback.
         }
-      });
-      live.addEventListener("close", (event) => {
-        if (socket !== live) return;
-        socket = null;
+      },
+      onDown: () => {
+        relaySocketRef.current = null;
         relayPushConnectedRef.current = false;
         setHumanPushConnected(false);
         relaySocketGenerationRef.current += 1;
-        if (relaySocketRef.current === live) {
-          relaySocketRef.current = null;
-        }
-        heartbeat.stop();
-        if (handleHumanSocketCompatibilityClose(event.code, scheduleReconnect)) return;
-        // The renewed token re-runs this effect; the backed-off redial is only the fallback.
+      },
+      onClose: (event) => {
+        // The renewed token reaches the next dial; the Hub decides when it is needed.
         if (event.code === HUMAN_AUTH_REQUIRED_CLOSE_CODE) window.dispatchEvent(new Event(AUTH_TOKEN_REJECTED_EVENT));
-        scheduleReconnect();
-      });
-      live.addEventListener("error", () => {
-        live.close();
-      });
-    }
-
-    if (reconnectAttempt.current > 0) scheduleReconnect();
-    else connect();
-    const stopResume = listenForHumanSocketResume(resumeHumanSocket, suspension.markSuspended);
+        return humanSocketCloseDecision(event.code);
+      },
+      heartbeat: {
+        intervalMs: RELAY_PUSH_PING_INTERVAL_MS,
+        timeoutMs: RELAY_PUSH_PONG_TIMEOUT_MS,
+        ping: (live) => live.send(HUMAN_HEARTBEAT_PING),
+      },
+      attempts: reconnectAttempt,
+    });
+    humanConnectionRef.current = connection;
+    relaySocketProbeRef.current = () => connection.probe();
+    connection.start();
     return () => {
-      cancelled = true;
+      connection.stop();
+      if (humanConnectionRef.current === connection) humanConnectionRef.current = null;
       relayFrames.dispose();
       relayPushConnectedRef.current = false;
       setHumanPushConnected(false);
-      heartbeat.stop();
       relaySocketProbeRef.current = null;
-      stopResume();
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
-      if (relaySocketRef.current === socket) {
-        relaySocketRef.current = null;
-      }
-      if (socket?.readyState !== WebSocket.CONNECTING) {
-        socket?.close();
-      }
     };
   }, [
     applyChannelHistory,
@@ -2057,9 +1969,15 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     relaySocketGenerationRef,
     historyTailBaseGenerationRef,
     queryClient,
-    token,
+    hasToken,
     user, markNativeMessageNotified,
   ]);
+
+  // A token renewed while the socket is down (the Hub refused the old one)
+  // dials at once; a working socket keeps running on the token it signed in with.
+  useEffect(() => {
+    if (token && !relayPushConnectedRef.current) humanConnectionRef.current?.replace();
+  }, [token]);
 
   // Catch up when the socket connects, and restart the fallback polls when it drops.
   // TanStack reads refetchInterval only after a fetch.

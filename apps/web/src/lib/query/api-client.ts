@@ -1,5 +1,7 @@
 import { DEFAULT_HUB_URL, normalizeHubUrl } from "@xmatrix/protocol";
 
+import { noteRejectedToken } from "../auth-events";
+
 export interface XMatrixErrorPayload {
   error?: string;
   message?: string;
@@ -136,6 +138,7 @@ export async function xmatrixApiRequest<T>(input: {
   } catch (cause) {
     throwTransportError(cause, input.signal);
   }
+  noteRejectedToken(response.status, Boolean(input.token));
   if (!response.ok) throw await errorFromResponse(response);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -149,7 +152,9 @@ export async function xmatrixRawResponse(
   init?: RequestInit,
 ): Promise<Response> {
   try {
-    return await fetch(input, { cache: "no-store", ...init });
+    const response = await fetch(input, { cache: "no-store", ...init });
+    noteRejectedToken(response.status, sendsBearer(input, init));
+    return response;
   } catch (cause) {
     throwTransportError(cause, init?.signal ?? (input instanceof Request ? input.signal : undefined));
   }
@@ -170,6 +175,11 @@ export async function xmatrixQueryRawResponse(
     }
   }
   return response;
+}
+
+function sendsBearer(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  return /^bearer\s/iu.test(headers.get("authorization") ?? "");
 }
 
 /**

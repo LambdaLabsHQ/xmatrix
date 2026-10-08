@@ -292,6 +292,8 @@ export type {
 } from "./connections/human.js";
 export {
   HUMAN_CLIENT_PRESENCE_DIGEST,
+  HUMAN_HEARTBEAT_PING,
+  HUMAN_HEARTBEAT_PONG,
   HUMAN_AUTH_INVALID_FAILURE_CODE,
   HUMAN_AUTH_REQUIRED_CLOSE_CODE,
   parseHumanChannelCatalogChangedMessage,

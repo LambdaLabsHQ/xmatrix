@@ -10,7 +10,7 @@ import { gitHubFileReferenceHref, gitHubFileReferences, pageLineDiff, parseGitHu
   type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
-import { PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
+import { PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
 import { PAGE_DOCUMENT_FRAGMENT, type PageSessionPresent, type PageSessionPrincipal } from "./page-session";
 import { pageConversation, workingBySection } from "./page-conversations";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -405,7 +405,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       }
       return c.json({ protocol: `${PAGE_SESSION_SUBPROTOCOL_PREFIX}${ticket}`,
         socketPath: `/ws/pages/${encodeURIComponent(spaceId)}/${encodeURIComponent(pageId)}`,
-        canEdit: page.canEdit, headRevision: page.headRevision }, 200, NO_STORE);
+        canEdit: page.canEdit, headRevision: page.headRevision, heartbeat: PAGE_SESSION_HEARTBEAT_PING }, 200, NO_STORE);
     } catch (error) {
       return failure(c, error);
     }

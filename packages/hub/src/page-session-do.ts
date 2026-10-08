@@ -19,6 +19,13 @@ import type { Env } from "./types";
  */
 
 export const PAGE_SESSION_SUBPROTOCOL_PREFIX = "xmatrix-page-v2.";
+/**
+ * The editor's heartbeat: answered by the runtime itself (a WebSocket
+ * auto-response) without waking this object. The ticket names it, so an
+ * editor only pings a Hub that answers.
+ */
+export const PAGE_SESSION_HEARTBEAT_PING = "ping";
+const PAGE_SESSION_HEARTBEAT_PONG = "pong";
 const TICKET_TTL_MS = 60_000;
 const COMMIT_IDLE_MS = 5_000;
 const REVALIDATE_MS = 60_000;
@@ -62,6 +69,7 @@ export class RelayPageSession extends DurableObject<Env> {
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
+    state.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_HEARTBEAT_PONG));
     this.session = this.newSession();
   }
 

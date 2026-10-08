@@ -50,6 +50,8 @@ class FakeXMLHttpRequest {
 
 /** The real transport, run against this file's fetch stub. */
 const transport = (() => {
+  // Its own imports (auth-events) are TypeScript too.
+  require("../../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
   const transportJs = ts.transpileModule(fs.readFileSync(`${__dirname}/../query/api-client.ts`, "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -57,9 +59,9 @@ const transport = (() => {
   vm.runInNewContext(transportJs, {
     module: transportModule,
     exports: transportModule.exports,
-    Error, DOMException, JSON, Math, Number, Date, Set, Object,
+    Error, DOMException, JSON, Math, Number, Date, Set, Object, Headers, Request,
     fetch: (...args) => fetchImpl(...args),
-    require,
+    require: (specifier) => require(specifier.startsWith(".") ? `../query/${specifier}` : specifier),
   });
   return transportModule.exports;
 })();
