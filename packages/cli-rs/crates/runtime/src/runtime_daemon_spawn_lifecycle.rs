@@ -455,9 +455,10 @@ async fn handle_daemon_spawn_request(
                         slot_id: existing_slot.as_str().to_string(),
                         base_repo: base_repo.clone(),
                         resumed: false,
+                        baseline: None,
                     });
                 }
-                let lease = if intent.handoff_transfer {
+                let mut lease = if intent.handoff_transfer {
                     let source_session = intent
                         .handoff_source_resume_session_key
                         .as_deref()
@@ -567,6 +568,11 @@ async fn handle_daemon_spawn_request(
                 .map_err(|error| {
                     CliError::Launch(format!("repo pool lease unavailable ({error})"))
                 })?;
+                match repo_pool::observe_lease_baseline_at(&layout, &base_repo, &request, &lease,
+                    intent.resume || intent.handoff_transfer).await {
+                    Ok(baseline) => lease.baseline = Some(baseline),
+                    Err(error) => eprintln!("repo pool: baseline evidence unavailable ({error})"),
+                }
                 Ok::<_, CliError>((base_repo, lease))
             })
             .await?;
@@ -625,6 +631,7 @@ async fn handle_daemon_spawn_request(
             slot_id: lease.slot_id.as_str().to_string(),
             base_repo,
             resumed: intent.resume,
+            baseline: lease.baseline,
         });
         repo_pool_spawn_claim = Some(DaemonRepoPoolSpawnClaim {
             canonical_repo_identity: canonical.as_str().to_string(),
@@ -720,6 +727,10 @@ async fn handle_daemon_spawn_request(
         }
     }
 
+    let baseline_warning_prompt = repo_pool_binding.as_ref().and_then(|binding| binding.baseline.as_ref())
+        .filter(|baseline| baseline.warn_agent).map(|baseline| format!(
+            "Repository continuity warning: this continued task's recorded base {} @ {} is no longer an ancestor of the confirmed remote default branch. Your checkout and uncommitted work have been preserved. Before publishing, check the current remote history and avoid reintroducing removed commits.\n\n{}",
+            baseline.base_ref, baseline.base_oid, intent.prompt));
     let spawn_result = if let Err(error) = command_lease.confirm_live(&relay).await {
         Err(error)
     } else if let Err(error) =
@@ -761,7 +772,7 @@ async fn handle_daemon_spawn_request(
             materializer_id: intent.materializer_id.as_deref(),
             execution_key: intent.execution_key.as_deref(),
             instance_id: intent.instance_id.as_deref(),
-            prompt: &intent.prompt,
+            prompt: baseline_warning_prompt.as_deref().unwrap_or(&intent.prompt),
             source_message_id: intent.source_message_id(),
             attachments: intent.attachments(),
             // Direct daemon routing workspace (registered cwd or management
@@ -810,6 +821,12 @@ async fn handle_daemon_spawn_request(
             return Err(error);
         }
     };
+    if repo_pool_binding.as_ref().and_then(|binding| binding.baseline.as_ref())
+        .is_some_and(|baseline| baseline.warn_agent)
+        && let (Some(layout), Some(request)) = (repo_pool_layout.as_ref(), repo_pool_request.as_ref())
+        && let Err(error) = repo_pool::acknowledge_baseline_warning_at(layout, request).await {
+        eprintln!("repo pool: warning receipt unavailable ({error})");
+    }
     child.instance_id = intent.instance_id.clone();
     child.resume_session_key = intent.resume_session_key.clone();
     child.repo_pool_binding = repo_pool_binding;
@@ -1638,7 +1655,8 @@ fn daemon_repo_pool_spawn_metadata(binding: Option<&DaemonRepoPoolBinding>) -> O
                 "repoIdentity": binding.canonical_repo_identity,
                 "repoKeyId": binding.repo_key_id,
                 "slotId": binding.slot_id,
-            }
+            },
+            "repositoryBaseline": binding.baseline,
         })
     })
 }

@@ -599,6 +599,7 @@ pub struct LeaseResult {
     pub base_ref: String,
     pub reused_available: bool,
     pub spawn_claim_token: String,
+    pub baseline: Option<RepositoryBaseline>,
 }
 
 #[derive(Debug, Clone)]
@@ -1766,6 +1767,7 @@ async fn transfer_retained_binding(
         base_ref,
         reused_available: false,
         spawn_claim_token,
+        baseline: None,
     })
 }
 
@@ -1922,6 +1924,7 @@ async fn lease_under_lock(
                 base_ref,
                 reused_available: false,
                 spawn_claim_token,
+                baseline: None,
             });
         }
         return Err(PoolError::new(
@@ -2056,6 +2059,7 @@ async fn lease_under_lock(
                     base_ref,
                     reused_available: false,
                     spawn_claim_token,
+                    baseline: Some(fetched.baseline()),
                 })
             }
             Err(err) => {
@@ -2220,6 +2224,7 @@ async fn refresh_idle_slot(
                 base_ref,
                 reused_available: true,
                 spawn_claim_token,
+                baseline: Some(fetched.baseline()),
             })
         }
         Err(err) => {
@@ -2904,6 +2909,8 @@ async fn snapshot_if_needed(path: &Path, slot_id: &str) -> Result<SnapshotOutcom
 struct ResolvedBase {
     base_ref: String,
     oid: String,
+    confirmed_at: String,
+    history_rewritten: Option<bool>,
 }
 
 async fn fetched_for_pinned_base<'a>(
@@ -3128,12 +3135,19 @@ async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, C
     )
     .await
     .map_err(ConfirmError::Git)?;
+    let confirmed_at = now_rfc3339();
     let (branch, advertised_oid) = parse_ls_remote_head(&advertised).ok_or_else(|| {
         ConfirmError::Pool(PoolError::new(
             PoolErrorCode::BaseRefUnresolved,
             "could not resolve origin default branch: origin advertises none with a commit",
         ))
     })?;
+    materialize_advertised_default(base_repo, &branch, &advertised_oid, confirmed_at).await
+}
+
+async fn materialize_advertised_default(
+    base_repo: &Path, branch: &str, advertised_oid: &str, mut confirmed_at: String,
+) -> Result<ResolvedBase, ConfirmError> {
     // Only fetch and resolve this one ref: every branch-specific step below
     // reads the branch origin named just now.
     let tracking = format!("refs/remotes/origin/{branch}");
@@ -3145,7 +3159,9 @@ async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, C
     )
     .await
     .ok();
-    if held.as_deref() != Some(advertised_oid.as_str()) {
+    let previous_default = git(base_repo,
+        &["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], GIT_LOCAL_TIMEOUT).await.ok();
+    if held.as_deref() != Some(advertised_oid) {
         // The remote-tracking ref is a cache of origin, including rewritten
         // history: force only this ref; local branches and leased worktrees
         // stay untouched.
@@ -3157,6 +3173,7 @@ async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, C
         )
         .await
         .map_err(ConfirmError::Git)?;
+        confirmed_at = now_rfc3339();
     }
     let oid = git(
         base_repo,
@@ -3170,6 +3187,12 @@ async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, C
             format!("could not resolve origin/{branch} after fetch"),
         ))
     })?;
+    let history_rewritten = if previous_default.as_deref() == Some(tracking.as_str()) {
+        match held.as_deref() {
+            Some(previous) => proven_ancestor(base_repo, previous, &oid).await.map(|ancestor| !ancestor),
+            None => None,
+        }
+    } else { None };
     // Keep the local default-branch note in step for Git tools run inside the
     // checkout. Nothing on this path reads it back, so a lost race is harmless.
     let _ = git(
@@ -3181,6 +3204,8 @@ async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, C
     Ok(ResolvedBase {
         base_ref: format!("origin/{branch}"),
         oid,
+        confirmed_at,
+        history_rewritten,
     })
 }
 
@@ -4420,7 +4445,7 @@ pub(crate) fn git_command(cwd: &Path, args: &[&str]) -> tokio::process::Command 
     command
 }
 
-async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, GitCommandError> {
+async fn git_output(cwd: &Path, args: &[&str], timeout: Duration) -> Result<std::process::Output, GitCommandError> {
     let mut command = git_command(cwd, args);
     command
         .stdout(std::process::Stdio::piped())
@@ -4439,6 +4464,11 @@ async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, Git
         Ok(Err(error)) => return Err(GitCommandError::new(GitRunError::Failed, &error.to_string())),
         Ok(Ok(output)) => output,
     };
+    Ok(output)
+}
+
+async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, GitCommandError> {
+    let output = git_output(cwd, args, timeout).await?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let detail = if stderr.trim().is_empty() {

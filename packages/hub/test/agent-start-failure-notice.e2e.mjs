@@ -13,6 +13,48 @@ import {
 import { createPgSpawnableScenario, launchScenarioRun, sendSpawnResult, sendStopResult }
   from "./agent-launch-postgres.fixture.mjs";
 
+async function diagnosedLaunch(worker, headers, runId) {
+  const diagnosis = await json(await worker.fetch("/api/invocations/diagnostics", {
+    method: "POST", headers, body: JSON.stringify({ runId }),
+  }));
+  return diagnosis.launches.find(value => value.runId === runId);
+}
+
+test("authenticated checkout evidence reaches invocation details and continuity notices deduplicate", async () => {
+  const worker = await startMockUserHubWorker({ id: `baseline-${randomUUID()}`,
+    email: "baseline@example.com", name: "Baseline" });
+  let daemon;
+  try {
+    const scenario = await createPgSpawnableScenario(worker, { agentName: "codex-baseline" });
+    ({ daemon } = scenario);
+    const { auth, channelId } = scenario;
+    const { command } = await launchScenarioRun(worker, scenario, "inspect checkout continuity");
+    const baseline = { baseRef: "origin/main", baseOid: "a".repeat(40), confirmedAt: "2026-10-08T10:00:00Z",
+      remote: { baseRef: "origin/trunk", baseOid: "b".repeat(40), confirmedAt: "2026-10-08T10:01:00Z" },
+      relationship: "diverged", noticeKey: "c".repeat(64) };
+    const result = { ok: true, pid: 4242, metadata: { repositoryBaseline: { ...baseline, privatePath: "/PRIVATE" } } };
+    sendSpawnResult(daemon, command, result);
+    const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channelId,
+      message => message.metadata?.source === "repository_baseline", "continuity notice");
+    sendSpawnResult(daemon, command, result);
+    const headers = { ...auth, "content-type": "application/json" };
+    const source = (await diagnosedLaunch(worker, headers, command.runId)).sourceMessageId;
+    const query = await json(await worker.fetch(`/api/channels/${channelId}/agent-launches/query`, {
+      method: "POST", headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ sourceMessageIds: [source] }),
+    }));
+    const launch = query.launches.find(value => value.runId === command.runId);
+    assert.equal(launch.activity.repositoryBaseline.baseOid, baseline.baseOid);
+    assert.equal(launch.activity.repositoryBaseline.confirmedAt, "2026-10-08T10:00:00.000Z");
+    assert.equal(launch.activity.repositoryBaseline.relationship, "diverged");
+    assert.doesNotMatch(JSON.stringify(query), /PRIVATE/u);
+    const history = await json(await worker.fetch(`/api/channels/${channelId}/history?limit=20`, { headers: auth }));
+    assert.equal(history.messages.filter(message => message.messageId === notice.messageId).length, 1);
+  } finally {
+    await stopAgentWorker(worker, daemon);
+  }
+});
+
 test("a Workstation startup failure is persisted in-channel as a product notice", async () => {
   const userId = `agent-start-failure-${randomUUID()}`;
   const worker = await startMockUserHubWorker({ id: userId, email: "agent-start-failure@example.com", name: "Agent Start Failure" });
@@ -116,10 +158,7 @@ for (const [reason, code] of [
     assert.equal(notice.metadata.failureCode, code);
     assert.doesNotMatch(JSON.stringify(notice), /TOKEN_SENTINEL/u);
     const headers = { ...auth, "content-type": "application/json" };
-    const diagnosis = await json(await worker.fetch("/api/invocations/diagnostics", {
-      method: "POST", headers, body: JSON.stringify({ runId: command.runId }),
-    }));
-    const launch = diagnosis.launches.find(value => value.runId === command.runId);
+    const launch = await diagnosedLaunch(worker, headers, command.runId);
     assert.equal(launch.state, "failed");
     assert.equal(launch.errorCode, code);
     assert.equal(launch.spawnedAt, undefined);

@@ -326,6 +326,7 @@ pub async fn rehydrate_retained_lease_at(
         base_ref: record.last_base_ref.clone(),
         reused_available: false,
         spawn_claim_token,
+        baseline: None,
     })
 }
 
