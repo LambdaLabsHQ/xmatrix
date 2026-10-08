@@ -26,17 +26,26 @@ test("a scroller shows a floating thumb while it moves, which fades, widens and 
   await expect(thumb).toHaveCount(1);
   await expect(thumb).toHaveAttribute("data-visible", "");
   const box = (await thumb.boundingBox())!;
-  // A quarter of the track, at the right edge, half way along what can scroll.
-  expect(box.x + box.width).toBeCloseTo(340, 0);
-  expect(box.height).toBeCloseTo((400 - 4) / 4, 0);
-  expect(box.y).toBeCloseTo(40 + 2 + ((400 - 4) * 3 / 4) * (600 / 1200), 0);
+  const list = await page.locator("#overlay-list").evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { right: rect.left + element.clientLeft + element.clientWidth, top: rect.top + element.clientTop,
+      viewport: element.clientHeight, content: element.scrollHeight, offset: element.scrollTop };
+  });
+  // At the right edge, as long as the share in view, as far along as the list has scrolled.
+  const track = list.viewport - 4;
+  const length = (track * list.viewport) / list.content;
+  expect(box.x + box.width).toBeCloseTo(list.right, 0);
+  expect(box.height).toBeCloseTo(length, 0);
+  expect(box.y).toBeCloseTo(list.top + 2 + (track - length) * (list.offset / (list.content - list.viewport)), 0);
 
-  // Held under the pointer it stays and drags; a quarter track moves a third of the scroll.
+  // Held under the pointer it stays and drags: a third of the free track is a third of the scroll.
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 99);
+  const max = list.content - list.viewport;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + (track - length) / 3);
   await page.mouse.up();
-  await expect.poll(() => page.locator("#overlay-list").evaluate((element) => element.scrollTop)).toBeGreaterThan(990);
+  await expect.poll(() => page.locator("#overlay-list").evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(list.offset + max / 3 - 8);
   await page.waitForTimeout(1200);
   await expect(thumb).toHaveAttribute("data-visible", "");
 

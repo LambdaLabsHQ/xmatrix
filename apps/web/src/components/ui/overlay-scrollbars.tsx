@@ -120,7 +120,7 @@ export function OverlayScrollbars() {
 
     const placeAll = () => {
       frame = 0;
-      for (const scroller of [...active.values()]) place(scroller);
+      for (const scroller of active.values()) place(scroller);
     };
     const schedulePlace = () => {
       if (!frame) frame = window.requestAnimationFrame(placeAll);
@@ -207,7 +207,7 @@ export function OverlayScrollbars() {
       document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("resize", onResize);
       window.cancelAnimationFrame(frame);
-      for (const scroller of [...active.values()]) release(scroller);
+      for (const scroller of active.values()) release(scroller);
     };
   }, []);
 
