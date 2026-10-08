@@ -3131,7 +3131,7 @@ async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, C
     let (branch, advertised_oid) = parse_ls_remote_head(&advertised).ok_or_else(|| {
         ConfirmError::Pool(PoolError::new(
             PoolErrorCode::BaseRefUnresolved,
-            "origin does not advertise a default branch with a commit",
+            "could not resolve origin default branch: origin advertises none with a commit",
         ))
     })?;
     // Only fetch and resolve this one ref: every branch-specific step below

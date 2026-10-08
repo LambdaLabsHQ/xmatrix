@@ -837,7 +837,7 @@ async fn fetch_confirmed_remote_default(base_cwd: &Path) -> Result<String, Strin
     )
     .await?;
     let (branch, _) = crate::repo_pool::parse_ls_remote_head(&advertised)
-        .ok_or_else(|| "origin does not advertise a default branch with a commit".to_string())?;
+        .ok_or_else(|| "could not resolve origin default branch: origin advertises none with a commit".to_string())?;
     let tracking = format!("refs/remotes/origin/{branch}");
     let refspec = format!("+refs/heads/{branch}:{tracking}");
     let fetch_label = format!("origin/{branch}");
