@@ -1,7 +1,10 @@
 import { readFile, readdir } from "node:fs/promises";
 
 // Replays the relation-level DDL of the checked-in migrations in order, so a
-// table renamed by a later migration is reported under its current name.
+// table renamed by a later migration is reported under its current name. This
+// is the one inventory of the schema: the production substrate check compares
+// a live database with it, and the shard and purge classifications are tested
+// against it, so a migration edits no list of tables.
 export async function checkedInMigrationRelations() {
   const directory = new URL("../migrations/", import.meta.url);
   const names = (await readdir(directory)).filter((name) => name.endsWith(".sql")).sort();
