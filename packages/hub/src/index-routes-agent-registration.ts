@@ -23,7 +23,7 @@ const REGISTRATIONS = { list: listAgentRegistrations, refreshQuota: refreshAgent
 function registrationFailure(error: unknown, fallback: string): Response {
   const failure = requestFailure(error);
   if (error instanceof ControlError || failure.body.retryable) return failureResponse(failure, NO_STORE);
-  return failureResponse({ ...failure, body: { error: fallback } }, NO_STORE);
+  return failureResponse({ ...failure, body: { ...failure.body, error: fallback } }, NO_STORE);
 }
 
 export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, dependencies: Partial<
