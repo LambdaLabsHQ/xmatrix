@@ -3151,7 +3151,9 @@ async fn required_origin_fetch(base_repo: &Path) -> Result<(), PoolError> {
     for attempt in 1..=GIT_FETCH_ATTEMPTS {
         let result = match spec.as_deref() {
             Some(branch) => {
-                let refspec = format!("refs/heads/{branch}:refs/remotes/origin/{branch}");
+                // This remote-tracking ref is a cache of origin, including rewritten history.
+                // Force only this ref; local branches and leased worktrees stay untouched.
+                let refspec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
                 git(
                     base_repo,
                     &["fetch", "--no-tags", "origin", &refspec],
