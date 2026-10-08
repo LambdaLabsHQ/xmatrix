@@ -106,7 +106,7 @@ test("Automation distinguishes failed catalogs from empty catalogs", async ({ pa
 
   await page.getByRole("button", { name: "Schedules" }).click();
 
-  await expect(page.getByText("Couldn't load Automations. xMatrix is busy right now. Try again in a moment.")).toBeVisible();
+  await expect(page.getByText("Couldn't load Automations. xMatrix is still unavailable after several tries.", { exact: false })).toBeVisible();
   await expect(page.getByText("No schedules yet.")).toHaveCount(0);
 });
 
@@ -255,7 +255,7 @@ test("Automation keeps stale tasks visible but fails closed when refresh loses c
 
   await page.clock.runFor(15_000);
 
-  await expect(page.getByText("Couldn't load Automations. xMatrix is busy right now. Try again in a moment.")).toBeVisible();
+  await expect(page.getByText("Couldn't load Automations. xMatrix is still unavailable after several tries.", { exact: false })).toBeVisible();
   await expect(scheduleRow(page, "Existing schedule")).toBeVisible();
   await expect(page.getByRole("button", { name: "Resume" })).toBeDisabled();
 });

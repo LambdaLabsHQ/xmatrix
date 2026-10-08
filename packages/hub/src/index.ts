@@ -135,5 +135,5 @@ export default {
 /** A failed cron task names its cause; a database outage is logged, a defect is also reported. */
 function scheduledTaskFailed(name: string, error: unknown): void {
   console.error(`${name} failed`, error);
-  if (!retryablePostgresFailure(error)) reportError(error);
+  if (!retryablePostgresFailure(error)) reportError(error, { operation: `scheduled: ${name}` });
 }

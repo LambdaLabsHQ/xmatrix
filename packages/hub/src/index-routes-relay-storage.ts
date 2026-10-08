@@ -25,6 +25,7 @@ import {
   actorUserId,
   requireAdmin,
   relayR2PrivateErrorResponse,
+  routeReportContext,
   requestErrorStatus,
   relayChannelIdFromRequest,
   relayVisibilityScopeIdFromRequest,
@@ -50,7 +51,7 @@ function relayR2Route(handler: (c: RelayStorageContext) => Promise<Response>) {
     try {
       return await handler(c);
     } catch (error) {
-      return relayR2PrivateErrorResponse(error);
+      return relayR2PrivateErrorResponse(error, () => routeReportContext(c));
     }
   };
 }

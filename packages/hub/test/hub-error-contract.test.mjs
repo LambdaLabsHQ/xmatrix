@@ -16,6 +16,7 @@ import { RelayR2PrivateApiError } from "../src/relay-r2-private-api.ts";
 // The Hub's one error contract: a transient failure is a retryable 503 with
 // Retry-After; anything else keeps its own status and is not retryable.
 
+const route = { req: { method: "GET", routePath: "/api/spaces/:spaceId/things", param: () => ({ spaceId: "space-1" }) } };
 const outage = () => new Error("Connection terminated unexpectedly");
 const defect = () => Object.assign(new Error('relation "secret_table" does not exist'), { code: "42P01" });
 const moving = () => new ControlError("space_placement_unavailable", 503, "Space placement is unavailable", true);
@@ -37,13 +38,13 @@ function assertNoDriverText(result) {
 }
 
 test("privateRouteResponse answers an outage as retryable and never echoes the driver", async () => {
-  const transient = await answer(privateRouteResponse(async () => { throw outage(); }));
+  const transient = await answer(privateRouteResponse(route, async () => { throw outage(); }));
   assertTransient(transient, "postgres_unavailable");
   assertNoDriverText(transient);
-  const internal = await answer(privateRouteResponse(async () => { throw defect(); }));
+  const internal = await answer(privateRouteResponse(route, async () => { throw defect(); }));
   assert.deepEqual(internal, { status: 500, retryAfter: null,
     body: { error: "Internal error", code: "internal_error", retryable: false } });
-  const refused = await answer(privateRouteResponse(async () => {
+  const refused = await answer(privateRouteResponse(route, async () => {
     throw new ControlError("machine_not_found", 404, "Machine not found");
   }));
   assert.deepEqual(refused.body, { error: "Machine not found", code: "machine_not_found", retryable: false });

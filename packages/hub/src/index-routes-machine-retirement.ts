@@ -16,7 +16,7 @@ export function registerMachineRetirementRoutes(app: Hono<{ Bindings: Env }>, de
     ["delete", "/api/machines/:machineId", false],
     ["post", "/api/machines/:machineId/rejoin", true],
   ] as const) {
-    app[method](path, (c) => privateRouteResponse(async () => {
+    app[method](path, (c) => privateRouteResponse(c, async () => {
       const authenticated = await (dependencies.authenticate ?? requireAuth)(c.req.raw, c.env);
       if (authenticated.agentRun) return Response.json({ error: "Removing a Machine requires its owner" }, { status: 403 });
       const user = requireHumanAuth(authenticated);

@@ -21,10 +21,11 @@ export function ErrorNotice({ error, action, onRetry, className }: {
   if (!failure) return null;
   return <div role="alert" className={className ?? statusInkClass("alert", "text-sm")}>
     <p>{failure.message}</p>
-    {(failure.reference || (onRetry && failure.retryable)) && <p className="mt-1 flex flex-wrap items-center gap-2">
+    {(failure.reference || failure.report || (onRetry && failure.retryable)) && <p className="mt-1 flex flex-wrap items-center gap-2">
       {onRetry && failure.retryable && <button type="button" onClick={onRetry}
         className={actionClass({ variant: "secondary", size: "sm" })}>Try again</button>}
       {failure.reference && <span className="text-xs text-muted-foreground">Error code: {failure.reference}</span>}
+      {failure.report && <span className="select-all text-xs text-muted-foreground">Report: {failure.report}</span>}
     </p>}
   </div>;
 }

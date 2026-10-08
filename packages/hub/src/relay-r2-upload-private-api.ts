@@ -3,7 +3,7 @@ import { immutableContentObjectKey, lowercaseHex , utf8ByteLength } from "@xmatr
 // PostgreSQL content stores intent/ref metadata; this module owns only bounded
 // request parsing and R2 I/O.
 import { ControlError, PostgresContentRepository } from "@xmatrix/db";
-import { transientError } from "./error-contract";
+import { ServiceUnavailable, transientError } from "./error-contract";
 import { createPostgresAuthorityDatabase, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import {
   POSTGRES_AUTHORITY_TIMEOUTS,
@@ -108,19 +108,20 @@ async function json(request: Request): Promise<JsonRecord> {
 }
 
 /**
- * One content authority call: its rejection keeps its code, status and retry
- * policy; any other failure is the authority being unavailable, retryable only
- * when it is a transient outage.
+ * One content authority call: its rejection keeps its code, status, reason and
+ * retry policy; an outage a replay can survive is logged with its cause and
+ * answered as a retryable 503; anything else is a defect and reaches the route
+ * boundary unchanged, which reports it with what the route was doing.
  */
 async function contentCall(call: () => Promise<unknown>): Promise<JsonRecord> {
   let value: unknown;
   try {
     value = await call();
   } catch (error) {
-    if (error instanceof ControlError) {
-      fail(error.code, error.status, "blob authority rejected the request", error.retryable);
-    }
-    fail("authority_unavailable", 503, "blob authority is unavailable", transientError(error));
+    if (error instanceof ControlError) fail(error.code, error.status, error.message, error.retryable);
+    if (!transientError(error)) throw error;
+    console.error("Attachment storage is briefly unavailable", error);
+    throw new ServiceUnavailable("authority_unavailable", "Attachments are briefly unavailable; try again");
   }
   return record(value);
 }
@@ -136,10 +137,10 @@ function intentContext(value: JsonRecord): RelayR2LiveUploadIntentContext & { ve
   const contentHash = hash(value.contentHash);
   const objectKey = bounded(value.objectKey, "objectKey", 1024);
   if (objectKey !== immutableContentObjectKey(bounded(value.scopeId, "scopeId"), contentHash) || value.checksum !== contentHash || value.state !== "pending") {
-    fail("authority_unavailable", 503, "blob authority returned a noncanonical intent");
+    throw new Error("Content authority returned a noncanonical upload intent");
   }
   const expiresAt = Date.parse(bounded(value.expiresAt, "expiresAt"));
-  if (!Number.isSafeInteger(expiresAt)) fail("authority_unavailable", 503, "blob authority returned an invalid expiry");
+  if (!Number.isSafeInteger(expiresAt)) throw new Error("Content authority returned an invalid upload intent expiry");
   return {
     intentId: id(value.intentId, "intentId"),
     visibilityScopeId: bounded(value.scopeId, "scopeId"),
