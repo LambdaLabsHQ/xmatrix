@@ -15,6 +15,13 @@ const catalog = (harnesses: string[]) => ({ registrations: harnesses.map(registr
 const CATALOG = /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?[^#]*)?$/u;
 const COMMANDS = "**/api/xmatrix/spaces/*/agent-registrations/commands";
 
+async function expectEnabledPairs(page: import("@playwright/test").Page) {
+  await expect.poll(() => fixtureRequestBodies(page, "enable-command")).toEqual([
+    expect.objectContaining({ action: "create", key: key("claude") }),
+    expect.objectContaining({ action: "create", key: key("codex") }),
+  ]);
+}
+
 function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT | typeof E2E_MOBILE_CONTEXT) {
   test.describe(name, () => {
     test.use(context);
@@ -29,10 +36,7 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       await fixtureRule(page, { id: "enabled-catalog", pattern: CATALOG, responder: { kind: "sequence",
         responses: [catalog(["claude"]), catalog(["claude", "codex"])].map((json) => ({ json })) } });
       await agents.getByRole("button", { name: "Bring them in", exact: true }).click();
-      await expect.poll(() => fixtureRequestBodies(page, "enable-command")).toEqual([
-        expect.objectContaining({ action: "create", key: key("claude") }),
-        expect.objectContaining({ action: "create", key: key("codex") }),
-      ]);
+      await expectEnabledPairs(page);
       await expect(page.getByTestId("agent-row").filter({ hasText: "Remote server" }).first()).toBeVisible();
       await page.screenshot({ path: test.info().outputPath(`installed-agents-${name}.png`) });
     });
@@ -47,10 +51,7 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       await fixtureRule(page, { id: "enabled-catalog", pattern: CATALOG, responder: { kind: "sequence",
         responses: [catalog(["claude"]), catalog(["claude", "codex"])].map((json) => ({ json })) } });
       await bring.click();
-      await expect.poll(() => fixtureRequestBodies(page, "enable-command")).toEqual([
-        expect.objectContaining({ action: "create", key: key("claude") }),
-        expect.objectContaining({ action: "create", key: key("codex") }),
-      ]);
+      await expectEnabledPairs(page);
       await expect(bring).toHaveCount(0);
       await page.screenshot({ path: test.info().outputPath(`onboarding-enabled-${name}.png`) });
     });
