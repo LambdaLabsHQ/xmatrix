@@ -744,6 +744,14 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   const back = () => detail.getByRole("button", { name: "Agents" }).tap();
   /* A row says what its location is doing; the owner is named only when it is someone else. */
   await expect(row("mobile-actions-agent")).toBeVisible();
+  const usageGlance = row("mobile-actions-agent").getByTestId("agent-usage-glance");
+  await expect(usageGlance).toBeVisible();
+  await expect(usageGlance).toHaveAttribute("aria-label", /5-hour window: 40% used.*Weekly: 86% used/);
+  await expect(usageGlance).toContainText("5h40%");
+  await expect(usageGlance).toContainText("1w86%");
+  await expect(usageGlance.locator("[data-tone=green]")).toHaveCount(1);
+  await expect(usageGlance.locator("[data-tone=yellow]")).toHaveCount(1);
+  await expect(row("research-agent").getByTestId("agent-usage-glance")).toHaveCount(0);
   /* The runtime is the group the locations belong to, so its icon and name
      match the location row instead of reading as a caption above it. */
   const agentHeading = page.getByRole("region", { name: "codex" }).locator(".app-tool-list-group-title");
