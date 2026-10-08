@@ -44,13 +44,15 @@ function fixture() {
   for (const c of Object.values(channels)) c.memberPresence[c.id].usage = quota(12);
   const readings = { owner: [{ registration: key, usage: quota(12) },
     { registration: { ...key, machineId: "another-machine" }, usage: quota(12) }] };
-  const channelReads = [];
+  const channelReads = [], quotaReads = [];
+  const pool = { usage: quota(12) };
   const factory = createProductionRelayRuntimeProductPortFactory({}, {
     readChannel: async (channelId) => {
       channelReads.push(channelId);
       return { channel: channels[channelId], openChannelHumanMemberIdsBySpace: { space: ["user:owner", "user:viewer"] } };
     },
     readOwnerQuota: async ownerUserId => readings[ownerUserId] ?? [],
+    readQuota: async registration => { quotaReads.push(registration); return pool.usage; },
     analytics: { writeDataPoint() {} }, readHistory: async () => { throw Error("unexpected history"); } });
   const transport = new AgentInstanceRuntimeTransport(factory.agentInstance());
   const sessions = ["a", "b"].map(id => ({ principal: { ownerUserId: "owner", agentId: id,
@@ -61,7 +63,7 @@ function fixture() {
     presentation: { usage: quota(99) }, clientVersion: "0.16.705", clientProtocolVersion: 2 }));
   for (const session of sessions) assert.equal(transport.rehydrate(new Socket(), { version: 1, domain: "agent_instance",
     expiresAt: new Date(Date.now() + 60_000).toISOString(), session }), true);
-  return { factory, sessions, channels, readings, channelReads };
+  return { factory, sessions, channels, readings, channelReads, quotaReads, pool };
 }
 
 /** Records both immediate frames and a presence digest's card and Channel as one list. */
@@ -76,6 +78,14 @@ function recordDelivered(frames) {
 }
 
 const quotaFrames = frames => frames.filter(({ frame }) => frame.type === "registration_quota");
+
+/** The fixture, with one presence change of its first Instance recorded per call. */
+function reporting() {
+  const context = fixture(), frames = [];
+  const report = (reason = "update") => context.factory.onAgentPresenceChange({ reason, session: context.sessions[0],
+    liveHumanSessions: [], ...recordDelivered(frames) });
+  return { ...context, frames, report };
+}
 
 test("an Instance update sends its registration's reading to the owner once, reading no other Channel", async () => {
   const { factory, sessions, channelReads } = fixture(), frames = [];
@@ -149,20 +159,51 @@ test("usage-limit holds reach catalog and member presentation without a fabricat
 });
 
 test("local accounting changes do not send an unchanged pool observation", async () => {
-  const { factory, sessions, channels } = fixture(), frames = [];
-  const publish = () => factory.onAgentPresenceChange({ reason: "update", session: sessions[0], liveHumanSessions: [],
-    ...recordDelivered(frames) });
+  const { sessions, quotaReads, pool, frames, report: publish } = reporting();
   await publish();
   frames.length = 0;
-  channels.a.memberPresence.a.usage = { ...quota(12), totalTokens: 2, contextUsedTokens: 1 };
   sessions[0].presentation.usage = { ...quota(99), totalTokens: 2, contextUsedTokens: 1 };
   await publish();
   assert.deepEqual(quotaFrames(frames), []);
+  assert.deepEqual(quotaReads, [], "a reading the Instance already reported is not read again");
   assert.equal(frames.find(({ frame }) => frame.type === "enhanced_presence").frame.agent.usage.totalTokens, 2);
   frames.length = 0;
-  channels.a.memberPresence.a.usage.quotaObservedAt = new Date(Date.parse(now) + 1).toISOString();
+  // The Instance reports a newer provider reading: its pool is read once, and the new version reaches the owner.
+  const later = new Date(Date.parse(now) + 1).toISOString();
+  pool.usage = { ...quota(30), quotaObservedAt: later };
+  sessions[0].presentation.usage = { ...quota(30), quotaObservedAt: later };
   await publish();
+  await publish();
+  assert.deepEqual(quotaReads, [key]);
   assert.equal(quotaFrames(frames).length, 1, "a new quota version still reaches the owner's other Agents");
+  assert.equal(frames.filter(({ frame }) => frame.type === "enhanced_presence")
+    .every(({ frame }) => frame.agent.usage.quotaUsages[0].percent === 30), true);
+});
+
+test("a status report after the Channel was read reads nothing and sends only the card", async () => {
+  const { channelReads, frames, report } = reporting();
+  await report("connect");
+  assert.deepEqual(channelReads, ["a"]);
+  frames.length = 0;
+  await report("update");
+  assert.deepEqual(channelReads, ["a"], "a status report reads no Channel");
+  assert.deepEqual(frames.map(({ userId, frame }) => [userId, frame.type]),
+    [["owner", "enhanced_presence"], ["viewer", "enhanced_presence"]]);
+});
+
+test("a catalog change in the Space, or leaving, reads the Channel again", async () => {
+  const { factory, channelReads, frames, report } = reporting();
+  await report("connect");
+  factory.onChannelCatalogChanged("another-space");
+  await report("update");
+  assert.deepEqual(channelReads, ["a"], "another Space's catalog says nothing about this Channel");
+  factory.onChannelCatalogChanged("space");
+  await report("update");
+  assert.deepEqual(channelReads, ["a", "a"]);
+  assert.ok(frames.some(({ userId, frame }) => userId === "viewer" && frame.type === "channel_updated"));
+  await report("disconnect");
+  await report("update");
+  assert.deepEqual(channelReads, ["a", "a", "a", "a"], "after leaving, a report reads the Channel again");
 });
 
 test("a status report goes through presence delivery, with no presence_updated event", async () => {
