@@ -314,7 +314,7 @@ fn workspace_list_retry_delay(attempt: u32) -> Option<Duration> {
 }
 
 fn is_retryable_workspace_list_error(error: &CliError) -> bool {
-    matches!(error, CliError::Request(_)) || error.is_relay_transient()
+    matches!(error, CliError::Request(_)) || error.is_transient()
 }
 
 fn canonical_path_key(path: &str) -> error::Result<String> {

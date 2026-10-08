@@ -52,6 +52,34 @@ test("a structured authority error keeps classification and correlation through 
   assert.doesNotMatch(JSON.stringify(output), /password|do-not-expose|token/);
 });
 
+test("a Durable Object reset by a deploy reaches a socket as retryable service_restarting", async () => {
+  const resetByDeploy = new Error("Durable Object reset because its code was updated.");
+  const dropped = Object.assign(new Error("connection to the object failed"), { retryable: true });
+  for (const error of [resetByDeploy, dropped]) {
+    const output = [];
+    const sockets = new RuntimeSocketState("test", (requestId, message, failure) => ({ requestId, message, failure }), () => {});
+    const logged = await capturingConsole(() => sockets.answerOperation(
+      { send: (value) => output.push(JSON.parse(value)) }, "request-1", "Registration failed", async () => { throw error; }));
+    assert.equal(output.length, 1);
+    assert.equal(output[0].message, "Registration failed");
+    assert.equal(output[0].failure.code, "service_restarting");
+    assert.equal(output[0].failure.retryable, true);
+    assert.equal(output[0].failure.stage, "runtime.session");
+    assert.match(output[0].failure.diagnosticId, /^diag_[a-f0-9-]{36}$/);
+    // A deploy is expected, not a Hub fault, and its text never crosses the socket.
+    assert.equal(logged.error.length, 0);
+    assert.doesNotMatch(JSON.stringify(output), /Durable Object|connection to the object/);
+  }
+  // Anything else unclassified stays a non-retryable session failure.
+  const output = [];
+  const sockets = new RuntimeSocketState("test", (requestId, message, failure) => ({ requestId, message, failure }), () => {});
+  await capturingConsole(() => sockets.answerOperation(
+    { send: (value) => output.push(JSON.parse(value)) }, "request-2", "Registration failed",
+    async () => { throw new Error("Durable Object storage failed"); }));
+  assert.equal(output[0].failure.code, "runtime.session_failed");
+  assert.equal(output[0].failure.retryable, false);
+});
+
 test("a permanent authority rejection never becomes automatically retryable", async () => {
   const failure = new RuntimeAuthorityOperationError("append-message", 403, {
     code: "agent_run_forbidden", retryable: true, diagnosticId: "Bearer private-token",
