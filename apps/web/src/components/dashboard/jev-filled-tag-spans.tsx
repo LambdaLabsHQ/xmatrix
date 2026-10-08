@@ -48,7 +48,7 @@ export function JevFilledTagSpans({ tags, fillKey }: { tags: readonly JevFilledT
   for (const [index, tag] of tags.slice(0, shown ?? tags.length).entries()) {
     const source = tag.source ?? "jev";
     if (source !== announced) {
-      parts.push(<span key={`filled-${source}-${index}`} className="sr-only">{source === "routing" ? " Routing filled" : " Jev filled"}</span>);
+      parts.push(<span key={`filled-${source}-${index}`} className="sr-only">{source === "routing" ? " Routing filled" : " xMatrix filled"}</span>);
       announced = source;
     }
     parts.push(<Fragment key={`filled-gap-${tag.field}`}>{" "}</Fragment>);

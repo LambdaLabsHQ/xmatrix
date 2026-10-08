@@ -1757,7 +1757,7 @@ pub enum ChannelCommand {
         /// Channel mode: open or closed
         #[arg(long, default_value = "open")]
         mode: String,
-        /// Channel topic shown with the channel. The Summary itself is maintained by Jev.
+        /// Channel topic shown with the channel. The Summary itself is maintained by xMatrix.
         #[arg(long = "topic", alias = "summary")]
         summary: Option<String>,
         /// Optional channel name. Without one, the conversation is named from

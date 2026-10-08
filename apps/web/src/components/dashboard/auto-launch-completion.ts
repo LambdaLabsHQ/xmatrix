@@ -148,7 +148,7 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
       for (const effort of model.efforts) add("effort", effort.value);
     }
   }
-  add("launch", "force", "force · Start without Jev's intent check");
+  add("launch", "force", "force · Start without xMatrix's intent check");
   return result;
 }
 

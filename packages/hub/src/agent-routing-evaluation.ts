@@ -45,10 +45,10 @@ class InvalidDecisionAnswer extends Error {
 
 export type RoutingDecisionEvent = { decisionId: string; at: string } & (
   { status: "started"; input: JevInput } |
-  { status: "succeeded"; answers: Record<string, RoutingChoice> } |
+  { status: "succeeded"; answers: Record<string, RoutingChoice>; model?: string } |
   { status: "failed"; reason: "provider_error" | "invalid_answer" | "timeout";
     code: RoutingEvaluationFailureCode; answerFailure?: DecisionAnswerFailure });
-export type RoutingEvaluator = ((input: JevInput, options?: { signal?: AbortSignal }) => Promise<{ answers: unknown }>) & {
+export type RoutingEvaluator = ((input: JevInput, options?: { signal?: AbortSignal }) => Promise<{ answers: unknown; model?: string }>) & {
   recordDecision?: (event: RoutingDecisionEvent) => Promise<void>;
 };
 export type RoutingChoice = { choice: string; probabilities: Record<string, number> };
@@ -128,6 +128,7 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
   };
   let phase: "provider_error" | "invalid_answer" = "provider_error";
   let validated: Record<string, RoutingChoice>;
+  let model: string | undefined;
   try {
     let result;
     try { result = await invoke(input); }
@@ -138,6 +139,9 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
       result = await invoke(input);
     }
     phase = "invalid_answer";
+    // The model that answered is recorded with the answers, so the launch
+    // details can say which model decided each step.
+    model = typeof result?.model === "string" && result.model ? result.model : undefined;
     const answers = record(result?.answers, "answers_missing");
     if (Object.keys(answers).some(key => !Object.hasOwn(input.questions, key))) {
       throw new InvalidDecisionAnswer("unexpected_answer");
@@ -166,6 +170,7 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
     controller.abort();
     clearTimeout(timer);
   }
-  await persist({ decisionId, at: new Date().toISOString(), status: "succeeded", answers: validated });
+  await persist({ decisionId, at: new Date().toISOString(), status: "succeeded", answers: validated,
+    ...(model ? { model } : {}) });
   return validated;
 }
