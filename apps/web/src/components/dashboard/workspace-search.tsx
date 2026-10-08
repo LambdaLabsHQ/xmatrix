@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Search in a Space, reached by ⌘F or the rail. The dialog is where a search
- * starts: it opens a place by name, previews the first messages and pages,
- * and its first row opens every result on the search page. Pressed inside a
+ * Search in a Space, reached by ⌘F or a search control. The panel that drops
+ * from that control is where a search starts: it opens a place by name,
+ * previews the first messages and pages, and its first row opens every result
+ * on the search page. Pressed inside a
  * conversation, ⌘F starts with `in:` that conversation; Backspace takes it off.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -21,7 +22,8 @@ import type {
 } from "@xmatrix/protocol";
 import { cn } from "@/lib/utils";
 import { channelTitle } from "@/components/dashboard/channel-links";
-import { CommandDialogShell, CommandResultButton, useCatalogSearch } from "./workspace-shell-chrome";
+import { useCatalogSearch } from "./workspace-shell-chrome";
+import { SearchPanel, SearchResultRow } from "./workspace-search-panel";
 import { buildWorkspaceSearchResults, scrollActiveCommandResultIntoView, searchResultIcon } from "./workspace-shell-helpers-extra";
 import type { WorkspaceMessageSearch } from "./workspace-shell-helpers";
 import type { SpaceChannelCatalog } from "./use-channel-catalog-paging";
@@ -385,17 +387,15 @@ export function WorkspaceSearchDialog({
 
   let index = -1;
   return (
-    <CommandDialogShell
+    <SearchPanel
       open={open}
       title="Search workspace"
-      icon={Search}
       query={text}
       inputRef={inputRef}
       placeholder={scoped ? "Search here" : `Search ${space?.name ?? "this Space"}`}
       emptyLabel={pending
         ? pending.kind === "in" ? "No conversation by that name" : "Nobody by that name"
         : "Search messages, pages, conversations and people. Type in: or from: to narrow it."}
-      inputInTopbar
       activeIndex={activeIndex}
       resultCount={rows.length}
       chips={filterChips(filters, setFilters)}
@@ -412,7 +412,7 @@ export function WorkspaceSearchDialog({
       {sections.map((section, sectionIndex) => (
         <div key={section.title ?? `section-${sectionIndex}`} role="group" aria-label={section.title}>
           {section.title && (
-            <div className="app-search-section-title px-2.5 pb-1 pt-2.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+            <div className="app-search-panel-section text-muted-foreground">
               {section.title}
             </div>
           )}
@@ -426,47 +426,47 @@ export function WorkspaceSearchDialog({
               onSelect: () => choose(row),
             };
             if (row.kind === "all") {
-              return <CommandResultButton key={row.key} {...common} icon={Search}
+              return <SearchResultRow key={row.key} {...common} icon={Search}
                 title={searchText ? `Search for “${searchText}”` : `Everything ${scopeLabel}`}
                 subtitle={scoped ? scopeLabel : `Every message and page in ${space?.name ?? "this Space"}`}
-                badge="↵" />;
+                hint="↵" />;
             }
             if (row.kind === "recent") {
-              return <CommandResultButton key={row.key} {...common} icon={Clock}
+              return <SearchResultRow key={row.key} {...common} icon={Clock}
                 title={searchRequestLabel(row.request)} subtitle="Recent search" />;
             }
             if (row.kind === "filter-in") {
-              return <CommandResultButton key={row.key} {...common} icon={Hash}
+              return <SearchResultRow key={row.key} {...common} icon={Hash}
                 title={`#${channelTitle(row.channel)}`} subtitle="Search only this conversation" />;
             }
             if (row.kind === "filter-from") {
-              return <CommandResultButton key={row.key} {...common} icon={AtSign}
+              return <SearchResultRow key={row.key} {...common} icon={AtSign}
                 title={row.author.label} subtitle={row.detail || "Only their messages"} />;
             }
             if (row.kind === "destination") {
-              return <CommandResultButton key={row.key} {...common} icon={ArrowRight}
+              return <SearchResultRow key={row.key} {...common} icon={ArrowRight}
                 title={row.label} subtitle="Open" />;
             }
             if (row.kind === "message") {
-              return <CommandResultButton key={row.key} {...common} icon={MessageSquare}
+              return <SearchResultRow key={row.key} {...common} icon={MessageSquare}
                 title={<Highlighted text={row.hit.snippet.trim() || "Attachment"} needle={searchText} />}
                 subtitle={[row.hit.senderLabel, hitChannelLabel(row.hit, channelById), row.hit.sentAt ? relativeTime(row.hit.sentAt) : ""]
                   .filter(Boolean).join(" · ")} />;
             }
             if (row.kind === "page") {
-              return <CommandResultButton key={row.key} {...common} icon={FileText}
+              return <SearchResultRow key={row.key} {...common} icon={FileText}
                 title={<Highlighted text={row.hit.snippet.trim() || row.hit.title} needle={searchText} />}
                 subtitle={row.hit.blockTitle ? `${row.hit.title} · ${row.hit.blockTitle}` : row.hit.title} />;
             }
-            return <CommandResultButton key={row.key} {...common} icon={searchResultIcon(row.result.kind)}
+            return <SearchResultRow key={row.key} {...common} icon={searchResultIcon(row.result.kind)}
               title={<Highlighted text={row.result.title} needle={searchText} />} subtitle={row.result.subtitle} />;
           })}
         </div>
       ))}
       {status && rows.length > 0 && (
-        <div className="px-3 py-2 text-xs text-muted-foreground" role="status">{status}</div>
+        <div className="app-search-panel-status text-muted-foreground" role="status">{status}</div>
       )}
-    </CommandDialogShell>
+    </SearchPanel>
   );
 }
 

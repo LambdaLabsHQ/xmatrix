@@ -39,7 +39,7 @@ export function useShellDialogs(isMobileViewport: boolean) {
     flushSync(() => {
       setWorkspaceSearchOpen(true);
     });
-    document.querySelector<HTMLInputElement>("[data-workspace-search-input='mobile']")?.focus();
+    document.querySelector<HTMLInputElement>("[data-workspace-search-input]")?.focus();
   }, [isMobileViewport]);
 
   return {
