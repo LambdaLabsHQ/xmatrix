@@ -42,8 +42,8 @@ export async function readRegistrationQuotaState(database: AuthorityDatabase,
   if (unique.length > 512) throw new Error("Registration quota selector limit exceeded");
   if (!unique.length) return new Map();
   const rows = await database.transaction({ requestId, operation: "registration.quota.read" }, tx =>
-    tx.query<QueryResultRow>({ name: "registration_quota_state_v2", text: `SELECT e.owner_user_id,e.machine_id,e.harness,
-        quota.remaining,quota.observed_at,quota.expires_at,quota.windows_json,quota.account_json FROM jsonb_to_recordset($1::jsonb)
+    tx.query<QueryResultRow>({ name: "registration_quota_state_v3", text: `SELECT e.owner_user_id,e.machine_id,e.harness,
+        quota.source,quota.remaining,quota.observed_at,quota.expires_at,quota.windows_json,quota.account_json FROM jsonb_to_recordset($1::jsonb)
         requested("ownerUserId" text,"machineId" text,harness text)
       JOIN control.agent_registration_environments e ON e.owner_user_id=requested."ownerUserId"
         AND e.machine_id=requested."machineId" AND e.harness=requested.harness
@@ -67,7 +67,7 @@ export async function readRegistrationQuotaState(database: AuthorityDatabase,
       : [{ percent: 100 - Number(row.remaining) }];
     const quotaAccount = parseLlmQuotaAccount(row.account_json);
     result.set(key, {
-      quotaState: !windows.length && Number(row.remaining) <= 0 ? "exhausted" : "observed",
+      quotaState: (row.source === "daemon" || !windows.length) && Number(row.remaining) <= 0 ? "exhausted" : "observed",
       quotaSource: "provider_api", quotaObservedAt: new Date(row.observed_at as string).toISOString(), quotaUsages,
       ...(quotaAccount ? { quotaAccount } : {}),
     });
