@@ -185,7 +185,6 @@ export function AppWindowPreview() {
         onChangeView={noop}
         onOpenProfile={noop}
         onLogout={noop}
-        onOpenSearch={noop}
       />
       <div className="app-workspace-panel" style={{ "--app-desktop-sidebar-width": "300px" } as React.CSSProperties}>
         <aside className="app-sidebar hidden w-[var(--app-desktop-sidebar-width)] flex-col bg-sidebar text-sidebar-foreground md:flex">
@@ -228,6 +227,7 @@ export function AppWindowPreview() {
                 updatingVisibility={false}
                 moving={false}
                 onToggleMembers={noop}
+                onOpenSearch={noop}
               />
               <MessageTimeline
                 channel={selected}

@@ -11,6 +11,9 @@ export interface MessageSearchHit {
   channelId: string;
   messageId: string;
   timelineSequence: number;
+  /** Who sent it, as the message itself names them. */
+  senderLabel: string;
+  sentAt: string;
 }
 
 /**

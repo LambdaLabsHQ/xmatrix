@@ -10,9 +10,15 @@ export async function searchWorkspaceMessages(input: {
   spaceId: string;
   query: string;
   resumeToken?: string;
+  /** Only this conversation and its threads. */
+  channelId?: string;
+  /** The Hub's author filter: `user:<id>` or `agent:<name>`. */
+  from?: string;
 }): Promise<MessageSearchPage> {
   const params = new URLSearchParams({ spaceId: input.spaceId, query: input.query });
   if (input.resumeToken) params.set("cursor", input.resumeToken);
+  if (input.channelId) params.set("channelId", input.channelId);
+  if (input.from) params.set("from", input.from);
   const response = await fetch(`${WEB_PROXY_ROUTES.message_search}?${params}`, {
     headers: { Authorization: `Bearer ${input.token}` },
     cache: "no-store",
