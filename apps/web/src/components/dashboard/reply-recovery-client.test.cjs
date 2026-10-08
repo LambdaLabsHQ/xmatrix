@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
 const ts = require('typescript');
+require('./typescript-require.cjs').installTypeScriptRequire();
 const source = fs.readFileSync(`${__dirname}/reply-recovery-client.ts`, 'utf8');
 const loaded = { exports: {} };
 new Function('exports', 'require', 'module', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(loaded.exports, require, loaded);

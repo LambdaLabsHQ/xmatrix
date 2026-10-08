@@ -1,5 +1,5 @@
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { xmatrixRawResponse } from "../../lib/query/api-client";
+import { errorFromResponse, xmatrixRawResponse } from "../../lib/query/api-client";
 
 export type PinRecord = { pinnedChannelIds: string[]; version: number };
 
@@ -11,7 +11,7 @@ export async function readPins(input: {
     cache: "no-store",
     signal: input.signal,
   });
-  if (!response.ok) throw new Error(`Pinned channels unavailable (${response.status})`);
+  if (!response.ok) throw await errorFromResponse(response);
   const record = await response.json() as { pinnedChannelIds?: unknown; version?: unknown };
   return {
     pinnedChannelIds: Array.isArray(record.pinnedChannelIds)
@@ -40,6 +40,6 @@ export async function savePin(input: {
       cache: "no-store",
     });
     if (response.ok) return;
-    if (response.status !== 409 || attempt === 1) throw new Error(`Pin could not be saved (${response.status})`);
+    if (response.status !== 409 || attempt === 1) throw await errorFromResponse(response);
   }
 }

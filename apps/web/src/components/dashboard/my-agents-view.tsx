@@ -26,7 +26,7 @@ import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
 import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
 import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
-import { noticeClass } from "@/components/ui/status-tone";
+import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
@@ -46,7 +46,6 @@ import {
   MY_AGENT_ACTION_LABEL,
   registrationActions,
   registrationActivity,
-  registrationCatalogErrorText,
   registrationListed,
   registrationRowTitle,
   registrationStatus,
@@ -59,6 +58,7 @@ import {
   ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSplit,
   ToolStateDot, useToolItem,
 } from "./tool-split";
+import { ErrorNotice } from "@/components/ui/error-notice";
 
 const ACTION_ICON: Record<MyAgentAction, ComponentType<{ className?: string }>> = {
   configure: Settings,
@@ -153,10 +153,8 @@ export function MyAgentsView({
       {!ready ? (
         <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents and installed harnesses.</p>
       ) : catalog.isError ? (
-        <div className="space-y-2 px-4 md:px-5">
-          <p role="alert" className="text-sm text-destructive">{registrationCatalogErrorText(catalog.error)}</p>
-          <Button size="sm" variant="outline" onClick={() => void catalog.refetch()}>Try again</Button>
-        </div>
+        <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()}
+          className={statusInkClass("alert", "px-4 text-sm md:px-5")} />
       ) : !catalog.data ? (
         <ListSkeleton label="Loading agents" rows={4} className="px-4 md:px-5" />
       ) : rows.length === 0 ? (
@@ -362,7 +360,8 @@ function RegistrationEditor({
     retry: false,
   });
   if (details.isError) {
-    return <p role="alert" className={noticeClass("alert", "mt-2")}>{details.error.message}</p>;
+    return <ErrorNotice error={details.error} action="Couldn't load this agent" className={noticeClass("alert", "mt-2")}
+      onRetry={() => void details.refetch()} />;
   }
   if (!details.data) {
     return (

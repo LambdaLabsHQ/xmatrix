@@ -78,6 +78,43 @@ uncaught failures through it so no route answers a plain-text `500`.
   keeps an earlier pin or read from undoing a later unpin. PostgreSQL remains
   the source of truth, with the existing version-conflict re-read.
 
+### Showing a failure
+
+A person reads a failure only through `describeError` / `userErrorMessage`
+(`src/lib/user-facing-error.ts`) or the `<ErrorNotice>` component built on it.
+Each call names the action that failed ("Couldn't load transfer proposals");
+the reason comes from the failure's class, never from raw exception text:
+
+| Failure | What the person reads |
+| --- | --- |
+| The caller cancelled its own request (`AbortError`, Query's cancellation) | Nothing. |
+| No answer (status `0`), its own deadline (`TimeoutError`), a `504` | Check the connection / it took too long; try again. |
+| Transient (`isTransientFailure`) | xMatrix is busy; try again in a moment. |
+| `401` | The session ended; sign in again. |
+| A generic Hub code (`forbidden`, `conflict`, `not_found`, …) | The status category in plain words. |
+| A specific Hub code with a sentence, or a body without a code | The Hub's own sentence. |
+| Any other `5xx`, a response missing what it promised (`unexpectedResponse`) | Something went wrong on our side; the code is the reference. |
+| A `UserFacingProblem` thrown by client code; a desktop main-process refusal | The sentence as written. |
+| Any other exception (`TypeError`, `SyntaxError`, an invariant) | A generic sentence; the detail goes to the console. |
+
+- A failed response is read with `errorFromResponse` (or `requireResponseOk`)
+  before its body, so status, code and retry policy survive. Reading JSON first
+  turns a gateway's HTML page into a `SyntaxError`.
+- `<ErrorNotice>` offers "Try again" when a retry can succeed and shows the Hub
+  code as a reference for a report.
+- A background poll whose only result is a transient failure shows nothing; the
+  poll retries on its own.
+- A screen that fails to render shows `app/error.tsx` (or `global-error.tsx`):
+  plain words, "Try again", and the render digest as the reference. A chunk
+  that no longer exists after a deploy asks for a reload instead.
+- ESLint forbids rendering `error.message`, `(error as Error).message` and
+  `new Error(payload.error || …)` in components and routes.
+- A deduplicated read follows only Query's signal; a caller that stops waiting
+  uses `untilCallerAborts`, so it never aborts the request others share.
+
+The Hub's messages for transient failures name no internal component
+(`postgres_unavailable` says "xMatrix is briefly unavailable; try again").
+
 ### Web proxy
 
 The web Worker's hop to the Hub (`src/lib/xmatrix-proxy.ts`) answers a dropped

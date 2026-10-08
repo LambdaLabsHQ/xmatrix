@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { pageApi } from "@/lib/pages/page-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /**
  * Whether anyone with a linked GitHub account may join the Space as a
@@ -29,7 +30,7 @@ export function SpaceOpenParticipation({ spaceId, token }: { spaceId: string; to
     try {
       queryClient.setQueryData(queryKey, await pageApi.setGovernance(spaceId, token, { openParticipation }));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not change who can join");
+      setError(userErrorMessage(cause, "Couldn't change who can join"));
     } finally {
       setBusy(false);
     }

@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth-context";
 import { pageApi } from "@/lib/pages/page-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /**
  * Joining an open project (docs/design/open-project-governance.md §1): signed
@@ -31,7 +32,7 @@ export function SpaceJoinClient({ spaceId }: { spaceId: string }) {
       await pageApi.participate(spaceId, session.access_token);
       router.push(`/app/${encodeURIComponent(spaceId)}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not join this project");
+      setError(userErrorMessage(cause, "Couldn't join this Space"));
       setBusy(false);
     }
   };

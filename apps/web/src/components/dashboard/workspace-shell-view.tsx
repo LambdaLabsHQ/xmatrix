@@ -62,7 +62,7 @@ import {
   useChannelCatalogPaging,
   ColdStartChannelCatalog,
 } from "./workspace-shell-modules";
-import { errorMessage } from "./workspace-shell-desktop-labels";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { usePlatformAdminCapability } from "./use-platform-admin-capability";
 import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
@@ -470,7 +470,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       setProjects((current) => sortProjects(replaceWorkspace(current, registered)));
       setFirstTaskWorkspace(outcome.workspace);
     } catch (err) {
-      setFirstTaskError(errorMessage(err, "Could not use that folder."));
+      setFirstTaskError(userErrorMessage(err, "Couldn't use that folder"));
     } finally {
       setFirstTaskBusy(false);
     }
@@ -499,7 +499,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       setChannels((current) => replaceChannel(current, channel));
       navigateToChannel(channel.id);
     } catch (err) {
-      setFirstTaskError((err as Error).message);
+      setFirstTaskError(userErrorMessage(err, "Couldn't start the conversation"));
     } finally {
       setFirstTaskBusy(false);
     }

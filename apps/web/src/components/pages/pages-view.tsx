@@ -36,6 +36,7 @@ import { discussionDraft, discussionTitle } from "@/components/dashboard/selecti
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 // The native shell also imports this module for its list screens. The editor
 // (ProseMirror and the page document) belongs to an open document, not to the cold-start list dependency graph.
@@ -823,7 +824,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
       await pageApi.publish(spaceId, page.pageId, token, !page.publishedAt);
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Could not change who can read this page");
+      setNotice(userErrorMessage(cause, "Couldn't change who can read this page"));
     }
   };
   const publicUrl = spaceId && page ? `/p/${encodeURIComponent(spaceId)}/${encodeURIComponent(page.pageId)}` : null;
@@ -835,7 +836,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
       await pageApi.setGovernance(spaceId, token, { governancePageId: page.governance ? null : page.pageId });
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Could not change who edits this page");
+      setNotice(userErrorMessage(cause, "Couldn't change who edits this page"));
     }
   };
 
@@ -856,7 +857,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
       await pageApi.update(spaceId, page.pageId, token, { title });
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Could not rename the page");
+      setNotice(userErrorMessage(cause, "Couldn't rename the page"));
     }
   };
 
@@ -937,7 +938,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
         name: `${request.mode === "ask" ? "Ask" : "Change"}: ${request.prompt.slice(0, 60)}`, anchor, firstMessage });
       void links.refetch();
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Could not ask");
+      setNotice(userErrorMessage(cause, "Couldn't send the question"));
       throw cause;
     }
   };

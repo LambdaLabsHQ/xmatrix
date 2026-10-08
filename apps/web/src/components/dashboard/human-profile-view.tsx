@@ -7,7 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
 import { GitHubAccountLink } from "@/components/dashboard/github-account-link";
-import { HumanProfileEditor } from "@/components/dashboard/human-profile-editor";
+import { HumanProfileEditor, humanProfileRefusal } from "@/components/dashboard/human-profile-editor";
 import {
   humanProfileFromSpaceMember,
   type CurrentHumanProfileSource,
@@ -15,8 +15,8 @@ import {
 import { HumanAvatarPicker } from "@/components/dashboard/human-avatar-picker";
 import { HumanLocalTime } from "@/components/dashboard/human-local-time";
 import { useHumanTimeZoneSync } from "@/components/dashboard/use-human-time-zone-sync";
-import { errorMessage } from "@/components/dashboard/workspace-shell-desktop-labels";
-import { xmatrixApiRequest, XMatrixApiError } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
+import { xmatrixApiRequest, XMatrixApiError, unexpectedResponse } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { PrivateSignInEmail } from "./private-sign-in-email";
 import { ToolDetailEmpty, ToolDetailSection, ToolPaperScroll } from "./tool-split";
@@ -76,21 +76,13 @@ export function ProfileView({
         rawBody: request.body,
         headers: request.contentType ? { "content-type": request.contentType } : undefined,
       });
-      if (!payload.profile) throw new Error("Profile response is missing");
+      if (!payload.profile) throw unexpectedResponse("The profile");
       return payload.profile;
     },
   });
   const saved = profileMutation.data ?? null;
   const saving = profileMutation.isPending;
-  const saveError = localError
-    ? { message: localError }
-    : profileMutation.error
-    ? {
-        code: profileMutation.error instanceof XMatrixApiError
-          ? profileMutation.error.code : undefined,
-        message: profileMutation.error.message,
-      }
-    : null;
+  const saveError = localError ? { message: localError } : null;
 
   const projected = projectedProfile(user, member, self);
 
@@ -113,25 +105,23 @@ export function ProfileView({
     try {
       await profileMutation.mutateAsync(request);
     } catch (error) {
-      // The mutation owns error state; add the existing domain fallback only
-      // when the transport did not return a useful message.
-      if (!(error instanceof Error) || !error.message) {
-        throw new Error(errorMessage(error, failureMessage));
-      }
+      // A profile rule the Hub refused has its own sentence; anything else is described in general.
+      const refusal = error instanceof XMatrixApiError ? humanProfileRefusal(error.code) : undefined;
+      setLocalError(refusal ?? userErrorMessage(error, failureMessage));
     }
   }
 
   async function uploadAvatar(blob: Blob, mimeType: string) {
     await writeProfile(
       { route: WEB_PROXY_ROUTES.me_avatar, method: "POST", contentType: mimeType, body: blob },
-      "Could not update your photo.",
+      "Couldn't update your photo",
     );
   }
 
   async function removeAvatar() {
     await writeProfile(
       { route: WEB_PROXY_ROUTES.me_avatar, method: "DELETE" },
-      "Could not remove your photo.",
+      "Couldn't remove your photo",
     );
   }
 
@@ -143,7 +133,7 @@ export function ProfileView({
         contentType: "application/json",
         body: JSON.stringify(edit),
       },
-      "Could not update your profile.",
+      "Couldn't update your profile",
     );
   }
 
@@ -212,7 +202,7 @@ export function HumanProfileView({
   /** Sign-in email, viewer's own only. Never shown for another member. */
   email?: string;
   saving?: boolean;
-  saveError?: { code?: string; message?: string } | null;
+  saveError?: { message: string } | null;
   onSave?: (edit: HumanProfileEdit) => Promise<void> | void;
   onUploadAvatar?: (blob: Blob, mimeType: string) => Promise<void> | void;
   onRemoveAvatar?: () => Promise<void> | void;

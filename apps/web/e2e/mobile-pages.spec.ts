@@ -153,7 +153,7 @@ test("a phone shows why a page could not be made, and + tries again", async ({ p
   const { list } = await openMobilePages(page);
   const create = page.locator(".app-mobile-create-fab");
   await create.tap();
-  await expect(list).toContainText("Could not create the page");
+  await expect(list).toContainText("Couldn't create the page");
   await expect(page).not.toHaveURL(/page=/u);
   await fixtureJson(page, "retry-create", PAGE_TREE_PATTERN,
     { page: summary("p-retry", null, "Untitled") }, { method: "POST" });

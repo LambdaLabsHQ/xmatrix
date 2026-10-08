@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 type InviteResponse = {
   invite?: SerializedSpaceInvite;
@@ -32,7 +33,7 @@ export function SpaceInviteClient({ token }: { token: string }) {
       const payload = await xmatrixApiRequest<InviteResponse>({
         url: WEB_PROXY_ROUTES.space_invite(token), signal,
       });
-      if (!payload.invite) throw new Error("Invite link is no longer available.");
+      if (!payload.invite) throw new UserFacingProblem("Invite link is no longer available.");
       return payload.invite;
     },
   });
@@ -47,7 +48,7 @@ export function SpaceInviteClient({ token }: { token: string }) {
   const invite = inviteQuery.data ?? null;
   const loadingInvite = inviteQuery.isPending;
   const accepting = acceptMutation.isPending;
-  const error = actionError ?? (inviteQuery.error instanceof Error ? inviteQuery.error.message : null);
+  const error = actionError ?? userErrorMessage(inviteQuery.error, "Couldn't open this invite");
 
   async function acceptInvite() {
     if (!session?.access_token) {
@@ -68,7 +69,7 @@ export function SpaceInviteClient({ token }: { token: string }) {
       }
       router.push("/app?view=team");
     } catch (nextError) {
-      setActionError((nextError as Error).message);
+      setActionError(userErrorMessage(nextError, "Couldn't accept the invite"));
     }
   }
 

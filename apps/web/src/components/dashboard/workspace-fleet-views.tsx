@@ -132,7 +132,8 @@ import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCred
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 
 import { useAuth } from "@/lib/auth-context";
-import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { xmatrixApiRequest, unexpectedResponse } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { GoogleDocFileSelection } from "./google-doc-file-selection";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
@@ -829,7 +830,7 @@ export function MachinesView({
       setRenamed((current) => ({ ...current, [editing.machineId]: name }));
       setEditing(null);
     } catch (reason) {
-      setRenameError(reason instanceof Error ? reason.message : "The Machine could not be renamed");
+      setRenameError(userErrorMessage(reason, "Couldn't rename the Machine"));
     } finally {
       savingName.current = false;
       setRenameBusy(false);
@@ -846,7 +847,7 @@ export function MachinesView({
       const saved = await setMachineAutoAssign(token, machineId, on);
       setAssigned((current) => ({ ...current, [machineId]: saved }));
     } catch (reason) {
-      setAssignError(reason instanceof Error ? reason.message : "Automatic assignment could not be changed");
+      setAssignError(userErrorMessage(reason, "Couldn't change automatic assignment"));
     } finally {
       setAssignBusy(null);
     }
@@ -864,7 +865,7 @@ export function MachinesView({
       setEditing(null);
       select(null);
     } catch (reason) {
-      setRemoveError(reason instanceof Error ? reason.message : "The Machine could not be removed");
+      setRemoveError(userErrorMessage(reason, "Couldn't remove the Machine"));
     } finally {
       setRemovingId(null);
     }
@@ -1162,8 +1163,8 @@ export function AppsView({
   });
   const connections = connectionsQuery.data ?? NO_CONNECTIONS;
   const executions = executionsQuery.data ?? NO_EXECUTIONS;
-  const connectionsError = connectionActionError ?? connectionsQuery.error?.message ?? null;
-  const executionsError = executionActionError ?? executionsQuery.error?.message ?? null;
+  const connectionsError = connectionActionError ?? userErrorMessage(connectionsQuery.error, "Couldn't load app connections");
+  const executionsError = executionActionError ?? userErrorMessage(executionsQuery.error, "Couldn't load app actions");
   const loadingExecutions = executionsQuery.isFetching;
   const setConnections = useCallback((update: (
     current: SerializedAppConnectorConnection[],
@@ -1289,7 +1290,7 @@ export function AppsView({
             installationId: mode === "manage" ? installationId || undefined : undefined,
           }),
         });
-        if (!payload.url) throw new Error("Failed to start GitHub install");
+        if (!payload.url) throw unexpectedResponse("The GitHub install link");
         window.location.assign(payload.url);
         return;
       }
@@ -1310,14 +1311,14 @@ export function AppsView({
           url: WEB_PROXY_ROUTES.space_app_connection_oauth_start(currentSpace.id, connector.id),
           method: "POST",
         });
-        if (!started.url) throw new Error(`Failed to start connecting ${connector.name}`);
+        if (!started.url) throw unexpectedResponse("The sign-in link");
         window.location.assign(started.url);
         return;
       }
 
       await connectWithCredentials(connector);
     } catch (error) {
-      setConnectionsError((error as Error).message);
+      setConnectionsError(userErrorMessage(error, `Couldn't connect ${connector.name}`));
     } finally {
       setUpdatingProviderId(null);
     }
@@ -1349,11 +1350,11 @@ export function AppsView({
     await checkConnector(connector);
   }
 
-  async function patchConnectorConnection(providerId: string, body: Record<string, unknown>, fallback: string) {
+  async function patchConnectorConnection(providerId: string, body: Record<string, unknown>) {
     const payload = await connectionMutation.mutateAsync({
       url: WEB_PROXY_ROUTES.space_app_connection(currentSpace!.id, providerId), method: "PATCH", body,
     });
-    if (!payload.connection) throw new Error(fallback);
+    if (!payload.connection) throw unexpectedResponse("The connection");
     setConnections(current => [...current.filter(connection => connection.providerId !== providerId), payload.connection!]);
   }
 
@@ -1363,11 +1364,10 @@ export function AppsView({
     setDisconnectingProviderId(connector.id);
     setConnectionsError(null);
     try {
-      await patchConnectorConnection(connector.id, { providerId: connector.id, status: "disconnected" },
-        "Failed to disconnect app connection");
+      await patchConnectorConnection(connector.id, { providerId: connector.id, status: "disconnected" });
       if (configuringProviderId === connector.id) closeConnectorConfiguration();
     } catch (error) {
-      setConnectionsError((error as Error).message);
+      setConnectionsError(userErrorMessage(error, `Couldn't disconnect ${connector.name}`));
     } finally {
       setUpdatingProviderId(null);
       setDisconnectingProviderId(null);
@@ -1383,7 +1383,7 @@ export function AppsView({
         url: WEB_PROXY_ROUTES.space_app_connection_check(currentSpace.id, connector.id),
         method: "POST",
       });
-      if (!payload.connection) throw new Error("Failed to check app connection");
+      if (!payload.connection) throw unexpectedResponse("The connection");
       setConnections((current) => [
         ...current.filter((connection) => connection.providerId !== connector.id),
         payload.connection!,
@@ -1393,7 +1393,7 @@ export function AppsView({
         setConnectionsError(payload.connection.error || payload.message || "App connection check failed");
       }
     } catch (error) {
-      setConnectionsError((error as Error).message);
+      setConnectionsError(userErrorMessage(error, `Couldn't check ${connector.name}`));
     } finally {
       setCheckingProviderId(null);
     }
@@ -1444,10 +1444,10 @@ export function AppsView({
       await patchConnectorConnection(connector.id, {
         providerId: connector.id,
         metadata: { ...connection.metadata, repository: configurationDraft.repository, actionsWorkflowIds },
-      }, "Failed to save connector configuration");
+      });
       closeConnectorConfiguration();
     } catch (error) {
-      setConnectionsError((error as Error).message);
+      setConnectionsError(userErrorMessage(error, `Couldn't save the ${connector.name} settings`));
     } finally {
       setSavingProviderId(null);
     }
@@ -2031,7 +2031,6 @@ export {
   desktopUpdateDescription,
   desktopUpdateErrorStatus,
   desktopUpdateLabel,
-  errorMessage,
 } from "./workspace-shell-desktop-labels";
 
 function MachineVersionFacts({ machine }: { machine: MachineSummary }) {

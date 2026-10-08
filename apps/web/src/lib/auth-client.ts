@@ -8,6 +8,9 @@ import type { AuthUser } from "@/lib/auth-context";
 import { classifyAuthClientFailure } from "@/lib/auth-error-policy";
 import { isTransientAuthStatus } from "@/lib/auth-session-policy";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { UserFacingProblem } from "@/lib/user-facing-error";
+
+const AUTH_UNAVAILABLE = "The sign-in service can't be reached right now. Check your connection and try again.";
 
 export interface WebAuthSession {
   access_token: string;
@@ -21,16 +24,18 @@ export interface WebAuthSession {
   };
 }
 
-export class TransientAuthSessionError extends Error {
+/** Sign-in could not be checked; the session stands until it can be. */
+export class TransientAuthSessionError extends UserFacingProblem {
   readonly transient = true;
 
-  constructor(message: string) {
-    super(message);
+  constructor() {
+    super(AUTH_UNAVAILABLE, true);
     this.name = "TransientAuthSessionError";
   }
 }
 
-class AuthClientError extends Error {
+/** A sign-in refusal; Better Auth and the Hub's sign-in routes word these for people. */
+class AuthClientError extends UserFacingProblem {
   readonly code?: string;
   readonly status?: number;
 
@@ -60,13 +65,12 @@ export async function loadBetterAuthSession(): Promise<{
   user: AuthUser | null;
 }> {
   const sessionResponse = await authClient.getSession().catch((error) => {
-    throw new TransientAuthSessionError(
-      error instanceof Error ? error.message : "Authentication service is temporarily unavailable."
-    );
+    console.warn("[auth] sign-in service unreachable", error);
+    throw new TransientAuthSessionError();
   });
   if (sessionResponse.error) {
     if (isTransientAuthStatus(sessionResponse.error.status)) {
-      throw new TransientAuthSessionError("Authentication service is temporarily unavailable.");
+      throw new TransientAuthSessionError();
     }
     throw new AuthClientError(
       sessionResponse.error.message || "Failed to load Better Auth session",
@@ -140,9 +144,7 @@ function throwAuthClientError(
     emailConfiguration: error.code === "email_delivery_configuration_error",
   });
   if (failure === "transient") {
-    throw new TransientAuthSessionError(
-      "Authentication service is temporarily unavailable. Please try again."
-    );
+    throw new TransientAuthSessionError();
   }
   throw new AuthClientError(message || fallbackMessage, error.code, status);
 }
@@ -171,9 +173,8 @@ async function postAuthRequest(
     body: JSON.stringify(body),
     cache: "no-store",
   }).catch((error) => {
-    throw new TransientAuthSessionError(
-      error instanceof Error ? error.message : "Authentication service is temporarily unavailable."
-    );
+    console.warn("[auth] sign-in service unreachable", error);
+    throw new TransientAuthSessionError();
   });
   if (response.ok) return;
 
@@ -193,9 +194,8 @@ export async function verifyBetterAuthOtp(email: string, otp: string): Promise<v
     email,
     otp,
   }).catch((error) => {
-    throw new TransientAuthSessionError(
-      error instanceof Error ? error.message : "Authentication service is temporarily unavailable."
-    );
+    console.warn("[auth] sign-in service unreachable", error);
+    throw new TransientAuthSessionError();
   });
   if (response.error) {
     throwAuthClientError(response.error, "Invalid verification code", response.error.status);
@@ -211,14 +211,14 @@ export async function signInWithBetterAuthGoogle(callbackURL: string): Promise<v
     errorCallbackURL: `${window.location.origin}/login`,
   });
   if (response.error) {
-    throw new Error(response.error.message || "Google sign-in failed");
+    throw new AuthClientError(response.error.message || "Google sign-in failed", response.error.code, response.error.status);
   }
 }
 
 /** The GitHub account this person linked, by GitHub's user id; null when none. */
 export async function linkedGitHubAccount(): Promise<{ accountId: string } | null> {
   const response = await authClient.listAccounts();
-  if (response.error) throw new Error(response.error.message || "Could not read linked accounts");
+  if (response.error) throw new AuthClientError(response.error.message || "Could not read linked accounts", response.error.code, response.error.status);
   const account = (response.data ?? []).find((item) => item.providerId === "github");
   return account ? { accountId: account.accountId } : null;
 }
@@ -226,18 +226,18 @@ export async function linkedGitHubAccount(): Promise<{ accountId: string } | nul
 /** Proves which GitHub account is this person's, through GitHub's own sign-in. */
 export async function linkGitHubAccount(callbackURL: string): Promise<void> {
   const response = await authClient.linkSocial({ provider: "github", callbackURL, errorCallbackURL: callbackURL });
-  if (response.error) throw new Error(response.error.message || "Could not link GitHub");
+  if (response.error) throw new AuthClientError(response.error.message || "Could not link GitHub", response.error.code, response.error.status);
 }
 
 export async function unlinkGitHubAccount(accountId: string): Promise<void> {
   const response = await authClient.unlinkAccount({ providerId: "github", accountId });
-  if (response.error) throw new Error(response.error.message || "Could not unlink GitHub");
+  if (response.error) throw new AuthClientError(response.error.message || "Could not unlink GitHub", response.error.code, response.error.status);
 }
 
 export async function signOutBetterAuth(): Promise<void> {
   const response = await authClient.signOut();
   if (response.error) {
-    throw new Error(response.error.message || "Failed to sign out");
+    throw new AuthClientError(response.error.message || "Failed to sign out", response.error.code, response.error.status);
   }
 }
 
@@ -246,14 +246,15 @@ async function fetchBetterAuthJwt(): Promise<string | null> {
     credentials: "include",
     cache: "no-store",
   }).catch((error) => {
-    throw new TransientAuthSessionError(error instanceof Error ? error.message : "Failed to fetch Better Auth token");
+    console.warn("[auth] sign-in service unreachable", error);
+    throw new TransientAuthSessionError();
   });
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
       return null;
     }
     if (isTransientAuthStatus(response.status)) {
-      throw new TransientAuthSessionError("Better Auth token is temporarily unavailable");
+      throw new TransientAuthSessionError();
     }
     throw new Error("Failed to fetch Better Auth token");
   }

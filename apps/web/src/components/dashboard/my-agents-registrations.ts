@@ -95,13 +95,6 @@ export function registrationRowTitle(registration: AgentRegistrationSummary): { 
 
 /** Why the registration catalog could not be read: the server's message plus
  * its error code, so a failure is diagnosable instead of an empty list. */
-export function registrationCatalogErrorText(error: unknown): string {
-  const message = error instanceof Error && error.message ? error.message : "The agent list could not be loaded.";
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === "string" && code && code !== "request_failed" && !message.includes(code)
-    ? `${message} (${code})` : message;
-}
-
 /** Space owners/admins configure an agent; an agent removed from the Space
  * before switches existed is added back by its owner. */
 export function registrationActions(registration: AgentRegistrationSummary): MyAgentAction[] {

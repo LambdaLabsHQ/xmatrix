@@ -204,9 +204,28 @@ export function xmatrixRetryDelayMs(failureCount: number, error: unknown): numbe
   return ceiling / 2 + Math.random() * (ceiling / 2);
 }
 
-/** Preserve the plain Error contract of raw-response command consumers. */
-export async function requireResponseOk(response: Response, fallback: string, ignoredStatus?: number): Promise<void> {
+/** A failure a caller raises itself: a response missing the record it promised. */
+export function unexpectedResponse(what: string): XMatrixApiError {
+  return new XMatrixApiError({ message: `${what} was missing from the response`, status: 500, code: "unexpected_response" });
+}
+
+/** A successful response's JSON; a failed one throws the classified error before its body is read. */
+export async function requireJson<T>(response: Response): Promise<T> {
+  if (!response.ok) throw await errorFromResponse(response);
+  return await response.json() as T;
+}
+
+/** The record a successful response promised under `field`; `what` names it if it is missing. */
+export async function requireField<T>(response: Response, field: string, what: string): Promise<T> {
+  if (!response.ok) throw await errorFromResponse(response);
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  const value = payload[field];
+  if (value === undefined || value === null) throw unexpectedResponse(what);
+  return value as T;
+}
+
+/** Throws a failed raw response as the classified error `describeError` shows. */
+export async function requireResponseOk(response: Response, ignoredStatus?: number): Promise<void> {
   if (response.ok || response.status === ignoredStatus) return;
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-  throw new Error(payload.error || fallback);
+  throw await errorFromResponse(response);
 }

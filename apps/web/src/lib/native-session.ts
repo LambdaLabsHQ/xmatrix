@@ -50,9 +50,8 @@ export async function refreshNativeSession(refreshToken: string): Promise<AuthRe
     body: JSON.stringify({ refreshToken }),
     cache: "no-store",
   }).catch((error) => {
-    throw new TransientNativeSessionRefreshError(
-      error instanceof Error ? error.message : "Native session refresh is temporarily unavailable"
-    );
+    console.warn("[auth] native session refresh unreachable", error);
+    throw new TransientNativeSessionRefreshError("Native session refresh is temporarily unavailable");
   });
 
   if (!response.ok) {

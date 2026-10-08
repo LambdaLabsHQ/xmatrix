@@ -1,7 +1,10 @@
 "use client";
 import { actionClass } from "@/components/ui/action-tone";
 import { useState } from "react";
+import { ErrorNotice } from "@/components/ui/error-notice";
+import { errorFromResponse, isTransientFailure } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { refetchUnlessHumanPush } from "./workspace-resource-push";
@@ -28,9 +31,8 @@ export function ChannelTransferQueue({ token, userId, spaceId, channelId, enable
         (channelId ? `?channelId=${encodeURIComponent(channelId)}` : ""), {
         headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal,
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Could not load transfer proposals");
-      return payload.proposals as Proposal[];
+      if (!response.ok) throw await errorFromResponse(response);
+      return (await response.json()).proposals as Proposal[];
     },
   });
   async function acknowledge(proposal: Proposal, role: "outbound" | "inbound") {
@@ -41,17 +43,18 @@ export function ChannelTransferQueue({ token, userId, spaceId, channelId, enable
         method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ role }),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Confirmation failed");
+      if (!response.ok) throw await errorFromResponse(response);
       await client.invalidateQueries({ queryKey: ["channel-transfers", userId] });
-    } catch (failure) { setError((failure as Error).message); }
+    } catch (failure) { setError(userErrorMessage(failure, "Couldn't confirm the transfer")); }
     finally { setBusy(null); }
   }
   if (!enabled) return null;
-  if (!query.data?.length && !query.error) return null;
+  // A background poll that failed in passing retries on its own; it is not worth a panel.
+  if (!query.data?.length && (!query.error || isTransientFailure(query.error))) return null;
   return <section aria-label="Channel transfer confirmations" className="max-h-80 overflow-auto border-b border-border p-3 text-sm">
     <h3 className="font-semibold">Channel transfers</h3>
-    {(error || query.error) && <p role="alert" className="text-destructive">{error || query.error?.message}</p>}
+    {error ? <p role="alert" className="text-destructive">{error}</p>
+      : <ErrorNotice error={query.error} action="Couldn't load transfer proposals" onRetry={() => void query.refetch()} />}
     {query.data?.map((proposal) => {
       const expired = new Date(proposal.expiresAt).getTime() <= Date.now();
       return <article key={proposal.id} className="space-y-2 border-b border-border py-3 last:border-0">

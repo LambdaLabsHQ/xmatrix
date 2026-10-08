@@ -5,6 +5,7 @@ import { WEB_PROXY_ROUTES, type AgentRegistrationDetails, type SpaceAgentRegistr
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { registrationEnvironmentCommand, registrationSpaceCommand, type EnvironmentChange, type EnvironmentState,
   type RegistrationChange } from "./registration-space-command";
+import { userErrorMessage } from "../../lib/user-facing-error";
 
 /** Stable identity of one registration tuple, for busy flags and React keys. */
 export function registrationTupleId(key: SpaceAgentRegistrationKey): string {
@@ -41,7 +42,7 @@ export function useRegistrationCommand(spaceId: string, token: string, onChanged
       onChanged();
       return true;
     } catch (error) {
-      setNotice({ error: true, text: error instanceof Error ? error.message : "Registration update failed" });
+      setNotice({ error: true, text: userErrorMessage(error, "Couldn't update the agent") ?? "" });
       return false;
     } finally {
       setPendingId(null);
