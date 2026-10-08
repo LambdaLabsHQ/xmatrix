@@ -717,10 +717,6 @@ export function latestChannelMentionTimestampMs(channelId: string, events: reado
   return latest;
 }
 
-export function formatUnreadCount(count: number): string {
-  return count > 99 ? "99+" : String(count);
-}
-
 export function compactChannelHistoryCacheInPlace(cache: Map<string, ChannelHistoryCacheEntry>): void {
   const compacted = compactChannelHistoryCache(cache);
   cache.clear();

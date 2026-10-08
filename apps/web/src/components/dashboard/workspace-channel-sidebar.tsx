@@ -6,10 +6,10 @@ import { useAndroidBackDismiss } from "./use-android-back";
 
 import {
   ChannelPresenceAvatars,
-  CountPill,
   channelHasWorkInHand,
   MobileTabDock,
 } from "./workspace-shell-chrome";
+import { CountPill } from "./count-pill";
 import { ListCreate, type CreateAction } from "./list-create";
 import { ListSectionHeading } from "./list-section-heading";
 

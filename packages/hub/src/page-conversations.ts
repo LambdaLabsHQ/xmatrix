@@ -1,5 +1,5 @@
 import type { PageConversationRecord } from "@xmatrix/db";
-import type { PageConversation, PageLink, PageWorkingAgent } from "@xmatrix/protocol";
+import type { PageConversation, PageLink, PageTreeActivity, PageWorkingAgent } from "@xmatrix/protocol";
 import { channelHeadPreview } from "./channel-head-preview";
 
 /**
@@ -38,4 +38,23 @@ export function workingBySection(links: readonly PageLink[],
     }
   }
   return out;
+}
+
+/**
+ * A page's open discussions for the page tree: how many, how many hold
+ * messages this reader has not read, and the newest message in any of them.
+ * As beside the page, someone who never opened a discussion has nothing unread there.
+ */
+export function pageTreeDiscussions(conversationIds: readonly string[],
+  conversations: ReadonlyMap<string, PageConversation>): PageTreeActivity["discussions"] {
+  let unread = 0;
+  let latest: PageConversation["lastMessage"] = null;
+  for (const conversationId of conversationIds) {
+    const conversation = conversations.get(conversationId);
+    if (!conversation) continue;
+    if (conversation.readSequence > 0 && conversation.headSequence > conversation.readSequence) unread += 1;
+    const message = conversation.lastMessage;
+    if (message && (!latest || Date.parse(message.sentAt) > Date.parse(latest.sentAt))) latest = message;
+  }
+  return { open: conversationIds.length, unread, latest };
 }
