@@ -137,11 +137,9 @@ pub(crate) fn child_env(
     if std::env::var_os("XMATRIX_UTF8_TEST_CLI_EXE").is_none() {
         return Ok(Vec::new());
     }
-    use sha2::{Digest as _, Sha256};
     use std::path::PathBuf;
     let exe = std::env::current_exe().map_err(|_| "Cannot resolve UTF-8 shell executable")?;
     let bytes = std::fs::read(&exe).map_err(|_| "Cannot read UTF-8 shell executable")?;
-    let hash = format!("{:x}", Sha256::digest(&bytes));
     let root = xmatrix_cli_core::config::config_dir().join("utf8-shells");
     let directory = root.clone();
     std::fs::create_dir_all(&directory).map_err(|_| "Cannot prepare UTF-8 shell directory")?;
@@ -176,7 +174,7 @@ pub(crate) fn child_env(
         };
         let alias = directory.join(name);
         if std::fs::read(&alias)
-            .map(|old| format!("{:x}", Sha256::digest(old)) != hash)
+            .map(|old| old != bytes)
             .unwrap_or(true)
         {
             let temporary = directory.join(format!("{}.tmp", uuid::Uuid::new_v4()));
