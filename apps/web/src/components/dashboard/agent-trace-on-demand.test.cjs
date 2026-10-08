@@ -637,3 +637,18 @@ test("one instance holding its read open does not delay another instance", async
   sync.cancel();
   releaseSlow();
 });
+
+test("a failing live read backs off and a hidden tab asks rarely", () => {
+  const { liveSyncDelayMs } = require("./agent-trace-on-demand.ts");
+  const failures = new Map();
+  const next = (failed, extra = {}) => liveSyncDelayMs({
+    held: false, failed, refreshIntervalMs: 1_000, failures, instanceId: "i", hidden: false, ...extra,
+  });
+  assert.equal(next(false), 1_000);
+  assert.deepEqual([next(true), next(true), next(true)], [2_000, 4_000, 8_000]);
+  for (let i = 0; i < 10; i += 1) next(true);
+  assert.equal(next(true), 30_000);
+  assert.equal(next(false), 1_000, "a success resets the backoff");
+  assert.equal(next(false, { held: true }), 0);
+  assert.equal(next(false, { hidden: true }), 15_000);
+});
