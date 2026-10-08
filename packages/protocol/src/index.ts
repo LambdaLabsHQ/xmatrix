@@ -453,7 +453,7 @@ export type {
   PageAuthor, PageAwareness, PageBlockAwareness, PageChanges, PageClaim, PageConversation,
   PageDocument, PageGitHubFile, PageLink, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
   PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PageOwedUpdate, PagePresent,
-  PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeAgent, PageWorkingAgent, PublicPage,
+  PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
 } from "./pages.js";
 
 export {

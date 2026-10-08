@@ -70,6 +70,20 @@ test("a page's links describe their conversations, and its sections name the Age
     const byConversation = await worker.fetch(`/api/spaces/${encodeURIComponent(spaceId)}/page-links?conversationId=${
       encodeURIComponent(channelId)}`, { headers: auth });
     assert.equal((await byConversation.json()).conversations, undefined, "only a page's links carry conversations");
+
+    // The page tree counts open discussions only, and previews the newest message in them.
+    const tree = async () => (await json(await worker.fetch(
+      `/api/spaces/${encodeURIComponent(spaceId)}/page-links/agents`, { headers: auth }))).pages
+      .find((item) => item.pageId === page.pageId);
+    assert.equal((await tree())?.discussions.open ?? 0, 0, "a section's conversation is not an open discussion");
+    const discussed = await worker.fetch(`/api/spaces/${encodeURIComponent(spaceId)}/page-links`, { method: "POST",
+      headers: auth, body: JSON.stringify({ conversationId: channelId, pageId: page.pageId, blockId: "release",
+        anchor: { quote: "Not yet", from: null, to: null } }) });
+    assert.equal(discussed.status, 200, await discussed.clone().text());
+    const { discussions } = await tree();
+    assert.equal(discussions.open, 1);
+    assert.equal(discussions.latest.from.label, "Page Reader");
+    assert.match(discussions.latest.bodyPreview, /Cut the release notes\.$/u);
   } finally {
     liveAgent?.ws.close();
     daemon?.ws.close();
