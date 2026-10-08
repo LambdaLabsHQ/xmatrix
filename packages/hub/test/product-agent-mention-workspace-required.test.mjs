@@ -281,10 +281,14 @@ test("implicit Channel About starts a silent one-shot session through ordinary r
   assert.match(launch.body, /--expected-revision/);
   // It reads its own Channel on demand; it never mirrors the Space.
   assert.match(launch.body, /`xmatrix channel history ch-1 --authoritative`/u);
-  // A file name only this request uses, applied only after it is written: a
-  // file another session left behind never becomes this Channel's About.
-  assert.match(launch.body, /Write the About to a new UTF-8 file named xmatrix-about-channel-about-ch-1-20\.txt in your working directory\. Only after that write has succeeded, apply it with `xmatrix channel about ch-1 --summary-file xmatrix-about-channel-about-ch-1-20\.txt --through </u);
-  assert.match(launch.body, /never run the write and the apply at the same time/u);
+  // The summary goes directly to the owning Hub; no local file can be reused.
+  assert.match(launch.body, /`xmatrix channel about ch-1 --stdin --through </u);
+  assert.match(launch.body, /`xmatrix channel about ch-1 --summary "<summary>" --through </u);
+  assert.match(launch.body, /If this CLI's help advertises --stdin/u);
+  assert.match(launch.body, /pipe one JSON object containing "summary"/u);
+  assert.match(launch.body, /do not write or read any intermediate file/u);
+  assert.match(launch.body, /JSON Unicode escapes/u);
+  assert.doesNotMatch(launch.body, /--summary-file|--name-file|xmatrix-about-/u);
   assert.equal(launch.runMetadata.routedAs, "management_channel_about");
   assert.equal(launch.initialMessageId, undefined);
   assert.match(launch.body, /Always recompute and apply the About/u);
@@ -313,6 +317,9 @@ test("a conversation's first message names it only while nobody has named it", a
   const automatic = await run({ autoName: true });
   assert.equal(automatic.result.spawned, 1);
   assert.match(automatic.launches[0].body, /Nobody has named this Channel yet/u);
+  assert.match(automatic.launches[0].body, /--summary "<summary>" --name "<name>"/u);
+  assert.match(automatic.launches[0].body, /pipe one JSON object containing "summary" and "name"/u);
+  assert.doesNotMatch(automatic.launches[0].body, /--summary-file|--name-file/u);
 });
 
 test("implicit Channel About joins the session already serving the Channel", async () => {
