@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import { DURABLE_OBJECT_RETRY_AFTER_SECONDS } from "./durable-object-failure";
 import { relayResponse } from "./private-response";
 import { crossSpaceRetryOwner } from "./cross-space-read";
 import { agentRunDelegationDenied } from "./agent-run-channel-delegation";
@@ -823,7 +824,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
         (typeof completed.runLifecycleChannelId === "string" ? completed.runLifecycleChannelId : "");
       if (reportChannelId) {
         try { await wakeAgentLaunchCoordinator(c.env, reportChannelId); }
-        catch { return c.json({ error: "Agent Launch Channel coordinator is unavailable" }, 503); }
+        catch { return coordinatorUnavailable(c); }
       }
     } else if (runLifecycleChannelId && runId &&
         (eventType === "machine_run_exited" || eventType === "machine_stop_result")) {
@@ -835,11 +836,17 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       // The stopped predecessor unblocks its durable reborn successor.
       if (eventType === "machine_stop_result" && completed.runLifecycleStopPurpose === "reborn-predecessor") {
         try { await wakeAgentLaunchCoordinator(c.env, runLifecycleChannelId); }
-        catch { return c.json({ error: "Agent Launch Channel coordinator is unavailable" }, 503); }
+        catch { return coordinatorUnavailable(c); }
       }
     }
     return c.json({ ok: true });
   }));
   registerIndexRoutesAuthSpaceInstances(app);
   registerIndexRoutesAuthSpaceManagement(app);
+}
+
+/** The daemon retries an unacknowledged report; tell it the wait is short. */
+function coordinatorUnavailable(c: Context): Response {
+  return c.json({ error: "Agent Launch Channel coordinator is unavailable", retryable: true }, 503,
+    { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) });
 }

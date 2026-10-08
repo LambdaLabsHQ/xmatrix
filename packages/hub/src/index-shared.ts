@@ -61,6 +61,7 @@ import { reportError } from "@xmatrix/protocol/error-reporting";
 import { AgentChannelAccessError, ControlError } from "@xmatrix/db";
 import { postgresControlErrorResponse } from "./postgres-authority-http";
 import { postgresRetryAfterSeconds, retryablePostgresFailure } from "./postgres-error-classification";
+import { DURABLE_OBJECT_RETRY_AFTER_SECONDS, transientDurableObjectFailure } from "./durable-object-failure";
 import { machineDaemonCommand } from "./machines";
 import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
 import { runtimeRepository } from "./runtime";
@@ -829,6 +830,10 @@ export function requestErrorStatus(error: unknown): ContentfulStatusCode {
     console.error("PostgreSQL is unavailable", error);
     return 503;
   }
+  if (transientDurableObjectFailure(error)) {
+    console.error("Durable Object is briefly unavailable", error);
+    return 503;
+  }
   // Every failure answered as a 500 is unexpected; it is reported, not only answered.
   reportError(error);
   return 500;
@@ -842,6 +847,10 @@ export function requestErrorStatus(error: unknown): ContentfulStatusCode {
 export function requestErrorResponse(c: Context, error: unknown): Response {
   if (error instanceof ControlError) return postgresControlErrorResponse(error);
   const status = requestErrorStatus(error);
+  if (status === 503 && transientDurableObjectFailure(error)) {
+    return c.json({ error: "xMatrix is restarting; try again", code: "service_restarting", retryable: true }, status,
+      { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) });
+  }
   if (status === 503) {
     return c.json({ error: "PostgreSQL is unavailable", code: "postgres_unavailable", retryable: true }, status,
       { "retry-after": String(postgresRetryAfterSeconds(error)) });

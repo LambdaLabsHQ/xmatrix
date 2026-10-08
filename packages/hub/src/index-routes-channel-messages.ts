@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import { DURABLE_OBJECT_RETRY_AFTER_SECONDS } from "./durable-object-failure";
 import { runtimeRepository } from "./runtime";
 import { AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, agentSendSubmissionCanonical, callerMessageMetadata, messagePublicationEvidence, sha256Hex } from "@xmatrix/protocol";
 import type { ChannelAppMention, ChannelAttachment } from "@xmatrix/protocol";
@@ -399,7 +400,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
               if (!(error instanceof AgentLaunchHandoverUnavailable)) throw error;
               // The message is committed; its retry re-runs the same launch
               // idempotently and hands it to the Channel coordinator.
-              return c.json({ error: error.message, code: error.code }, 503);
+              return c.json({ error: error.message, code: error.code, retryable: true }, 503,
+                { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) });
             }
           } else c.executionCtx.waitUntil(postCommit.catch(() => undefined));
         }
