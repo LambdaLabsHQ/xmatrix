@@ -242,7 +242,7 @@ pub(crate) fn start_claude_stream_process(
     effort_transcript.poll(resume_id);
     let mut command = tokio::process::Command::new(&spawn_cmd);
     let presentation_pending = crate::write_current_run_presentation_pending(true);
-    apply_windows_utf8_env_tokio(&mut command);
+    apply_windows_utf8_env_tokio(&mut command)?;
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }
