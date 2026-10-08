@@ -68,7 +68,7 @@ export async function proxyMessageAttachmentUpload(input: {
       failure,
       cause,
     });
-    return Response.json({ error: failure.error, reason: failure.reason }, { status: failure.status });
+    return Response.json({ error: failure.error, reason: failure.reason, retryable: failure.retryable }, { status: failure.status });
   } finally {
     clearTimeout(timeout);
   }
