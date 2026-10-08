@@ -58,9 +58,24 @@ export function startErrorReporting({ dsn, release, component }: ErrorReportingT
   reporting = true;
 }
 
-/** Reports a failure the Worker answers or logs instead of rethrowing. */
-export function reportError(error: unknown): void {
-  if (reporting) captureException(error);
+/**
+ * What a boundary was doing when it failed: the operation (a route template or
+ * a task name) and the opaque ids it acted on. Never content, never a person.
+ */
+export type ErrorReportContext = {
+  operation: string;
+  ids?: Record<string, string>;
+};
+
+/**
+ * Reports a failure the Worker answers or logs instead of rethrowing, and
+ * returns the report's id so the answer can quote it; none when not reporting.
+ */
+export function reportError(error: unknown, context?: ErrorReportContext): string | undefined {
+  if (!reporting) return undefined;
+  return captureException(error, context
+    ? { tags: { operation: context.operation }, extra: context.ids ?? {} }
+    : undefined);
 }
 
 /** Settles once the reports raised so far are sent; a Worker waits on it after answering. */

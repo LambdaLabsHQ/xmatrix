@@ -13,7 +13,7 @@ export function registerMachineResourceRoutes(app: Hono<{ Bindings: Env }>, depe
   authenticate?: typeof requireAuth; database?: AuthorityDatabase; now?: () => number;
 } = {}): void {
   const authenticate = dependencies.authenticate ?? requireAuth;
-  app.get("/api/machines/:machineId/resource-history", (c) => privateRouteResponse(async () => {
+  app.get("/api/machines/:machineId/resource-history", (c) => privateRouteResponse(c, async () => {
     const authenticated = await authenticate(c.req.raw, c.env);
     if (authenticated.agentRun) {
       return Response.json({ error: "Reading Machine load history requires its owner" }, { status: 403, headers: NO_STORE });

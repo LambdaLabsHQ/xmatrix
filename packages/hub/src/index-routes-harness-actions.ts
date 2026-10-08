@@ -46,7 +46,7 @@ const HARNESS_ACTION_PORT: HarnessActionPort = {
 export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
   dependencies: Partial<HarnessActionPort> = {}): void {
   const port = { ...HARNESS_ACTION_PORT, ...dependencies };
-  app.post(HUB_ROUTES.machine_harness_actions, (c) => privateRouteResponse(async () => {
+  app.post(HUB_ROUTES.machine_harness_actions, (c) => privateRouteResponse(c, async () => {
     const authenticated = await port.authenticate(c.req.raw, c.env);
     if (authenticated.agentRun) return refuse("Harness actions require the Machine's owner", 403);
     const user = requireHumanAuth(authenticated);
@@ -84,7 +84,7 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
   }));
 
   // What became of the owner's recent actions on one Machine, so a page opened later still shows it.
-  app.get(HUB_ROUTES.machine_harness_actions, (c) => privateRouteResponse(async () => {
+  app.get(HUB_ROUTES.machine_harness_actions, (c) => privateRouteResponse(c, async () => {
     const authenticated = await port.authenticate(c.req.raw, c.env);
     if (authenticated.agentRun) return refuse("Harness actions require the Machine's owner", 403);
     const user = requireHumanAuth(authenticated);
@@ -93,7 +93,7 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
     return Response.json({ actions: await port.recent(c.env, user.id, machineId) }, { headers: NO_STORE });
   }));
 
-  app.get(`${HUB_ROUTES.machine_harness_actions}/:controlId`, (c) => privateRouteResponse(async () => {
+  app.get(`${HUB_ROUTES.machine_harness_actions}/:controlId`, (c) => privateRouteResponse(c, async () => {
     const authenticated = await port.authenticate(c.req.raw, c.env);
     // An Agent Run follows its owner's harness actions, as the owner would.
     const user = { id: authenticated.agentRun?.ownerUserId || authenticated.id };

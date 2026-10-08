@@ -55,7 +55,7 @@ import { agentRunUploadScopeId } from "./agent-run-upload-scope";
 import { automationDatumFromPayload } from "./relay-authority-schedule-occurrence";
 import { base64UrlEncodeValue } from "./relay-v2-primitives";
 import { AgentRunDelegationError, requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
-import { reportError } from "@xmatrix/protocol/error-reporting";
+import { reportError, type ErrorReportContext } from "@xmatrix/protocol/error-reporting";
 import { AgentChannelAccessError, ControlError } from "@xmatrix/db";
 import { domainFailure, failureResponse, transientFailure, type RequestFailure } from "./error-contract";
 import { machineDaemonCommand } from "./machines";
@@ -821,7 +821,7 @@ export function requestErrorStatus(error: unknown): ContentfulStatusCode {
  * retryable 503, and anything else as an internal error whose detail stays in
  * the report.
  */
-export function requestFailure(error: unknown): RequestFailure {
+export function requestFailure(error: unknown, context?: () => ErrorReportContext): RequestFailure {
   if (error instanceof ControlError) return domainFailure(error);
   const message = (error as Error | undefined)?.message ?? "";
   if (error instanceof AuthFailure || message === "Invalid or expired auth token") {
@@ -833,14 +833,23 @@ export function requestFailure(error: unknown): RequestFailure {
   // An outage the driver or runtime says a replay can survive; a defect stays a reported 500.
   const transient = transientFailure(error);
   if (transient) return transient;
-  // Every failure answered as a 500 is unexpected; it is reported, not only answered.
-  reportError(error);
-  return { status: 500, body: { error: "Internal error", code: "internal_error", retryable: false }, headers: {} };
+  // Every failure answered as a 500 is unexpected; it is reported with what the
+  // route was doing, and the answer quotes the report so a person can cite it.
+  const reference = reportError(error, context?.());
+  return { status: 500, body: { error: "Internal error", code: "internal_error", retryable: false,
+    ...(reference ? { reference } : {}) }, headers: {} };
+}
+
+/** What a route was doing: its template and the opaque ids in its path, never its body. */
+export function routeReportContext(c: Context): ErrorReportContext {
+  const ids = Object.fromEntries(Object.entries(c.req.param() as Record<string, string>)
+    .filter(([name, value]) => /Id$/u.test(name) && typeof value === "string" && value.length <= 200));
+  return { operation: `${c.req.method} ${c.req.routePath}`, ids };
 }
 
 /** A route's failure as JSON under `requestFailure`. */
 export function requestErrorResponse(c: Context, error: unknown): Response {
-  const failure = requestFailure(error);
+  const failure = requestFailure(error, () => routeReportContext(c));
   return c.json(failure.body, failure.status as ContentfulStatusCode, failure.headers);
 }
 

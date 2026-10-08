@@ -8,7 +8,7 @@ import { daemonStopTargets, issueDaemonStopsForArchivedChannelTree } from "./pro
 const NO_STORE = { "cache-control": "private, no-store" };
 
 export function registerChannelTransferRoutes(app: Hono<{ Bindings: Env }>): void {
-  app.post("/api/channels/:channelId/transfer-proposals", (c) => privateRouteResponse(async () => {
+  app.post("/api/channels/:channelId/transfer-proposals", (c) => privateRouteResponse(c, async () => {
       const user = await requireAuth(c.req.raw, c.env);
       const channelId = c.req.param("channelId");
       const body = await c.req.json<Record<string, unknown>>();
@@ -23,14 +23,14 @@ export function registerChannelTransferRoutes(app: Hono<{ Bindings: Env }>): voi
         principal: user.agentRun ? { kind: "agent", id: user.agentRun.agentId } : { kind: "user", id: user.id },
       }), { headers: NO_STORE });
   }));
-  app.get("/api/spaces/:spaceId/channel-transfers", (c) => privateRouteResponse(async () => {
+  app.get("/api/spaces/:spaceId/channel-transfers", (c) => privateRouteResponse(c, async () => {
       const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));
       const spaceId = c.req.param("spaceId");
       const channelId = c.req.query("channelId");
       return Response.json(await listChannelTransfers(c.env, { spaceId, ...(channelId ? { channelId } : {}),
         principal: { kind: "user", id: user.id } }), { headers: NO_STORE });
   }));
-  app.post("/api/spaces/:spaceId/channel-transfers/:proposalId/ack", (c) => privateRouteResponse(async () => {
+  app.post("/api/spaces/:spaceId/channel-transfers/:proposalId/ack", (c) => privateRouteResponse(c, async () => {
       const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));
       const sourceSpaceId = c.req.param("spaceId");
       const body = await c.req.json<Record<string, unknown>>();
