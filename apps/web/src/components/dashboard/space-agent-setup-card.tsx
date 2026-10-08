@@ -3,7 +3,6 @@
 import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
 import { Check, CloudOff, Copy, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
-import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { noticeClass } from "@/components/ui/status-tone";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
@@ -99,7 +98,7 @@ export function SpaceAgentSetupCard({
                 </button>
               </div>
             )}
-            <div className="mt-4 grid gap-3">
+            <div className="mt-4">
               {state.candidates.map((candidate) => (
                 <CandidateRow
                   key={candidate.presetId}
@@ -137,7 +136,7 @@ function CandidateRow({
   onBind: () => void;
 }) {
   return (
-    <LiquidGlassCard className="app-space-agent-candidate rounded-[20px] p-4">
+    <div className="border-b border-border py-4 last:border-0">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <IdentityAvatar
@@ -176,7 +175,7 @@ function CandidateRow({
           Enable
         </button>
       </div>
-    </LiquidGlassCard>
+    </div>
   );
 }
 

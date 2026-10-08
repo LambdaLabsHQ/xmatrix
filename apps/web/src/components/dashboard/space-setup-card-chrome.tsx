@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 
 /* Shared frame for the first-run cards that stand in for an empty Space
    screen. They are consecutive steps of one flow, so they have to look like one
-   flow rather than two similar ones. The frame stays transparent so the wood
-   canvas remains visible; only the bounded controls inside carry material. */
+   flow rather than two similar ones. The frame stays transparent so the
+   detail paper behind it is the only material; rows are ruled, not carded. */
 
 export function SetupCardShell({ children }: { children: React.ReactNode }) {
   return (
