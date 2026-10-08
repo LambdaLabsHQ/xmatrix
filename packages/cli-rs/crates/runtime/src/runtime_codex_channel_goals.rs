@@ -91,12 +91,23 @@ async fn submit_codex_turn_interruptible(
                         // stale idle snapshot for the same transport event.
                     }
                     other => {
+                        // A card answer goes to the question Codex waits on,
+                        // and the turn carries on.
+                        if let Some(reply) = crate::runtime_harness_questions::questionnaire_reply(&other)
+                            && interrupter.answer_question(&reply).await
+                        {
+                            if let Some(relay) = trace_relay {
+                                crate::runtime_harness_questions::ack_questionnaire_reply(relay, &reply);
+                            }
+                            continue;
+                        }
                         if event_requests_active_turn_interrupt_with_replay(
                             &other,
                             trace_channel_id,
                             Some(agent.id.as_str()),
                             interrupt_history_replay,
                         ) {
+                            interrupter.cancel_questions().await;
                             if let Err(err) = interrupter.interrupt_active_turn().await {
                                 eprintln!("{} codex app-server interrupt failed: {err}", "⚠".yellow().bold());
                             }

@@ -172,6 +172,7 @@ import { UserFacingProblem, userErrorMessage } from "../../lib/user-facing-error
 import type { WorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";
+import { questionnaireAnswerPayload, type QuestionnaireAnswer } from "./questionnaire-card";
 
 export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const queryClient = useQueryClient();
@@ -351,9 +352,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void rebornMessageSender(message);
   });
 
-  const handleTimelineQuestionnaireAnswer = useStableCallback((message: TimelineItem, answer: string) => {
-    void sendQuestionnaireAnswer(message, answer);
-  });
+  const handleTimelineQuestionnaireAnswer = useStableCallback((message: TimelineItem, answer: QuestionnaireAnswer) =>
+    sendQuestionnaireAnswer(message, answer));
 
   const handleTimelineOpenInternalAppLink = useStableCallback((href: string) => openInternalAppLink(href));
 
@@ -2557,8 +2557,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   }
 
-  async function sendQuestionnaireAnswer(message: TimelineItem, answer: string) {
-    if (!s.token || !message.channelId || !message.messageId || !answer.trim()) return;
+  /** Whether the answer was posted; a card stays open when it was not. */
+  async function sendQuestionnaireAnswer(message: TimelineItem, answer: QuestionnaireAnswer): Promise<boolean> {
+    if (!s.token || !message.channelId || !message.messageId || !answer.body.trim()) return false;
 
     queueChannelTimelineScroll(message.channelId);
     setHistoryError(null);
@@ -2569,14 +2570,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           Authorization: `Bearer ${s.token}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({
-          body: answer.trim(),
-          replyToMessageId: message.messageId,
-          metadata: {
-            kind: "xmatrix.questionnaire_answer.v1",
-            questionnaireMessageId: message.messageId,
-          },
-        }),
+        body: JSON.stringify(questionnaireAnswerPayload(message, answer)),
         cache: "no-store",
       });
       await requireResponseOk(res);
@@ -2593,8 +2587,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       if (payload.channel) {
         setChannels((current) => replaceChannel(current, payload.channel!));
       }
+      return true;
     } catch (err) {
       setHistoryError(userErrorMessage(err, "Couldn't send your answer"));
+      return false;
     }
   }
 

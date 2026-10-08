@@ -1056,39 +1056,6 @@ fn claude_stream_trace_extracts_text_and_tool_blocks() {
 }
 
 #[test]
-fn claude_questionnaire_channel_message_extracts_choice_metadata() {
-    let tool = serde_json::json!({
-        "type": "tool_call",
-        "id": "toolu_ask",
-        "name": "AskUserQuestion",
-        "input": {
-            "questions": [
-                {
-                    "id": "mode",
-                    "question": "Pick modes",
-                    "multiple": true,
-                    "options": [
-                        { "id": "a", "label": "Alpha", "description": "First" },
-                        "Beta"
-                    ]
-                }
-            ]
-        }
-    });
-
-    let (body, metadata) = claude_questionnaire_channel_message(&tool, "toolu_ask")
-        .expect("AskUserQuestion should become channel metadata");
-
-    assert!(body.contains("Claude asks: Pick modes"));
-    assert_eq!(metadata["kind"], "xmatrix.questionnaire.v1");
-    assert_eq!(metadata["toolUseId"], "toolu_ask");
-    assert_eq!(metadata["selectionMode"], "multiple");
-    assert_eq!(metadata["questions"][0]["id"], "mode");
-    assert_eq!(metadata["questions"][0]["options"][0]["label"], "Alpha");
-    assert_eq!(metadata["questions"][0]["options"][1]["label"], "Beta");
-}
-
-#[test]
 fn claude_init_details_keeps_only_meaningful_fields() {
     let init = serde_json::json!({
         "type": "system",

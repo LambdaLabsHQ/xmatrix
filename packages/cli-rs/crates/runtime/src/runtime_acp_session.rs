@@ -64,6 +64,7 @@ impl AcpSession {
             presentation: AgentPresentationFacts::default(),
             config,
             activity: ChannelActivityReporter::default(),
+            questions: Default::default(),
         })
     }
 
@@ -146,6 +147,7 @@ impl AcpSession {
             presentation: AgentPresentationFacts::default(),
             config,
             activity: ChannelActivityReporter::default(),
+            questions: Default::default(),
         })
     }
 
@@ -170,6 +172,7 @@ impl AcpSession {
     fn interrupter(&self) -> error::Result<AcpInterrupter> {
         Ok(AcpInterrupter {
             write: self.write.clone(),
+            questions: self.questions.clone(),
             session_id: self.session_id.clone().ok_or_else(|| {
                 CliError::Launch(format!(
                     "{} agent session not initialized",
@@ -535,6 +538,44 @@ impl AcpSession {
         Ok(selected)
     }
 
+    /// Show a form elicitation as a card and park it for the answer; with no
+    /// channel to show it in, or no question in it, cancel it at once.
+    async fn park_acp_question(
+        &mut self,
+        message: &Value,
+        relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
+        channel_id: Option<&str>,
+    ) -> error::Result<()> {
+        let id = message.get("id").cloned().unwrap_or(Value::Null);
+        let params = message.get("params").cloned().unwrap_or(Value::Null);
+        let questions = crate::runtime_harness_questions::acp_questions(&params);
+        match (relay, channel_id) {
+            (Some(relay), Some(channel_id)) if !questions.is_empty() => {
+                let key = params
+                    .get("elicitationId")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| format!("acp-{}", uuid::Uuid::new_v4()));
+                crate::runtime_harness_questions::publish_questionnaire(
+                    relay,
+                    channel_id,
+                    crate::runtime_harness_questions::questionnaire_message(
+                        &self.config.trace_source,
+                        &self.config.display_name,
+                        &key,
+                        &questions,
+                    ),
+                );
+                self.questions.park(key, (id, params));
+                Ok(())
+            }
+            _ => {
+                self.write_message(&acp_result(id, serde_json::json!({ "action": "cancel" })))
+                    .await
+            }
+        }
+    }
+
     async fn submit_turn(
         &mut self,
         text: &str,
@@ -621,6 +662,8 @@ impl AcpSession {
                     }
                     break;
                 }
+                // The agent is silent because it waits on its person.
+                Err(_) if self.questions.any() => continue,
                 Err(_) => {
                     let error = format!(
                         "{} ACP turn timed out after {}s without agent events",
@@ -645,6 +688,13 @@ impl AcpSession {
             latest_usage = merge_llm_usage(latest_usage, self.presentation.usage.clone());
             latest_model = self.presentation.model.clone().or(latest_model);
 
+            if message.get("method").and_then(Value::as_str) == Some("elicitation/create")
+                && message.get("id").is_some()
+            {
+                self.park_acp_question(&message, trace_relay, trace_channel_id)
+                    .await?;
+                continue;
+            }
             if acp_handle_server_request(self, &message).await?.is_some() {
                 continue;
             }
@@ -1281,7 +1331,10 @@ async fn acp_handle_server_request(
         return Ok(None);
     }
 
-    let result = if method.contains("permission") {
+    let result = if method == "elicitation/create" {
+        // Outside a turn there is no channel to ask in.
+        serde_json::json!({ "action": "cancel" })
+    } else if method.contains("permission") {
         // Auto-approve tool execution when the agent still asks (belt and suspenders
         // with --always-approve on the spawn line). Option selection is driven by
         // the ACP `kind` semantics so each vendor's wording works; when the request
