@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import type { Locator, Page } from "@playwright/test";
+import { fixtureJson } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 const EMPTY_COMPOSER_PASTE_SENTINEL = "\u200B";
@@ -81,6 +82,25 @@ test.describe("desktop channel selection", () => {
     await page.getByRole("button", { name: /random/i }).first().click();
 
     await expectEmptyComposerCaret(textarea);
+  });
+
+  test("keeps the caret in the composer after sending, by Enter or by the Send button", async ({ page }) => {
+    const textarea = await openTwoChannelWorkspace(page);
+    await fixtureJson(page, "send-message", new RegExp(`/api/xmatrix/channels/${E2E_CHANNEL.id}/messages$`, "u"),
+      { message: { messageId: "m-1" } }, { method: "POST", delayMs: 400 });
+
+    await textarea.focus();
+    await textarea.pressSequentially("first");
+    await page.keyboard.press("Enter");
+    await expect(textarea).toHaveValue(/^\u200B?$/u);
+    await expect(textarea).toBeFocused();
+
+    await textarea.pressSequentially("second");
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(textarea).toHaveValue(/^\u200B?$/u);
+    await expect(textarea).toBeFocused();
+    await page.keyboard.type("third");
+    await expect(textarea).toHaveValue("third");
   });
 
   test("draws a soft caret on one middle line with the hint chip and the attach button", async ({ page }) => {
