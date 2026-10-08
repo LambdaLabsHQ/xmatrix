@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   decideFirstMessageLaunch,
   executeRegistrationLaunchDispatch,
+  executeFirstMessageDecision,
 } from "../src/registration-launch-dispatch.ts";
 
 test('composite dispatch persists sanitized rejection through current source and channel authority', async t => {
@@ -119,4 +120,23 @@ test("Jev's harness is written as its reading the moment Jev has it, before the 
     } }, async () => {}, clock);
   assert.equal(parametersChosen, true);
   assert.equal(calls.filter(([kind]) => kind === 'recommend').length, 1, 'written once');
+});
+
+
+test("an Agent's first-message decision is persisted before its harness can be summoned", async t => {
+  const { PostgresRegistrationLaunchRepository, PostgresFirstMessageLaunchChoiceRepository } = await import('@xmatrix/db');
+  const { calls, choices } = firstMessageChoices({ deadlineAt: '2020-01-01T00:00:00.000Z' });
+  for (const [method, implementation] of Object.entries(choices)) {
+    t.mock.method(PostgresFirstMessageLaunchChoiceRepository.prototype, method, implementation);
+  }
+  t.mock.method(PostgresRegistrationLaunchRepository.prototype, 'readHarnessToStart', async () => 'codex');
+  const database = { cacheMode: 'disabled', transaction: async (_context, callback) => callback({ query: async query => {
+    if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel', space_id: 'space', shard_id: 'shard', placement_epoch: 1, entity_version: 1 }];
+    if (query.name === 'space_placement_resolve_v1') return [{ space_id: 'space', shard_id: 'shard', placement_epoch: 1, state: 'active', target_shard_id: null, plan_class: 'single' }];
+    throw new Error(`unexpected ${query.name}`);
+  } }) };
+  const result = await executeFirstMessageDecision({ ...firstMessageInput, database, directory: database,
+    evaluate: async () => { throw new Error('unused'); }, body: 'start an agent', window: false });
+  assert.deepEqual(result, { claimed: true, harness: 'codex' });
+  assert.deepEqual(calls, [['open', 'm1'], ['recommend', 'codex'], ['claim', 'jev', 'codex']]);
 });

@@ -4,6 +4,7 @@ export interface FirstMessageLaunchChoiceRow {
   channel_id: string;
   message_id: string;
   author_id: string;
+  author_kind: "user" | "agent";
   author_user_id: string;
   sent_at: string | Date;
   body_hash: string;
