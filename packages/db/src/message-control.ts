@@ -2644,7 +2644,7 @@ export class PostgresMessageRepository {
       name: "message_search_candidates_v3",
       text: `WITH readable AS MATERIALIZED (
           SELECT c.channel_id FROM data.channels c
-          WHERE c.space_id=$1 AND ($6::text IS NULL OR c.channel_id=$6 OR c.parent_channel_id=$6)
+          WHERE c.space_id=$1 AND ($6::text IS NULL OR c.channel_id=$6 OR (c.metadata_json->>'kind'='thread' AND c.metadata_json->>'threadRootChannelId'=$6))
             AND ${channelCapabilityPredicate({ capability: "message_content_read",
             channelAlias: "c", principalKindSql: "$2::text", principalIdSql: "$3::text" })}
         )

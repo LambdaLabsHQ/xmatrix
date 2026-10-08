@@ -1486,15 +1486,6 @@ export function ChannelHeader({
                   onMove={onMove}
                   onVisibilityChange={onVisibilityChange}
                 />
-                <button
-                  type="button"
-                  title="Search (⌘F / Ctrl+F)"
-                  aria-label="Search"
-                  onClick={onOpenSearch}
-                  className="app-channel-search hidden size-8 shrink-0 items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground md:flex"
-                >
-                  <Search className="size-4" />
-                </button>
               </div>
             )}
             {channel && (
@@ -1519,7 +1510,7 @@ export function ChannelHeader({
           <p className="mt-1 truncate text-[13px] text-muted-foreground">{channel.topic}</p>
         )}
       </div>
-      <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
+      <div className="app-channel-header-actions ml-auto flex shrink-0 items-center justify-end gap-1">
         <button
           type="button"
           title="Channel details"
@@ -1535,6 +1526,17 @@ export function ChannelHeader({
               : 0}
         </button>
         {actions}
+        {channel && (
+          <button
+            type="button"
+            title="Search (⌘F / Ctrl+F)"
+            aria-label="Search"
+            onClick={onOpenSearch}
+            className="app-channel-search hidden size-8 shrink-0 items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground md:flex"
+          >
+            <Search className="size-4" />
+          </button>
+        )}
       </div>
     </div>
   );

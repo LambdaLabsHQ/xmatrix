@@ -111,7 +111,7 @@ test("a conversation found by name opens and is revealed in the list", async ({ 
   await expect(row).toBeInViewport();
 });
 
-test("conversation actions and borderless search sit beside its name", async ({ page }) => {
+test("conversation actions sit beside its name and borderless search aligns right", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const header = page.locator(".app-main .app-panel-header").first();
   const name = header.getByText(E2E_CHANNEL.name, { exact: true });
@@ -121,7 +121,11 @@ test("conversation actions and borderless search sit beside its name", async ({ 
   await expect(page.locator(".app-global-bar")).toHaveCount(0);
   const [nameBox, actionsBox, searchBox] = await Promise.all([name.boundingBox(), actions.boundingBox(), search.boundingBox()]);
   expect(actionsBox!.x - (nameBox!.x + nameBox!.width)).toBeLessThanOrEqual(8);
-  expect(searchBox!.x - (actionsBox!.x + actionsBox!.width)).toBeLessThanOrEqual(8);
+  expect(searchBox!.x - (actionsBox!.x + actionsBox!.width)).toBeGreaterThan(100);
+  const headerBox = await header.boundingBox();
+  const paddingRight = await header.evaluate((node) => parseFloat(getComputedStyle(node).paddingRight));
+  expect(searchBox!.x + searchBox!.width).toBeCloseTo(headerBox!.x + headerBox!.width - paddingRight, 0);
+  expect(searchBox!.y).toBeCloseTo(actionsBox!.y, 0);
   expect(await search.evaluate((node) => getComputedStyle(node).borderWidth)).toBe("0px");
   await search.hover();
   expect(await search.evaluate((node) => getComputedStyle(node).boxShadow)).toBe("none");

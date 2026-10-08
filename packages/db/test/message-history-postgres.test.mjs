@@ -186,8 +186,17 @@ integration("search candidates cover only readable live messages, newest first, 
   assert.deepEqual(outsider, [], "a non-member reads nothing");
   const inChannel = await repository.searchCandidates({ requestId: `${id}-in`, spaceId: space,
     principal: { kind: "user", id: seeded.reader }, channelId: seeded.channel, limit: 50 });
-  assert.ok(inChannel.length > 0 && inChannel.every((candidate) => candidate.channelId === seeded.channel),
-    "a Channel filter keeps only that Channel's messages");
+  assert.deepEqual(inChannel.map((candidate) => candidate.messageId), ids,
+    "a Channel filter includes its readable threads and excludes the closed thread");
+  assert.ok(inChannel.some((candidate) => candidate.channelId === seeded.thread));
+  const inThread = await repository.searchCandidates({ requestId: `${id}-in-thread`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, channelId: seeded.thread, limit: 50 });
+  assert.equal(inThread.length, 4);
+  assert.ok(inThread.every((candidate) => candidate.channelId === seeded.thread),
+    "a thread filter does not include its parent conversation");
+  const inClosedThread = await repository.searchCandidates({ requestId: `${id}-in-closed`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, channelId: `closed-thread-${id}`, limit: 50 });
+  assert.deepEqual(inClosedThread, [], "a Channel filter cannot grant access");
   const byAuthor = await repository.searchCandidates({ requestId: `${id}-from`, spaceId: space,
     principal: { kind: "user", id: seeded.reader }, authorKind: "user", authorId: seeded.author, limit: 50 });
   assert.ok(byAuthor.length > 0 && byAuthor.every((candidate) => candidate.authorId === seeded.author),

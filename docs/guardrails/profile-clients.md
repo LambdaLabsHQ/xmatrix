@@ -82,8 +82,8 @@ compatible with older daemons; savings require the new CLI/daemon to be installe
 
 The Web shell uses Cmd/Ctrl+F for search in the current Space. In a conversation,
 the shortcut starts with an `in:` filter; search buttons start across the Space.
-Desktop conversation headers place actions and a borderless search icon beside
-the title. Other destinations retain their global search entry and mobile keeps
+Desktop conversation headers place actions beside the title and a borderless
+search icon at the right edge of the same row. Other destinations retain their global search entry and mobile keeps
 its top-bar icon. Cmd/Ctrl+P quick-open is removed.
 
 The dialog combines name navigation with server-backed message and page search.

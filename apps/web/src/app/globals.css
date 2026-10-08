@@ -1653,7 +1653,8 @@
     box-shadow: 0 8px 22px oklch(0 0 0 / 0.16) !important;
   }
 
-  :root:not(.dark) .xmatrix-app .app-panel-header > div:first-child {
+  :root:not(.dark) .xmatrix-app .app-panel-header > div:first-child,
+  :root:not(.dark) .xmatrix-app .app-panel-header .app-channel-header-actions {
     min-width: 0;
     padding-block: 0.25rem;
   }
@@ -4432,7 +4433,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 }
 
-/* The conversation's search action is ink beside its title, including on hover. */
+/* The conversation's search action is ink at the header's right edge, including on hover. */
 .xmatrix-app .app-panel-header button.app-channel-search,
 .xmatrix-app .app-panel-header button.app-channel-search:hover {
   background: transparent !important;
