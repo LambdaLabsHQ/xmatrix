@@ -195,7 +195,7 @@ import type {
   SerializedChannel,
   SerializedSpace,
 } from "@xmatrix/protocol";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { xmatrixRawResponse, XMatrixApiError } from "@/lib/query/api-client";
 
 // Recovered monofile top-level declarations missing from split modules
 // (inMemoryRelayClientProfileId lives in workspace-shell-helpers.tsx)
@@ -396,7 +396,7 @@ async function appendChannelMessageWithAttachments(input: {
       }),
   });
   if (outcome.kind === "unconfirmed") throw new MessageSendDeadlineError();
-  if (outcome.kind === "failed") throw new Error(outcome.message);
+  if (outcome.kind === "failed") throw new XMatrixApiError(outcome);
   return outcome.payload as {
     message?: unknown;
     channel?: SerializedChannel;

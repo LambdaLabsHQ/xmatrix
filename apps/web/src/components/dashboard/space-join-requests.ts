@@ -10,6 +10,7 @@ import { queryOptions } from "@tanstack/react-query";
 
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { xmatrixApiRequest, xmatrixRawResponse } from "@/lib/query/api-client";
+import { UserFacingProblem } from "../../lib/user-facing-error";
 
 export type SpaceJoinRequest = {
   id: string;
@@ -70,7 +71,7 @@ export async function decideSpaceJoinRequest(input: {
   approve: boolean;
 }): Promise<void> {
   const { token, spaceId, requestId, approve } = input;
-  if (!token) throw new Error("Sign in before deciding join requests");
+  if (!token) throw new UserFacingProblem("Sign in before deciding join requests");
   await xmatrixApiRequest({ url: WEB_PROXY_ROUTES.space_join_request_decide(spaceId, requestId), token,
     method: "POST", body: { approve } });
 }

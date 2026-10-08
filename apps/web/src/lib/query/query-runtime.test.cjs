@@ -152,3 +152,27 @@ test("one transient rule: no answer, slow down, or the Hub's own label", async (
     globalThis.fetch = original;
   }
 });
+
+test("an aborted caller stops waiting without failing the shared query for others", async () => {
+  const { untilCallerAborts } = require("./caller-abort.ts");
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let release;
+  let sharedSignal;
+  const options = {
+    queryKey: ["xmatrix", "hub", "user-1", "http-query", "transfers"],
+    queryFn: async ({ signal }) => {
+      sharedSignal = signal;
+      await new Promise((resolve) => { release = resolve; });
+      return "proposals";
+    },
+  };
+  const leaving = new AbortController();
+  const left = untilCallerAborts(client.fetchQuery(options), leaving.signal);
+  const right = untilCallerAborts(client.fetchQuery(options), new AbortController().signal);
+  leaving.abort();
+  await assert.rejects(left, { name: "AbortError" });
+  release();
+  assert.equal(await right, "proposals");
+  assert.equal(sharedSignal.aborted, false);
+  client.clear();
+});

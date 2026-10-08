@@ -16,6 +16,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { queueHarnessAction, readHarnessAction } from "./machine-harness-api";
 import { ToolDetailSection } from "./tool-split";
 import { fetchMachineDaemons } from "./workspace-admin-views";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 type Step = "start" | "finish" | "cancel";
 type Operation = { controlId: string; step: Step; startedAt: number };
@@ -75,7 +76,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
   const queue = useMutation({
     mutationFn: async (input: { step: Step; code?: string }) => {
       const daemon = view.daemon;
-      if (!daemon?.machineId) throw new Error("This machine is offline.");
+      if (!daemon?.machineId) throw new UserFacingProblem("This machine is offline.", true);
       const result = await queueHarnessAction(token, daemon.machineId, daemon.hostId, registration.key.harness,
         `login_${input.step}`, undefined, input.code);
       return { ...input, controlId: result.controlId };
@@ -84,7 +85,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
       setOperation({ controlId, step, startedAt: Date.now() });
       if (step !== "finish") setNotice(null);
     },
-    onError: (error) => setNotice({ text: error instanceof Error ? error.message : "The sign-in could not be requested.", error: true }),
+    onError: (error) => setNotice({ text: userErrorMessage(error, "Couldn't request the sign-in") ?? "", error: true }),
   });
 
   const settled = SETTLED(status.data?.status) ? status.data : undefined;

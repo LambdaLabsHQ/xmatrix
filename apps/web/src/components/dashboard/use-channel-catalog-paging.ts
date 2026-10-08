@@ -42,6 +42,7 @@ import {
 import { exactChannelIdFromRouteKey, routeEntityTokenFromKey } from "./channel-links";
 import { mergeChannelListHydratedFields } from "./workspace-admin-views";
 import { listenForForegroundRefresh } from "./foreground-refresh";
+import { userErrorMessage } from "../../lib/user-facing-error";
 
 export interface ChannelCatalogQuery {
   view: ChannelCatalogPageView;
@@ -147,7 +148,7 @@ function pageFromCache(client: QueryClient, queryKey: QueryKey): ChannelCatalogC
     loading: state?.fetchStatus === "fetching",
     loaded: Boolean(data?.pages.length),
     error: state?.status === "error"
-      ? state.error instanceof Error ? state.error.message : "Failed to load channels"
+      ? userErrorMessage(state.error, "Couldn't load channels")
       : null,
   };
 }

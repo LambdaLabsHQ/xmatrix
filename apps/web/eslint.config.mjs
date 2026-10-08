@@ -72,6 +72,41 @@ const config = [
     },
   },
   {
+    // A person reads a failure only through describeError / ErrorNotice
+    // (src/lib/user-facing-error.ts, docs/architecture/client-resilience.md).
+    // Raw exception text — a browser's "signal is aborted without reason", a
+    // gateway's HTML, a code like "membership version conflict" — never reaches
+    // the screen, and a failed response is read with errorFromResponse so its
+    // status, code and retry policy survive.
+    files: ["src/components/**/*.{ts,tsx}", "src/app/**/*.{ts,tsx}"],
+    ignores: ["src/app/api/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "MemberExpression[property.name='message'][object.type='TSAsExpression'][object.typeAnnotation.typeName.name='Error']",
+          message: "Show a failure with userErrorMessage(error, action) or <ErrorNotice>, not its raw message.",
+        },
+        {
+          selector: "ConditionalExpression[test.operator='instanceof'][test.right.name='Error'][consequent.property.name='message']",
+          message: "Show a failure with userErrorMessage(error, action) or <ErrorNotice>, not its raw message.",
+        },
+        {
+          selector: "NewExpression[callee.name='Error'][arguments.0.type='LogicalExpression'][arguments.0.left.property.name='error']",
+          message: "Throw `await errorFromResponse(response)` so the status, code and retry policy survive.",
+        },
+        {
+          selector: "JSXExpressionContainer MemberExpression[property.name='message'][object.name=/[eE]rror$/]",
+          message: "Render a failure with <ErrorNotice>, not its raw message.",
+        },
+        {
+          selector: "JSXExpressionContainer MemberExpression[property.name='message'][object.property.name=/[eE]rror$/]",
+          message: "Render a failure with <ErrorNotice>, not its raw message.",
+        },
+      ],
+    },
+  },
+  {
     files: ["src/**/*.cjs"],
     rules: {
       "@typescript-eslint/no-require-imports": "off",

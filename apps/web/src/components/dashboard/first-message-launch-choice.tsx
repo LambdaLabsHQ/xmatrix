@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { preparationFailureSummary, type InteractionDecisionWindow, type InteractionLaunchOption } from "@xmatrix/protocol";
 import { avatarImageSrc } from "./identity-avatar";
 import { launchChoiceRead, launchChoiceView, type LaunchChoiceView } from "./first-message-launch-choice-state";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /** The option's own icon, from its launch option; never rebuilt from the harness name here. */
 function OptionMark({ option }: { option: InteractionLaunchOption }) {
@@ -83,7 +84,7 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, op
       setPending(harness);
       setError(null);
       try { await onChoose(harness); }
-      catch (failure) { setPending(undefined); setError((failure as Error).message); }
+      catch (failure) { setPending(undefined); setError(userErrorMessage(failure, "Couldn't start the Agent")); }
     };
     // The window lists Jev's pick even when the reader's catalog has not loaded yet.
     const listed = window?.options.length ? window.options : options;

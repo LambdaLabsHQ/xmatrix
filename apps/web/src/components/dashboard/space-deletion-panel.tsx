@@ -8,6 +8,7 @@ import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { actionClass } from "@/components/ui/action-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 export interface SpaceDeletionSummary {
   spaceId: string;
@@ -52,7 +53,7 @@ export function SpaceDangerZone({
       await onDeleteSpace(space.id);
       await queryClient.invalidateQueries({ queryKey: spaceDeletionsQueryKey(userId) });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete the Space");
+      setError(userErrorMessage(err, "Couldn't delete the Space"));
       setBusy(false);
     }
   }
@@ -119,7 +120,7 @@ export function DeletedSpacesList({
       await onRestoreSpace(spaceId);
       await queryClient.invalidateQueries({ queryKey: spaceDeletionsQueryKey(userId) });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not restore the Space");
+      setError(userErrorMessage(err, "Couldn't restore the Space"));
     } finally {
       setRestoringId(null);
     }

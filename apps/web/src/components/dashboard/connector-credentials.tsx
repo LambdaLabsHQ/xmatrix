@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /* A connection's credentials (docs/design/connector-platform.md §3.2). Values
    an admin writes are never read back; the ingress URL and secrets the Hub
@@ -100,7 +101,8 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
   const stored = new Set(view.data?.credentialFields ?? connection?.credentialFields ?? []);
   const missingIngress = connector.events && !view.data?.ingressUrl;
   const pending = save.isPending || view.isFetching;
-  const error = save.error?.message ?? view.error?.message;
+  const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
+    userErrorMessage(view.error, "Couldn't load the credentials");
 
   return (
     <div className="space-y-4">

@@ -31,6 +31,7 @@ import {
 } from "./platform-admin-overview";
 import { ToolDetailSection } from "./tool-split";
 import { AdminPaperAction } from "./admin-paper";
+import { ErrorNotice } from "@/components/ui/error-notice";
 
 const ACTIVITY_RANGES = [7, 14, 30, 90] as const;
 
@@ -54,9 +55,7 @@ export function AdminReadState({ error, loading, hasData, emptyTitle, emptyBody,
   }
   return (
     <>
-      {error instanceof Error && (
-        <p role="alert" className={noticeClass("alert", "mb-4 rounded-lg px-4 py-3")}>{error.message}</p>
-      )}
+      <ErrorNotice error={error} action="Couldn't load platform data" className={noticeClass("alert", "mb-4 rounded-lg px-4 py-3")} />
       {hasData ? children : loading ? (
         <ContentSkeleton label="Loading platform data" lines={6} className="min-h-[240px] justify-center" />
       ) : (

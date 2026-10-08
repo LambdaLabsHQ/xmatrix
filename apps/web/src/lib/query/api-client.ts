@@ -204,9 +204,8 @@ export function xmatrixRetryDelayMs(failureCount: number, error: unknown): numbe
   return ceiling / 2 + Math.random() * (ceiling / 2);
 }
 
-/** Preserve the plain Error contract of raw-response command consumers. */
-export async function requireResponseOk(response: Response, fallback: string, ignoredStatus?: number): Promise<void> {
+/** Throws a failed raw response as the classified error `describeError` shows. */
+export async function requireResponseOk(response: Response, ignoredStatus?: number): Promise<void> {
   if (response.ok || response.status === ignoredStatus) return;
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-  throw new Error(payload.error || fallback);
+  throw await errorFromResponse(response);
 }

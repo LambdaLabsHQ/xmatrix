@@ -126,7 +126,6 @@ import {
   desktopUpdateErrorStatus,
   earliestPositiveSequence,
   emptyAgentConfigForm,
-  errorMessage,
   eventLabel,
   exchangeDesktopCliSession,
   fetchChannels,
@@ -168,7 +167,8 @@ import {
 import { shareTimelineItems } from "./workspace-shell-message-model";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
-import { xmatrixApiRequest, requireResponseOk } from "@/lib/query/api-client";
+import { errorFromResponse, xmatrixApiRequest, requireResponseOk } from "@/lib/query/api-client";
+import { UserFacingProblem, unexpectedResponse, userErrorMessage } from "../../lib/user-facing-error";
 import type { WorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";
@@ -753,11 +753,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   const [localMachineName, setLocalMachineName] = useState<string | null>();
   const readLocalMachineName = useCallback(async (machineId: string): Promise<string | null> => {
-    if (!s.token) throw new Error("Sign in to name this machine.");
+    if (!s.token) throw new UserFacingProblem("Sign in to name this machine.");
     const result = await xmatrixApiRequest<{ machineId: string; name: string | null }>({
       url: WEB_PROXY_ROUTES.machine_name(machineId), token: s.token,
     });
-    if (result.machineId !== machineId) throw new Error("Could not verify this machine's name.");
+    if (result.machineId !== machineId) throw new UserFacingProblem("Could not verify this machine's name.");
     return result.name;
   }, [s.token]);
   useEffect(() => {
@@ -767,7 +767,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void readLocalMachineName(s.desktopContext.machineId).then(name => {
       if (!cancelled) setLocalMachineName(name);
     }).catch(error => {
-      if (!cancelled) setLocalActionError(errorMessage(error, "Could not read this machine's name."));
+      if (!cancelled) setLocalActionError(userErrorMessage(error, "Couldn't read this machine's name"));
     });
     return () => { cancelled = true; };
   }, [s.token, s.desktopContext?.machineId, readLocalMachineName, setLocalActionError]);
@@ -781,12 +781,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const result = await xmatrixApiRequest<{ machineId: string; name: string }>({
         url: WEB_PROXY_ROUTES.machine_name(machineId), token: s.token, method: "POST", body: { name: name.trim() },
       });
-      if (result.machineId !== machineId || !result.name) throw new Error("Could not confirm this machine's name.");
+      if (result.machineId !== machineId || !result.name) throw new UserFacingProblem("Could not confirm this machine's name.");
       setLocalMachineName(result.name);
       const status = await s.desktopBridge?.startDaemon?.();
       if (status) setDesktopDaemonStatus(status);
     } catch (error) {
-      setLocalActionError(errorMessage(error, "Could not name this machine."));
+      setLocalActionError(userErrorMessage(error, "Couldn't name this machine"));
     } finally { setLocalActionBusy(null); }
   }
 
@@ -816,7 +816,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const discoveries = await s.desktopBridge.discoverAgentPresets(AGENT_PRESETS);
       setAgentPresetDiscoveries(discoveries);
     } catch (err) {
-      setLocalActionError(errorMessage(err, "Could not discover local agents."));
+      setLocalActionError(userErrorMessage(err, "Couldn't discover local agents"));
     } finally {
       setLoadingAgentPresetDiscoveries(false);
     }
@@ -954,7 +954,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         const context = await desktopBridge.getContext();
         if (cancelled) return undefined;
         setDesktopContext(context);
-        if (!context.machineId) throw new Error("Update xMatrix to finish setting up this machine.");
+        if (!context.machineId) throw new UserFacingProblem("Update xMatrix to finish setting up this machine.");
         const name = await readLocalMachineName(context.machineId);
         if (cancelled) return undefined;
         setLocalMachineName(name);
@@ -971,7 +971,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         if (cancelled) return;
         setDesktopDaemonStatus({
           state: "error",
-          message: errorMessage(nextError, "Could not refresh the local daemon session."),
+          message: userErrorMessage(nextError, "Couldn't refresh the local daemon session") ?? "",
           updatedAt: new Date().toISOString(),
         });
       });
@@ -1117,7 +1117,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const workspace = await registerWorkspace(s.token, candidate);
       setProjects((current) => sortProjects(replaceWorkspace(current, workspace)));
     } catch (err) {
-      setLocalActionError(errorMessage(err, "Could not add local directory."));
+      setLocalActionError(userErrorMessage(err, "Couldn't add local directory"));
     } finally {
       setLocalActionBusy(null);
     }
@@ -1131,7 +1131,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const workspace = await registerWorkspace(s.token, candidate);
       setProjects((current) => sortProjects(replaceWorkspace(current, workspace)));
     } catch (err) {
-      setLocalActionError(errorMessage(err, "Could not import workspace."));
+      setLocalActionError(userErrorMessage(err, "Couldn't import workspace"));
     } finally {
       setLocalActionBusy(null);
     }
@@ -1164,7 +1164,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       await deleteWorkspace(s.token, workspace);
       setProjects((current) => current.filter((item) => workspaceKey(item) !== key));
     } catch (err) {
-      setLocalActionError(errorMessage(err, "Could not remove local directory."));
+      setLocalActionError(userErrorMessage(err, "Couldn't remove local directory"));
     } finally {
       setLocalActionBusy(null);
     }
@@ -1199,7 +1199,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       });
       setDesktopSetupStatus(status);
     } catch (err) {
-      setLocalActionError(errorMessage(err, "Could not save setup status."));
+      setLocalActionError(userErrorMessage(err, "Couldn't save setup status"));
     } finally {
       setLocalActionBusy(null);
     }
@@ -1457,7 +1457,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       if (s.viewRef.current === "pages" && s.selectedPageId) openPageConversation(channel.id, { focus: true });
       else navigateToChannel(channel.id);
     } catch (err) {
-      setHistoryError(errorMessage(err, "Could not start the conversation."));
+      setHistoryError(userErrorMessage(err, "Couldn't start the conversation"));
     }
   }
 
@@ -1518,7 +1518,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setHistoryError(null);
       navigateToChannel(nextChannel.id, link.messageId);
     } catch (error) {
-      setHistoryError(errorMessage(error, "Could not open this channel link."));
+      setHistoryError(userErrorMessage(error, "Couldn't open this channel link"));
     }
   }
 
@@ -1530,7 +1530,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   async function requestHub<T extends object>(
     url: string,
     request: { method: "POST" | "PATCH" | "DELETE"; body?: unknown },
-    failure: string,
     complete: (payload: T) => boolean = () => true,
   ): Promise<T> {
     const res = await fetch(url, {
@@ -1542,10 +1541,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
       cache: "no-store",
     });
-    const payload = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok || !complete(payload)) {
-      throw new Error(payload.error || failure);
-    }
+    if (!res.ok) throw await errorFromResponse(res);
+    const payload = (await res.json().catch(() => ({}))) as T;
+    if (!complete(payload)) throw unexpectedResponse("The result");
     return payload;
   }
 
@@ -1553,18 +1551,17 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   async function requestSpaceChange(
     url: string,
     request: { method: "POST" | "PATCH" | "DELETE"; body?: unknown },
-    failure: string,
   ): Promise<SerializedSpace> {
     const { space } = await requestHub<{ space?: SerializedSpace }>(
-      url, request, failure, (payload) => Boolean(payload.space),
+      url, request, (payload) => Boolean(payload.space),
     );
     return space!;
   }
 
   async function updateSpacePreferredLanguage(spaceId: string, language: "zh" | "en" | "") {
-    if (!s.token) throw new Error("Sign in before updating the space");
+    if (!s.token) throw new UserFacingProblem("Sign in before updating the space");
     const space = s.spaces.find((item) => item.id === spaceId);
-    if (!space) throw new Error("Space not found");
+    if (!space) throw new UserFacingProblem("Space not found");
     const metadata = { ...space.metadata };
     if (language) {
       metadata.locale = {
@@ -1580,7 +1577,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const updated = await requestSpaceChange(WEB_PROXY_ROUTES.space(spaceId), {
       method: "PATCH",
       body: { metadata },
-    }, "Could not update the space language");
+    });
     setSpaces((current) => replaceSpace(current, updated));
   }
 
@@ -1588,11 +1585,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     spaceId: string,
     patch: Partial<SpaceMemberPermissions>,
   ): Promise<void> {
-    if (!s.token) throw new Error("Sign in before updating Space member permissions");
+    if (!s.token) throw new UserFacingProblem("Sign in before updating Space member permissions");
     const space = await requestSpaceChange(WEB_PROXY_ROUTES.space_member_permissions(spaceId), {
       method: "PATCH",
       body: patch,
-    }, "Could not update Space member permissions");
+    });
     setSpaces((current) => replaceSpace(current, space));
   }
 
@@ -1611,7 +1608,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const space = await requestSpaceChange(WEB_PROXY_ROUTES.space(spaceId), {
         method: "PATCH",
         body: { name: nextName },
-      }, "Failed to rename workspace");
+      });
       setSpaces((current) => replaceSpace(current, space));
       if (s.currentSpaceId === space.id) {
         const nextPath = appViewPath(s.selectedChannel, s.view, space.id, replaceSpace(s.spaces, space));
@@ -1619,7 +1616,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         setBrowserPath(nextPath);
       }
     } catch (err) {
-      setSpacesError((err as Error).message);
+      setSpacesError(userErrorMessage(err, "Couldn't rename the Space"));
     } finally {
       setRenamingSpaceId(null);
     }
@@ -1628,11 +1625,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   /* Deletion only schedules the purge; the owner can restore the Space until
      the returned time, from the Team view's list of deleted Spaces. */
   async function deleteSpace(spaceId: string): Promise<{ purgeAfter: string }> {
-    if (!s.token) throw new Error("Sign in before deleting a Space");
+    if (!s.token) throw new UserFacingProblem("Sign in before deleting a Space");
     const { deletion } = await requestHub<{ deletion?: { purgeAfter?: unknown } }>(
       WEB_PROXY_ROUTES.space(spaceId),
       { method: "DELETE" },
-      "Could not delete the Space",
       (payload) => typeof payload.deletion?.purgeAfter === "string",
     );
     const purgeAfter = deletion!.purgeAfter as string;
@@ -1648,14 +1644,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function restoreSpace(spaceId: string): Promise<void> {
-    if (!s.token) throw new Error("Sign in before restoring a Space");
+    if (!s.token) throw new UserFacingProblem("Sign in before restoring a Space");
     const res = await fetch(WEB_PROXY_ROUTES.space_restore(spaceId), {
       method: "POST",
       headers: { Authorization: `Bearer ${s.token}` },
       cache: "no-store",
     });
-    const payload = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) throw new Error(payload.error || "Could not restore the Space");
+    await requireResponseOk(res);
     await refreshWorkspace();
   }
 
@@ -1687,7 +1682,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setError(null);
       setSpacesError(null);
     } catch (err) {
-      setError((err as Error).message);
+      setError(userErrorMessage(err, "Couldn't load your workspace"));
     } finally {
       setLoadingWorkspace(false);
     }
@@ -1700,7 +1695,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function createNewConversation(body: string, mode: "open" | "closed") {
-    if (!s.token || !s.user || !s.currentSpaceId) throw new Error("Choose a Space first");
+    if (!s.token || !s.user || !s.currentSpaceId) throw new UserFacingProblem("Choose a Space first");
     return createConversation({ token: s.token, spaceId: s.currentSpaceId,
       memberName: s.user.name || s.user.email || "Human", body, mode });
   }
@@ -1710,7 +1705,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
      selected conversation from React state, which has not settled in the tick
      after a create, so the message is delivered to the created channel. */
   async function sendNewConversationMessage(channel: SerializedChannel, snapshot: ComposerSendSnapshot) {
-    if (!s.token) throw new Error("Sign in again to send");
+    if (!s.token) throw new UserFacingProblem("Sign in again to send");
     setChannels((current) => replaceChannel(current, channel));
     setComposingConversation(false);
     setPendingExplicitSpaceId(channel.spaceId);
@@ -1775,7 +1770,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     } catch (err) {
       console.warn("Failed to update channel visibility before Hub could record the result", {
         channelId: channel.id,
-        error: err instanceof Error ? err.message : String(err),
+        error: err,
       });
     } finally {
       setUpdatingChannelVisibilityId(null);
@@ -1808,12 +1803,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         body: JSON.stringify({ spaceId: targetSpaceId }),
         cache: "no-store",
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Failed to create transfer proposal");
+      await requireResponseOk(response);
       await queryClient.invalidateQueries({ queryKey: ["channel-transfers"] });
       setChannelMoveOpen(false);
     } catch (err) {
-      setChannelMoveError((err as Error).message);
+      setChannelMoveError(userErrorMessage(err, "Couldn't propose the move"));
     } finally {
       setMovingChannelId(null);
     }
@@ -1839,7 +1833,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         body: JSON.stringify({ name }),
         cache: "no-store",
       });
-      await requireResponseOk(res, "Failed to create workspace");
+      await requireResponseOk(res);
 
       const payload = (await res.json()) as { space?: SerializedSpace };
       if (payload.space) {
@@ -1859,7 +1853,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       if (!nameOverride) setNewSpaceName("");
       return payload.space;
     } catch (err) {
-      setSpacesError((err as Error).message);
+      setSpacesError(userErrorMessage(err, "Couldn't create the Space"));
     } finally {
       setCreatingSpace(false);
     }
@@ -1872,11 +1866,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     spaceId: string,
     emails: string[]
   ): Promise<SpaceInviteResult> {
-    if (!s.token) throw new Error("Sign in before inviting members");
-    if (!s.user) throw new Error("Sign in before inviting members");
+    if (!s.token) throw new UserFacingProblem("Sign in before inviting members");
+    if (!s.user) throw new UserFacingProblem("Sign in before inviting members");
     const space = s.spaces.find((item) => item.id === spaceId);
     if (!space || !canInviteToSpace(space, s.user.id)) {
-      throw new Error("Only workspace owners and admins can invite members");
+      throw new UserFacingProblem("Only workspace owners and admins can invite members");
     }
     return requestHub<SpaceInviteResult>(WEB_PROXY_ROUTES.space_invite_emails(spaceId), {
       method: "POST",
@@ -1885,20 +1879,20 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         role: "member",
         workspaceName: space?.name,
       },
-    }, "Failed to send invite");
+    });
   }
 
   /** A Space member the signed-in Human may manage; the owner never is, for the `ownerRefusal` reason. */
   function administeredMember(spaceId: string, memberUserId: string, ownerRefusal: string) {
-    if (!s.token) throw new Error("Sign in before managing members");
-    if (!s.user) throw new Error("Sign in before managing members");
+    if (!s.token) throw new UserFacingProblem("Sign in before managing members");
+    if (!s.user) throw new UserFacingProblem("Sign in before managing members");
     const space = s.spaces.find((item) => item.id === spaceId);
     if (!space || !canInviteToSpace(space, s.user.id)) {
-      throw new Error("Only workspace owners and admins can manage members");
+      throw new UserFacingProblem("Only workspace owners and admins can manage members");
     }
     const member = space.members.find((item) => item.userId === memberUserId);
-    if (!member) throw new Error("Member not found");
-    if (member.role === "owner") throw new Error(ownerRefusal);
+    if (!member) throw new UserFacingProblem("Member not found");
+    if (member.role === "owner") throw new UserFacingProblem(ownerRefusal);
     return member;
   }
 
@@ -1917,7 +1911,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         avatarUrl: member.avatarUrl,
         role,
       },
-    }, "Failed to update member");
+    });
     setSpaces((current) => replaceSpace(current, updated));
     return { space: updated };
   }
@@ -1929,7 +1923,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     administeredMember(spaceId, memberUserId, "The owner cannot be removed");
     const updated = await requestSpaceChange(WEB_PROXY_ROUTES.space_member(spaceId, memberUserId), {
       method: "DELETE",
-    }, "Failed to remove member");
+    });
     setSpaces((current) => replaceSpace(current, updated));
     return { space: updated };
   }
@@ -1992,7 +1986,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       if (s.user?.id) authorizeHistoryRender({ userId: s.user.id, channelId, historyRevision: s.historyRevision });
       setHistoryError(null);
     } catch (err) {
-      if (s.historyRef.current.length === 0) setHistoryError((err as Error).message);
+      if (s.historyRef.current.length === 0) setHistoryError(userErrorMessage(err, "Couldn't load messages"));
     } finally {
       setLoadingHistory(false);
     }
@@ -2092,7 +2086,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       );
       setHistoryError(null);
     } catch (err) {
-      setHistoryError((err as Error).message);
+      setHistoryError(userErrorMessage(err, "Couldn't load earlier messages"));
     } finally {
       olderHistoryLoadInFlightRef.current = false;
       setOlderLoading(false);
@@ -2134,7 +2128,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     try {
       await sendChannelMessage({ body });
     } catch (err) {
-      const message = (err as Error).message;
+      const message = userErrorMessage(err, "Couldn't send the request to the Agent");
       setAgentsError(message);
       setHistoryError(message);
     } finally {
@@ -2220,7 +2214,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     try {
       await sendChannelMessage({ body: rebornBody });
     } catch (err) {
-      const error = (err as Error).message;
+      const error = userErrorMessage(err, "Couldn't restart the Agent");
       setAgentsError(error);
       setHistoryError(error);
     } finally {
@@ -2267,7 +2261,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const { channel } = await requestHub<{ channel?: SerializedChannel }>(
         WEB_PROXY_ROUTES.channel(channelId),
         { method: "PATCH", body: { name: nextName } },
-        "Failed to rename channel",
         (payload) => Boolean(payload.channel),
       ) as { channel: SerializedChannel };
       setChannels((current) => replaceChannel(current, channel));
@@ -2277,7 +2270,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         setBrowserPath(nextPath);
       }
     } catch (err) {
-      setHistoryError((err as Error).message);
+      setHistoryError(userErrorMessage(err, "Couldn't rename the channel"));
     } finally {
       setRenamingChannelId(null);
     }
@@ -2338,7 +2331,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       await registrationCatalog.refetch();
       setAgentConfigDialog(null);
     } catch (err) {
-      setAgentsError(errorMessage(err, "Could not add the agent to this Space."));
+      setAgentsError(userErrorMessage(err, "Couldn't add the agent to this Space"));
     } finally {
       setSavingAgentConfig(false);
     }
@@ -2359,7 +2352,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           commandId: `registration-ui:${crypto.randomUUID()}` } });
       await registrationCatalog.refetch();
     } catch (err) {
-      setAgentsError(errorMessage(err, "Could not disable the agent."));
+      setAgentsError(userErrorMessage(err, "Couldn't disable the agent"));
     } finally {
       setDeletingAgentId(null);
     }
@@ -2548,7 +2541,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       // POST may have committed. Only a determinate error is a failure, and an
       // unknown result is carried by the row rather than the channel banner.
       const unknownResult = isMessageSendDeadlineError(err);
-      const message = unknownResult ? "Result unconfirmed" : (err as Error).message;
+      const message = unknownResult ? "Result unconfirmed" : userErrorMessage(err, "Couldn't send the message") ?? undefined;
       setOutgoingMessages((current) =>
         current.map((item) =>
           item.clientMessageId === clientMessageId
@@ -2559,7 +2552,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       if (unknownResult) {
         void reconcileUnconfirmedSend(channelId, clientMessageId);
       } else {
-        setHistoryError(message);
+        setHistoryError(message ?? null);
       }
     }
   }
@@ -2586,7 +2579,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         }),
         cache: "no-store",
       });
-      await requireResponseOk(res, "Failed to send answer");
+      await requireResponseOk(res);
       const payload = (await res.json()) as { message?: unknown; channel?: SerializedChannel };
       if (isValidChannelMessage(payload.message)) {
         mergeAndRememberChannelHistory(message.channelId, [payload.message]);
@@ -2601,7 +2594,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         setChannels((current) => replaceChannel(current, payload.channel!));
       }
     } catch (err) {
-      setHistoryError((err as Error).message);
+      setHistoryError(userErrorMessage(err, "Couldn't send your answer"));
     }
   }
 
@@ -2647,7 +2640,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       pushBrowserPath(nextPath);
       setBrowserPath(nextPath);
     } catch (err) {
-      setHistoryError((err as Error).message);
+      setHistoryError(userErrorMessage(err, "Couldn't open the thread"));
     }
   }
 
@@ -2672,7 +2665,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       }
       setHistoryError(null);
     } catch (err) {
-      setHistoryError((err as Error).message);
+      setHistoryError(userErrorMessage(err, "Couldn't update the message"));
     }
   }
 
