@@ -20,7 +20,7 @@ test("a mention Jev read as an explanation settles into prose and the author can
   await install(page, "Correction: the summon came from my own heading, which named @claude in bold.", {
     rejections: [{ invocationId: "registration-launch:message-intent:0", channelId: E2E_CHANNEL.id, sourceMessageId: messageId,
       sourceMention: "@claude", targetRef: "claude", code: "summon_intent_explanation",
-      message: "Jev read this as an explanation or report, not asking an Agent to start; write launch:force after the mention to start one anyway. No launch was allocated.",
+      message: "xMatrix read this as an explanation or report, not asking an Agent to start; write launch:force after the mention to start one anyway. No launch was allocated.",
       rejectedAt: E2E_NOW, evidenceExpiresAt: "2099-01-01T00:00:00Z" }],
   });
   await fixtureJson(page, "intent-launch-anyway", `**/api/xmatrix/channels/channel-general/messages/${messageId}/launch-anyway`,
@@ -69,11 +69,11 @@ test("a just-sent summon shows Jev reading it, and the shimmer ends on its own",
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const pending = page.locator(".app-mention-summon-written");
   await expect(pending).toHaveAttribute("data-reading", "true");
-  await expect(pending).toContainText("Jev is reading");
+  await expect(pending).toContainText("xMatrix is reading");
   await page.screenshot({ path: "test-results/summon-intent-reading.png", clip: { x: 0, y: 0, width: 1280, height: 900 } });
   await page.clock.runFor(31_000);
   await expect(pending).not.toHaveAttribute("data-reading", "true");
-  await expect(pending).not.toContainText("Jev is reading");
+  await expect(pending).not.toContainText("xMatrix is reading");
 });
 
 test("the composer says who decides and Force writes launch:force into the draft", async ({ page }) => {
@@ -82,7 +82,7 @@ test("the composer says who decides and Force writes launch:force into the draft
   const input = page.locator("textarea.composer-textarea").first();
   await input.fill("@claude repo:owner/xmatrix fix the flaky test");
   const pill = page.locator(".app-composer-summon-pill");
-  await expect(pill).toContainText("Jev decides whether @claude starts");
+  await expect(pill).toContainText("xMatrix decides whether @claude starts");
   await page.screenshot({ path: "test-results/summon-intent-composer.png", clip: { x: 0, y: 500, width: 1280, height: 400 } });
   await pill.getByRole("button", { name: /Force/ }).click();
   await expect(input).toHaveValue("@claude repo:owner/xmatrix launch:force fix the flaky test");

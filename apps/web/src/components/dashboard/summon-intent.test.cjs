@@ -53,9 +53,9 @@ test("a started summon first says how it was read as a request", () => {
   const jev = summonView({ ...base, routingDecision: { source: "jev", evaluatedAt: at, rows: [],
     parameters: parameters({ source: "jev", selected: "summon", probabilities: { summon: .96, reference: .02, explanation: .01, example: .01 } }) } });
   assert.deepEqual(jev.steps.map(step => step.label), [
-    "Read as a request", "Jev selected an environment", "Machine accepted", "Process started", "Joined channel", "Runtime ready", "Reasoning started",
+    "Read as a request", "Environment selected", "Machine accepted", "Process started", "Joined channel", "Runtime ready", "Reasoning started",
   ]);
-  assert.equal(jev.steps[0].note, "Jev · 96%");
+  assert.equal(jev.steps[0].note, "xMatrix · 96%");
   const forced = summonView({ ...base, routingDecision: { source: "jev", evaluatedAt: at, rows: [], parameters: parameters({ source: "author" }) } });
   assert.equal(forced.steps[0].label, "Started on the author's request");
   assert.equal(forced.steps[0].note, "launch:force");

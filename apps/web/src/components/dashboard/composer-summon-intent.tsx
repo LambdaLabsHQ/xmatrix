@@ -22,10 +22,10 @@ export function ComposerSummonIntent({ draft, onDraftChange, textareaRef }: {
         {forced ? <Zap aria-hidden="true" size={13} /> : <Sparkles aria-hidden="true" size={13} />}
         <span className="app-composer-summon-text">
           {forced ? <><strong>{address}</strong> starts directly</>
-            : <>Jev decides whether <strong>{address}</strong> starts</>}
+            : <>xMatrix decides whether <strong>{address}</strong> starts</>}
         </span>
         <button type="button" className="app-composer-summon-toggle" aria-pressed={forced}
-          title={forced ? "Remove launch:force and let Jev decide" : "Add launch:force: start without Jev's intent check"}
+          title={forced ? "Remove launch:force and let xMatrix decide" : "Add launch:force: start without xMatrix's intent check"}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             const next = toggleLaunchForce(draft, mention);

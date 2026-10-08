@@ -329,7 +329,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       (requestedMetadata && Object.prototype.hasOwnProperty.call(requestedMetadata, "summary"))
     ) {
       return c.json({
-        error: "Channel Summary is maintained by Jev",
+        error: "Channel Summary is maintained by xMatrix",
         code: "channel_summary_ai_managed",
       }, 403);
     }
@@ -430,7 +430,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     }
     if (!about && Object.prototype.hasOwnProperty.call(patch, "summary")) {
       return c.json({
-        error: "Channel Summary is maintained by Jev",
+        error: "Channel Summary is maintained by xMatrix",
         code: "channel_summary_ai_managed",
       }, 403);
     }
