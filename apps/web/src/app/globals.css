@@ -919,14 +919,12 @@
   .xmatrix-app .message-code-scroll {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
-    scrollbar-width: thin;
     touch-action: pan-x pan-y;
   }
 
   .xmatrix-app .message-table-scroll {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
-    scrollbar-width: thin;
     touch-action: pan-x pan-y;
   }
 
@@ -1116,7 +1114,7 @@
     border-radius: 999px;
   }
 
-  .light .xmatrix-app * {
+  .light:not([data-overlay-scrollbars]) .xmatrix-app * {
     scrollbar-color: oklch(0.4 0 0 / 0.4) transparent;
   }
 
@@ -2510,7 +2508,6 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   padding: 0.25rem var(--app-search-panel-gutter) var(--app-search-panel-gutter);
   box-shadow: inset 0 1px 0 oklch(0.42 0.012 238 / 0.08);
   overscroll-behavior: contain;
-  scrollbar-width: thin;
 }
 
 .xmatrix-app .app-search-panel-section {
@@ -7363,7 +7360,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 
 .app-invocation-steps li[data-state="failed"] > .app-invocation-step-mark { border-color: var(--destructive); color: var(--destructive); }
 
-.app-invocation-popup { overscroll-behavior: contain; scrollbar-width: thin; }
+.app-invocation-popup { overscroll-behavior: contain; }
 
 /* --- A written summon ----------------------------------------------------- */
 /* `@auto repo:… harness:…` is the author's own text, so the chip carries
@@ -8742,4 +8739,67 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   .xmatrix-app .app-rail-update-arrow {
     animation: none;
   }
+}
+
+/* Overlay scrollbars (components/ui/overlay-scrollbars.tsx): where native bars
+   would take a permanent gutter they are hidden, and a thin thumb floats over
+   the scroller while it moves, as on macOS and iOS. Chrome only honours
+   ::-webkit-scrollbar while scrollbar-width and scrollbar-color are auto. */
+html[data-overlay-scrollbars]::-webkit-scrollbar,
+html[data-overlay-scrollbars] ::-webkit-scrollbar {
+  display: none;
+}
+
+.overlay-scrollbars {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.overlay-scrollbar-thumb {
+  position: absolute;
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
+}
+
+.overlay-scrollbar-thumb[data-visible] {
+  opacity: 1;
+  transition-duration: 0s;
+  pointer-events: auto;
+}
+
+.overlay-scrollbar-thumb::before {
+  content: "";
+  position: absolute;
+  border-radius: 9999px;
+  background: oklch(0.3 0 0 / 0.42);
+  transition: width 0.12s ease-out, height 0.12s ease-out, background-color 0.12s ease-out;
+}
+
+.overlay-scrollbar-thumb[data-axis="y"]::before {
+  top: 0;
+  right: 2px;
+  bottom: 0;
+  width: 6px;
+}
+
+.overlay-scrollbar-thumb[data-axis="x"]::before {
+  right: 0;
+  bottom: 2px;
+  left: 0;
+  height: 6px;
+}
+
+.overlay-scrollbar-thumb[data-axis="y"]:is(:hover, [data-dragging])::before {
+  width: 9px;
+}
+
+.overlay-scrollbar-thumb[data-axis="x"]:is(:hover, [data-dragging])::before {
+  height: 9px;
+}
+
+.overlay-scrollbar-thumb:is(:hover, [data-dragging])::before {
+  background: oklch(0.3 0 0 / 0.58);
 }
