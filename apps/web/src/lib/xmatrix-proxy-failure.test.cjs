@@ -71,3 +71,14 @@ test("every proxy catch classifies instead of hard-coding one message", () => {
     assert.doesNotMatch(source, /"xMatrix hub is unavailable right now\."/, relativePath);
   }
 });
+
+test("only a dropped Hub connection is retryable", () => {
+  assert.equal(classifyProxyFailure({ cause: new TypeError("fetch failed"), timedOut: false }).retryable, true);
+  const abort = new Error("aborted");
+  abort.name = "AbortError";
+  assert.equal(classifyProxyFailure({ cause: abort, timedOut: true }).retryable, false);
+  assert.equal(classifyProxyFailure({
+    cause: new ProxySessionRefreshError(new Error("refresh rejected")),
+    timedOut: false,
+  }).retryable, false);
+});

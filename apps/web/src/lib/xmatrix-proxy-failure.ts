@@ -16,6 +16,13 @@ export type ProxyFailure = {
   status: number;
   reason: ProxyFailureReason;
   error: string;
+  /**
+   * Only a dropped Hub connection is worth retrying: the Hub restarts on every
+   * deploy and the next attempt reaches the new one. A timeout means the Hub
+   * is slow and a refresh failure means the session is gone; repeating either
+   * only adds load or delays the real error.
+   */
+  retryable: boolean;
 };
 
 /** Thrown when authorization could not be resolved, before the Hub is called. */
@@ -42,6 +49,7 @@ export function classifyProxyFailure(input: {
       status: 503,
       reason: "session_refresh_failed",
       error: "Your xMatrix session could not be refreshed. Sign in again.",
+      retryable: false,
     };
   }
   if (aborted(input.cause, input.timedOut)) {
@@ -49,12 +57,14 @@ export function classifyProxyFailure(input: {
       status: 504,
       reason: "hub_timeout",
       error: "xMatrix hub did not respond in time.",
+      retryable: false,
     };
   }
   return {
     status: 503,
     reason: "hub_unreachable",
     error: "xMatrix hub is unavailable right now.",
+    retryable: true,
   };
 }
 
