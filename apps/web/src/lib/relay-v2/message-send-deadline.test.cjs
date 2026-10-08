@@ -91,8 +91,8 @@ test("a committed append returns its payload", async () => {
 });
 
 test("a 4xx with a readable body reports the server's reason", async () => {
-  const outcome = await appendWithDefaultRetry(async () => ({ ok: false, status: 403, json: async () => ({ error: "not a member" }) }), 200);
-  assert.deepEqual(outcome, { kind: "failed", message: "not a member" });
+  const outcome = await appendWithDefaultRetry(async () => ({ ok: false, status: 403, json: async () => ({ error: "not a member", code: "forbidden", retryable: false }) }), 200);
+  assert.deepEqual(outcome, { kind: "failed", status: 403, message: "not a member", code: "forbidden", retryable: false });
 });
 
 test("retries exhausted by network failures leave the result unknown", async () => {

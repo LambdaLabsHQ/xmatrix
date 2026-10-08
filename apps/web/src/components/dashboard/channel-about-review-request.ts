@@ -1,7 +1,7 @@
 import { WEB_PROXY_ROUTES, type SerializedChannel } from "@xmatrix/protocol";
 
 import { runIdempotentMutationFetchWithRetry } from "./workspace-refresh-policy";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { requireResponseOk, xmatrixRawResponse } from "@/lib/query/api-client";
 
 export async function requestChannelAboutReview(input: {
   token: string;
@@ -16,7 +16,5 @@ export async function requestChannelAboutReview(input: {
       cache: "no-store",
     },
   ));
-  if (response.ok) return;
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-  throw new Error(payload.error || `About summary request failed with HTTP ${response.status}.`);
+  await requireResponseOk(response);
 }

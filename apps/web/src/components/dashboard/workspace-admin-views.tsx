@@ -15,7 +15,6 @@ import {
   desktopDaemonLabel,
   desktopUpdateDescription,
   desktopUpdateLabel,
-  errorMessage,
 } from "./workspace-shell-desktop-labels";
 
 import { type AppView } from "./workspace-shell-navigation";
@@ -177,7 +176,8 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
-import { xmatrixApiRequest, requireResponseOk, xmatrixRawResponse } from "@/lib/query/api-client";
+import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse } from "@/lib/query/api-client";
+import { unexpectedResponse, userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
@@ -363,7 +363,7 @@ export function SettingsView({
   const canManageSecrets = secretQuery.data?.canManage === true;
   const secretCatalogLoaded = secretQuery.isFetched;
   const secretCatalogLoading = secretQuery.isFetching;
-  const secretCatalogError = secretActionError ?? secretQuery.error?.message ?? null;
+  const secretCatalogError = secretActionError ?? userErrorMessage(secretQuery.error, "Couldn't load secrets");
   const secretSaving = secretMutation.isPending && secretMutation.variables?.kind === "save";
   const deletingSecretRef = secretMutation.isPending && secretMutation.variables?.kind === "delete"
     ? secretMutation.variables.secretRef ?? null : null;
@@ -386,7 +386,7 @@ export function SettingsView({
       await getDesktopBridge()?.switchEnvironment?.(environment);
       window.location.assign(clientAppUrl(environment));
     } catch (error) {
-      setEnvironmentSwitchError(errorMessage(error, "Could not switch environments."));
+      setEnvironmentSwitchError(userErrorMessage(error, "Couldn't switch environments"));
       setEnvironmentSwitching(false);
     }
   }
@@ -460,7 +460,7 @@ export function SettingsView({
       setSecretCatalogError(null);
     } catch (err) {
       setSecretEditor((current) =>
-        current ? { ...current, error: errorMessage(err, "Could not save secret.") } : current
+        current ? { ...current, error: userErrorMessage(err, "Couldn't save secret") ?? "" } : current
       );
     }
   }
@@ -483,7 +483,7 @@ export function SettingsView({
         current?.draft.secretRef === entry.secretRef ? null : current
       );
     } catch (err) {
-      setSecretCatalogError(errorMessage(err, "Could not delete secret."));
+      setSecretCatalogError(userErrorMessage(err, "Couldn't delete secret"));
     }
   }
 
@@ -1013,7 +1013,7 @@ export function TeamView({
     } catch (error) {
       setCodeErrorBySpace((current) => ({
         ...current,
-        [spaceId]: error instanceof Error ? error.message : "Failed to decide this request",
+        [spaceId]: userErrorMessage(error, "Couldn't decide this request") ?? "",
       }));
     }
   }
@@ -1033,7 +1033,7 @@ export function TeamView({
     } catch (error) {
       setCodeErrorBySpace((current) => ({
         ...current,
-        [space.id]: error instanceof Error ? error.message : "Failed to create invite code",
+        [space.id]: userErrorMessage(error, "Couldn't create the invite code") ?? "",
       }));
     } finally {
       setCreatingCodeSpaceId(null);
@@ -1082,7 +1082,7 @@ export function TeamView({
     } catch (err) {
       setInviteStatusBySpace((current) => ({
         ...current,
-        [space.id]: { type: "error", message: (err as Error).message },
+        [space.id]: { type: "error", message: userErrorMessage(err, "Couldn't send the invite") ?? "" },
       }));
     } finally {
       setInvitingSpaceId(null);
@@ -1098,7 +1098,7 @@ export function TeamView({
       await operation();
       setMemberStatusBySpace(current => ({ ...current, [spaceId]: { type: "success", message } }));
     } catch (err) {
-      setMemberStatusBySpace(current => ({ ...current, [spaceId]: { type: "error", message: (err as Error).message } }));
+      setMemberStatusBySpace(current => ({ ...current, [spaceId]: { type: "error", message: userErrorMessage(err, "Couldn't update the member") ?? "" } }));
     } finally { setMemberActionKey(null); }
   }
 
@@ -1128,7 +1128,7 @@ export function TeamView({
     } catch (error) {
       setPermissionErrorBySpace((current) => ({
         ...current,
-        [space.id]: error instanceof Error ? error.message : "Failed to update member permissions",
+        [space.id]: userErrorMessage(error, "Couldn't update member permissions") ?? "",
       }));
     } finally {
       setPermissionBusyBySpace((current) => ({ ...current, [space.id]: false }));
@@ -1683,14 +1683,11 @@ export async function fetchChannelCatalog(
       { signal: sequenceSignal },
     );
   } catch (error) {
-    if (sequenceSignal.aborted) throw new Error("Channel list request timed out", { cause: error });
+    if (sequenceSignal.aborted) throw new DOMException("Channel list request timed out", "TimeoutError");
     throw error;
   }
 
-  if (!res.ok) {
-    const payload = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(payload.error || "Failed to load channels");
-  }
+  if (!res.ok) throw await errorFromResponse(res);
 
   const data = (await res.json()) as {
     channels?: SerializedChannel[];
@@ -1857,13 +1854,9 @@ export async function patchAutomation(
     body: JSON.stringify(input),
     cache: "no-store",
   });
-  const payload = (await res.json().catch(() => ({}))) as {
-    automation?: SerializedAutomation;
-    error?: string;
-  };
-  if (!res.ok || !payload.automation) {
-    throw new Error(payload.error || "Failed to update Automation");
-  }
+  if (!res.ok) throw await errorFromResponse(res);
+  const payload = (await res.json().catch(() => ({}))) as { automation?: SerializedAutomation };
+  if (!payload.automation) throw unexpectedResponse("The Automation");
   return payload.automation;
 }
 
@@ -1881,8 +1874,9 @@ export async function setAutomationPaused(
     body: JSON.stringify({ expectedVersion: automation.version }),
     cache: "no-store",
   });
-  const payload = (await res.json().catch(() => ({}))) as { automation?: SerializedAutomation; error?: string };
-  if (!res.ok || !payload.automation) throw new Error(payload.error || "Failed to change Automation state");
+  if (!res.ok) throw await errorFromResponse(res);
+  const payload = (await res.json().catch(() => ({}))) as { automation?: SerializedAutomation };
+  if (!payload.automation) throw unexpectedResponse("The Automation");
   return payload.automation;
 }
 
@@ -1893,7 +1887,7 @@ export async function removeAutomation(token: string, automation: SerializedAuto
     body: JSON.stringify({ expectedVersion: automation.version }),
     cache: "no-store",
   });
-  await requireResponseOk(res, "Failed to delete Automation", 404);
+  await requireResponseOk(res, 404);
 }
 
 export async function registerWorkspace(
@@ -1918,13 +1912,9 @@ export async function registerWorkspace(
     cache: "no-store",
   });
 
-  const payload = (await res.json().catch(() => ({}))) as {
-    workspace?: SerializedWorkspace;
-    error?: string;
-  };
-  if (!res.ok || !payload.workspace) {
-    throw new Error(payload.error || "Failed to register workspace");
-  }
+  if (!res.ok) throw await errorFromResponse(res);
+  const payload = (await res.json().catch(() => ({}))) as { workspace?: SerializedWorkspace };
+  if (!payload.workspace) throw unexpectedResponse("The workspace");
   return payload.workspace;
 }
 
@@ -1935,7 +1925,7 @@ export async function deleteWorkspace(token: string, workspace: SerializedWorksp
     body: JSON.stringify({ machineId: workspace.machineId, canonicalCwd: workspace.canonicalCwd }),
     cache: "no-store",
   });
-  await requireResponseOk(res, "Failed to remove workspace", 404);
+  await requireResponseOk(res, 404);
 }
 
 export type ChannelHistoryPage = {
@@ -1974,10 +1964,7 @@ export async function fetchChannelHistory(
       ? AbortSignal.any([options.signal, AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS)])
       : AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS),
   });
-  if (!res.ok) {
-    const payload = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-    throw new Error(payload.error || "Failed to load channel history");
-  }
+  if (!res.ok) throw await errorFromResponse(res);
   const data = (await res.json()) as {
     messages?: ChannelMessage[];
     hasMore?: unknown;
@@ -2072,7 +2059,7 @@ export async function reactToChannelMessage(
     cache: "no-store",
   });
 
-  return requireMessageResponse(res, "Failed to update reaction");
+  return requireMessageResponse(res);
 }
 
 export async function updateChannelMessage(
@@ -2091,7 +2078,7 @@ export async function updateChannelMessage(
     cache: "no-store",
   });
 
-  return requireMessageResponse(res, "Failed to edit message");
+  return requireMessageResponse(res);
 }
 
 export async function recallChannelMessage(
@@ -2105,7 +2092,7 @@ export async function recallChannelMessage(
     cache: "no-store",
   });
 
-  return requireMessageResponse(res, "Failed to recall message");
+  return requireMessageResponse(res);
 }
 
 export function replaceChannel(channels: SerializedChannel[], channel: SerializedChannel): SerializedChannel[] {
@@ -2666,8 +2653,9 @@ export async function fetchWorkingSpace(token: string, signal?: AbortSignal): Pr
   }
 }
 
-async function requireMessageResponse(response: Response, fallback: string): Promise<ChannelMessage> {
-  const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: ChannelMessage };
-  if (!response.ok || !payload.message) throw new Error(payload.error || fallback);
+async function requireMessageResponse(response: Response): Promise<ChannelMessage> {
+  if (!response.ok) throw await errorFromResponse(response);
+  const payload = (await response.json().catch(() => ({}))) as { message?: ChannelMessage };
+  if (!payload.message) throw unexpectedResponse("The message");
   return payload.message;
 }

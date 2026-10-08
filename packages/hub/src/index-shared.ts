@@ -806,7 +806,7 @@ export function relayR2PrivateErrorResponse(error: unknown): Response {
   }
   const transient = failure.status === 503;
   return failureResponse({ ...failure, body: {
-    error: transient ? "Private object service is temporarily unavailable" : "Private object service failed",
+    error: transient ? "Stored files are briefly unavailable; try again" : "Stored files could not be read",
     code: "private_storage_unavailable", retryable: transient,
   } }, PRIVATE_JSON_HEADERS);
 }

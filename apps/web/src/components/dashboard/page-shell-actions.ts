@@ -10,6 +10,7 @@ const PAGE_CONVERSATION_STATE_KEY = "__xmatrixPageConversation";
 import { pageApi, type PageLinkAnchor } from "@/lib/pages/page-client";
 import { createConversation } from "@/components/dashboard/start-conversation";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { UserFacingProblem } from "@/lib/user-facing-error";
 
 /** How the workspace shell opens pages and starts conversations about them. */
 export function pageShellActions(input: {
@@ -120,7 +121,7 @@ export function pageShellActions(input: {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ body: options.firstMessage }), cache: "no-store",
       });
-      if (!sent.ok) throw new Error("The conversation was created, but its first message could not be sent. Send it there.");
+      if (!sent.ok) throw new UserFacingProblem("It was created, but its first message wasn't sent; open it and send the message again.");
     }
     // Machinery attached to a page lives in its own conversation; the page stays open.
     if (options.open === false) return channel.id;

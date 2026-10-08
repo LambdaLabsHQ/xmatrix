@@ -41,6 +41,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { AUTH_TOKEN_REJECTED_EVENT, useAuth } from "@/lib/auth-context";
 import { untilCallerAborts } from "@/lib/query/caller-abort";
+import { userErrorMessage } from "../../lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { applyChannelReadStateToCatalog } from "./channel-catalog-read-state";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
@@ -140,7 +141,6 @@ import {
   currentBrowserLocation,
   currentLoginReturnPath,
   emptyAgentConfigForm,
-  errorMessage,
   fetchChannelHistory,
   fetchEvents,
   fetchProjects,
@@ -2078,7 +2078,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setLoadingWorkspace(spacesQuery.isPending);
     const primaryError = spacesQuery.error ?? projectsQuery.error;
     if (primaryError) {
-      const message = primaryError instanceof Error ? primaryError.message : "Workspace unavailable";
+      const message = userErrorMessage(primaryError, "Couldn't load your Spaces");
       setError(message);
       setSpacesError(message);
       return;
@@ -2226,9 +2226,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       // background refetch. Keep painting it, but revoke mutation capability
       // until a fresh authoritative response succeeds.
       setAutomationExecutionEnabled(null);
-      setAutomationLoadError(errorMessage(
-        automationsQuery.error, "Could not load Automations.",
-      ));
+      setAutomationLoadError(userErrorMessage(automationsQuery.error, "Couldn't load Automations"));
     } else if (automationsQuery.data) {
       setAutomationExecutionEnabled(automationsQuery.data.executionEnabled);
       setAutomationLoadError(null);

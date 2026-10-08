@@ -24,7 +24,7 @@ export interface BoundedAppendResponse {
 export type MessageAppendOutcome =
   | { kind: "committed"; payload: Record<string, unknown> }
   | { kind: "unconfirmed" }
-  | { kind: "failed"; message: string };
+  | { kind: "failed"; status: number; message: string; code?: string; retryable?: boolean };
 
 export const MESSAGE_SEND_DEADLINE_MS = 15_000;
 
@@ -88,9 +88,9 @@ export async function performBoundedMessageAppend(
         // outcome, so a stalled *error* body is still a determinate failure and
         // must fail fast rather than be dressed up as unknown.
         if (response.ok) return { kind: "unconfirmed" };
-        return { kind: "failed", message: fallback };
+        return { kind: "failed", status: response.status, message: fallback };
       }
-      if (!response.ok) return { kind: "failed", message: fallback };
+      if (!response.ok) return { kind: "failed", status: response.status, message: fallback };
       // A 2xx that simply carries no parseable body is still a success: the
       // headers already decided that. Tolerating it preserves the behaviour
       // that existed before this logic moved here.
@@ -98,8 +98,13 @@ export async function performBoundedMessageAppend(
     }
 
     if (!response.ok) {
-      const message = typeof payload.error === "string" ? payload.error : fallback;
-      return { kind: "failed", message };
+      return {
+        kind: "failed",
+        status: response.status,
+        message: typeof payload.error === "string" ? payload.error : fallback,
+        ...(typeof payload.code === "string" ? { code: payload.code } : {}),
+        ...(typeof payload.retryable === "boolean" ? { retryable: payload.retryable } : {}),
+      };
     }
     return { kind: "committed", payload };
   } finally {

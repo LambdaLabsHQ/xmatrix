@@ -26,6 +26,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
 } from "react";
+import { UserFacingProblem } from "../../lib/user-facing-error";
 
 export type ComposerSendSnapshot = {
   body: string;
@@ -157,7 +158,7 @@ export function messageAttachmentBindings(
   return attachments.map((attachment) => {
     const upload = (attachment as ComposerChannelAttachment).relayV2Upload;
     if (!upload) {
-      throw new Error("This draft contains an outdated attachment. Remove it and attach the file again.");
+      throw new UserFacingProblem("This draft contains an outdated attachment. Remove it and attach the file again.");
     }
     const presentationResidual = {
       ...(attachment.durationMs === undefined ? {} : { durationMs: attachment.durationMs }),

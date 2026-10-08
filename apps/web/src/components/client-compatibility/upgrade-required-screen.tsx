@@ -7,6 +7,7 @@ import type {
 } from "@xmatrix/protocol";
 import { checkAppCompatibility } from "@/lib/app-client-compatibility";
 import { getDesktopBridge, type DesktopUpdateStatus } from "@/lib/desktop/bridge";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 type ScreenState =
   | { state: "checking" }
@@ -30,7 +31,7 @@ export function UpgradeRequiredScreen() {
     } catch (error) {
       setScreen({
         state: "unavailable",
-        message: error instanceof Error ? error.message : "Compatibility check failed.",
+        message: userErrorMessage(error, "Couldn't check whether this app is up to date") ?? "",
       });
     }
   }, []);

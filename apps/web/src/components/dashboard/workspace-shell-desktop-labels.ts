@@ -2,6 +2,7 @@
  * Pure desktop status copy helpers (no workspace UI view module imports).
  */
 import type { DesktopDaemonStatus, DesktopUpdateStatus } from "@/lib/desktop/bridge";
+import { userErrorMessage } from "../../lib/user-facing-error";
 
 export function desktopUpdateLabel(
   status: DesktopUpdateStatus | null,
@@ -34,9 +35,6 @@ export function desktopUpdateLabel(
   }
 }
 
-export function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 export function desktopUpdateErrorStatus(
   status: DesktopUpdateStatus | null,
@@ -46,7 +44,7 @@ export function desktopUpdateErrorStatus(
   return {
     ...status,
     state: "error",
-    message: errorMessage(error, "Could not install xMatrix update."),
+    message: userErrorMessage(error, "Couldn't install xMatrix update") ?? "",
     updatedAt: new Date().toISOString(),
   };
 }

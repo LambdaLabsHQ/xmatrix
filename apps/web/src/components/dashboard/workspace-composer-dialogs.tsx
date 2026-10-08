@@ -150,6 +150,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { createPortal, flushSync } from "react-dom";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
@@ -723,7 +724,7 @@ export function Composer({
       // Drop and the file picker call this fire-and-forget, so a rejection here
       // would surface as an unhandled rejection and nothing else. Whatever rows
       // exist have already been failed by the stage that threw.
-      setAttachmentError((error as Error)?.message || "Could not attach the file.");
+      setAttachmentError(userErrorMessage(error, "Couldn't attach the file"));
       return 0;
     } finally {
       intakeDepthRef.current -= 1;
@@ -829,7 +830,7 @@ export function Composer({
         registry.settle(entry.id);
         updatePendingAttachment(entry.id, {
           status: "failed",
-          error: (result.error as Error)?.message || "Upload failed",
+          error: userErrorMessage(result.error, "Couldn't upload the file") ?? "Upload cancelled.",
           progress: 0,
         });
         continue;
@@ -881,7 +882,7 @@ export function Composer({
         attachments,
       });
     } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : "Could not prepare the message.");
+      setAttachmentError(userErrorMessage(error, "Couldn't prepare the message"));
     } finally {
       preparingSendRef.current = false;
       setPreparingSend(false);
@@ -904,7 +905,7 @@ export function Composer({
     if (entry.kind === "image") {
       const prepared = await prepareImageAttachmentFile(entry.file);
       if (!registry.isLive(entry.id, generation)) return null;
-      if (!prepared) throw new Error("Image must be 1 MB or smaller.");
+      if (!prepared) throw new UserFacingProblem("Image must be 1 MB or smaller.");
       uploadFile = prepared;
       if (uploadFile.size !== entry.file.size || uploadFile.name !== entry.file.name) {
         updatePendingAttachment(entry.id, {
@@ -1517,7 +1518,7 @@ export function ChannelDetails({
   });
   const connectorConnections = connectorsQuery.data ?? [];
   const connectorsLoading = connectorsQuery.isPending && connectorsQuery.isEnabled;
-  const connectorsError = connectorsQuery.error?.message ?? null;
+  const connectorsError = userErrorMessage(connectorsQuery.error, "Couldn't load apps");
 
   const requestAboutSummary = useCallback(async () => {
     if (!token || !channel || aboutSummaryBusy) return;
@@ -1526,7 +1527,7 @@ export function ChannelDetails({
     try {
       await requestChannelAboutReview({ token, channel });
     } catch (error) {
-      setAboutSummaryError(error instanceof Error ? error.message : String(error));
+      setAboutSummaryError(userErrorMessage(error, "Couldn't request the summary"));
     } finally {
       setAboutSummaryBusy(false);
     }

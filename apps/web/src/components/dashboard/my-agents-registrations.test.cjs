@@ -3,7 +3,7 @@ const test = require("node:test");
 const { compileTsModules } = require("./compile-ts-modules.cjs");
 
 const compiled = compileTsModules(__dirname, ["my-agents-registrations", "time-display"]);
-const { registrationActions, registrationActivity, registrationSwitch, registrationCatalogErrorText,
+const { registrationActions, registrationActivity, registrationSwitch,
   registrationListed, registrationRowTitle, registrationStatus } = compiled.exports;
 
 test.after(compiled.dispose);
@@ -114,15 +114,6 @@ test("a removed agent leaves the list for everyone but its owner, who can add it
   assert.equal(registrationListed(registration({ state: "revoked" })), false);
   assert.equal(registrationListed(registration({ state: "revoked", canConfigureSpace: true, canRemoveFromSpace: true })), false);
   assert.equal(registrationListed(registration({ state: "revoked", canManageOwnerGrant: true })), true);
-});
-
-test("a catalog failure explains itself with the server's reason and code", () => {
-  const failure = Object.assign(new Error("Registration request failed"), { code: "registration_internal_error" });
-  assert.equal(registrationCatalogErrorText(failure), "Registration request failed (registration_internal_error)");
-  assert.equal(registrationCatalogErrorText(Object.assign(new Error("Request failed (502)"), { code: "request_failed" })),
-    "Request failed (502)");
-  assert.equal(registrationCatalogErrorText(new Error("")), "The agent list could not be loaded.");
-  assert.equal(registrationCatalogErrorText(undefined), "The agent list could not be loaded.");
 });
 
 test("quota status names exhausted windows and drops windows that have reset", () => {

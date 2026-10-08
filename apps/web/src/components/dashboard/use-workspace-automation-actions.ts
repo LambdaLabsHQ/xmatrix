@@ -10,6 +10,7 @@ import {
   setAutomationPaused,
   sortAutomations,
 } from "./workspace-shell-modules";
+import { UserFacingProblem, userErrorMessage } from "../../lib/user-facing-error";
 
 type AutomationActionState = {
   token: string | null | undefined;
@@ -21,9 +22,6 @@ type AutomationActionState = {
   setError: Dispatch<SetStateAction<string | null>>;
 };
 
-function automationError(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 export function useWorkspaceAutomationActions(state: AutomationActionState) {
   async function toggleAutomation(automation: SerializedAutomation) {
@@ -34,7 +32,7 @@ export function useWorkspaceAutomationActions(state: AutomationActionState) {
       const updated = await setAutomationPaused(state.token, automation, automation.enabled);
       state.setAutomations((current) => sortAutomations(replaceAutomation(current, updated)));
     } catch (error) {
-      state.setError(automationError(error, "Could not update Automation."));
+      state.setError(userErrorMessage(error, "Couldn't update the Automation"));
     } finally {
       state.setBusy(null);
     }
@@ -49,7 +47,7 @@ export function useWorkspaceAutomationActions(state: AutomationActionState) {
     state.setError(null);
     try {
       const current = state.automations.find((automation) => automation.id === automationId);
-      if (!current) throw new Error("Automation is no longer available.");
+      if (!current) throw new UserFacingProblem("Automation is no longer available.");
       const updated = await patchAutomation(state.token, automationId, {
         ...input,
         expectedVersion: current.version,
@@ -60,7 +58,7 @@ export function useWorkspaceAutomationActions(state: AutomationActionState) {
         updated,
       )));
     } catch (error) {
-      state.setError(automationError(error, "Could not update Automation."));
+      state.setError(userErrorMessage(error, "Couldn't update the Automation"));
     } finally {
       state.setBusy(null);
     }
@@ -78,7 +76,7 @@ export function useWorkspaceAutomationActions(state: AutomationActionState) {
         lineageRoot ? item.input?.lineage?.rootMessageId !== lineageRoot : item.id !== automation.id
       ));
     } catch (error) {
-      state.setError(automationError(error, "Could not delete evaluator lineage."));
+      state.setError(userErrorMessage(error, "Couldn't delete the evaluator lineage"));
     } finally {
       state.setBusy(null);
     }

@@ -17,10 +17,8 @@ test("session exchange keeps native validation separate from the legacy callback
     requests.push({ url, init });
     return response.clone();
   });
-  const legacy = await requestCliSessionExchange("browser-token");
-  assert.equal(legacy.exchangeResponse.ok, true);
-  assert.deepEqual(legacy.cliSession, session);
-  await assert.rejects(exchangeDesktopCliSession("browser-token"), /Local daemon session exchange response was incomplete/);
+  assert.deepEqual(await requestCliSessionExchange("browser-token"), session);
+  await assert.rejects(exchangeDesktopCliSession("browser-token"), /The local daemon session was missing from the response/);
 
   response = new Response(JSON.stringify({ ...session, refreshToken: "refresh-token", extra: "ignored" }));
   assert.deepEqual(await exchangeDesktopCliSession("browser-token"), { ...session, refreshToken: "refresh-token" });
@@ -28,8 +26,8 @@ test("session exchange keeps native validation separate from the legacy callback
     assert.equal(request.url, WEB_PROXY_ROUTES.cli_exchange_session);
     assert.deepEqual(request.init, { cache: "no-store", method: "POST", headers: { authorization: "Bearer browser-token" } });
   }
-  response = new Response(JSON.stringify({ error: "exchange denied" }), { status: 403 });
-  await assert.rejects(exchangeDesktopCliSession("browser-token"), /exchange denied/);
+  response = new Response(JSON.stringify({ error: "exchange denied", code: "forbidden" }), { status: 403 });
+  await assert.rejects(exchangeDesktopCliSession("browser-token"), { status: 403, code: "forbidden", message: "exchange denied" });
   response = new Response("invalid JSON", { status: 500 });
-  await assert.rejects(exchangeDesktopCliSession("browser-token"), /Failed to create a local daemon session/);
+  await assert.rejects(exchangeDesktopCliSession("browser-token"), { status: 500, message: "Request failed (500)" });
 });

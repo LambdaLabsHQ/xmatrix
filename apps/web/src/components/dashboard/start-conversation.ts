@@ -1,5 +1,6 @@
 import { WEB_PROXY_ROUTES, type SerializedChannel } from "@xmatrix/protocol";
-import { xmatrixRawResponse } from "../../lib/query/api-client";
+import { errorFromResponse, xmatrixRawResponse } from "../../lib/query/api-client";
+import { UserFacingProblem, unexpectedResponse } from "../../lib/user-facing-error";
 
 /**
  * A conversation's name until xMatrix names it from what it is about: the
@@ -45,13 +46,9 @@ export async function createConversation(input: {
     }),
     cache: "no-store",
   });
-  const payload = (await response.json().catch(() => ({}))) as {
-    channel?: SerializedChannel;
-    error?: string;
-  };
-  if (!response.ok || !payload.channel) {
-    throw new Error(payload.error || "Could not start the conversation");
-  }
+  if (!response.ok) throw await errorFromResponse(response);
+  const payload = (await response.json().catch(() => ({}))) as { channel?: SerializedChannel };
+  if (!payload.channel) throw unexpectedResponse("The conversation");
   return payload.channel;
 }
 
@@ -73,8 +70,8 @@ export async function startConversation(input: {
     cache: "no-store",
   });
   if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new Error(payload.error || "The conversation was created, but the message could not be sent. Send it there.");
+    console.warn("[xmatrix] first message not sent", await errorFromResponse(response));
+    throw new UserFacingProblem("It was created, but the first message wasn't sent; open it and send the message again.");
   }
   return channel;
 }

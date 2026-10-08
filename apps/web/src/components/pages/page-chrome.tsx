@@ -21,6 +21,7 @@ import { pageApi, type PageRevision } from "@/lib/pages/page-client";
 import { cn } from "@/lib/utils";
 import { agentState } from "./page-margin";
 import type { MarginConversation } from "./page-margin-model";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /**
  * Around a page (pages-live-document.md §3.2, §7): who is on it, its menu,
@@ -349,7 +350,7 @@ export function PageHistory({ spaceId, pageId, token, headRevision, canEdit, con
       setPreview(null);
       onPromoted();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not apply this revision");
+      setError(userErrorMessage(cause, "Couldn't apply this revision"));
     }
   };
   // As in Google Docs, the newest version is open when History opens.
@@ -453,7 +454,7 @@ export function DeletePageDialog({ open, title, hasChildren, onClose, onDelete }
     setBusy(true);
     setError(null);
     try { await onDelete(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete this page."); }
+    catch (cause) { setError(userErrorMessage(cause, "Couldn't delete this page")); }
     finally { setBusy(false); }
   };
   return (
