@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { jwtVerify } from "jose";
 import { exchangeSentryInstallation, sentryInstallationClient } from "../src/connectors/sentry-installation.ts";
 import { oauthClient, refreshOAuthFields } from "../src/connectors/oauth.ts";
 import { SENTRY_ACTIONS, verifySentry } from "../src/connectors/actions/sentry.ts";
@@ -156,8 +157,16 @@ test("complete rotated pair is persisted before action, with version CAS and no 
   assertSavedRotation(run, "rotated-access", "rotated-refresh");
   assert.deepEqual(run.calls.map(call => call.method), ["POST", "PUT"]);
   assert.equal(run.calls[0].url, `${url}authorizations/`);
-  assert.deepEqual(run.calls[0].body, { grant_type: "refresh_token", refresh_token: "fixture-refresh",
-    client_id: client.clientId, client_secret: client.clientSecret });
+  // The manual JWT grant needs no saved refresh token, so a rotation lost in transit cannot strand the grant.
+  assert.deepEqual(run.calls[0].body, { grant_type: "urn:sentry:params:oauth:grant-type:jwt-bearer" });
+  assert.ok(!JSON.stringify(run.calls[0].body).includes(client.clientSecret));
+  const [scheme, assertion] = run.calls[0].headers.get("authorization").split(" ");
+  assert.equal(scheme, "Bearer");
+  const { payload, protectedHeader } = await jwtVerify(assertion, new TextEncoder().encode(client.clientSecret),
+    { algorithms: ["HS256"], issuer: client.clientId, subject: client.clientId });
+  assert.equal(protectedHeader.alg, "HS256");
+  assert.match(payload.jti, /^[0-9a-f-]{36}$/u);
+  assert.ok(payload.exp - payload.iat <= 60);
   assert.equal(run.calls[1].headers.get("authorization"), "Bearer rotated-access");
   for (const options of [{ conflict: true }, { status: 401 }, { status: 503 }]) {
     const rejected = await refreshedWrite(options);
