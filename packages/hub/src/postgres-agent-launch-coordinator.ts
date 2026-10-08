@@ -501,10 +501,6 @@ export function earliestDue(due: Partial<Record<string, number>>): number | unde
   return times.length ? Math.min(...times) : undefined;
 }
 
-export async function nextChannelDueAt(database: AuthorityDatabase, shardId: string, channelId: string): Promise<number | undefined> {
-  return earliestDue(await nextChannelStepDue(database, shardId, channelId));
-}
-
 /** One read of when each kind of this Channel's work is next due, so a timed
  *  pass runs only the steps that have work instead of every step. */
 export async function nextChannelStepDue(database: AuthorityDatabase, shardId: string, channelId: string): Promise<ChannelStepDue> {
