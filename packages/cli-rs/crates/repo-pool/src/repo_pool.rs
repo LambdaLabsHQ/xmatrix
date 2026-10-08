@@ -6,6 +6,8 @@
 // Domain-oriented include sections (same module scope via include!).
 // Remaining peels stay include! until they gain explicit pub(crate) boundaries.
 include!("repo_pool_manifest.rs");
+include!("repo_pool_baseline.rs");
 include!("repo_pool_reclaim.rs");
 include!("repo_pool_rehydrate.rs");
+include!("repo_pool_handoff.rs");
 include!("repo_pool_tests.rs");

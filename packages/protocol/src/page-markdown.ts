@@ -73,6 +73,17 @@ export function pageBlocks(markdown: string): PageBlock[] {
   return blocks;
 }
 
+/**
+ * The titles of the top sections (heading depth 1 or 2) in `before` that
+ * `after` no longer has, in page order: what a whole-document edit removed,
+ * or renamed, at the level a reader would miss.
+ */
+export function pageRemovedSections(before: string, after: string): string[] {
+  const top = (markdown: string) => pageBlocks(markdown).filter((block) => block.depth === 1 || block.depth === 2);
+  const kept = new Set(top(after).map((block) => block.title.trim()));
+  return [...new Set(top(before).map((block) => block.title.trim()).filter((title) => !kept.has(title)))];
+}
+
 /** The block containing a character offset, or '' before the first heading. */
 export function pageBlockAt(markdown: string, offset: number): string {
   let id = "";
@@ -280,4 +291,119 @@ export function removeAutomationReference(markdown: string, automationId: string
     else if (/[\p{L}\p{N}]/u.test(rest.replace(/^\s*\d+[.)]/u, ""))) lines.push(rest.replace(/[ \t]+$/u, ""));
   }
   return lines.join("\n").replace(/\n{3,}/gu, "\n\n");
+}
+
+/**
+ * The link scheme of a GitHub file embedded in a page
+ * (docs/design/pages-live-document.md §6.5): `xmatrix:github-file/<owner>/<repo>/<path>`,
+ * with `?ref=<branch, tag or commit>` to pin it; without one it is the
+ * repository's default branch. The editor draws the file below the link, read
+ * through from GitHub each time; the page holds the reference, never the file.
+ */
+export const GITHUB_FILE_REFERENCE_SCHEME = "xmatrix:github-file/";
+
+export interface GitHubFileReference {
+  /** `owner/repo`. */
+  repository: string;
+  /** The file's path in the repository, without a leading slash. */
+  path: string;
+  /** A branch, tag or commit; null for the default branch. */
+  ref: string | null;
+}
+
+const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u;
+const GITHUB_REPO = /^[A-Za-z0-9._-]{1,100}$/u;
+const GITHUB_REF = /^[A-Za-z0-9._/-]{1,250}$/u;
+const GITHUB_PATH_MAX = 500;
+const GITHUB_FILE_REFERENCE = /\]\((xmatrix:github-file\/[^)\s]+)(?:\s+"[^"]*")?\)/gu;
+
+function decodedSegment(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
+/** A path segment as a link destination carries it: parentheses too, so the markdown link stays whole. */
+function encodedSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(/[()]/gu, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function gitHubFileReferenceOf(owner: string, repo: string, path: readonly string[],
+  ref: string | null): GitHubFileReference | null {
+  if (!GITHUB_OWNER.test(owner) || !GITHUB_REPO.test(repo) || repo === "." || repo === "..") return null;
+  if (!path.length || path.some((part) => !part || part === "." || part === ".."
+    || [...part].some((char) => char.charCodeAt(0) < 0x20))) {
+    return null;
+  }
+  const joined = path.join("/");
+  if (joined.length > GITHUB_PATH_MAX) return null;
+  if (ref !== null && (!GITHUB_REF.test(ref) || ref.split("/").some((part) => !part || part === ".."))) return null;
+  return { repository: `${owner}/${repo}`, path: joined, ref };
+}
+
+/** The reference a `xmatrix:github-file/…` link names; null for any other link or an invalid one. */
+export function parseGitHubFileReference(href: string): GitHubFileReference | null {
+  if (!href.startsWith(GITHUB_FILE_REFERENCE_SCHEME)) return null;
+  const rest = href.slice(GITHUB_FILE_REFERENCE_SCHEME.length);
+  const queryAt = rest.indexOf("?");
+  const location = queryAt < 0 ? rest : rest.slice(0, queryAt);
+  let ref: string | null = null;
+  if (queryAt >= 0) {
+    const query = new URLSearchParams(rest.slice(queryAt + 1));
+    if ([...query.keys()].some((key) => key !== "ref")) return null;
+    ref = query.get("ref") || null;
+  }
+  const parts = location.split("/").map(decodedSegment);
+  if (parts.length < 3 || parts.some((part) => part === null)) return null;
+  const [owner, repo, ...path] = parts as string[];
+  return gitHubFileReferenceOf(owner!, repo!, path, ref);
+}
+
+/** The link destination that embeds a file; the same reference always gives the same text. */
+export function gitHubFileReferenceHref(reference: GitHubFileReference): string {
+  const path = reference.path.split("/").map(encodedSegment).join("/");
+  return `${GITHUB_FILE_REFERENCE_SCHEME}${reference.repository}/${path}${
+    reference.ref ? `?ref=${encodeURIComponent(reference.ref)}` : ""}`;
+}
+
+/**
+ * A file named by a GitHub link (`https://github.com/<owner>/<repo>/blob/<ref>/<path>`)
+ * or by an embed's own link. The segment after `blob` is the ref, so a branch
+ * whose name holds a `/` is written with `?ref=` instead.
+ */
+export function gitHubFileReferenceFrom(text: string): GitHubFileReference | null {
+  const trimmed = text.trim();
+  if (trimmed.startsWith(GITHUB_FILE_REFERENCE_SCHEME)) return parseGitHubFileReference(trimmed);
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || !["github.com", "www.github.com"].includes(url.hostname)) return null;
+  const parts = url.pathname.replace(/^\/+|\/+$/gu, "").split("/").map(decodedSegment);
+  if (parts.length < 5 || parts.some((part) => part === null) || parts[2] !== "blob") return null;
+  const [owner, repo, , ref, ...path] = parts as string[];
+  return gitHubFileReferenceOf(owner!, repo!, path, ref!);
+}
+
+/** Where the file is on GitHub, for a reader outside the editor. */
+export function gitHubFileUrl(reference: GitHubFileReference): string {
+  const ref = reference.ref ? reference.ref.split("/").map(encodedSegment).join("/") : "HEAD";
+  return `https://github.com/${reference.repository}/blob/${ref}/${reference.path.split("/").map(encodedSegment).join("/")}`;
+}
+
+/** Each GitHub file the page's text embeds, outside code, as canonical link destinations in order. */
+export function gitHubFileReferences(markdown: string): string[] {
+  const references = new Set<string>();
+  for (const { line, prose } of markdownLines(markdown)) {
+    if (!prose) continue;
+    for (const match of line.replace(/`[^`]*`/gu, (code) => " ".repeat(code.length)).matchAll(GITHUB_FILE_REFERENCE)) {
+      const reference = parseGitHubFileReference(match[1]!);
+      if (reference) references.add(gitHubFileReferenceHref(reference));
+    }
+  }
+  return [...references];
 }

@@ -3,6 +3,7 @@ import { type Page } from "@playwright/test";
 import {
   fixtureChannelCatalog,
   fixtureJson,
+  fixtureSpaceResources,
   installApiFixtures,
   openWorkspaceWithStubs,
 } from "./workspace-fixtures";
@@ -65,11 +66,11 @@ test.describe("mobile workspace switcher", () => {
     /* The entry names the current space, so the switcher is discoverable
        (the "现在怎么切" complaint was an invisible entry point). */
     await expect(entry).toContainText(/Personal|Lambda Labs/);
-    /* A real tap target, not a squashed icon: full row height, wide. */
+    /* A real tap target, not a squashed icon: the whole Space sign. */
     const box = await entry.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(40);
-    expect(box!.width).toBeGreaterThanOrEqual(200);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(120);
   });
 
   test("tapping the entry opens a true bottom sheet, not a layer trapped in the topbar", async ({
@@ -170,6 +171,7 @@ test.describe("mobile workspace switcher", () => {
     await fixtureJson(page, "channels", /\/api\/xmatrix\/channels(?:\?.*)?$/, { channels: [] });
     await fixtureChannelCatalog(page, "channel-catalog", []);
     await fixtureJson(page, "spaces", "**/api/xmatrix/spaces**", { spaces: [TEAM_SPACE] });
+    await fixtureSpaceResources(page);
     await page.goto("/app");
 
     await expect(page.locator(".app-mobile-title")).toBeVisible();

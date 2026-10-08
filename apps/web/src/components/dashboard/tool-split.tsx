@@ -137,7 +137,7 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
           {label}
         </button>
       ) : (
-        <p className={titleClass}>{label}</p>
+        <div className={titleClass}>{label}</div>
       )}
       <IdentityIndent.Provider value={Boolean(identity)}>
         <ul>{children}</ul>
@@ -193,7 +193,7 @@ export function ToolStateDot({ state }: { state: ToolState }) {
 }
 
 /** The chosen item, on paper: where it sits, its name, one line of state, what to do; then its sections. */
-export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, status, actions, children }: {
+export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, status, actions, wide, children }: {
   /** A phone's way back to the list; the overview shown beside the list has none. */
   onBack?: () => void;
   backLabel?: string;
@@ -203,10 +203,12 @@ export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, 
   titleAccessory?: ReactNode;
   status?: ReactNode;
   actions?: ReactNode;
+  /** Tables of many columns read on a wider sheet than prose. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   return (
-    <ToolPaperScroll>
+    <ToolPaperScroll wide={wide}>
       {onBack && (
         <button type="button" onClick={onBack}
           className="-ml-1 mb-2 flex items-center gap-0.5 text-sm font-medium text-muted-foreground hover:text-foreground md:hidden">
@@ -232,11 +234,12 @@ export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, 
 }
 
 /** The paper's scroll and text column; a view that draws its own header (Profile) uses it directly. */
-export function ToolPaperScroll({ children }: { children: ReactNode }) {
+export function ToolPaperScroll({ wide, children }: { wide?: boolean; children: ReactNode }) {
   return (
     <div className="app-tool-detail-scroll min-h-0 flex-1 overflow-y-auto">
       {/* On a phone the paper's text keeps to the plank's content line. */}
-      <article className="mx-auto max-w-3xl px-[var(--mobile-content-inset,1rem)] pt-3 pb-[calc(env(safe-area-inset-bottom)+2rem)] md:px-8 md:pt-8">
+      <article className={cn("mx-auto px-[var(--mobile-content-inset,1rem)] pt-3 pb-[calc(env(safe-area-inset-bottom)+2rem)] md:px-8 md:pt-8",
+        wide ? "max-w-6xl" : "max-w-3xl")}>
         {children}
       </article>
     </div>
@@ -322,6 +325,8 @@ export type ToolSection = {
   content: ReactNode;
   /** The section that makes a new one: the list's + rather than a row. */
   create?: boolean;
+  /** Read on the wide sheet, for tables of many columns. */
+  wide?: boolean;
 };
 
 /**
@@ -365,7 +370,7 @@ export function SectionedToolView({ title, sections, label = title, defaultKey }
       }
       detail={shown ? (
         <ToolDetail onBack={() => select(null)} backLabel={title} context={title} title={shown.label}
-          status={shown.description} actions={shown.actions}>
+          status={shown.description} actions={shown.actions} wide={shown.wide}>
           {shown.content}
         </ToolDetail>
       ) : null}

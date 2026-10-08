@@ -95,7 +95,6 @@ import {
   LocalManagedAgent,
   MOBILE_CHANNEL_LIST_RETURN_PATH_STATE_KEY,
   MOBILE_MORE_RETURN_PATH_STATE_KEY,
-  ManagementAgentPatch,
   OLDER_HISTORY_LIMIT,
   OutgoingMessage,
   SpaceInviteResult,
@@ -142,7 +141,6 @@ import {
   latestSequence,
   localWorkspacesForDesktop,
   metadataString,
-  mergeSpaceListSnapshot,
   nativeNotificationEventMessageId,
   nativeNotificationEventMessageIdWasHandled,
   notificationPathForEvent,
@@ -241,12 +239,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setChannelMoveTargetSpaceId,
     setMovingChannelId,
     setChannelMoveError,
-    setChannelQuickOpen,
     setWorkspaceSearchOpen,
     setRenamingSpaceId,
     setNewSpaceName,
     setCreatingSpace,
-    setManagementSetupSpaceId,
     authorizeHistoryRender,
     mergeAndRememberChannelHistory,
     queueChannelTimelineScroll,
@@ -1248,6 +1244,19 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setBrowserPath(nextPath);
   }
 
+  /** The search page for a search, written as its query string (`q`, `in`, `from`). */
+  function openSearchResults(query: string) {
+    setView("search");
+    setSelectedChannelId(null);
+    setMobileChannelDetailsOpen(false);
+    setReplyTarget(null);
+    setWorkspaceSearchOpen(false);
+    const viewPath = appViewPath(null, "search", s.currentSpaceId, s.spaces);
+    const nextPath = query ? `${viewPath}?${query}` : viewPath;
+    pushBrowserPath(nextPath);
+    setBrowserPath(nextPath);
+  }
+
   /** `userId` omitted means the viewer's own profile — the rail avatar's case. */
   function openHumanProfile(userId?: string, spaceId?: string) {
     setProfileUserId(userId && userId !== s.user?.id ? userId : null);
@@ -1377,7 +1386,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setSelectedChannelId(channelId);
       s.viewRef.current = "messages";
       s.selectedChannelIdRef.current = channelId;
-      setChannelQuickOpen(false);
       setWorkspaceSearchOpen(false);
       if (!messageId && !s.isMobileViewportRef.current) {
         setComposerAutoFocusRequest((current) => current + 1);
@@ -1504,7 +1512,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       }
 
       setChannels(nextChannels);
-      s.spacesRef.current = mergeSpaceListSnapshot(s.spacesRef.current, nextSpaces);
+      s.spacesRef.current = nextSpaces;
       setSpaces(s.spacesRef.current);
       s.channelsRef.current = nextChannels;
       setHistoryError(null);
@@ -1673,7 +1681,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       ]);
       reconcileAgentTraceChannelAccess(nextChannels);
       setChannels(nextChannels);
-      setSpaces((current) => mergeSpaceListSnapshot(current, nextSpaces));
+      setSpaces(nextSpaces);
       setProjects(nextProjects);
       setEvents(nextEvents.filter((event) => !isLlmTraceEvent(event)));
       setError(null);
@@ -1716,6 +1724,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       body: snapshot.body,
       attachments: snapshot.attachments,
       invocationSelections: snapshot.invocationSelections,
+      summonIntents: snapshot.summonIntents,
       appMentions: parseAppMentions(snapshot.body, APP_CONNECTORS),
     });
   }
@@ -1835,7 +1844,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const payload = (await res.json()) as { space?: SerializedSpace };
       if (payload.space) {
         setSpaces((current) => replaceSpace(current, payload.space!));
-        setManagementSetupSpaceId(payload.space.id);
         if (options?.select) {
           const nextSpaces = replaceSpace(s.spaces, payload.space);
           setPendingExplicitSpaceId(payload.space.id);
@@ -1924,35 +1932,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }, "Failed to remove member");
     setSpaces((current) => replaceSpace(current, updated));
     return { space: updated };
-  }
-
-  async function updateSpaceManagementAgent(
-    spaceId: string,
-    patch: ManagementAgentPatch
-  ): Promise<void> {
-    if (!s.token || !s.user) throw new Error("Sign in before managing the space");
-    const space = s.spaces.find((item) => item.id === spaceId);
-    if (!space || !canInviteToSpace(space, s.user.id)) {
-      throw new Error("Only workspace owners and admins can manage the management agent");
-    }
-    const payload = await requestHub<{
-      space?: SerializedSpace;
-      managementAgent?: SerializedSpace["managementAgent"];
-      managementChannel?: SerializedChannel;
-    }>(
-      WEB_PROXY_ROUTES.space_management_agent(spaceId),
-      { method: "PATCH", body: patch },
-      "Failed to update the management agent",
-      (answer) => Boolean(answer.space || answer.managementAgent),
-    );
-    // The hub returns the full space today; fall back to patching the config
-    // in place so a slimmer response shape cannot strand the UI.
-    const nextSpace =
-      payload.space || { ...space, managementAgent: payload.managementAgent };
-    setSpaces((current) => replaceSpace(current, nextSpace));
-    if (payload.managementChannel) {
-      setChannels((current) => replaceChannel(current, payload.managementChannel!));
-    }
   }
 
   const reconcileUnconfirmedSend = createUnconfirmedSendReconciler({
@@ -2431,6 +2410,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
 
     const invocationSelections = fromComposer ? composerSnapshot?.invocationSelections : undefined;
+    const summonIntents = fromComposer ? composerSnapshot?.summonIntents : undefined;
     const appMentions = parseAppMentions(body, APP_CONNECTORS);
     const replyToMessageId = replySnapshot?.messageId;
     const replyTo = replySnapshot?.messageId
@@ -2455,15 +2435,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setReplyTarget(null);
     }
     await deliverOutgoingMessage(channel, {
-      body, invocationSelections, attachments, replyToMessageId, replyTo, appMentions,
+      body, invocationSelections, summonIntents, attachments, replyToMessageId, replyTo, appMentions,
     });
   }
 
   /** Shows the message as pending in its channel at once, then appends it. */
   async function deliverOutgoingMessage(
     channel: SerializedChannel,
-    { body, invocationSelections, attachments, replyToMessageId, replyTo, appMentions }:
-      Pick<OutgoingMessage, "body" | "invocationSelections" | "attachments" | "replyToMessageId" | "replyTo" | "appMentions">,
+    { body, invocationSelections, summonIntents, attachments, replyToMessageId, replyTo, appMentions }:
+      Pick<OutgoingMessage, "body" | "invocationSelections" | "summonIntents" | "attachments" | "replyToMessageId" | "replyTo" | "appMentions">,
   ) {
     if (!s.token) return;
     const channelId = channel.id;
@@ -2480,6 +2460,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       channelId,
       body,
       invocationSelections,
+      summonIntents,
       attachments,
       replyToMessageId,
       replyTo,
@@ -2500,6 +2481,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         clientMessageId,
         body,
         invocationSelections,
+        summonIntents,
         attachments,
         replyToMessageId,
         appMentions,
@@ -2808,6 +2790,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
+    openSearchResults,
     openHumanProfile,
     profileUserId,
     openSchedule,
@@ -2841,7 +2824,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     inviteSpaceMembers,
     updateSpaceMemberRole,
     removeSpaceMember,
-    updateSpaceManagementAgent,
     stopAgentInstance,
     rebornAgentInstance,
     handoffAgentInstance,

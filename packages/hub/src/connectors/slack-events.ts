@@ -1,6 +1,5 @@
-import type { ConnectorDelivery, ConnectorDeliveryResult } from "./provider";
-import { hmacHex, timingSafeEqual } from "@xmatrix/protocol";
-import { connectorEvent, excerpt, lowerHeader, parseJsonObject, record, sourceToken, text } from "./event-format";
+import { createSignedJsonReceiver } from "./delivery-proof";
+import { connectorEvent, excerpt, lowerHeader, record, sourceToken, text } from "./event-format";
 
 /*
  * Slack Events API: `X-Slack-Signature` is `v0=` + HMAC-SHA256 of
@@ -10,22 +9,13 @@ import { connectorEvent, excerpt, lowerHeader, parseJsonObject, record, sourceTo
  * into Slack never loop. A source is a Slack channel id.
  */
 
-const MAX_SKEW_SECONDS = 300;
-
-export async function receiveSlackDelivery(delivery: ConnectorDelivery,
-  now: number = Date.now()): Promise<ConnectorDeliveryResult> {
-  const timestamp = lowerHeader(delivery.headers, "x-slack-request-timestamp");
-  const seconds = Number(timestamp);
-  const secret = delivery.credentials.signingSecret;
-  if (!secret || !Number.isFinite(seconds) || Math.abs(now / 1_000 - seconds) > MAX_SKEW_SECONDS) {
-    return { ok: false, status: 401, error: "Invalid Slack request timestamp" };
-  }
-  const expected = `v0=${await hmacHex("SHA-256", secret, `v0:${timestamp}:${delivery.rawBody}`)}`;
-  if (!timingSafeEqual(lowerHeader(delivery.headers, "x-slack-signature").toLowerCase(), expected)) {
-    return { ok: false, status: 401, error: "Invalid Slack signature" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return { ok: false, status: 400, error: "Slack body must be JSON" };
+export const receiveSlackDelivery = createSignedJsonReceiver({
+  name: "Slack", secretField: "signingSecret", proof: {
+    header: "x-slack-signature", prefix: "v0=",
+    timestamp: (headers) => lowerHeader(headers, "x-slack-request-timestamp"),
+    signed: (body, timestamp) => `v0:${timestamp}:${body}`,
+  },
+}, (_, payload) => {
   if (payload.type === "url_verification") {
     return { ok: "respond", response: Response.json({ challenge: text(payload.challenge) }) };
   }
@@ -47,4 +37,4 @@ export async function receiveSlackDelivery(delivery: ConnectorDelivery,
       provider: "Slack", title: `${text(event.user)} reacted :${text(event.reaction)}: in #${text(item.channel)}` })] };
   }
   return { ok: true, events: [] };
-}
+});

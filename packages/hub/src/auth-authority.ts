@@ -1,6 +1,8 @@
 import {
   ADMIN_OVERVIEW_MAX_USER_ROWS,
+  ADMIN_USER_DETAIL_MAX_ROWS,
   type AdminUserAccessSummary,
+  type AdminUserSession,
   type AdminUserSummary,
 } from "@xmatrix/protocol";
 import {
@@ -234,18 +236,7 @@ export async function authDirectoryAdminUsers(
   };
 }
 
-async function readD1AdminUsers(
-  env: Env,
-  now: string,
-): Promise<AdminAuthUserRow[]> {
-  const database = requireAuthD1(env);
-  const total = await database.prepare('SELECT COUNT(*) AS "count" FROM "user"')
-    .first<{ count: number }>();
-  if (Number(total?.count ?? 0) > ADMIN_OVERVIEW_MAX_USER_ROWS) {
-    throw new Error("Auth admin user inventory bound was reached");
-  }
-  const result = await database.prepare(
-    `SELECT u."id", u."name", u."handle", u."email",
+const D1_ADMIN_USER_SELECT = `SELECT u."id", u."name", u."handle", u."email",
       u."emailVerified" AS "email_verified", u."createdAt" AS "created_at",
       u."profileCompletedAt" AS "profile_completed_at",
       (SELECT COUNT(*) FROM "session" s WHERE s."userId" = u."id") AS "session_count",
@@ -256,8 +247,26 @@ async function readD1AdminUsers(
       (SELECT GROUP_CONCAT(provider."providerId")
         FROM (SELECT DISTINCT a."providerId" FROM "account" a
           WHERE a."userId" = u."id" ORDER BY a."providerId") provider) AS "providers"
-     FROM "user" u ORDER BY u."createdAt" DESC, u."id"
-     LIMIT ?2`,
+     FROM "user" u`;
+
+async function readD1AdminUsers(
+  env: Env,
+  now: string,
+  userId?: string,
+): Promise<AdminAuthUserRow[]> {
+  const database = requireAuthD1(env);
+  if (userId) {
+    const result = await database.prepare(`${D1_ADMIN_USER_SELECT} WHERE u."id" = ?2 LIMIT 1`)
+      .bind(now, userId).all<AdminAuthUserRow>();
+    return result.results ?? [];
+  }
+  const total = await database.prepare('SELECT COUNT(*) AS "count" FROM "user"')
+    .first<{ count: number }>();
+  if (Number(total?.count ?? 0) > ADMIN_OVERVIEW_MAX_USER_ROWS) {
+    throw new Error("Auth admin user inventory bound was reached");
+  }
+  const result = await database.prepare(
+    `${D1_ADMIN_USER_SELECT} ORDER BY u."createdAt" DESC, u."id" LIMIT ?2`,
   ).bind(now, ADMIN_OVERVIEW_MAX_USER_ROWS).all<AdminAuthUserRow>();
   const rows = result.results ?? [];
   if (rows.length < Number(total?.count ?? 0)) {
@@ -266,14 +275,7 @@ async function readD1AdminUsers(
   return rows;
 }
 
-async function readPostgresAdminUsers(
-  env: Env,
-  now: string,
-): Promise<AdminAuthUserRow[]> {
-  return authPostgresTransaction(env, "auth.admin.users", async (transaction) => {
-    const rows = await transaction.query<QueryResultRow & AdminAuthUserRow>({
-      name: "auth_admin_users_v1",
-      text: `SELECT u.id, u.name, u.handle, u.email, u.email_verified,
+const POSTGRES_ADMIN_USER_SELECT = `SELECT u.id, u.name, u.handle, u.email, u.email_verified,
         u.created_at, u.profile_completed_at,
         (SELECT COUNT(*) FROM control.auth_sessions s WHERE s.user_id = u.id) AS session_count,
         (SELECT COUNT(*) FROM control.auth_sessions s
@@ -281,8 +283,16 @@ async function readPostgresAdminUsers(
         (SELECT MAX(s.updated_at) FROM control.auth_sessions s
           WHERE s.user_id = u.id) AS last_session_at,
         ARRAY(SELECT DISTINCT a.provider_id FROM control.auth_accounts a
-          WHERE a.user_id = u.id ORDER BY a.provider_id) AS providers,
-        COUNT(*) OVER () AS total_count
+          WHERE a.user_id = u.id ORDER BY a.provider_id) AS providers`;
+
+async function readPostgresAdminUsers(
+  env: Env,
+  now: string,
+): Promise<AdminAuthUserRow[]> {
+  return authPostgresTransaction(env, "auth.admin.users", async (transaction) => {
+    const rows = await transaction.query<QueryResultRow & AdminAuthUserRow>({
+      name: "auth_admin_users_v1",
+      text: `${POSTGRES_ADMIN_USER_SELECT}, COUNT(*) OVER () AS total_count
        FROM control.auth_users u ORDER BY u.created_at DESC, u.id
        LIMIT ${ADMIN_OVERVIEW_MAX_USER_ROWS}`,
       values: [now],
@@ -293,6 +303,68 @@ async function readPostgresAdminUsers(
     }
     return [...rows];
   });
+}
+
+interface AdminAuthSessionRow {
+  created_at: Date | string | number;
+  updated_at: Date | string | number;
+  expires_at: Date | string | number;
+}
+
+export interface AuthDirectoryAdminUser {
+  user: AdminUserSummary;
+  sessions: AdminUserSession[];
+}
+
+/**
+ * One registered user for the operator detail: identity, sign-in methods, and
+ * session timing. IP addresses, user agents, and tokens stay in Auth.
+ */
+export async function authDirectoryAdminUser(
+  env: Env,
+  userId: string,
+  now: string,
+): Promise<AuthDirectoryAdminUser | null> {
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(nowMs)) throw new Error("admin user access time is invalid");
+  const bound = ADMIN_USER_DETAIL_MAX_ROWS;
+  let userRows: AdminAuthUserRow[];
+  let sessionRows: AdminAuthSessionRow[];
+  if (authAuthority(env) === "d1") {
+    userRows = await readD1AdminUsers(env, now, userId);
+    sessionRows = (await requireAuthD1(env).prepare(
+      `SELECT "createdAt" AS "created_at", "updatedAt" AS "updated_at", "expiresAt" AS "expires_at"
+       FROM "session" WHERE "userId" = ?1 ORDER BY "updatedAt" DESC LIMIT ?2`,
+    ).bind(userId, bound).all<AdminAuthSessionRow>()).results ?? [];
+  } else {
+    [userRows, sessionRows] = await authPostgresTransaction(env, "auth.admin.user", async (transaction) => [
+      [...await transaction.query<QueryResultRow & AdminAuthUserRow>({
+        name: "auth_admin_user_v1",
+        text: `${POSTGRES_ADMIN_USER_SELECT} FROM control.auth_users u WHERE u.id = $2 LIMIT 1`,
+        values: [now, userId],
+        maxRows: 1,
+      })],
+      [...await transaction.query<QueryResultRow & AdminAuthSessionRow>({
+        name: "auth_admin_user_sessions_v1",
+        text: `SELECT created_at, updated_at, expires_at FROM control.auth_sessions
+          WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2`,
+        values: [userId, bound],
+        maxRows: bound,
+      })],
+    ] as const);
+  }
+  const row = userRows[0];
+  if (!row) return null;
+  return {
+    user: adminAuthUser(row),
+    sessions: sessionRows.flatMap((session) => {
+      const createdAt = adminAuthTimestamp(session.created_at);
+      const lastActiveAt = adminAuthTimestamp(session.updated_at);
+      const expiresAt = adminAuthTimestamp(session.expires_at);
+      if (!createdAt || !lastActiveAt || !expiresAt) return [];
+      return [{ createdAt, lastActiveAt, expiresAt, active: Date.parse(expiresAt) > nowMs }];
+    }),
+  };
 }
 
 function adminAuthUser(row: AdminAuthUserRow): AdminUserSummary {

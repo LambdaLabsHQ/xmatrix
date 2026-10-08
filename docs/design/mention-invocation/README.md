@@ -4,16 +4,38 @@ The invoking `@` owns its status. Each Agent in a message updates independently,
 
 These screenshots use local synthetic fixtures and the repository theme, not production data.
 
+The Web composer asks Jev about summon intent after a 350 ms typing pause,
+using the exact outgoing body, summon ranges and the author's authorized
+Channel context. Mention bands show the reading. A declined address has a clickable dotted
+underline that opens xMatrix's explanation and a **Start anyway** option at
+that mention. The option writes `launch:force` only on that summon; sending
+still owns publication and launch. Normal summons add no explanatory text,
+and no caption sits below the input. The separate intent/Force pill is removed. Enter finishes or reuses
+the current bounded preview request before publishing. Any edit or Channel
+change discards the old reading. Forced mentions skip preview.
+
+A Human send carries the confirmed readings, bound to exact UTF-16 offsets and
+mention text. These are the author's intent choices, like `launch:force`,
+not credentials or proof of a model decision. The server accepts them only
+from Human message authors and still reads the stored source, current access,
+registration grants, launch fences, workspace, model and machine authority.
+A confirmed non-request allocates nothing; a confirmed request skips only the
+intent question and records its source as `draft`. The first four summons are
+previewed. Unread summons, old clients, first messages of new Channels and
+unavailable previews retain the ordinary post-send intent check. No durable
+launch or Run is created by preview.
+
 An authenticated pre-spawn failure produces an idempotent Channel notice even
 when the Launch already marked its Run failed. A hint does not: Jev reading the
 mention as not a request, or telling the author to name the machine, stays on
 this card.
 
-Invocation details show a fixed,
-actionable classification for repository preparation failures: an unavailable
-default branch (including an empty repository), insufficient disk space, or a
-failed fetch. Raw daemon paths, command lines and credentials are excluded from
-these classifications. CLI diagnostics carry the same specific failure code.
+Invocation details and Channel notices preserve the originating startup failure,
+including Git stderr such as `non-fast-forward`, with stable classification codes.
+They do not replace the cause with a guessed network/permissions explanation or
+retry advice. Credentials and machine-private absolute paths are redacted, control
+characters stripped, and output bounded while preserving diagnostic line breaks.
+Old CLIs can only report the cause they retained; new CLI releases retain Git stderr.
 A later stop confirmation preserves the failed-startup outcome and describes
 cleanup rather than implying an Agent successfully started and was stopped.
 An accepted execution cancellation keeps its own outcome: a late failed spawn
@@ -33,3 +55,12 @@ report cannot publish a new startup-failure notice or relabel its cleanup.
 - [Saved-reply recovery without rerunning the input](reply-recovery-mobile.png)
 
 Reproduce with `pnpm --filter @xmatrix/web exec playwright test e2e/mention-invocation.spec.ts --project=web --workers=1`.
+
+Repository-backed invocation details also retain the actual checkout base branch,
+full OID and confirmation timestamp in UTC after the Run finishes. Continued
+repo-pool tasks show the current confirmed remote snapshot separately, with
+ancestor/diverged/unknown evidence about the recorded base. Unknown evidence
+is never presented as safe or as a history rewrite. Baseline facts are not
+posted as routine Channel messages. A confirmed divergence produces one
+continuity warning for the human and Agent, preserving the old checkout.
+Optional daemon evidence is absent for older clients; no time or base is guessed.

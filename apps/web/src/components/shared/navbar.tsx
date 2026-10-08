@@ -10,9 +10,8 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 const navLinks = [
   { href: "/download", label: "Download" },
-  { href: "/#how-it-works", label: "How it Works" },
-  { href: "/#agent-materials", label: "Agent Setup" },
-  { href: "/#architecture", label: "Platform" },
+  { href: "/#how-it-works", label: "Setup" },
+  { href: "/#connectors", label: "Connectors" },
   { href: "/#pricing", label: "Pricing" },
 ];
 
@@ -32,7 +31,7 @@ export function Navbar() {
           ? 1
           : 0
         : Math.min(1, Math.max(0, window.scrollY / WOOD_REVEAL_DISTANCE_PX));
-      setWoodReveal((prev) => (Math.abs(prev - next) < 0.01 ? prev : next));
+      setWoodReveal(next);
     };
 
     const onScroll = () => {
@@ -58,12 +57,17 @@ export function Navbar() {
       style={{ ["--navbar-wood-reveal" as string]: String(woodReveal) }}
     >
       <div className="site-navbar-layout mx-auto">
-        <BrandMark
-          href="/"
-          iconSrc="/brand/xmatrix-icon-transparent.png"
-          className="site-navbar-brand shrink-0"
-          iconClassName="overflow-visible"
-        />
+        <div className="site-navbar-brand shrink-0">
+          <span aria-hidden className="site-navbar-brand-glass">
+            <LiquidGlassPill className="size-full">{null}</LiquidGlassPill>
+          </span>
+          <BrandMark
+            href="/"
+            iconSrc="/brand/xmatrix-icon-transparent.png"
+            className="relative z-10"
+            iconClassName="overflow-visible"
+          />
+        </div>
         <div className="site-navbar-bar">
           <WoodPanel className="site-navbar-inner">{null}</WoodPanel>
           <div className="site-navbar-content relative z-10 flex h-full items-center justify-end gap-4 lg:justify-between">

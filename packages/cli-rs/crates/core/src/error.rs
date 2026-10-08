@@ -42,6 +42,11 @@ pub enum CliError {
     #[error("{0}")]
     Http(String),
 
+    /// A Hub reply refused with an HTTP status, keeping the Hub's code and its
+    /// `retryable` verdict. Displays as the Hub's message, like `Http`.
+    #[error("{}", .0.message)]
+    HttpStatus(Box<HttpStatusError>),
+
     #[error("{0}")]
     UpgradeRequired(String),
 
@@ -74,6 +79,17 @@ pub enum CliError {
 }
 
 pub type Result<T> = std::result::Result<T, CliError>;
+
+/// The Hub's transient-failure contract: `{ error, code, retryable }` with a
+/// status. Only `retryable: true` means a replay may succeed; every other
+/// refusal is the Hub's decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpStatusError {
+    pub status: u16,
+    pub code: Option<String>,
+    pub retryable: bool,
+    pub message: String,
+}
 
 #[derive(Clone, Debug, Error)]
 pub enum ProviderTransportFailure {
@@ -234,6 +250,35 @@ impl CliError {
             _ => None,
         }
     }
+    /// The message of a Hub HTTP refusal, whichever way it was built.
+    pub fn http_message(&self) -> Option<&str> {
+        match self {
+            Self::Http(message) => Some(message),
+            Self::HttpStatus(error) => Some(&error.message),
+            _ => None,
+        }
+    }
+
+    pub fn http_status(&self) -> Option<&HttpStatusError> {
+        match self {
+            Self::HttpStatus(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// An outage a later attempt may get past: the network never delivered
+    /// the request or its answer, or the Hub said `retryable: true`. Anything
+    /// else is a rejection and retrying it repeats the same answer.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::HttpStatus(error) => error.retryable,
+            Self::Request(error) => {
+                error.is_connect() || error.is_timeout() || error.is_request() || error.is_body()
+            }
+            _ => self.is_relay_transient(),
+        }
+    }
+
     pub fn is_relay_transient(&self) -> bool {
         matches!(self, Self::RelayTransient(_))
             || self

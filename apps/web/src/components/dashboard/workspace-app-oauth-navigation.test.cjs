@@ -50,12 +50,29 @@ for (const outcome of ["connected", "failed"]) {
   });
 }
 
-for (const outcome of ["connected", "updated"]) {
-  test(`GitHub ${outcome} keeps its selected detail after consuming callback parameters`, () => {
-    const { url, notice } = consumeCallback(`github=${outcome}`, "github");
-    assert.equal(url.searchParams.get("item"), "github");
-    assert.equal(url.searchParams.get("github"), null);
-    assert.equal(url.searchParams.get("keep"), "value");
+/** Runs the Apps view's GitHub return effect with what /connect/github kept for the tab. */
+function consumeGitHubReturn(outcome) {
+  let notice;
+  let selected = "notion";
+  const effect = callbacks.find((body) => body.includes("takeGitHubConnectOutcome()"));
+  vm.runInNewContext(`(() => {${effect}\n})()`, {
+    takeGitHubConnectOutcome: () => outcome,
+    setSetupNotice(value) { notice = value; },
+    setSelectedConnectorId(id) { selected = id; },
+  });
+  return { selected, notice };
+}
+
+for (const outcome of ["connected", "updated", "authorized"]) {
+  test(`GitHub ${outcome} selects GitHub and says so`, () => {
+    const { selected, notice } = consumeGitHubReturn(outcome);
+    assert.equal(selected, "github");
     assert.equal(notice.tone, "success");
   });
 }
+
+test("no GitHub return leaves the Apps view as it was", () => {
+  const { selected, notice } = consumeGitHubReturn(undefined);
+  assert.equal(selected, "notion");
+  assert.equal(notice, undefined);
+});

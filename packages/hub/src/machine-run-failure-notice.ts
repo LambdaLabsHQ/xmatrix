@@ -1,7 +1,7 @@
-import { publicMachineStartupFailure, sha256Hex } from "@xmatrix/protocol";
+import { sha256Hex, type RepositoryBaseline } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
 import { humanizeMachineRunFailureDetail, machineStopFailureCode } from "./machine-run-failure";
-import { XMATRIX_MANAGEMENT_AVATAR_URL, XMATRIX_MANAGEMENT_LABEL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import type { Env } from "./types";
 
 export interface MachineRunFailureNotice {
@@ -22,8 +22,8 @@ function onMachine(input: { machineName?: string }): string {
 function systemNoticeAuthor(input: { ownerUserId: string; ownerEmail: string }) {
   return { principal: { kind: "user", id: input.ownerUserId },
     senderSnapshot: { identityId: `user:${input.ownerUserId}`, kind: "user", userId: input.ownerUserId,
-      email: input.ownerEmail, label: XMATRIX_MANAGEMENT_LABEL, name: XMATRIX_MANAGEMENT_LABEL,
-      avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL } };
+      email: input.ownerEmail, label: XMATRIX_SYSTEM_LABEL, name: XMATRIX_SYSTEM_LABEL,
+      avatarUrl: XMATRIX_SYSTEM_AVATAR_URL } };
 }
 
 /** Stable per-Run key: a replay retries the append, never adds another notice. */
@@ -39,8 +39,7 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
     messageKind: "xmatrix.system.runtime-failure", ...systemNoticeAuthor(input),
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
       source: "machine_run_failure", runId: input.runId, machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
-      failureCode: humanized.code, failureDetail: publicMachineStartupFailure(detail)
-        ? humanized.summary : detail.slice(0, 1_000),
+      failureCode: humanized.code, failureDetail: humanized.summary,
       ...(input.phase ? { statusPhase: input.phase } : {}) } },
   };
 }
@@ -83,4 +82,27 @@ export async function machineStopResultNoticeCommand(input: MachineStopResultNot
 
 export async function publishMachineStopResultNotice(env: Env, input: MachineStopResultNotice): Promise<void> {
   await appendChannelMessage(env, input.channelId, await machineStopResultNoticeCommand(input));
+}
+
+/** Once per checkout/base in this Channel, including report replays and later
+ * reborns. Only immutable base facts enter the command; remote tips change. */
+export async function repositoryBaselineNoticeCommand(input: {
+  channelId: string; ownerUserId: string; ownerEmail: string; baseline: RepositoryBaseline;
+}) {
+  if (input.baseline.relationship !== "diverged" || !input.baseline.noticeKey || !input.baseline.remote) {
+    throw new TypeError("A repository continuity notice requires proven divergence");
+  }
+  const digest = await sha256Hex(`${input.channelId}\0${input.baseline.noticeKey}`);
+  return {
+    commandId: `repository-baseline-notice:${digest}`, messageId: `system:repository-baseline:${digest}`,
+    channelId: input.channelId, ...systemNoticeAuthor(input), messageKind: "xmatrix.system.repository-continuity",
+    body: `This continued task's recorded base ${input.baseline.baseRef} @ ${input.baseline.baseOid} is no longer an ancestor of the confirmed remote default branch. The checkout and uncommitted work have been preserved. Before publishing, check the current remote history and avoid reintroducing removed commits.`,
+    residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
+      source: "repository_baseline", noticeKey: input.baseline.noticeKey,
+      baseRef: input.baseline.baseRef, baseOid: input.baseline.baseOid } },
+  };
+}
+
+export async function publishRepositoryBaselineNotice(env: Env, input: Parameters<typeof repositoryBaselineNoticeCommand>[0]): Promise<void> {
+  await appendChannelMessage(env, input.channelId, await repositoryBaselineNoticeCommand(input));
 }

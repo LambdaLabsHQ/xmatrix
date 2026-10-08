@@ -6,7 +6,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type StatusTagIcon } from "@xmatrix/protocol";
+import { channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type StatusTagIcon } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -195,6 +195,7 @@ import type {
   SerializedChannel,
   SerializedSpace,
 } from "@xmatrix/protocol";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 // Recovered monofile top-level declarations missing from split modules
 // (inMemoryRelayClientProfileId lives in workspace-shell-helpers.tsx)
@@ -346,6 +347,8 @@ async function appendChannelMessageWithAttachments(input: {
   replyToMessageId?: string;
   appMentions: ReturnType<typeof parseAppMentions>;
   invocationSelections?: AgentInvocationSelections;
+  /** Jev's reading of each summon while the author typed this exact body. */
+  summonIntents?: DraftSummonIntent[];
   deadlineMs?: number;
 }): Promise<{
   message?: unknown;
@@ -370,6 +373,7 @@ async function appendChannelMessageWithAttachments(input: {
     replyToMessageId: input.replyToMessageId,
     appMentions: input.appMentions.length > 0 ? input.appMentions : undefined,
     invocationSelections: input.invocationSelections,
+    summonIntents: input.summonIntents?.length ? input.summonIntents : undefined,
     attachments: attachmentBindings.length > 0 ? attachmentBindings : undefined,
   });
   // The deadline, retry bounding and outcome classification live in
@@ -380,7 +384,7 @@ async function appendChannelMessageWithAttachments(input: {
     deadlineMs: input.deadlineMs,
     withRetry: (attempt, options) => runIdempotentMutationFetchWithRetry(attempt, options),
     send: (signal) =>
-      fetch(WEB_PROXY_ROUTES.channel_messages(input.channel.id), {
+      xmatrixRawResponse(WEB_PROXY_ROUTES.channel_messages(input.channel.id), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${input.token}`,
@@ -757,10 +761,9 @@ export function buildTimeline(
   const presenceByMember = new Map<string, ChannelMemberPresence>();
   const presenceByEmail = new Map<string, ChannelMemberPresence>();
   const presenceByLabel = new Map<string, ChannelMemberPresence>();
-  // A management delegate signs as "xMatrix" under identity `xmatrix:management`,
-  // while its live Instance sits under the delegate Profile's member entry, whose
-  // label is the Profile's own name. The instance id is the one key both sides
-  // share, so an agent sender resolves through it before any name lookup.
+  // An agent sender's identity need not match the member entry its live Instance
+  // sits under; the instance id is the one key both sides share, so an agent
+  // sender resolves through it before any name lookup.
   const presenceByInstanceId = new Map<string, ChannelMemberPresence>();
 
   if (channel) {
@@ -1523,9 +1526,7 @@ export function buildAgentWorkItems(
     const agentLabel = presence.label || member;
     for (const instance of presence.instances || []) {
       if (!isChannelResidentPresence(instance)) continue;
-      const reservedSystemAgent = isXMatrixDelegateInstance(instance);
-      const instanceAgentLabel = reservedSystemAgent ? "xMatrix" : agentLabel;
-      const avatarUrl = reservedSystemAgent ? XMATRIX_SYSTEM_AVATAR_URL : presence.avatarUrl;
+      const avatarUrl = presence.avatarUrl;
       const target: AgentTraceTarget = {
         id: member,
         instanceId: instance.id,
@@ -1534,7 +1535,7 @@ export function buildAgentWorkItems(
         instanceScoped: true,
         channelId: channel.id,
         connectedAt: instance.connectedAt,
-        name: reservedSystemAgent ? "xMatrix" : agentInstanceDisplayName(instance),
+        name: agentInstanceDisplayName(instance),
         status: instance.status,
         avatarUrl,
         activity: presenceStatusLabel(instance),
@@ -1550,10 +1551,10 @@ export function buildAgentWorkItems(
         instance,
         sortIndex: items.length,
         label: instance.label || instance.id,
-        agentLabel: instanceAgentLabel,
+        agentLabel,
         status: instance.status,
         avatarUrl,
-        avatarKind: reservedSystemAgent ? "system" : "agent",
+        avatarKind: "agent",
         activity: instance.activity || presence.activity,
         intent: instance.intent || presence.intent,
         files: instance.files?.length ? instance.files : presence.files,
@@ -1914,7 +1915,7 @@ export function channelOnlineAgentAvatarItems(channel: SerializedChannel | null)
 
     const instances = presence.instances || [];
     const onlineInstances = instances.filter((instance) =>
-      isChannelResidentPresence(instance) && !isXMatrixDelegateInstance(instance)
+      isChannelResidentPresence(instance)
     );
     onlineInstances.forEach((instance, instanceIndex) => {
       items.push({
@@ -1928,23 +1929,6 @@ export function channelOnlineAgentAvatarItems(channel: SerializedChannel | null)
   });
 
   return items.sort(compareChannelAgentAvatarBirthOrder);
-}
-
-export function isXMatrixDelegateInstance(instance: SerializedAgentInstance): boolean {
-  return /^xmatrix(?::[1-9]\d*)?$/iu.test(instance.label?.trim() || "");
-}
-
-export function channelXMatrixDelegateInstance(
-  channel: SerializedChannel | null
-): SerializedAgentInstance | null {
-  if (!channel) return null;
-  for (const member of channelMembersByPresence(channel)) {
-    const presence = memberPresence(channel, member);
-    if (presence.kind !== "agent") continue;
-    const instance = (presence.instances || []).find(isXMatrixDelegateInstance);
-    if (instance) return instance;
-  }
-  return null;
 }
 
 /**

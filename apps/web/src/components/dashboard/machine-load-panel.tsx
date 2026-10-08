@@ -5,7 +5,8 @@ import { machineResourceObservation } from "@xmatrix/protocol";
 import { statusInkClass } from "@/components/ui/status-tone";
 import { cn } from "@/lib/utils";
 
-import { machineGlanceReadings, machineLoadReadings, meterTone, type MachineGlanceReading } from "./machine-load";
+import { MachineLoadHistoryChart } from "./machine-load-history-chart";
+import { machineGlanceReadings, machineLoadReadings, meterTone } from "./machine-load";
 import type { MachineSummary } from "./workspace-shell-helpers";
 
 /** One measured share, shown as a labelled value over a bar. */
@@ -20,16 +21,23 @@ export type MeterReading = {
   high: boolean;
 };
 
-/** Live load of an online Machine; an offline Machine has no current load to show. */
-export function MachineLoadPanel({ machine, now }: { machine: MachineSummary; now: number }) {
-  if (machine.status !== "online" || !machine.daemon) return null;
-  const resources = machineResourceObservation(machine.daemon.metadata?.machineResources, now);
+/** Live load of an online Machine, and for its owner how that load changed;
+ * an offline Machine has no current load but keeps its history. */
+export function MachineLoadPanel({ machine, now, token }: { machine: MachineSummary; now: number; token?: string | null }) {
+  const online = machine.status === "online" && machine.daemon;
+  const history = token && machine.machineId
+    ? <MachineLoadHistoryChart key={machine.machineId} machineId={machine.machineId} token={token} /> : null;
+  if (!online) return history;
+  const resources = machineResourceObservation(machine.daemon!.metadata?.machineResources, now);
   const readings = machineLoadReadings(resources);
   return (
-    <div className="mt-4 border-t border-border/70 pt-3">
-      <MeterReadingList label="Machine load" readings={readings}
-        empty="No recent load sample from this daemon." />
-    </div>
+    <>
+      <div className="mt-4 border-t border-border/70 pt-3">
+        <MeterReadingList label="Machine load" readings={readings}
+          empty="No recent load sample from this daemon." />
+      </div>
+      {history}
+    </>
   );
 }
 
@@ -41,13 +49,16 @@ export function MachineLoadGlance({ machine, now }: { machine: MachineSummary; n
 }
 
 /** The glance bars themselves; the Machine tag's hover card shows the same ones. */
-export function MachineLoadGlanceBars({ glance }: { glance: readonly MachineGlanceReading[] }) {
+export function MachineLoadGlanceBars({ glance, label, testId = "machine-load-glance" }: {
+  glance: readonly { key: string; label: string; percent: number; detail?: string }[];
+  label?: string; testId?: string;
+}) {
   if (!glance.length) return null;
   return (
-    <span role="img" className="app-machine-load-glance" data-testid="machine-load-glance"
-      aria-label={glance.map((reading) => `${reading.label} ${reading.percent}%`).join(", ")}>
+    <span role="img" className="app-machine-load-glance" data-testid={testId}
+      aria-label={label ?? glance.map((reading) => `${reading.label} ${reading.percent}%`).join(", ")}>
       {glance.map((reading) => (
-        <span key={reading.key} className="app-machine-load-glance-item" aria-hidden="true">
+        <span key={reading.key} className="app-machine-load-glance-item" title={reading.detail} aria-hidden="true">
           <span className="app-machine-load-glance-label">
             <span>{reading.label}</span>
             <span className="app-machine-load-glance-value font-semibold tabular-nums">{reading.percent}%</span>

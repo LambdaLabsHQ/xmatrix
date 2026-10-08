@@ -41,9 +41,9 @@ test("an owner opens the project, names its governance page, and sees what parti
   await page.getByTestId("pages-view").getByRole("button", { name: "Share" }).click();
   await fixtureJson(page, "page-tree-rules", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u,
     { pages: [{ ...summary, governance: true }] });
-  await page.getByLabel("Only owners and admins edit this page").click();
+  await page.getByLabel("Space rules: only owners and admins edit this page").click();
   await expect.poll(() => fixtureRequestBodies(page, "governance-set-page")).toEqual([{ governancePageId: "p-rules" }]);
-  await expect(page.getByLabel("Only owners and admins edit this page")).toBeChecked();
+  await expect(page.getByLabel("Space rules: only owners and admins edit this page")).toBeChecked();
 });
 
 test("a person joins an open project as a participant, once their GitHub account is linked", async ({ page }) => {

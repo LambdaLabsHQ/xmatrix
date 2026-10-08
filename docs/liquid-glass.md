@@ -79,6 +79,15 @@ outline styling so the backdrop filter never stacks.
 
 ## Semantic material components
 
+Public navigation reveals a glass surface behind the logo as the page scrolls
+on desktop, tablet, and phone. It shares the wood navigation bar's reveal value,
+stays transparent at the top, and keeps the logo outside the wood bar.
+
+The mobile Channel details overlay puts its pinned navigation header and content
+sections on the same `WoodPanel` cards: 16px corners and side gutters, with a
+16px paper gap below the header. The header sits below the top safe area and
+keeps a 44px back target while the sections scroll independently.
+
 On iOS, the system Dock's visible glass capsule stays horizontally centered,
 including when UIKit limits its width or relayouts its platter. The native
 bridge reports the capsule's measured right inset as `--app-native-dock-inset`;

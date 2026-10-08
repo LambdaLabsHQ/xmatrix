@@ -380,10 +380,10 @@ export class PostgresAgentRegistrationRepository {
     // The quota is the observation a launch reads for this registration's pool,
     // while it is current.
     const labels = await this.database.transaction({ requestId: input.requestId, operation: "registration.machine-labels" },
-      tx => tx.query({ name: "registration_catalog_machine_labels_v9", text: `SELECT
+      tx => tx.query({ name: "registration_catalog_machine_labels_v10", text: `SELECT
         requested.owner,requested.machine,requested.harness,machine.name,
         e.declaration_json,daemon.online,daemon.last_seen_at,daemon.resources,daemon.platform,
-        quota.remaining,quota.observed_at,quota.expires_at,quota.windows_json,quota.account_json
+        quota.source,quota.remaining,quota.observed_at,quota.expires_at,quota.windows_json,quota.account_json
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN control.agent_registration_environments e ON e.owner_user_id=requested.owner
           AND e.machine_id=requested.machine AND e.harness=requested.harness

@@ -2,8 +2,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
+const { XMatrixApiError } = require("../../lib/query/api-client.ts");
 const {
-  isRetriableWorkspaceFetchStatus,
+  workspaceResponseIsTransient,
   runIdempotentMutationFetchWithRetry,
   runWorkspaceFetchWithRetry,
   workspaceResponseDefersRetry,
@@ -23,13 +24,33 @@ function countedStatusResponse(status) {
   };
 }
 
-test("retriable status classification matches transient failures only", () => {
-  for (const status of [408, 429, 500, 502, 503, 504]) {
-    assert.equal(isRetriableWorkspaceFetchStatus(status), true, `status ${status} should retry`);
+/** What the transport throws when a request got no answer at all. */
+const transportFailure = () => new XMatrixApiError({ message: "Failed to fetch", status: 0, retryable: true });
+
+test("retriable status classification matches transient failures only", async () => {
+  for (const status of [408, 429, 502, 503, 504]) {
+    assert.equal(await workspaceResponseIsTransient({ ok: false, status }), true, `status ${status} should retry`);
   }
-  for (const status of [200, 301, 400, 401, 403, 404, 413]) {
-    assert.equal(isRetriableWorkspaceFetchStatus(status), false, `status ${status} should not retry`);
+  for (const status of [400, 401, 403, 404, 413, 500]) {
+    assert.equal(await workspaceResponseIsTransient({ ok: false, status }), false, `status ${status} should not retry`);
   }
+});
+
+test("the Hub's own label decides whether its 5xx is transient", async () => {
+  const hub = (status, body) => new Response(JSON.stringify(body), { status });
+  assert.equal(await workspaceResponseIsTransient(hub(500, { error: "x", code: "internal_error", retryable: false })), false);
+  assert.equal(await workspaceResponseIsTransient(hub(503, { error: "x", code: "postgres_unavailable", retryable: true })), true);
+  assert.equal(await workspaceResponseIsTransient(hub(503, { error: "x", code: "page_session_unavailable", retryable: false })), false);
+  assert.equal(await workspaceResponseIsTransient(new Response("<html>Bad gateway</html>", { status: 502 })), true);
+});
+
+test("a programming error is not retried", async () => {
+  let attempts = 0;
+  await assert.rejects(runWorkspaceFetchWithRetry(async () => {
+    attempts += 1;
+    throw new TypeError("undefined is not a function");
+  }, { sleep: noSleep }), /not a function/);
+  assert.equal(attempts, 1);
 });
 
 test("retries transient 5xx then succeeds", async () => {
@@ -106,7 +127,7 @@ test("retries a network throw then succeeds", async () => {
   const res = await runWorkspaceFetchWithRetry(
     async () => {
       attempts += 1;
-      if (attempts < 2) throw new TypeError("Failed to fetch");
+      if (attempts < 2) throw transportFailure();
       return { ok: true, status: 200 };
     },
     { sleep: noSleep }
@@ -128,7 +149,7 @@ test("rethrows a persistent network error after exhausting attempts", async () =
     runWorkspaceFetchWithRetry(
       async () => {
         attempts += 1;
-        throw new TypeError("Failed to fetch");
+        throw transportFailure();
       },
       { sleep: noSleep }
     ),
@@ -144,7 +165,7 @@ test("idempotent mutations retry an ambiguous network failure with the same oper
     async () => {
       attempts += 1;
       operationIds.push("client-message-1");
-      if (attempts === 1) throw new TypeError("Failed to fetch");
+      if (attempts === 1) throw transportFailure();
       return { ok: true, status: 200 };
     },
     { sleep: noSleep }
@@ -241,4 +262,15 @@ test("each catalog attempt is bounded so a dead keep-alive cannot hold the in-fl
   assert.ok(CHANNEL_CATALOG_FETCH_TOTAL_TIMEOUT_MS < WORKSPACE_FETCH_ATTEMPT_TIMEOUT_MS * 2);
   const signal = workspaceAttemptSignal();
   assert.equal(signal.aborted, false);
+});
+
+test("an attempt that hit its own deadline is retried; a caller abort is not", async () => {
+  let attempts = 0;
+  const res = await runWorkspaceFetchWithRetry(async () => {
+    attempts += 1;
+    if (attempts === 1) throw new DOMException("attempt deadline", "TimeoutError");
+    return { ok: true, status: 200 };
+  }, { sleep: noSleep });
+  assert.equal(res.ok, true);
+  assert.equal(attempts, 2);
 });

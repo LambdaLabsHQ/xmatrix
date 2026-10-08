@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { declinedIntent, draftSummons, toggleLaunchForce, readingIntentUntil, INTENT_READING_WINDOW_MS } = require("./summon-intent.ts");
+const { declinedIntent, draftSummonRanges, forceDraftSummon, draftSummonReadingsForDisplay, readingIntentUntil, INTENT_READING_WINDOW_MS } = require("./summon-intent.ts");
 const { summonView, summonIntentNote } = require("./mention-invocation-state.ts");
 
 test("only the three intent refusals read as a declined summon", () => {
@@ -12,22 +12,21 @@ test("only the three intent refusals read as a declined summon", () => {
   assert.equal(declinedIntent("registration_not_found"), undefined);
 });
 
-test("the Force toggle adds and removes exactly launch:force on its own summon", () => {
-  const draft = "@claude repo:owner/repo fix it, then ask @codex";
-  const [first, second] = draftSummons(draft);
-  assert.equal(first.forced, false);
-  const forced = toggleLaunchForce(draft, first.mention);
-  assert.equal(forced.draft, "@claude repo:owner/repo launch:force fix it, then ask @codex");
-  assert.equal(forced.draft.slice(0, forced.caret), "@claude repo:owner/repo launch:force");
-  const [again] = draftSummons(forced.draft);
-  assert.equal(again.forced, true);
-  assert.equal(toggleLaunchForce(forced.draft, again.mention).draft, draft);
-  assert.equal(toggleLaunchForce(draft, second.mention).draft, `${draft} launch:force`);
+test("draft preview ranges cover conditions and skip force, code and quotes", () => {
+  const draft = "@claude repo:owner/repo fix it, then @codex launch:force check";
+  const ranges = draftSummonRanges(draft);
+  assert.deepEqual(ranges, [{ start: 0, end: 23 }]);
+  assert.equal(draft.slice(ranges[0].start, ranges[0].end), "@claude repo:owner/repo");
+  assert.deepEqual(draftSummonRanges("write `@claude repo:a/b` to summon"), []);
+  assert.deepEqual(draftSummonRanges("> @claude fix it"), []);
 });
 
-test("a summon written as code or a quote is not offered for intent", () => {
-  assert.deepEqual(draftSummons("write `@claude repo:a/b` to summon"), []);
-  assert.deepEqual(draftSummons("> @claude fix it"), []);
+test("picked Agent previews include its following conditions and retain duplicate offsets", () => {
+  const body = "@Review repo:a/b fix it; @Review was the name";
+  const at = body.lastIndexOf("@Review");
+  const ranges = draftSummonRanges(body, [{ start: 0, end: 7, text: "@Review" },
+    { start: at, end: at + 7, text: "@Review" }]);
+  assert.deepEqual(ranges, [{ start: 0, end: 16 }, { start: at, end: at + 7 }]);
 });
 
 test("the reading shimmer is bounded by the reading window and ignores bad clocks", () => {
@@ -53,12 +52,42 @@ test("a started summon first says how it was read as a request", () => {
   const jev = summonView({ ...base, routingDecision: { source: "jev", evaluatedAt: at, rows: [],
     parameters: parameters({ source: "jev", selected: "summon", probabilities: { summon: .96, reference: .02, explanation: .01, example: .01 } }) } });
   assert.deepEqual(jev.steps.map(step => step.label), [
-    "Read as a request", "Jev selected an environment", "Machine accepted", "Process started", "Joined channel", "Runtime ready", "Reasoning started",
+    "Read as a request", "Environment selected", "Machine accepted", "Process started", "Joined channel", "Runtime ready", "Reasoning started",
   ]);
-  assert.equal(jev.steps[0].note, "Jev · 96%");
+  assert.equal(jev.steps[0].note, "xMatrix · 96%");
   const forced = summonView({ ...base, routingDecision: { source: "jev", evaluatedAt: at, rows: [], parameters: parameters({ source: "author" }) } });
   assert.equal(forced.steps[0].label, "Started on the author's request");
   assert.equal(forced.steps[0].note, "launch:force");
   assert.equal(summonIntentNote(undefined), undefined);
   assert.equal(summonView(base).steps[0].label, "Environment selected");
+});
+
+
+test("preview offsets project through picked references without conflating duplicate summons", () => {
+  const body = "#Plan @codex asks @codex";
+  const readings = [{ start: 43, end: 49, mention: "@codex", choice: "summon" },
+    { start: 55, end: 61, mention: "@codex", choice: "explanation" }];
+  assert.deepEqual(draftSummonReadingsForDisplay(readings, body), [
+    { ...readings[0], start: 6, end: 12 }, { ...readings[1], start: 18, end: 24 }]);
+  assert.deepEqual(draftSummonReadingsForDisplay(readings, "no mentions"), []);
+});
+
+
+test("Start anyway writes force only after the selected declined summon and refuses stale offsets", () => {
+  const body = "@codex explains @codex repo:a/b";
+  const reading = { start: 16, end: body.length, mention: "@codex repo:a/b", choice: "explanation" };
+  assert.deepEqual(forceDraftSummon(body, reading), { body: `${body} launch:force`, caret: body.length + 13 });
+  assert.equal(forceDraftSummon(`prefix ${body}`, reading), undefined);
+  assert.equal(forceDraftSummon(body, { ...reading, start: -1 }), undefined);
+});
+
+test("Start anyway separates the force condition from punctuation after the address", () => {
+  const { parseAutoLaunchMentions } = require("@xmatrix/protocol");
+  for (const body of ["@claude, was the heading", "@claude; then the report"]) {
+    const next = forceDraftSummon(body, { start: 0, end: 7, mention: "@claude", choice: "explanation" });
+    const [mention] = parseAutoLaunchMentions(next.body);
+    assert.equal(mention.tags.launch, "force");
+    assert.equal(mention.error, undefined);
+    assert.equal(next.body.slice(next.caret), body.slice(7));
+  }
 });

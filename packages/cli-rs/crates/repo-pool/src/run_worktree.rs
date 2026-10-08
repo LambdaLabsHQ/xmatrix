@@ -73,7 +73,7 @@ thread_local! {
 const LOCK_REASON_PREFIX: &str = "xmatrix-run:";
 const BINDINGS_FILE_NAME: &str = ".xmatrix-run-worktree-bindings.json";
 
-const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(20);
 /// Legacy hard wall-clock used by quiet/non-progress git helpers that must
 /// still bound network ops (for example `remote set-head --auto`).
 const GIT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -770,19 +770,15 @@ async fn lock_run_worktree(base_cwd: &Path, path: &Path, key: &str) {
     .await;
 }
 
-/// Pick the freshest sensible base. Local repo summons use the remote default
-/// branch when known and fall back to HEAD; remote repo summons require a
-/// successful progress-streaming fetch of the remote default branch before the
-/// worktree is created. A slow-but-progressing download is not treated as
-/// stuck: only a stall (no progress) or the absolute max wall clock fails.
+/// Pick the freshest sensible base. Remote repo summons ask origin which
+/// branch is its default and require a successful progress-streaming fetch of
+/// exactly that branch before the worktree is created. A slow-but-progressing
+/// download is not treated as stuck: only a stall (no progress) or the
+/// absolute max wall clock fails. Local repo summons use the remote default
+/// branch when known and fall back to HEAD.
 async fn resolve_base_ref(base_cwd: &Path, freshness: BaseRefFreshness) -> Result<String, String> {
     if matches!(freshness, BaseRefFreshness::RequireRemoteFetch) {
-        let _ = git(
-            base_cwd,
-            &["remote", "set-head", "origin", "--auto"],
-            GIT_FETCH_TIMEOUT,
-        )
-        .await;
+        return fetch_confirmed_remote_default(base_cwd).await;
     }
     let remote_branch = match git(
         base_cwd,
@@ -816,40 +812,50 @@ async fn resolve_base_ref(base_cwd: &Path, freshness: BaseRefFreshness) -> Resul
     };
 
     let Some(remote_branch) = remote_branch else {
-        return match freshness {
-            BaseRefFreshness::BestEffort => Ok("HEAD".to_string()),
-            BaseRefFreshness::RequireRemoteFetch => {
-                Err("could not resolve origin default branch for remote repo".to_string())
-            }
-        };
+        return Ok("HEAD".to_string());
     };
     if let Some(branch) = remote_branch.strip_prefix("origin/") {
         let refspec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
-        let fetch_label = format!("origin/{branch}");
-        let fetch_args = [
-            "fetch",
-            "--progress",
-            "--no-tags",
-            "origin",
-            refspec.as_str(),
-        ];
-        let fetch = if matches!(freshness, BaseRefFreshness::RequireRemoteFetch) {
-            // Remote-repo summons must prove the fetch is alive (streamed
-            // progress) rather than sitting dark until a short hard timeout.
-            git_fetch_with_progress(base_cwd, &fetch_args, &fetch_label).await
-        } else {
-            git(
-                base_cwd,
-                &["fetch", "--quiet", "--no-tags", "origin", &refspec],
-                GIT_FETCH_TIMEOUT,
-            )
-            .await
-        };
-        if matches!(freshness, BaseRefFreshness::RequireRemoteFetch) {
-            fetch?;
-        }
+        let _ = git(
+            base_cwd,
+            &["fetch", "--quiet", "--no-tags", "origin", &refspec],
+            GIT_FETCH_TIMEOUT,
+        )
+        .await;
     }
     Ok(remote_branch)
+}
+
+/// A local `origin/HEAD` may name a branch origin has since renamed or
+/// deleted, so origin names the branch here, and the base is the
+/// remote-tracking ref this fetch just updated.
+async fn fetch_confirmed_remote_default(base_cwd: &Path) -> Result<String, String> {
+    let advertised = git(
+        base_cwd,
+        &["ls-remote", "--symref", "origin", "HEAD"],
+        GIT_FETCH_TIMEOUT,
+    )
+    .await?;
+    let (branch, _) = crate::repo_pool::parse_ls_remote_head(&advertised).ok_or_else(|| {
+        "could not resolve origin default branch: origin advertises none with a commit".to_string()
+    })?;
+    let tracking = format!("refs/remotes/origin/{branch}");
+    let refspec = format!("+refs/heads/{branch}:{tracking}");
+    let fetch_label = format!("origin/{branch}");
+    git_fetch_with_progress(
+        base_cwd,
+        &["fetch", "--progress", "--no-tags", "origin", &refspec],
+        &fetch_label,
+    )
+    .await?;
+    // Keep the local default-branch note in step for later local summons.
+    let _ = git(
+        base_cwd,
+        &["symbolic-ref", "refs/remotes/origin/HEAD", &tracking],
+        GIT_LOCAL_TIMEOUT,
+    )
+    .await;
+    Ok(fetch_label)
 }
 
 /// Outcome of one GC sweep, for logging.
@@ -976,7 +982,8 @@ pub async fn gc_run_worktrees(
     .await
 }
 
-/// Reclaim ended trees, and sweep the repo-pool slots (L1) alongside them.
+/// Reclaim ended trees, and sweep the repo-pool slots (L1) alongside them,
+/// then any other linked tree on the machine when the owner allowed it.
 /// The pool sweep is not gated on the watermark: one slot carries a whole
 /// checkout plus its build output, so waiting for the volume to fall under the
 /// warn mark reclaims far too late. Pressure only lowers the warm-cache budget.
@@ -1001,6 +1008,19 @@ pub async fn reclaim_worktree_storage_if_needed(
     repo_pool::log_pool_reclaim_outcome(
         &repo_pool::reclaim_pool_slots(pool_liveness, keep_idle).await,
     );
+    // Trees xMatrix did not create wait the same named-tree floor, and only
+    // once the owner turned their reclaim on.
+    let foreign_min_idle = if under_pressure {
+        PRESSURE_NAMED_TTL.min(named_orphan_min_age())
+    } else {
+        named_orphan_min_age()
+    };
+    if let Some(foreign) =
+        crate::machine_worktrees::reclaim_foreign_worktrees_if_enabled(live_cwds, foreign_min_idle)
+            .await
+    {
+        crate::machine_worktrees::log_foreign_reclaim_outcome(&foreign);
+    }
     outcome
 }
 
@@ -1135,6 +1155,21 @@ fn prune_stale_bindings(root: &Path, apply: bool) -> Result<Vec<String>, String>
 /// `refs/xmatrix/snapshot/<dir>` before removal, so no un-landed work is ever
 /// lost. Any git failure skips the tree conservatively.
 pub async fn reclaim_run_worktree(path: &Path, apply: bool) -> Result<bool, String> {
+    let dir_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .ok_or_else(|| "worktree path has no directory name".to_string())?;
+    reclaim_linked_worktree(path, apply, &dir_name).await
+}
+
+/// [`reclaim_run_worktree`] with the snapshot pinned to
+/// `refs/xmatrix/snapshot/<snapshot_name>`. Trees the daemon did not create
+/// can share a directory name, so they pass a name that cannot collide.
+pub(crate) async fn reclaim_linked_worktree(
+    path: &Path,
+    apply: bool,
+    snapshot_name: &str,
+) -> Result<bool, String> {
     if let Some(reason) = worktree_lock_reason(path).await?
         && !reason.starts_with(LOCK_REASON_PREFIX)
     {
@@ -1178,11 +1213,7 @@ pub async fn reclaim_run_worktree(path: &Path, apply: bool) -> Result<bool, Stri
             )
             .await?;
         }
-        let dir_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .ok_or_else(|| "worktree path has no directory name".to_string())?;
-        let snapshot_ref = format!("refs/xmatrix/snapshot/{dir_name}");
+        let snapshot_ref = format!("refs/xmatrix/snapshot/{snapshot_name}");
         git(
             path,
             &["update-ref", &snapshot_ref, "HEAD"],
@@ -1267,7 +1298,7 @@ pub fn log_gc_outcome(outcome: &RunWorktreeGcOutcome) {
     );
 }
 
-async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+pub(crate) async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     command_output("git", args, repo_pool::git_command(cwd, args), timeout).await
 }
 
@@ -1698,83 +1729,7 @@ mod tests {
     use super::*;
     include!("../../core/tests/support/fs_cleanup.rs");
 
-    fn unique_temp_dir(label: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "xmatrix-run-worktree-{label}-{}-{nanos}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn git_available() -> bool {
-        std::process::Command::new("git")
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
-    // When these tests run under a git hook (pre-commit CI), git exports
-    // GIT_DIR/GIT_INDEX_FILE/GIT_WORK_TREE into the environment. Those
-    // override -C/cwd, so a fixture "git commit" would land in the REAL
-    // repository mid-commit. Always scrub them.
-    fn git_command() -> std::process::Command {
-        let mut command = std::process::Command::new("git");
-        command
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_INDEX_FILE")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_OBJECT_DIRECTORY")
-            .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES");
-        command
-    }
-
-    fn run_git(cwd: &Path, args: &[&str]) {
-        let status = git_command()
-            .arg("-C")
-            .arg(cwd)
-            .args(args)
-            // Git exports these variables to hooks. Without clearing them,
-            // fixture commands run by the tracked pre-commit hook mutate the
-            // caller's real worktree instead of the temporary test repo.
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed in {}", cwd.display());
-    }
-
-    fn run_git_no_cwd(args: &[&str]) {
-        let status = git_command().args(args).status().unwrap();
-        assert!(status.success(), "git {args:?} failed");
-    }
-
-    fn init_repo_with_commit(dir: &Path) {
-        run_git(dir, &["init", "--quiet", "--initial-branch=main"]);
-        run_git(dir, &["config", "user.email", "test@example.com"]);
-        run_git(dir, &["config", "user.name", "Test"]);
-        std::fs::write(dir.join("README.md"), "hello").unwrap();
-        run_git(dir, &["add", "."]);
-        run_git(dir, &["commit", "--quiet", "-m", "init"]);
-    }
-
-    fn seed_remote(remote: &Path, seed: &Path) -> String {
-        run_git(
-            remote,
-            &["init", "--bare", "--quiet", "--initial-branch=main"],
-        );
-        init_repo_with_commit(seed);
-        let remote_arg = remote.display().to_string();
-        run_git(seed, &["remote", "add", "origin", &remote_arg]);
-        run_git(seed, &["push", "--quiet", "-u", "origin", "main"]);
-        remote_arg
-    }
+    use crate::test_support::*;
 
     fn update_remote_readme(seed: &Path, contents: &str) {
         std::fs::write(seed.join("README.md"), contents).unwrap();
@@ -1966,19 +1921,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    fn remote_materialization_fixture() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        let remote = unique_temp_dir("remote-bare");
+        let seed = unique_temp_dir("remote-seed");
+        let base = unique_temp_dir("remote-base");
+        let root = unique_temp_dir("remote-root");
+        let remote_arg = seed_remote(&remote, &seed);
+        clone_remote(&remote_arg, &base);
+        (remote, seed, base, root)
+    }
+
     #[tokio::test]
     async fn remote_repo_materialization_fetches_latest_origin_branch() {
         if !git_available() {
             return;
         }
-        let remote = unique_temp_dir("remote-bare");
-        let seed = unique_temp_dir("remote-seed");
-        let base = unique_temp_dir("remote-base");
-        let root = unique_temp_dir("remote-root");
-
-        let remote_arg = seed_remote(&remote, &seed);
-
-        clone_remote(&remote_arg, &base);
+        let (remote, seed, base, root) = remote_materialization_fixture();
 
         update_remote_readme(&seed, "latest\n");
         assert_eq!(
@@ -2004,6 +1962,42 @@ mod tests {
                 .unwrap()
                 .trim_end(),
             "latest"
+        );
+
+        cleanup_test_dirs(&[&root, &base, &seed, &remote]);
+    }
+
+    #[tokio::test]
+    async fn remote_repo_materialization_follows_a_renamed_default_branch() {
+        if !git_available() {
+            return;
+        }
+        let (remote, seed, base, root) = remote_materialization_fixture();
+
+        // Origin renames main to trunk; the checkout still notes origin/HEAD -> origin/main.
+        run_git(&seed, &["checkout", "--quiet", "-b", "trunk"]);
+        std::fs::write(seed.join("README.md"), "trunk\n").unwrap();
+        run_git(&seed, &["commit", "--quiet", "-am", "trunk"]);
+        run_git(&seed, &["push", "--quiet", "origin", "trunk"]);
+        run_git(&remote, &["symbolic-ref", "HEAD", "refs/heads/trunk"]);
+        run_git(&remote, &["update-ref", "-d", "refs/heads/main"]);
+
+        let materialized = materialize_run_worktree_at_with_freshness(
+            &root,
+            &base,
+            "remote-renamed-run",
+            false,
+            BaseRefFreshness::RequireRemoteFetch,
+        )
+        .await
+        .expect("remote materialization should follow origin's default branch");
+
+        assert_eq!(materialized.base_ref, "origin/trunk");
+        assert_eq!(
+            std::fs::read_to_string(materialized.path.join("README.md"))
+                .unwrap()
+                .trim_end(),
+            "trunk"
         );
 
         cleanup_test_dirs(&[&root, &base, &seed, &remote]);

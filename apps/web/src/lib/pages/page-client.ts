@@ -1,13 +1,14 @@
 import {
   DEFAULT_HUB_URL, PAGE_DOCUMENT_FRAGMENT, WEB_PROXY_ROUTES, normalizeHubUrl,
-  type AutomationTrigger, type PageAwareness, type PageClaim, type PageConversation, type PageDocument, type PageLinkAnchor,
-  type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeAgent,
+  type AutomationTrigger, type PageAutomationAnchorChange, type PageAwareness, type PageClaim, type PageConversation, type PageDocument,
+  type PageGitHubFile, type PageLinkAnchor,
+  type PageLink, type PageRecentChange, type PageRevision, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
 
 export type {
   PageAwareness, PageClaim, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
-  PageSummary, PageTreeAgent,
+  PageSummary, PageTreeActivity, PageTreeAgent,
 };
 import * as decoding from "lib0/decoding";
 import { encodePageSync, encodePageAwareness, readPageSyncReply } from "./page-sync-codec";
@@ -15,6 +16,7 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { ReconnectingSocket } from "@/lib/connectivity/reconnecting-socket";
 
 /** How an open project is run (docs/design/open-project-governance.md). */
 export interface SpaceGovernance {
@@ -52,6 +54,10 @@ export const pageApi = {
   markRead: (spaceId: string, pageId: string, token: string, revision: number) =>
     xmatrixApiRequest<{ revision: number }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
       method: "PUT", body: { revision } }),
+  /** A GitHub file the page embeds, read through from GitHub by the Hub (pages-live-document.md §6.5). */
+  githubFile: (spaceId: string, pageId: string, token: string, href: string, signal?: AbortSignal) =>
+    xmatrixApiRequest<PageGitHubFile>({
+      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/github-file?href=${encodeURIComponent(href)}`, token, signal }),
   awareness: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixApiRequest<PageAwareness>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/awareness`, token, signal }),
   claims: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
@@ -88,7 +94,7 @@ export const pageApi = {
       token, signal,
     }),
   agents: (spaceId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ pages: Array<{ pageId: string; agents: PageTreeAgent[] }> }>({
+    xmatrixApiRequest<{ pages: PageTreeActivity[] }>({
       url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
   // A page's Automations (docs/design/pages-live-document.md §6).
   automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
@@ -144,7 +150,9 @@ export interface PagePresenceState {
 
 export type PageSessionNotice =
   | { type: "session"; headRevision: number | null; canEdit: boolean }
-  | { type: "committed"; revision: number; headRevision: number; author?: string }
+  /** The Automations the commit paused because their reference left the page. */
+  | { type: "committed"; revision: number; headRevision: number; author?: string;
+    detachedAutomations?: PageAutomationAnchorChange[] }
   | { type: "suggestion"; revision: number; author: string }
   | { type: "access"; canEdit?: boolean; canRead?: boolean }
   | { type: "claims"; claims: PageClaim[] }
@@ -172,6 +180,16 @@ function hubSocketUrl(socketPath: string): string {
  * kept in sync with the page's session object over a ticketed WebSocket,
  * reconnecting with backoff until closed or refused.
  */
+const PAGE_TICKET_TIMEOUT_MS = 15_000;
+/**
+ * The Hub answers this text frame itself (a WebSocket auto-response), without
+ * waking the page's Durable Object, so a dead socket is found in seconds at no
+ * cost. Only a Hub whose ticket names it is pinged.
+ */
+const PAGE_SESSION_PING = "ping";
+const PAGE_HEARTBEAT_INTERVAL_MS = 25_000;
+const PAGE_HEARTBEAT_TIMEOUT_MS = 10_000;
+
 export class PageLiveSession {
   readonly doc = new Y.Doc();
   /** The page's document (docs/design/pages-live-document.md §4.1), which the editor binds. */
@@ -179,14 +197,15 @@ export class PageLiveSession {
   readonly awareness = new awarenessProtocol.Awareness(this.doc);
   canEdit = false;
   synced = false;
-  private socket: WebSocket | null = null;
-  private closed = false;
-  private attempt = 0;
-  private retry: ReturnType<typeof setTimeout> | undefined;
+  private token: string;
+  /** Sockets whose Hub answers the text heartbeat, from the ticket it issued. */
+  private readonly heartbeatSockets = new WeakSet<WebSocket>();
+  private readonly connection: ReconnectingSocket;
   private readonly listeners = new Set<(notice: PageSessionNotice | { type: "status"; connected: boolean }) => void>();
 
   constructor(private readonly input: { spaceId: string; pageId: string; token: string;
     user: { name: string; color: string } }) {
+    this.token = input.token;
     this.awareness.setLocalStateField("user", { ...input.user, kind: "user" });
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === this) return;
@@ -200,7 +219,45 @@ export class PageLiveSession {
       const changed = [...added, ...updated, ...removed];
       this.send(encodePageAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, changed)));
     });
-    void this.connect();
+    this.connection = new ReconnectingSocket({
+      open: () => this.open(),
+      onOpen: (socket) => {
+        socket.send(encodePageSync(encoder => syncProtocol.writeSyncStep1(encoder, this.doc)));
+        socket.send(encodePageAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID])));
+        this.emit({ type: "status", connected: true });
+      },
+      onMessage: (_socket, event) => {
+        if (event.data instanceof ArrayBuffer) this.receive(new Uint8Array(event.data));
+      },
+      onDown: () => {
+        this.synced = false;
+        awarenessProtocol.removeAwarenessStates(this.awareness,
+          [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID), this);
+        this.emit({ type: "status", connected: false });
+      },
+      onClose: (event) => {
+        // Access revoked (4003) or the page removed (4004): there is nothing to reconnect to.
+        if (event.code !== 4003 && event.code !== 4004) return "reconnect";
+        this.emit({ type: "access", canRead: false });
+        return "stop";
+      },
+      heartbeat: {
+        intervalMs: PAGE_HEARTBEAT_INTERVAL_MS,
+        timeoutMs: PAGE_HEARTBEAT_TIMEOUT_MS,
+        ping: (socket) => socket.send(PAGE_SESSION_PING),
+        supported: (socket) => this.heartbeatSockets.has(socket),
+      },
+      backoff: { baseMs: 500, maxMs: 30_000 },
+    });
+    this.connection.start();
+  }
+
+  /**
+   * A renewed token only matters for the next ticket. The document stays: it
+   * holds edits the Hub may not have yet, and sync sends them on reconnect.
+   */
+  setToken(token: string): void {
+    this.token = token;
   }
 
   on(listener: (notice: PageSessionNotice | { type: "status"; connected: boolean }) => void): () => void {
@@ -213,62 +270,29 @@ export class PageLiveSession {
   }
 
   private send(data: Uint8Array): void {
-    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(data);
+    const socket = this.connection.current;
+    if (socket?.readyState === WebSocket.OPEN) socket.send(data);
   }
 
-  private async connect(): Promise<void> {
-    if (this.closed) return;
-    try {
-      const session = await xmatrixApiRequest<{ protocol: string; socketPath: string; canEdit: boolean }>({
-        url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.input.pageId), token: this.input.token,
-        method: "POST", body: { document: PAGE_DOCUMENT_FRAGMENT },
-      });
-      if (this.closed) return;
-      // A Hub from before pages were documents keeps markdown text; joining it
-      // would show an empty document. Wait for the Hub that serves this editor.
-      if (!session.protocol.startsWith(PAGE_SESSION_PROTOCOL)) {
-        this.emit({ type: "error", code: "page_server_outdated" });
-        this.schedule();
-        return;
-      }
-      this.canEdit = session.canEdit;
-      const socket = new WebSocket(hubSocketUrl(session.socketPath), session.protocol);
-      socket.binaryType = "arraybuffer";
-      this.socket = socket;
-      socket.addEventListener("open", () => {
-        if (this.socket !== socket) return;
-        this.attempt = 0;
-        socket.send(encodePageSync(encoder => syncProtocol.writeSyncStep1(encoder, this.doc)));
-        socket.send(encodePageAwareness(awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID])));
-        this.emit({ type: "status", connected: true });
-      });
-      socket.addEventListener("message", (event) => {
-        if (this.socket !== socket || !(event.data instanceof ArrayBuffer)) return;
-        this.receive(new Uint8Array(event.data));
-      });
-      socket.addEventListener("close", (event) => {
-        if (this.socket !== socket) return;
-        this.socket = null;
-        this.synced = false;
-        awarenessProtocol.removeAwarenessStates(this.awareness,
-          [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID), this);
-        this.emit({ type: "status", connected: false });
-        // Access revoked (4003) or the page removed (4004): there is nothing to reconnect to.
-        if (event.code === 4003 || event.code === 4004) {
-          this.emit({ type: "access", canRead: false });
-          return;
-        }
-        this.schedule();
-      });
-    } catch {
-      this.schedule();
+  private async open(): Promise<WebSocket> {
+    const session = await xmatrixApiRequest<{ protocol: string; socketPath: string; canEdit: boolean;
+      heartbeat?: string }>({
+      url: WEB_PROXY_ROUTES.space_page_live(this.input.spaceId, this.input.pageId), token: this.token,
+      method: "POST", body: { document: PAGE_DOCUMENT_FRAGMENT },
+      // A ticket request stuck on a dead connection must not stop every later attempt.
+      signal: AbortSignal.timeout(PAGE_TICKET_TIMEOUT_MS),
+    });
+    // A Hub from before pages were documents keeps markdown text; joining it
+    // would show an empty document. Wait for the Hub that serves this editor.
+    if (!session.protocol.startsWith(PAGE_SESSION_PROTOCOL)) {
+      this.emit({ type: "error", code: "page_server_outdated" });
+      throw new Error("page_server_outdated");
     }
-  }
-
-  private schedule(): void {
-    if (this.closed) return;
-    const delay = Math.min(30_000, 500 * 2 ** this.attempt++);
-    this.retry = setTimeout(() => void this.connect(), delay);
+    this.canEdit = session.canEdit;
+    const socket = new WebSocket(hubSocketUrl(session.socketPath), session.protocol);
+    socket.binaryType = "arraybuffer";
+    if (session.heartbeat === PAGE_SESSION_PING) this.heartbeatSockets.add(socket);
+    return socket;
   }
 
   private receive(data: Uint8Array): void {
@@ -278,6 +302,9 @@ export class PageLiveSession {
       const { kind, reply } = readPageSyncReply(decoder, this.doc, this);
       if (kind === syncProtocol.messageYjsSyncStep2 && !this.synced) {
         this.synced = true;
+        // Backoff resets once the session really works, not when a socket
+        // opens: a restarting Durable Object accepts and then closes at once.
+        this.connection.markHealthy();
         this.emit({ type: "synced" });
       }
       if (reply) this.send(reply);
@@ -292,11 +319,9 @@ export class PageLiveSession {
   }
 
   destroy(): void {
-    this.closed = true;
-    if (this.retry) clearTimeout(this.retry);
+    // Tell the others this person left while the socket is still up.
     awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], "local");
-    this.socket?.close(1000);
-    this.socket = null;
+    this.connection.stop();
     this.awareness.destroy();
     this.doc.destroy();
   }

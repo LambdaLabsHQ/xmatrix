@@ -24,7 +24,6 @@ const MAX_VISIBLE_LIVE_AGENT_CHANNELS = 200;
 /** Resting Instances shown per Channel, newest first (docs/instance-sleep.md §5). */
 export const MAX_RESTING_INSTANCES_PER_CHANNEL = 12;
 const MAX_RESTING_AGENT_INSTANCES = 2_048; // the query's literal LIMIT
-const XMATRIX_MANAGEMENT_LABEL = "xMatrix";
 
 interface ChannelAgentPresenceRow extends QueryResultRow {
   instance_id: string;
@@ -281,10 +280,6 @@ function addPresenceRow(
     throw new DatabaseContractError("Agent presence ordinal is invalid");
   }
   const runMetadata = row.run_metadata_json ?? {};
-  // The xMatrix persona belongs to one management Run and is stamped on its
-  // Instance label only; the member label stays the registration's name.
-  const managementDelegate = runMetadata.routedAs === "management_assistant_mention";
-  const instanceLabel = managementDelegate ? XMATRIX_MANAGEMENT_LABEL : row.agent_name;
   const label = row.agent_name;
   const avatarUrl = harnessAvatarUrl(row.registration_harness);
   const channelInstanceId = String(ordinal);
@@ -294,7 +289,7 @@ function addPresenceRow(
     id: row.instance_id,
     channelInstanceId,
     channelId: row.channel_id,
-    label: `${instanceLabel}:${channelInstanceId}`,
+    label: `${label}:${channelInstanceId}`,
     connectedAt,
     lastSeenAt,
     status: row.status as SerializedAgentInstance["status"],

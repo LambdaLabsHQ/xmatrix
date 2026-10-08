@@ -10,6 +10,8 @@ export interface ProductAgentKillTarget {
   machineId: string;
   hostId: string;
   executionKey?: string;
+  resumeSessionKey?: string;
+  repoPool?: { repoIdentity: string; repoKeyId: string; slotId: string };
   /** Set when a `/kill all` already fenced this Run in its message append. */
   stopRequestSourceMessageId?: string;
 }
@@ -20,8 +22,14 @@ export interface ProductAgentHandoffExport {
   channelId: string;
 }
 
+export interface ProductAgentHandoffSource {
+  instanceId: string;
+  runId: string;
+}
+
 export interface ProductAgentInterventionPort {
-  listKillTargets(channelId: string): Promise<ProductAgentKillTarget[]>;
+  /** A handoff also stops an exited source's rest, so it cannot wake again. */
+  listKillTargets(channelId: string, handoffSource?: ProductAgentHandoffSource): Promise<ProductAgentKillTarget[]>;
   issueStop(
     target: ProductAgentKillTarget,
     controlId: string,

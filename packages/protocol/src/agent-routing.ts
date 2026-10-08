@@ -178,6 +178,10 @@ const HARNESS_LABEL: Record<string, string> = {
   opencode: "OpenCode", cursor: "Cursor", "cursor-agent": "Cursor", kimi: "Kimi", zcode: "ZCode",
   copilot: "Copilot", gemini: "Gemini", qwen: "Qwen Code", goose: "goose", junie: "Junie",
   vibe: "Mistral Vibe", kiro: "Kiro", hermes: "Hermes", openclaw: "OpenClaw",
+  qoder: "Qoder", codebuddy: "CodeBuddy", omp: "Oh My Pi", auggie: "Auggie", cline: "Cline", kilo: "Kilo",
+  droid: "Droid", devin: "Devin", commandcode: "Command Code", jcode: "jcode", prime: "Prime Agent",
+  trae: "TraeCode", antigravity: "Antigravity", autohand: "Autohand", amp: "Amp", reasonix: "Reasonix",
+  dimcode: "DimCode",
 };
 
 export function boundedRoutingLabel(value: unknown): string | undefined {
@@ -233,16 +237,16 @@ export interface PresentedRoutingDecision {
 }
 
 const ROUTING_FAILURE_TEXT: Record<string, string> = {
-  timeout: "Jev did not answer within the decision budget.",
-  jev_aborted: "Jev did not answer within the decision budget.",
-  jev_invalid_input: "Jev rejected the decision input.",
-  jev_customer_verification_required: "The Jev account requires customer verification.",
-  jev_auth_failed: "Jev authentication failed.",
-  jev_permission_denied: "Jev denied permission for this decision.",
-  jev_rate_limited: "Jev rate-limited the decision.",
-  jev_evaluation_failed: "Jev reported an evaluation failure.",
-  invalid_answer: "Jev returned an answer that did not name a listed environment.",
-  evaluator_unconfigured: "No Jev evaluator is configured on this Hub.",
+  timeout: "xMatrix did not answer within the decision budget.",
+  jev_aborted: "xMatrix did not answer within the decision budget.",
+  jev_invalid_input: "xMatrix rejected the decision input.",
+  jev_customer_verification_required: "The routing model account requires customer verification.",
+  jev_auth_failed: "Routing model authentication failed.",
+  jev_permission_denied: "xMatrix denied permission for this decision.",
+  jev_rate_limited: "xMatrix rate-limited the decision.",
+  jev_evaluation_failed: "xMatrix reported an evaluation failure.",
+  invalid_answer: "xMatrix returned an answer that did not name a listed environment.",
+  evaluator_unconfigured: "No routing model is configured on this Hub.",
   internal_error: "The Hub failed while preparing or reading the decision.",
 };
 
@@ -259,7 +263,7 @@ export function routingDecisionCopy(decision: { source: string; rows?: readonly 
   const rows = visibleRoutingChoiceRows(decision.rows ?? []);
   const selected = rows.find(row => row.selected);
   const rule = decision.source === "jev"
-    ? "Jev chose what suits the work; the matching environment with the most measured headroom runs it. Process startup is confirmed separately in the timeline. Only environments matching the explicit identity constraints are shown."
+    ? "xMatrix chose what suits the work; the matching environment with the most measured headroom runs it. Process startup is confirmed separately in the timeline. Only environments matching the explicit identity constraints are shown."
     : "This snapshot records candidates and constraint checks. Selection and process startup are recorded separately. Only environments matching the explicit identity constraints are shown.";
   if (selected) {
     const quota = selected.remainingQuota !== undefined && !selected.quotaAssumed
@@ -267,14 +271,14 @@ export function routingDecisionCopy(decision: { source: string; rows?: readonly 
       : "Provider quota was not measured.";
     const who = routingChoiceIdentity(selected);
     return { rule, verdict: decision.source === "jev"
-      ? `Jev chose ${who}. ${quota}`
+      ? `xMatrix chose ${who}. ${quota}`
       : `Recorded selection: ${who}. ${quota}` };
   }
   const checked = `${rows.length} environment${rows.length === 1 ? " was" : "s were"} checked.`;
   return { rule, verdict: decision.source === "jev-unavailable"
     ? `The environment selection service failed. No Agent was started. ${routingFailureText(decision.failureCode)} ${checked}`
     : decision.source === "jev-abstained"
-      ? `Jev did not return a usable choice. No Agent was started. ${checked}`
+      ? `xMatrix did not return a usable choice. No Agent was started. ${checked}`
       : `No eligible environment matched this summon. No Agent was started. ${checked}` };
 }
 

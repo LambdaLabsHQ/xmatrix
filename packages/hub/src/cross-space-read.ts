@@ -6,13 +6,14 @@ import {
 } from "@xmatrix/db";
 import { HUB_ROUTES } from "@xmatrix/protocol";
 import type { Context, Hono } from "hono";
+import { postgresControlErrorResponse } from "./postgres-authority-http";
 
 import type { AgentRunPrincipal } from "./auth";
 import { appendChannelMessage } from "./channel-messages";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
-import { XMATRIX_MANAGEMENT_AVATAR_URL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL } from "./xmatrix-system-identity";
 import type { Env } from "./types";
 
 /**
@@ -36,13 +37,6 @@ function runProof(run: AgentRunPrincipal): CrossSpaceRunProof {
     "This Run credential names no Instance; reads outside its Space need an exact Run");
   return { agentId: run.agentId, runId: run.runId, instanceId: run.instanceId,
     executionKey: run.executionKey, channelId: run.channelId, spaceId: run.spaceId };
-}
-
-/** A typed failure from the grant authority, as the route's HTTP answer. */
-export function crossSpaceReadErrorResponse(error: unknown): Response | null {
-  if (!(error instanceof CrossSpaceReadError)) return null;
-  return Response.json({ error: error.message, code: error.code, retryable: error.retryable },
-    { status: error.status, headers: { "cache-control": "private, no-store" } });
 }
 
 /** A read outside the Run's Space, granted: made as `owner`, in `spaceId`. */
@@ -97,7 +91,7 @@ async function appendNotice(env: Env, grant: CrossSpaceReadGrant, ownerEmail: st
     messageKind: CROSS_SPACE_READ_MESSAGE_KIND,
     senderSnapshot: { identityId: `user:${grant.ownerUserId}`, kind: "user", userId: grant.ownerUserId,
       email: ownerEmail, label: "xMatrix access request", name: "xMatrix access request",
-      avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL },
+      avatarUrl: XMATRIX_SYSTEM_AVATAR_URL },
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
       crossSpaceRead: { grantId: grant.id, spaceId: grant.spaceId, ownerUserId: grant.ownerUserId,
         ...(grant.agentName ? { agentName: grant.agentName } : {}) } } },
@@ -106,8 +100,7 @@ async function appendNotice(env: Env, grant: CrossSpaceReadGrant, ownerEmail: st
 }
 
 function failure(c: Context<{ Bindings: Env }>, error: unknown): Response {
-  return crossSpaceReadErrorResponse(error) ??
-    requestErrorResponse(c, error);
+  return requestErrorResponse(c, error);
 }
 
 function publicGrant(grant: CrossSpaceReadGrant): Record<string, unknown> {
@@ -226,7 +219,7 @@ export async function crossSpaceRetryOwner(env: Env, run: AgentRunPrincipal | un
     return await crossSpaceReadOwner(env, run, target) ?? denied;
   } catch (error) {
     if (error instanceof CrossSpaceReadError && error.code === "cross_space_read_grant_required") {
-      return crossSpaceReadErrorResponse(error)!;
+      return postgresControlErrorResponse(error);
     }
     if (error instanceof CrossSpaceReadError && error.status === 404) return denied;
     throw error;

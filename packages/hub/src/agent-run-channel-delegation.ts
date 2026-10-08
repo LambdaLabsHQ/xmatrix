@@ -1,4 +1,5 @@
-import { AgentChannelAccessError, PostgresAgentChannelAccessRepository } from "@xmatrix/db";
+import { ControlError, PostgresAgentChannelAccessRepository } from "@xmatrix/db";
+import { controlErrorResponse } from "./postgres-authority-http";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import type { Env } from "./types";
@@ -11,9 +12,9 @@ import type { Env } from "./types";
  * owner's grants. The Run never widens past its owner, and the owner's grants
  * are never widened by the Run: both must hold.
  */
-export class AgentRunDelegationError extends Error {
-  constructor(readonly code: string, readonly status: 400 | 403 | 404 | 409 | 503, message = code) {
-    super(message);
+export class AgentRunDelegationError extends ControlError {
+  constructor(code: string, status: 400 | 403 | 404 | 409 | 503, message = code) {
+    super(code, status, message, status === 503);
   }
 }
 
@@ -48,13 +49,6 @@ export function agentRunCreatedByMetadata(run: AgentRunPrincipal): Record<string
   };
 }
 
-export function agentRunDelegationFailure(error: unknown): Response | null {
-  if (error instanceof AgentRunDelegationError || error instanceof AgentChannelAccessError) {
-    return Response.json({ error: error.message, code: error.code }, { status: error.status });
-  }
-  return null;
-}
-
 /** The delegation proof as a route answer: null when proven, else the refusal. */
 export async function agentRunDelegationDenied(
   env: Env,
@@ -65,9 +59,7 @@ export async function agentRunDelegationDenied(
     await requireAgentRunChannelDelegation(env, run, channelIds);
     return null;
   } catch (error) {
-    const denied = agentRunDelegationFailure(error);
-    if (denied) return denied;
-    throw error;
+    return controlErrorResponse(error);
   }
 }
 

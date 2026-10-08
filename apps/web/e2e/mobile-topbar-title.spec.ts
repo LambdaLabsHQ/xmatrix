@@ -47,7 +47,7 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
       const paint = await fab.evaluate((button) => {
         const style = getComputedStyle(button);
         const dockStyle = getComputedStyle(document.querySelector(".app-mobile-tab-dock")!);
-        const plankStyle = getComputedStyle(document.querySelector(".app-topbar")!);
+        const plankStyle = getComputedStyle(document.querySelector(".app-topbar .app-mobile-title")!);
         const canvas = document.createElement("canvas");
         const context = canvas.getContext("2d")!;
         context.fillStyle = style.backgroundColor;
@@ -102,7 +102,12 @@ test("channel detail keeps the list bar's height, safe area and shadowless edge"
   const [backBox, titleBox] = await Promise.all([bar.locator(".app-mobile-topbar-back").boundingBox(),
     title.boundingBox()]);
   expect(titleBox!.x - (backBox!.x + backBox!.width)).toBeLessThanOrEqual(8);
-  await expect(title).toHaveCSS("font-size", "20px");
+  await expect(title).toHaveCSS("font-size", "17px");
+  /* One wood sign carries the chevron and the title; the bar itself is paper. */
+  const sign = bar.locator(".app-mobile-back-sign");
+  await expect(sign.locator(".app-mobile-topbar-back")).toBeVisible();
+  await expect(sign.locator(".app-mobile-bar-title")).toBeVisible();
+  expect(await sign.evaluate((node) => getComputedStyle(node).backgroundImage)).toContain("wood.webp");
   expect(await bar.boundingBox()).toEqual(listBox);
   await expect(bar).toHaveCSS("box-shadow", "none");
   const summary = page.locator(".app-mobile-channel-about");

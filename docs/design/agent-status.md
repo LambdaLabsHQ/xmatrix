@@ -132,6 +132,12 @@ symptoms. Completion/cancellation clears them too; cancellation itself is not
 a failure. A failure remains until new work starts. Other Channels and known
 old turn ids cannot modify the current Instance's symptom.
 
+An island showing only a symptom or notice still exposes the Instance's
+hover controls above its avatar, including when provider quota is exhausted.
+The controls use their own containing block for positioning: they are siblings
+of the glass capsule, whose backdrop filter creates a separate containing block
+for the avatar inside it. The wait and intent cards use the same positioning.
+
 When an active Instance has no observable progress for five minutes, the
 existing owned 60-second maintenance timer reports **No runtime progress**.
 The observable latency is five to six minutes. This is an attention signal,
@@ -170,3 +176,10 @@ Older Hubs drop these optional fields, older clients ignore them, and older
 runtimes continue their existing busy/idle behavior. ACP peers without notice
 support continue v1 without requiring a protocol migration. Generic public
 presence contains no trace text or source fingerprints.
+
+The Agents list and detail status name each exhausted provider quota window
+(e.g. `5h limit reached`, `1w limit reached`, or `5h + 1w limit reached`).
+A turn-level usage-limit report retains still-current provider window detail
+while holding the routing pool empty; expired detail is discarded. When the
+provider did not identify a window, the status says the window is unavailable.
+The usage section continues to show the separate window meters and reset times.

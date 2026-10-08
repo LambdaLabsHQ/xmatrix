@@ -49,6 +49,24 @@ async function installInvocationFixture(page: Page, launches: unknown[], body = 
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", { launches, rejections: [rejection], continuations });
 }
 
+test("repository baseline remains in finished invocation details with UTC and unknown evidence", async ({ page }) => {
+  const baseline = { baseRef: "origin/main", baseOid: "a".repeat(40), confirmedAt: "2026-10-08T10:00:00Z",
+    remote: { baseRef: "origin/trunk", baseOid: "b".repeat(40), confirmedAt: "2026-10-08T10:01:00Z" },
+    relationship: "unknown" };
+  const record = { ...codex, state: "connected", activity: { runStatus: "stopped", updatedAt: E2E_NOW,
+    repositoryBaseline: baseline } };
+  await installInvocationFixture(page, [record], codex.sourceMention);
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await page.locator(".app-mention-invocation").click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByText("Details", { exact: true }).click();
+  await expect(dialog).toContainText(`origin/main @ ${baseline.baseOid}`);
+  await expect(dialog).toContainText("Confirmed 2026-10-08T10:00:00Z (UTC).");
+  await expect(dialog).toContainText(`origin/trunk @ ${baseline.remote.baseOid}`);
+  await expect(dialog).toContainText("Could not confirm whether the recorded base belongs to the current remote history.");
+  await expect(dialog).not.toContainText("recorded base is outside");
+});
+
 test("each mention has independent live progress and a keyboard-accessible timeline", async ({ page }) => {
   await page.clock.install({ time: new Date(E2E_NOW) });
   await installInvocationFixture(page, [codex, claude]);
@@ -76,9 +94,14 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await chips.nth(0).hover();
   const detail = page.getByRole("dialog");
   await expect(detail).toContainText("Workstation");
+  await expect(detail).toHaveAttribute("data-material", "liquid-glass-card");
+  await page.clock.runFor(100);
+  await expect(detail).toHaveCSS("backdrop-filter", /blur\(.+url\(.+xm-lens-.+saturate\(/);
+  await expect(detail.locator("[data-material^=liquid-glass]")).toHaveCount(0);
   await expect(detail).toContainText("Connection attempt 7.");
   const startup = detail.getByRole("list", { name: "Invocation progress" });
-  await expect(startup.locator("li", { hasText: "Joined channel" })).toHaveAttribute("data-state", "current");
+  await expect(startup.locator("li[data-state=current]")).toHaveText(/^Connecting$/);
+  await expect(startup).not.toContainText("Joined channel");
   await expect(startup.locator("li", { hasText: "Process started" })).toHaveAttribute("data-state", "done");
   await detail.hover();
   await expect(detail).toBeVisible();
@@ -245,7 +268,7 @@ test("an elsewhere handoff shows the parameters Jev picked on the successor chip
   await expect(auto.locator('[data-jev-arriving="true"]')).toHaveCount(0);
   await expect(auto.locator(".app-mention-invocation").nth(1)).toContainText("Starting");
   await expect(auto.locator(".app-mention-invocation").nth(1)).not.toContainText("Picking");
-  await expect(auto).toHaveAttribute("aria-label", /Jev filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ\/xmatrix\. Routing filled machine:Workstation/);
+  await expect(auto).toHaveAttribute("aria-label", /xMatrix filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ\/xmatrix\. Routing filled machine:Workstation/);
   // A successor the author named is already on the chip, so harness is not drawn again.
   await expect(named.locator('[data-jev="true"]')).toHaveText([
     "model:grok-4", "effort:high", "repo:LambdaLabsHQ/xmatrix",
@@ -562,7 +585,7 @@ test("the summon chip lists every checked environment, including Grok past the o
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const chip = page.locator(".app-mention-invocation").first();
   // The chip carries Jev's choices as tags; the machine it measured is in the panel only.
-  await expect(chip).not.toContainText("Jev chose");
+  await expect(chip).not.toContainText("xMatrix chose");
   // Jev's model and effort land in the mention. The repository was already
   // written, so it is not filled a second time, and a decision opened from
   // history does not replay the arrival animation.
@@ -570,10 +593,10 @@ test("the summon chip lists every checked environment, including Grok past the o
   await expect(filled).toHaveText(["model:model-B", "effort:high"]);
   await expect(chip.locator('[data-routing="true"]')).toHaveText(["machine:星豆号"]);
   await expect(chip.locator('[data-jev-arriving="true"]')).toHaveCount(0);
-  await expect(chip).toHaveAttribute("aria-label", /Jev filled model:model-B, effort:high\. Routing filled machine:星豆号/);
+  await expect(chip).toHaveAttribute("aria-label", /xMatrix filled model:model-B, effort:high\. Routing filled machine:星豆号/);
   await chip.click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog.locator("li", { hasText: "Jev selected an environment" })).toContainText("bobos · Codex · 星豆号 · 8% left · repo LambdaLabsHQ/xmatrix");
+  await expect(dialog.locator("li", { hasText: "Environment selected" })).toContainText("bobos · Codex · 星豆号 · 8% left · repo LambdaLabsHQ/xmatrix");
   await dialog.getByText("Details", { exact: true }).click();
   await expect(dialog).toContainText("Quota unknown");
   await expect(dialog.getByRole("list", { name: "Not eligible" })).toContainText("grok-air");
@@ -655,11 +678,11 @@ for (const denied of [false, true]) test(`the panel ${denied ? 'says Jev decisio
   const dialog = page.getByRole('dialog');
   if (denied) {
     await dialog.getByText('Details', { exact: true }).click();
-    await expect(dialog).toContainText("Jev's decisions are visible only to the summoning user.");
+    await expect(dialog).toContainText("Routing decisions are visible only to the summoning user.");
     return;
   }
   // Jev's answers come first, one row each, then the startup measured after them.
-  const jev = dialog.getByRole('region', { name: "Jev's decision" });
+  const jev = dialog.getByRole('region', { name: "Routing decision" });
   const answer = jev.getByRole('listitem').filter({ hasText: 'Model' }).first();
   await expect(answer).toContainText('gpt-5.5 · high');
   await expect(answer).toContainText('82%');
@@ -702,7 +725,7 @@ test('a historical parameter failure shows its retained cause before raw records
   await page.goto('/app/personal-sspaceperso/channels/general-cchannelgen', { waitUntil: 'domcontentloaded' });
   await page.locator('.app-mention-invocation').first().click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog).toContainText('Cause: Jev\'s "workspace" answer selected an option that was not offered.');
+  await expect(dialog).toContainText('Cause: xMatrix\'s "workspace" answer selected an option that was not offered.');
   await expect(dialog).toContainText('Selected environment: claude · Claude Code · Legend Mac');
   await expect(dialog).not.toContainText('Process startup is confirmed separately');
   await expect(dialog.getByText('Candidate observations')).toBeVisible();
@@ -758,7 +781,7 @@ test("a confirmed stop sits on the command instead of another message", async ({
   await expect(chip).toContainText("@claude:1:stop");
   await expect(chip).toContainText("Stopped");
   await expect(chip).toHaveAttribute("data-tone", "success");
-  await expect(page.getByText("Jev is reading")).toHaveCount(0);
+  await expect(page.getByText("xMatrix is reading")).toHaveCount(0);
   await expect(page.getByText("Stop requested for")).toHaveCount(0);
   await chip.click();
   const dialog = page.getByRole("dialog");
@@ -793,7 +816,7 @@ test("an accepted stop says Stopping until the Workstation confirms it", async (
   const chip = await openStopChip(page, "@claude:1:stop", [stopReceipt("accepted")], "stop-receipts-accepted");
   await expect(chip).toContainText("Stopping");
   await expect(chip.locator(".app-invocation-spinner")).toBeVisible();
-  await expect(page.getByText("Jev is reading")).toHaveCount(0);
+  await expect(page.getByText("xMatrix is reading")).toHaveCount(0);
   await chip.click();
   await expect(page.getByRole("dialog")).toContainText("Waiting for the Workstation to confirm the process has terminated.");
 });
@@ -815,7 +838,7 @@ test("Jev's choices enter the mention one by one, taking no space before they ar
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
     { launches: [], rejections: [], continuations: [] });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  await expect(page.locator(".app-mention-summon-written")).toContainText("Jev is reading");
+  await expect(page.locator(".app-mention-summon-written")).toContainText("xMatrix is reading");
   await page.clock.pauseAt(new Date(Date.parse(E2E_NOW) + 20_000));
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
     { launches: [auto], rejections: [], continuations: [] });
@@ -842,5 +865,5 @@ test("Jev's choices enter the mention one by one, taking no space before they ar
   const status = chip.locator(".app-mention-invocation-status");
   await expect(status).toHaveText(/Connecting$/);
   await expect(status).not.toContainText("Joined channel");
-  await expect(chip).not.toContainText("Jev chose");
+  await expect(chip).not.toContainText("xMatrix chose");
 });

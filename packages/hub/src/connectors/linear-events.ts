@@ -1,5 +1,5 @@
 import type { ConnectorEvent } from "./provider";
-import { createSignedJsonReceiver } from "./hmac";
+import { createSignedJsonReceiver } from "./delivery-proof";
 import { connectorEvent, excerpt, lowerHeader, record, safeUrl, sourceToken, text } from "./event-format";
 
 /*
@@ -11,7 +11,7 @@ import { connectorEvent, excerpt, lowerHeader, record, safeUrl, sourceToken, tex
 const MAX_AGE_MS = 60_000;
 
 export const receiveLinearDelivery = createSignedJsonReceiver({
-  name: "Linear", secretField: "signingSecret", signatureHeader: "linear-signature",
+  name: "Linear", secretField: "signingSecret", proof: { header: "linear-signature" },
 }, (delivery, payload, now) => {
   const sent = Number(payload.webhookTimestamp);
   if (!Number.isSafeInteger(sent) || sent <= 0 || Math.abs(now - sent) > MAX_AGE_MS) {

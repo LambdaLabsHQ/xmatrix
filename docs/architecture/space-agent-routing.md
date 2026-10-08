@@ -118,13 +118,15 @@ offers the real model/effort domain of the chosen harness's environments, includ
 owner-declared versus observed provenance and observation time. Model names and harness names are unrelated values: no code
 compares, filters, aliases or derives one from the other, and no `models` list
 carries a harness name. An empty declared model list allows no model override,
-so its only option is the runtime default; a non-empty list is the complete set
-of allowed models, compared literally. Missing or expired catalogs supply one explicit harness-default
-option with no model or effort override. This is not a model identifier: the
-runtime reports the actual model after startup. An explicit `model:` or
-`effort:` tag still requires a matching declared or observed option. Jev sees
-this default-only state in the parameter choice, and the environment that runs
-the work offers the model/effort and location Jev chose.
+so Jev skips model/effort selection and the launch leaves the runtime defaults
+untouched. No synthetic default option or model tag is emitted. A non-empty
+list is the complete set of allowed models, compared literally; without a
+matching observed catalog entry, the declared models themselves are offered.
+An explicit `model:` or `effort:` tag still requires a matching allowed option.
+The runtime reports the actual model after startup. The environment that runs
+the work offers the model/effort (when chosen) and location Jev chose. When
+environments of one harness mix empty and non-empty model lists, only declared
+models enter the model decision; the selected environment must offer that model.
 
 Runtime model reports must persist both the sanitized `models` catalog and its
 Hub-stamped `modelsObservedAt` on the Instance row. The routing reader consumes
@@ -140,16 +142,20 @@ budget. Only an explicit `models` field replaces that observation. The presence
 writer carries an explicit empty report as `models: []`, clearing both the
 catalog and its observation timestamp without changing hibernation limits.
 
-Jev judges only semantic fit:
+Jev judges only semantic fit, in one call:
 1. Whether the author asks for work.
-2. Which harness suits the work. Each harness is listed once, with its owners'
-   descriptions and its models.
-3. Which model, effort and location to use, among the chosen harness's environments.
+2. Which location the work is about, among every eligible environment's.
+3. How well each harness suits the work, one `score` question per harness on
+   four levels: unsuitable, capable, strong fit, asked for. Each question holds
+   only that harness's owners' descriptions and models, so no harness is first
+   in a list. A harness known only by its name is capable. A call holds at most
+   eight questions; further fit questions go out in parallel calls. With one
+   harness there is nothing to compare and no fit is asked.
 
-Jev never sees machine load, provider quota or allocation counts. A named harness
-with no intent to read skips the first Jev call. Explicit machine, workspace and
-parameter constraints still narrow the candidates first, and a measured exhausted
-quota still excludes an environment.
+Jev never sees machine load, provider quota or allocation counts. Explicit
+machine, workspace and parameter constraints still narrow the candidates first,
+and a measured exhausted quota still excludes an environment. When the chosen
+environment declares models, a second call chooses its model and effort.
 
 An owner can keep a Machine out of automatic assignment (`data.machines.auto_assign`
 false; the Machine page switch or `xmatrix machine auto-assign off`). Its
@@ -160,10 +166,9 @@ one of its registrations. When nothing else remains the launch is refused with
 matches more than one person (`registration_machine_ambiguous`), is a hint on
 the mention's card: the Channel is not told. Running Instances there are unaffected.
 
-Which environment runs the work is measured, not judged
-(`leastLoadedEnvironment`). Among the chosen harness's environments that offer the
-chosen model/effort and location, the one with the most headroom wins. Headroom is
-the scarcest of three shares:
+Harness and machine are chosen together (`jointRanking`), over every environment
+that offers the chosen location. Each has a fit (Jev's score for its harness ÷ 3;
+⅓ when only one harness is eligible) and a headroom, the scarcest of three shares:
 
 - **CPU:** `1 − 1-minute load ÷ logical CPUs` or `1 − CPU usage`, whichever is
   smaller. Windows reports no load average. An overloaded machine goes below zero.
@@ -174,16 +179,28 @@ the scarcest of three shares:
   on credits keeps 1%, eligible but after every account with window headroom.
   Whether to spend credits is the provider account's setting, not xMatrix's.
 
-A machine without a current sample has unknown headroom and ranks after every
-measured one. Ties go to the fewest outstanding Runs on the machine, whose load
-may not show yet, and then to candidate order. Evidence from
-`registration-parameters-v6` on records Jev's harness distribution by harness name
-in place of the earlier per-environment choice.
+A machine without a current sample has unknown headroom, counted as none.
+Environments another one beats on both fit and headroom drop out (the Pareto
+frontier). Of the rest, the one whose weaker side is strongest wins:
+`min(fit, headroom) + 0.001 × (fit + headroom)`, the "balanced" profile, where
+either side satisfies at 1. A weighted sum is not used: it cannot reach every
+point of a non-convex frontier. Ties go to the fewest outstanding Runs on the
+machine, whose load may not show yet, and then to candidate order. When the
+chosen model's quota is exhausted there (Cursor's per-model pools), the
+next-ranked environment of the same harness offering it runs the work.
+
+Evidence from `registration-parameters-v10` records `fit` (each harness's score
+and level distribution) and `placement` (the eight best-ranked environments with
+fit, headroom, frontier membership and utility) instead of a harness choice.
+From `registration-parameters-v6` to `v9`, Jev chose the harness first and
+headroom chose a machine of that harness only, so load could not move work to
+another harness; `harness` records that choice. The design and its research are
+in the Space page "Agent 路由：语义适合度与量化余量联合选择".
 
 A daemon on a host with a built-in battery reports `formFactor: "laptop"` in its
 machine resources. That is a property of the machine, not a choice about the
-work, so Jev's parameter request does not ask it. Headroom picks among every
-environment that offers the chosen model, effort and location, laptop or not.
+work, so Jev's parameter request does not ask it. The joint ranking weighs every
+environment that offers the chosen location, laptop or not.
 An owner who does not want that machine to take automatic work turns its
 auto-assign switch off; naming the machine, or a directory registered on it,
 still selects it. Evidence from `registration-parameters-v7` may record a
@@ -217,6 +234,15 @@ The Web Machines page shows the same parsed sample as the Machine's load and pol
 the owner's daemon list every 30 seconds while it is open, because relay push does
 not carry resource samples. An online Machine without a current sample is shown as
 having no recent sample, never as idle.
+
+The daemon also reports a sample at least once a minute when nothing moved, so the
+Hub keeps the Machine's load history: each sample accepted from the live connection
+becomes one row per minute in `data.machine_resource_samples` (kept 7 days), and the
+Worker's scheduled tick rolls completed hours into `data.machine_resource_hourly`
+(kept 90 days) and prunes both at minute 7 of every hour. Only the Machine's owner,
+signed in as a Human, reads it through `GET /api/machines/:machineId/resource-history`
+(`range` 1h or 24h per minute, 7d, 30d or 90d per hour); the Web Machines page charts
+it below the current load. History is an observation, never routing input.
 The original message is immutable input, not a generated request form.
 
 Record identity selection separately from parameter selection, including the
@@ -639,8 +665,9 @@ distribution, selected-option probability and rubric version. Failed semantic ch
 by the invocation deadline; they do not create a second source of launch authority.
 
 Native one-click installation currently supports Codex, OpenCode, Pi, GitHub
-Copilot CLI, Gemini CLI, Qwen Code, Junie and OpenClaw via a native-owned npm
-package allowlist. It requires installed Node.js/npm, runs as
+Copilot CLI, Gemini CLI, Qwen Code, Junie, OpenClaw, Qoder CLI, CodeBuddy Code,
+Auggie, Cline, Kilo, Factory Droid, Command Code, Autohand Code, Reasonix and
+DimCode via a native-owned npm package allowlist. It requires installed Node.js/npm, runs as
 the current user, has a bounded process-tree lifetime and never enrolls or signs
 in the runtime automatically. Other presets retain their existing manual setup.
 The [official Codex CLI documentation](https://developers.openai.com/codex/cli)

@@ -14,7 +14,7 @@ export async function handleTelegramAppDelivery(env: Env, request: Request, depe
   try {
     const native = await dependencies.native(env);
     if (!native) return Response.json({ error: "Telegram company bot is not configured" }, { status: 503 });
-    verifyTelegramAppRequest(native.secret, request.headers);
+    await verifyTelegramAppRequest(native.secret, request.headers);
     const bytes = await readBoundedRequestBody(request, 32 * 1024);
     if (!bytes) return Response.json({ error: "Telegram update exceeds its bound" }, { status: 413 });
     const event = telegramAppInteraction(new TextDecoder().decode(bytes), native.app.botId);

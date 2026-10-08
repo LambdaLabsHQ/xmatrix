@@ -95,6 +95,7 @@ import type {
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 // Split from workspace-shell-helpers.tsx (size guard)
 
@@ -156,6 +157,7 @@ export type OutgoingMessage = {
   channelId: string;
   body: string;
   invocationSelections?: ComposerSendSnapshot["invocationSelections"];
+  summonIntents?: ComposerSendSnapshot["summonIntents"];
   attachments: ChannelAttachment[];
   replyToMessageId?: string;
   replyTo?: TimelineItem["replyTo"];
@@ -203,34 +205,9 @@ export type ChannelPinLookup = {
 
 export type WorkspaceMessageSearch = (
   query: string,
-  resumeToken?: string
+  resumeToken?: string,
+  filters?: { channelId?: string; from?: string },
 ) => Promise<MessageSearchPage>;
-
-export type WorkspaceMessageSearchState =
-  | { kind: "idle" }
-  | {
-      kind: "loading";
-      query: string;
-      historyRevision: number;
-      reader: WorkspaceMessageSearch;
-    }
-  | {
-      kind: "ready";
-      query: string;
-      page: MessageSearchPage;
-      historyRevision: number;
-      reader: WorkspaceMessageSearch;
-      /** Another page of older messages is still being read. */
-      scanning: boolean;
-      /** The scan stopped before the oldest readable message. */
-      incomplete: boolean;
-    }
-  | {
-      kind: "unavailable";
-      query: string;
-      historyRevision: number;
-      reader: WorkspaceMessageSearch;
-    };
 
 export type ChannelCreateMode = "open" | "closed";
 
@@ -941,7 +918,7 @@ export async function loadAttachmentImageBlob(
   } else if (source.startsWith("data:")) {
     blob = dataUrlToBlob(source);
   } else {
-    blob = await fetch(source, { cache: "no-store" }).then(async (response) => {
+    blob = await xmatrixRawResponse(source, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) {
         throw new Error("Image attachment request failed");
       }
@@ -1173,6 +1150,29 @@ export function centeredToolbarPosition(avatar: Element, toolbarWidth: number) {
   const maxLeft = Math.max(minLeft, boundaryRight - toolbarWidth - gutter);
   const preferredLeft = avatarRect.left + (avatarRect.width - toolbarWidth) / 2;
   return { left: Math.min(Math.max(preferredLeft, minLeft), maxLeft), top: avatarRect.top };
+}
+
+/**
+ * A panel that grows up out of a capsule: its bottom edge is the capsule's,
+ * its left edge the capsule's unless the main viewport's gutter pushes it in,
+ * and it is never narrower than the capsule. Returns where the capsule sits
+ * inside the panel, so the panel can start clipped to exactly that shape.
+ */
+export function morphPanelPosition(capsule: Element, panelWidth: number) {
+  const capsuleRect = capsule.getBoundingClientRect();
+  const boundaryRect = capsule.closest(".app-main")?.getBoundingClientRect();
+  const gutter = 12;
+  const width = Math.max(panelWidth, capsuleRect.width);
+  const minLeft = (boundaryRect?.left ?? 0) + gutter;
+  const maxLeft = Math.max(minLeft, (boundaryRect?.right ?? window.innerWidth) - width - gutter);
+  const left = Math.min(Math.max(capsuleRect.left, minLeft), maxLeft);
+  return {
+    left,
+    bottom: capsuleRect.bottom,
+    capsuleLeft: capsuleRect.left - left,
+    capsuleWidth: capsuleRect.width,
+    capsuleHeight: capsuleRect.height,
+  };
 }
 
 /** Follow viewport and layout changes with one queued animation frame. */

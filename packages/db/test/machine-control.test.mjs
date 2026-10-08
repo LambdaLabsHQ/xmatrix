@@ -212,7 +212,7 @@ test("Machine enroll rejects mismatched migrated audit evidence", async () => {
 });
 
 test("Machine list emits the required public connection timestamps", async () => {
-  const db = database((query) => query.name === "machine_control_list_v6"
+  const db = database((query) => query.name === "machine_control_list_v8"
     ? [{ ...daemon, machine_name: "Studio", active_runs: "2", auto_assign: false },
       { ...daemon, daemon_id: "daemon-2", auto_assign: null }] : []);
 
@@ -228,6 +228,25 @@ test("Machine list emits the required public connection timestamps", async () =>
   assert.equal(value.daemons[0].lastSeenAt, "2026-08-30T00:00:01.000Z");
   assert.equal(value.daemons[0].machineName, "Studio");
   assert.equal(value.daemons[0].activeRuns, 2);
+  assert.equal(Object.hasOwn(value.daemons[0], "unansweredSince"), false);
+});
+
+test("Machine list says since when an online daemon left work unanswered", async () => {
+  const since = new Date("2026-10-07T10:09:00.000Z");
+  const db = database((query) => query.name === "machine_control_list_v8"
+    ? [{ ...daemon, unanswered_since: since },
+      { ...daemon, daemon_id: "daemon-2", status: "offline", unanswered_since: since }] : []);
+  const value = await new PostgresMachineControlRepository(db).list({ requestId: "list-2", ownerUserId: "user-1" });
+  // Connection events alone kept it "online"; unclaimed work is the evidence it is not responding.
+  assert.equal(value.daemons[0].status, "online");
+  assert.equal(value.daemons[0].unansweredSince, "2026-10-07T10:09:00.000Z");
+  // An offline daemon is already shown offline; the field only qualifies "online".
+  assert.equal(Object.hasOwn(value.daemons[1], "unansweredSince"), false);
+  const list = db.calls.find((call) => call.name === "machine_control_list_v8");
+  assert.equal(list.values[3], 60_000);
+  assert.equal(list.values[4], 30 * 60_000);
+  assert.match(list.text, /command_type<>'quota_probe'/u);
+  assert.match(list.text, /expires_at IS NULL OR command\.expires_at>clock_timestamp\(\)/u);
 });
 
 test("Machine claim leases queued PostgreSQL commands with exact epoch evidence", async () => {
@@ -738,6 +757,11 @@ test("Partial snapshots reach only the Channels of the Runs they name, and bind 
   assert.equal(db.calls.some((call) => call.name === "machine_control_snapshot_routes_v3"), false);
   const resources = db.calls.find((call) => call.name === "machine_resource_observation_v2");
   assert.deepEqual(JSON.parse(resources.values[2]), { observedAt, cpuLogicalCount: 8, connectionEpoch: 1 });
+  // The same sample is kept as history for the owner's Machine, only while its connection is live.
+  const history = db.calls.find((call) => call.name === "machine_resource_history_sample_v1");
+  assert.deepEqual(history.values.slice(0, 4), ["user-1", "machine-1", "daemon-1", observedAt]);
+  assert.equal(history.values.at(-1), 1);
+  assert.match(history.text, /status='online'\s+AND connection_epoch=\$13/u);
 });
 
 test("Snapshots persist a valid harness inventory for their connection and drop an invalid one", async () => {

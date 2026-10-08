@@ -1,5 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
-import { PageControlError, PostgresPageRepository, type PagePrincipal } from "@xmatrix/db";
+import { ControlError, PageControlError, PostgresPageRepository, type PagePrincipal } from "@xmatrix/db";
+import { postgresControlErrorResponse } from "./postgres-authority-http";
+import { failureResponse, transientFailure } from "./error-contract";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import {
@@ -17,6 +19,13 @@ import type { Env } from "./types";
  */
 
 export const PAGE_SESSION_SUBPROTOCOL_PREFIX = "xmatrix-page-v2.";
+/**
+ * The editor's heartbeat: answered by the runtime itself (a WebSocket
+ * auto-response) without waking this object. The ticket names it, so an
+ * editor only pings a Hub that answers.
+ */
+export const PAGE_SESSION_HEARTBEAT_PING = "ping";
+const PAGE_SESSION_HEARTBEAT_PONG = "pong";
 const TICKET_TTL_MS = 60_000;
 const COMMIT_IDLE_MS = 5_000;
 const REVALIDATE_MS = 60_000;
@@ -60,6 +69,7 @@ export class RelayPageSession extends DurableObject<Env> {
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
+    state.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_HEARTBEAT_PONG));
     this.session = this.newSession();
   }
 
@@ -80,7 +90,8 @@ export class RelayPageSession extends DurableObject<Env> {
           const result = await pages(this.env).edit({ requestId: crypto.randomUUID(), spaceId: this.need("space"),
             pageId: this.need("page"), principal: pagePrincipalFromSession(principal), ...input });
           await tellPageAutomationChannels(this.env, result.automationChannels);
-          return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision };
+          return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision,
+            detachedAutomations: result.detachedAutomations, attachedAutomations: result.attachedAutomations };
         } catch (error) {
           if (error instanceof PageControlError && error.code === "page_revision_conflict") {
             throw new PageSessionConflict(Number(error.detail?.headRevision ?? 0), String(error.detail?.body ?? ""));
@@ -220,9 +231,9 @@ export class RelayPageSession extends DurableObject<Env> {
       }
       return Response.json({ error: "Not found" }, { status: 404 });
     } catch (error) {
-      if (error instanceof PageControlError) {
-        return Response.json({ error: error.message, code: error.code }, { status: error.status });
-      }
+      if (error instanceof ControlError) return postgresControlErrorResponse(error);
+      const transient = transientFailure(error);
+      if (transient) return failureResponse(transient);
       console.error("page session request failed", error);
       // The Hub's console logs are not always kept, so the editor sees what failed.
       const reason = error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 300) : "unknown error";

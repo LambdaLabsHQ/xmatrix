@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { hmacHex, sha256Hex } from "@xmatrix/protocol";
 import { validateSentryEventIdentity } from "@xmatrix/db";
-import { hmacMatches } from "../src/connectors/hmac.ts";
+import { deliveryProven } from "../src/connectors/delivery-proof.ts";
 import { connectorEvent, parseJsonObject, record } from "../src/connectors/event-format.ts";
 import { sentryInstallationClient, validateSentryInstallationCredentials } from "../src/connectors/sentry-installation.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
@@ -24,7 +24,7 @@ function receiver() {
   const accepted = [], wakes = [];
   let committed = false, failure;
   const imports = { "@xmatrix/protocol": { sha256Hex }, "../index-shared": { readBoundedRequestBody: async request => request.arrayBuffer() },
-    "./sentry-installation": { sentryInstallationClient }, "./hmac": { hmacMatches }, "./event-format": { parseJsonObject },
+    "./sentry-installation": { sentryInstallationClient }, "./delivery-proof": { deliveryProven }, "./event-format": { parseJsonObject },
     "./sentry-event-identity": { sentryEventIdentity }, "./sentry-event-drain": { drainSentryEvents: async () => {
       assert.equal(committed, true, "wake follows receipt commit"); wakes.push(true);
     } }, "./credentials": { connectorSentryEventRepository: () => ({ accept: async input => {

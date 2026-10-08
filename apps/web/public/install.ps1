@@ -139,7 +139,25 @@ function Start-DaemonSetup {
   param([string]$InstallPath)
 
   & $InstallPath whoami *> $null
-  if ($LASTEXITCODE -ne 0 -and -not [Environment]::UserInteractive) {
+  if ($env:XMATRIX_CONNECT) {
+    # A setup command from xMatrix is approved on the page that showed it, so
+    # it needs no console input; a failed approval still installs the daemon.
+    Write-Info "Approve this terminal on the xMatrix page that showed this command"
+    $previousSkip = $env:XMATRIX_SKIP_DAEMON_AUTOSTART
+    $env:XMATRIX_SKIP_DAEMON_AUTOSTART = "1"
+    try {
+      & $InstallPath login --connect $env:XMATRIX_CONNECT
+      if ($LASTEXITCODE -ne 0) {
+        Write-Info "This machine is not connected yet. Resume with: xmatrix login --connect $($env:XMATRIX_CONNECT)"
+      }
+    } finally {
+      if ($null -eq $previousSkip) {
+        Remove-Item Env:XMATRIX_SKIP_DAEMON_AUTOSTART -ErrorAction SilentlyContinue
+      } else {
+        $env:XMATRIX_SKIP_DAEMON_AUTOSTART = $previousSkip
+      }
+    }
+  } elseif ($LASTEXITCODE -ne 0 -and -not [Environment]::UserInteractive) {
     # Same rule as install.sh: a non-interactive install must not block on
     # sign-in. The daemon still installs; the next `xmatrix login` reaches it.
     Write-Info "No interactive session for sign-in; run 'xmatrix login' to finish setup"

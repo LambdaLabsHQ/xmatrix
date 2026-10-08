@@ -1,6 +1,8 @@
 import { Hono, type Context } from "hono";
-import { hmacHex, timingSafeEqual, type AppConnectorCompletionDynamicSource, type UpsertAppConnectorConnectionRequest } from "@xmatrix/protocol";
+import { type AppConnectorCompletionDynamicSource, type UpsertAppConnectorConnectionRequest } from "@xmatrix/protocol";
+import { deliveryProven, GITHUB_SIGNATURE } from "./connectors/delivery-proof";
 import type { Env } from "./types";
+import { ServiceUnavailable } from "./error-contract";
 import { daemonStopTargets, issueDaemonStopsForArchivedChannelTree } from "./product-agent-intervention-authority-adapter";
 import { armSpaceDeletionClock } from "./space-deletion-clock";
 import { checkAppConnection } from "./app-connection-check";
@@ -8,8 +10,8 @@ import { appCommand, findAppConnection, listAppConnections, listAppExecutions, u
 import { schedulerRepository } from "./automations";
 import { changeMembership, createSpaceInvite, deleteSpace, getSpace, listSpaceDeletions, restoreSpace } from "./spaces";
 import { SpaceControlError } from "@xmatrix/db";
-import { buildGitHubAppInstallUrl, githubConnectionInstallationIds, githubUserCanAccessInstallation, resolveAppConnectorCompletionOptions, type AppConnectorConnectionView } from "./app-connectors";
-import { linkedGitHubAccessToken } from "./better-auth";
+import { buildGitHubAppInstallUrl, describeGitHubInstallation, githubConnectionInstallationIds, resolveAppConnectorCompletionOptions, type AppConnectorConnectionView } from "./app-connectors";
+import { githubConnectAuthorizeUrl, githubConnectReturnUrl, githubGrantInstallationIds } from "./github-connect-authorization";
 import { dispatchProductChannelAbout } from "./product-agent-mention-authority-adapter";
 import { dispatchProductGitHubWebhook } from "./product-github-webhook-authority-adapter";
 import { fireGitHubAutomationTriggers } from "./automation-triggers";
@@ -65,7 +67,7 @@ function deploymentPinnedSpace(env: Env, spaceId: string): boolean {
     .some((pinned) => typeof pinned === "string" && pinned.trim() === spaceId);
 }
 
-/** The execution Channel and request id a management launch names; undefined when either is missing or too long. */
+/** The Channel and request id a Channel About refresh names; undefined when either is missing or too long. */
 async function readLaunchRequest(c: Context): Promise<{ channelId: string; requestId: string } | undefined> {
   const body = (await c.req.json().catch(() => ({}))) as { channelId?: unknown; requestId?: unknown };
   const channelId = typeof body.channelId === "string" ? body.channelId.trim() : "";
@@ -77,7 +79,7 @@ async function readLaunchRequest(c: Context): Promise<{ channelId: string; reque
 
 
 export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env }>): void {
-  app.post("/api/spaces/:spaceId/management/channel-about", (c) => jsonErrors(c, async () => {
+  app.post("/api/spaces/:spaceId/channel-about", (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
     const spaceId = c.req.param("spaceId");
     const launch = await readLaunchRequest(c);
@@ -92,7 +94,8 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       requestId,
       actorUserId: authUser.id,
     });
-    if (result.spawned !== 1) {
+    // A session already serving the Channel takes the request as its pending refresh.
+    if (result.spawned !== 1 && result.coalesced !== 1) {
       return c.json({
         error: result.notices[0] || "Could not start Channel About",
         code: "channel_about_not_started",
@@ -152,8 +155,8 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       console.error("Space deletion clock was not armed", {
         spaceId, error: error instanceof Error ? error.message : String(error),
       });
-      return c.json({ error: "Space deletion was recorded but its purge is not scheduled yet; retry",
-        code: "space_deletion_clock_unavailable", retryable: true }, 503);
+      throw new ServiceUnavailable("space_deletion_clock_unavailable",
+        "Space deletion was recorded but its purge is not scheduled yet; retry");
     }
     return c.json({ ok: true, deletion });
   }));
@@ -211,30 +214,37 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     if (!spaceId) {
       return c.json({ error: "spaceId is required" }, 400);
     }
-    const clientSecret = c.env.GITHUB_APP_CLIENT_SECRET?.trim();
-    const appSlug = c.env.GITHUB_APP_SLUG?.trim();
-    if (!clientSecret || !appSlug) {
-      return c.json({ error: "GitHub App install is not configured" }, 503);
+    // Connect needs the App's whole identity; a partial one is a deployment
+    // error named here, never one worked around.
+    const missing = (["GITHUB_APP_ID", "GITHUB_APP_CLIENT_ID", "GITHUB_APP_CLIENT_SECRET",
+      "GITHUB_APP_PRIVATE_KEY", "GITHUB_APP_SLUG"] as const).filter((key) => !c.env[key]?.trim());
+    if (missing.length > 0) {
+      return c.json({ error: `GitHub App is not configured: ${missing.join(", ")} unset` }, 503);
     }
+    const clientSecret = c.env.GITHUB_APP_CLIENT_SECRET!.trim();
+    const appSlug = c.env.GITHUB_APP_SLUG!.trim();
 
     await getSpace(c.env, { spaceId, principal: { kind: "user", id: authUser.id } });
 
-    // mode=manage targets one retained installation; mode=add opens the account picker.
-    // Default: first connect uses install; later Configure manage uses the primary id.
-    let mode: "add" | "manage" | "install" =
-      modeQuery === "add" || modeQuery === "manage" || modeQuery === "install" ? modeQuery : "install";
+    // install/add authorize on GitHub, which shows which installations the
+    // person reaches; mode=account opens GitHub's install page for a new
+    // account; mode=manage opens one linked installation's settings.
+    let mode: "add" | "manage" | "install" | "account" =
+      modeQuery === "add" || modeQuery === "manage" || modeQuery === "install" || modeQuery === "account"
+        ? modeQuery : "install";
     let installationId: string | undefined = requestedInstallationId || undefined;
 
     const listedConnections = await listAppConnections(c.env, { spaceId, actorUserId: authUser.id })
       .catch(() => null);
     if (listedConnections) {
       const connections = listedConnections as Array<
-        { providerId?: string; metadata?: Record<string, unknown> }
+        { providerId?: string; status?: string; metadata?: Record<string, unknown> }
       >;
       const githubConnection = connections.find(
         (connection) => connection.providerId === "github"
       );
-      const retainedIds = githubConnection
+      // A disconnected connection has nothing to manage: Connect installs anew.
+      const retainedIds = githubConnection && githubConnection.status !== "disconnected"
         ? githubConnectionInstallationIds(githubConnection)
         : [];
       if (!modeQuery) {
@@ -248,11 +258,14 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
           installationId = retainedIds[0];
         }
       }
-      if (mode === "add") {
+      if (mode !== "manage") {
         installationId = undefined;
       }
     } else if (mode === "manage" && !installationId) {
       return c.json({ error: "No GitHub installation is available to manage" }, 409);
+    }
+    if (mode === "install" || mode === "add") {
+      return c.json({ url: await githubConnectAuthorizeUrl(c.env, { spaceId, userId: authUser.id }), mode });
     }
 
     const state = await signGitHubAppState(
@@ -267,10 +280,10 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     const install = await buildGitHubAppInstallUrl(c.env, {
       appSlug,
       state,
-      mode,
+      mode: mode === "account" ? "add" : mode,
       installationId,
     });
-    return c.json({ url: install.url, mode: install.mode });
+    return c.json({ url: install.url, mode });
   }));
   app.get("/api/apps/github/setup", async (c) => {
     const clientSecret = c.env.GITHUB_APP_CLIENT_SECRET?.trim();
@@ -282,13 +295,15 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       const installationId = c.req.query("installation_id") || "";
       const setupAction = c.req.query("setup_action") || "";
       const payload = await verifyGitHubAppState(state, clientSecret);
+      // Only an install state: a connect state or a grant is never one.
+      if (payload && "purpose" in payload) return c.redirect(githubConnectReturnUrl(c.env, "failed"), 302);
       const spaceId = typeof payload?.spaceId === "string" ? payload.spaceId : "";
       const userId = typeof payload?.userId === "string" ? payload.userId : "";
       if (!spaceId || !userId) {
-        return c.redirect(`${appOrigin(c.env)}/app?github=failed`, 302);
+        return c.redirect(githubConnectReturnUrl(c.env, "failed"), 302);
       }
-      const appsRedirect = (status: "connected" | "updated" | "failed" | "cancelled" | "pending" | "account_required") =>
-        `${appOrigin(c.env)}/app/${encodeURIComponent(spaceId)}/apps?github=${status}`;
+      const appsRedirect = (status: "failed" | "cancelled" | "pending") =>
+        githubConnectReturnUrl(c.env, status, { spaceId });
       if (setupAction === "request") {
         return c.redirect(appsRedirect("pending"), 302);
       }
@@ -299,65 +314,11 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
         return c.redirect(appsRedirect("failed"), 302);
       }
       // installation_id arrives unsigned and can name anyone's installation:
-      // the admin's own linked GitHub account must be able to reach it.
-      const githubToken = await linkedGitHubAccessToken(c.env, userId);
-      if (!githubToken) return c.redirect(appsRedirect("account_required"), 302);
-      if (!await githubUserCanAccessInstallation(c.env, githubToken, installationId)) {
-        return c.redirect(appsRedirect("failed"), 302);
-      }
-
-      // Merge, never replace: the installation is appended to the stored list under
-      // the connection's row lock, so a second org or "Manage access" keeps the
-      // other installations, default repository and channel/write config. Only set
-      // baseline scopes on the first successful connection.
-      let hasExistingConnection = false;
-      const listedExisting = await listAppConnections(c.env, { spaceId, actorUserId: userId })
-        .catch(() => null);
-      if (listedExisting) {
-        const existingConnections = listedExisting as Array<
-          { providerId?: string; metadata?: Record<string, unknown> }
-        >;
-        const existingGithub = existingConnections.find(
-          (connection) => connection.providerId === "github"
-        );
-        hasExistingConnection = Boolean(
-          existingGithub && githubConnectionInstallationIds(existingGithub).length > 0
-        );
-      }
-
-      const body: UpsertAppConnectorConnectionRequest = {
-        providerId: "github",
-        providerName: "GitHub",
-        status: "configured",
-        authMode: "oauth",
-        secretRefs: [
-          "GITHUB_APP_ID",
-          "GITHUB_APP_CLIENT_ID",
-          "GITHUB_APP_CLIENT_SECRET",
-          "GITHUB_APP_PRIVATE_KEY",
-          "GITHUB_WEBHOOK_SECRET",
-        ],
-      };
-      if (!hasExistingConnection) {
-        body.scopes = ["metadata:read", "issues:read"];
-        body.capabilities = ["github.metadata.read", "github.issues.read"];
-      }
-
-      const connected = await upsertAppConnection(c.env, {
-        // The append is idempotent itself; a fresh command id keeps a repeated
-        // setup (whose body differs once a connection exists) from a replay mismatch.
-        commandId: `github-setup:${crypto.randomUUID()}`,
-        spaceId, providerId: "github", actorUserId: userId,
-        body: { ...body, metadataAppend: { installationIds: installationId } } as unknown as Record<string, unknown>,
-      }).then(() => true, () => false);
-      const status = connected
-        ? setupAction === "update"
-          ? "updated"
-          : "connected"
-        : "failed";
-      return c.redirect(appsRedirect(status), 302);
+      // the person who installed it proves on GitHub that they reach it.
+      return c.redirect(await githubConnectAuthorizeUrl(c.env, { spaceId, userId,
+        installation: { id: installationId, setupAction } }), 302);
     } catch {
-      return c.redirect(`${appOrigin(c.env)}/app?github=failed`, 302);
+      return c.redirect(githubConnectReturnUrl(c.env, "failed"), 302);
     }
   });
   app.post("/api/apps/github/webhook", async (c) => {
@@ -366,9 +327,7 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       return c.json({ error: "GitHub webhook is not configured" }, 503);
     }
     const body = await c.req.text();
-    const expected = `sha256=${await hmacHex("SHA-256", secret, body)}`;
-    const received = c.req.header("x-hub-signature-256") || "";
-    if (!timingSafeEqual(received, expected)) {
+    if (!await deliveryProven(GITHUB_SIGNATURE, c.req.raw.headers, body, secret)) {
       return c.json({ error: "Invalid GitHub webhook signature" }, 401);
     }
     const event = c.req.header("x-github-event") || "unknown";
@@ -413,7 +372,15 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     if (providerId !== "github" && body.status !== "disconnected" && body.status !== "error") {
       return c.json({ error: "Save the app's credentials and check it to connect" }, 400);
     }
-    if (providerId === "github" && body.metadata !== undefined) {
+    if (providerId === "github" && body.status === "disconnected") {
+      // Disconnect forgets the linked installations, so the next Connect
+      // authorizes on GitHub again instead of reviving the old ones by a check.
+      const stored = await findAppConnection(c.env, { spaceId: c.req.param("spaceId"), providerId: "github",
+        actorUserId: authUser.id });
+      const { installationId: _installationId, installationIds: _installationIds, ...kept } =
+        (stored?.metadata ?? {}) as Record<string, unknown>;
+      body.metadata = kept;
+    } else if (providerId === "github" && body.metadata !== undefined) {
       // Configure may send the stored installations back, never different ones.
       const stored = await findAppConnection(c.env, { spaceId: c.req.param("spaceId"), providerId: "github",
         actorUserId: authUser.id });
@@ -429,6 +396,71 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       body: body as unknown as Record<string, unknown>,
     }));
   }));
+  // The GitHub accounts list: the installations this Space links, and, after
+  // Connect authorized on GitHub, the ones that person reaches and may link.
+  app.get("/api/spaces/:spaceId/app-connections/github/installations", (c) => jsonErrors(c, async () => {
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const spaceId = c.req.param("spaceId");
+    const stored = await findAppConnection(c.env, { spaceId, providerId: "github", actorUserId: authUser.id });
+    const linkedIds = stored && stored.status !== "disconnected" ? githubConnectionInstallationIds(stored) : [];
+    const describe = async (installationId: string) =>
+      await describeGitHubInstallation(c.env, installationId).catch(() => undefined);
+    const linked = await Promise.all(linkedIds.map(async (installationId) => await describe(installationId)
+      ?? { installationId, login: `Installation ${installationId}`, type: "Unavailable" }));
+    const granted = await githubGrantInstallationIds(c.env, c.req.query("grant")?.trim(),
+      { spaceId, userId: authUser.id });
+    const available = (await Promise.all((granted ?? [])
+      .filter((installationId) => !linkedIds.includes(installationId))
+      .map(describe))).filter((account) => account !== undefined);
+    return c.json({ linked, available, authorized: granted !== undefined },
+      200, { "cache-control": "private, no-store" });
+  }));
+  app.post("/api/spaces/:spaceId/app-connections/github/installations", (c) => jsonErrors(c, async () => {
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const spaceId = c.req.param("spaceId");
+    const body = await c.req.json().catch(() => ({})) as { installationId?: unknown; grant?: unknown };
+    const installationId = typeof body.installationId === "string" ? body.installationId.trim() : "";
+    if (!/^[1-9][0-9]{0,19}$/u.test(installationId)) {
+      return c.json({ error: "installationId is invalid" }, 400);
+    }
+    // The grant is this person's own authorization on GitHub for this Space:
+    // only an installation it names is linked.
+    const granted = await githubGrantInstallationIds(c.env,
+      typeof body.grant === "string" ? body.grant.trim() : undefined, { spaceId, userId: authUser.id });
+    if (!granted) return c.json({ error: "Connect GitHub again to choose accounts" }, 409);
+    if (!granted.includes(installationId)) {
+      return c.json({ error: "Your GitHub account cannot reach this installation" }, 403);
+    }
+    if (!await linkGitHubInstallation(c.env, spaceId, authUser.id, installationId)) {
+      return c.json({ error: "GitHub installation could not be linked" }, 409);
+    }
+    return c.json({ connection: await findAppConnection(c.env, { spaceId, providerId: "github",
+      actorUserId: authUser.id }) });
+  }));
+  app.delete("/api/spaces/:spaceId/app-connections/github/installations/:installationId", (c) =>
+    jsonErrors(c, async () => {
+      const authUser = await requireAuth(c.req.raw, c.env);
+      const spaceId = c.req.param("spaceId");
+      const installationId = c.req.param("installationId").trim();
+      const stored = await findAppConnection(c.env, { spaceId, providerId: "github", actorUserId: authUser.id });
+      const linkedIds = stored ? githubConnectionInstallationIds(stored) : [];
+      if (!stored || !linkedIds.includes(installationId)) {
+        return c.json({ error: "installationId is not linked to this space" }, 404);
+      }
+      // Unlinking only forgets the installation here; it stays installed on GitHub.
+      const remaining = linkedIds.filter((id) => id !== installationId);
+      const { installationId: _installationId, installationIds: _installationIds, ...kept } =
+        (stored.metadata ?? {}) as Record<string, unknown>;
+      return c.json(await upsertAppConnection(c.env, {
+        commandId: productCommandId(c.req.raw, "unlink-github-installation"),
+        spaceId, providerId: "github", actorUserId: authUser.id,
+        body: {
+          providerId: "github",
+          metadata: remaining.length > 0 ? { ...kept, installationIds: remaining } : kept,
+          ...(remaining.length > 0 ? {} : { status: "disconnected" }),
+        },
+      }));
+    }));
   app.post("/api/spaces/:spaceId/app-connections/:providerId/check", (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
     return c.json(await checkAppConnection(c.env, { spaceId: c.req.param("spaceId"),
@@ -514,4 +546,68 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
     });
     return await emailCreatedInvite(c, created, emails, body);
   }));
+}
+
+/**
+ * Links one installation the user has already proven they can reach. Shared by
+ * the install callback and Configure's Link, so both keep the same contract.
+ */
+export async function linkGitHubInstallation(
+  env: Env, spaceId: string, userId: string, installationId: string
+): Promise<boolean> {
+  // Merge, never replace: the installation is appended to the stored list under
+  // the connection's row lock, so a second org or "Manage access" keeps the
+  // other installations, default repository and channel/write config. Only set
+  // baseline scopes on the first successful connection.
+  let hasExistingConnection = false;
+  let reconnectMetadata: Record<string, unknown> | undefined;
+  const listedExisting = await listAppConnections(env, { spaceId, actorUserId: userId })
+    .catch(() => null);
+  if (listedExisting) {
+    const existingConnections = listedExisting as Array<
+      { providerId?: string; status?: string; scopes?: string[]; metadata?: Record<string, unknown> }
+    >;
+    const existingGithub = existingConnections.find(
+      (connection) => connection.providerId === "github"
+    );
+    // A reconnect after Disconnect keeps the scopes chosen before it.
+    hasExistingConnection = Boolean(
+      existingGithub && (githubConnectionInstallationIds(existingGithub).length > 0 ||
+        (existingGithub.scopes?.length ?? 0) > 0)
+    );
+    if (existingGithub?.status === "disconnected") {
+      // Reconnecting replaces the installations a disconnect left behind
+      // rather than appending to them.
+      const { installationId: _installationId, installationIds: _installationIds, ...kept } =
+        existingGithub.metadata ?? {};
+      reconnectMetadata = kept;
+    }
+  }
+
+  const body: UpsertAppConnectorConnectionRequest = {
+    providerId: "github",
+    providerName: "GitHub",
+    status: "configured",
+    authMode: "oauth",
+    secretRefs: [
+      "GITHUB_APP_ID",
+      "GITHUB_APP_CLIENT_ID",
+      "GITHUB_APP_CLIENT_SECRET",
+      "GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_WEBHOOK_SECRET",
+    ],
+  };
+  if (!hasExistingConnection) {
+    body.scopes = ["metadata:read", "issues:read"];
+    body.capabilities = ["github.metadata.read", "github.issues.read"];
+  }
+  if (reconnectMetadata) body.metadata = reconnectMetadata;
+
+  return upsertAppConnection(env, {
+    // The append is idempotent itself; a fresh command id keeps a repeated
+    // link (whose body differs once a connection exists) from a replay mismatch.
+    commandId: `github-setup:${crypto.randomUUID()}`,
+    spaceId, providerId: "github", actorUserId: userId,
+    body: { ...body, metadataAppend: { installationIds: installationId } } as unknown as Record<string, unknown>,
+  }).then(() => true, () => false);
 }

@@ -1,5 +1,6 @@
 #![deny(warnings)]
 
+mod about_input;
 mod cross_space_access;
 pub use cross_space_access::cmd_access;
 mod invocation_diagnostics;
@@ -15,9 +16,7 @@ use std::sync::{Arc, Mutex};
 use colored::Colorize;
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use xmatrix_cli_args::{
-    ChannelCommand, ChannelVisibilityState, ManagementReadState, SpaceCommand, WorktreeState,
-};
+use xmatrix_cli_args::{ChannelCommand, ChannelVisibilityState, SpaceCommand, WorktreeState};
 use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_marker};
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::hex::sha256_hex;
@@ -49,6 +48,8 @@ struct ChannelHistoryResponse {
     messages: Vec<serde_json::Value>,
     #[serde(default)]
     has_more: bool,
+    #[serde(default)]
+    about_input: Option<serde_json::Value>,
 }
 
 pub async fn cmd_channels(
@@ -1369,21 +1370,70 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
         ChannelCommand::About {
             channel_id,
             summary,
-            summary_file,
             name,
-            name_file,
+            stdin,
             through,
+            expected_revision,
         } => {
-            let summary = about_text_input(
-                "channel About summary",
-                summary,
-                summary_file,
-                "--summary-file",
-            )?
-            .unwrap_or_default();
-            let name = about_text_input("channel name", name, name_file, "--name-file")?;
+            let input = about_input::read(summary, name, stdin).await?;
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_about(hub_url, token, &channel_id, summary, name, through).await
+            cmd_channel_about(
+                hub_url,
+                token,
+                &channel_id,
+                input.summary,
+                input.name,
+                through,
+                expected_revision,
+            )
+            .await
+        }
+        ChannelCommand::MetadataHistory {
+            channel_id,
+            before_revision,
+            revision,
+            input,
+            limit,
+        } => {
+            let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
+            let mut route = format!(
+                "/api/channels/{}/metadata-history?limit={limit}",
+                urlencoding::encode(&channel_id)
+            );
+            if let Some(n) = before_revision {
+                route.push_str(&format!("&beforeRevision={n}"));
+            }
+            if let Some(n) = revision {
+                route.push_str(&format!("&revision={n}"));
+            }
+            if let Some(id) = input {
+                route.push_str(&format!("&inputId={}", urlencoding::encode(&id)));
+            }
+            let response: serde_json::Value =
+                http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).unwrap_or_default()
+            );
+            Ok(())
+        }
+        ChannelCommand::MetadataRestore {
+            channel_id,
+            revision,
+            expected_revision,
+        } => {
+            let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
+            let route = format!(
+                "/api/channels/{}/metadata-restore",
+                urlencoding::encode(&channel_id)
+            );
+            let response: serde_json::Value = http::request_json(&with_route(hub_url, &route), "POST", Some(token),
+                Some(serde_json::json!({ "revision": revision, "expectedRevision": expected_revision }))).await?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).unwrap_or_default()
+            );
+            Ok(())
         }
         ChannelCommand::Move {
             channel_id,
@@ -1450,14 +1500,13 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
             cmd_channel_worktree(hub_url, token, &channel_id, state).await
         }
-        ChannelCommand::ManagementRead { channel_id, state } => {
-            let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_management_read(hub_url, token, &channel_id, state).await
-        }
         ChannelCommand::Send(args) => cmd_send_args(hub_url, token, args).await,
-        ChannelCommand::History { channel_id } => {
+        ChannelCommand::History {
+            channel_id,
+            authoritative,
+        } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_history(hub_url, token, &channel_id).await
+            cmd_channel_history(hub_url, token, &channel_id, authoritative).await
         }
         ChannelCommand::Chat { channel_id, limit } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
@@ -1841,27 +1890,6 @@ async fn cmd_channel_rename(
     Ok(())
 }
 
-/// One About text field from its argument or its UTF-8 file, refused when the
-/// shell's code page already mangled it.
-fn about_text_input(
-    field: &str,
-    argument: Option<String>,
-    file: Option<PathBuf>,
-    file_flag: &str,
-) -> error::Result<Option<String>> {
-    let (text, source) = match (argument, file) {
-        (_, Some(path)) => (text_input::read_text_file(&path)?, TextSource::File),
-        (Some(text), None) => (text, TextSource::Argument),
-        (None, None) => return Ok(None),
-    };
-    let routes = TextRoutes {
-        stdin: false,
-        file_flag: Some(file_flag),
-    };
-    text_input::ensure_text_intact(field, &text, source, routes)?;
-    Ok(Some(text))
-}
-
 /// The channel's own About session saves its summary, and may name a channel
 /// nobody has named yet, through the ordinary channel update.
 async fn cmd_channel_about(
@@ -1871,6 +1899,7 @@ async fn cmd_channel_about(
     summary: String,
     name: Option<String>,
     through: Option<String>,
+    expected_revision: Option<u64>,
 ) -> error::Result<()> {
     #[derive(Deserialize)]
     struct AboutResponse {
@@ -1882,6 +1911,9 @@ async fn cmd_channel_about(
         return Err(CliError::Launch("channel About summary is required".into()));
     }
     let mut body = serde_json::json!({ "summary": summary });
+    if let Some(revision) = expected_revision {
+        body["expectedRevision"] = serde_json::json!(revision);
+    }
     if let Some(name) = name.map(|name| name.trim().trim_start_matches('#').to_string())
         && !name.is_empty()
     {
@@ -1946,50 +1978,6 @@ async fn cmd_channel_visibility(
     Ok(())
 }
 
-async fn cmd_channel_management_read(
-    hub_url: &str,
-    token: &str,
-    channel_id: &str,
-    state: ManagementReadState,
-) -> error::Result<()> {
-    #[derive(Deserialize)]
-    struct UpdateResponse {
-        channel: protocol::SerializedChannel,
-    }
-
-    let visibility = match state {
-        ManagementReadState::On => serde_json::Value::String("management-visible".to_string()),
-        ManagementReadState::Activity => serde_json::Value::String("metadata-only".to_string()),
-        ManagementReadState::Off => serde_json::Value::String("excluded".to_string()),
-        ManagementReadState::Inherit => serde_json::Value::Null,
-    };
-
-    let response: UpdateResponse = http::request_json(
-        &with_route(
-            hub_url,
-            &format!("/api/channels/{}", urlencoding::encode(channel_id)),
-        ),
-        "PATCH",
-        Some(token),
-        Some(serde_json::json!({ "managementVisibility": visibility })),
-    )
-    .await?;
-
-    let label = match state {
-        ManagementReadState::On => "can read messages",
-        ManagementReadState::Activity => "can see activity only",
-        ManagementReadState::Off => "cannot read this channel",
-        ManagementReadState::Inherit => "uses the space default",
-    };
-    println!(
-        "{} Management assistant {} for {}",
-        "✓".green().bold(),
-        label,
-        channel_label(&response.channel)
-    );
-    Ok(())
-}
-
 async fn cmd_channel_worktree(
     hub_url: &str,
     token: &str,
@@ -2049,6 +2037,14 @@ pub async fn load_full_channel_history(
         sort_channel_history(&mut messages);
         return Ok(messages);
     }
+    load_authoritative_channel_history(hub_url, token, channel_id).await
+}
+
+async fn load_authoritative_channel_history(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+) -> error::Result<Vec<protocol::ChannelMessage>> {
     let mut before_sequence: Option<u64> = None;
     let mut messages = Vec::new();
     let mut seen_message_ids = HashSet::new();
@@ -2069,6 +2065,9 @@ pub async fn load_full_channel_history(
 
         let response: ChannelHistoryResponse =
             http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await?;
+        if let Some(input) = &response.about_input {
+            println!("About authoritative input: {input}");
+        }
         if response.messages.is_empty() {
             if response.has_more {
                 return Err(CliError::Relay(
@@ -2230,8 +2229,17 @@ async fn daemon_cached_channel_history(
     Some((messages, repairs, unreadable.len()))
 }
 
-async fn cmd_channel_history(hub_url: &str, token: &str, channel_id: &str) -> error::Result<()> {
-    let messages = load_full_channel_history(hub_url, token, channel_id).await?;
+async fn cmd_channel_history(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    authoritative: bool,
+) -> error::Result<()> {
+    let messages = if authoritative {
+        load_authoritative_channel_history(hub_url, token, channel_id).await?
+    } else {
+        load_full_channel_history(hub_url, token, channel_id).await?
+    };
     let threads = match load_channel_read_context(hub_url, token, channel_id).await {
         Ok(context) => {
             println!("{}", context.text);

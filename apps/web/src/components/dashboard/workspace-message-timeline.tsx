@@ -35,7 +35,7 @@ import {
 import { agentInstanceDisplayStatus } from "./workspace-shell-presence";
 
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
-import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
+import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
   RichMessageContent,
@@ -67,7 +67,7 @@ import {
   copyImageAttachmentToClipboard,
   copyTextToClipboard,
   dataUrlToBlob,
-  fixedContainingBlockRect, centeredToolbarPosition, observeToolbarLayout,
+  fixedContainingBlockRect, centeredToolbarPosition, morphPanelPosition, observeToolbarLayout,
   isMessageActionBypassTarget,
   isTimelineNearBottom,
   presentationAttachmentKind,
@@ -96,7 +96,6 @@ import {
   formatFileSize,
   formatTime,
   isMachineRunFailureNotice,
-  isXMatrixDelegateInstance,
   presenceStatusLabel,
   provenanceBadgeClass,
   provenanceLabel,
@@ -166,7 +165,6 @@ import {
   Reply,
   ArrowUp,
   ArrowRightLeft,
-  Shield,
   SmilePlus,
   Trash2,
   X,
@@ -368,7 +366,7 @@ function useChannelAgentLaunches(channel: SerializedChannel | null, token: strin
     },
     queryFn: ({ signal }) => loadInvocationPages({ channelId: channel!.id, sourceMessageIds, signal,
       fetchPage: async (request, pageSignal) => {
-        const response = await fetch(WEB_PROXY_ROUTES.channel_agent_launches(channel!.id), {
+        const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_agent_launches(channel!.id), {
           method: "POST", signal: pageSignal, cache: "no-store",
           headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
           body: JSON.stringify(request),
@@ -542,7 +540,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   [launchChoicesByMessage, launchOptions]);
   const chooseFirstLaunch = useCallback(async (messageId: string, body: string, harness: string | null | "shown") => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.channel_message_launch_choice(channel.id, messageId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_choice(channel.id, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, ...(harness === "shown" ? { shown: true } : harness ? { harness } : {}) }),
@@ -561,7 +559,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   }, [invocationQueryData]);
   const retryAgentLaunch = useCallback(async (launch: SerializedAgentLaunch) => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.agent_launch_retry(launch.launchId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.agent_launch_retry(launch.launchId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ channelId: channel.id }),
@@ -573,7 +571,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   // rechecks the body against the stored message and the caller's authorship.
   const launchAnyway = useCallback(async (messageId: string, body: string, sourceMention: string) => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.channel_message_launch_anyway(channel.id, messageId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_anyway(channel.id, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, sourceMention }),
@@ -909,17 +907,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                     and topic. Repeating them here as an icon, a title and a
                     #name stacked three names above the first message, so the
                     intro only holds what the top bar does not say. */}
-                {!isThread && channel?.metadata?.xmatrixManagementChannel === true && (
-                  <div className="message-timeline-intro px-5 pb-4">
-                    <div className={noticeClass("secondary", "flex max-w-3xl flex-wrap items-center gap-2 text-xs")}>
-                      <Shield className="size-4 shrink-0" />
-                      <span className="font-bold">xMatrix management office</span>
-                      <span className="text-muted-foreground">
-                        Queries, action claims, proposals, and audit facts for this space appear here.
-                      </span>
-                    </div>
-                  </div>
-                )}
 
           {error && (
             <div className="mx-5 mb-3 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -2821,7 +2808,7 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
         if (!source) throw new Error("Markdown attachment is unavailable");
         const text = source.startsWith("data:")
           ? await dataUrlToBlob(source).text()
-          : await fetch(source, { cache: "no-store" }).then(async (response) => {
+          : await xmatrixRawResponse(source, { cache: "no-store" }).then(async (response) => {
               if (!response.ok) throw new Error("Markdown attachment request failed");
               return response.text();
             });
@@ -3115,6 +3102,7 @@ function QuickReactionPicker({
 
 export type { AgentWorkItem } from "./workspace-shell-message-model";
 import type { AgentWorkItem } from "./workspace-shell-message-model";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 
 
@@ -3305,8 +3293,10 @@ export function AgentWorkAvatar({
   const touchHandledRef = useRef(false);
   const suppressNextClickRef = useRef(false);
   const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
+  const actionPopupRef = useRef<HTMLDivElement | null>(null);
   const actionToolbarRef = useRef<HTMLDivElement | null>(null);
   const hoverStackRef = useRef<HTMLDivElement | null>(null);
+  const morphContentRef = useRef<HTMLDivElement | null>(null);
   // Which part of the item the pointer is on picks the card above it: the
   // island's words have their own (what it waits on), the face the Instance's.
   const [hoverPart, setHoverPart] = useState<"instance" | "intent">("instance");
@@ -3380,23 +3370,35 @@ export function AgentWorkAvatar({
 
   const positionActionToolbar = useCallback(() => {
     const avatar = avatarButtonRef.current;
-    if (!avatar) return;
-    const anchor = (hoverPart === "intent"
-      ? avatar.closest(".app-agent-work-item")?.querySelector(".app-agent-work-intent") : null) ?? avatar;
-    const viewportPosition = centeredToolbarPosition(anchor,
-      hoverStackRef.current?.getBoundingClientRect().width || (canReborn ? 220 : 140));
-    const containingBlockRect = fixedContainingBlockRect(avatar);
+    const popup = actionPopupRef.current;
+    const stack = hoverStackRef.current;
+    const content = morphContentRef.current;
+    if (!avatar || !popup || !stack || !content) return;
+    // The panel grows up out of the capsule the pointer is on: the island,
+    // or the bare disc when there is none.
+    const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    // The content keeps its final layout whatever size the glass is at, so
+    // it measures the panel the glass grows into.
+    const contentRect = content.getBoundingClientRect();
+    const morph = morphPanelPosition(capsule, contentRect.width);
+    // The panel sits outside the glass island. Its backdrop filter contains
+    // the avatar, but does not contain this sibling popup.
+    const containingBlockRect = fixedContainingBlockRect(popup);
     const nextPosition = {
-      left: viewportPosition.left - (containingBlockRect?.left ?? 0),
-      top: viewportPosition.top - (containingBlockRect?.top ?? 0),
-    };
+      left: morph.left - (containingBlockRect?.left ?? 0),
+      top: morph.bottom - (containingBlockRect?.top ?? 0),
+      "--app-agent-work-capsule-x": `${morph.capsuleLeft}px`,
+      "--app-agent-work-capsule-w": `${morph.capsuleWidth}px`,
+      "--app-agent-work-capsule-h": `${morph.capsuleHeight}px`,
+      "--app-agent-work-panel-w": `${Math.max(contentRect.width, morph.capsuleWidth)}px`,
+      "--app-agent-work-panel-h": `${contentRect.height}px`,
+    } as CSSProperties;
     setActionToolbarPosition((currentPosition) => {
-      if (currentPosition.left === nextPosition.left && currentPosition.top === nextPosition.top) {
-        return currentPosition;
-      }
-      return nextPosition;
+      const current = currentPosition as Record<string, unknown>;
+      const next = nextPosition as Record<string, unknown>;
+      return Object.keys(next).every((key) => current[key] === next[key]) ? currentPosition : nextPosition;
     });
-  }, [canReborn, hoverPart]);
+  }, []);
 
   // On the island the capsule is the one glass.
   const island = Boolean(item.intent || waiting || issue || notice);
@@ -3415,6 +3417,8 @@ export function AgentWorkAvatar({
     </div>
   );
   const hoverCards = hoverPart === "intent" && intentCard ? intentCard : instanceCards;
+  const { left: actionLayerLeft, top: actionLayerTop, ...morphGeometry } = actionToolbarPosition;
+  const actionLayerPosition = { left: actionLayerLeft, top: actionLayerTop };
   const hasHoverCards = Boolean(hoverCards);
 
   useLayoutEffect(() => {
@@ -3424,9 +3428,18 @@ export function AgentWorkAvatar({
     const layoutRoot = avatar?.closest(".app-message-surface");
     if (!avatar || !stack || !workItem || !layoutRoot) return;
 
-    return observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
+    // The panel opens from the capsule's shape, so that shape has to be known
+    // before the pointer arrives: follow the capsule's size while at rest too.
+    const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    const capsuleObserver = new ResizeObserver(() => positionActionToolbar());
+    capsuleObserver.observe(capsule);
+    const stopFollowingLayout = observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
       () => workItem.matches(":hover, :focus-within"));
-  }, [positionActionToolbar, hasHoverCards]);
+    return () => {
+      capsuleObserver.disconnect();
+      stopFollowingLayout();
+    };
+  }, [positionActionToolbar, hasHoverCards, island]);
 
   useLayoutEffect(() => {
     positionActionToolbar();
@@ -3528,6 +3541,10 @@ export function AgentWorkAvatar({
   return (
     <div
       className="app-agent-work-item group relative flex shrink-0 items-center"
+      data-morph={hoverCards ? (island ? "panel" : "row") : undefined}
+      // The capsule's geometry rides on the item, so a stretching disc can
+      // push the items after it aside by exactly the width it grows.
+      style={morphGeometry}
       onPointerOver={(event) => {
         // Moving onto the card itself keeps the card it is on.
         const target = event.target as Element;
@@ -3558,9 +3575,18 @@ export function AgentWorkAvatar({
         </LiquidGlassPill>
       ) : avatarButton}
       {hoverCards ? (
-        // Every card the item shows sits above it in one column, in one chrome.
-        <div className="app-agent-work-actions" style={actionToolbarPosition}>
-          <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
+        // The island grows up into a panel, as the composer does for its
+        // completions: one glass whose bottom row is the island itself (the
+        // seat), with the card the pointer asked for above it. A bare disc
+        // has no words to sit under, so it just stretches right into a
+        // capsule with its controls beside the face.
+        <div ref={actionPopupRef} className="app-agent-work-actions" style={actionLayerPosition}>
+          <LiquidGlassPill className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
+            <div ref={morphContentRef} className="app-agent-work-morph-content">
+              <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
+              <span className="app-agent-work-morph-seat" aria-hidden="true" />
+            </div>
+          </LiquidGlassPill>
         </div>
       ) : null}
     </div>
@@ -3728,7 +3754,6 @@ export function agentWorkHandoffSuccessors(harnesses: readonly string[]): string
 export function agentWorkCanReborn(item: AgentWorkItem): boolean {
   if (item.canStop === false) return false;
   if (item.avatarKind === "system") return false;
-  if (isXMatrixDelegateInstance(item.instance)) return false;
   const channelInstanceId = item.instance.channelInstanceId?.trim();
   return Boolean(channelInstanceId && /^[1-9]\d*$/.test(channelInstanceId));
 }

@@ -1,3 +1,4 @@
+import { ControlError } from "./control-error.js";
 import { storedIso as iso } from "./stored-values.js";
 import type { QueryResultRow } from "pg";
 import { sha256Hex } from "@xmatrix/protocol";
@@ -33,11 +34,8 @@ const PENDING_LIST_LIMIT = 20;
 export type CrossSpaceReadScope = "channel" | "space";
 export type CrossSpaceReadAction = "approve" | "deny" | "revoke";
 
-export class CrossSpaceReadError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string, readonly retryable = false) {
-    super(message);
-    this.name = "CrossSpaceReadError";
-  }
+export class CrossSpaceReadError extends ControlError {
+  override name = "CrossSpaceReadError";
 }
 
 /** The exact live Run a read is made for, as the Hub authenticated it. */

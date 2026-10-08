@@ -22,8 +22,9 @@ use crate::agent_trace_read::{
     wait_for_trace_history,
 };
 use crate::agent_trace_store::{AgentHostTraceStore, trace_timestamp_now};
+use crate::backoff::Backoff;
 use crate::config;
-use crate::connection_error::durable_object_runtime_reset;
+use crate::connection_error::hub_restarting;
 use crate::error::{CliError, Result};
 use crate::http;
 use crate::protocol::*;
@@ -41,9 +42,8 @@ const REQUEST_TIMEOUT_MS: u64 = 30_000;
 const WRITE_CHANNEL_CAPACITY: usize = 256;
 
 // Reconnection constants
-const RECONNECT_BASE_MS: u64 = 1_000;
-const RECONNECT_MAX_MS: u64 = 30_000;
-const RECONNECT_JITTER_MS: u64 = 500;
+const RECONNECT_BASE: std::time::Duration = std::time::Duration::from_secs(1);
+const RECONNECT_MAX: std::time::Duration = std::time::Duration::from_secs(30);
 const CLIENT_NETWORK_REASON_MAX_CHARS: usize = 240;
 const CLIENT_NETWORK_SAMPLE_MAX_CHANNELS: usize = 1;
 const CLIENT_NETWORK_SAMPLE_FAILURE_LOG_INTERVAL_MS: u64 = 60_000;
@@ -786,6 +786,11 @@ impl AgentInstanceConnectionClient {
         let hub_capabilities = self.hub_capabilities.clone();
 
         let handle = tokio::spawn(async move {
+            // One backoff across disconnects: it starts over only after a
+            // session that stayed up, so a Hub that admits and drops the
+            // socket at once is redialled ever more slowly, not at the base.
+            let mut backoff = Backoff::new(RECONNECT_BASE, RECONNECT_MAX);
+            let mut connected_at: Option<std::time::Instant> = None;
             loop {
                 // ── Wait for a disconnect signal ────────────────────────────
                 disconnect_notify.notified().await;
@@ -825,7 +830,9 @@ impl AgentInstanceConnectionClient {
                 );
 
                 // ── Reconnection loop with exponential backoff ──────────────
-                let mut delay_ms = RECONNECT_BASE_MS;
+                if let Some(at) = connected_at.take() {
+                    backoff.reset_if_healthy(at.elapsed());
+                }
                 let mut reconnect_attempt: u32 = 0;
                 let reconnect_started_ms = now_ms();
 
@@ -835,9 +842,7 @@ impl AgentInstanceConnectionClient {
                     }
                     reconnect_attempt = reconnect_attempt.saturating_add(1);
 
-                    // Jitter: use low bits of timestamp
-                    let jitter = now_ms() % RECONNECT_JITTER_MS;
-                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms + jitter)).await;
+                    backoff.wait().await;
 
                     if intentional_close.load(std::sync::atomic::Ordering::Acquire) {
                         return;
@@ -874,7 +879,6 @@ impl AgentInstanceConnectionClient {
                                 Some(last_activity_age_ms),
                                 Some("websocket_connect_failed".into()),
                             );
-                            delay_ms = (delay_ms * 2).min(RECONNECT_MAX_MS);
                             continue;
                         }
                     };
@@ -897,7 +901,6 @@ impl AgentInstanceConnectionClient {
                                 Some(last_activity_age_ms),
                                 Some("auth_token_state_poisoned".into()),
                             );
-                            delay_ms = (delay_ms * 2).min(RECONNECT_MAX_MS);
                             continue;
                         }
                     };
@@ -935,7 +938,6 @@ impl AgentInstanceConnectionClient {
                                 Some(last_activity_age_ms),
                                 Some("register_serialize_failed".into()),
                             );
-                            delay_ms = (delay_ms * 2).min(RECONNECT_MAX_MS);
                             continue;
                         }
                     };
@@ -952,7 +954,6 @@ impl AgentInstanceConnectionClient {
                             Some(last_activity_age_ms),
                             Some("register_send_failed".into()),
                         );
-                        delay_ms = (delay_ms * 2).min(RECONNECT_MAX_MS);
                         continue;
                     }
 
@@ -977,7 +978,6 @@ impl AgentInstanceConnectionClient {
                                 Some(last_activity_age_ms),
                                 Some("registration_response_timeout".into()),
                             );
-                            delay_ms = (delay_ms * 2).min(RECONNECT_MAX_MS);
                             continue;
                         }
                     };
@@ -997,7 +997,6 @@ impl AgentInstanceConnectionClient {
                                 Some(last_activity_age_ms),
                                 Some("registration_non_text_message".into()),
                             );
-                            delay_ms = (delay_ms * 2).min(RECONNECT_MAX_MS);
                             continue;
                         }
                     };
@@ -1061,7 +1060,6 @@ impl AgentInstanceConnectionClient {
                                     Some(last_activity_age_ms),
                                     Some("unexpected_registration_response".into()),
                                 );
-                                delay_ms = (delay_ms * 2).min(RECONNECT_MAX_MS);
                                 continue;
                             }
                         };
@@ -1110,7 +1108,6 @@ impl AgentInstanceConnectionClient {
                             Some(last_activity_age_ms),
                             Some("presence_replay_failed".into()),
                         );
-                        delay_ms = (delay_ms * 2).min(RECONNECT_MAX_MS);
                         continue;
                     }
 
@@ -1205,6 +1202,7 @@ impl AgentInstanceConnectionClient {
 
                     // Break out of back-off loop → go back to waiting for
                     // next disconnect signal.
+                    connected_at = Some(std::time::Instant::now());
                     break;
                 }
             }
@@ -2267,11 +2265,11 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
                 continue;
             }
             if let AgentInstanceServerMessage::Error {
-                message,
                 request_id,
+                failure,
                 ..
             } = &server_msg
-                && durable_object_runtime_reset(message)
+                && hub_restarting(failure.as_ref())
             {
                 if let Some(request_id) = request_id {
                     let mut guard = ctx.pending.lock().await;
@@ -4386,13 +4384,9 @@ fn agent_operation_error(
     message: String,
     failure: Option<crate::protocol::AgentOperationFailure>,
 ) -> CliError {
-    if let Some(failure) = failure {
-        return crate::error::AgentOperationError { message, failure }.into();
-    }
-    if durable_object_runtime_reset(&message) {
-        CliError::RelayTransient(message)
-    } else {
-        CliError::Relay(message)
+    match failure {
+        Some(failure) => crate::error::AgentOperationError { message, failure }.into(),
+        None => CliError::Relay(message),
     }
 }
 

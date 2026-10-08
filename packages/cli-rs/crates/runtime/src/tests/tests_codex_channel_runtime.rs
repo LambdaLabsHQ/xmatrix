@@ -558,61 +558,30 @@ fn shared_bootstrap_is_folded_once_into_the_first_runtime_input() {
 }
 
 #[test]
-fn child_agent_env_keeps_existing_utf8_overrides_and_adds_missing_defaults() {
-    let mut env = vec![("PYTHONUTF8".to_string(), "custom".to_string())];
-    append_windows_utf8_env(&mut env);
-
+fn child_agent_env_enforces_utf8_instead_of_inheriting_old_encoding() {
+    let mut env = vec![
+        ("PythonUtf8".to_string(), "0".to_string()),
+        ("LC_ALL".to_string(), "C".to_string()),
+        ("OTHER".to_string(), "keep".to_string()),
+    ];
+    append_windows_utf8_env(&mut env).unwrap();
     if cfg!(windows) {
-        assert_eq!(
-            env.iter()
-                .find(|(key, _)| key == "PYTHONUTF8")
-                .map(|(_, value)| value.as_str()),
-            Some("custom")
-        );
-        assert!(
-            env.iter()
-                .any(|(key, value)| key == "PYTHONIOENCODING" && value == "utf-8")
-        );
+        for &(key, value) in WINDOWS_UTF8_CHILD_ENV {
+            let matching = env
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case(key))
+                .collect::<Vec<_>>();
+            assert_eq!(matching.len(), 1);
+            assert_eq!(matching[0].1, value);
+        }
     } else {
-        assert_eq!(env, vec![("PYTHONUTF8".to_string(), "custom".to_string())]);
+        assert_eq!(env[0].1, "0");
+        assert_eq!(env[1].1, "C");
     }
-}
-
-#[test]
-fn windows_utf8_env_defaults_fill_only_what_nobody_configured() {
-    let all = windows_utf8_env_defaults(|_| false);
-    for expected in [
-        ("PYTHONUTF8", "1"),
-        ("PYTHONIOENCODING", "utf-8"),
-        ("LANG", "C.UTF-8"),
-    ] {
-        assert!(all.contains(&expected), "{expected:?} missing from {all:?}");
-    }
-    assert!(!all.iter().any(|(key, _)| *key == "LC_ALL"));
-
-    let configured = windows_utf8_env_defaults(|key| key == "PYTHONIOENCODING");
-    assert!(!configured.iter().any(|(key, _)| *key == "PYTHONIOENCODING"));
-    assert!(configured.contains(&("PYTHONUTF8", "1")));
-
-    // Any configured locale variable keeps the user's locale untouched.
-    for locale in ["LANG", "LC_ALL", "LC_CTYPE"] {
-        let defaults = windows_utf8_env_defaults(|key| key == locale);
-        assert!(
-            !defaults.iter().any(|(key, _)| *key == "LANG"),
-            "{locale} should suppress LANG"
-        );
-        assert!(defaults.contains(&("PYTHONUTF8", "1")));
-    }
-}
-
-#[test]
-fn utf8_env_key_lookup_matches_explicit_names_case_insensitively() {
-    let explicit = [std::ffi::OsStr::new("PythonUtf8")];
-    assert!(utf8_env_key_configured("PYTHONUTF8", explicit.into_iter()));
-    assert!(!utf8_env_key_configured(
-        "XMATRIX_TEST_UNSET_UTF8_KEY",
-        explicit.into_iter()
-    ));
+    assert!(
+        env.iter()
+            .any(|(key, value)| key == "OTHER" && value == "keep")
+    );
 }
 
 #[test]

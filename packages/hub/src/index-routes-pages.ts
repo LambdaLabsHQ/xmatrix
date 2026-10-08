@@ -1,22 +1,25 @@
 import { MAX_PAGE_CONVERSATIONS, PageControlError, PostgresPageRepository, readPageConversations,
   type PagePrincipal } from "@xmatrix/db";
+import { ServiceUnavailable } from "./error-contract";
 import { relayResponse } from "./private-response";
 import type { Context, Hono } from "hono";
 import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-principal";
 import { requireAuth } from "./index-shared";
-import { PreReviewError, publishPreReviewVerdict } from "./github-pre-review";
-import { pageLineDiff, type PageAwareness, type PageChanges, type PageConversation, type PageLink,
-  type PageLinkAnchor } from "@xmatrix/protocol";
+import { publishPreReviewVerdict } from "./github-pre-review";
+import { gitHubFileReferenceHref, gitHubFileReferences, pageLineDiff, parseGitHubFileReference, type PageAwareness,
+  type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import type { AuthUser } from "./auth";
-import { PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
+import { PAGE_SESSION_HEARTBEAT_PING, PAGE_SESSION_SUBPROTOCOL_PREFIX, pageSessionId } from "./page-session-do";
 import { PAGE_DOCUMENT_FRAGMENT, type PageSessionPresent, type PageSessionPrincipal } from "./page-session";
-import { pageConversation, workingBySection } from "./page-conversations";
+import { pageConversation, pageTreeDiscussions, workingBySection } from "./page-conversations";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { requireMachineDaemonAuth } from "./index-shared";
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { fireOwedAutomationTriggers } from "./automation-triggers";
+import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
+import { findAppConnection } from "./apps";
 import type { Env } from "./types";
 
 /**
@@ -75,6 +78,26 @@ function integer(value: unknown): number {
 }
 
 const NO_STORE = { "cache-control": "no-store" } as const;
+
+/**
+ * Files read for page embeds in the last minute, per Space connection, so a
+ * busy page does not spend GitHub's rate limit. A failed read is not kept.
+ */
+const GITHUB_FILE_CACHE_MS = 60_000;
+const GITHUB_FILE_CACHE_ENTRIES = 200;
+const githubFiles = new Map<string, { at: number; file: Promise<GitHubFileContent> }>();
+
+function cachedGitHubFile(key: string, read: () => Promise<GitHubFileContent>): Promise<GitHubFileContent> {
+  const now = Date.now();
+  const hit = githubFiles.get(key);
+  if (hit && now - hit.at < GITHUB_FILE_CACHE_MS) return hit.file;
+  githubFiles.delete(key);
+  const file = read();
+  githubFiles.set(key, { at: now, file });
+  file.catch(() => { if (githubFiles.get(key)?.file === file) githubFiles.delete(key); });
+  while (githubFiles.size > GITHUB_FILE_CACHE_ENTRIES) githubFiles.delete(githubFiles.keys().next().value!);
+  return file;
+}
 
 /** The page named by the route, read as the caller, which is also its access check. */
 async function readAsCaller(c: Context<{ Bindings: Env }>) {
@@ -337,7 +360,6 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       return c.json(await publishPreReviewVerdict(c.env, { channelId, actorUserId: run.ownerUserId,
         runId: run.runId, verdict: body.verdict, summary }), 200, NO_STORE);
     } catch (error) {
-      if (error instanceof PreReviewError) return c.json({ error: error.message, code: error.code }, error.status as 403);
       return failure(c, error);
     }
   });
@@ -377,10 +399,10 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       const registered = await sessionCall(c.env, spaceId, pageId, "/internal/ticket", {
         ticket, principal: sessionPrincipal(authUser), canEdit: page.canEdit,
       });
-      if (!registered.ok) return c.json({ error: "Page session is unavailable" }, 503);
+      if (!registered.ok) throw new ServiceUnavailable("page_session_unavailable", "Page session is unavailable");
       return c.json({ protocol: `${PAGE_SESSION_SUBPROTOCOL_PREFIX}${ticket}`,
         socketPath: `/ws/pages/${encodeURIComponent(spaceId)}/${encodeURIComponent(pageId)}`,
-        canEdit: page.canEdit, headRevision: page.headRevision }, 200, NO_STORE);
+        canEdit: page.canEdit, headRevision: page.headRevision, heartbeat: PAGE_SESSION_HEARTBEAT_PING }, 200, NO_STORE);
     } catch (error) {
       return failure(c, error);
     }
@@ -394,7 +416,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       }
       const headers = new Headers(c.req.raw.headers);
       headers.set("x-xmatrix-page-ticket", protocol.slice(PAGE_SESSION_SUBPROTOCOL_PREFIX.length));
-      return pageSession(c.env, c.req.param("spaceId"), c.req.param("pageId"))
+      return await pageSession(c.env, c.req.param("spaceId"), c.req.param("pageId"))
         .fetch(new Request("https://page-session/ws", { headers }));
     } catch (error) {
       return failure(c, error);
@@ -460,6 +482,36 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     });
   }));
 
+  // A GitHub file the page embeds (pages-live-document.md §6.5), read through
+  // as the caller: only a file the page's head text references, only through
+  // this Space's GitHub connection, and never stored.
+  app.get(`${base}/:pageId/github-file`, async (c) => {
+    try {
+      const { spaceId, authUser, page } = await readAsCaller(c);
+      const reference = parseGitHubFileReference(c.req.query("href") ?? "");
+      if (!reference) return c.json({ error: "href is not a GitHub file embed", code: "invalid_request" }, 400);
+      const href = gitHubFileReferenceHref(reference);
+      if (!gitHubFileReferences(page.body).includes(href)) {
+        return c.json({ error: "The page does not embed this file", code: "page_github_file_not_referenced" }, 404);
+      }
+      const connection = await findAppConnection(c.env, { spaceId, providerId: "github",
+        actorUserId: authUser.agentRun?.ownerUserId ?? authUser.id });
+      if (!connection || connection.status !== "configured") {
+        return c.json({ error: "Connect GitHub for this Space to show embedded files",
+          code: "github_connection_required" }, 409);
+      }
+      const [owner, repo] = reference.repository.split("/") as [string, string];
+      const read = () => readGitHubFile(c.env, connection, { owner, repo, path: reference.path, ref: reference.ref });
+      // A changed installation/grant must not reuse the old connection's content.
+      const file = Number.isSafeInteger(connection.version) && connection.version! > 0
+        ? await cachedGitHubFile(`${connection.id}\u0000${connection.version}\u0000${href}`, read)
+        : await read();
+      return c.json(file as unknown as Record<string, unknown>, 200, NO_STORE);
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+
   app.post(`${base}/:pageId/revisions/:revision/promote`, async (c) => run(c, async () => {
     const body = await json(c);
     const authUser = await requireAuth(c.req.raw, c.env);
@@ -503,10 +555,20 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       : result;
   }));
 
-  // The page tree's Agents: who is reading or editing each page from a live Run.
-  app.get("/api/spaces/:spaceId/page-links/agents", async (c) => run(c, async () => repository(c.env).agentsOnPages({
-    requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), principal: await principal(c),
-  })));
+  // The page tree's activity: who is reading or editing each page from a live
+  // Run, and its open discussions, with what this reader has not read there.
+  app.get("/api/spaces/:spaceId/page-links/agents", async (c) => run(c, async () => {
+    const spaceId = c.req.param("spaceId");
+    const caller = await principal(c);
+    const { pages } = await repository(c.env).agentsOnPages({ requestId: crypto.randomUUID(), spaceId, principal: caller });
+    // Newest first, so a Space with more open discussions than are read describes the recent ones.
+    const conversationIds = [...new Set(pages.flatMap((page) => page.discussions))].slice(0, MAX_PAGE_CONVERSATIONS);
+    const conversations = new Map((conversationIds.length === 0 ? [] : await readPageConversations(database(c.env), {
+      requestId: crypto.randomUUID(), spaceId, principal: caller, conversationIds,
+    })).map((record) => [record.conversationId, pageConversation(record)]));
+    return { pages: pages.map(({ discussions, ...page }): PageTreeActivity =>
+      ({ ...page, discussions: pageTreeDiscussions(discussions, conversations) })) };
+  }));
 
   app.post("/api/spaces/:spaceId/page-links", async (c) => run(c, async () => {
     const body = await json(c);

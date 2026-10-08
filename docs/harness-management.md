@@ -78,7 +78,22 @@ recipe or control for one; anything else is refused when issued.
   `metadata_json.harnesses`.
 - **Status.** `GET /api/machine-daemons/harness-actions/:controlId` returns the
   owner's `HarnessActionStatus`: `queued`, `running`, a result status, or
-  `expired`, with a bounded one-line `error`.
+  `expired`, with a bounded one-line `error` and `requestedAt`. A claimed
+  action whose lease lapsed and that is older than `HARNESS_ACTION_SETTLE_MS`
+  (claim TTL + `HARNESS_ACTION_TIMEOUT_MS` + lease grace) reads as `expired`
+  ("the machine stopped responding before it reported a result"): no daemon
+  can still be running it. The reading is derived, not written, so a late
+  result still completes the command and replaces it.
+- **Recent.** `GET /api/machine-daemons/harness-actions?machineId=` returns
+  the owner's latest action per preset on that Machine from the last day
+  (owner-requested actions only; Hub's `release` notices and sign-ins are not
+  listed), so the Machines page shows how an action ended after a reload.
+- **Not responding.** `status` and `lastSeenAt` follow connection events only
+  (`lastSeenAt` of an online daemon is its last connect). The daemon list adds
+  `unansweredSince` to an online daemon that has a command available but
+  unclaimed, or a lease it stopped renewing, for over a minute (only work from
+  the last 30 minutes counts). Web shows such a Machine as "not responding" and
+  warns that a new action may not reach it; actions stay available.
 - **Registry versions.** Presets name their official npm or PyPI package in
   `management.latest`; inventory items carry `latestVersion` only when the
   daemon read it from that registry. Without it, a newer version is unknown.
@@ -184,7 +199,9 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
   stored command once the daemon answers. They are issued and leased only to
   daemons advertising `machine_harness_login_v1`.
 - **On the daemon.** `login_start` replaces any sign-in waiting for that preset,
-  runs `start` with piped stdin from the home directory and answers within 45
+  runs `start` from the home directory with piped stdin, or in a pseudo-terminal
+  when the recipe sets `terminal` (its prompt refuses a pipe; a pasted code is
+  typed in as a line), and answers within 45
   seconds with `login: { state: "awaiting_user", flow, verificationUri,
   userCode? }`; only `https://` URLs are offered. The process stays waiting for
   at most 15 minutes. `login_finish` writes the pasted code (paste flows) and
@@ -197,10 +214,15 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
   (`signed_in`, `signed_out`, `unknown`) on their inventory item; each sign-in
   action re-probes the preset.
 
-Presets with a sign-in today: codex, claude, copilot, cursor, grok, hermes,
-kimi, kiro, opencode and zcode. gemini, goose and openclaw sign in only inside an
-interactive terminal; pi, vibe, junie and qwen have no official headless sign-in
-(API keys or their TUI).
+Presets with a sign-in today: codex, claude, cline, copilot, cursor, devin
+(in a pseudo-terminal), grok, hermes, jcode, kilo, kimi, kiro, omp (paste the
+code or the address the browser ends on), opencode, qoder and zcode. gemini,
+goose and openclaw sign in only inside an interactive terminal; pi, vibe, junie
+and qwen have no official headless sign-in (API keys or their TUI). auggie and
+commandcode accept only a localhost browser callback (commandcode also takes a
+pasted API key), dimcode prints no link even in a terminal, and codebuddy,
+droid, prime, trae, antigravity, autohand, amp and reasonix have no CLI sign-in
+(in-app, ACP `authenticate`, API keys or enterprise tokens).
 
 See [Machines and CLI management](harness-management-cli.md) for user commands and confirmation behavior.
 

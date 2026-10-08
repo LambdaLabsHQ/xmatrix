@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { Popover } from "@base-ui/react/popover";
+import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
 import { preparationFailureSummary, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
@@ -44,6 +45,19 @@ function InvocationRuntimeDetails({ activity, view, unavailable }: {
   </>;
 }
 
+function RepositoryBaselineDetails({ baseline }: { baseline: NonNullable<AgentLaunchActivity["repositoryBaseline"]> }) {
+  return <div className="app-invocation-description">
+    <p>Checkout base: <code>{baseline.baseRef} @ {baseline.baseOid}</code></p>
+    <p>{baseline.confirmedAt ? `Confirmed ${baseline.confirmedAt} (UTC).` : "Original confirmation time unavailable."}</p>
+    {baseline.historyRewritten === true && <p>The previous tip of this same remote branch was replaced or rolled back.</p>}
+    {baseline.remote && <p>Remote snapshot: <code>{baseline.remote.baseRef} @ {baseline.remote.baseOid}</code><br />
+      Confirmed {baseline.remote.confirmedAt} (UTC).</p>}
+    {baseline.relationship === "diverged" && <p>The recorded base is outside the confirmed remote history. The checkout was preserved.</p>}
+    {baseline.relationship === "ancestor" && <p>The recorded base is an ancestor of this remote snapshot.</p>}
+    {baseline.relationship === "unknown" && <p>Could not confirm whether the recorded base belongs to the current remote history.</p>}
+  </div>;
+}
+
 export function MentionContinuationChip({ record, unavailable }: { record: SerializedAgentContinuation; unavailable?: boolean }) {
   const view = continuationView(record, unavailable);
   const label = record.sourceName + record.sourceMention.slice(record.sourceName.length + 1);
@@ -60,6 +74,7 @@ export function MentionContinuationChip({ record, unavailable }: { record: Seria
     subtitle={`${record.kind === "reborn" ? "Restart" : `Handoff to @${record.targetName}`} · ${record.activity?.hostName || "Selected machine"}`}
     details={<>
       <InvocationRuntimeDetails activity={view.terminal ? undefined : record.activity} view={view} unavailable={unavailable} />
+      {record.activity?.repositoryBaseline && <RepositoryBaselineDetails baseline={record.activity.repositoryBaseline} />}
       <code>Successor: {record.runId}</code><code>Predecessor: {record.sourceRunId}</code>
     </>} />;
 }
@@ -77,7 +92,7 @@ export function MentionInvocationChip({ label, labelContent, announcement, image
   const decision = parsePresentedRoutingDecision(launch.routingDecision);
   const summon = summonView(launch, executions, unavailable);
   const selection = routingSelectionNote(decision);
-  const lead = summon.steps.findIndex(step => step.label === "Jev selected an environment" || step.label === "Environment selected");
+  const lead = summon.steps.findIndex(step => step.label === "Environment selected");
   const view = { ...summon, steps: summon.steps.map((step, index) => index === lead && selection ? { ...step, note: selection } : step) };
   const activity = launch.activity;
   const execution = executions.find(record => record.executionId === view.executionId && record.runId === launch.runId);
@@ -99,6 +114,7 @@ export function MentionInvocationChip({ label, labelContent, announcement, image
     details={<>
       {decision && <RoutingDecisionBoard decision={decision} evidenceOnly />}
       <InvocationRuntimeDetails activity={view.terminal ? undefined : activity} view={view} unavailable={unavailable} />
+      {activity?.repositoryBaseline && <RepositoryBaselineDetails baseline={activity.repositoryBaseline} />}
       {launch.attempt > 0 && <p className="app-invocation-description">Command delivery retries: {launch.attempt}</p>}
     </>} />;
 }
@@ -183,7 +199,7 @@ function MentionProseCard({ card, sourceMention, labelContent, title, ariaLabel,
     </Popover.Trigger>
     <Popover.Portal container={portal.container}>
       <Popover.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="app-invocation-positioner">
-        <Popover.Popup className="app-invocation-popup app-intent-popup" data-tone="neutral" onClick={(event) => event.stopPropagation()}>
+        <Popover.Popup render={<LiquidGlassCard />} className="app-invocation-popup app-intent-popup" data-tone="neutral" onClick={(event) => event.stopPropagation()}>
           <div className="app-invocation-heading"><div>
             <Popover.Title className="app-invocation-title">{title}</Popover.Title>
             <p className="app-invocation-machine">{sourceMention}</p>
@@ -218,11 +234,11 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
   return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title="Not a summon"
     className="app-mention-intent-declined"
     launching={launching === "launching" || launching === "sent"}
-    ariaLabel={`${rejection.sourceMention}: not a summon. Jev read this as ${copy.reading}. Show details`}>
+    ariaLabel={`${rejection.sourceMention}: not a summon. xMatrix read this as ${copy.reading}. Show details`}>
     <Popover.Description className="app-intent-reading">
-      Jev read this as <strong>{copy.reading}</strong>, so no Agent was started.
+      xMatrix read this as <strong>{copy.reading}</strong>, so no Agent was started.
     </Popover.Description>
-    {confidence !== undefined && <div className="app-intent-confidence" aria-label={`Jev confidence ${Math.round(confidence * 100)}%`}>
+    {confidence !== undefined && <div className="app-intent-confidence" aria-label={`Routing confidence ${Math.round(confidence * 100)}%`}>
       <span className="app-intent-confidence-bar"><span style={{ width: `${Math.round(confidence * 100)}%` }} /></span>
       <span>{Math.round(confidence * 100)}%</span>
     </div>}
@@ -298,7 +314,7 @@ export function MentionSummonPending({ labelContent, reading, fillKey }: { label
   return <span className="app-mention-chip app-mention-invocation app-mention-summon-written" data-reading={reading ? "true" : undefined}>
     <span className="app-mention-chip-label">{labelContent}</span>
     {reading && <span className="app-mention-invocation-status" role="status">
-      <span aria-hidden="true">·</span><span className="app-intent-reading-label">Jev is reading</span>
+      <span aria-hidden="true">·</span><span className="app-intent-reading-label">xMatrix is reading</span>
     </span>}
   </span>;
 }
@@ -376,7 +392,7 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
     </Popover.Trigger>
     <Popover.Portal container={portal.container}>
       <Popover.Positioner side="bottom" align="start" sideOffset={8} collisionPadding={12} className="app-invocation-positioner">
-        <Popover.Popup className="app-invocation-popup" data-tone={view.tone} onClick={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
+        <Popover.Popup render={<LiquidGlassCard />} className="app-invocation-popup" data-tone={view.tone} onClick={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()}>
           <div className="app-invocation-heading"><div>
             <Popover.Title className="app-invocation-title">@{name}{instanceOrdinal && <>:{instanceOrdinal}</>}{destinationName && <> → @{destinationName}</>}</Popover.Title>
             <p className="app-invocation-machine">{subtitle}</p>
@@ -408,7 +424,7 @@ function InvocationPanelBody({ jev, view, lead, context, details, sourceAddress,
   // Jev's own rows above say how the request was read and what was chosen; the
   // startup then begins with what was measured, not judged: the machine.
   const steps = decided ? view.steps.filter(step => step.label !== "Read as a request")
-    .map(step => step.label === "Jev selected an environment" || step.label === "Environment selected" ? { ...step, label: "Machine selected" } : step) : view.steps;
+    .map(step => step.label === "Environment selected" ? { ...step, label: "Machine selected" } : step) : view.steps;
   return <>
     {jev?.invocationId && (state.cause ? <p role="status" className="app-invocation-description">Cause: {state.cause}</p>
       : !state.loaded && state.busy ? <p className="app-invocation-description">Checking failure reason…</p>
@@ -430,12 +446,16 @@ function InvocationPanelBody({ jev, view, lead, context, details, sourceAddress,
 
 function InvocationSteps({ steps, label }: { steps: InvocationStep[]; label: string }) {
   return <ol className="app-invocation-steps" aria-label={label}>
-    {steps.map((step) => <li key={step.label} data-state={step.state}>
-      <span className="app-invocation-step-mark" aria-hidden="true">{step.state === "done" ? <Check size={12} /> : step.state === "failed" ? <X size={12} /> : step.state === "current" ? <span /> : null}</span>
-      <span>{step.label}{step.note && <span className="app-invocation-step-note"> · {step.note}</span>}</span>
-      <span className="app-invocation-step-time">{step.at
-        ? <time dateTime={step.at}>{new Date(step.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
-        : step.state === "current" ? "Waiting" : step.state === "done" ? "" : step.state === "failed" ? "Reported" : ""}</span>
-    </li>)}
+    {steps.map((step) => {
+      // The step in progress says what is happening now, in the chip's word.
+      const live = step.state === "current" && step.status;
+      return <li key={step.label} data-state={step.state}>
+        <span className="app-invocation-step-mark" aria-hidden="true">{step.state === "done" ? <Check size={12} /> : step.state === "failed" ? <X size={12} /> : step.state === "current" ? <span /> : null}</span>
+        <span>{live || step.label}{step.note && <span className="app-invocation-step-note"> · {step.note}</span>}</span>
+        <span className="app-invocation-step-time">{step.at
+          ? <time dateTime={step.at}>{new Date(step.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
+          : step.state === "current" ? (live ? "" : "Waiting") : step.state === "failed" ? "Reported" : ""}</span>
+      </li>;
+    })}
   </ol>;
 }

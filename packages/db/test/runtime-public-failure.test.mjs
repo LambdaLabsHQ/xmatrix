@@ -13,17 +13,23 @@ test("public launch errors use fixed classifications rather than provider error 
   assert.equal(publicRuntimeErrorCode("runtime_sql_contract_error"), "runtime_sql_contract_error");
 });
 
-test("known spawn failures explain the cause and recovery without exposing private stderr", () => {
+test("spawn failures retain their cause without exposing credentials or private paths", () => {
   const detail = "repo pool lease unavailable (base_ref_unresolved: could not resolve origin default branch after fetch) /private/token=PRIVATE_SENTINEL";
   for (const code of ["daemon_spawn_failed", "machine_spawn_failed"]) {
     assert.equal(publicLaunchFailureCode(code, detail), "repository_base_unresolved");
     const message = publicLaunchFailureMessage(code, detail);
-    assert.match(message, /no usable default branch/u);
-    assert.match(message, /initial commit/u);
-    assert.match(message, /repo:owner\/repository/u);
+    assert.match(message, /could not resolve origin default branch after fetch/u);
+    assert.doesNotMatch(message, /initial commit/u);
     assert.doesNotMatch(message, /PRIVATE_SENTINEL|\/private/u);
   }
   assert.equal(publicLaunchFailureCode("machine_spawn_failed", "unknown PRIVATE_SENTINEL"), "machine_spawn_failed");
-  assert.doesNotMatch(publicLaunchFailureMessage("machine_spawn_failed", "unknown PRIVATE_SENTINEL"), /PRIVATE_SENTINEL/u);
+  assert.equal(publicLaunchFailureMessage("machine_spawn_failed", "unknown failure reason"), "unknown failure reason");
   assert.equal(publicLaunchFailureCode("runtime_sql_contract_error", detail), "runtime_sql_contract_error");
+});
+
+test("invocation failures retain Git's rejection instead of a network suggestion", () => {
+  const detail = "fetch_required_failed: required origin fetch failed (\n ! [rejected] main -> origin/main (non-fast-forward))";
+  assert.equal(publicLaunchFailureMessage("daemon_spawn_failed", detail), detail);
+  assert.equal(publicLaunchFailureMessage("machine_spawn_failed", detail), detail);
+  assert.doesNotMatch(publicLaunchFailureMessage("runtime_sql_contract_error", "password=SECRET select * from private"), /SECRET|select/u);
 });

@@ -31,7 +31,8 @@ export type AgentConfigDialogState = {
 
 /* Presets the desktop shell can npm-install; mirrors its native-owned allowlist
    in apps/desktop/src/agent-preset-install.ts, which stays the authority. */
-const NATIVE_INSTALL_PRESETS = ["codex", "opencode", "pi", "copilot", "gemini", "qwen", "junie", "openclaw"];
+const NATIVE_INSTALL_PRESETS = ["codex", "opencode", "pi", "copilot", "gemini", "qwen", "junie", "openclaw", "qoder",
+  "codebuddy", "auggie", "cline", "kilo", "droid", "commandcode", "autohand", "reasonix", "dimcode"];
 
 /* One line naming everything the disclosure holds, so a closed Details is
    still an answer to "what else is there?" rather than a dead end. */

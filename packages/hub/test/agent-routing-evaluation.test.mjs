@@ -21,6 +21,15 @@ test('one choice receives all candidates and numerical facts without prerequisit
   assert.equal(result.environment.choice, 'candidate_99');
 });
 
+test('the succeeded record names the model that answered', async () => {
+  const events = [];
+  const request = input(2);
+  const evaluate = Object.assign(async received => ({ ...answer(received, 'candidate_1'), model: 'vendor/router-a' }),
+    { recordDecision: async event => { events.push(event); } });
+  await evaluateRoutingChoices(request, evaluate);
+  assert.deepEqual(events.map(event => [event.status, event.model]), [['started', undefined], ['succeeded', 'vendor/router-a']]);
+});
+
 test('an answer outside the finite candidate list is rejected', async () => {
   let calls = 0;
   await assert.rejects(evaluateRoutingChoices(input(2), async request => {
@@ -30,12 +39,36 @@ test('an answer outside the finite candidate list is rejected', async () => {
 });
 
 test('deadline aborts even an evaluator that ignores its signal', async () => {
-  let signal;
+  const signals = [];
   await assert.rejects(evaluateRoutingChoices(input(1), async (_request, options) => {
-    signal = options.signal;
+    signals.push(options.signal);
     return new Promise(() => {});
   }, { budgetMs: 20 }), error => error.code === 'jev_aborted' && error.reason === 'timeout');
-  assert.equal(signal.aborted, true);
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every(signal => signal.aborted));
+});
+
+test('a timed-out attempt retries the identical choice once with a fresh deadline', async () => {
+  const request = input(2);
+  const received = [], signals = [], events = [];
+  const evaluate = Object.assign(async (value, options) => {
+    received.push(value); signals.push(options.signal);
+    if (received.length === 1) return new Promise(() => {});
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return answer(value, 'candidate_1');
+  }, { recordDecision: async event => { events.push(event.status); } });
+  const result = await evaluateRoutingChoices(request, evaluate, { budgetMs: 40 });
+  assert.equal(result.environment.choice, 'candidate_1');
+  assert.deepEqual(received, [request, request]);
+  assert.equal(signals[0].aborted, true);
+  assert.deepEqual(events, ['started', 'succeeded']);
+  let calls = 0;
+  const reported = await evaluateRoutingChoices(request, async value => {
+    if (++calls === 1) throw Object.assign(new Error('provider timed out'), { code: 'jev_aborted' });
+    return answer(value, 'candidate_0');
+  });
+  assert.equal(reported.environment.choice, 'candidate_0');
+  assert.equal(calls, 2);
 });
 
 test('an unclassified provider failure is surfaced without another model call', async () => {
@@ -73,11 +106,23 @@ test('a transient gateway failure retries the identical choice once within its d
   assert.equal(exhausted, 2);
 });
 
-test('missing answers, outside choices and incomplete distributions are rejected', async () => {
+test('missing answers and outside choices are rejected', async () => {
   await assert.rejects(evaluateRoutingChoices(input(1), async () => ({ answers: {} })), { code: 'invalid_answer' });
-  await assert.rejects(evaluateRoutingChoices(input(2), async () => ({ answers: { environment:
-    { choice: 'candidate_0', probabilities: { candidate_0: 1, abstain: 0 } } } })), { code: 'invalid_answer' });
   await assert.rejects(evaluateRoutingChoices(input(1), async request => answer(request, 'outside')), { code: 'invalid_answer' });
+});
+
+test('the pick is the answer: its probabilities are kept as given, never judged', async () => {
+  // Ten options rounded to two decimals sum to .95, and the pick is not the
+  // most probable; the pick still decides.
+  const request = input(10);
+  const probabilities = Object.fromEntries(Object.keys(request.questions.environment.criteria)
+    .map((key, index) => [key, index === 3 ? .14 : .09]));
+  const result = await evaluateRoutingChoices(request, async () => ({ answers: { environment: {
+    choice: 'candidate_0', probabilities: { ...probabilities, stray: 1 } } } }));
+  assert.equal(result.environment.choice, 'candidate_0');
+  assert.deepEqual(result.environment.probabilities, probabilities);
+  const bare = await evaluateRoutingChoices(input(2), async () => ({ answers: { environment: { choice: 'candidate_1' } } }));
+  assert.deepEqual(bare.environment, { choice: 'candidate_1', probabilities: {} });
 });
 
 test('invalid answer reports the question key from the request, with a typed validation issue', async () => {
@@ -146,4 +191,16 @@ test('empty option sets fail before spending a model call', async () => {
   const request = tagInput();
   request.questions.model.criteria = {};
   await assert.rejects(evaluateRoutingChoices(request, async () => assert.fail('no options')), /Invalid routing question/);
+});
+
+test('a score answer lies on the offered levels and keeps its level distribution', async () => {
+  const request = { state: { message: 'Fix tests' }, questions: { fit: { type: 'score', instructions: 'Rate', criteria: ['no', 'ok', 'good', 'asked'] } } };
+  const result = await evaluateRoutingChoices(request, async () => ({ answers: { fit: { score: 2.2, probabilities: { 1: .1, 2: .6, 3: .3, extra: 1 } } } }));
+  assert.deepEqual(result.fit, { score: 2.2, probabilities: { 1: .1, 2: .6, 3: .3 } });
+  for (const score of [-1, 3.5, Number.NaN, '2']) {
+    await assert.rejects(evaluateRoutingChoices(request, async () => ({ answers: { fit: { score } } })),
+      error => error.code === 'invalid_answer' && error.answerFailure.issue === 'score_invalid' && error.answerFailure.questionKey === 'fit');
+  }
+  await assert.rejects(evaluateRoutingChoices({ ...request, questions: { fit: { ...request.questions.fit, criteria: ['only'] } } },
+    async () => assert.fail('no call')), /Invalid routing question/);
 });

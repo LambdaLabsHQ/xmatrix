@@ -1,6 +1,6 @@
-import type { ConnectorDelivery, ConnectorDeliveryResult, ConnectorEvent } from "./provider";
-import { timingSafeEqual } from "@xmatrix/protocol";
-import { connectorEvent, excerpt, lowerHeader, oneLine, parseJsonObject, record, safeUrl, sourceToken, text } from "./event-format";
+import type { ConnectorEvent } from "./provider";
+import { createSignedJsonReceiver } from "./delivery-proof";
+import { connectorEvent, excerpt, lowerHeader, oneLine, record, safeUrl, sourceToken, text } from "./event-format";
 
 /*
  * GitLab project and group webhooks: `X-Gitlab-Token` echoes the secret token
@@ -16,13 +16,9 @@ function commits(payload: Record<string, unknown>): string[] {
   });
 }
 
-export async function receiveGitLabDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  const secret = delivery.credentials.webhookToken;
-  if (!secret || !timingSafeEqual(lowerHeader(delivery.headers, "x-gitlab-token"), secret)) {
-    return { ok: false, status: 401, error: "Invalid GitLab token" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return { ok: false, status: 400, error: "GitLab body must be JSON" };
+export const receiveGitLabDelivery = createSignedJsonReceiver({
+  name: "GitLab", secretField: "webhookToken", proof: { header: "x-gitlab-token", token: true },
+}, (delivery, payload) => {
   const kind = text(payload.object_kind);
   const project = record(payload.project);
   const path = sourceToken(project.path_with_namespace);
@@ -75,4 +71,4 @@ export async function receiveGitLabDelivery(delivery: ConnectorDelivery): Promis
       provider, title: `Release ${text(payload.action)} — ${text(payload.name) || text(payload.tag)}`, url }));
   }
   return { ok: true, events };
-}
+});

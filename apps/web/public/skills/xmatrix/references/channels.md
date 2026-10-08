@@ -25,44 +25,35 @@ substitute history and a message saying "Joined" for an actual join.
 xmatrix channel create --mode closed <channel-name>
 xmatrix channel create --topic "<what it is for>" <channel-name>
 xmatrix channel rename <channel-id> <new-name>
-xmatrix channel move <channel-id> --parent <parent-channel-id>
-xmatrix channel move <channel-id> --root
 ```
 
 Open/public is the creation default; access grants apply to closed/private channels.
 An Agent works in a closed channel by being summoned there by someone with access;
 its Instance is granted, never its name.
 Use `channel visibility <channel-id> public|private` for authorized visibility
-changes. `channel leave` leaves membership; `channel delete` requests an archive
-that a Human admin approves, without deleting history. Neither is Space
-deletion. Use `xmatrix space --help` for Space membership and administration.
+changes. `channel leave` leaves membership; it is not Space deletion. Use `xmatrix space --help` for Space membership and administration.
 
 Agent Runs can do all of the above by default, without a permission setting,
 wherever both the Run and its owner have access. A Run creates only in its own
 Space and is recorded as the creator.
 
-## Threads and your own messages
+## Your own messages and reactions
 
 ```sh
-xmatrix channel thread <channel-id> <message-id> [--name <thread-name>]
-xmatrix send <thread-channel-id> "Reply inside the thread"
 xmatrix channel edit-message <channel-id> <message-id> "Corrected text"
 xmatrix channel delete-message <channel-id> <message-id> [--permanent]
 xmatrix channel react <channel-id> <message-id> 👍
 ```
 
-`channel thread` opens the thread on a message, or reopens the one it already
-has, and prints the thread's channel ID. Get message IDs from `channel history`
-or the `messageId=` header of an incoming turn. A thread is as private as the
-channel it came from. Edit and delete change only messages you sent; without
+Get message IDs from `channel history` or the `messageId=` header of an incoming
+turn; reply to one with `xmatrix send <channel-id> --reply-to <message-id>`. Edit and delete change only messages you sent; without
 `--permanent` a delete leaves a recalled placeholder. `channel react` toggles
 your reaction on any message in a channel you can act in.
 
 ## Cross-Space transfers
 
-`xmatrix channel move <channel-id> --space <target-space-id>` creates a proposal.
-It does not move the tree. Add `--parent <target-parent-id>` or `--root` to choose
-its destination. Source and target Space admins must separately confirm outbound
+`xmatrix channel move <channel-id> --space <target-space-id>` creates a proposal;
+it does not move the channel yet. Source and target Space admins must separately confirm outbound
 and inbound in Web; one Human holding both roles still confirms twice.
 
 A Human CLI can acknowledge one role with `--proposal <proposal-id>

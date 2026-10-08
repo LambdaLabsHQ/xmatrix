@@ -97,7 +97,6 @@ export {
   type PostgresMembershipMutation,
   type PostgresSpaceMutation,
   type SpaceControlPrincipal,
-  type UpdatePostgresSpaceManagementConfig,
   type UpdatePostgresSpaceMemberCreationPolicy,
 } from "./space-control.js";
 export {
@@ -179,6 +178,10 @@ export {
 } from "./machine-run-terminal-reports.js";
 export { MachineNameError, renameMachine, nameMachine, getMachineName, setMachineAutoAssign } from "./machine-names.js";
 export { rejoinMachine, retireMachine } from "./machine-retirement.js";
+export {
+  MachineResourceHistoryError, maintainMachineResourceHistory, parseMachineResourceHistoryRange,
+  readMachineResourceHistory,
+} from "./machine-resource-history.js";
 export { MachineIdentityAdoptionError, adoptLegacyMachineIds } from "./machine-identity-adoption.js";
 export {
   PostgresAutomationRepository,
@@ -218,7 +221,7 @@ export { PostgresRegistrationExecutionRepository } from "./agent-registration-ex
 export { firstMessageSummonId, readMessageInvocationSelections, XMATRIX_SYSTEM_AUTHOR_ID } from "./message-invocation-selections.js";
 export { PostgresRegistrationRevocationRepository, type RegistrationStopIntent } from "./agent-registration-revocation.js";
 
-export type { RegistrationLaunchCandidate, RegistrationLaunchChooser, RegistrationManagementLaunch, RegistrationLaunchCoalesce, RegistrationAboutSession, ChannelAboutSessionStopTarget } from "./agent-registration-launch.js";
+export type { RegistrationLaunchCandidate, RegistrationLaunchChooser, RegistrationAboutSession, ChannelAboutSessionStopTarget } from "./agent-registration-launch.js";
 export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationCancellations } from "./agent-registration-launch.js";
 export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
 export { readRegistrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
@@ -258,7 +261,7 @@ export type {
 export {
   readsOnly,
 } from "./space-roles.js";
-export { readHarnessActionStatus, readHarnessReleaseTargets, type HarnessReleaseTarget } from "./machine-harness-actions.js";
+export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessReleaseTarget } from "./machine-harness-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
 export { observeRegistrationQuota, readRegistrationQuotaState, registrationQuotaKey, type RegistrationQuotaKey } from "./registration-quota-state.js";

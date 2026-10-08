@@ -3,7 +3,7 @@
 import process from "node:process";
 import { Client } from "pg";
 
-import { runIfInvoked, withClient } from "./cli.mjs";
+import { runIfInvoked, withClient, withClientTransaction } from "./cli.mjs";
 
 const DEFAULT_BATCH_SIZE = 1_000;
 const DEFAULT_MAX_ROWS = 10_000;
@@ -40,9 +40,39 @@ export function parseLifecycleOptions(argv) {
   });
 }
 
-async function snapshot(client) {
-  const [relations, ages, outbox, expired] = await Promise.all([
-    client.query(`SELECT namespace.nspname||'.'||relation.relname AS relation,
+// Evidence reads scan tables no index serves: `data.outbox` alone took 4 s on the
+// production origin, and the five oldest-row scans together exceeded the 5 s delete
+// timeout before any delete began. They run one at a time in a read-only
+// transaction with their own ceiling; the deletes keep the tighter one.
+const SNAPSHOT_STATEMENT_TIMEOUT = "30s";
+const DELETE_STATEMENT_TIMEOUT = "5s";
+
+async function snapshotQuery(client, label, text, values) {
+  try {
+    return await client.query(text, values);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`lifecycle snapshot ${label}: ${message}`, { cause: error });
+  }
+}
+
+function snapshot(client) {
+  return withClientTransaction(client, async () => {
+    await client.query("SET TRANSACTION READ ONLY");
+    await client.query(`SET LOCAL statement_timeout = '${SNAPSHOT_STATEMENT_TIMEOUT}'`);
+    return readSnapshot(client);
+  });
+}
+
+async function oldest(client, relation, column) {
+  const result = await snapshotQuery(client, `oldest ${relation}`,
+    `SELECT MIN(${column}) AS oldest_at FROM ${relation}`);
+  return result.rows[0]?.oldest_at ?? null;
+}
+
+async function readSnapshot(client) {
+  const relations = await snapshotQuery(client, "relations",
+    `SELECT namespace.nspname||'.'||relation.relname AS relation,
         GREATEST(relation.reltuples,0)::bigint AS estimated_rows,
         pg_total_relation_size(relation.oid)::bigint AS total_bytes,
         pg_indexes_size(relation.oid)::bigint AS index_bytes
@@ -51,18 +81,25 @@ async function snapshot(client) {
         AND relation.relname IN (
           'idempotency_keys','message_sequence_reservations','agent_message_executions','outbox','message_mutations'
         )) OR (namespace.nspname='control' AND relation.relname='scoped_control_command_replays')
-      ORDER BY relation.relname`),
-    client.query(`SELECT
-        (SELECT MIN(created_at) FROM data.idempotency_keys) AS idempotency_oldest_at,
-        (SELECT MIN(created_at) FROM data.message_sequence_reservations)
-          AS sequence_reservation_oldest_at,
-        (SELECT MIN(created_at) FROM data.outbox) AS outbox_oldest_at,
-        (SELECT MIN(created_at) FROM data.agent_message_executions) AS message_execution_oldest_at,
-        (SELECT MIN(occurred_at) FROM data.message_mutations) AS mutation_oldest_at`),
-    client.query(`SELECT status,COUNT(*)::bigint AS estimated_rows,MIN(created_at) AS oldest_at,
+      ORDER BY relation.relname`);
+  // One scan of the outbox serves both its per-status counts and its oldest row.
+  const outbox = await snapshotQuery(client, "outbox by status",
+    `SELECT status,COUNT(*)::bigint AS estimated_rows,MIN(created_at) AS oldest_at,
         MIN(available_at) AS oldest_available_at
-      FROM data.outbox GROUP BY status ORDER BY status`),
-    client.query(`SELECT
+      FROM data.outbox GROUP BY status ORDER BY status`);
+  const outboxOldest = outbox.rows.reduce((earliest, row) =>
+    row.oldest_at !== null && row.oldest_at !== undefined &&
+      (earliest === null || row.oldest_at < earliest) ? row.oldest_at : earliest, null);
+  const ages = {
+    idempotency_oldest_at: await oldest(client, "data.idempotency_keys", "created_at"),
+    sequence_reservation_oldest_at:
+      await oldest(client, "data.message_sequence_reservations", "created_at"),
+    outbox_oldest_at: outboxOldest,
+    message_execution_oldest_at: await oldest(client, "data.agent_message_executions", "created_at"),
+    mutation_oldest_at: await oldest(client, "data.message_mutations", "occurred_at"),
+  };
+  const expired = await snapshotQuery(client, "expired rows",
+    `SELECT
         (SELECT COUNT(*)::integer FROM (
           SELECT 1 FROM data.idempotency_keys WHERE expires_at<=clock_timestamp()
           ORDER BY expires_at,space_id,idempotency_key LIMIT $1
@@ -78,11 +115,10 @@ async function snapshot(client) {
         (SELECT COUNT(*)::integer FROM (
           SELECT 1 FROM control.scoped_control_command_replays WHERE expires_at<=now()
           ORDER BY expires_at,scope_kind,scope_id,command_id LIMIT $1
-        ) bounded) AS scoped_command_replay_rows`, [MAX_MANUAL_ROWS + 1]),
-  ]);
+        ) bounded) AS scoped_command_replay_rows`, [MAX_MANUAL_ROWS + 1]);
   return {
     relations: relations.rows,
-    oldest: ages.rows[0] ?? {},
+    oldest: ages,
     outboxByStatus: outbox.rows,
     expiredIdempotencyRowsCapped: Number(expired.rows[0]?.idempotency_rows ?? 0),
     expiredSequenceReservationRowsCapped: Number(
@@ -150,7 +186,7 @@ async function deleteBatch(client, relation, limit) {
 export async function runLifecycleMaintenance(client, options, dependencies = {}) {
   const monotonicNow = dependencies.monotonicNow ?? (() => performance.now());
   await client.query("SET application_name = 'xmatrix-postgres-lifecycle-maintenance'");
-  await client.query("SET statement_timeout = '5s'");
+  await client.query(`SET statement_timeout = '${DELETE_STATEMENT_TIMEOUT}'`);
   await client.query("SET lock_timeout = '2s'");
   const before = await snapshot(client);
   const startedAt = monotonicNow();

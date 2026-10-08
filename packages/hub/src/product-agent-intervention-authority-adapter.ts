@@ -112,7 +112,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
           instanceId: target.instanceId,
           reason,
           worktreeDisposition: "retain",
-          ...(handoffExport ? { handoffExport } : {}),
+          ...(handoffExport ? { handoffExport, resumeSessionKey: target.resumeSessionKey,
+            ...target.repoPool } : {}),
         },
         metadata: {},
         capabilities: [],
@@ -122,7 +123,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
 
   /** The daemon's terminal stop report, or none before the deadline. */
   async function awaitDaemonStopResult(target: ProductAgentKillTarget, controlId: string,
-    timeoutMs: number): Promise<Record<string, unknown> | undefined> {
+    timeoutMs: number, handoff = false): Promise<Record<string, unknown> | undefined> {
     return probeAuthorityUntilTerminal<Record<string, unknown>>({
       deadlineAtMs: Date.now() + timeoutMs,
       probe: async () => {
@@ -136,6 +137,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
           machineId: target.machineId,
           hostId: target.hostId,
           worktreeDisposition: "retain",
+          ...(handoff ? { resumeSessionKey: target.resumeSessionKey, ...target.repoPool } : {}),
         });
         if (statusPayload.status === "completed") return record(statusPayload.result) ?? {};
         if (statusPayload.status === "failed") {
@@ -147,13 +149,14 @@ export function createProductAgentInterventionAuthorityPort(input: {
   }
 
   return {
-    async listKillTargets(channelId) {
+    async listKillTargets(channelId, handoffSource) {
       // Stopping every Agent in a busy Channel must see every Agent in it.
       const listed: unknown[] = [];
       let cursor: string | null = null;
       do {
         const page = await runtime().listChannelAgentKillTargets({ requestId: crypto.randomUUID(),
-          channelId, actorUserId: input.actorUserId, cursor, limit: 200 });
+          channelId, actorUserId: input.actorUserId, cursor, limit: 200,
+          ...(handoffSource ? { handoffSource } : {}) });
         listed.push(...page.targets);
         cursor = typeof page.cursor === "string" ? page.cursor : null;
       } while (cursor);
@@ -173,6 +176,10 @@ export function createProductAgentInterventionAuthorityPort(input: {
         const hostId = typeof target?.hostId === "string" ? target.hostId : "";
         if (!instanceId || !runId || !agentId || !mentionTarget || !ownerUserId ||
             !machineOwnerUserId || !machineId) return [];
+        const pool = record(target?.repoPool);
+        const repoPool = typeof pool?.repoIdentity === "string" && typeof pool.repoKeyId === "string" &&
+          typeof pool.slotId === "string" ? { repoIdentity: pool.repoIdentity, repoKeyId: pool.repoKeyId,
+            slotId: pool.slotId } : undefined;
         return [{
           instanceId,
           runId,
@@ -182,6 +189,8 @@ export function createProductAgentInterventionAuthorityPort(input: {
           machineOwnerUserId,
           machineId,
           hostId,
+          ...(typeof target?.resumeSessionKey === "string" ? { resumeSessionKey: target.resumeSessionKey } : {}),
+          ...(repoPool ? { repoPool } : {}),
           ...(typeof target?.executionKey === "string"
             ? { executionKey: target.executionKey }
             : {}),
@@ -258,8 +267,12 @@ export function createProductAgentInterventionAuthorityPort(input: {
     },
 
     async issueHandoffStop(target, controlId, reason, channelId, handoffExport, timeoutMs) {
+      // An exited source may still be sleeping/interrupted. Retire its rest
+      // before the successor can reply and wake it; its checkout stays retained.
+      await runtime().stopRestingInstances({ requestId: stableCommandId("handoff-rest-stop", controlId),
+        channelId, actorUserId: input.actorUserId, handoffSource: { instanceId: target.instanceId, runId: target.runId } });
       await issueDaemonStop(target, controlId, reason, channelId, handoffExport);
-      const result = await awaitDaemonStopResult(target, controlId, timeoutMs);
+      const result = await awaitDaemonStopResult(target, controlId, timeoutMs, true);
       if (!result) return { stopped: false };
       return { stopped: true, ...(record(result.handoffExport) ? { handoffExport: record(result.handoffExport)! } : {}) };
     },

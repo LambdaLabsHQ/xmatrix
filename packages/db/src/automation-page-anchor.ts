@@ -1,8 +1,8 @@
 import type { QueryResultRow } from "pg";
-import { automationReferences, sha256Hex } from "@xmatrix/protocol";
+import { automationReferences, sha256Hex, type PageAutomationAnchorChange } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
-import { commitAutomationChange } from "./automation-commit.js";
-import { storedIso } from "./stored-values.js";
+import { automationName, commitAutomationChange } from "./automation-commit.js";
+import { storedIso, storedObject } from "./stored-values.js";
 
 const MAX_PAGE_AUTOMATIONS = 200;
 
@@ -12,19 +12,22 @@ const MAX_PAGE_AUTOMATIONS = 200;
  * left the head revision is paused as detached, and one whose reference came
  * back resumes. Runs in the transaction that moves the page's head, so the
  * text and what runs never disagree. Returns the conversations whose
- * coordinators must hear of the change.
+ * coordinators must hear of the change, and the Automations it detached and
+ * attached, so whoever wrote the edit is told what it did.
  */
 export async function reconcilePageAutomations(tx: DatabaseTransaction, input: {
   spaceId: string; pageId: string; body: string; at: string; revision: number;
-}): Promise<string[]> {
+}): Promise<PageAutomationReconciliation> {
   const referenced = automationReferences(input.body);
-  const rows = await tx.query<QueryResultRow>({ name: "page_automations_reconcile_v2", text: `SELECT
+  const rows = await tx.query<QueryResultRow>({ name: "page_automations_reconcile_v3", text: `SELECT
       a.automation_id,a.channel_id,a.enabled,a.detached_at,a.version,
-      a.created_at,a.next_run_at,a.last_run_at
+      a.created_at,a.next_run_at,a.last_run_at,a.payload_json
     FROM data.automations a JOIN data.channels c ON c.channel_id=a.channel_id
     WHERE a.page_id=$1 AND c.space_id=$2 ORDER BY a.automation_id FOR UPDATE OF a`,
   values: [input.pageId, input.spaceId], maxRows: MAX_PAGE_AUTOMATIONS });
   const changed: string[] = [];
+  const detached: PageAutomationAnchorChange[] = [];
+  const attached: PageAutomationAnchorChange[] = [];
   for (const row of rows) {
     const automationId = String(row.automation_id);
     const present = referenced.has(automationId);
@@ -50,8 +53,21 @@ export async function reconcilePageAutomations(tx: DatabaseTransaction, input: {
       reused: false, projectionMutations: [], recipientChanges: [],
     }, input.at);
     changed.push(String(row.channel_id));
+    (detach ? detached : attached).push({ automationId, name: storedName(row.payload_json) });
   }
-  return [...new Set(changed)];
+  return { channels: [...new Set(changed)], detached, attached };
+}
+
+export interface PageAutomationReconciliation {
+  channels: string[];
+  detached: PageAutomationAnchorChange[];
+  attached: PageAutomationAnchorChange[];
+}
+
+function storedName(value: unknown): string {
+  const payload = storedObject(value);
+  const message = storedObject(payload.message);
+  return automationName(payload.name, typeof message.body === "string" ? message.body : "");
 }
 
 /**
@@ -60,6 +76,11 @@ export async function reconcilePageAutomations(tx: DatabaseTransaction, input: {
  * pass the stamp before anything may run. Leaving it there makes the due claim
  * bump the version, so a pause that still holds the create version conflicts.
  * An Automation that has already run keeps the schedule it has.
+ *
+ * The delay is at most one interval: an Automation enabled before whose runs
+ * never dispatched had its due moved on by its cadence, so the time since
+ * create is days, not the first delay. An invalid interval keeps the due; the
+ * due claim disables the Automation and says why.
  */
 function nextRunWhenEnabled(row: QueryResultRow, at: string): string {
   const next = storedIso(row.next_run_at);
@@ -67,7 +88,9 @@ function nextRunWhenEnabled(row: QueryResultRow, at: string): string {
   const atMs = Date.parse(at);
   const nextMs = Date.parse(next);
   if (!(nextMs <= atMs)) return next;
-  const delayMs = Math.max(0, nextMs - Date.parse(storedIso(row.created_at)));
+  const intervalMs = Number(storedObject(row.payload_json).intervalMinutes) * 60_000;
+  if (!(intervalMs > 0)) return next;
+  const delayMs = Math.min(intervalMs, Math.max(0, nextMs - Date.parse(storedIso(row.created_at))));
   return new Date(atMs + delayMs).toISOString();
 }
 

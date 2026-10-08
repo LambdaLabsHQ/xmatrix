@@ -9,18 +9,16 @@ import { decideNewConversationLaunch, dispatchRegistrationInput, prepareRegistra
 import { runtimeRepository } from "./runtime";
 import { launchHandoffSuccessorElsewhere } from "./handoff-elsewhere";
 import { ControlError, RegistrationAccessError } from "@xmatrix/db";
-import { getChannel, getSpace, getSpaceManagementConfig } from "./spaces";
+import { getChannel, getSpace } from "./spaces";
 import {
-  hasProductManagementAgentMention,
   orchestrateProductAgentMentions,
   orchestrateProductChannelAbout,
-  orchestrateProductManagementAgentMention,
   orchestrateProductNewConversationStart,
   productSpacePreferredLanguage,
   type ProductAgentMentionPort,
   type ProductAgentMentionOrchestrationResult,
   type ProductChannelView } from "./product-agent-mention";
-import { XMATRIX_MANAGEMENT_AVATAR_URL, XMATRIX_MANAGEMENT_LABEL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
 import { sha256Hex } from "@xmatrix/protocol";
@@ -69,9 +67,9 @@ export function productAgentSystemNoticeSenderSnapshot(
     kind: "user",
     userId: actorUserId,
     email: `${actorUserId.replace(/[^a-zA-Z0-9._-]/gu, "_")}@unknown.invalid`,
-    label: XMATRIX_MANAGEMENT_LABEL,
-    name: XMATRIX_MANAGEMENT_LABEL,
-    avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL,
+    label: XMATRIX_SYSTEM_LABEL,
+    name: XMATRIX_SYSTEM_LABEL,
+    avatarUrl: XMATRIX_SYSTEM_AVATAR_URL,
   };
 }
 
@@ -180,6 +178,7 @@ export function createProductAgentMentionAuthorityPort(input: {
       }
       return {
         id: channel.id,
+        ...(typeof channel.name === "string" ? { name: channel.name } : {}),
         spaceId: channel.spaceId,
         mode: channel.mode === "closed" ? "closed" : "open",
         ...(typeof channel.archivedAt === "string" ? { archivedAt: channel.archivedAt } : {}),
@@ -187,25 +186,6 @@ export function createProductAgentMentionAuthorityPort(input: {
           ? { metadata: channel.metadata as Record<string, unknown> }
           : {}),
       } satisfies ProductChannelView;
-    },
-
-    async getManagementConfig(spaceId) {
-      const payload = await readOrLog("get-space-management-config",
-        () => getSpaceManagementConfig(input.env, { spaceId, principal }),
-        { spaceId, sourceMessageId: input.sourceMessageId });
-      if (!payload) return { enabled: false, generation: 0 };
-      const config = payload.managementAgent as Record<string, unknown> | undefined;
-      return {
-        enabled: config?.enabled === true,
-        ...(typeof config?.sideEffectsEnabled === "boolean"
-          ? { sideEffectsEnabled: config.sideEffectsEnabled }
-          : {}),
-        generation: Number.isSafeInteger(payload.version) ? Number(payload.version) : 0,
-        ...(typeof config?.prompt === "string" ? { prompt: config.prompt } : {}),
-        ...(typeof config?.managementChannelId === "string"
-          ? { managementChannelId: config.managementChannelId }
-          : {}),
-      };
     },
 
     async getSpacePreferredLanguage(spaceId) {
@@ -362,27 +342,6 @@ export async function dispatchProductAgentMentionsAfterAuthorityMessage(
   return result;
 }
 
-export async function dispatchProductManagementAgentMentionAfterAuthorityMessage(input: {
-  env: ProductAgentMentionAuthorityEnv;
-  channelId: string;
-  messageId: string;
-  body: string;
-  actorUserId: string;
-}): Promise<ProductAgentMentionOrchestrationResult | undefined> {
-  if (!hasProductManagementAgentMention(input.body)) return undefined;
-  return orchestrateProductManagementAgentMention({
-    channelId: input.channelId,
-    messageId: input.messageId,
-    body: input.body,
-    actorUserId: input.actorUserId,
-    port: createProductAgentMentionAuthorityPort({
-      env: input.env,
-      actorUserId: input.actorUserId,
-      sourceMessageId: input.messageId,
-    }),
-  });
-}
-
 /** A new conversation's first message that summons nobody; see
  * `orchestrateProductNewConversationStart`. */
 export async function dispatchProductNewConversationStart(input: {
@@ -402,6 +361,7 @@ export async function dispatchProductChannelAbout(input: {
   spaceId?: string;
   channelId: string;
   requestId: string;
+  triggerMessageId?: string;
   successorOfRunId?: string;
   actorUserId: string;
   skipDaemonWake?: boolean;
@@ -412,6 +372,7 @@ export async function dispatchProductChannelAbout(input: {
     ...(input.spaceId ? { spaceId: input.spaceId } : {}),
     channelId: input.channelId,
     requestId: input.requestId,
+    ...(input.triggerMessageId ? { triggerMessageId: input.triggerMessageId } : {}),
     ...(input.successorOfRunId ? { successorOfRunId: input.successorOfRunId } : {}),
     actorUserId: input.actorUserId,
     port: createProductAgentMentionAuthorityPort({

@@ -1,12 +1,11 @@
-import { privateJsonResponse as noStoreJson } from "./private-json-response";
+import { ControlError } from "@xmatrix/db";
 import { readBoundedStream } from "./read-bounded-stream";
 import { plainRecord } from "@xmatrix/protocol";
 import {
   parseRelayV2MessageAttachmentAuthority,
   type RelayV2MessageAttachmentAuthority,
 } from "@xmatrix/protocol/relay-v2/message-attachment";
-// @ts-expect-error Node's native TS runner requires .ts; Wrangler resolves and validates the same source.
-import { RelayR2DownloadGatewayError, type RelayPrivateR2ObjectMetadata } from "./relay-r2-download-gateway.ts";
+import type { RelayPrivateR2ObjectMetadata } from "./relay-r2-download-gateway.ts";
 import { lowercaseHex, utf8ByteLength } from "@xmatrix/protocol";
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -25,15 +24,11 @@ export type RelayR2PrivateApiErrorCode =
   | "capability_security_unavailable"
   | "private_storage_unavailable";
 
-export class RelayR2PrivateApiError extends Error {
-  readonly code: RelayR2PrivateApiErrorCode;
-  readonly status: number;
-
-  constructor(code: RelayR2PrivateApiErrorCode, status: number, message: string) {
-    super(message);
-    this.name = "RelayR2PrivateApiError";
-    this.code = code;
-    this.status = status;
+export class RelayR2PrivateApiError extends ControlError {
+  declare readonly code: RelayR2PrivateApiErrorCode;
+  override name = "RelayR2PrivateApiError";
+  constructor(code: RelayR2PrivateApiErrorCode, status: number, message: string, retryable = false) {
+    super(code, status, message, retryable);
   }
 }
 
@@ -49,8 +44,9 @@ function apiError(
   code: RelayR2PrivateApiErrorCode,
   status: number,
   message: string,
+  retryable = false,
 ): RelayR2PrivateApiError {
-  return new RelayR2PrivateApiError(code, status, message);
+  return new RelayR2PrivateApiError(code, status, message, retryable);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -158,16 +154,6 @@ function hasRequiredOptionalFields(
     keys.every((field) => allowed.has(field));
 }
 
-export function relayR2PrivateApiErrorResponse(error: unknown): Response | undefined {
-  if (error instanceof RelayR2PrivateApiError) {
-    return noStoreJson({ error: error.message, code: error.code }, error.status);
-  }
-  if (error instanceof RelayR2DownloadGatewayError) {
-    return noStoreJson({ error: error.message, code: error.code }, error.status);
-  }
-  return undefined;
-}
-
 async function readAuthoritativeMessageAttachment(input: {
   attachmentAuthority: RelayR2MessageAttachmentAuthority;
   userId: string;
@@ -189,6 +175,7 @@ async function readAuthoritativeMessageAttachment(input: {
       "capability_security_unavailable",
       503,
       "message attachment authority is temporarily unavailable",
+      true,
     );
   }
   const payload = await readBoundedInternalJson(
@@ -202,6 +189,7 @@ async function readAuthoritativeMessageAttachment(input: {
       response.status >= 500
         ? "message attachment authority is temporarily unavailable"
         : "message attachment is not available to this principal",
+      response.status >= 500 && isRecord(payload) && payload.retryable === true,
     );
   }
   if (
@@ -336,6 +324,7 @@ export async function handleRelayV2MessageAttachmentProductMedia(input: {
       "private_storage_unavailable",
       503,
       "message attachment failed immutable storage verification",
+      true,
     );
   }
   if (!object) {

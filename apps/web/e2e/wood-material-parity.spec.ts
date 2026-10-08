@@ -13,7 +13,7 @@ for (const mobile of [false, true]) {
       return [style.backgroundColor, style.backgroundImage, style.backgroundSize, style.backgroundPosition, style.backgroundBlendMode];
     });
     expect(paint[1]).toContain('/textures/wood.webp');
-    const selectors = mobile ? ['.app-topbar', '.app-detail-plank'] : ['.app-rail', '.app-detail-plank'];
+    const selectors = mobile ? ['.app-topbar .app-mobile-back-sign', '.app-detail-plank'] : ['.app-rail', '.app-detail-plank'];
     for (const selector of selectors) {
       for (const element of await page.locator(selector).all()) {
         expect(await element.evaluate((node) => {
@@ -46,11 +46,13 @@ for (const view of ['profile', 'activity', 'more']) {
           ? [element.className.toString()] : [];
       }));
     expect(surfaces).toEqual([]);
-    expect(await page.locator('.app-topbar').evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('wood.webp');
+    // The bar is paper; its wood is the sign: the Space's on a dock root, the chevron and title's on a pushed screen.
+    const wood = page.locator('.app-topbar.app-mobile-tab-root-bar :is(.app-mobile-space-trigger, .app-mobile-title), .app-topbar .app-mobile-back-sign');
+    expect(await wood.first().evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('wood.webp');
   });
 }
 
-test('mobile channel details puts its planks on paper under a wood bar', async ({ page }) => {
+test('mobile channel details puts its navigation and content planks on paper', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, summary: 'Planks on paper.' }, []);
   await page.getByRole('button', { name: 'More', exact: true }).tap();

@@ -22,6 +22,7 @@
     "vars": {
       "RELAY_POSTGRES_SHARD_1_ID": "shard-1",
       "AUTH_COOKIE_DOMAIN": ".xmatrix.sh",
+      "GITHUB_APP_CLIENT_ID": "Iv23limvMtfVQPAwswdX",
       "PLATFORM_ADMIN_EMAILS": {
         "env": "XMATRIX_PLATFORM_ADMIN_EMAILS"
       },

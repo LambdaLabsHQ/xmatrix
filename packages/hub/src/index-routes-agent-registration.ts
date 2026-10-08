@@ -3,7 +3,8 @@ import { ControlError } from "@xmatrix/db";
 import { parseAgentRegistrationCommand, parseSpaceAgentRegistrationKey, groupAgentRegistrationCatalog,
   parseAgentEnvironmentCommand, parseAgentRegistrationKey, type AgentRegistrationSummary } from "@xmatrix/protocol";
 import type { Env } from "./types";
-import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorStatus } from "./index-shared";
+import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestFailure } from "./index-shared";
+import { failureResponse } from "./error-contract";
 import { changeAgentEnvironment, controlAgentRegistration, getAgentEnvironment, getAgentRegistration,
   listAgentRegistrations, refreshAgentRegistrationQuota } from "./agent-registrations";
 
@@ -15,12 +16,14 @@ const REGISTRATIONS = { list: listAgentRegistrations, refreshQuota: refreshAgent
   get: getAgentRegistration, control: controlAgentRegistration,
   getEnvironment: getAgentEnvironment, changeEnvironment: changeAgentEnvironment };
 
-/** A registration rejection under its own status and code; anything else is the route's own failure. */
+/**
+ * A registration rejection under its own status and code, and an outage as a
+ * retryable 503; anything else is the route's own failure.
+ */
 function registrationFailure(error: unknown, fallback: string): Response {
-  if (error instanceof ControlError) {
-    return Response.json({ code: error.code, error: error.message }, { status: error.status, headers: NO_STORE });
-  }
-  return Response.json({ error: fallback }, { status: requestErrorStatus(error), headers: NO_STORE });
+  const failure = requestFailure(error);
+  if (error instanceof ControlError || failure.body.retryable) return failureResponse(failure, NO_STORE);
+  return failureResponse({ ...failure, body: { error: fallback } }, NO_STORE);
 }
 
 export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, dependencies: Partial<

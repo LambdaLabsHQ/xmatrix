@@ -21,6 +21,31 @@ export const SUMMON_INTENT_CATEGORIES = {
   example: "The mention is syntax, documentation, a quotation or an example of how to write a mention.",
 } as const;
 export type SummonIntentCategory = keyof typeof SUMMON_INTENT_CATEGORIES;
+/** Jev's reading of one summon while its author typed it, keyed by the
+ * summon's text through its last condition. Sending the message with it is
+ * the author's answer to the intent question, as `launch:force` is. */
+export type DraftSummonIntent = { start: number; end: number; mention: string; choice: SummonIntentCategory };
+
+/** A send's draft readings, or undefined when there are none; throws on a malformed list. */
+export function parseDraftSummonIntents(value: unknown, body: string): DraftSummonIntent[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 16) throw new Error("Draft summon intents must be a list of at most 16");
+  const starts = new Set<number>();
+  return value.map(item => {
+    const entry = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+    if (Object.keys(entry).some(key => !["start", "end", "mention", "choice"].includes(key)) ||
+        !Number.isSafeInteger(entry.start) || !Number.isSafeInteger(entry.end) || Number(entry.start) < 0 ||
+        Number(entry.end) <= Number(entry.start) || Number(entry.end) > body.length || starts.has(Number(entry.start)) ||
+        typeof entry.mention !== "string" || !entry.mention || entry.mention.length > 2_000 ||
+        body.slice(Number(entry.start), Number(entry.end)) !== entry.mention ||
+        typeof entry.choice !== "string" || !Object.hasOwn(SUMMON_INTENT_CATEGORIES, entry.choice)) {
+      throw new Error("Draft summon intent must name a summon in the body and one reading");
+    }
+    starts.add(Number(entry.start));
+    return { start: Number(entry.start), end: Number(entry.end), mention: entry.mention, choice: entry.choice as SummonIntentCategory };
+  });
+}
+
 /** Jev reads one mention at a time; the author kind is context, not identity. */
 export const SUMMON_INTENT_INSTRUCTIONS = "Decide what the author of the message is doing with the mention at state.summon (its exact text and UTF-16 offsets in state.message). " +
   "Read the whole message and channel context: an Agent name inside an explanation, correction, report, heading, quotation or example is not a request. " +
@@ -68,8 +93,7 @@ export const REGISTRATION_PREPARATION_REJECTION_CODES = [
   "registration_launch_aborted", "registration_launch_recovery_unavailable", "invalid_registration_launch",
   "invalid_registration_repository", "registration_repo_route_unavailable", "registration_managed_route_unavailable",
   "registration_environment_ineligible", "registration_environment_missing", "registration_not_granted",
-  "space_policy_exceeds_owner_grant", "registration_resource_not_admitted", "management_delegate_active",
-  "management_delegate_limit", "management_generation_changed", "about_session_active", "about_session_limit",
+  "space_policy_exceeds_owner_grant", "registration_resource_not_admitted", "about_session_active", "about_session_limit",
   ...SUMMON_INTENT_REJECTION_CODES,
   ...(["environment", "parameter"] as const).flatMap(phase =>
     Object.keys(REGISTRATION_JEV_FAILURES).map(reason => `registration_${phase}_${reason}`)),
@@ -78,29 +102,29 @@ export const REGISTRATION_PREPARATION_REJECTION_CODES = [
 /** Public, bounded reasons for a summon that never allocated a launch. */
 export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = {
   registration_parameter_unavailable: "No eligible harness advertises the requested parameter and value. No launch was allocated.",
-  routing_selection_failed: "Jev could not select an environment. No launch was allocated.",
+  routing_selection_failed: "xMatrix could not select an environment. No launch was allocated.",
   routing_parameter_selection_failed: "Launch parameter selection failed. No launch was allocated.",
   routing_parameter_constraints_invalid: "Explicit parameters do not match the selected environment. No launch was allocated.",
   routing_parameter_models_empty: "No supported model/effort options remain for the selected environment and explicit parameters. No launch was allocated.",
   routing_parameter_workspaces_empty: "No authorized repository or directory options remain for the selected environment and explicit parameters. No launch was allocated.",
   routing_parameter_catalog_invalid: "The launch parameter catalog is invalid or exceeds its bound. No launch was allocated.",
   routing_parameter_catalog_unavailable: "The selected environment's launch parameter catalogs could not be read. No launch was allocated.",
-  routing_parameter_invalid_answer: "Jev returned an invalid launch parameter answer. No launch was allocated.",
-  routing_parameter_jev_aborted: "Jev timed out while choosing launch parameters. No launch was allocated.",
-  routing_parameter_jev_invalid_input: "Jev rejected the launch parameter request. No launch was allocated.",
-  routing_parameter_jev_customer_verification_required: "Jev provider account verification is required. No launch was allocated.",
-  routing_parameter_jev_auth_failed: "Jev provider authentication failed. No launch was allocated.",
-  routing_parameter_jev_permission_denied: "Jev provider denied this request. No launch was allocated.",
-  routing_parameter_jev_rate_limited: "Jev provider rate limited this request. No launch was allocated.",
-  routing_parameter_jev_evaluation_failed: "Jev provider failed while choosing launch parameters. No launch was allocated.",
+  routing_parameter_invalid_answer: "xMatrix returned an invalid launch parameter answer. No launch was allocated.",
+  routing_parameter_jev_aborted: "xMatrix timed out while choosing launch parameters. No launch was allocated.",
+  routing_parameter_jev_invalid_input: "xMatrix rejected the launch parameter request. No launch was allocated.",
+  routing_parameter_jev_customer_verification_required: "The routing model provider account verification is required. No launch was allocated.",
+  routing_parameter_jev_auth_failed: "The routing model provider authentication failed. No launch was allocated.",
+  routing_parameter_jev_permission_denied: "The routing model provider denied this request. No launch was allocated.",
+  routing_parameter_jev_rate_limited: "The routing model provider rate limited this request. No launch was allocated.",
+  routing_parameter_jev_evaluation_failed: "The routing model provider failed while choosing launch parameters. No launch was allocated.",
   routing_evidence_unavailable: "Decision evidence could not be stored. No launch was allocated.",
   registration_evidence_unavailable: "Registered decision evidence could not be stored. No launch was allocated.",
   registration_context_unavailable: "Authorized channel context could not be read. Selection did not start and no launch was allocated.",
-  registration_environment_selection_failed: "Jev could not select a registered environment. No launch was allocated.",
+  registration_environment_selection_failed: "xMatrix could not select a registered environment. No launch was allocated.",
   registration_parameter_selection_failed: "A registered environment was selected but parameter selection failed. No launch was allocated.",
   registration_selection_failed: "Registered environment or launch parameter selection failed. No launch was allocated.",
-  registration_selection_unconfigured: "Jev selection is not configured for registered environments. No launch was allocated.",
-  registration_selection_invalid: "Jev's selection no longer matches authorized launch resources. No launch was allocated.",
+  registration_selection_unconfigured: "Routing is not configured for registered environments. No launch was allocated.",
+  registration_selection_invalid: "xMatrix's selection no longer matches authorized launch resources. No launch was allocated.",
   registration_not_found: "No registered environment offers an authorized model and workspace for this invocation. No launch was allocated.",
   registration_candidates_limit: "Too many registered environments matched this invocation. No launch was allocated.",
   registration_machine_unavailable: "No registered environment is available on the requested machine. No launch was allocated.",
@@ -114,11 +138,11 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   ...Object.fromEntries((["environment", "parameter"] as const).flatMap(phase =>
     Object.entries(REGISTRATION_JEV_FAILURES).map(([reason, description]) => [
       `registration_${phase}_${reason}`,
-      `Jev ${description} while choosing ${phase === "environment" ? "a registered environment" : "launch parameters"}. No launch was allocated.`,
+      `xMatrix ${description} while choosing ${phase === "environment" ? "a registered environment" : "launch parameters"}. No launch was allocated.`,
     ]))),
-  summon_intent_reference: "Jev read this as naming the Agent, not asking one to start; write launch:force after the mention to start one anyway. No launch was allocated.",
-  summon_intent_explanation: "Jev read this as an explanation or report, not asking an Agent to start; write launch:force after the mention to start one anyway. No launch was allocated.",
-  summon_intent_example: "Jev read this as an example or quotation, not asking an Agent to start; write launch:force after the mention to start one anyway. No launch was allocated.",
+  summon_intent_reference: "xMatrix read this as naming the Agent, not asking one to start; write launch:force after the mention to start one anyway. No launch was allocated.",
+  summon_intent_explanation: "xMatrix read this as an explanation or report, not asking an Agent to start; write launch:force after the mention to start one anyway. No launch was allocated.",
+  summon_intent_example: "xMatrix read this as an example or quotation, not asking an Agent to start; write launch:force after the mention to start one anyway. No launch was allocated.",
   registration_runtime_unknown: "The registration declares no launch command and its harness has no Hub preset runtime. No launch was allocated.",
   registration_launch_rejected: "The registered summon could not satisfy its current configuration or authorization. No launch was allocated.",
   registration_workspace_or_daemon_unavailable: "The selected machine's daemon or registered workspace is unavailable for this launch. No launch was allocated.",
@@ -141,9 +165,6 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_not_granted: "The registration owner has not granted this Space or Channel use of the selected environment. No launch was allocated.",
   space_policy_exceeds_owner_grant: "The Space policy asks for more than the registration owner granted. No launch was allocated.",
   registration_resource_not_admitted: "A requested workspace, model, secret or capability is not admitted for the selected registration. No launch was allocated.",
-  management_delegate_active: "A management delegate is already active for this Space. No launch was allocated.",
-  management_delegate_limit: "The Space has reached its management delegate limit. No launch was allocated.",
-  management_generation_changed: "The Space management configuration changed during launch. No launch was allocated.",
   about_session_active: "An About session is already active for this Channel. No launch was allocated.",
   about_session_limit: "The Channel has reached its About session limit. No launch was allocated.",
   routing_no_eligible: "No eligible environment matched this summon. No launch was allocated.",
@@ -164,7 +185,7 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
 
 export const DECISION_ANSWER_ISSUES = ["answers_missing", "answer_missing", "choice_missing",
   "choice_not_offered", "distribution_missing", "distribution_mismatch", "distribution_invalid",
-  "choice_distribution_conflict", "unexpected_answer"] as const;
+  "choice_distribution_conflict", "unexpected_answer", "score_invalid"] as const;
 export type DecisionAnswerIssue = typeof DECISION_ANSWER_ISSUES[number];
 export type DecisionAnswerFailure = { questionKey?: string;
   issue: DecisionAnswerIssue };
@@ -193,8 +214,9 @@ function parameterAnswerMessage(detail: DecisionAnswerFailure): string {
     distribution_invalid: "had invalid probabilities",
     choice_distribution_conflict: "did not select its highest-probability option",
     unexpected_answer: "included an unexpected option",
+    score_invalid: "did not give a score on the offered levels",
   };
-  return `Jev's ${subject} ${issue[detail.issue]}. No launch was allocated.`;
+  return `xMatrix's ${subject} ${issue[detail.issue]}. No launch was allocated.`;
 }
 
 /** A registration a launch could see, and why it was not offered. */

@@ -1,0 +1,14 @@
+<svg role="img" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Reasonix</title>
+  <defs>
+    <linearGradient id="reasonix-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5EEAD4"/>
+      <stop offset=".5" stop-color="#A5B4FC"/>
+      <stop offset="1" stop-color="#E879F9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0B1020"/>
+  <path d="M32 10 54 32 32 54 10 32Z" fill="none" stroke="url(#reasonix-mark)" stroke-width="3.5" stroke-linejoin="round"/>
+  <path d="M32 20 44 32 32 44 20 32Z" fill="none" stroke="url(#reasonix-mark)" stroke-width="2.5" stroke-linejoin="round" opacity=".75"/>
+  <path d="M32 27 37 32 32 37 27 32Z" fill="url(#reasonix-mark)"/>
+</svg>

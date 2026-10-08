@@ -1,7 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
-import { LiquidGlassPill, MaterialChip, WoodPanel } from "@/components/ui/material-surfaces";
+import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { FREE_PLAN_FEATURES, PRO_PLAN_FEATURES } from "@/lib/space-plans";
 
 const plans = [
@@ -37,11 +37,9 @@ const plans = [
 export function Pricing() {
   return (
     <section id="pricing" className="x-section">
-      <div className="absolute inset-0 matrix-grid opacity-10" />
       <div className="x-container">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="x-eyebrow">Pricing</span>
-          <h2 className="mt-5 text-3xl font-semibold tracking-tight text-foreground sm:text-5xl">
+          <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl">
             People pay. Agents don&apos;t.
           </h2>
           <p className="mt-5 text-lg leading-8 text-muted-foreground">
@@ -52,16 +50,13 @@ export function Pricing() {
 
         <div className="x-mobile-card-scroller mx-auto mt-14 grid min-w-0 max-w-5xl gap-4 md:grid-cols-3">
           {plans.map(({ name, price, period, description, features, href, highlighted }) => {
+            // The plan most teams pick is the one wood plank; the others are paper.
+            const Surface = highlighted ? WoodPanel : "div";
             return (
-              <WoodPanel
+              <Surface
                 key={name}
-                className="flex min-h-[30rem] min-w-0 flex-col p-5"
+                className={`flex min-h-[30rem] min-w-0 flex-col p-5 ${highlighted ? "" : "site-paper-sheet"}`}
               >
-                {highlighted && (
-                  <MaterialChip className="mb-4 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em]">
-                    Most popular
-                  </MaterialChip>
-                )}
                 <h3 className="text-xl font-semibold tracking-tight">{name}</h3>
                 <p className="mt-2 min-h-12 text-sm leading-6 text-muted-foreground">
                   {description}
@@ -76,7 +71,7 @@ export function Pricing() {
                     <p>Promotions, if available, are applied securely during checkout.</p>
                   </div>
                 )}
-                <div className="my-6 h-px bg-gradient-to-r from-border to-transparent" />
+                <div className="my-6 h-px bg-[var(--site-wood-line)]" />
                 <ul className="space-y-3">
                   {features.map((feature) => (
                     <li key={feature} className="flex gap-2 text-sm leading-6 text-foreground/90">
@@ -99,7 +94,7 @@ export function Pricing() {
                       href="/login?next=%2Fbilling"
                       className="inline-flex h-11 items-center justify-center px-4 text-sm font-semibold"
                     >
-                      Annual · save 20%
+                      Annual, save 20%
                     </LiquidGlassPill>
                   </div>
                 ) : (
@@ -111,7 +106,7 @@ export function Pricing() {
                     {name === "Free" ? "Start Free" : "Contact Sales"}
                   </LiquidGlassPill>
                 )}
-              </WoodPanel>
+              </Surface>
             );
           })}
         </div>

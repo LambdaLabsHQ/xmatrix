@@ -1,4 +1,4 @@
-import { stubFetchResponses } from "./support/fetch-responses.mjs";
+import { withProviderResponses as fetched } from "./support/fetch-responses.mjs";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -16,17 +16,6 @@ const grant = { access_token: "fixture-access", refresh_token: "fixture-refresh"
 const id = "fixture_doc_123456";
 const paragraph = text => ({ paragraph: { elements: [{ textRun: { content: text } }] } });
 
-async function fetched(responses, operation) {
-  const fetch = stubFetchResponses(responses, {
-    decodeBody: body => body instanceof URLSearchParams ? Object.fromEntries(body) : body ? JSON.parse(body) : undefined,
-    reply: response => {
-      if (response.error) throw response.error;
-      return new Response(JSON.stringify(response.body ?? {}), { status: response.status ?? 200 });
-    },
-  });
-  try { return { result: await operation(fetch.calls), calls: fetch.calls }; }
-  finally { fetch.restore(); }
-}
 
 test("Google authorization requests only offline drive.file with signed Space/admin state", async () => {
   const client = oauthClient(env, "google");

@@ -44,14 +44,14 @@ function dockEdges(page: Page) {
   return edges(page.getByRole("navigation", { name: "Primary" }));
 }
 
-/** The plank's content line: where its name starts and its trailing glyph ends. */
+/** The bar's content line: where the Space sign's glyph starts and its trailing search glyph ends. */
 async function contentLine(page: Page) {
   await settled(page);
   const bar = page.locator(".app-topbar");
   const [plank, name, search, dock, width] = await Promise.all([edges(bar),
-    edges(bar.locator(".app-mobile-bar-title"), { text: true }), edges(bar.locator(".app-mobile-search-icon svg")),
+    edges(bar.locator("svg.app-mobile-space-glyph")), edges(bar.locator(".app-mobile-search-icon svg")),
     dockEdges(page), page.evaluate(() => window.innerWidth)]);
-  // The plank is the board itself, not a card: screen edge to screen edge.
+  // The bar spans the screen; its wood is only the Space sign, whose glyph sits on the line.
   expect(plank.left).toBe(0);
   expect(plank.right).toBe(width);
   expect(name.left - dock.left).toBeCloseTo(20, 0);
@@ -124,6 +124,14 @@ test.describe("a phone's list rows", () => {
     const line = await contentLine(page);
 
     const phone = await measure(conversation);
+    const paper = await conversation.evaluate((element) => {
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = "var(--app-panel-paper)";
+      element.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    });
     expect(phone.height).toBe(56);
     expect(phone.title).toEqual(["16px", "620", "22px"]);
     expect(phone.meta).toEqual(["13px", "450", "18px"]);
@@ -165,9 +173,12 @@ test.describe("a phone's list rows", () => {
     expect((await edges(heading.locator(":scope > *").first())).left).toBeCloseTo(line.start, 0);
     expect((await edges(heading.locator(":scope > span").last(), { text: true })).right).toBeCloseTo(line.end, 0);
 
-    // The same row a desktop draws, on the same tone.
+    // The same row a desktop draws. A phone never shows its list beside a
+    // conversation, so the list is the conversation's paper, not the column's tone.
     const desktop = await desktopConversationRow(page);
-    expect(phone).toEqual({ ...desktop, inset: phone.inset });
+    expect(phone).toEqual({ ...desktop, inset: phone.inset, listTone: phone.listTone });
+    expect(phone.listTone).toBe(paper);
+    expect(desktop.listTone).not.toBe(paper);
     // The measured title begins after the # and its gap. Only the row's
     // padding changes: 20px on desktop, the shared content line on phone.
     expect(phone.inset).toBe(Math.round(desktop.inset + line.start - 20));
@@ -190,10 +201,11 @@ test.describe("a phone's list rows", () => {
     await expect(back).toBeVisible();
     await expect(page.locator(".app-tool-list-row").first()).toBeVisible();
     await settled(page);
-    const [plank, chevron, search, dock] = await Promise.all([edges(bar), edges(back.locator("svg")),
+    const [plank, sign, search, dock] = await Promise.all([edges(bar), edges(bar.locator(".app-mobile-back-sign")),
       edges(bar.locator(".app-mobile-search-icon svg")), dockEdges(page)]);
-    // The chevron's 20px box moves out by a quarter, so its point, a third in, sits on the line.
-    expect(chevron.left - dock.left).toBeCloseTo(15, 0);
+    // The chevron is cut into the title's sign, which starts where the Space sign does.
+    await expect(bar.locator(".app-mobile-back-sign").getByRole("button", { name: "Back to More" })).toBeVisible();
+    expect(sign.left - dock.left).toBeCloseTo(6, 0);
     expect(dock.right - search.right).toBeCloseTo(20, 0);
     const setting = page.locator(".app-tool-list-row").first();
     await expect(setting).toBeVisible();

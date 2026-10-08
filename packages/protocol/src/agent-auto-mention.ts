@@ -1,6 +1,5 @@
 import { INTERACTION_LAUNCH_FIELDS, matchInteractionGrammar } from "./message-interaction-grammar.js";
 import { isHarnessParameterId, parseHarnessParameterValues } from "./harness-parameters.js";
-import { utf8ByteLength } from "./hex.js";
 import { agentPresetForLauncher } from "./agent-presets.js";
 import { createInstanceMentionScanner, isAbsoluteLocalPath, repoSummonReference } from "./agent-mention.js";
 import { filterOperationalMentions } from "./operational-mention-context.js";
@@ -190,31 +189,6 @@ export function parseAutoLaunchMentions(body: string): AutoLaunchMention[] {
     consumedUntil = parsed.end;
   }
   return filterOperationalMentions(body, mentions);
-}
-
-/** Largest Space management prompt, in UTF-8 bytes. */
-export const MANAGEMENT_PROMPT_MAX_BYTES = 32 * 1024;
-
-/**
- * A Space's management prompt is written like a summon: a leading `@auto` or
- * `@<harness>` with its conditions constrains which registration runs it, and
- * the rest is the instruction. A management Run always works in its Space
- * management directory, so it takes no repository, directory or lifecycle.
- */
-export function parseManagementPrompt(prompt: string): { tags: AutoLaunchTags; body: string; error?: string } {
-  if (utf8ByteLength(prompt) > MANAGEMENT_PROMPT_MAX_BYTES) {
-    return { tags: {}, body: "", error: "The management prompt is too long." };
-  }
-  const [first] = parseAutoLaunchMentions(prompt);
-  const leading = first && !prompt.slice(0, first.start).trim() ? first : undefined;
-  const tags = leading?.tags ?? {};
-  const body = (leading ? prompt.slice(leading.end) : prompt).trim();
-  if (leading?.error) return { tags, body, error: leading.error };
-  if (tags.repo || tags.pwd) {
-    return { tags, body,
-      error: "A management prompt runs in its Space management directory; remove repo and pwd." };
-  }
-  return { tags, body };
 }
 
 /** Parsed configuration choices, transported separately from task prompt text. */

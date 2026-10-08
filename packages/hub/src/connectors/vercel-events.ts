@@ -1,19 +1,14 @@
-import type { ConnectorDelivery, ConnectorDeliveryResult } from "./provider";
-import { hmacMatches } from "./hmac";
-import { connectorEvent, lowerHeader, parseJsonObject, record, safeUrl, sourceToken, text } from "./event-format";
+import { createSignedJsonReceiver } from "./delivery-proof";
+import { connectorEvent, record, safeUrl, sourceToken, text } from "./event-format";
 
 /*
  * Vercel webhooks: `x-vercel-signature` is the HMAC-SHA1 of the body with the
  * webhook secret. A source is a project name.
  */
 
-export async function receiveVercelDelivery(delivery: ConnectorDelivery): Promise<ConnectorDeliveryResult> {
-  if (!await hmacMatches("SHA-1", delivery.credentials.webhookSecret, delivery.rawBody,
-    lowerHeader(delivery.headers, "x-vercel-signature"))) {
-    return { ok: false, status: 401, error: "Invalid Vercel signature" };
-  }
-  const payload = parseJsonObject(delivery.rawBody);
-  if (!payload) return { ok: false, status: 400, error: "Vercel body must be JSON" };
+export const receiveVercelDelivery = createSignedJsonReceiver({
+  name: "Vercel", secretField: "webhookSecret", proof: { header: "x-vercel-signature", hash: "SHA-1" },
+}, (_, payload) => {
   const type = text(payload.type);
   if (!type.startsWith("deployment.")) return { ok: true, events: [] };
   const body = record(payload.payload);
@@ -29,4 +24,4 @@ export async function receiveVercelDelivery(delivery: ConnectorDelivery): Promis
     summary: `${project} ${target} deployment ${verb}`,
     provider: `Vercel · ${project || "deployment"}`, title: `${target} deployment ${verb}`, url,
   })] };
-}
+});

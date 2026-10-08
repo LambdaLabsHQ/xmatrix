@@ -36,19 +36,6 @@
   opacity: 0.52;
 }
 
-@utility app-command-input-recipe {
-  border: 0 !important;
-  border-radius: 9999px !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  color: var(--foreground) !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
-}
-
 @utility app-wood-panel-recipe {
   background-color: var(--app-wood-panel-base) !important;
   background-image: var(--app-wood-texture) !important;
@@ -80,9 +67,11 @@
 /* Chips and avatar discs bend through the composer's own lens (the same
    bezel and offset; a thinner lens read as no refraction at all), but Apple
    scales the shadow with the glass: the fitted shadow belongs to a 40pt
-   control, so 18-46px glass casts a third of it. A context or a surface
-   tunes both shadows through liquidGlassMaterialStyle. */
-:is(.xmatrix-app, .site-canvas) :is(.app-shared-chip, .identity-avatar-face, .identity-avatar-badge) {
+   control, so 18-46px glass casts a third of it. The work island is a disc
+   grown sideways, so it casts the disc's shadow; the full one read as a grey
+   ring around it. A context or a surface tunes both shadows through
+   liquidGlassMaterialStyle. */
+:is(.xmatrix-app, .site-canvas) :is(.app-shared-chip, .identity-avatar-face, .identity-avatar-badge, .app-agent-work-island) {
   --app-glass-edge: var(--app-liquid-rim-layers), var(--app-liquid-shadow-small);
 }
 
@@ -230,17 +219,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-sidebar.app-sideb
     0 22px 46px rgb(0 0 0 / 0.24),
     0 8px 18px rgb(0 0 0 / 0.16),
     0 0 0 1px rgb(0 0 0 / 0.04) !important;
-}
-
-@utility app-command-panel-recipe {
-  background: oklch(1 0 0 / 0.92) !important;
-  background-color: oklch(1 0 0 / 0.92) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(1.18) !important;
-  backdrop-filter: blur(24px) saturate(1.18) !important;
-  box-shadow:
-    inset 0 1px 0 var(--app-specular),
-    inset 0 -1px 0 var(--app-specular-soft),
-    0 18px 48px var(--app-ink-shadow) !important;
 }
 
 @utility app-glass-filter-recipe {

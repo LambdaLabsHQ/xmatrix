@@ -44,6 +44,8 @@ export interface HarnessLogin {
   codeRegex?: string;
   /** Output after a pasted code meaning the harness refused it and waits for another. */
   rejectedRegex?: string;
+  /** Run the sign-in in a pseudo-terminal: its prompt refuses to read from a pipe. */
+  terminal?: boolean;
   /** Exit status 0 means signed in, unless `signedInRegex` must also match its output. */
   status?: HarnessCommand & { signedInRegex?: string };
   notes?: string;
@@ -156,6 +158,18 @@ export const MACHINE_HARNESS_RELEASE_CAPABILITY = "machine_harness_release_v1";
 /** A daemon without it cannot parse a `login_*` command, so none is issued or leased to it. */
 export const MACHINE_HARNESS_LOGIN_CAPABILITY = "machine_harness_login_v1";
 export const HARNESS_LOGIN_ACTIONS: readonly HarnessAction[] = ["login_start", "login_finish", "login_cancel"];
+/** A harness action no daemon claimed within this long expires and never runs later. */
+export const HARNESS_ACTION_CLAIM_TTL_MS = 10 * 60_000;
+/** The daemon ends an install or update process tree after this long. */
+export const HARNESS_ACTION_TIMEOUT_MS = 15 * 60_000;
+/**
+ * After this long from issue, a claimed action whose lease lapsed can no longer
+ * be running: it was claimed before the claim TTL, ran for at most the action
+ * timeout, and its lease (renewed every 15 s, 60 s at most) has since lapsed.
+ * Status reads settle it as `expired` so the owner is not left waiting on a
+ * daemon that stopped answering. A late result still replaces that reading.
+ */
+export const HARNESS_ACTION_SETTLE_MS = HARNESS_ACTION_CLAIM_TTL_MS + HARNESS_ACTION_TIMEOUT_MS + 2 * 60_000;
 const LOGIN_CODE_MAX = 2_048;
 const LOGIN_URL_MAX = 2_048;
 const LOGIN_USER_CODE_MAX = 64;
@@ -201,6 +215,8 @@ export interface HarnessActionStatus {
   status: "queued" | "running" | "succeeded" | "failed" | "unsupported" | "expired";
   result?: HarnessActionResult;
   error?: string;
+  /** When the owner asked; absent from Hubs that predate it. */
+  requestedAt?: string;
   completedAt?: string;
 }
 

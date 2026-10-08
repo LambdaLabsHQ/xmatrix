@@ -78,6 +78,7 @@ export interface PostgresMachineDaemonPortDependencies {
     spaceId: string;
     channelId: string;
     requestId: string;
+    triggerMessageId?: string;
     successorOfRunId: string;
     actorUserId: string;
   }): Promise<unknown>;
@@ -456,6 +457,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
           "channelAboutFollowUps[].successorOfRunId",
         ),
         actorUserId: requiredString(followUp.actorUserId, "channelAboutFollowUps[].actorUserId"),
+        ...(followUp.triggerMessageId !== undefined ? { triggerMessageId: requiredString(followUp.triggerMessageId, "channelAboutFollowUps[].triggerMessageId") } : {}),
       });
     }
     return result.channelAboutFollowUps.length;

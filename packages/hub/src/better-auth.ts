@@ -363,21 +363,6 @@ function postgresJwtPlugin(env: Env, postgres: boolean): ReturnType<typeof jwt> 
   } as unknown as ReturnType<typeof jwt>;
 }
 
-/**
- * The access token of the GitHub account this user linked, refreshed when it
- * has expired; null when they linked none or it can no longer be used.
- */
-export async function linkedGitHubAccessToken(env: Env, userId: string): Promise<string | null> {
-  const read = async (database: AuthDatabase, postgres: boolean) => {
-    const auth = createAuthWithDatabase(env, database, postgres, productAuthBehavior(env), () => undefined);
-    const tokens = await auth.api.getAccessToken({ body: { providerId: "github", userId } }).catch(() => null);
-    return typeof tokens?.accessToken === "string" && tokens.accessToken ? tokens.accessToken : null;
-  };
-  return authAuthority(env) === "postgres"
-    ? withAuthPostgresPool(env, (database) => read(database, true))
-    : read(requireAuthD1(env), false);
-}
-
 export async function sendBetterAuthLoginOtp(env: Env, email: string): Promise<void> {
   await callBetterAuth(env, "/email-otp/send-verification-otp", {
     method: "POST",

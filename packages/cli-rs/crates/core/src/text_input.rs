@@ -76,7 +76,7 @@ pub fn detect_lossy_text(
 pub struct TextRoutes<'a> {
     /// The command accepts the text on `--stdin`.
     pub stdin: bool,
-    /// The command's UTF-8 file flag for this text, such as `--summary-file`.
+    /// The command's UTF-8 file flag for this text, such as `--body-file`.
     pub file_flag: Option<&'a str>,
 }
 
@@ -212,13 +212,13 @@ mod tests {
             mangled,
             TextRoutes {
                 stdin: false,
-                file_flag: Some("--name-file"),
+                file_flag: Some("--body-file"),
             },
         );
         assert!(file_only.contains("channel name"));
         assert!(file_only.contains("code page 936"));
         assert!(file_only.contains("Nothing was sent"));
-        assert!(file_only.contains("`--name-file <path>`"));
+        assert!(file_only.contains("`--body-file <path>`"));
         assert!(!file_only.contains("--stdin"));
 
         let stdin_only = lossy_text_message(

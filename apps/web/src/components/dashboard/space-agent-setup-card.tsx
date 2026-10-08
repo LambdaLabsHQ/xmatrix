@@ -9,6 +9,8 @@ import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { IdentityAvatar } from "./identity-avatar";
+import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
+import type { useInstalledHarnesses } from "./use-installed-harnesses";
 import type {
   SpaceAgentSetupCandidate,
   SpaceAgentSetupState,
@@ -33,6 +35,9 @@ export function SpaceAgentSetupCard({
   onStartDaemon,
   onRefresh,
   onRetryAgents,
+  fleet,
+  onBringAll,
+  onManageMachines,
 }: {
   state: SpaceAgentSetupState;
   hostLabel: string;
@@ -42,7 +47,20 @@ export function SpaceAgentSetupCard({
   onStartDaemon: () => void;
   onRefresh: () => void;
   onRetryAgents: () => void;
+  fleet?: ReturnType<typeof useInstalledHarnesses>;
+  onBringAll: () => void;
+  onManageMachines: () => void;
 }) {
+  if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
+    <SetupCardHeader title="Your installed agents" body="Turn them on to summon them. Choose a working folder when you send the first task." />
+    <InstalledHarnessSwitchList fleet={fleet} />
+    <button type="button" disabled={!fleet.ready || Boolean(fleet.pending) || fleet.enablingAll}
+      onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
+      {fleet.enablingAll ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+      {fleet.enablingAll ? "Enabling…" : "Bring them in"}
+    </button>
+    <button type="button" onClick={onManageMachines} className={actionClass({ variant: "secondary", size: "md" }, "mt-4 ml-2")}>Manage machines</button>
+  </SetupCardShell>;
   if (state.kind === "hidden") return null;
 
   return (
@@ -64,7 +82,7 @@ export function SpaceAgentSetupCard({
           <>
             <SetupCardHeader
               title={`Found ${describeCandidates(state.candidates)} on ${hostLabel}`}
-              body="Bind one to this space and it can pick up work here. Nothing is installed or changed until you confirm."
+              body="Turn on the installed agents so they can take work."
             />
             {state.kind === "daemon-stopped" && (
               <div className={noticeClass("attention", "mt-4 p-3")}>
@@ -91,12 +109,12 @@ export function SpaceAgentSetupCard({
                 />
               ))}
             </div>
+            <button type="button" disabled={state.kind === "daemon-stopped" || Boolean(busy) || !fleet?.ready}
+              onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
+              <Check className="size-4" /> Bring them in
+            </button>
             <p className="mt-4 text-xs text-muted-foreground">
-              Detected on this machine by checking which agent commands are installed. Nothing about
-              your projects is read or uploaded by this step. To add a harness from another machine,
-              its owner runs{" "}
-              <code>xmatrix agent add &lt;harness&gt; --space &lt;space-id&gt;</code>
-              {" "}there.
+              Detected by checking installed commands. Manage installed harnesses and their Space switches from Machines.
             </p>
           </>
         )}
@@ -155,7 +173,7 @@ function CandidateRow({
           className={actionClass({ variant: "primary", size: "md" })}
         >
           <Check className="size-4" />
-          Add to xMatrix
+          Enable
         </button>
       </div>
     </LiquidGlassCard>
@@ -231,7 +249,7 @@ function RemoteMachinePanel() {
       <SetupCardHeader
         icon={HardDrive}
         title="Connect the machine your agents run on"
-        body="Agents run on a real machine, not in this tab. Open the xMatrix desktop app on the machine you code on and it will find the agents already installed there."
+        body="Connect a machine, then install or turn on its harnesses from Machines. Installed agents appear here automatically."
       />
       <RemoteMachineHint />
     </>

@@ -45,51 +45,63 @@ class InvalidDecisionAnswer extends Error {
 
 export type RoutingDecisionEvent = { decisionId: string; at: string } & (
   { status: "started"; input: JevInput } |
-  { status: "succeeded"; answers: Record<string, RoutingChoice> } |
+  { status: "succeeded"; answers: Record<string, RoutingAnswer>; model?: string } |
   { status: "failed"; reason: "provider_error" | "invalid_answer" | "timeout";
     code: RoutingEvaluationFailureCode; answerFailure?: DecisionAnswerFailure });
-export type RoutingEvaluator = ((input: JevInput, options?: { signal?: AbortSignal }) => Promise<{ answers: unknown }>) & {
+export type RoutingEvaluator = ((input: JevInput, options?: { signal?: AbortSignal }) => Promise<{ answers: unknown; model?: string }>) & {
   recordDecision?: (event: RoutingDecisionEvent) => Promise<void>;
 };
 export type RoutingChoice = { choice: string; probabilities: Record<string, number> };
+/** A position on a question's ordered levels, from 0 to the top level. */
+export type RoutingScore = { score: number; probabilities: Record<string, number> };
+export type RoutingAnswer = RoutingChoice | RoutingScore;
 
 function record(value: unknown, issue: DecisionAnswerIssue, questionKey?: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new InvalidDecisionAnswer(issue, questionKey);
   return value as Record<string, unknown>;
 }
 
+/** The model picks one listed option; that pick is the answer. The SDK has
+ *  already checked the reply, so the Hub only makes sure the pick is one it
+ *  offered (it indexes by it). Probabilities are kept as given, for display. */
 export function validateRoutingChoice(value: unknown, options: string[], questionKey?: string): RoutingChoice {
   const answer = record(value, "answer_missing", questionKey);
   if (typeof answer.choice !== "string") throw new InvalidDecisionAnswer("choice_missing", questionKey);
   if (!options.includes(answer.choice)) throw new InvalidDecisionAnswer("choice_not_offered", questionKey);
-  const probabilities = record(answer.probabilities, "distribution_missing", questionKey);
-  if (Object.keys(probabilities).length !== options.length ||
-      !options.every(key => Object.hasOwn(probabilities, key))) {
-    throw new InvalidDecisionAnswer("distribution_mismatch", questionKey);
-  }
-  if (!options.every(key => typeof probabilities[key] === "number" &&
-      Number.isFinite(probabilities[key]) && Number(probabilities[key]) >= 0 && Number(probabilities[key]) <= 1) ||
-      Math.abs(Object.values(probabilities).reduce<number>((sum, item) => sum + Number(item), 0) - 1) > .02) {
-    throw new InvalidDecisionAnswer("distribution_invalid", questionKey);
-  }
-  if (probabilities[answer.choice] !== Math.max(...Object.values(probabilities).map(Number))) {
-    throw new InvalidDecisionAnswer("choice_distribution_conflict", questionKey);
-  }
+  const given = answer.probabilities && typeof answer.probabilities === "object" && !Array.isArray(answer.probabilities)
+    ? answer.probabilities as Record<string, unknown> : {};
+  const probabilities = Object.fromEntries(options.flatMap(key =>
+    typeof given[key] === "number" && Number.isFinite(given[key]) ? [[key, given[key]]] : []));
   return { choice: answer.choice, probabilities: probabilities as Record<string, number> };
 }
 
+/** A score lies on the levels offered; its distribution, when given, is over
+ *  their zero-based indices and is kept as given, for display. */
+export function validateRoutingScore(value: unknown, levels: number, questionKey?: string): RoutingScore {
+  const answer = record(value, "answer_missing", questionKey);
+  if (typeof answer.score !== "number" || !Number.isFinite(answer.score) || answer.score < 0 || answer.score > levels - 1) {
+    throw new InvalidDecisionAnswer("score_invalid", questionKey);
+  }
+  const given = answer.probabilities && typeof answer.probabilities === "object" && !Array.isArray(answer.probabilities)
+    ? answer.probabilities as Record<string, unknown> : {};
+  const probabilities = Object.fromEntries(Array.from({ length: levels }, (_, level) => String(level)).flatMap(key =>
+    typeof given[key] === "number" && Number.isFinite(given[key]) ? [[key, given[key]]] : []));
+  return { score: answer.score, probabilities: probabilities as Record<string, number> };
+}
+
 /** One read-only choice compares the complete authorized candidate set within a deadline.
- * A transient gateway failure may retry the identical finite request once;
- * no allocation, fallback launch or synthetic probability occurs. */
+ * A transient gateway failure or a timed-out attempt may retry the identical
+ * finite request once, with a fresh deadline; no allocation, fallback launch or
+ * synthetic probability occurs. */
 export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingEvaluator,
-  { budgetMs = 10_000 }: { budgetMs?: number } = {}): Promise<Record<string, RoutingChoice>> {
+  { budgetMs = 10_000 }: { budgetMs?: number } = {}): Promise<Record<string, RoutingAnswer>> {
   if (!Number.isInteger(budgetMs) || budgetMs < 1 || budgetMs > 10_000) throw new Error("Invalid routing budget");
   // Freeze the serialized request before persistence so later caller mutations
   // cannot make the stored input differ from the model's actual input.
   input = JSON.parse(JSON.stringify(input));
   const questions = Object.entries(input.questions);
-  if (!questions.length || questions.length > 8 || questions.some(([, question]) =>
-    question.type !== "choice" || !Object.keys(question.criteria).length)) {
+  if (!questions.length || questions.length > 8 || questions.some(([, question]) => question.type === "choice"
+    ? !Object.keys(question.criteria).length : question.type !== "score" || question.criteria.length < 2)) {
     throw new Error("Invalid routing question");
   }
   const assertSize = (request: JevInput) => {
@@ -110,40 +122,51 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
   };
   const decisionId = crypto.randomUUID();
   await persist({ decisionId, at: new Date().toISOString(), status: "started", input });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), budgetMs);
+  // Each attempt has its own deadline; the last one decides whether the failure was a timeout.
+  let controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const invoke = async (request: JevInput) => {
     assertSize(request);
-    controller.signal.throwIfAborted();
+    controller = new AbortController();
+    const { signal } = controller;
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), budgetMs);
     let onAbort!: () => void;
     const interrupted = new Promise<never>((_, reject) => {
       onAbort = () => reject(new Error("Routing evaluation interrupted"));
-      controller.signal.addEventListener("abort", onAbort, { once: true });
+      signal.addEventListener("abort", onAbort, { once: true });
     });
     try {
-      return await Promise.race([evaluate(request, { signal: controller.signal }), interrupted]);
+      return await Promise.race([evaluate(request, { signal }), interrupted]);
     } finally {
-      controller.signal.removeEventListener("abort", onAbort);
+      signal.removeEventListener("abort", onAbort);
     }
   };
   let phase: "provider_error" | "invalid_answer" = "provider_error";
-  let validated: Record<string, RoutingChoice>;
+  let validated: Record<string, RoutingAnswer>;
+  let model: string | undefined;
   try {
     let result;
     try { result = await invoke(input); }
     catch (error) {
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-      if (controller.signal.aborted || code !== "jev_evaluation_failed" && code !== "jev_rate_limited") throw error;
-      await new Promise(resolve => setTimeout(resolve, 200));
+      const timedOut = controller.signal.aborted || code === "jev_aborted";
+      if (!timedOut && code !== "jev_evaluation_failed" && code !== "jev_rate_limited") throw error;
+      controller.abort();
+      if (!timedOut) await new Promise(resolve => setTimeout(resolve, 200));
       result = await invoke(input);
     }
     phase = "invalid_answer";
+    // The model that answered is recorded with the answers, so the launch
+    // details can say which model decided each step.
+    model = typeof result?.model === "string" && result.model ? result.model : undefined;
     const answers = record(result?.answers, "answers_missing");
     if (Object.keys(answers).some(key => !Object.hasOwn(input.questions, key))) {
       throw new InvalidDecisionAnswer("unexpected_answer");
     }
     // Every question is required. Never return a partially usable launch configuration.
     validated = Object.fromEntries(questions.map(([key, question]) => {
+      if (question.type === "score") return [key, validateRoutingScore(answers[key], question.criteria.length, key)];
       if (question.type !== "choice") throw new Error("Invalid routing question");
       return [key, validateRoutingChoice(answers[key], Object.keys(question.criteria), key)];
     }));
@@ -166,6 +189,7 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
     controller.abort();
     clearTimeout(timer);
   }
-  await persist({ decisionId, at: new Date().toISOString(), status: "succeeded", answers: validated });
+  await persist({ decisionId, at: new Date().toISOString(), status: "succeeded", answers: validated,
+    ...(model ? { model } : {}) });
   return validated;
 }

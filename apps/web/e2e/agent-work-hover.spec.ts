@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
@@ -43,6 +43,73 @@ async function openActiveAgentWorkspace(page: Page) {
   });
 }
 
+async function expectToolbarAttached(avatar: Locator, toolbar: Locator) {
+  await expect.poll(async () => {
+    const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
+    if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
+    return Math.abs(avatarBox.y - (toolbarBox.y + toolbarBox.height));
+  }).toBeLessThanOrEqual(12);
+}
+
+for (const mobile of [false, true]) {
+  test.describe(`failed-turn controls ${mobile ? "mobile" : "desktop"}`, () => {
+    test.use({
+      ...(mobile ? E2E_MOBILE_CONTEXT : DESKTOP_HOVER_CONTEXT),
+      deviceScaleFactor: 4,
+      viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 },
+    });
+    test("failed-turn island keeps hover controls beside the avatar and reachable from the status", async ({ page }, testInfo) => {
+      const presence = ACTIVE_AGENT_CHANNEL.memberPresence["agent:codex"];
+      const instance = presence.instances[0];
+      await openWorkspaceWithStubs(page, {
+        spaces: [E2E_SPACE],
+        channels: [{
+          ...ACTIVE_AGENT_CHANNEL,
+          memberPresence: {
+            "agent:codex": {
+              ...presence,
+              status: "online",
+              instances: [{
+                ...instance,
+                status: "online",
+                usage: {
+                  quotaState: "observed",
+                  quotaSource: "provider_api",
+                  quotaObservedAt: new Date().toISOString(),
+                  quotaUsages: [{ label: "5h", usedPercent: 100 }],
+                  quotaAccount: { allowed: false },
+                },
+                runtimeState: { status: "idle", issue: { kind: "failed", sinceMillis: Date.now() - 480_000 } },
+              }],
+            },
+          },
+        }],
+      });
+
+      if (mobile) {
+        await page.locator(".app-mobile-channel-list-pane")
+          .getByText(ACTIVE_AGENT_CHANNEL.name || "general", { exact: true }).first().tap();
+      }
+      const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+      const issue = page.locator(".app-agent-work-dock [data-runtime-issue='failed']");
+      const controls = page.locator(".app-agent-work-actions");
+      const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
+      await expect(avatar.locator(".app-agent-work-limit")).toHaveText("limit");
+      if (mobile) await issue.getByRole("button").focus();
+      else await issue.hover();
+      await expect(controls).toHaveCSS("visibility", "visible");
+      await expectToolbarAttached(avatar, toolbar);
+      await expect(toolbar.getByRole("note")).toHaveText("Usage limit reached: provider refuses requests");
+      await toolbar.hover();
+      await expect(controls).toHaveCSS("visibility", "visible");
+      await page.screenshot({ path: testInfo.outputPath("failed-turn-hover.png") });
+      await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeEnabled();
+      await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
+      await expect(page.getByRole("heading", { name: "Stop agent?" })).toBeVisible();
+    });
+  });
+}
+
 test("agent avatar reveals one compact, keyboard-accessible action toolbar", async ({ page }) => {
   await openActiveAgentWorkspace(page);
 
@@ -52,20 +119,23 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
 
   await expect(avatar).toBeVisible();
   await expect(avatar).not.toHaveAttribute("title");
-  await expect(controls).toHaveCSS("opacity", "0");
+  await expect(controls).toHaveCSS("visibility", "hidden");
 
   await avatar.hover();
-  await expect(controls).toHaveCSS("opacity", "1");
+  await expect(controls).toHaveCSS("visibility", "visible");
   await expect(toolbar.locator(".app-agent-work-instance-name")).toHaveText("codex:1");
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toContainText("Reborn");
   await expect(toolbar.getByRole("button", { name: "Stop codex:1" })).toContainText("Stop");
-  await expect(toolbar).toHaveCSS("backdrop-filter", /^(?!none$).+/);
+  // The glass is the panel the capsule grows into, not the toolbar inside it.
+  await expect(controls.locator(".app-agent-work-morph")).toHaveCSS("backdrop-filter", /^(?!none$).+/);
 
   const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
   expect(avatarBox).not.toBeNull();
   expect(toolbarBox).not.toBeNull();
   expect(toolbarBox!.width).toBeGreaterThan(toolbarBox!.height * 2);
-  expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(avatarBox!.y);
+  // A bare disc stretches right: the controls sit beside the face, on its line.
+  expect(toolbarBox!.x).toBeGreaterThanOrEqual(avatarBox!.x + avatarBox!.width - 1);
+  expect(Math.abs((toolbarBox!.y + toolbarBox!.height / 2) - (avatarBox!.y + avatarBox!.height / 2))).toBeLessThanOrEqual(2);
 
   const mainBox = await page.locator(".app-main").boundingBox();
   expect(mainBox).not.toBeNull();
@@ -92,10 +162,10 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   expect(actionCentersAreInteractive).toEqual([true, true]);
 
   await toolbar.hover();
-  await expect(controls).toHaveCSS("opacity", "1");
+  await expect(controls).toHaveCSS("visibility", "visible");
 
   await avatar.focus();
-  await expect(controls).toHaveCSS("opacity", "1");
+  await expect(controls).toHaveCSS("visibility", "visible");
   await page.keyboard.press("Tab");
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeFocused();
 });
@@ -189,13 +259,12 @@ test.describe("mobile agent controls", () => {
       (dock as HTMLElement).style.transform = "translateY(96px)";
     });
 
-    await expect
-      .poll(async () => {
-        const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
-        if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
-        return Math.abs(avatarBox.y - (toolbarBox.y + toolbarBox.height));
-      })
-      .toBeLessThanOrEqual(12);
+    // A bare disc stretches right, so its controls stay on the face's line.
+    await expect.poll(async () => {
+      const [avatarBox, toolbarBox] = await Promise.all([avatar.boundingBox(), toolbar.boundingBox()]);
+      if (!avatarBox || !toolbarBox) return Number.POSITIVE_INFINITY;
+      return Math.abs((avatarBox.y + avatarBox.height / 2) - (toolbarBox.y + toolbarBox.height / 2));
+    }).toBeLessThanOrEqual(2);
   });
 
   test("agent Instance control is large enough and clears the floating composer", async ({ page }) => {
@@ -213,4 +282,27 @@ test.describe("mobile agent controls", () => {
     expect(avatarBox!.width).toBeGreaterThanOrEqual(48);
     expect(avatarBox!.y + avatarBox!.height).toBeLessThanOrEqual(composerBox!.y - 10);
   });
+});
+
+test("a stretching disc pushes the Instances after it aside", async ({ page }) => {
+  const instance = ACTIVE_AGENT_CHANNEL.memberPresence["agent:codex"].instances[0];
+  const idle = (n: number) => ({ ...instance, id: `instance-codex-${n}`, channelInstanceId: String(n), label: `codex:${n}`,
+    status: "online", activity: undefined });
+  await openWorkspaceWithStubs(page, {
+    spaces: [E2E_SPACE],
+    channels: [{ ...ACTIVE_AGENT_CHANNEL, memberPresence: { "agent:codex": {
+      ...ACTIVE_AGENT_CHANNEL.memberPresence["agent:codex"], status: "online", activity: undefined, instances: [idle(1), idle(2)] } } }],
+  });
+  const first = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+  const second = page.getByRole("button", { name: /Open Codex.*codex:2/ });
+  const restingLeft = (await second.boundingBox())!.x;
+  await first.hover();
+  const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
+  await expect(toolbar).toBeVisible();
+  await expect.poll(async () => {
+    const [toolbarBox, secondBox] = await Promise.all([toolbar.boundingBox(), second.boundingBox()]);
+    return toolbarBox && secondBox ? secondBox.x - (toolbarBox.x + toolbarBox.width) : -1;
+  }).toBeGreaterThanOrEqual(0);
+  await page.mouse.move(5, 5);
+  await expect.poll(async () => Math.round((await second.boundingBox())!.x)).toBe(Math.round(restingLeft));
 });

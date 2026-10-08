@@ -3257,6 +3257,8 @@ dependencies = [
  "dirs",
  "fs2",
  "futures-util",
+ "gethostname",
+ "getrandom 0.3.4",
  "regex",
  "reqwest",
  "rustls",
@@ -3283,6 +3285,7 @@ dependencies = [
  "urlencoding",
  "xmatrix-cli-args",
  "xmatrix-cli-core",
+ "xmatrix-repo-pool",
  "xmatrix-windows-continuity",
 ]
 
@@ -3334,6 +3337,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "strsim",
  "sysinfo",
  "time",
  "tokio",
@@ -3446,6 +3450,7 @@ dependencies = [
  "dirs",
  "fs2",
  "libc",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.11.0",

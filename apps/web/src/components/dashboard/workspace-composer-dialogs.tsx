@@ -3,6 +3,9 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
 import { useAndroidBackHandler } from "./use-android-back";
+import { useComposerHint } from "./composer-hints";
+import { useDraftSummonIntents } from "./use-draft-summon-intents";
+import { draftSummonReadingsForDisplay, forceDraftSummon } from "./summon-intent";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
@@ -44,6 +47,7 @@ import { StatusView } from "./status-view";
 import { MachineHarnessPanel } from "./machine-harness-panel";
 
 import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { PlatformAdminTabs } from "./workspace-platform-admin-tabs";
 import { humanProfileFromSpaceMember } from "./human-profile-summary";
 import { ProfileView } from "./human-profile-view";
@@ -64,7 +68,6 @@ import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   COUNT_CHIP_MATERIAL_CLASS,
-  XMATRIX_SYSTEM_AVATAR_URL,
 } from "./workspace-shell-constants";
 
 import {
@@ -84,7 +87,6 @@ import {
 
 import {
   insertMentionIntoDraft,
-  insertMentionTriggerIntoDraft,
 } from "./workspace-shell-helpers-extra";
 
 import {
@@ -109,7 +111,6 @@ import {
   avatarInitials,
   channelAttachmentKindForFile,
   channelOnlineAgentAvatarItems,
-  channelXMatrixDelegateInstance,
   cleanStatusChips,
   clipboardHasTextPayload,
   defaultAttachmentName,
@@ -159,7 +160,6 @@ import { BranchBadge } from "./status-tag";
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
 import {
-  AtSign,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -219,7 +219,6 @@ import {
 } from "@/components/dashboard/composer-caret";
 
 import {
-  channelAboutReviewConfigurationError,
   requestChannelAboutReview,
 } from "@/components/dashboard/channel-about-review-request";
 
@@ -243,7 +242,7 @@ import { APP_CONNECTORS } from "@/lib/app-connectors";
 
 import { spaceMemberCanCreate } from "./space-member-permissions";
 
-import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { xmatrixApiRequest, xmatrixRawResponse } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { cn } from "@/lib/utils";
@@ -253,7 +252,6 @@ import { spaceVisibilityScope, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelSummarySource,
-  ManagementChannelVisibility,
   ObservabilityEvent,
   SerializedAgent,
   SerializedAgentInstance,
@@ -391,7 +389,7 @@ export function Composer({
   placeholder?: string;
   ariaLabel?: string;
   sendTitle?: string;
-  /** Extra controls beside Mention agent, inside the input box. */
+  /** Extra controls inside the input box, before Send. */
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
 }) {
@@ -462,6 +460,7 @@ export function Composer({
     !readingAttachment &&
     !preparingSend &&
     !sending;
+  const composerHint = useComposerHint(writable && !placeholder && localDraft.length === 0);
   const completionApiRef = useRef<ComposerCompletionApi | null>(null);
   const setCursor = useCallback((value: number) => {
     completionApiRef.current?.setCursor(value);
@@ -850,6 +849,13 @@ export function Composer({
     }
   }
 
+  // Jev reads each summon as the author types; the hint shows it and the send carries it.
+  const outgoingDraft = useMemo(() => composerSendDraft(invocationDraftRef.current, localDraft),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localDraft, invocationDraftRef.current]);
+  const draftIntents = useDraftSummonIntents({ token, channelId: startsConversation ? undefined : channel?.id,
+    body: outgoingDraft.body, selections: outgoingDraft.selections });
+
   async function submitComposer() {
     // Enter reaches here without the Send button's gate: a file still being
     // read would otherwise be left behind while the text goes out.
@@ -857,6 +863,7 @@ export function Composer({
     preparingSendRef.current = true;
     setPreparingSend(true);
     setAttachmentError(null);
+    const sendScope = invocationScope;
     try {
       // Picked channels and pages are shown by name and sent as their id tokens.
       const { body, selections } = composerSendDraft(invocationDraftRef.current, localDraft);
@@ -865,9 +872,12 @@ export function Composer({
         sourceRevision: 1, sourceBodyHash, selections }, {
         spaceId: space?.id ?? channel?.spaceId ?? "", body, bodyHash: sourceBodyHash, revision: 1,
       }) : undefined;
+      const summonIntents = body === outgoingDraft.body ? await draftIntents.readBeforeSend() : [];
+      if (invocationScopeRef.current !== sendScope) return;
       await onSend({
         body,
         ...(invocationSelections ? { invocationSelections } : {}),
+        ...(summonIntents.length ? { summonIntents } : {}),
         attachments,
       });
     } catch (error) {
@@ -929,7 +939,7 @@ export function Composer({
         setAttachmentError("Only PNG, JPEG, WebP, and GIF images are supported.");
         continue;
       }
-      const blob = await fetch(image.dataUrl).then((response) => response.blob()).catch(() => null);
+      const blob = await xmatrixRawResponse(image.dataUrl).then((response) => response.blob()).catch(() => null);
       if (!blob || blob.size <= 0) {
         setAttachmentError("Failed to read the pasted image.");
         continue;
@@ -1097,6 +1107,19 @@ export function Composer({
           onInvocationSelect={selectInvocation}
           onReferenceSelect={selectReference}
           referenceRanges={invocationDraftRef.current?.bindings.filter((binding) => !isAgentBinding(binding))}
+          summonReadings={draftSummonReadingsForDisplay(draftIntents.readings, localDraft,
+            invocationDraftRef.current?.bindings.filter(isAgentBinding))}
+          summonReadingPending={draftIntents.reading}
+          onSummonStartAnyway={reading => {
+            const next = forceDraftSummon(textareaRef.current?.value ?? localDraft, reading);
+            if (!next) return;
+            setDraftText(next.body);
+            requestAnimationFrame(() => {
+              const input = textareaRef.current;
+              input?.focus();
+              input?.setSelectionRange(next.caret, next.caret);
+            });
+          }}
           channel={channel}
           space={space}
           token={token}
@@ -1115,15 +1138,7 @@ export function Composer({
           }}
           completionApiRef={completionApiRef}
           textareaRef={textareaRef}
-          placeholder={placeholder || (
-            emptyPasteAnchorActive && localDraft.length === 0
-              ? ""
-              : channel
-                ? isJoined
-                  ? "输入消息"
-                  : "Join channel to send"
-                : "输入消息"
-          )}
+          placeholder={placeholder || (channel && !isJoined ? "Join channel to send" : composerHint)}
           ariaLabel={ariaLabel || "Message composer"}
           sendTitle={sendTitle || "Send"}
           onEscape={onEscape}
@@ -1364,25 +1379,11 @@ export function Composer({
           }
           afterSend={afterSend}
           inputTrailing={
-            <div className="composer-inline-actions flex shrink-0 items-center gap-1 text-muted-foreground">
-              <ComposerIcon
-                label="Mention agent"
-                icon={AtSign}
-                onClick={() => {
-                  const target = textareaRef.current;
-                  const nextCursor = target?.selectionStart ?? localDraft.length;
-                  const next = insertMentionTriggerIntoDraft(localDraft, nextCursor);
-                  setDraftText(next.value);
-                  setCursor(next.cursor);
-                  scheduleTextareaSelection(
-                    () => textareaRef.current,
-                    next.value,
-                    { start: next.cursor, end: next.cursor }
-                  );
-                }}
-              />
-              {inlineActions}
-            </div>
+            inlineActions ? (
+              <div className="composer-inline-actions flex shrink-0 items-center gap-1 text-muted-foreground">
+                {inlineActions}
+              </div>
+            ) : null
           }
         />
     </div>
@@ -1481,6 +1482,7 @@ export function ChannelDetails({
 }) {
   const machineCatalog = useAgentRegistrationCatalog(space?.id ?? "", token ?? "", Boolean(space?.id && token));
   const [aboutSummaryBusy, setAboutSummaryBusy] = useState(false);
+  const [aboutSummaryError, setAboutSummaryError] = useState<string | null>(null);
   const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null);
   const [automationMessageDraft, setAutomationMessageDraft] = useState("");
   const [automationIntervalDraft, setAutomationIntervalDraft] = useState(AUTOMATION_MIN_INTERVAL_MINUTES);
@@ -1488,6 +1490,7 @@ export function ChannelDetails({
   const channelSpaceId = channel?.spaceId;
   useEffect(() => {
     setEditingAutomationId(null);
+    setAboutSummaryError(null);
   }, [channelId]);
 
   const members = useMemo(() => (
@@ -1497,25 +1500,6 @@ export function ChannelDetails({
     () => channelOnlineAgentAvatarItems(channel),
     [channel]
   );
-  const managementDelegateInstance = useMemo(
-    () => channelXMatrixDelegateInstance(channel),
-    [channel]
-  );
-  const managementAgent = useMemo(() => {
-    if (!channel) return null;
-    const config = space?.managementAgent;
-    const channelVisibility = channel?.metadata?.managementVisibility;
-    const visibility: ManagementChannelVisibility =
-      channelVisibility === "management-visible" ||
-      channelVisibility === "metadata-only" ||
-      channelVisibility === "excluded"
-        ? channelVisibility
-        : config?.defaultChannelVisibility || "management-visible";
-    return { config, visibility, enabled: config?.enabled === true };
-  }, [channel, space?.managementAgent]);
-  const aboutManagementAgent = space?.managementAgent;
-  const aboutSummaryError = channelAboutReviewConfigurationError(aboutManagementAgent);
-
   const connectorsQuery = useQuery({
     queryKey: xmatrixQueryKeys.domain(
       { userId: currentUserMemberId || "anonymous" },
@@ -1538,12 +1522,15 @@ export function ChannelDetails({
   const requestAboutSummary = useCallback(async () => {
     if (!token || !channel || aboutSummaryBusy) return;
     setAboutSummaryBusy(true);
+    setAboutSummaryError(null);
     try {
-      await requestChannelAboutReview({ token, channel, managementAgent: aboutManagementAgent });
+      await requestChannelAboutReview({ token, channel });
+    } catch (error) {
+      setAboutSummaryError(error instanceof Error ? error.message : String(error));
     } finally {
       setAboutSummaryBusy(false);
     }
-  }, [aboutManagementAgent, aboutSummaryBusy, channel, token]);
+  }, [aboutSummaryBusy, channel, token]);
 
   const channelAutomations = useMemo(
     () => automations.filter((automation) => automation.channelId === channelId),
@@ -1600,9 +1587,10 @@ export function ChannelDetails({
             action={
               <button
                 type="button"
-                title={aboutSummaryError || "Regenerate Summary with xMatrix"}
-                disabled={Boolean(aboutSummaryError) || aboutSummaryBusy}
-                onClick={() => void requestAboutSummary().catch(() => undefined)}
+                title="Regenerate Summary"
+                aria-label="Regenerate Summary"
+                disabled={aboutSummaryBusy}
+                onClick={() => void requestAboutSummary()}
                 className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
               >
                 <RefreshCw className={aboutSummaryBusy ? "size-3.5 animate-spin" : "size-3.5"} />
@@ -1614,6 +1602,9 @@ export function ChannelDetails({
               <p className="mt-1 text-xs text-muted-foreground" title={channel.summarySource.generatedAt}>
                 {summarySourceLine(channel.summarySource, channel.historyHeadSequence)}
               </p>
+            )}
+            {aboutSummaryError && (
+              <p role="alert" className="mt-1 text-xs text-destructive">{aboutSummaryError}</p>
             )}
           </DetailBlock>
 
@@ -1669,35 +1660,10 @@ export function ChannelDetails({
 
           <DetailBlock title="Agents">
             <div className="space-y-2">
-              {!managementAgent && agentItems.length === 0 ? (
+              {agentItems.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No active agent instances</p>
               ) : (
                 <>
-                  {managementAgent ? (
-                    <div className="app-detail-agent-row flex items-start gap-2.5 border-b border-border/60 px-2 py-2.5 text-sm">
-                      <IdentityAvatar
-                        kind="system"
-                        label="xMatrix"
-                        status={managementDelegateInstance?.status}
-                        imageUrl={XMATRIX_SYSTEM_AVATAR_URL}
-                        initials="XM"
-                        size="sm"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate">xMatrix</p>
-                          {managementDelegateInstance ? (
-                            <span className="w-16 shrink-0 text-left text-[11px] capitalize text-muted-foreground">
-                              {presenceStatusLabel(managementDelegateInstance)}
-                            </span>
-                          ) : null}
-                        </div>
-                        {managementDelegateInstance ? (
-                          <LiveAgentPresentationChips instance={managementDelegateInstance} />
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
                   {agentItems.map((item) => {
                     const presence = memberPresence(channel, item.member);
                     if (presence.kind !== "agent") return null;
@@ -1999,23 +1965,23 @@ export function ChannelDetails({
         aria-label="Channel details"
       >
         <div className="app-details app-mobile-channel-details-surface flex min-h-0 flex-1 flex-col">
-          <header className="app-mobile-channel-details-header flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-2 py-2">
+          <WoodPanel as="header" className="app-detail-plank app-mobile-channel-details-header flex shrink-0 items-center gap-2 p-3">
             <button
               type="button"
               title="Back to channel"
               aria-label="Back to channel"
               onClick={onCloseMobileOverlay}
-              className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+              className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/30 hover:text-foreground"
             >
               <ChevronLeft className="size-5" />
             </button>
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-black">Channel details</h2>
-              <p className="truncate text-xs text-muted-foreground">
+              <h2 className="truncate text-base font-semibold">Channel details</h2>
+              <p className="truncate text-sm text-muted-foreground" title={mobileOverlayChannelLabel}>
                 {mobileOverlayChannelLabel}
               </p>
             </div>
-          </header>
+          </WoodPanel>
           <div className="app-mobile-channel-details-sheet flex min-h-0 flex-1 flex-col">
             {detailsBody}
           </div>
@@ -2304,7 +2270,6 @@ export function ToolSurface({
   localSetupReady,
   localMachineName,
   onNameLocalMachine,
-  managementSetupSpaceId,
   onStartDesktopDaemon,
   onStopDesktopDaemon,
   onRestartDesktopDaemon,
@@ -2329,7 +2294,6 @@ export function ToolSurface({
   onInviteSpaceMembers,
   onUpdateSpaceMemberRole,
   onRemoveSpaceMember,
-  onUpdateSpaceManagementAgent,
   onUpdateSpaceMemberPermissions,
   onUpdateSpacePreferredLanguage,
   onDeleteSpace,
@@ -2337,7 +2301,6 @@ export function ToolSurface({
   creatingSpace,
   onCreateSpace,
   onSelectSpace,
-  onDismissManagementSetup,
   onLogout,
   onOpenAgentCreate,
   onOpenLocalManagedAgentEdit,
@@ -2387,7 +2350,6 @@ export function ToolSurface({
   localSetupReady: boolean;
   localMachineName: string | null | undefined;
   onNameLocalMachine: (name: string) => void;
-  managementSetupSpaceId: string | null;
   onStartDesktopDaemon: () => void;
   onStopDesktopDaemon: () => void;
   onRestartDesktopDaemon: () => void;
@@ -2411,7 +2373,6 @@ export function ToolSurface({
   creatingSpace: boolean;
   onCreateSpace: (name: string) => Promise<SerializedSpace | undefined>;
   onSelectSpace: (spaceId: string) => void;
-  onDismissManagementSetup: () => void;
   onLogout: () => void;
   onOpenAgentCreate: () => void;
   onOpenLocalManagedAgentEdit: () => void;
@@ -2490,14 +2451,12 @@ export function ToolSurface({
         user={user}
         currentSpace={currentSpace}
         error={spacesError}
-        managementSetupSpaceId={managementSetupSpaceId}
         joinRequestsBySpace={joinRequestsBySpace}
         onDecideJoinRequest={onDecideJoinRequest}
         onCreateSpaceInviteCode={onCreateSpaceInviteCode}
         onInviteSpaceMembers={onInviteSpaceMembers}
         onUpdateSpaceMemberRole={onUpdateSpaceMemberRole}
         onRemoveSpaceMember={onRemoveSpaceMember}
-        onUpdateSpaceManagementAgent={onUpdateSpaceManagementAgent}
         onUpdateSpaceMemberPermissions={onUpdateSpaceMemberPermissions}
         onUpdateSpacePreferredLanguage={onUpdateSpacePreferredLanguage}
         onDeleteSpace={onDeleteSpace}
@@ -2506,7 +2465,6 @@ export function ToolSurface({
         creatingSpace={creatingSpace}
         onCreateSpace={onCreateSpace}
         onSelectSpace={onSelectSpace}
-        onDismissManagementSetup={onDismissManagementSetup}
       />
     );
   }
@@ -2518,6 +2476,8 @@ export function ToolSurface({
           spaceId={currentSpace?.id ?? null}
           token={token}
           machines={currentSpaceMachines}
+          channels={currentSpaceChannels}
+          events={currentSpaceEvents}
           automations={currentSpaceAutomations}
           onOpenAgents={() => onChangeView("agents")}
           onOpenMachine={(machineId) => onChangeView("machines", machineId)}
@@ -2535,11 +2495,10 @@ export function ToolSurface({
         spaceId={currentSpace?.id ?? null}
         token={token}
         currentUserId={user.id}
-        currentSpace={currentSpace}
         error={agentsError}
         channels={currentSpaceChannels}
         onOpenConversation={onOpenConversation}
-        onOpenAgentCreate={onOpenAgentCreate}
+        onOpenMachines={() => onChangeView("machines")}
       />
     );
   }
@@ -2562,8 +2521,10 @@ export function ToolSurface({
         loading={false}
         error={agentsError}
         token={token}
+        spaceId={currentSpace?.id}
         defaultItem={view === "local" ? THIS_MACHINE_ITEM : undefined}
-        thisMachine={desktopAvailable ? {
+        thisMachine={desktopAvailable && desktopContext
+          && !["ios", "android"].includes(desktopContext.platform) ? {
           machineId: desktopContext?.machineId,
           name: "Unnamed machine",
           online: desktopDaemonStatus?.state === "running",
@@ -2586,7 +2547,7 @@ export function ToolSurface({
           setupReady={localSetupReady}
           machineName={localMachineName}
           onNameMachine={onNameLocalMachine}
-          harnesses={<MachineHarnessPanel token={token}
+          harnesses={<MachineHarnessPanel key={currentSpace?.id} token={token} spaceId={currentSpace?.id}
             daemon={machines.find(machine => machine.machineId === desktopContext?.machineId)?.daemon} />}
           onStartDaemon={onStartDesktopDaemon}
           onRestartDaemon={onRestartDesktopDaemon}

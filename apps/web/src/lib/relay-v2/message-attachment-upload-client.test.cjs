@@ -48,6 +48,24 @@ class FakeXMLHttpRequest {
   }
 }
 
+/** The real transport, run against this file's fetch stub. */
+const transport = (() => {
+  // Its own imports (auth-events) are TypeScript too.
+  require("../../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
+  const transportJs = ts.transpileModule(fs.readFileSync(`${__dirname}/../query/api-client.ts`, "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const transportModule = { exports: {} };
+  vm.runInNewContext(transportJs, {
+    module: transportModule,
+    exports: transportModule.exports,
+    Error, DOMException, JSON, Math, Number, Date, Set, Object, Headers, Request,
+    fetch: (...args) => fetchImpl(...args),
+    require: (specifier) => require(specifier.startsWith(".") ? `../query/${specifier}` : specifier),
+  });
+  return transportModule.exports;
+})();
+
 const moduleValue = { exports: {} };
 vm.runInNewContext(js, {
   module: moduleValue,
@@ -94,6 +112,7 @@ vm.runInNewContext(js, {
         RELAY_V2_BLOB_UPLOAD_PREFIX: "/api/relay-v2/private-r2/uploads",
       };
     }
+    if (specifier === "../query/api-client") return transport;
     return require(specifier);
   },
 });

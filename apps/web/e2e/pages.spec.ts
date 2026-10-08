@@ -6,7 +6,7 @@ import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
 
 import { expect, test } from "./fixtures";
-import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
+import { fixtureJson, fixtureRequestBodies, fixtureRequestRecords } from "./in-page-api-fixtures";
 import { editPageMarkdown, pageDocument, pageMarkdown } from "./page-document-fixture";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, installWorkspaceStubs } from "./workspace-fixtures";
 
@@ -131,7 +131,9 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
     pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-codex", name: "codex:1", status: "idle",
       conversationId: E2E_CHANNEL.id, activity: "viewing", blockId: "notes" }, { instanceId: "i-claude", name: "claude:2",
-      status: "busy", conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "status" }] }],
+      status: "busy", conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "status", section: "Status" }],
+    discussions: { open: 2, unread: 1, latest: null } }, { pageId: "p-company", agents: [], discussions: { open: 1, unread: 0,
+      latest: { from: { kind: "user", label: "Ada" }, bodyPreview: "Ship it Friday?", sentAt: NOW } } }],
   });
 
   const server = pageDocument(BODY);
@@ -171,6 +173,15 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   const tree = browser.getByTestId("page-tree");
   await expect(tree).toContainText("Company");
   await expect(tree).toContainText("Relay");
+  // A page's row counts its open discussions, in the count chip while one has replies not yet read;
+  // its second line says what is happening there, not a row of faces.
+  const counts = tree.getByTestId("page-tree-discussions");
+  await expect(counts.filter({ has: browser.locator(".app-count-pill") }))
+    .toHaveAccessibleName("2 open discussions, 1 with unread replies");
+  await expect(counts.filter({ hasNot: browser.locator(".app-count-pill") })).toHaveAccessibleName("1 open discussion");
+  await expect(tree.locator(".identity-avatar-face")).toHaveCount(0);
+  await expect(tree.getByRole("button", { name: "Relay claude:2 editing · Status" })).toBeVisible();
+  await expect(tree.getByRole("button", { name: "Company Ada: Ship it Friday?" })).toBeVisible();
   // The first page opens by default; count the sessions of the page we switch to.
   await expect.poll(() => connections).toBeGreaterThan(0);
   connections = 0;
@@ -427,8 +438,8 @@ test("an owner may start a Space's pages from a repository or a first page, and 
   await fixtureJson(browser, "page-tree-first", pageTree, { pages: [page("p-first", null, "First document", "V")] });
   await fixtureJson(browser, "page-create", pageTree, { page: page("p-first", null, "First document", "V") },
     { method: "POST" });
-  browser.once("dialog", (dialog) => void dialog.accept("First document"));
   await browser.getByRole("button", { name: "Create the first page" }).click();
+  await expect.poll(() => fixtureRequestBodies(browser, "page-create")).toEqual([{ title: "Untitled", parentPageId: null }]);
   await expect(browser.getByTestId("page-migration-review")).toBeHidden();
   await expect(browser.getByTestId("pages-view")).toContainText("First document");
   // An owner publishes the page for anyone with the link.
@@ -827,7 +838,7 @@ test("selecting a passage asks AI about it without leaving the page", async ({ p
   await expect.poll(async () => (await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({
     conversationId: asked.id, blockId: "status", anchor: { quote: "In progress" } });
   const [message] = await fixtureRequestBodies(browser, "ask-message");
-  expect(String(message!.body)).toBe("@xMatrix what is left\n\nAbout this passage of page:p-relay (section #status):\n> In progress");
+  expect(String(message!.body)).toBe("@auto what is left\n\nAbout this passage of page:p-relay (section #status):\n> In progress");
   // The discussion opens beside the page, where the answer arrives.
   await expect(browser).toHaveURL(/conversation=channel-ask/u);
   await expect(browser.getByTestId("page-conversation")).toBeVisible();
@@ -1038,4 +1049,106 @@ test("everyday editing works as in Google Docs: rename the page, grow a table, l
   await expect(editor.locator('a[href="https://xmatrix.sh/docs"]')).toBeVisible();
   await expect.poll(() => pageMarkdown(server)).toContain("See the notes. <https://xmatrix.sh/docs>\n");
   await expect.poll(() => pageMarkdown(server)).toMatch(/\| Search \| Shipped \| +\|\n\| +\| +\| +\|/u);
+});
+
+const PROMPT_FILE = {
+  repository: "LambdaLabsHQ/xmatrix", path: "docs/prompts/bootstrap.md", ref: null, sha: "abc1234def5678", size: 210,
+  htmlUrl: "https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/prompts/bootstrap.md",
+  text: "# Startup prompt\n\nYou are running inside an xMatrix session.\n\n- Follow the [channel contract](contract.md).\n" +
+    "- Keep responses concise.\n\n```sh\nxmatrix send <channel-id> \"<message>\"\n```\n",
+  truncated: false,
+};
+
+test("a GitHub file the page embeds is drawn below its link, read through the Hub", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-github-file", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/github-file\?href=/u,
+    PROMPT_FILE);
+  const editor = await openLivePage(browser,
+    "# Relay\n\n## Startup prompt\n\n[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md)\n");
+  const card = editor.getByTestId("page-github-file");
+  await expect(card).toContainText("LambdaLabsHQ/xmatrix / docs/prompts/bootstrap.md");
+  await expect(card).toContainText("default branch · abc1234");
+  await expect(card.locator("h1", { hasText: "Startup prompt" })).toBeVisible();
+  await expect(card.locator("pre")).toContainText("xmatrix send <channel-id>");
+  await expect(card.getByRole("link", { name: "channel contract" }), "links point where they do on GitHub")
+    .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/prompts/contract.md");
+  await expect(card.getByRole("link", { name: "Open on GitHub" })).toHaveAttribute("href", PROMPT_FILE.htmlUrl);
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file.png") });
+  await browser.setViewportSize({ width: 393, height: 852 });
+  await expect(card.getByRole("link", { name: "Open on GitHub" })).toBeVisible();
+  await expect.poll(() => card.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file-mobile.png") });
+});
+
+test("a long embedded file unfolds while its source stays accessible", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-github-file", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/github-file\?href=/u,
+    { ...PROMPT_FILE, text: "# Startup prompt\n\n" + "A paragraph in the prompt.\n\n".repeat(40) + "The end of the prompt.\n" });
+  const editor = await openLivePage(browser,
+    "[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md)\n");
+  const file = editor.getByTestId("page-github-file");
+  await expect(file.getByRole("button", { name: "Show all" })).toBeVisible();
+  await expect(file.getByRole("link", { name: "Open on GitHub" })).toBeVisible();
+  await file.getByRole("button", { name: "Show all" }).click();
+  await expect(file.getByText("The end of the prompt.", { exact: true })).toBeVisible();
+  await expect(file.getByRole("button", { name: "Show all" })).toHaveCount(0);
+});
+
+test("the insert menu embeds a pasted GitHub file link, and a refusal names what is missing", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-github-file", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/github-file\?href=/u,
+    { error: "Connect GitHub for this Space to show embedded files", code: "github_connection_required" }, { status: 409 });
+  const server = pageDocument("# Relay\n\n## Prompts\n\nThe startup prompt:\n");
+  const editor = await openLivePage(browser, server);
+  await editor.getByText("The startup prompt:", { exact: true }).click();
+  await browser.keyboard.press("End");
+  await browser.keyboard.press("Enter");
+  await browser.keyboard.type("/github");
+  await expect(browser.getByTestId("page-insert-menu")).toContainText("GitHub file");
+  await browser.keyboard.press("Enter");
+  const form = browser.getByTestId("page-embed-github-file");
+  await form.getByRole("textbox", { name: "GitHub file link" }).fill("https://github.com/LambdaLabsHQ/xmatrix/tree/main/docs");
+  await form.getByRole("button", { name: "Embed" }).click();
+  await expect(form, "a folder link is not a file").toContainText("Paste a file link");
+  await form.getByRole("textbox", { name: "GitHub file link" })
+    .fill("https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/prompts/bootstrap.md");
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file-insert.png") });
+  await form.getByRole("button", { name: "Embed" }).click();
+  await expect(form).toBeHidden();
+  await expect.poll(() => pageMarkdown(server))
+    .toContain("[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md?ref=main)");
+  await expect(editor.getByTestId("page-github-file")).toContainText("Connect GitHub for this Space to show this file.");
+  await browser.screenshot({ path: test.info().outputPath("pages-github-file-refused.png") });
+});
+
+
+test("page deletion requires confirmation, reports refusal, and can retry", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-delete", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u,
+    { error: "Move or remove its child pages first" }, { method: "DELETE", status: 409 });
+  await openLivePage(browser);
+  await browser.getByRole("button", { name: "Delete page", exact: true }).click();
+  const dialog = browser.getByRole("dialog", { name: "Delete this page?" });
+  await expect(dialog).toContainText("version history");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  expect(await fixtureRequestRecords(browser, "page-delete")).toHaveLength(0);
+  await browser.getByRole("button", { name: "Delete page", exact: true }).click();
+  await dialog.getByRole("button", { name: "Delete page" }).click();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await fixtureJson(browser, "page-delete", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u,
+    { removed: true }, { method: "DELETE" });
+  await fixtureJson(browser, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, { pages: [] });
+  await dialog.getByRole("button", { name: "Delete page" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(browser).not.toHaveURL(/page=p-relay/u);
+  await expect(browser.getByTestId("page-editor")).toHaveCount(0);
+});
+
+test("a page with children cannot be deleted from the confirmation", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V"), page("p-child", "p-relay", "Child", "V")]);
+  await openLivePage(browser);
+  await browser.getByRole("button", { name: "Delete page", exact: true }).click();
+  const dialog = browser.getByRole("dialog", { name: "Delete this page?" });
+  await expect(dialog).toContainText("child pages first");
+  await expect(dialog.getByRole("button", { name: "Delete page" })).toBeDisabled();
 });

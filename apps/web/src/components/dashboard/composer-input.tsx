@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -9,6 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowUp, Loader2, PlugZap, } from "lucide-react";
+import { ComposerSummonOptions } from "./composer-summon-options";
+import type { DraftSummonIntent } from "@xmatrix/protocol";
 import {
   handleComposerTextareaKeyDown,
   useComposerCompletion,
@@ -19,14 +22,19 @@ import { LiquidGlassSurface } from "@/components/ui/liquid-glass-surface";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
+import { stripEmptyPasteSentinel } from "./composer-caret";
 import { ComposerTextHighlight } from "./composer-text-highlight";
 import { channelMentionCandidates } from "./mention-complete";
 import { buildMentionReadIndex } from "./mention-read-state";
-import { ComposerSummonIntent } from "./composer-summon-intent";
 
 export type ComposerInputAuthorityProps = ComposerContextFields & {
   /** Picked channel and page references in the draft, highlighted as the chips they send as. */
   referenceRanges?: ReadonlyArray<{ start: number; end: number; text: string }>;
+  /** Jev's reading of each summon in the draft, painted on its band; declined mentions offer options at their address. */
+  summonReadings?: ReadonlyArray<DraftSummonIntent>;
+  /** A reading for the current draft is still on its way. */
+  summonReadingPending?: boolean;
+  onSummonStartAnyway?: (reading: DraftSummonIntent) => void;
   onSend: () => void;
   /** Escape cancels (thread draft) or is unused (main composer). */
   onEscape?: () => void;
@@ -88,6 +96,9 @@ function ComposerInputSurface({
   onInvocationSelect,
   onReferenceSelect,
   referenceRanges,
+  summonReadings,
+  summonReadingPending,
+  onSummonStartAnyway,
   channel,
   space,
   token,
@@ -160,6 +171,39 @@ function ComposerInputSurface({
     completionApiRef.current = completion;
   }
 
+  // The completion panel morphs out of the capsule: the glass box itself
+  // grows from the height it had to the panel's (or back), with its content
+  // pinned to the bottom edge and revealed as it grows, as the work dock's
+  // island grows into its panel. The box's last settled height is kept so
+  // the change can start from it.
+  const settledBoxHeightRef = useRef<number | null>(null);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const observer = new ResizeObserver(() => {
+      if (!box.getAnimations().length) settledBoxHeightRef.current = box.getBoundingClientRect().height;
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+  const completionOpen = completion.isCompletionOpen;
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const from = settledBoxHeightRef.current;
+    if (!box || from === null) return;
+    const to = box.getBoundingClientRect().height;
+    settledBoxHeightRef.current = to;
+    if (Math.abs(to - from) < 1 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    for (const running of box.getAnimations()) running.cancel();
+    box.classList.add("app-composer-box-morphing");
+    const animation = box.animate([{ height: `${from}px` }, { height: `${to}px` }], completionOpen
+      ? { duration: 360, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
+      : { duration: 240, easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+    const settle = () => box.classList.remove("app-composer-box-morphing");
+    animation.onfinish = settle;
+    animation.oncancel = settle;
+  }, [completionOpen]);
+
   useEffect(() => {
     if (!autoFocus) return;
     const textarea = textareaRef.current;
@@ -218,7 +262,6 @@ function ComposerInputSurface({
           </div>
         )}
         {completion.renderOverlays()}
-        <ComposerSummonIntent draft={textareaValue ?? draft} onDraftChange={onDraftChange} textareaRef={textareaRef} />
         {/* One capsule: attach, text, actions and send share the glass. When
             the text wraps or a header shows, the same surface grows into a
             panel and the controls stay on its bottom edge. */}
@@ -227,7 +270,8 @@ function ComposerInputSurface({
           <div className="relative min-w-0 flex-1">
           <ComposerTextHighlight value={textareaValue ?? draft} textareaRef={textareaRef}
             mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
-            references={referenceRanges} />
+            references={referenceRanges} summonReadings={summonReadings} summonReadingPending={summonReadingPending}
+            hint={stripEmptyPasteSentinel(textareaValue ?? draft).length === 0 ? placeholder : undefined} />
           <Textarea
             ref={textareaRef}
             value={textareaValue ?? draft}
@@ -265,13 +309,14 @@ function ComposerInputSurface({
               }
               onKeyDownExtra?.(event);
             }}
-            placeholder={placeholder}
             aria-label={ariaLabel}
             className={cn(
               "composer-textarea flex-1 resize-none border-0 bg-transparent shadow-none outline-none transition-all duration-200 focus-visible:ring-0",
               compact ? "min-h-0 p-0 text-sm" : "min-h-9 px-0 py-1.5 text-sm sm:min-h-11 sm:py-2 sm:text-[15px]"
             )}
           />
+          {onSummonStartAnyway && <ComposerSummonOptions readings={summonReadings ?? []}
+            textareaRef={textareaRef} disabled={disabled || !enabled || sending} onStartAnyway={onSummonStartAnyway} />}
           </div>
           {inputTrailing}
           <button

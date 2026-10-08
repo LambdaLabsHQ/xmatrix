@@ -209,6 +209,10 @@ that the Profile path is refused. Step 3 records the exact Run ids stopped.
   refresh and its unregistered passthrough had no caller and are deleted,
   together with the terminal crate's frontend and input modules and the
   dependencies only they used.
+  Outside a Run, a word that names no harness in `agent-presets.json` is
+  reported as clap's unrecognized subcommand, with its "a similar subcommand
+  exists" tip, before any runtime setup; a harness name keeps the
+  daemon-started-Run refusal.
 
 ## Agent Role retirement
 

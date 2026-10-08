@@ -41,7 +41,7 @@ test("a summon chip leads with the harness vendor icon", () => {
 test("a summon lists every step on one level", () => {
   const chosen = summonView({ ...base, routingDecision: { source: "jev", evaluatedAt: "2026-09-22T18:00:00Z" } });
   assert.deepEqual(chosen.steps.map(entry => entry.label), [
-    "Jev selected an environment", "Machine accepted", "Process started", "Joined channel", "Runtime ready", "Reasoning started",
+    "Environment selected", "Machine accepted", "Process started", "Joined channel", "Runtime ready", "Reasoning started",
   ]);
   assert.equal(chosen.steps[0].at, "2026-09-22T18:00:00Z");
   assert.equal(summonView(base).steps[0].label, "Environment selected");

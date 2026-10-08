@@ -30,14 +30,14 @@ async function run(providerId, command, responses, calls = [], credentials = {})
   } finally { globalThis.fetch = previous; }
 }
 
-test("task read actions use the current Channel read policy without granting their writes", () => {
+test("task read actions use the current Channel read policy and their writes run by default", () => {
   for (const [providerId, actionId] of [["linear", "read_issue"], ["gitlab", "read_issue"], ["gitlab", "read_merge_request"], ["jira", "read_issue"]]) {
     const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find(provider => provider.id === providerId);
     assert.equal(manifest.actions.find(action => action.id === actionId).effect, "read");
     assert.ok(isPolicyAction(manifest, actionId));
     assert.equal(actionRefusal({ providerId, actionId, effect: "read", mode: null, senderKind: "agent" }), undefined);
     assert.match(actionRefusal({ providerId, actionId, effect: "read", mode: "deny", senderKind: "agent" }), /denied/);
-    assert.match(actionRefusal({ providerId, actionId: "comment", effect: "write", mode: null, senderKind: "agent" }), /policy/);
+    assert.equal(actionRefusal({ providerId, actionId: "comment", effect: "write", mode: null, senderKind: "agent" }), undefined);
   }
 });
 

@@ -14,12 +14,12 @@ import { cn } from "@/lib/utils";
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { MessageReferenceCatalogProvider, type MessageReferenceCatalog } from "./message-reference-catalog";
 import { MachineLinkProvider, type MachineLinks } from "./machine-link";
-import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
+import { channelsInSpace, machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
+import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useAndroidBackHandler } from "./use-android-back";
 import { Loader2, Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
-import { spaceMemberCanCreate } from "@/components/dashboard/space-member-permissions";
 import {
   decideSpaceJoinRequest,
   spaceJoinRequestsQueryOptions,
@@ -38,9 +38,9 @@ import {
   ChannelDetails,
   ChannelHeader,
   ChannelMoveDialog,
-  ChannelQuickOpenDialog,
   ChannelSidebar,
   Composer,
+  GlobalSearchBar,
   DesktopUpdateRailButton,
   DesktopUpdateRestartDialog,
   MessageTimeline,
@@ -51,7 +51,6 @@ import {
   MobileChannelSummaryPlaque,
   TopWorkspaceBar,
   WorkspaceRail,
-  WorkspaceSearchDialog,
   channelHasAgentMembers,
   latestChannelConnectorStateMessageId,
   replaceChannel,
@@ -69,6 +68,9 @@ import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
+import { AGENT_PRESETS } from "@xmatrix/protocol";
+import { harnessSpaceKey } from "./harness-space-switch";
+import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { SpaceAgentSetupCard } from "./space-agent-setup-card";
 import { composeFirstTaskMessage, spaceFirstTaskState } from "./space-first-task";
 import {
@@ -82,8 +84,13 @@ import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
 import { DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
-import { PageTreePanel, PagesView, usePageCreation, usePageTree } from "@/components/pages/pages-view";
+import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
+import { usePageCreation } from "@/components/pages/page-creation";
 import { searchWorkspacePages } from "./workspace-message-search";
+import { channelTitle } from "@/components/dashboard/channel-links";
+import { WorkspaceSearchDialog, WorkspaceSearchView } from "./workspace-search";
+import { searchRequestFromParams, searchRequestParams, type SearchFilters } from "./workspace-search-model";
+import { parseAppLocation } from "./workspace-shell-navigation";
 import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
 
 /**
@@ -104,6 +111,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     loading,
     token,
     routeInfo,
+    browserPath,
     desktopBridge,
     desktopUpdateBridgeAvailable,
     channelsRef,
@@ -199,15 +207,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     movingChannelId,
     channelMoveError,
     setChannelMoveError,
-    channelQuickOpen,
-    setChannelQuickOpen,
     workspaceSearchOpen,
+    workspaceSearchHere,
     setWorkspaceSearchOpen,
     isMobileViewport,
     renamingSpaceId,
     creatingSpace,
-    managementSetupSpaceId,
-    setManagementSetupSpaceId,
     desktopSidebarWidth,
     resizingDesktopSidebar,
     startDesktopSidebarResize,
@@ -223,7 +228,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     humanMemberId,
     canUseSelectedChannel,
     logoutAndClearDeviceData,
-    workspaceSearchMessages,
     messageSearch,
     persistComposerDraftSnapshot,
     handleTimelineScrollPositionChange,
@@ -274,6 +278,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
+    openSearchResults,
     openSchedule,
     clearScheduleFocus,
     openAppsForSpace,
@@ -305,7 +310,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     inviteSpaceMembers,
     updateSpaceMemberRole,
     removeSpaceMember,
-    updateSpaceManagementAgent,
     stopAgentInstance,
     rebornAgentInstance,
     handoffAgentInstance,
@@ -375,6 +379,22 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         spaceId: registration.key.spaceId })),
     [registrationCatalog.data],
   );
+  const installedFleet = useInstalledHarnesses(currentSpaceId, token, user?.id, channelsLoaded && !selectedChannel);
+  const [bringingLocal, setBringingLocal] = useState(false);
+  const bringingLocalLock = useRef(false);
+  async function enableLocalHarnesses(presetIds: string[]) {
+    if (bringingLocalLock.current || !currentSpaceId || !user || !desktopContext?.machineId) return;
+    bringingLocalLock.current = true;
+    setBringingLocal(true);
+    try {
+      for (const presetId of presetIds) {
+        const preset = AGENT_PRESETS.find((candidate) => candidate.id === presetId);
+        if (preset && !(await installedFleet.set(harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId, presetId), preset, true))) break;
+      }
+    } finally { bringingLocalLock.current = false; setBringingLocal(false); }
+  }
+  const keepHarnessSetup = installedFleet.enablingAll || bringingLocal ||
+    Boolean(installedFleet.error && installedFleet.candidates.length > 0);
   const agentsLoaded = Boolean(token) && !loadingWorkspace && registrationCatalog.isSuccess;
   const spaceAgentsUnreachable = registrationCatalog.isError;
   // A Space's agents are its registrations, so a Space with none cannot do
@@ -386,7 +406,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       channelsLoaded,
       agentsLoaded,
       spaceAgentsUnreachable,
-      spaceAgentCount: spaceAgents.length,
+      spaceAgentCount: keepHarnessSetup ? 0 : (registrationCatalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled").length,
       desktopAvailable: Boolean(desktopBridge),
       discoveryAvailable: Boolean(desktopBridge?.discoverAgentPresets),
       loadingDiscoveries: loadingAgentPresetDiscoveries,
@@ -395,7 +415,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     }),
     [
       agentPresetDiscoveries,
-      spaceAgents,
+      registrationCatalog.data,
+      keepHarnessSetup,
       desktopBridge,
       desktopDaemonStatus,
       loadingAgentPresetDiscoveries,
@@ -423,7 +444,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onboardingCatalog.rows.length]
   );
   // Only on the empty first screen: an open conversation is never covered.
-  const showSpaceAgentSetup = spaceAgentSetup.kind !== "hidden" && !selectedChannel;
+  const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel;
   /* A failed read is not onboarding: it reads on the tool pages' paper, since
      wood carries only liquid glass and this screen has none. */
   const showSpaceUnreachable = showSpaceAgentSetup && spaceAgentSetup.kind === "unreachable";
@@ -524,6 +545,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     if (!token || !currentSpaceId) return undefined;
     return (query: string) => searchWorkspacePages({ token, spaceId: currentSpaceId, query });
   }, [currentSpaceId, token]);
+  const searchRequest = useMemo(() => searchRequestFromParams(parseAppLocation(browserPath).searchParams), [browserPath]);
+  // ⌘F searches where the reader is: inside a conversation, only that conversation.
+  const searchHereFilters = useMemo<SearchFilters>(() => workspaceSearchHere && view === "messages" && selectedChannel
+    ? { channel: { id: selectedChannel.id, label: channelTitle(selectedChannel) } }
+    : {}, [selectedChannel, view, workspaceSearchHere]);
   const pageCreation = usePageCreation(currentSpaceId, token ?? "", openPage);
   // A `page:<id>#<section>` chip opens the page at that section; a new seq scrolls there again.
   const [pageSectionRequest, setPageSectionRequest] =
@@ -586,6 +612,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       : spaces.find((space) => space.id === spaceId)?.pendingJoinRequestCount ?? 0;
     return total + count;
   }, 0);
+  // Status pulses while any conversation in this Space has an Agent at work,
+  // the same "in progress" the conversation list shows.
+  const statusLive = useMemo(
+    () => channelsInSpace(channels, currentSpaceId).some((channel) => channelHasWorkInHand(channel, events)),
+    [channels, currentSpaceId, events],
+  );
 
   /* Stable identities. These are handed down through memoised subtrees, so a
      fresh closure on every render would re-render them for changes that have
@@ -612,29 +644,17 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const canCreateChannel = Boolean(user && currentSpace);
   const canMovePages = Boolean(currentSpace && user &&
     ["owner", "admin"].includes(transferSpaceRole(currentSpace, user.id) || ""));
-  // On a phone each dock tab's + sits beside the tab bar, on the tab's own screen.
-  const mobileCreate: CreateAction | null = !nativeMobileTabVisible || agentConfigDialog
-    ? null
-    : view === "messages" && canCreateChannel
-    ? { label: "New conversation", onCreate: openNewConversation }
-    : view === "pages"
-      ? { label: "New page", onCreate: () => void pageCreation.create(null),
-        disabled: pageCreation.creating || !currentSpaceId }
-      : view === "agents" && user && spaceMemberCanCreate(currentSpace, user.id, "agentCreation")
-        ? { label: "New agent", onCreate: openAgentCreate }
-        : null;
-  // On a desktop each list leads with its +, and Ctrl/⌘+N makes what the list shows.
-  const desktopCreate: CreateAction | null = isMobileViewport || agentConfigDialog
-    ? null
-    : view === "messages" && canCreateChannel
+  // Both clients lead to the same action; each controls where it is visible.
+  const listCreate: CreateAction | null = view === "messages" && canCreateChannel
     ? { label: "New conversation", onCreate: openNewConversation, active: composingConversation }
     : view === "pages"
       ? { label: "New page", onCreate: () => void pageCreation.create(null),
         disabled: pageCreation.creating || !currentSpaceId }
       : view === "agents" && user
-        ? { label: "New agent", onCreate: openAgentCreate,
-          disabled: !spaceMemberCanCreate(currentSpace, user.id, "agentCreation") }
+        ? { label: "Manage machines", onCreate: () => changeAppView("machines") }
         : null;
+  const mobileCreate = !nativeMobileTabVisible || agentConfigDialog ? null : listCreate;
+  const desktopCreate = isMobileViewport || agentConfigDialog ? null : listCreate;
   // Elsewhere Ctrl/⌘+N starts a new conversation (browsers that reserve it for a new window keep it).
   const shortcutCreate = desktopCreate && !desktopCreate.disabled ? desktopCreate.onCreate
     : canCreateChannel ? openNewConversation : null;
@@ -660,11 +680,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         visible: nativeMobileTabVisible,
         activeView: view,
         spaceId: currentSpaceId,
+        statusLive,
         // Omit identity while auth is unresolved; null explicitly means signed out.
         ...(!loading ? { userId: user?.id ?? null } : {}),
       })
       .catch(() => undefined);
-  }, [desktopBridge, isIOSNativeShell, nativeMobileTabVisible, view, currentSpaceId, loading, user?.id]);
+  }, [desktopBridge, isIOSNativeShell, nativeMobileTabVisible, view, currentSpaceId, statusLive, loading, user?.id]);
 
   useEffect(() => {
     if (!isIOSNativeShell || !desktopBridge?.onMobileTabChange) return;
@@ -728,6 +749,30 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     );
   }
 
+  const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && installedFleet.ready &&
+    installedFleet.candidates.length > 0;
+  const spaceAgentSetupSurface = (
+        <div className={cn("min-h-0 flex-1 overflow-y-auto",
+          showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
+          <SpaceAgentSetupCard
+            state={spaceAgentSetup}
+            hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
+            busy={bringingLocal ? "enabling" : localActionBusy}
+            error={installedFleet.error ?? localActionError}
+            fleet={installedFleet}
+            onManageMachines={() => changeAppView("machines")}
+            onBringAll={() => installedFleet.candidates.length > 0 ? void installedFleet.enableAll() :
+              void enableLocalHarnesses(agentPresetDiscoveries.filter((candidate) => candidate.runtimeAvailable).map((candidate) => candidate.presetId))}
+            onStartDaemon={() => void startDesktopDaemon()}
+            onRefresh={() => void refreshAgentPresetDiscoveries()}
+            // Re-reads the registrations, not the local runtime discovery:
+            // the failure this retries is the registration read.
+            onRetryAgents={() => void registrationCatalog.refetch()}
+            onBindAgent={(candidate) => void enableLocalHarnesses([candidate.presetId])}
+          />
+        </div>
+  );
+
   const mobileChannelListPane = (
     /* The outer slab clips the fixed edge lighting. The texture lives
        on the full-height content wrapper inside the scroll viewport,
@@ -737,7 +782,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
        is — otherwise "the channel list" and "Follow-ups" are the same
        selector now that both stay mounted. */
     <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-      <MobileChannelChatList
+      {showMobileHarnessSetup ? spaceAgentSetupSurface : <MobileChannelChatList
             currentSpaceId={currentSpaceId}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
@@ -752,7 +797,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             onCopyChannelLink={(channel) => copyChannelLink(channel)}
             pendingChannelId={pendingChannelNavigationId}
             onSelect={(channelId, messageId) => requestChannelNavigation(channelId, messageId)}
-          />
+          />}
     </div>
   );
   const pendingCrossSpaceReads = canUseSelectedChannel ? pendingCrossSpaceReadRequests : [];
@@ -804,6 +849,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           channel={selectedChannel}
           spaces={spaces}
           currentUserId={user.id}
+          onOpenSearch={openWorkspaceSearch}
           onRename={(name) => void renameChannel(selectedChannel.id, name)}
           onVisibilityChange={(mode) => void updateChannelVisibility(selectedChannel, mode)}
           onMove={() => openChannelMove(selectedChannel)}
@@ -834,31 +880,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <ConversationPageCards spaceId={selectedChannel.spaceId} conversationId={selectedChannel.id} token={token}
           onOpenPage={openPage} excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
-      {showSpaceAgentSetup && (
-        <div className={cn("min-h-0 flex-1 overflow-y-auto",
-          showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
-          <SpaceAgentSetupCard
-            state={spaceAgentSetup}
-            hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
-            busy={localActionBusy}
-            error={localActionError}
-            onStartDaemon={() => void startDesktopDaemon()}
-            onRefresh={() => void refreshAgentPresetDiscoveries()}
-            // Re-reads the registrations, not the local runtime discovery:
-            // the failure this retries is the registration read.
-            onRetryAgents={() => void registrationCatalog.refetch()}
-            onBindAgent={(candidate) => {
-              // Binding produces an identity and nothing else. Registering a
-              // directory here is what made a brand-new Space arrive with a
-              // repository already bound to it, which nobody had chosen.
-              const discovery = agentPresetDiscoveries.find(
-                (item) => item.presetId === candidate.presetId
-              );
-              if (discovery) void importDiscoveredAgent(discovery);
-            }}
-          />
-        </div>
-      )}
+      {showSpaceAgentSetup && !showMobileHarnessSetup && spaceAgentSetupSurface}
       {showSpaceFirstTask && (
         <div className="app-space-setup-canvas min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard
@@ -1051,7 +1073,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // phone's Pages list, or shown while the Space is being moved to pages.
   const pagesViewSurface = (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
-      onSelectPage={openPage} conversation={pageConversation} focusSection={pageSectionRequest}
+      onSelectPage={openPage} onPageDeleted={closePage} conversation={pageConversation} focusSection={pageSectionRequest}
+      freshPageId={pageCreation.freshPageId}
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>
         renderConversationSurface(placement === "margin" ? "page-margin" : "beside-page") } : {})}
@@ -1122,7 +1145,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       localSetupReady={localSetupReady}
       localMachineName={localMachineName}
       onNameLocalMachine={(name) => void nameLocalMachine(name)}
-      managementSetupSpaceId={managementSetupSpaceId}
       onStartDesktopDaemon={() => void startDesktopDaemon()}
       onStopDesktopDaemon={() => void stopDesktopDaemon()}
       onRestartDesktopDaemon={() => void restartDesktopDaemon()}
@@ -1147,7 +1169,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onInviteSpaceMembers={inviteSpaceMembers}
       onUpdateSpaceMemberRole={updateSpaceMemberRole}
       onRemoveSpaceMember={removeSpaceMember}
-      onUpdateSpaceManagementAgent={updateSpaceManagementAgent}
       onUpdateSpaceMemberPermissions={updateSpaceMemberPermissions}
       onUpdateSpacePreferredLanguage={updateSpacePreferredLanguage}
       onDeleteSpace={deleteSpace}
@@ -1155,17 +1176,33 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       creatingSpace={creatingSpace}
       onCreateSpace={(name) => createSpace(name, { select: true })}
       onSelectSpace={selectSpace}
-      onDismissManagementSetup={() => setManagementSetupSpaceId(null)}
       onLogout={() => void logoutAndClearDeviceData().catch(() => undefined)}
       onOpenAgentCreate={openAgentCreate}
       onOpenLocalManagedAgentEdit={openLocalManagedAgentEdit}
       onDeleteAgent={(agent) => void deleteAgent(agent)}
     />
   );
-  const toolSurface = renderToolSurface(view === "messages" || view === "pages" ? "more" : view);
+  const searchSurface = view === "search" ? (
+    <WorkspaceSearchView
+      request={searchRequest}
+      spaceName={currentSpace?.name ?? "this Space"}
+      channels={channels}
+      pages={pageTree.data ?? []}
+      searchMessages={messageSearch}
+      searchPages={searchPages}
+      onChangeRequest={(request) => openSearchResults(searchRequestParams(request).toString())}
+      onEditSearch={openWorkspaceSearch}
+      onSelectChannel={(channelId) => navigateToChannel(channelId)}
+      onSelectMessage={(channelId, messageId) => navigateToChannel(channelId, messageId)}
+      onSelectPage={(pageId, blockId) => openPageAt(pageId, blockId)}
+    />
+  ) : null;
+  const toolSurface = view === "search" ? searchSurface
+    : renderToolSurface(view === "messages" || view === "pages" ? "more" : view as Exclude<AppView, "messages" | "search">);
   const statusSurface = dockTabMounted("status") ? renderToolSurface("status") : null;
   const moreSurface = dockTabMounted("more")
-    ? renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
+    ? view === "search" ? searchSurface
+      : renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
     : null;
 
   return (
@@ -1177,18 +1214,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       {/* One live root subscription per loaded Space. Renders nothing. */}
       {channelCatalogPaging.roots}
       {children}
-      <ChannelQuickOpenDialog
-        open={channelQuickOpen}
-        channels={channels}
-        spaces={spaces}
-        currentSpaceId={currentSpaceId}
-        selectedChannelId={selectedChannelId}
-        catalogPaging={currentSpaceCatalog}
-        onSelect={(channelId) => navigateToChannel(channelId)}
-        onCancel={() => setChannelQuickOpen(false)}
-      />
       <WorkspaceSearchDialog
         open={workspaceSearchOpen}
+        initialFilters={searchHereFilters}
+        spaceId={currentSpaceId}
         // Match the channel-list surface: when live catalog is still empty the
         // durable presentation cache is what the user can already see and type.
         channels={channels}
@@ -1196,13 +1225,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         agents={agents}
         projects={projects}
         machineDaemons={machineDaemons}
-        events={events}
-        messages={workspaceSearchMessages}
         pages={pageTree.data ?? []}
         searchMessages={messageSearch}
         searchPages={searchPages}
-        historyRevision={historyRevision}
         catalogPaging={currentSpaceCatalog}
+        onOpenResults={(request) => openSearchResults(searchRequestParams(request).toString())}
         onSelectChannel={(channelId) => navigateToChannel(channelId)}
         onSelectMessage={(channelId, messageId) => navigateToChannel(channelId, messageId)}
         onSelectPage={(pageId, blockId) => {
@@ -1211,6 +1238,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         }}
         onSelectMember={(userId, spaceId) => {
           openHumanProfile(userId, spaceId);
+          setWorkspaceSearchOpen(false);
+        }}
+        onChangeView={(nextView) => {
+          changeAppView(nextView);
           setWorkspaceSearchOpen(false);
         }}
         onCancel={() => setWorkspaceSearchOpen(false)}
@@ -1262,19 +1293,25 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onLogout={() => void logoutAndClearDeviceData().catch(() => undefined)}
           onReportIssue={openIssueReport}
           pendingJoinRequestCount={pendingJoinRequestCount}
+          statusLive={statusLive}
           updateControl={desktopBridge ? (
             <DesktopUpdateRailButton
               status={desktopUpdateStatus}
               onInstall={requestDesktopUpdateInstall}
             />
           ) : undefined}
-          onOpenSearch={openWorkspaceSearch}
         />
+        {!(view === "messages" && selectedChannel && !composingConversation) && <GlobalSearchBar
+          spaceName={currentSpace?.name ?? "this Space"}
+          searching={workspaceSearchOpen}
+          onOpenSearch={openWorkspaceSearch}
+        />}
         <CreateFab action={mobileCreate} />
         {!isIOSNativeShell && (
           <MobileTabDock
             activeView={view}
             hidden={!nativeMobileTabVisible}
+            statusLive={statusLive}
             onChangeView={changeAppView}
           />
         )}
@@ -1308,10 +1345,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             error={channelSidebarError(error)}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
-            onOpenManagementSetup={(spaceId) => {
-              setManagementSetupSpaceId(spaceId);
-              changeAppView("team");
-            }}
             view={view}
             readCounts={channelReadCounts}
             mentionClearedAt={channelMentionClearedAt}

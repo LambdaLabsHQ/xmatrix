@@ -22,17 +22,11 @@ import {
 } from "./workspace-shell-constants";
 import { sendHumanChannelFocus } from "./send-human-channel-focus";
 import { useChannelHistoryWarmup } from "./use-channel-history-warmup";
-import {
-  bindHumanSocketHeartbeat,
-  createHumanSocketSuspensionTracker,
-  listenForHumanSocketResume,
-  shouldResumeHumanSocketNow,
-} from "./human-socket-heartbeat";
+import { ReconnectingSocket } from "@/lib/connectivity/reconnecting-socket";
 import { listenForForegroundRefresh } from "./foreground-refresh";
 import {
   channelLastMessagePreviewFromEntry,
 } from "./workspace-shell-formatters";
-import { assembleWorkspaceSearchMessages } from "./workspace-shell-search-model";
 import { useMessageJump } from "./use-message-jump";
 import {
   useCallback,
@@ -50,7 +44,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { applyChannelReadStateToCatalog } from "./channel-catalog-read-state";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
-import { admittedHumanSocketUrl, handleHumanSocketCompatibilityClose } from "@/lib/app-client-compatibility";
+import { admittedHumanSocketUrl, humanSocketCloseDecision } from "@/lib/app-client-compatibility";
 import { applyMemberReadEvent } from "./mention-read-state";
 import {
   filterHistoryForChannel,
@@ -119,7 +113,9 @@ import {
   OLDER_HISTORY_LIMIT,
   HistoryRenderAuthority,
   OutgoingMessage,
+  HUMAN_HEARTBEAT_PING,
   RELAY_PUSH_PING_INTERVAL_MS,
+  RELAY_PUSH_PONG_TIMEOUT_MS,
   AUTOMATION_REFRESH_INTERVAL_MS,
   TRACE_EVENT_LIMIT,
   TimelineItem,
@@ -130,6 +126,7 @@ import {
   conversationViewOpen,
   pagesViewPath,
   SPLIT_TOOL_VIEWS,
+  adminViewPath,
   toolItemPath,
   toolItemSelection,
   pagesViewSelection,
@@ -147,7 +144,7 @@ import {
   fetchEvents,
   fetchProjects,
   fetchAutomations,
-  fetchSpaces,
+  fetchSpacesForLanding,
   fetchWorkingSpace,
   historyMessageCountEstimate,
   isLlmTraceEvent,
@@ -163,7 +160,6 @@ import {
   latestSequence,
   loginPathWithNext,
   mergeObservabilityEvents,
-  mergeSpaceListSnapshot,
   patchChannelAgentPresenceFromMessage,
   patchChannelsAgentPresenceFromAgent,
   persistWorkingSpace,
@@ -237,6 +233,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const relaySocketRef = useRef<WebSocket | null>(null);
   const relayReconnectAttemptRef = useRef(0);
+  const humanConnectionRef = useRef<ReconnectingSocket | null>(null);
+  // The Human socket reads the token when it dials: a renewal must not drop a
+  // working socket (the Hub closes it with 4401 when it needs a new token).
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const hasToken = Boolean(token);
 
   /** Pings the live Human socket now; a dead one closes after the pong timeout. */
   const relaySocketProbeRef = useRef<(() => void) | null>(null);
@@ -714,9 +716,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const isMobileViewport = useIsMobileViewport();
 
   const {
-    channelQuickOpen,
-    setChannelQuickOpen,
     workspaceSearchOpen,
+    workspaceSearchHere,
     setWorkspaceSearchOpen,
     openWorkspaceSearch,
   } = useShellDialogs(isMobileViewport);
@@ -727,7 +728,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [creatingSpace, setCreatingSpace] = useState(false);
 
-  const [managementSetupSpaceId, setManagementSetupSpaceId] = useState<string | null>(null);
 
   const {
     desktopSidebarWidth,
@@ -1394,15 +1394,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, setHistoryError, setLoadingHistory });
 
   useEffect(() => {
-    if (!token || !user) return;
+    if (!hasToken || !user) return;
     const userId = user.id;
 
-    let cancelled = false;
-    let reconnectTimer: number | undefined;
-    let socket: WebSocket | null = null;
     // Survives a token renewal re-running this effect, so a renewed token the Hub
     // still refuses backs off too; only an accepted connect resets it.
     const reconnectAttempt = relayReconnectAttemptRef;
+    let connectedBefore = false;
 
     function relayUrl() {
       const hubUrl = normalizeHubUrl(
@@ -1411,79 +1409,14 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       return admittedHumanSocketUrl(hubUrl, userId);
     }
 
-    function scheduleReconnect() {
-      if (cancelled) return;
-      const delay = Math.min(30000, 1000 * 2 ** Math.min(reconnectAttempt.current, 5));
-      reconnectAttempt.current += 1;
-      reconnectTimer = window.setTimeout(connect, delay);
-    }
-
-    const heartbeat = bindHumanSocketHeartbeat(
-      relaySocketRef, RELAY_PUSH_PING_INTERVAL_MS, replaceSocket,
-    );
-    relaySocketProbeRef.current = () => heartbeat.probe();
-    const suspension = createHumanSocketSuspensionTracker();
-
-    /** Drops the current socket without waiting for its close event. */
-    function dropSocket() {
-      const stale = socket;
-      socket = null;
-      if (relaySocketRef.current === stale) relaySocketRef.current = null;
-      relayPushConnectedRef.current = false;
-      relaySocketGenerationRef.current += 1;
-      heartbeat.stop();
-      if (reconnectTimer !== undefined) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = undefined;
-      }
-      // Its listeners see it is no longer current and stay silent.
-      stale?.close();
-    }
-
-    /** Drops the current socket and dials a new one at once. */
-    function replaceSocket() {
-      if (cancelled) return;
-      dropSocket();
-      reconnectAttempt.current = 0;
-      connect();
-    }
-
     /**
      * The Hub refused this token. It holds the socket open before closing it, to
      * slow clients that only redial on close; this one renews the token now.
      */
     function refuseSocket() {
-      if (cancelled || !socket) return;
-      dropSocket();
+      if (!connection.current) return;
       window.dispatchEvent(new Event(AUTH_TOKEN_REJECTED_EVENT));
-      scheduleReconnect();
-    }
-
-    function resumeHumanSocket() {
-      if (cancelled) return;
-      const live = relaySocketRef.current;
-      const hidden = document.hidden;
-      const action = shouldResumeHumanSocketNow({
-        hidden,
-        online: navigator.onLine !== false,
-        socketReadyState: live ? live.readyState : null,
-        suspended: suspension.consume(hidden),
-      });
-      if (action === "probe") {
-        heartbeat.probe();
-        return;
-      }
-      if (action === "replace") {
-        replaceSocket();
-        return;
-      }
-      if (action !== "reconnect") return;
-      if (reconnectTimer !== undefined) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = undefined;
-      }
-      reconnectAttempt.current = 0;
-      connect();
+      connection.backOff();
     }
 
     // Presence and activity from many working Agents land as one commit per
@@ -1525,11 +1458,21 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           }
           relayPushConnectedRef.current = true;
           setHumanPushConnected(true);
-          reconnectAttempt.current = 0;
+          connection.markHealthy();
+          if (connectedBefore) {
+            // Frames pushed while the socket was down are gone, and polling
+            // stays off while it is up: read what they would have changed.
+            const identity = { userId };
+            void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.spaces(identity) });
+            void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(identity, "workspace-projects") });
+            void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(identity, "workspace-events") });
+            invalidateWorkspaceResources(queryClient);
+          }
+          connectedBefore = true;
           reconcileUnconfirmedOnReconnectRef.current?.();
           sendHumanChannelFocus({
             channelId: conversationViewOpen(viewRef.current) ? selectedChannelIdRef.current : null,
-            socket,
+            socket: connection.current,
             connected: true,
             selectedChannelIdRef,
             historyChannelIdRef,
@@ -1951,29 +1894,20 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       }
     }
 
-    function connect() {
-      if (cancelled) return;
-      const live = new WebSocket(relayUrl());
-      socket = live;
-      relaySocketRef.current = live;
-      live.addEventListener("open", () => {
-        if (cancelled || socket !== live) {
-          live.close();
-          return;
-        }
+    const connection = new ReconnectingSocket({
+      open: async () => new WebSocket(relayUrl()),
+      onOpen: (live) => {
+        relaySocketRef.current = live;
         relayPushConnectedRef.current = false;
         live.send(JSON.stringify({
           type: "human_connect",
-          token,
+          token: tokenRef.current,
           requestId: "web-subscribe",
           // Presence for conversations not on screen may come as a once-a-second digest.
           device: { ...browserDevicePresence(desktopBridgeRef.current), capabilities: [HUMAN_CLIENT_PRESENCE_DIGEST] },
         }));
-        heartbeat.start();
-      });
-      live.addEventListener("message", (event) => {
-        if (socket !== live) return;
-        heartbeat.noteInbound();
+      },
+      onMessage: (_live, event) => {
         try {
           const decoded = JSON.parse(String(event.data)) as unknown;
           const catalogChanged = parseHumanChannelCatalogChangedMessage(decoded);
@@ -1986,45 +1920,35 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         } catch {
           // Ignore malformed push payloads; REST refresh remains the fallback.
         }
-      });
-      live.addEventListener("close", (event) => {
-        if (socket !== live) return;
-        socket = null;
+      },
+      onDown: () => {
+        relaySocketRef.current = null;
         relayPushConnectedRef.current = false;
         setHumanPushConnected(false);
         relaySocketGenerationRef.current += 1;
-        if (relaySocketRef.current === live) {
-          relaySocketRef.current = null;
-        }
-        heartbeat.stop();
-        if (handleHumanSocketCompatibilityClose(event.code, scheduleReconnect)) return;
-        // The renewed token re-runs this effect; the backed-off redial is only the fallback.
+      },
+      onClose: (event) => {
+        // The renewed token reaches the next dial; the Hub decides when it is needed.
         if (event.code === HUMAN_AUTH_REQUIRED_CLOSE_CODE) window.dispatchEvent(new Event(AUTH_TOKEN_REJECTED_EVENT));
-        scheduleReconnect();
-      });
-      live.addEventListener("error", () => {
-        live.close();
-      });
-    }
-
-    if (reconnectAttempt.current > 0) scheduleReconnect();
-    else connect();
-    const stopResume = listenForHumanSocketResume(resumeHumanSocket, suspension.markSuspended);
+        return humanSocketCloseDecision(event.code);
+      },
+      heartbeat: {
+        intervalMs: RELAY_PUSH_PING_INTERVAL_MS,
+        timeoutMs: RELAY_PUSH_PONG_TIMEOUT_MS,
+        ping: (live) => live.send(HUMAN_HEARTBEAT_PING),
+      },
+      attempts: reconnectAttempt,
+    });
+    humanConnectionRef.current = connection;
+    relaySocketProbeRef.current = () => connection.probe();
+    connection.start();
     return () => {
-      cancelled = true;
+      connection.stop();
+      if (humanConnectionRef.current === connection) humanConnectionRef.current = null;
       relayFrames.dispose();
       relayPushConnectedRef.current = false;
       setHumanPushConnected(false);
-      heartbeat.stop();
       relaySocketProbeRef.current = null;
-      stopResume();
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
-      if (relaySocketRef.current === socket) {
-        relaySocketRef.current = null;
-      }
-      if (socket?.readyState !== WebSocket.CONNECTING) {
-        socket?.close();
-      }
     };
   }, [
     applyChannelHistory,
@@ -2045,9 +1969,15 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     relaySocketGenerationRef,
     historyTailBaseGenerationRef,
     queryClient,
-    token,
+    hasToken,
     user, markNativeMessageNotified,
   ]);
+
+  // A token renewed while the socket is down (the Hub refused the old one)
+  // dials at once; a working socket keeps running on the token it signed in with.
+  useEffect(() => {
+    if (token && !relayPushConnectedRef.current) humanConnectionRef.current?.replace();
+  }, [token]);
 
   // Catch up when the socket connects, and restart the fallback polls when it drops.
   // TanStack reads refetchInterval only after a fetch.
@@ -2090,7 +2020,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     : HISTORY_REFRESH_INTERVAL_MS;
   const spacesQuery = useQuery({
     queryKey: xmatrixQueryKeys.spaces({ userId: authenticatedUserId || "anonymous" }),
-    queryFn: ({ signal }) => fetchSpaces(token!, signal),
+    queryFn: ({ signal }) => fetchSpacesForLanding(token!, signal),
     enabled: workspaceQueriesEnabled,
     staleTime: 15_000,
     refetchInterval: workspaceRefetchInterval,
@@ -2157,7 +2087,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }
     const nextSpaces = spacesQuery.data;
     if (!nextSpaces) return;
-    setSpaces((current) => mergeSpaceListSnapshot(current, nextSpaces));
+    setSpaces(nextSpaces);
     setSpacesLoadedUserId(authenticatedUserId);
     setError(null);
     setSpacesError(null);
@@ -2717,6 +2647,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     // A list destination's address names its open item the same way.
     const canonicalPath = view === "pages"
       ? pagesViewPath(viewPath, selectedPageId, routeInfo.conversationKey)
+      : view === "admin" || view === "search" ? adminViewPath(viewPath, currentBrowserLocation())
       : SPLIT_TOOL_VIEWS.includes(view) ? toolItemPath(viewPath, toolItemSelection(currentBrowserLocation())) : viewPath;
     if (currentBrowserLocation() !== canonicalPath) {
       replaceBrowserPath(canonicalPath);
@@ -2764,34 +2695,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     void removeRetiredBrowserReplica();
   }, []);
 
-  // Only assemble the search corpus while the dialog is open. Closed search must
-  // not flatMap every channel history cache entry on unrelated shell re-renders.
-  const workspaceSearchMessages = useMemo(() => {
-    // Mobile channel-list has no selected channel; still scan cached tails so
-    // message search is not empty while the Hub search is unavailable.
-    const assembled = assembleWorkspaceSearchMessages({
-      open: workspaceSearchOpen,
-      channelIds: channels.map((channel) => channel.id),
-      authorizedHistory: renderableHistory,
-      historyAuthorized: historyRenderAuthorized,
-      historyCache: historyCacheRef.current,
-    });
-    return assembled.length > 0 ? assembled : EMPTY_CHANNEL_HISTORY;
-    // historyCacheRevision versions the mutable historyCacheRef this reads.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    channels,
-    historyCacheRevision,
-    historyRenderAuthorized,
-    renderableHistory,
-    workspaceSearchOpen,
-  ]);
-
   // Message search runs on the Hub over every Channel the reader may read.
   const messageSearch = useMemo<WorkspaceMessageSearch | undefined>(() => {
     if (!token || !currentSpaceId) return undefined;
-    return (query, resumeToken) => searchWorkspaceMessages({
-      token, spaceId: currentSpaceId, query, resumeToken,
+    return (query, resumeToken, filters) => searchWorkspaceMessages({
+      token, spaceId: currentSpaceId, query, resumeToken, ...filters,
     });
   }, [currentSpaceId, token]);
 
@@ -2813,6 +2721,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     token,
     authenticatedUserId,
     mobileListFixture,
+    browserPath,
     setBrowserPath,
     routeInfo,
     desktopBridge,
@@ -3001,9 +2910,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setMovingChannelId,
     channelMoveError,
     setChannelMoveError,
-    channelQuickOpen,
-    setChannelQuickOpen,
     workspaceSearchOpen,
+    workspaceSearchHere,
     setWorkspaceSearchOpen,
     isMobileViewport,
     renamingSpaceId,
@@ -3012,8 +2920,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setNewSpaceName,
     creatingSpace,
     setCreatingSpace,
-    managementSetupSpaceId,
-    setManagementSetupSpaceId,
     desktopSidebarWidth,
     resizingDesktopSidebar,
     startDesktopSidebarResize,
@@ -3042,7 +2948,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     canUseSelectedChannel,
     agentStatusEvents,
     logoutAndClearDeviceData,
-    workspaceSearchMessages,
     messageSearch,
     persistComposerDraftSnapshot,
   };

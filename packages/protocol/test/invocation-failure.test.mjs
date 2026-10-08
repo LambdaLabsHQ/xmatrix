@@ -59,7 +59,21 @@ test("answer failures name the actual request key without a fixed parameter list
   const detail = { questionKey: "browserMode", issue: "choice_not_offered" };
   assert.deepEqual(parseDecisionAnswerFailure(detail), detail);
   assert.equal(preparationFailureSummary("routing_parameter_invalid_answer", detail),
-    `Jev's "browserMode" answer selected an option that was not offered.`);
+    `xMatrix's "browserMode" answer selected an option that was not offered.`);
   assert.equal(parseDecisionAnswerFailure({ questionKey: "private\ntext", issue: "choice_not_offered" }), undefined);
   assert.equal(parseDecisionAnswerFailure({ questionKey: "browserMode", issue: "private error" }), undefined);
+});
+
+
+test("draft readings bind the exact UTF-16 range and reject stale or ambiguous input", async () => {
+  const { parseDraftSummonIntents } = await import("../dist/index.js");
+  const body = "🌍 @codex asks @codex";
+  const first = { start: 3, end: 9, mention: "@codex", choice: "summon" };
+  const second = { start: 15, end: 21, mention: "@codex", choice: "reference" };
+  assert.deepEqual(parseDraftSummonIntents([first, second], body), [first, second]);
+  assert.equal(parseDraftSummonIntents(undefined, body), undefined);
+  for (const value of [null, {}, [first, first], [{ ...first, start: 2 }], [{ ...first, end: 10 }],
+    [{ ...first, choice: "invalid" }], [{ ...first, extra: true }], [{ ...first, start: -1 }],
+    [{ ...first, start: 3.5 }], Array(17).fill(first)]) assert.throws(() => parseDraftSummonIntents(value, body));
+  assert.throws(() => parseDraftSummonIntents([first], "changed body"));
 });

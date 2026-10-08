@@ -3,6 +3,7 @@ import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, page
 import { canonicalPageMarkdown, pageChangedDocBlocks } from "@xmatrix/protocol/page-document";
 import { readsOnly } from "./space-roles.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
+import { ControlError } from "./control-error.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
@@ -10,7 +11,7 @@ import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-ch
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
 import { reconcilePageAutomations, removePageAutomations } from "./automation-page-anchor.js";
 import type {
-  PageAuthor, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageOwedUpdate, PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
+  PageAuthor, PageAutomationAnchorChange, PageBlockAwareness, PageClaim, PageDocument, PageLink, PageLinkAnchor, PageOwedUpdate, PageRecentChange, PageRevision, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
 } from "@xmatrix/protocol";
 
 export type { PageAuthor, PageClaim, PageDocument, PageLink, PageRevision, PageSummary, PublicPage };
@@ -209,9 +210,13 @@ type Actor = PageActor;
 /**
  * A committed revision. When it moved the head, `automationChannels` are the
  * conversations whose Automations it paused or resumed; their coordinators
- * must hear of it (docs/design/pages-live-document.md §6.4).
+ * must hear of it (docs/design/pages-live-document.md §6.4). The detached and
+ * attached Automations are told to whoever wrote the edit.
  */
-export interface PageCommit { page: PageSummary; revision: PageRevision; automationChannels: string[] }
+export interface PageCommit {
+  page: PageSummary; revision: PageRevision; automationChannels: string[];
+  detachedAutomations: PageAutomationAnchorChange[]; attachedAutomations: PageAutomationAnchorChange[];
+}
 
 interface AccessView { canRead: boolean; canEdit: boolean }
 
@@ -256,7 +261,9 @@ export async function inActiveSpace<T>(database: AuthorityDatabase,
   const placement = await new PostgresSpacePlacementDirectory(database).find({ requestId, operation }, spaceId);
   if (!placement) throw new ErrorType("space_not_found", 404);
   if (placement.state !== "active" || placement.targetShardId !== null) {
-    throw new ErrorType("space_placement_unavailable", 503);
+    // A Space that is moving shards is back in moments: say so, whichever
+    // domain asked, so every client retries it like the other controls do.
+    throw new ControlError("space_placement_unavailable", 503, "Space placement is unavailable", true);
   }
   return database.transaction({ requestId, operation,
     placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } }, callback);
@@ -646,7 +653,7 @@ export class PostgresPageRepository {
     }
     await this.insertRevision(tx, spaceId, pageId, revision, text, authors, conversationIds,
       suggestion ? "suggestion" : input.kind, input.baseRevision, now);
-    const automationChannels = suggestion ? [] : await (async () => {
+    const anchoring = suggestion ? { channels: [], detached: [], attached: [] } : await (async () => {
       await tx.query({
         name: "page_head_advance_v1",
         text: `UPDATE data.pages SET head_revision=$3, version=version+1, updated_at=$4
@@ -665,7 +672,8 @@ export class PostgresPageRepository {
     return { page: this.summary(updated), revision: {
       revision, kind: suggestion ? "suggestion" : input.kind, authors, conversationIds,
       basedOnRevision: input.baseRevision, createdAt: now,
-    }, automationChannels };
+    }, automationChannels: anchoring.channels, detachedAutomations: anchoring.detached,
+    attachedAutomations: anchoring.attached };
   }
 
   /** Accepts a suggestion, or restores an earlier revision, as a new head. */
@@ -1518,11 +1526,12 @@ export class PostgresPageRepository {
    * The Agents on each page now, for the page tree and the page itself:
    * every Agent live in a conversation whose current Run read or edited the
    * page (its link was seen after the Instance started), with the section it
-   * last touched. Derived, never stored; only pages and conversations this
-   * reader may open are described.
+   * last touched; and each page's open discussions, newest first. Derived,
+   * never stored; only pages and conversations this reader may open are
+   * described.
    */
   async agentsOnPages(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
-    Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[] }> }> {
+    Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; discussions: string[] }> }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.agents", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
@@ -1546,6 +1555,24 @@ export class PostgresPageRepository {
           LIMIT ${MAX_LINKS}`,
         values: [spaceId, actor.userId], maxRows: MAX_LINKS,
       });
+      // A discussion is open until its outcome is written into the page; the others wait on nobody.
+      const open = await tx.query<QueryResultRow & { page_id: string; conversation_id: string }>({
+        name: "page_open_discussions_v1",
+        text: `SELECT pl.page_id, pl.conversation_id, max(pl.last_seen_at) AS seen
+          FROM data.page_links pl
+          JOIN data.channels c ON c.space_id=pl.space_id AND c.channel_id=pl.conversation_id
+          WHERE pl.space_id=$1 AND pl.anchor_json IS NOT NULL AND pl.resolved_at IS NULL
+            AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
+              principalKindSql: "'user'", principalIdSql: "$2" })}
+          GROUP BY pl.page_id, pl.conversation_id
+          ORDER BY seen DESC
+          LIMIT ${MAX_LINKS}`,
+        values: [spaceId, actor.userId], maxRows: MAX_LINKS,
+      });
+      const discussionsOf = new Map<string, string[]>();
+      for (const row of open.filter((item) => readable.has(item.page_id))) {
+        discussionsOf.set(row.page_id, [...(discussionsOf.get(row.page_id) ?? []), row.conversation_id]);
+      }
       const visible = rows.filter((row) => readable.has(row.page_id));
       const presence = await loadChannelAgentPresence(tx, spaceId, visible.map((row) => row.conversation_id));
       const byPage = new Map<string, PageTreeAgent[]>();
@@ -1568,7 +1595,29 @@ export class PostgresPageRepository {
           }
         }
       }
-      return { pages: [...byPage].map(([pageId, agents]) => ({ pageId, agents })) };
+      // The section an Agent is in, by its heading, read from the page's head.
+      const sectioned = tree.filter((row) => byPage.get(row.page_id)?.some((agent) => agent.blockId));
+      if (sectioned.length > 0) {
+        const heads = await tx.query<QueryResultRow & { page_id: string; body: string | null }>({
+          name: "page_agent_sections_v1",
+          text: `SELECT r.page_id, r.body FROM data.page_revisions r
+            JOIN unnest($2::text[], $3::bigint[]) AS head(page_id, revision)
+              ON r.page_id=head.page_id AND r.revision=head.revision
+            WHERE r.space_id=$1`,
+          values: [spaceId, sectioned.map((row) => row.page_id), sectioned.map((row) => String(row.head_revision))],
+          maxRows: sectioned.length,
+        });
+        for (const head of heads) {
+          const titles = new Map(pageBlocks(canonicalPageMarkdown(head.body ?? "")).map((block) => [block.id, block.title]));
+          for (const agent of byPage.get(head.page_id) ?? []) {
+            const section = agent.blockId ? titles.get(agent.blockId) : undefined;
+            if (section) agent.section = section;
+          }
+        }
+      }
+      const pageIds = new Set([...byPage.keys(), ...discussionsOf.keys()]);
+      return { pages: [...pageIds].map((pageId) => ({ pageId, agents: byPage.get(pageId) ?? [],
+        discussions: discussionsOf.get(pageId) ?? [] })) };
     });
   }
 }

@@ -10,6 +10,7 @@ pub struct HubRoutes;
 impl HubRoutes {
     pub const LOGIN: &str = "/api/auth/cli/login";
     pub const DEVICE_START: &str = "/api/auth/cli/device/start";
+    pub const SETUP_INTENTS: &str = "/api/setup-intents";
     pub const DEVICE_TOKEN: &str = "/api/auth/cli/device/token";
     pub const REFRESH: &str = "/api/auth/refresh";
     pub const EXCHANGE_SESSION: &str = "/api/auth/cli/exchange-session";
@@ -887,28 +888,6 @@ pub fn channel_activity_line(activity: &ChannelActivity) -> String {
             }
         }
     }
-}
-
-pub fn space_management_channels_route(space_id: &str, query: &str, limit: u32) -> String {
-    format!(
-        "/api/spaces/{}/management/channels?q={}&limit={}",
-        urlencoding::encode(space_id),
-        urlencoding::encode(query),
-        limit
-    )
-}
-
-pub fn space_management_channel_route(
-    space_id: &str,
-    channel_id: &str,
-    message_limit: u32,
-) -> String {
-    format!(
-        "/api/spaces/{}/management/channels/{}?messageLimit={}",
-        urlencoding::encode(space_id),
-        urlencoding::encode(channel_id),
-        message_limit
-    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
