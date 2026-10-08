@@ -447,7 +447,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const showSpaceAgentSetup = (spaceAgentSetup.kind !== "hidden" || keepHarnessSetup) && !selectedChannel;
   /* A failed read is not onboarding: it reads on the tool pages' paper, since
      wood carries only liquid glass and this screen has none. */
-  const showSpaceUnreachable = showSpaceAgentSetup && spaceAgentSetup.kind === "unreachable";
   const showSpaceFirstTask =
     !showSpaceAgentSetup && spaceFirstTask.kind !== "hidden" && !selectedChannel;
   const [firstTaskBusy, setFirstTaskBusy] = useState(false);
@@ -752,8 +751,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && installedFleet.ready &&
     installedFleet.candidates.length > 0;
   const spaceAgentSetupSurface = (
-        <div className={cn("min-h-0 flex-1 overflow-y-auto",
-          showSpaceUnreachable ? "app-tool-paper app-tool-detail" : "app-space-setup-canvas")}>
+        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
             state={spaceAgentSetup}
             hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
@@ -833,11 +831,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     data-testid={placement === "main" ? undefined : "page-conversation"}
   >
     <section
-      className={cn(
-        "app-message-surface relative flex min-w-0 flex-1 flex-col overflow-hidden",
-        ((showSpaceAgentSetup && !showSpaceUnreachable) || showSpaceFirstTask) &&
-          "app-message-surface-space-setup app-material-scroll-content"
-      )}
+      className="app-message-surface relative flex min-w-0 flex-1 flex-col overflow-hidden"
     >
       {selectedChannel && <ChannelTransferQueue token={token} userId={user.id}
         spaceId={selectedChannel.spaceId} channelId={selectedChannel.id}
@@ -882,7 +876,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       )}
       {showSpaceAgentSetup && !showMobileHarnessSetup && spaceAgentSetupSurface}
       {showSpaceFirstTask && (
-        <div className="app-space-setup-canvas min-h-0 flex-1 overflow-y-auto">
+        <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard
             state={spaceFirstTask}
             spaceName={currentSpace?.name}

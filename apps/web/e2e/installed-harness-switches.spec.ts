@@ -43,6 +43,9 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       await page.goto("/app/personal-sspaceperso/chat");
       const bring = page.getByRole("button", { name: "Bring them in", exact: true });
       await expect(bring).toBeVisible();
+      // A Space's empty screen is detail paper, never the setup wood board.
+      await expect(page.locator(".app-tool-paper").filter({ has: bring })).toHaveCount(1);
+      await expect(page.locator(".app-message-surface-space-setup")).toHaveCount(0);
       await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
       await fixtureRule(page, { id: "enabled-catalog", pattern: CATALOG, responder: { kind: "sequence",
         responses: [catalog(["claude"]), catalog(["claude", "codex"])].map((json) => ({ json })) } });
