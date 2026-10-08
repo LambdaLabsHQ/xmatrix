@@ -683,13 +683,9 @@ for (const denied of [false, true]) test(`the panel ${denied ? 'says Jev decisio
   }
   // Jev's answers come first, one row each, then the startup measured after them.
   const jev = dialog.getByRole('region', { name: "Routing decision" });
-  const answer = jev.getByRole('listitem').filter({ hasText: 'Model' }).first();
-  await expect(answer).toContainText('gpt-5.5 · high');
-  await expect(answer).toContainText('82%');
-  await expect(jev.getByText('Select a supported model and effort pair.')).toBeHidden();
-  await answer.getByText('gpt-5.5 · high').first().click();
-  await expect(answer.getByText('Select a supported model and effort pair.')).toBeVisible();
+  const answer = jev.getByRole('list', { name: 'Model options' });
   await expect(answer.locator('li[data-selected]')).toContainText('gpt-5.5 · high');
+  await expect(answer.locator('li[data-selected]')).toContainText('82%');
   await expect(answer.locator('li:not([data-selected])', { hasText: 'Harness default' })).toContainText('18%');
   await jev.getByText('Input', { exact: true }).click();
   await expect(jev).toContainText(source);
@@ -919,14 +915,16 @@ test("@auto shows the Agent and machine routing chose, and why, in one row", asy
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("region", { name: /Routing decision/ }).waitFor();
   const jev = dialog.getByRole("region", { name: /Routing decision/ });
-  const agent = jev.getByRole("listitem").filter({ hasText: "Agent" }).first();
-  await expect(agent.locator("summary")).toContainText("codex on build-idle");
-  await expect(agent).toContainText("claude fits better, but build-busy is overloaded");
+  const agent = jev.getByRole("list", { name: "Agent options" });
+  await expect(agent.locator("li[data-selected]")).toContainText("codex · build-idle");
+  await expect(agent.locator("li[data-selected]")).toContainText("Capable · 85% room");
+  await expect(agent.getByRole("listitem").nth(1)).toContainText("claude · build-busy");
+  await expect(agent.getByRole("listitem").nth(1)).toContainText("Strong fit · overloaded");
+  await expect(jev).toContainText("claude fits better, but build-busy is overloaded");
   await expect(jev.getByText(/^Fit/)).toHaveCount(0);
   await expect(dialog.getByRole("list", { name: "Invocation progress" })).not.toContainText("Machine selected");
-  await agent.locator("summary").click();
-  const weighed = agent.getByRole("list", { name: "Environments weighed" });
-  await expect(weighed.locator("li[data-selected]")).toContainText("Capable · 85% room");
-  await expect(weighed.getByRole("listitem").nth(1)).toContainText("claude · build-busy");
-  await expect(weighed.getByRole("listitem").nth(1)).toContainText("Strong fit · overloaded");
+  // Three are shown; the rest are one click away.
+  await expect(agent.getByRole("listitem")).toHaveCount(3);
+  await jev.getByRole("button", { name: "1 more" }).click();
+  await expect(agent.getByRole("listitem")).toHaveCount(4);
 });
