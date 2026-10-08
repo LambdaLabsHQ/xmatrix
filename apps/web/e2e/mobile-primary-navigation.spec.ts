@@ -566,8 +566,12 @@ test("long pressing a mobile channel opens its actions side by side under the ro
   await expect(actions).toHaveCount(0);
   await longPress();
   await expect(actions.getByRole("button", { name: "Unpin channel", exact: true })).toBeVisible();
-  await page.keyboard.press("Escape");
+  await actions.getByRole("button", { name: "Unpin channel", exact: true }).click();
   await expect(actions).toHaveCount(0);
+  await expect(page.getByText("Pinned", { exact: true })).toHaveCount(0);
+  await longPress();
+  await expect(actions.getByRole("button", { name: "Pin channel", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
 });
 
 test("opening a mobile channel uses a compact app bar, directional transition, and stable loading skeleton", async ({ page }, testInfo) => {

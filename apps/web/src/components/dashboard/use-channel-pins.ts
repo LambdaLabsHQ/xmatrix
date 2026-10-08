@@ -17,25 +17,30 @@ export function useChannelPins(input: { token?: string; userId?: string; spaceId
   const enabled = Boolean(input.token && input.userId && input.spaceId);
   const pins = useQuery({
     queryKey: key,
-    queryFn: () => readPins({ token: input.token!, spaceId: input.spaceId! }),
+    queryFn: ({ signal }) => readPins({ token: input.token!, spaceId: input.spaceId!, signal }),
     enabled,
     staleTime: 30_000,
   });
   const mutation = useMutation({
+    mutationKey: key,
+    // A later unpin must save after the pin it undoes, across hook consumers.
+    scope: { id: JSON.stringify(key) },
     mutationFn: (change: { channelId: string; pinned: boolean }) =>
       savePin({ token: input.token!, spaceId: input.spaceId!, change }),
-    onMutate: ({ channelId, pinned }) => {
+    onMutate: async ({ channelId, pinned }) => {
+      await client.cancelQueries({ queryKey: key, exact: true });
       const current = client.getQueryData<PinRecord>(key) ?? { pinnedChannelIds: [], version: 0 };
       const rest = current.pinnedChannelIds.filter((id) => id !== channelId);
       client.setQueryData<PinRecord>(key, { ...current, pinnedChannelIds: pinned ? [channelId, ...rest] : rest });
     },
+    // Keep later optimistic choices until the last queued save has settled.
     // Pins lead the Channel list, so its order is re-read along with them.
-    onSettled: () => Promise.all([
+    onSettled: () => client.isMutating({ mutationKey: key, exact: true }) === 1 ? Promise.all([
       client.invalidateQueries({ queryKey: key, exact: true }),
       client.invalidateQueries({
         queryKey: xmatrixQueryKeys.channels({ userId: input.userId || "anonymous", spaceId: input.spaceId || "none" }),
       }),
-    ]),
+    ]) : undefined,
   });
   const mutatePin = mutation.mutate;
   const toggleChannelPinned = useCallback((channelId: string) => {
