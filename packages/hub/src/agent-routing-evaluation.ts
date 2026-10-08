@@ -48,7 +48,7 @@ export type RoutingDecisionEvent = { decisionId: string; at: string } & (
   { status: "succeeded"; answers: Record<string, RoutingChoice>; model?: string } |
   { status: "failed"; reason: "provider_error" | "invalid_answer" | "timeout";
     code: RoutingEvaluationFailureCode; answerFailure?: DecisionAnswerFailure });
-export type RoutingEvaluator = ((input: JevInput, options?: { signal?: AbortSignal }) => Promise<{ answers: unknown; model?: string; rounding?: EvaluationRounding }>) & {
+export type RoutingEvaluator = ((input: JevInput, options?: { signal?: AbortSignal }) => Promise<{ answers: unknown; model?: string }>) & {
   recordDecision?: (event: RoutingDecisionEvent) => Promise<void>;
 };
 export type RoutingChoice = { choice: string; probabilities: Record<string, number> };
@@ -58,37 +58,17 @@ function record(value: unknown, issue: DecisionAnswerIssue, questionKey?: string
   return value as Record<string, unknown>;
 }
 
-/** The SDK's own allowance: a probability may be off by half its last
- *  declared decimal, and a sum by that much per option. */
-const DISTRIBUTION_TOLERANCE = 1e-6;
-export type EvaluationRounding = { probabilityDecimals?: number };
-function probabilityRoundingError(rounding: EvaluationRounding | undefined): number {
-  const decimals = rounding?.probabilityDecimals;
-  return Number.isInteger(decimals) && decimals! >= 0 && decimals! <= 15 ? 0.5 * 10 ** -decimals! : 0;
-}
-
-/** Checks one answer exactly as the SDK that returned it did, so an answer
- *  the model was allowed to give is never refused here. */
-export function validateRoutingChoice(value: unknown, options: string[], questionKey?: string,
-  rounding?: EvaluationRounding): RoutingChoice {
+/** The model picks one listed option; that pick is the answer. The SDK has
+ *  already checked the reply, so the Hub only makes sure the pick is one it
+ *  offered (it indexes by it). Probabilities are kept as given, for display. */
+export function validateRoutingChoice(value: unknown, options: string[], questionKey?: string): RoutingChoice {
   const answer = record(value, "answer_missing", questionKey);
   if (typeof answer.choice !== "string") throw new InvalidDecisionAnswer("choice_missing", questionKey);
   if (!options.includes(answer.choice)) throw new InvalidDecisionAnswer("choice_not_offered", questionKey);
-  const probabilities = record(answer.probabilities, "distribution_missing", questionKey);
-  if (Object.keys(probabilities).length !== options.length ||
-      !options.every(key => Object.hasOwn(probabilities, key))) {
-    throw new InvalidDecisionAnswer("distribution_mismatch", questionKey);
-  }
-  if (!options.every(key => typeof probabilities[key] === "number" &&
-      Number.isFinite(probabilities[key]) && Number(probabilities[key]) >= 0 && Number(probabilities[key]) <= 1) ||
-      Math.abs(Object.values(probabilities).reduce<number>((sum, item) => sum + Number(item), 0) - 1) >
-        DISTRIBUTION_TOLERANCE + options.length * probabilityRoundingError(rounding)) {
-    throw new InvalidDecisionAnswer("distribution_invalid", questionKey);
-  }
-  const selected = Number(probabilities[answer.choice]);
-  if (Object.values(probabilities).some(probability => Number(probability) > selected + DISTRIBUTION_TOLERANCE)) {
-    throw new InvalidDecisionAnswer("choice_distribution_conflict", questionKey);
-  }
+  const given = answer.probabilities && typeof answer.probabilities === "object" && !Array.isArray(answer.probabilities)
+    ? answer.probabilities as Record<string, unknown> : {};
+  const probabilities = Object.fromEntries(options.flatMap(key =>
+    typeof given[key] === "number" && Number.isFinite(given[key]) ? [[key, given[key]]] : []));
   return { choice: answer.choice, probabilities: probabilities as Record<string, number> };
 }
 
@@ -163,7 +143,7 @@ export async function evaluateRoutingChoices(input: JevInput, evaluate: RoutingE
     // Every question is required. Never return a partially usable launch configuration.
     validated = Object.fromEntries(questions.map(([key, question]) => {
       if (question.type !== "choice") throw new Error("Invalid routing question");
-      return [key, validateRoutingChoice(answers[key], Object.keys(question.criteria), key, result?.rounding)];
+      return [key, validateRoutingChoice(answers[key], Object.keys(question.criteria), key)];
     }));
   } catch (error) {
     const providerCode = error && typeof error === "object" && "code" in error &&

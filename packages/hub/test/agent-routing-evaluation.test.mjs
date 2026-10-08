@@ -30,27 +30,6 @@ test('the succeeded record names the model that answered', async () => {
   assert.deepEqual(events.map(event => [event.status, event.model]), [['started', undefined], ['succeeded', 'vendor/router-a']]);
 });
 
-test('a distribution the SDK accepted at its declared rounding is accepted here too', async () => {
-  // Ten options at two decimals: each may be off by .005, so the sum by .05.
-  const request = input(10);
-  const probabilities = Object.fromEntries(Object.keys(request.questions.environment.criteria)
-    .map((key, index) => [key, index === 0 ? .1 : .1 - .004]));
-  const evaluate = async () => ({ answers: { environment: { choice: 'candidate_0', probabilities } },
-    rounding: { probabilityDecimals: 2 } });
-  const result = await evaluateRoutingChoices(request, evaluate);
-  assert.equal(result.environment.choice, 'candidate_0');
-  // Without a declared rounding the SDK allows none, and neither does the Hub.
-  await assert.rejects(evaluateRoutingChoices(request, async () => ({ answers: (await evaluate()).answers })),
-    { code: 'invalid_answer' });
-});
-
-test('a choice tied for the highest probability is a highest-probability choice', async () => {
-  const request = input(2);
-  const result = await evaluateRoutingChoices(request, async () => ({ answers: { environment: {
-    choice: 'candidate_1', probabilities: { candidate_0: .5, candidate_1: .5 } } } }));
-  assert.equal(result.environment.choice, 'candidate_1');
-});
-
 test('an answer outside the finite candidate list is rejected', async () => {
   let calls = 0;
   await assert.rejects(evaluateRoutingChoices(input(2), async request => {
@@ -103,11 +82,23 @@ test('a transient gateway failure retries the identical choice once within its d
   assert.equal(exhausted, 2);
 });
 
-test('missing answers, outside choices and incomplete distributions are rejected', async () => {
+test('missing answers and outside choices are rejected', async () => {
   await assert.rejects(evaluateRoutingChoices(input(1), async () => ({ answers: {} })), { code: 'invalid_answer' });
-  await assert.rejects(evaluateRoutingChoices(input(2), async () => ({ answers: { environment:
-    { choice: 'candidate_0', probabilities: { candidate_0: 1, abstain: 0 } } } })), { code: 'invalid_answer' });
   await assert.rejects(evaluateRoutingChoices(input(1), async request => answer(request, 'outside')), { code: 'invalid_answer' });
+});
+
+test('the pick is the answer: its probabilities are kept as given, never judged', async () => {
+  // Ten options rounded to two decimals sum to .95, and the pick is not the
+  // most probable; the pick still decides.
+  const request = input(10);
+  const probabilities = Object.fromEntries(Object.keys(request.questions.environment.criteria)
+    .map((key, index) => [key, index === 3 ? .14 : .09]));
+  const result = await evaluateRoutingChoices(request, async () => ({ answers: { environment: {
+    choice: 'candidate_0', probabilities: { ...probabilities, stray: 1 } } } }));
+  assert.equal(result.environment.choice, 'candidate_0');
+  assert.deepEqual(result.environment.probabilities, probabilities);
+  const bare = await evaluateRoutingChoices(input(2), async () => ({ answers: { environment: { choice: 'candidate_1' } } }));
+  assert.deepEqual(bare.environment, { choice: 'candidate_1', probabilities: {} });
 });
 
 test('invalid answer reports the question key from the request, with a typed validation issue', async () => {

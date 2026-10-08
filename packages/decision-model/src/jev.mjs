@@ -52,10 +52,7 @@ export function createJevClient({ apiKey, timeoutMs = 15_000, zeroDataRetention 
           ...(zeroDataRetention ? { providerOptions: { gateway: { zeroDataRetention: true } } } : {}),
         });
         // Omit raw response bodies, headers and provider diagnostics.
-        // `rounding` is the precision the answers were validated at; a caller
-        // that checks them again must allow the same.
-        return { model: JEV_MODEL, answers: result.answers, usage: result.usage,
-          ...(result.rounding ? { rounding: result.rounding } : {}) };
+        return { model: JEV_MODEL, answers: result.answers, usage: result.usage };
       } catch (error) {
         let verificationRequired = false;
         if (error?.statusCode === 403) {

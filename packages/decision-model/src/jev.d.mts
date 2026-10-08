@@ -16,6 +16,5 @@ export function createJevClient(options: {
     model: typeof JEV_MODEL;
     answers: Experimental_EvaluationResult<JevInput["questions"]>["answers"];
     usage: Experimental_EvaluationResult<JevInput["questions"]>["usage"];
-    rounding?: Experimental_EvaluationResult<JevInput["questions"]>["rounding"];
   }>;
 };
