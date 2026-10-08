@@ -200,12 +200,14 @@ function caretBox(mirror: HTMLElement, layer: HTMLElement, index: number): { x: 
     else if (child instanceof Text) draft.push(child);
     else if (child.firstChild instanceof Text) draft.push(child.firstChild);
   }
-  // The box of the character after the caret, so a caret where the text
-  // wraps stands at the start of the next line as the native one does.
+  // The box of the character after the caret: a caret where the text wraps
+  // stands at the start of the next line as the native one does, and one
+  // before a newline at the end of its line. A collapsed range at a newline
+  // has no box at all.
   const rectAt = (node: Text, offset: number) => {
     const range = document.createRange();
     range.setStart(node, offset);
-    if (offset < node.data.length && node.data[offset] !== "\n") range.setEnd(node, offset + 1);
+    if (offset < node.data.length) range.setEnd(node, offset + 1);
     const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
     return rect.height ? rect : undefined;
   };
