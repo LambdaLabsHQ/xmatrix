@@ -196,7 +196,7 @@ fn disk_usage(root: &Path, deadline: Instant) -> Option<u64> {
         };
         for entry in entries.flatten() {
             seen = seen.wrapping_add(1);
-            if seen % 4_096 == 0 && Instant::now() >= deadline {
+            if seen.is_multiple_of(4_096) && Instant::now() >= deadline {
                 return None;
             }
             let Ok(metadata) = entry.metadata() else {
@@ -250,8 +250,7 @@ async fn reclaim(paths: &[String], live_cwds: &HashSet<PathBuf>) -> Result<Value
             kept.push(json!({ "path": path, "reason": "no longer a worktree on this machine" }));
         }
     }
-    let outcome =
-        reclaim_foreign_worktrees(&chosen, live_cwds, None, Duration::ZERO, true).await;
+    let outcome = reclaim_foreign_worktrees(&chosen, live_cwds, None, Duration::ZERO, true).await;
     for path in &outcome.in_use {
         kept.push(json!({ "path": path.to_string_lossy(), "reason": "in use" }));
     }
@@ -301,8 +300,14 @@ mod tests {
         seed_remote(&remote, &repo);
         let chosen = dir.join("chosen");
         let other = dir.join("other");
-        run_git(&repo, &["worktree", "add", "--detach", chosen.to_str().unwrap()]);
-        run_git(&repo, &["worktree", "add", "--detach", other.to_str().unwrap()]);
+        run_git(
+            &repo,
+            &["worktree", "add", "--detach", chosen.to_str().unwrap()],
+        );
+        run_git(
+            &repo,
+            &["worktree", "add", "--detach", other.to_str().unwrap()],
+        );
         let chosen_path = run_worktree_path(&repo, "chosen");
         let live: HashSet<PathBuf> = [repo.clone()].into_iter().collect();
         let result = execute_worktree_action(
