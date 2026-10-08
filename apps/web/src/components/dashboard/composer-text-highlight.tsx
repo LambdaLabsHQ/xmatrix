@@ -92,7 +92,7 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
   const pieces = spans.flatMap((span, index) => {
     const plain = value.slice(offset, span.start);
     offset = span.end;
-    return [plain, <span key={span.start} data-mention={index}>{value.slice(span.start, span.end)}</span>];
+    return [plain, <span key={span.start} data-mention={index} data-start={span.start}>{value.slice(span.start, span.end)}</span>];
   });
   return <div ref={mirrorRef} aria-hidden="true" data-testid="composer-text-highlight"
     className="pointer-events-none absolute left-0 top-0 overflow-hidden whitespace-pre-wrap break-words text-transparent"

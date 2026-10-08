@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowUp, Loader2, PlugZap, } from "lucide-react";
-import { draftSummonHint } from "./summon-intent";
+import { ComposerSummonOptions } from "./composer-summon-options";
 import type { DraftSummonIntent } from "@xmatrix/protocol";
 import {
   handleComposerTextareaKeyDown,
@@ -30,11 +30,11 @@ import { buildMentionReadIndex } from "./mention-read-state";
 export type ComposerInputAuthorityProps = ComposerContextFields & {
   /** Picked channel and page references in the draft, highlighted as the chips they send as. */
   referenceRanges?: ReadonlyArray<{ start: number; end: number; text: string }>;
-  /** Jev's reading of each summon in the draft, painted on its band with a hint after the text. */
+  /** Jev's reading of each summon in the draft, painted on its band; declined mentions offer options at their address. */
   summonReadings?: ReadonlyArray<DraftSummonIntent>;
   /** A reading for the current draft is still on its way. */
   summonReadingPending?: boolean;
-  summonReadingUnavailable?: boolean;
+  onSummonStartAnyway?: (reading: DraftSummonIntent) => void;
   onSend: () => void;
   /** Escape cancels (thread draft) or is unused (main composer). */
   onEscape?: () => void;
@@ -98,7 +98,7 @@ function ComposerInputSurface({
   referenceRanges,
   summonReadings,
   summonReadingPending,
-  summonReadingUnavailable,
+  onSummonStartAnyway,
   channel,
   space,
   token,
@@ -315,11 +315,8 @@ function ComposerInputSurface({
               compact ? "min-h-0 p-0 text-sm" : "min-h-9 px-0 py-1.5 text-sm sm:min-h-11 sm:py-2 sm:text-[15px]"
             )}
           />
-          {(summonReadings?.length || summonReadingPending || summonReadingUnavailable) ?
-            <div role="status" data-testid="composer-summon-hint" className="app-composer-summon-hint">
-              {summonReadings?.length ? summonReadings.map(draftSummonHint).join(" · ")
-                : summonReadingPending ? "Reading summon intent…" : "Preview unavailable · intent will be checked on send"}
-            </div> : null}
+          {onSummonStartAnyway && <ComposerSummonOptions readings={summonReadings ?? []}
+            textareaRef={textareaRef} disabled={disabled || !enabled || sending} onStartAnyway={onSummonStartAnyway} />}
           </div>
           {inputTrailing}
           <button

@@ -6,8 +6,11 @@ These screenshots use local synthetic fixtures and the repository theme, not pro
 
 The Web composer asks Jev about summon intent after a 350 ms typing pause,
 using the exact outgoing body, summon ranges and the author's authorized
-Channel context. Mention bands and a small hint inside the composer show the
-reading; the separate intent/Force pill is removed. Enter finishes or reuses
+Channel context. Mention bands show the reading. A declined address has a clickable dotted
+underline that opens xMatrix's explanation and a **Start anyway** option at
+that mention. The option writes `launch:force` only on that summon; sending
+still owns publication and launch. Normal summons add no explanatory text,
+and no caption sits below the input. The separate intent/Force pill is removed. Enter finishes or reuses
 the current bounded preview request before publishing. Any edit or Channel
 change discards the old reading. Forced mentions skip preview.
 

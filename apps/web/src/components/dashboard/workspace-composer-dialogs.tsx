@@ -5,7 +5,7 @@ import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
 import { useAndroidBackHandler } from "./use-android-back";
 import { useComposerHint } from "./composer-hints";
 import { useDraftSummonIntents } from "./use-draft-summon-intents";
-import { draftSummonReadingsForDisplay } from "./summon-intent";
+import { draftSummonReadingsForDisplay, forceDraftSummon } from "./summon-intent";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
@@ -1110,7 +1110,16 @@ export function Composer({
           summonReadings={draftSummonReadingsForDisplay(draftIntents.readings, localDraft,
             invocationDraftRef.current?.bindings.filter(isAgentBinding))}
           summonReadingPending={draftIntents.reading}
-          summonReadingUnavailable={draftIntents.unavailable}
+          onSummonStartAnyway={reading => {
+            const next = forceDraftSummon(textareaRef.current?.value ?? localDraft, reading);
+            if (!next) return;
+            setDraftText(next.body);
+            requestAnimationFrame(() => {
+              const input = textareaRef.current;
+              input?.focus();
+              input?.setSelectionRange(next.caret, next.caret);
+            });
+          }}
           channel={channel}
           space={space}
           token={token}
