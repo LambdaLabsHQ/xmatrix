@@ -419,7 +419,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       }
       const headers = new Headers(c.req.raw.headers);
       headers.set("x-xmatrix-page-ticket", protocol.slice(PAGE_SESSION_SUBPROTOCOL_PREFIX.length));
-      return pageSession(c.env, c.req.param("spaceId"), c.req.param("pageId"))
+      return await pageSession(c.env, c.req.param("spaceId"), c.req.param("pageId"))
         .fetch(new Request("https://page-session/ws", { headers }));
     } catch (error) {
       return failure(c, error);

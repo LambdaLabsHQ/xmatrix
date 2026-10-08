@@ -1,5 +1,6 @@
 import type { Context, Hono } from "hono";
 import { DURABLE_OBJECT_RETRY_AFTER_SECONDS } from "./durable-object-failure";
+import { failureResponse } from "./error-contract";
 import { relayResponse } from "./private-response";
 import { crossSpaceRetryOwner } from "./cross-space-read";
 import { agentRunDelegationDenied } from "./agent-run-channel-delegation";
@@ -30,7 +31,7 @@ import { machineHostnameObservation } from "./machine-hostname-observation";
 import { signMachineDaemonCredential } from "./connections/machine-daemon/auth";
 import { applyMachineDaemonSpawnLaunchResult, dispatchMachineDaemonRunLifecycleReplica, machineSpawnRegistryEvidenceMatches } from "./index-routes-machine-daemon-admission";
 import { RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH } from "./runtime-transport/relay-runtime-product-adapter";
-import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestErrorStatus, productCommandId, clientKey, internalClientHeaders, isLoginRateLimited, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
+import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, isLoginRateLimited, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
 import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space-instances";
 import { linkGitHubInstallation, registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
@@ -225,9 +226,10 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     try {
       authUser = await verifyAuthToken(token, c.env);
     } catch (error) {
-      const status = requestErrorStatus(error);
-      await logAuthMetric({ routeGroup: "exchange_session", status, outcome: "invalid_token" });
-      return c.json({ error: (error as Error).message }, status);
+      const failure = requestFailure(error);
+      await logAuthMetric({ routeGroup: "exchange_session", status: failure.status,
+        outcome: failure.status === 401 ? "invalid_token" : "verification_unavailable" });
+      return failureResponse(failure);
     }
 
     if (mockAuthUserForToken(token, c.env)) {

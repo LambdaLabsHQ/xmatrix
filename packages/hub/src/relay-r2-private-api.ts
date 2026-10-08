@@ -27,8 +27,8 @@ export type RelayR2PrivateApiErrorCode =
 export class RelayR2PrivateApiError extends ControlError {
   declare readonly code: RelayR2PrivateApiErrorCode;
   override name = "RelayR2PrivateApiError";
-  constructor(code: RelayR2PrivateApiErrorCode, status: number, message: string) {
-    super(code, status, message);
+  constructor(code: RelayR2PrivateApiErrorCode, status: number, message: string, retryable = false) {
+    super(code, status, message, retryable);
   }
 }
 
@@ -44,8 +44,9 @@ function apiError(
   code: RelayR2PrivateApiErrorCode,
   status: number,
   message: string,
+  retryable = false,
 ): RelayR2PrivateApiError {
-  return new RelayR2PrivateApiError(code, status, message);
+  return new RelayR2PrivateApiError(code, status, message, retryable);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -174,6 +175,7 @@ async function readAuthoritativeMessageAttachment(input: {
       "capability_security_unavailable",
       503,
       "message attachment authority is temporarily unavailable",
+      true,
     );
   }
   const payload = await readBoundedInternalJson(
@@ -187,6 +189,7 @@ async function readAuthoritativeMessageAttachment(input: {
       response.status >= 500
         ? "message attachment authority is temporarily unavailable"
         : "message attachment is not available to this principal",
+      response.status >= 500 && isRecord(payload) && payload.retryable === true,
     );
   }
   if (
@@ -321,6 +324,7 @@ export async function handleRelayV2MessageAttachmentProductMedia(input: {
       "private_storage_unavailable",
       503,
       "message attachment failed immutable storage verification",
+      true,
     );
   }
   if (!object) {

@@ -18,8 +18,8 @@ const SECRET_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u;
 
 export class SpaceSecretError extends ControlError {
   override name = "SpaceSecretError";
-  constructor(code: string, status: number, message: string = code) {
-    super(code, status, message);
+  constructor(code: string, status: number, message: string = code, retryable = false) {
+    super(code, status, message, retryable);
   }
 }
 

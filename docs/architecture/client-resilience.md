@@ -26,9 +26,28 @@ caller's outcome, not a transport failure, and passes through unchanged.
 ### Hub side
 
 The Hub answers every transient failure as `503` with
-`{ error, code, retryable: true }` and a `Retry-After` header. `requestErrorResponse`
-(`packages/hub/src/index-shared.ts`) is the one mapper; `app.onError` routes
+`{ error, code, retryable: true }` and a `Retry-After` header, and every other
+failure under its own status with `retryable: false`. `requestFailure`
+(`packages/hub/src/index-shared.ts`) is the one mapper, built from
+`packages/hub/src/error-contract.ts`; `requestErrorResponse`,
+`privateRouteResponse`, `postgresControlErrorResponse` and the private-storage
+and message-authority mappers all answer through it, and `app.onError` routes
 uncaught failures through it so no route answers a plain-text `500`.
+
+- Transient means a replay can succeed: a PostgreSQL outage the driver
+  classifies as retryable, a Durable Object reset, dropped or overloaded, a
+  `ControlError` that says `retryable: true` (a Space moving shards, private
+  object storage failing in passing), or a Better Auth JWKS that could not be
+  fetched.
+- A domain rejection (`ControlError`) keeps its own status and code; those are
+  public API. Route mappers may keep their own public code (for example
+  `private_storage_unavailable`) but take status, retry policy and headers
+  from the contract.
+- `401` is only a definite verdict on the credential. A credential that could
+  not be checked is a retryable `503`, never a `401`, because a client signs
+  out on `401`.
+- No body carries a driver's or provider's raw message; the detail goes to the
+  error report.
 
 ### Web client
 

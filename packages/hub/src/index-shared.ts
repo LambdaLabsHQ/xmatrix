@@ -1,4 +1,4 @@
-import { privateJsonResponse } from "./private-json-response";
+import { PRIVATE_JSON_HEADERS, privateJsonResponse } from "./private-json-response";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { agentBillingReadRoute, BillingReadAccessDenied } from "./billing-read-access";
@@ -57,9 +57,7 @@ import { base64UrlEncodeValue } from "./relay-v2-primitives";
 import { AgentRunDelegationError, requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { reportError } from "@xmatrix/protocol/error-reporting";
 import { AgentChannelAccessError, ControlError } from "@xmatrix/db";
-import { postgresControlErrorResponse } from "./postgres-authority-http";
-import { postgresRetryAfterSeconds, retryablePostgresFailure } from "./postgres-error-classification";
-import { DURABLE_OBJECT_RETRY_AFTER_SECONDS, transientDurableObjectFailure } from "./durable-object-failure";
+import { domainFailure, failureResponse, transientFailure, type RequestFailure } from "./error-contract";
 import { machineDaemonCommand } from "./machines";
 import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
 import { runtimeRepository } from "./runtime";
@@ -799,60 +797,51 @@ export function relayR2PrivateErrorResponse(error: unknown): Response {
       409,
     );
   }
-  if (error instanceof ControlError) return postgresControlErrorResponse(error);
-  const status = requestErrorStatus(error);
-  return privateJsonResponse(
-    status === 401
-      ? { error: (error as Error).message, code: "not_authenticated" }
-      : status === 403
-        ? { error: (error as Error).message, code: "forbidden" }
-      : { error: "Private object service is temporarily unavailable", code: "private_storage_unavailable" },
-    status,
-  );
+  const failure = requestFailure(error);
+  // A domain rejection keeps its own status and code; only an outage is the storage being unavailable.
+  if (error instanceof ControlError) return failureResponse(failure, PRIVATE_JSON_HEADERS);
+  if (failure.status === 401 || failure.status === 403) {
+    return privateJsonResponse({ error: failure.body.error,
+      code: failure.status === 401 ? "not_authenticated" : "forbidden" }, failure.status);
+  }
+  const transient = failure.status === 503;
+  return failureResponse({ ...failure, body: {
+    error: transient ? "Private object service is temporarily unavailable" : "Private object service failed",
+    code: "private_storage_unavailable", retryable: transient,
+  } }, PRIVATE_JSON_HEADERS);
 }
 
 export function requestErrorStatus(error: unknown): ContentfulStatusCode {
-  if (error instanceof ControlError) return error.status as ContentfulStatusCode;
-  if (error instanceof AuthFailure) {
-    return 401;
-  }
-  if (error instanceof PermissionFailure || error instanceof BillingReadAccessDenied) {
-    return 403;
-  }
-  if ((error as Error).message === "Invalid or expired auth token") return 401;
-  // An outage the driver says a replay can survive; a defect stays a reported 500.
-  if (retryablePostgresFailure(error)) {
-    console.error("PostgreSQL is unavailable", error);
-    return 503;
-  }
-  if (transientDurableObjectFailure(error)) {
-    console.error("Durable Object is briefly unavailable", error);
-    return 503;
-  }
-  // Every failure answered as a 500 is unexpected; it is reported, not only answered.
-  reportError(error);
-  return 500;
+  return requestFailure(error).status as ContentfulStatusCode;
 }
 
 /**
- * A route's failure as JSON: a domain rejection under its own status and code,
- * a refused session under its message, a database outage as retryable, and
- * anything else as an internal error whose detail stays in the report.
+ * A failure under the Hub's one error contract: a domain rejection under its
+ * own status and code, a refused session under its message, an outage as a
+ * retryable 503, and anything else as an internal error whose detail stays in
+ * the report.
  */
+export function requestFailure(error: unknown): RequestFailure {
+  if (error instanceof ControlError) return domainFailure(error);
+  const message = (error as Error | undefined)?.message ?? "";
+  if (error instanceof AuthFailure || message === "Invalid or expired auth token") {
+    return { status: 401, body: { error: message }, headers: {} };
+  }
+  if (error instanceof PermissionFailure || error instanceof BillingReadAccessDenied) {
+    return { status: 403, body: { error: message }, headers: {} };
+  }
+  // An outage the driver or runtime says a replay can survive; a defect stays a reported 500.
+  const transient = transientFailure(error);
+  if (transient) return transient;
+  // Every failure answered as a 500 is unexpected; it is reported, not only answered.
+  reportError(error);
+  return { status: 500, body: { error: "Internal error", code: "internal_error", retryable: false }, headers: {} };
+}
+
+/** A route's failure as JSON under `requestFailure`. */
 export function requestErrorResponse(c: Context, error: unknown): Response {
-  if (error instanceof ControlError) return postgresControlErrorResponse(error);
-  const status = requestErrorStatus(error);
-  if (status === 503 && transientDurableObjectFailure(error)) {
-    return c.json({ error: "xMatrix is restarting; try again", code: "service_restarting", retryable: true }, status,
-      { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) });
-  }
-  if (status === 503) {
-    return c.json({ error: "PostgreSQL is unavailable", code: "postgres_unavailable", retryable: true }, status,
-      { "retry-after": String(postgresRetryAfterSeconds(error)) });
-  }
-  return status === 500
-    ? c.json({ error: "Internal error", code: "internal_error", retryable: false }, status)
-    : c.json({ error: (error as Error).message }, status);
+  const failure = requestFailure(error);
+  return c.json(failure.body, failure.status as ContentfulStatusCode, failure.headers);
 }
 
 /** Runs a route's work, answering its failures, thrown or rejected, as `requestErrorResponse`. */

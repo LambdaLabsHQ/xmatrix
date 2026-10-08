@@ -82,11 +82,23 @@ test('a transient gateway failure retries the identical choice once within its d
   assert.equal(exhausted, 2);
 });
 
-test('missing answers, outside choices and incomplete distributions are rejected', async () => {
+test('missing answers and outside choices are rejected', async () => {
   await assert.rejects(evaluateRoutingChoices(input(1), async () => ({ answers: {} })), { code: 'invalid_answer' });
-  await assert.rejects(evaluateRoutingChoices(input(2), async () => ({ answers: { environment:
-    { choice: 'candidate_0', probabilities: { candidate_0: 1, abstain: 0 } } } })), { code: 'invalid_answer' });
   await assert.rejects(evaluateRoutingChoices(input(1), async request => answer(request, 'outside')), { code: 'invalid_answer' });
+});
+
+test('the pick is the answer: its probabilities are kept as given, never judged', async () => {
+  // Ten options rounded to two decimals sum to .95, and the pick is not the
+  // most probable; the pick still decides.
+  const request = input(10);
+  const probabilities = Object.fromEntries(Object.keys(request.questions.environment.criteria)
+    .map((key, index) => [key, index === 3 ? .14 : .09]));
+  const result = await evaluateRoutingChoices(request, async () => ({ answers: { environment: {
+    choice: 'candidate_0', probabilities: { ...probabilities, stray: 1 } } } }));
+  assert.equal(result.environment.choice, 'candidate_0');
+  assert.deepEqual(result.environment.probabilities, probabilities);
+  const bare = await evaluateRoutingChoices(input(2), async () => ({ answers: { environment: { choice: 'candidate_1' } } }));
+  assert.deepEqual(bare.environment, { choice: 'candidate_1', probabilities: {} });
 });
 
 test('invalid answer reports the question key from the request, with a typed validation issue', async () => {
