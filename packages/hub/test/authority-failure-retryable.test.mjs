@@ -70,3 +70,50 @@ test("hub and db declare no second code-and-status error shape beside ControlErr
   }
   assert.deepEqual(offenders, []);
 });
+
+// "Briefly unavailable" is one thrown ServiceUnavailable: a coordinator handover
+// that escaped a route used to answer a non-retryable 500, so neither the CLI
+// nor the web replayed the request its committed work was waiting on.
+test("a part of the Hub briefly unavailable answers a retryable 503 with Retry-After, on routes and sockets", async () => {
+  const { AgentLaunchHandoverUnavailable } = await import("../src/agent-launch-coordinator-wake.ts");
+  const { ChannelCatalogTimeoutError } = await import("../src/channel-catalog-deadline.ts");
+  const { ServiceUnavailable } = await import("../src/error-contract.ts");
+  const { runtimeOperationFailure } = await import("../src/runtime-transport/runtime-operation-failure.ts");
+  const { Hono } = await import("hono");
+  for (const [error, code, retryAfter] of [
+    [new AgentLaunchHandoverUnavailable(500), "agent_launch_handover_unavailable", "1"],
+    [new ServiceUnavailable("page_session_unavailable", "Page session is unavailable"), "page_session_unavailable", "1"],
+    [new ChannelCatalogTimeoutError("projection"), "channel_catalog_timeout", "2"],
+  ]) {
+    const app = new Hono();
+    app.get("/", (c) => requestErrorResponse(c, error));
+    const response = await app.request("/");
+    assert.equal(response.status, 503, code);
+    assert.equal(response.headers.get("retry-after"), retryAfter, code);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", code);
+    assert.deepEqual(await response.json(), { error: error.message, code, retryable: true });
+    // A socket answers it as an authority rejection a client may replay.
+    assert.equal(runtimeOperationFailure(error).retryable, true, code);
+  }
+});
+
+// Retry-After is written by the error contract alone; a route throws ServiceUnavailable instead.
+test("no Hub route hand-writes a retryable 503 or its Retry-After", () => {
+  const owners = new Set([
+    "error-contract.ts",
+    // A 429, not an unavailable service.
+    "request-rate-limit.ts",
+    // Relays the header an upstream Authority already answered.
+    "private-response.ts",
+    // The message authority's own outage mapper; folding it into requestFailure is open (audit §1).
+    "postgres-message-authority.ts",
+  ]);
+  const offenders = [];
+  const dir = new URL("../src/", import.meta.url);
+  for (const entry of readdirSync(dir, { recursive: true })) {
+    if (!String(entry).endsWith(".ts") || owners.has(String(entry))) continue;
+    const source = readFileSync(join(dir.pathname, String(entry)), "utf8");
+    if (/["']retry-after["']/iu.test(source) || /retryable: true \}, 503/u.test(source)) offenders.push(String(entry));
+  }
+  assert.deepEqual(offenders, []);
+});

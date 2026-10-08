@@ -1,5 +1,4 @@
 import type { Context, Hono } from "hono";
-import { DURABLE_OBJECT_RETRY_AFTER_SECONDS } from "./durable-object-failure";
 import { runtimeRepository } from "./runtime";
 import { AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, agentSendSubmissionCanonical, callerMessageMetadata, messagePublicationEvidence, sha256Hex } from "@xmatrix/protocol";
 import type { ChannelAppMention, ChannelAttachment } from "@xmatrix/protocol";
@@ -10,7 +9,6 @@ import { agentMessagePresentationForLiveBinding, loadLiveAgentPresenceFromRuntim
 import { runtimeCellsForChannel } from "./runtime-transport/runtime-route-directory-delivery";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { dispatchProductMessagePostCommit, productMessageControlFinishesBeforeResponse } from "./product-message-post-commit";
-import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake";
 import { productMessageSenderPresentation } from "./message-sender-presentation";
 import { crossChannelReplyOrigin } from "./product-cross-channel-reply";
 import { messageMutationActor } from "./agent-run-channel-delegation";
@@ -395,14 +393,9 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           });
           // waitUntil is cancelled after the response and the summon then vanishes.
           if (productMessageControlFinishesBeforeResponse(message.body)) {
-            try { await postCommit; }
-            catch (error) {
-              if (!(error instanceof AgentLaunchHandoverUnavailable)) throw error;
-              // The message is committed; its retry re-runs the same launch
-              // idempotently and hands it to the Channel coordinator.
-              return c.json({ error: error.message, code: error.code, retryable: true }, 503,
-                { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) });
-            }
+            // The message is committed; a handover the coordinator refused is a
+            // retryable 503, and its retry re-runs the same launch idempotently.
+            await postCommit;
           } else c.executionCtx.waitUntil(postCommit.catch(() => undefined));
         }
         return c.json({

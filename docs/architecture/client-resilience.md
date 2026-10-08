@@ -39,6 +39,11 @@ uncaught failures through it so no route answers a plain-text `500`.
   `ControlError` that says `retryable: true` (a Space moving shards, private
   object storage failing in passing), or a Better Auth JWKS that could not be
   fetched.
+- A part of the Hub that is briefly unavailable (the Agent Launch coordinator
+  refusing a handover, a page session, the Space deletion clock, a catalog
+  deadline) is thrown as `ServiceUnavailable`, a retryable `503` `ControlError`
+  carrying its `Retry-After`. Routes do not hand-write that answer; a source
+  guard in `authority-failure-retryable.test.mjs` enforces it.
 - A domain rejection (`ControlError`) keeps its own status and code; those are
   public API. Route mappers may keep their own public code (for example
   `private_storage_unavailable`) but take status, retry policy and headers
