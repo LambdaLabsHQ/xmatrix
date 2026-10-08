@@ -532,3 +532,5 @@ export {
   readBoundedStream,
 } from "./read-bounded-stream.js";
 export * from "./setup-intent.js";
+export { cleanRepositoryBaseline } from "./repository-baseline.js";
+export type { RepositoryBaseline } from "./repository-baseline.js";

@@ -34,3 +34,12 @@ report cannot publish a new startup-failure notice or relabel its cleanup.
 - [Saved-reply recovery without rerunning the input](reply-recovery-mobile.png)
 
 Reproduce with `pnpm --filter @xmatrix/web exec playwright test e2e/mention-invocation.spec.ts --project=web --workers=1`.
+
+Repository-backed invocation details also retain the actual checkout base branch,
+full OID and confirmation timestamp in UTC after the Run finishes. Continued
+repo-pool tasks show the current confirmed remote snapshot separately, with
+ancestor/diverged/unknown evidence about the recorded base. Unknown evidence
+is never presented as safe or as a history rewrite. Baseline facts are not
+posted as routine Channel messages. A confirmed divergence produces one
+continuity warning for the human and Agent, preserving the old checkout.
+Optional daemon evidence is absent for older clients; no time or base is guessed.

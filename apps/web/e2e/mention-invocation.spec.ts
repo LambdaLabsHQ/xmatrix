@@ -49,6 +49,24 @@ async function installInvocationFixture(page: Page, launches: unknown[], body = 
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query", { launches, rejections: [rejection], continuations });
 }
 
+test("repository baseline remains in finished invocation details with UTC and unknown evidence", async ({ page }) => {
+  const baseline = { baseRef: "origin/main", baseOid: "a".repeat(40), confirmedAt: "2026-10-08T10:00:00Z",
+    remote: { baseRef: "origin/trunk", baseOid: "b".repeat(40), confirmedAt: "2026-10-08T10:01:00Z" },
+    relationship: "unknown" };
+  const record = { ...codex, state: "connected", activity: { runStatus: "stopped", updatedAt: E2E_NOW,
+    repositoryBaseline: baseline } };
+  await installInvocationFixture(page, [record], codex.sourceMention);
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await page.locator(".app-mention-invocation").click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByText("Details", { exact: true }).click();
+  await expect(dialog).toContainText(`origin/main @ ${baseline.baseOid}`);
+  await expect(dialog).toContainText("Confirmed 2026-10-08T10:00:00Z (UTC).");
+  await expect(dialog).toContainText(`origin/trunk @ ${baseline.remote.baseOid}`);
+  await expect(dialog).toContainText("Could not confirm whether the recorded base belongs to the current remote history.");
+  await expect(dialog).not.toContainText("recorded base is outside");
+});
+
 test("each mention has independent live progress and a keyboard-accessible timeline", async ({ page }) => {
   await page.clock.install({ time: new Date(E2E_NOW) });
   await installInvocationFixture(page, [codex, claude]);

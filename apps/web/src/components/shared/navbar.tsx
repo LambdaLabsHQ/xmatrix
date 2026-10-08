@@ -31,7 +31,7 @@ export function Navbar() {
           ? 1
           : 0
         : Math.min(1, Math.max(0, window.scrollY / WOOD_REVEAL_DISTANCE_PX));
-      setWoodReveal((prev) => (Math.abs(prev - next) < 0.01 ? prev : next));
+      setWoodReveal(next);
     };
 
     const onScroll = () => {

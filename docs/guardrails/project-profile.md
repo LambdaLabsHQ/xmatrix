@@ -42,6 +42,12 @@ preserves the failed-startup outcome. See [invocation status](../design/mention-
 
 Teams native integration uses a company home-tenant Bot, Human admin confirmation and primary PostgreSQL room grants, alongside explicit outbound-only manual webhooks. Its supported scope, canonical release configuration and evidence requirements are documented in [Teams native contract](../connectors/teams-native.md). Company identity and native acceptance remain external prerequisites.
 
+New repository tasks confirm the remote default branch on every independent
+launch, sharing only simultaneous checks. Invocation details retain actual
+baseline evidence; continued tasks preserve their recorded checkout and warn
+only on proven base divergence. Local shared Git objects are not purged by this
+feature. See [repository preparation](../daemon-service-model.md#repository-snapshot-preparation).
+
 Channel About sessions submit summary/title text directly through Hub using
 CLI arguments or bounded JSON stdin; they do not stage local files. Their
 own-Channel authorization and immutable database revision/input evidence are
