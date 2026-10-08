@@ -391,8 +391,6 @@
   --app-action-edge: inset 0 0 0 0.5px oklch(1 0.02 90 / 0.6),
     inset 0 1px 0 oklch(1 0.02 90 / 0.5),
     0 0 12px -4px oklch(0.35 0.07 60 / 0.45);
-  --app-topbar-search-width: clamp(14rem, 34vw, 28rem);
-  --app-topbar-search-max-width: calc(100vw - 2rem);
 
   /* Where a list row's content starts and ends. Beside a desktop's rail it
      starts 20px inside its list. A phone's list runs edge to edge, like the

@@ -524,8 +524,8 @@ integration("the page tree shows each page's Agents: live in a conversation whos
     const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: r() });
     const onPages = async (principal) => Object.fromEntries((await call("agentsOnPages", { principal })).pages
       .filter(({ agents }) => agents.length > 0)
-      .map(({ pageId, agents }) => [pageId, agents.map(({ instanceId, name, status, conversationId, activity, blockId }) =>
-        ({ instanceId, name, status, conversationId, activity, blockId }))]));
+      .map(({ pageId, agents }) => [pageId, agents.map(({ instanceId, name, status, conversationId, activity, blockId,
+        section }) => ({ instanceId, name, status, conversationId, activity, blockId, ...(section ? { section } : {}) }))]));
 
     const { page: company } = await call("create", { principal: owner, title: "Company" });
     const { page: project } = await call("create", { principal: owner, parentPageId: company.pageId, title: "Project" });
@@ -542,15 +542,23 @@ integration("the page tree shows each page's Agents: live in a conversation whos
     const live = { instanceId: ids.instance, name: "claude:1", status: "online", conversationId: ids.open };
     assert.deepEqual(await onPages(member), {
       [company.pageId]: [{ ...live, activity: "viewing", blockId: "" }],
-      [project.pageId]: [{ ...live, activity: "editing", blockId: "status" }],
-    });
+      [project.pageId]: [{ ...live, activity: "editing", blockId: "status", section: "Status" }],
+    }, "an Agent's section is named by its heading");
 
-    // Each page counts the conversations about it that this reader may open.
-    const counts = async (principal) => Object.fromEntries((await call("agentsOnPages", { principal })).pages
-      .map(({ pageId, conversations }) => [pageId, conversations]));
-    assert.deepEqual(await counts(member), { [company.pageId]: 1, [project.pageId]: 1 },
-      "the closed conversation is not counted for a member who cannot open it");
-    assert.deepEqual(await counts(owner), { [company.pageId]: 1, [project.pageId]: 1, [quiet.pageId]: 1 });
+    // Each page lists its open discussions this reader may open; a plain link or a resolved one is not one.
+    const discussions = async (principal) => Object.fromEntries((await call("agentsOnPages", { principal })).pages
+      .filter((page) => page.discussions.length > 0).map(({ pageId, discussions }) => [pageId, discussions]));
+    assert.deepEqual(await discussions(member), {}, "reading or editing a page opens no discussion");
+    const anchor = { quote: "Shipped", from: { assoc: 0 }, to: { assoc: 0 } };
+    await call("link", { principal: owner, pageId: project.pageId, conversationId: ids.open, blockId: "status",
+      source: "manual", anchor });
+    const { link: closed } = await call("link", { principal: owner, pageId: quiet.pageId, conversationId: ids.closed,
+      source: "manual", anchor });
+    assert.deepEqual(await discussions(member), { [project.pageId]: [ids.open] },
+      "a discussion in a conversation the member cannot open is not theirs to see");
+    assert.deepEqual(await discussions(owner), { [project.pageId]: [ids.open], [quiet.pageId]: [ids.closed] });
+    await call("resolveLink", { principal: owner, linkId: closed.linkId, resolved: true });
+    assert.deepEqual(await discussions(owner), { [project.pageId]: [ids.open] }, "a resolved discussion is closed");
 
     await client.query("UPDATE data.instances SET status='busy' WHERE instance_id=$1", [ids.instance]);
     assert.equal((await onPages(member))[project.pageId][0].status, "busy");

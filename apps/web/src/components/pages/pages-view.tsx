@@ -16,10 +16,11 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
   PageLiveSession, pageApi, pageChildren,
-  type PageClaim, type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageSummary, type PageTreeAgent,
+  type PageClaim, type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageSummary, type PageTreeActivity, type PageTreeAgent,
 } from "@/lib/pages/page-client";
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
+import { CountPill } from "@/components/dashboard/count-pill";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
 import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
@@ -75,11 +76,11 @@ export function usePageTree(spaceId: string | null, token: string) {
   });
 }
 
-interface PageTreeActivity {
+interface PageTreeActivities {
   /** The Agents reading or editing each page from a live Run. */
   agents: Map<string, PageTreeAgent[]>;
-  /** How many conversations are about each page, as its margin counts them. */
-  conversations: Map<string, number>;
+  /** Each page's open discussions, as this reader sees them. */
+  discussions: Map<string, PageTreeActivity["discussions"]>;
 }
 
 function usePageAgents(spaceId: string | null, token: string) {
@@ -87,34 +88,57 @@ function usePageAgents(spaceId: string | null, token: string) {
   return useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-tree-agents", [spaceId]),
     enabled: Boolean(spaceId && token && user?.id), staleTime: 5_000, refetchInterval: 15_000,
-    queryFn: ({ signal }) => pageApi.agents(spaceId!, token, signal).then((result): PageTreeActivity => ({
+    queryFn: ({ signal }) => pageApi.agents(spaceId!, token, signal).then((result): PageTreeActivities => ({
       agents: new Map(result.pages.map((page) => [page.pageId, page.agents])),
-      conversations: new Map(result.pages.map((page) => [page.pageId, page.conversations ?? 0])),
+      discussions: new Map(result.pages.map((page) => [page.pageId, page.discussions])),
     })),
   });
 }
 
-const NO_ACTIVITY: PageTreeActivity = { agents: new Map(), conversations: new Map() };
+const NO_ACTIVITY: PageTreeActivities = { agents: new Map(), discussions: new Map() };
 
-// A page's conversations beside its title, as the page's own header counts them; who is on it is the second line.
-function PageConversationCount({ count }: { count: number }) {
+/**
+ * A page's open discussions beside its title, as Google Docs counts unresolved
+ * comments. While one has replies this reader has not read, the count wears the
+ * app's count chip, as a conversation's unread does; otherwise it stays faint.
+ */
+function PageDiscussionCount({ open, unread }: { open: number; unread: number }) {
+  const label = `${open} open discussion${open === 1 ? "" : "s"}${unread > 0 ? `, ${unread} with unread replies` : ""}`;
+  if (unread > 0) {
+    return (
+      <span className="app-page-row-discussions flex shrink-0 items-center px-0.5" data-testid="page-tree-discussions"
+        aria-label={label}>
+        <CountPill count={open} title={label} />
+      </span>
+    );
+  }
   return (
-    <span className="app-page-row-conversations flex shrink-0 items-center gap-1 px-0.5 text-xs tabular-nums text-muted-foreground"
-      data-testid="page-tree-conversations" aria-label={`${count} conversation${count === 1 ? "" : "s"}`}>
-      <MessageSquare className="size-3.5" aria-hidden="true" />{count}
+    <span className="app-page-row-discussions app-page-row-discussions-read flex shrink-0 items-center gap-1 px-0.5 text-xs tabular-nums text-muted-foreground"
+      data-testid="page-tree-discussions" title={label} aria-label={label}>
+      <MessageSquare className="size-3.5" aria-hidden="true" />{open}
     </span>
   );
 }
 
-/** A page row's second line: who is on the page now, else when it last changed. */
-export function pageRowMeta(page: Pick<PageSummary, "updatedAt">, agents: readonly PageTreeAgent[], now = Date.now()) {
+function names(agents: readonly PageTreeAgent[]): string {
+  const unique = [...new Set(agents.map((agent) => agent.name))];
+  return unique.length > 2 ? `${unique.slice(0, 2).join(", ")} +${unique.length - 2}` : unique.join(", ");
+}
+
+/**
+ * A page row's second line, what is happening on the page: an Agent editing
+ * it and where, else the newest reply in its open discussions, else who is
+ * reading it, else when it last changed.
+ */
+export function pageRowMeta(page: Pick<PageSummary, "updatedAt">, agents: readonly PageTreeAgent[],
+  latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()) {
   const editing = agents.filter((agent) => agent.activity === "editing");
-  const on = editing.length > 0 ? editing : agents;
-  if (on.length > 0) {
-    const names = [...new Set(on.map((agent) => agent.name))];
-    const who = names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
-    return `${who} ${editing.length > 0 ? "editing" : "reading"}`;
+  if (editing.length > 0) {
+    const sections = [...new Set(editing.map((agent) => agent.section).filter(Boolean))];
+    return `${names(editing)} editing${sections.length === 1 ? ` · ${sections[0]}` : ""}`;
   }
+  if (latest) return `${latest.from.label}: ${latest.bodyPreview}`;
+  if (agents.length > 0) return `${names(agents)} reading`;
   const age = formatRelativeAge(page.updatedAt, now);
   return age ? `Edited ${age}` : "";
 }
@@ -144,7 +168,7 @@ function PageTreeRow({ depth, selected, open, onToggle, expandHidden, children }
 }
 
 function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect, onPrefetch, onCreateChild }: {
-  page: PageSummary; childrenOf: Map<string | null, PageSummary[]>; activity: PageTreeActivity; depth: number;
+  page: PageSummary; childrenOf: Map<string | null, PageSummary[]>; activity: PageTreeActivities; depth: number;
   selectedPageId: string | null; onSelect: (pageId: string) => void; onPrefetch: (pageId: string) => void;
   /** Makes a page under this one, from the row itself. */
   onCreateChild?: (pageId: string) => void;
@@ -153,7 +177,7 @@ function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect,
   const [open, setOpen] = useState(true);
   const selected = page.pageId === selectedPageId;
   const agents = activity.agents.get(page.pageId) ?? [];
-  const conversations = activity.conversations.get(page.pageId) ?? 0;
+  const discussions = activity.discussions.get(page.pageId);
   return (
     <li>
       <PageTreeRow depth={depth} selected={selected} open={open}
@@ -166,9 +190,9 @@ function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect,
             <span className="app-page-row-title app-list-row-title truncate">{page.title}</span>
             {page.accessMode === "restricted" && <Lock className="size-3 shrink-0 text-muted-foreground" />}
           </span>
-          <span className="app-list-row-meta truncate">{pageRowMeta(page, agents)}</span>
+          <span className="app-list-row-meta truncate">{pageRowMeta(page, agents, discussions?.latest)}</span>
         </button>
-        {conversations > 0 && <PageConversationCount count={conversations} />}
+        {discussions && discussions.open > 0 && <PageDiscussionCount open={discussions.open} unread={discussions.unread} />}
         {/* Shown while the row is hovered; a touch screen has no hover, so there it stays. */}
         {onCreateChild && (
           <button type="button" aria-label="New sub-page" title="New sub-page"
