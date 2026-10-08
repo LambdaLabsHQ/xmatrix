@@ -1,7 +1,14 @@
+import type { Locator } from "@playwright/test";
+
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
+
+/** A computed style read mid-transition is an in-between value: wait for the element's motion to end. */
+async function settled(locator: Locator): Promise<void> {
+  await expect.poll(() => locator.evaluate((element) => element.getAnimations().length)).toBe(0);
+}
 
 test("expanded desktop workspace switcher is one glass panel floating over the list", async ({ page }) => {
   const otherSpace = {
@@ -49,6 +56,8 @@ test("expanded desktop workspace switcher is one glass panel floating over the l
      backdrop filter) makes one of these reads differ. */
   const shell = page.locator(".app-space-switcher-shell-open");
   await expect(shell).toBeVisible();
+  // The glass fades in while the panel grows.
+  await settled(shell);
   const material = await shell.evaluate((element) => {
     const read = (node: Element) => {
       const own = getComputedStyle(node);
@@ -88,6 +97,7 @@ test("expanded desktop workspace switcher is one glass panel floating over the l
      member count; under the pointer the row takes a flat inset highlight. */
   const row = page.locator(".app-space-switcher-option", { hasText: "Personal" });
   await row.hover();
+  await settled(row);
   const paint = await row.evaluate((element) => {
     const shellNode = element.closest(".app-space-switcher-shell-open")!;
     const avatar = element.querySelector(".app-space-avatar")!;
