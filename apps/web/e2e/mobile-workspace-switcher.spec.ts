@@ -66,11 +66,11 @@ test.describe("mobile workspace switcher", () => {
     /* The entry names the current space, so the switcher is discoverable
        (the "现在怎么切" complaint was an invisible entry point). */
     await expect(entry).toContainText(/Personal|Lambda Labs/);
-    /* A real tap target, not a squashed icon: full row height, wide. */
+    /* A real tap target, not a squashed icon: the whole Space sign. */
     const box = await entry.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(40);
-    expect(box!.width).toBeGreaterThanOrEqual(200);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(120);
   });
 
   test("tapping the entry opens a true bottom sheet, not a layer trapped in the topbar", async ({
