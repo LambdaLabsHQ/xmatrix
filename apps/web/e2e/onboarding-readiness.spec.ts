@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import {
-  E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_SPACE,
+  E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_SPACE, E2E_CHANNEL,
   fixtureRequests, fixtureRule, installWorkspaceStubs, releaseFixture,
 } from "./workspace-fixtures";
 
@@ -44,6 +44,17 @@ for (const [name, viewport] of [
         await expect(page.getByTestId("connect-machine")).toBeVisible();
       });
     }
+
+    test("existing conversations remain reachable before the first agent is added", async ({ page }) => {
+      await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+      await page.goto("/app", { waitUntil: "domcontentloaded" });
+      const row = page.locator(name === "mobile"
+        ? `[data-mobile-channel-row-id="${E2E_CHANNEL.id}"]`
+        : `[data-channel-row-id="${E2E_CHANNEL.id}"]`);
+      await expect(row).toBeVisible();
+      await row.click();
+      await expect(page).toHaveURL(new RegExp(`--${E2E_CHANNEL.id}$`));
+    });
 
     test("a failed agents read is on paper, not the setup wood", async ({ page }) => {
       await installWorkspaceStubs(page, { spaces: [E2E_SPACE] });

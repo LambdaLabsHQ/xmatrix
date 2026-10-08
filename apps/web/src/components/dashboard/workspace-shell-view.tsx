@@ -749,8 +749,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     );
   }
 
-  // A phone shows the first-run card in place of its list too, once there is something to do there.
-  const showMobileHarnessSetup = isMobileViewport && showSpaceAgentSetup && ((installedFleet.ready &&
+  // First-run guidance replaces only an empty phone list; existing conversations remain reachable.
+  const hasSpaceConversations = onboardingCatalog.rows.length > 0 || channels.some((channel) =>
+    !currentSpaceId || channel.spaceId === currentSpaceId);
+  const showMobileHarnessSetup = isMobileViewport && !hasSpaceConversations && showSpaceAgentSetup && ((installedFleet.ready &&
     installedFleet.candidates.length > 0) || spaceAgentSetup.kind === "no-local-machine");
   const spaceAgentSetupSurface = (
         <div className={cn("min-h-0 flex-1 overflow-y-auto",
