@@ -193,6 +193,8 @@ test("prepared PostgreSQL Launch wake goes to its own Channel's coordinator with
     channelId: "ch-1",
     launchIds: ["launch-1", "launch-2"],
     shardId: "shard-1",
+    // The event names its work: the pass runs Launch work and whatever else is due.
+    work: ["launch"],
   });
 });
 

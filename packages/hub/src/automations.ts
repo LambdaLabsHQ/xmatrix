@@ -52,7 +52,7 @@ export async function commitAutomation(env: Env, input: Record<string, unknown>)
   const channelId = typeof committed.channelId === "string" ? committed.channelId : "";
   if (channelId) {
     try {
-      await wakeAgentLaunchCoordinator(env, channelId);
+      await wakeAgentLaunchCoordinator(env, channelId, ["automation"]);
     } catch {
       throw new ControlError("scheduler_coordination_unavailable", 503,
         "Automation committed but its Channel coordinator did not accept the change", true);

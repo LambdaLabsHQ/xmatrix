@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { createAuthorityDatabase } from "../../db/src/index.ts";
-import { claim, earliestDue, nextChannelStepDue } from "../src/postgres-agent-launch-coordinator.ts";
+import { claim, nextChannelStepDue } from "../src/postgres-agent-launch-coordinator.ts";
 
-const nextChannelDueAt = async (database, shardId, channelId) =>
-  earliestDue(await nextChannelStepDue(database, shardId, channelId));
+const nextChannelDueAt = async (database, shardId, channelId) => {
+  const times = Object.values(await nextChannelStepDue(database, shardId, channelId));
+  return times.length ? Math.min(...times) : undefined;
+};
 
 const url = process.env.XMATRIX_TEST_POSTGRES_URL;
 const integration = url || process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true" ? test : test.skip;

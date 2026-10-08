@@ -428,6 +428,51 @@ async function requireManager(tx: DatabaseTransaction, automation: QueryResultRo
   await automationChannel(tx, String(automation.channel_id), { kind: "user", id: actorUserId }, capability);
 }
 
+/**
+ * A Channel's earliest Automation wake ($1 = channel id), as one scalar query:
+ * cadence, retry, lease, execution deadline, cleanup and orphan convergence.
+ * The Channel coordinator reads it in the same statement as its other due
+ * times, so a pass pays one round trip for all of them.
+ */
+export const CHANNEL_AUTOMATION_WAKE_SQL = `SELECT MIN(wake_at) AS wake_at FROM (
+          SELECT t.next_run_at AS wake_at,c.space_id,t.channel_id
+            FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
+            WHERE t.channel_id=$1 AND t.enabled=true
+          UNION ALL
+          SELECT o.next_attempt_at,c.space_id,t.channel_id
+            FROM data.automation_occurrences o
+            JOIN data.automations t ON t.automation_id=o.automation_id
+            JOIN data.channels c ON c.channel_id=t.channel_id
+            WHERE t.channel_id=$1 AND o.status='pending'
+          UNION ALL
+          SELECT o.lease_until,c.space_id,t.channel_id
+            FROM data.automation_occurrences o
+            JOIN data.automations t ON t.automation_id=o.automation_id
+            JOIN data.channels c ON c.channel_id=t.channel_id
+            WHERE t.channel_id=$1 AND o.status IN ('leased','prepared') AND o.lease_until IS NOT NULL
+          UNION ALL
+          SELECT o.execution_deadline_at,c.space_id,t.channel_id
+            FROM data.automation_occurrences o JOIN data.automations t ON t.automation_id=o.automation_id
+            JOIN data.channels c ON c.channel_id=t.channel_id
+            WHERE t.channel_id=$1 AND o.status='dispatched' AND o.finished_at IS NULL
+          UNION ALL
+          SELECT (r.metadata_json#>>'{executionCancellation,processCleanup,nextAttemptAt}')::timestamptz,
+            c.space_id,t.channel_id FROM data.runs r
+            JOIN data.automation_occurrences o ON o.run_id=r.run_id AND o.owner_user_id=r.owner_user_id
+            JOIN data.automations t ON t.automation_id=o.automation_id
+            JOIN data.channels c ON c.channel_id=t.channel_id
+            WHERE t.channel_id=$1 AND o.status='cancelled'
+              AND r.metadata_json#>>'{executionCancellation,processCleanup,status}'='pending'
+          UNION ALL
+          SELECT o.updated_at + INTERVAL '2 minutes',c.space_id,t.channel_id
+            FROM data.automation_occurrences o
+            LEFT JOIN data.runs r ON r.run_id=o.run_id AND r.owner_user_id=o.owner_user_id
+            JOIN data.automations t ON t.automation_id=o.automation_id
+            JOIN data.channels c ON c.channel_id=t.channel_id
+            WHERE t.channel_id=$1 AND o.status='dispatched' AND o.finished_at IS NULL
+              AND (r.run_id IS NULL OR r.status NOT IN (${ACTIVE_RUN_STATUS_SQL}))
+        ) automation_wakes WHERE wake_at IS NOT NULL`;
+
 export class PostgresAutomationRepository {
   private readonly channelDirectory: PostgresChannelSpaceDirectory;
   private readonly entityDirectory: PostgresEntitySpaceDirectory;
@@ -1470,44 +1515,7 @@ export class PostgresAutomationRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "automation.next-channel-automation-wake" }, async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "automation_next_channel_wake_v1",
-        text: `SELECT MIN(wake_at) AS wake_at FROM (
-          SELECT t.next_run_at AS wake_at,c.space_id,t.channel_id
-            FROM data.automations t JOIN data.channels c ON c.channel_id=t.channel_id
-            WHERE t.channel_id=$1 AND t.enabled=true
-          UNION ALL
-          SELECT o.next_attempt_at,c.space_id,t.channel_id
-            FROM data.automation_occurrences o
-            JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
-            WHERE t.channel_id=$1 AND o.status='pending'
-          UNION ALL
-          SELECT o.lease_until,c.space_id,t.channel_id
-            FROM data.automation_occurrences o
-            JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
-            WHERE t.channel_id=$1 AND o.status IN ('leased','prepared') AND o.lease_until IS NOT NULL
-          UNION ALL
-          SELECT o.execution_deadline_at,c.space_id,t.channel_id
-            FROM data.automation_occurrences o JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
-            WHERE t.channel_id=$1 AND o.status='dispatched' AND o.finished_at IS NULL
-          UNION ALL
-          SELECT (r.metadata_json#>>'{executionCancellation,processCleanup,nextAttemptAt}')::timestamptz,
-            c.space_id,t.channel_id FROM data.runs r
-            JOIN data.automation_occurrences o ON o.run_id=r.run_id AND o.owner_user_id=r.owner_user_id
-            JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
-            WHERE t.channel_id=$1 AND o.status='cancelled'
-              AND r.metadata_json#>>'{executionCancellation,processCleanup,status}'='pending'
-          UNION ALL
-          SELECT o.updated_at + INTERVAL '2 minutes',c.space_id,t.channel_id
-            FROM data.automation_occurrences o
-            LEFT JOIN data.runs r ON r.run_id=o.run_id AND r.owner_user_id=o.owner_user_id
-            JOIN data.automations t ON t.automation_id=o.automation_id
-            JOIN data.channels c ON c.channel_id=t.channel_id
-            WHERE t.channel_id=$1 AND o.status='dispatched' AND o.finished_at IS NULL
-              AND (r.run_id IS NULL OR r.status NOT IN (${ACTIVE_RUN_STATUS_SQL}))
-        ) automation_wakes WHERE wake_at IS NOT NULL`,
+        text: CHANNEL_AUTOMATION_WAKE_SQL,
         values: [channelId], maxRows: 1 });
       return rows[0]?.wake_at ? iso(rows[0].wake_at) : null;
     });

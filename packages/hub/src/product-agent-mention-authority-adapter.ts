@@ -34,7 +34,7 @@ export async function dispatchPreparedAgentLaunchWake(input: {
   // A fully rejected batch is a valid prepare result. There is no durable work
   // to wake, and the coordinator intentionally rejects an empty launch set.
   if (input.launchIds.length === 0) return "skipped";
-  const wake = await wakeAgentLaunchChannel(input.channels, input)
+  const wake = await wakeAgentLaunchChannel(input.channels, { ...input, work: ["launch"] })
     .catch(() => { throw new AgentLaunchHandoverUnavailable(); });
   if (!wake.ok) throw new AgentLaunchHandoverUnavailable(wake.status);
   return "woken";
@@ -156,6 +156,13 @@ export function createProductAgentMentionAuthorityPort(input: {
     actorUserId: input.actorUserId, ...handoff,
   });
   const principal = { kind: "user" as const, id: input.actorUserId };
+  /** A prepared reborn or handoff is the Channel coordinator's to carry: tell it before answering. */
+  const handedToReborn = async (channelId: string, result: { intentId?: unknown; state?: unknown },
+    failure: "registration_reborn_failed" | "registration_handoff_failed") => {
+    if (typeof result.intentId !== "string") throw new RegistrationAccessError(failure, 502);
+    await wakeAgentLaunchCoordinator(input.env, channelId, ["reborn"]);
+    return { intentId: result.intentId, state: String(result.state) };
+  };
 
   return {
     launchRegistrationInput: (launch) => dispatchRegistrationInput({
@@ -199,17 +206,13 @@ export function createProductAgentMentionAuthorityPort(input: {
         commandId: `registration-reborn:${sourceMessageId}:${sourceInstanceId}`.slice(0, 200),
         actorUserId: input.actorUserId, channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt,
       }) as { intentId?: unknown; state?: unknown };
-      if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_reborn_failed", 502);
-      await wakeAgentLaunchCoordinator(input.env, channelId);
-      return { intentId: result.intentId, state: String(result.state) };
+      return handedToReborn(channelId, result, "registration_reborn_failed");
     },
 
     async prepareRegisteredHandoff({ channelId, sourceInstanceId, sourceMessageId, sourceMention, successorHarness, prompt }) {
       const result = await handoffPrepare({ channelId, sourceInstanceId, sourceMessageId, sourceMention,
         successorHarness, prompt });
-      if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_handoff_failed", 502);
-      await wakeAgentLaunchCoordinator(input.env, channelId);
-      return { intentId: result.intentId, state: String(result.state) };
+      return handedToReborn(channelId, result, "registration_handoff_failed");
     },
 
     async prepareRegisteredAutoHandoff({ channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt }) {
