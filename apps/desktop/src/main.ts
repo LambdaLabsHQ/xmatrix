@@ -67,6 +67,7 @@ import {
   type DesktopNotificationPayload,
 } from "./notifications";
 import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-errors";
+import { daemonFailureNeedsLogin } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
 import { planWindowOpen } from "./window-navigation";
 import {
@@ -974,20 +975,6 @@ function daemonOutputSummary(output: string) {
     .join(" ");
 }
 
-function daemonFailureNeedsLogin(message: string) {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes("not logged in") ||
-    normalized.includes("session refresh failed") ||
-    normalized.includes("invalid refresh token") ||
-    normalized.includes("already used") ||
-    normalized.includes("invalid or expired auth token") ||
-    normalized.includes("saved session cannot be refreshed") ||
-    normalized.includes("session expired") ||
-    normalized.includes("login state lost") ||
-    normalized.includes("waiting for browser login")
-  );
-}
 
 function daemonLoginRequiredMessage(output: string) {
   const summary = daemonOutputSummary(output);
