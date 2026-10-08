@@ -22,8 +22,8 @@ import { type AppView } from "./workspace-shell-navigation";
 import {
   COUNT_CHIP_MATERIAL_CLASS,
   WORKING_SPACE_KV_KEY,
-  XMATRIX_RELEASE_VERSION,
 } from "./workspace-shell-constants";
+import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
 
 import {
   agentPresetOrCustom,
@@ -1606,9 +1606,14 @@ export function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** A component's version, marked when it is older than this web/hub release. */
-export function MachineVersionValue({ version, className }: { version?: string; className?: string }) {
-  const status = releaseVersionStatus(version);
+/** A component's version, marked when it is older than that component's stable release. */
+export function MachineVersionValue({ version, component, className }: {
+  version?: string;
+  component: ReleaseComponent;
+  className?: string;
+}) {
+  const latestVersion = useLatestComponentRelease(component);
+  const status = releaseVersionStatus(version, latestVersion);
   return (
     <span className={cn("flex min-h-5 min-w-0 flex-wrap items-center gap-1.5", className)}>
       <span className="min-w-0 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
@@ -1617,7 +1622,7 @@ export function MachineVersionValue({ version, className }: { version?: string; 
       {status === "outdated" && (
         <span
           className={statusChipClass("attention", "inline-flex h-5 shrink-0 items-center gap-1 px-1.5")}
-          title={`This component is older than web/hub ${formatVersion(XMATRIX_RELEASE_VERSION)}.`}
+          title={`The latest stable release is ${formatVersion(latestVersion!)}.`}
         >
           <AlertTriangle className="size-3.5" />
           Update
