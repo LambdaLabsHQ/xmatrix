@@ -26,7 +26,7 @@ test("session exchange keeps native validation separate from the legacy callback
   assert.deepEqual(await exchangeDesktopCliSession("browser-token"), { ...session, refreshToken: "refresh-token" });
   for (const request of requests) {
     assert.equal(request.url, WEB_PROXY_ROUTES.cli_exchange_session);
-    assert.deepEqual(request.init, { method: "POST", headers: { authorization: "Bearer browser-token" } });
+    assert.deepEqual(request.init, { cache: "no-store", method: "POST", headers: { authorization: "Bearer browser-token" } });
   }
   response = new Response(JSON.stringify({ error: "exchange denied" }), { status: 403 });
   await assert.rejects(exchangeDesktopCliSession("browser-token"), /exchange denied/);
