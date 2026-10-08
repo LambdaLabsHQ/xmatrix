@@ -155,7 +155,6 @@ import {
   Download,
   FileText,
   Hash,
-  HelpCircle,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -164,7 +163,6 @@ import {
   Pencil,
   RefreshCw,
   Reply,
-  ArrowUp,
   ArrowRightLeft,
   SmilePlus,
   Trash2,
@@ -281,33 +279,11 @@ import type {
 
 export type { TimelineItem, ThreadReplyParticipant } from "./workspace-shell-message-model";
 import type { TimelineItem } from "./workspace-shell-message-model";
-
-
-
-export type QuestionnaireOption = {
-  id: string;
-  label: string;
-  value?: string;
-  description?: string;
-};
-
-
-
-export type QuestionnaireQuestion = {
-  id: string;
-  label: string;
-  selectionMode: "single" | "multiple";
-  options: QuestionnaireOption[];
-};
-
-
-
-export type QuestionnaireMetadata = {
-  kind: "xmatrix.questionnaire.v1";
-  toolUseId?: string;
-  selectionMode?: "single" | "multiple";
-  questions: QuestionnaireQuestion[];
-};
+import {
+  AnsweredQuestionnairesProvider,
+  QuestionnaireMessage,
+  questionnaireMetadata,
+} from "./questionnaire-card";
 
 
 
@@ -820,6 +796,7 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   return (
     <PageReferenceScopeProvider scope={pageReferenceScope}>
+    <AnsweredQuestionnairesProvider timeline={timeline}>
     <MentionReadChannelScopeProvider scope={mentionReadScope}>
     <div
       ref={setTimelineScrollRoot}
@@ -1065,6 +1042,7 @@ export const MessageTimeline = memo(function MessageTimeline({
       )}
     </div>
     </MentionReadChannelScopeProvider>
+    </AnsweredQuestionnairesProvider>
     </PageReferenceScopeProvider>
   );
 });
@@ -1246,166 +1224,6 @@ export function MessageTimestamp({ value, clock = false, className }: { value: s
       {clock ? formatMessageClockTime(value) : formatMessageTimestamp(value)}
     </time>
   );
-}
-
-
-
-export function QuestionnaireMessage({
-  questionnaire,
-  message,
-  onAnswer,
-}: {
-  questionnaire: QuestionnaireMetadata;
-  message: TimelineItem;
-  onAnswer: (message: TimelineItem, answer: string) => void;
-}) {
-  const [selected, setSelected] = useState<Record<string, string[]>>({});
-  const canSubmit = questionnaire.questions.every((question) => {
-    if (question.options.length === 0) return true;
-    return (selected[question.id] || []).length > 0;
-  });
-
-  function toggle(question: QuestionnaireQuestion, option: QuestionnaireOption) {
-    setSelected((current) => {
-      const currentValues = current[question.id] || [];
-      if (question.selectionMode === "multiple") {
-        const exists = currentValues.includes(option.id);
-        return {
-          ...current,
-          [question.id]: exists
-            ? currentValues.filter((value) => value !== option.id)
-            : [...currentValues, option.id],
-        };
-      }
-      return { ...current, [question.id]: [option.id] };
-    });
-  }
-
-  function submit() {
-    const lines = questionnaire.questions.map((question) => {
-      const ids = selected[question.id] || [];
-      const labels = question.options
-        .filter((option) => ids.includes(option.id))
-        .map((option) => option.value || option.label);
-      return `${question.label}: ${labels.length > 0 ? labels.join(", ") : ""}`;
-    });
-    onAnswer(message, lines.join("\n"));
-  }
-
-  return (
-    <div className="mt-2 max-w-3xl border border-border bg-background p-3">
-      <div className="mb-2 flex items-center gap-2 text-sm font-black">
-        <HelpCircle className="size-4 text-primary" />
-        <span>Claude question</span>
-        <span className={cn("px-1.5 py-0.5 text-[11px] font-bold uppercase text-muted-foreground", COUNT_CHIP_MATERIAL_CLASS)}>
-          {questionnaire.selectionMode === "multiple" ? "multi" : "single"}
-        </span>
-      </div>
-      <div className="space-y-3">
-        {questionnaire.questions.map((question) => (
-          <fieldset key={question.id} className="min-w-0">
-            <legend className="mb-1 text-sm font-bold">{question.label}</legend>
-            {question.options.length > 0 ? (
-              <div className="grid gap-1.5">
-                {question.options.map((option) => {
-                  const checked = (selected[question.id] || []).includes(option.id);
-                  return (
-                    <label
-                      key={option.id}
-                      className={cn(
-                        "flex min-w-0 cursor-pointer items-start gap-2 border border-border px-2.5 py-2 text-sm transition hover:bg-muted/60",
-                        checked && "border-primary bg-primary/10"
-                      )}
-                    >
-                      <input
-                        type={question.selectionMode === "multiple" ? "checkbox" : "radio"}
-                        name={`${message.messageId || message.id}:${question.id}`}
-                        checked={checked}
-                        onChange={() => toggle(question, option)}
-                        className="mt-0.5 size-4 shrink-0 accent-primary"
-                      />
-                      <span className="min-w-0">
-                        <span className="block break-words font-bold">{option.label}</span>
-                        {option.description && (
-                          <span className="mt-0.5 block break-words text-xs text-muted-foreground">
-                            {option.description}
-                          </span>
-                        )}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Free-form answer requested.</p>
-            )}
-          </fieldset>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          disabled={!canSubmit}
-          onClick={submit}
-          className="inline-flex h-8 items-center gap-1.5 rounded bg-primary px-2.5 text-xs font-bold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <ArrowUp className="size-3.5" strokeWidth={2.5} />
-          Send answer
-        </button>
-      </div>
-    </div>
-  );
-}
-
-
-
-export function questionnaireMetadata(metadata: Record<string, unknown> | undefined): QuestionnaireMetadata | null {
-  if (!metadata || metadata.kind !== "xmatrix.questionnaire.v1") return null;
-  const rawQuestions = Array.isArray(metadata.questions) ? metadata.questions : [];
-  const questions = rawQuestions
-    .map((item, index): QuestionnaireQuestion | null => {
-      if (!item || typeof item !== "object") return null;
-      const record = item as Record<string, unknown>;
-      const label = typeof record.label === "string" ? record.label.trim() : "";
-      if (!label) return null;
-      const selectionMode = record.selectionMode === "multiple" ? "multiple" : "single";
-      const options = Array.isArray(record.options)
-        ? record.options
-            .map((option, optionIndex): QuestionnaireOption | null => {
-              if (!option || typeof option !== "object") return null;
-              const optionRecord = option as Record<string, unknown>;
-              const optionLabel = typeof optionRecord.label === "string" ? optionRecord.label.trim() : "";
-              if (!optionLabel) return null;
-              return {
-                id:
-                  typeof optionRecord.id === "string" && optionRecord.id.trim()
-                    ? optionRecord.id.trim()
-                    : `o${optionIndex + 1}`,
-                label: optionLabel,
-                value: typeof optionRecord.value === "string" ? optionRecord.value : undefined,
-                description:
-                  typeof optionRecord.description === "string" && optionRecord.description.trim()
-                    ? optionRecord.description.trim()
-                    : undefined,
-              };
-            })
-            .filter((option): option is QuestionnaireOption => Boolean(option))
-        : [];
-      return {
-        id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : `q${index + 1}`,
-        label,
-        selectionMode,
-        options,
-      };
-    })
-    .filter((question): question is QuestionnaireQuestion => Boolean(question));
-  if (questions.length === 0) return null;
-  return {
-    kind: "xmatrix.questionnaire.v1",
-    toolUseId: typeof metadata.toolUseId === "string" ? metadata.toolUseId : undefined,
-    selectionMode: metadata.selectionMode === "multiple" ? "multiple" : "single",
-    questions,
-  };
 }
 
 

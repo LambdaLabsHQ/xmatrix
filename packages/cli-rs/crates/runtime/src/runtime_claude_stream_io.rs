@@ -27,13 +27,13 @@ use crate::runtime_claude_messages::claude_assistant_text;
 use crate::runtime_claude_messages::claude_frame_is_subagent;
 use crate::runtime_claude_messages::claude_init_details;
 use crate::runtime_claude_messages::claude_message_id;
-use crate::runtime_claude_messages::claude_questionnaire_channel_message;
 use crate::runtime_claude_messages::claude_runtime_notice_payload;
 use crate::runtime_claude_messages::claude_tool_item_key;
 use crate::runtime_claude_messages::claude_tool_name;
 use crate::runtime_claude_messages::claude_tool_result_blocks;
 use crate::runtime_claude_messages::claude_tool_use_blocks;
 use crate::runtime_claude_stream_session::ActiveStreamTurn;
+use crate::runtime_claude_stream_session::ClaudeParkedQuestion;
 use crate::runtime_claude_stream_session::ClaudeSessionControls;
 use crate::runtime_claude_stream_session::ClaudeStreamProcess;
 use crate::runtime_claude_stream_session::ClaudeWatchdogTimings;
@@ -43,6 +43,13 @@ use crate::runtime_claude_turn::claude_liveness_probe_control_request;
 use crate::runtime_claude_turn::claude_model_catalog;
 use crate::runtime_claude_turn::claude_result_is_cli_originated;
 use crate::runtime_claude_turn::save_claude_resume_session_id;
+use crate::runtime_claude_turn::{
+    ClaudeToolPermission, claude_cancelled_control_request, claude_permission_response,
+    claude_tool_permission,
+};
+use crate::runtime_harness_questions::{
+    claude_questions, publish_questionnaire, questionnaire_message,
+};
 use crate::runtime_trusted_role_prompt::claude_stream_extra_args;
 use crate::runtime_trusted_role_prompt::trusted_role_system_prompt_from_env;
 use crate::runtime_usage_limit::{claude_rate_limit_rejection, usage_limit_from_error};
@@ -489,6 +496,63 @@ pub(crate) async fn claude_stream_reader(
             publish_background_tasks(generation, Some(count));
         }
         task_channels.retain(|task_id, _| background_tasks.running.contains_key(task_id));
+
+        // AskUserQuestion waits on its person: park it and show its card in
+        // the channel the turn serves. Any other tool runs as before.
+        match claude_tool_permission(&value) {
+            Some(ClaudeToolPermission::Allow(response)) => {
+                let _ = write_claude_control_line(&control_stdin, &response).await;
+                continue;
+            }
+            Some(ClaudeToolPermission::Ask {
+                request_id,
+                tool_use_id,
+                input,
+            }) => {
+                let channel = active
+                    .lock()
+                    .await
+                    .as_ref()
+                    .map(|turn| turn.channel_id.clone())
+                    .or_else(|| cli_turn.as_ref().map(|(channel, _)| channel.clone()))
+                    .or_else(|| last_channel_id.clone());
+                let questions = claude_questions(&input);
+                match channel.filter(|_| !questions.is_empty()) {
+                    Some(channel) => {
+                        publish_questionnaire(
+                            &relay,
+                            &channel,
+                            questionnaire_message(
+                                "claude_code",
+                                "Claude",
+                                &tool_use_id,
+                                &questions,
+                            ),
+                        );
+                        model_state
+                            .questions
+                            .park(tool_use_id, ClaudeParkedQuestion { request_id, input });
+                    }
+                    None => {
+                        let refusal = claude_permission_response(
+                            &request_id,
+                            Err(
+                                "xMatrix could not show this question to anyone; ask in your reply instead.",
+                            ),
+                        );
+                        let _ = write_claude_control_line(&control_stdin, &refusal).await;
+                    }
+                }
+                continue;
+            }
+            None => {}
+        }
+        if let Some(request_id) = claude_cancelled_control_request(&value) {
+            model_state
+                .questions
+                .forget(|parked| parked.request_id == request_id);
+            continue;
+        }
 
         // The CLI asking the host something (an MCP elicitation, a tool
         // permission) must be answered or the turn parks until its deadline.
@@ -1186,7 +1250,6 @@ pub(crate) struct ClaudeStreamTraceState {
     pub(crate) last_message_id: Option<String>,
     seen_tool_uses: HashSet<String>,
     seen_tool_results: HashSet<String>,
-    seen_questionnaires: HashSet<String>,
     /// Bash commands that create pull requests, by tool use id, until their result.
     pull_request_commands: HashMap<String, String>,
     /// The plan outlives a turn, so the reporter does too (`next_turn`).
@@ -1352,11 +1415,6 @@ pub(crate) async fn publish_claude_stream_trace(
                     }),
                 )
                 .await;
-                if let Some((body, metadata)) = claude_questionnaire_channel_message(&tool, &key)
-                    && state.seen_questionnaires.insert(key.clone())
-                {
-                    publish_claude_questionnaire_message(relay, channel_id, body, metadata).await;
-                }
             }
         }
         Some("user") => {
@@ -1411,28 +1469,6 @@ pub(crate) async fn publish_claude_stream_trace(
             .await;
         }
         _ => {}
-    }
-}
-
-pub(crate) async fn publish_claude_questionnaire_message(
-    relay: &Arc<agent_instance_connection::AgentInstanceConnectionClient>,
-    channel_id: &str,
-    body: String,
-    metadata: Value,
-) {
-    let relay = relay.clone();
-    if let Err(err) = relay.send_message(protocol::AgentInstanceClientMessage::ChannelMessage {
-        request_id: None,
-        channel_id: channel_id.to_string(),
-        body,
-        reply_to_message_id: None,
-        app_mentions: None,
-        metadata: Some(metadata),
-    }) {
-        eprintln!(
-            "{} failed to publish Claude questionnaire: {err}",
-            "⚠".yellow().bold()
-        );
     }
 }
 
