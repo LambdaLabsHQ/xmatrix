@@ -171,6 +171,16 @@ Startup checkpoint history is bounded to 16 first observations from the current 
 
 Wrapper execution-phase updates cannot set `delivered=true`. The retained legacy field is false for these writes and is not a Channel commit receipt. A delivered bit alone does not make a local process terminal. Machine lifecycle authority classifies execution from explicit phases, completion and exit evidence independently from reply delivery; scheduled execution retains its explicit phase requirement. Final reply receipts and recovery are a separate, still-incomplete contract. Deploy the Hub/DB classification before publishing this CLI semantic change because older servers treated `delivered=false` as execution failure.
 
+## Repository snapshot preparation
+
+Fresh repo-pool leases fetch origin's default branch before creating a worktree
+(successful snapshots may be shared for 120 seconds). The fetch permits a
+non-fast-forward update only to that branch's remote-tracking ref, so a remote
+history rewrite or rollback replaces the cached snapshot. Local branches,
+uncommitted files, and existing leased worktrees remain unchanged. New worktrees
+use the fetched commit; a failed fetch still aborts preparation and reports its
+original cause. Existing retained Runs keep their checkout on resume.
+
 ## Startup failure diagnostics
 
 The daemon preserves the originating failure text through the Channel startup
