@@ -7,7 +7,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use xmatrix_cli_core::git_credential;
 
 const MANIFEST_VERSION: u8 = 1;
@@ -31,9 +31,6 @@ const WORKTREE_LOCK_REASON_PREFIX: &str = "xmatrix-repo-pool:";
 const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(20);
 const GIT_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 const GIT_FETCH_ATTEMPTS: u32 = 3;
-/// Same-repo `:new` bursts share one snapshot. Long enough to cover a spawn
-/// wave; short enough that a later lease is not hours behind origin.
-const REQUIRED_FETCH_CACHE_TTL: Duration = Duration::from_secs(120);
 const GIT_WORKTREE_ADD_TIMEOUT: Duration = Duration::from_secs(120);
 const GIT_MUTATION_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -2937,7 +2934,6 @@ struct InFlightFetch {
 }
 
 struct FetchRepoState {
-    cache: Option<(Instant, ResolvedBase)>,
     inflight: Option<Arc<InFlightFetch>>,
 }
 
@@ -2960,16 +2956,6 @@ fn fetch_coordinator_key(base_repo: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-fn invalidate_required_fetch_cache(base_repo: &Path) {
-    let key = fetch_coordinator_key(base_repo);
-    if let Ok(mut states) = fetch_repo_states().lock()
-        && let Some(state) = states.get_mut(&key)
-    {
-        state.cache = None;
-    }
-}
-
-#[cfg(test)]
 fn take_required_fetch_perform_count(base_repo: &Path) -> u32 {
     let key = fetch_coordinator_key(base_repo);
     fetch_perform_counts()
@@ -2986,13 +2972,14 @@ fn fetch_perform_counts() -> &'static StdMutex<std::collections::HashMap<PathBuf
 }
 
 enum FetchPlan {
-    Cached(ResolvedBase),
     Join(Arc<InFlightFetch>),
     Lead(Arc<InFlightFetch>),
 }
 
-/// Repo-level required fetch: reuse a fresh snapshot, join an in-flight fetch,
-/// or become the leader. Never holds the pool manifest lock.
+/// Repo-level required fetch: join the confirmation already in flight or lead
+/// a new one. Only simultaneous callers share a result; a finished
+/// confirmation is never reused, so every later lease asks origin again.
+/// Never holds the pool manifest lock.
 async fn required_fetch_and_resolve(base_repo: &Path) -> Result<ResolvedBase, PoolError> {
     let key = fetch_coordinator_key(base_repo);
     loop {
@@ -3000,15 +2987,10 @@ async fn required_fetch_and_resolve(base_repo: &Path) -> Result<ResolvedBase, Po
             let mut states = fetch_repo_states()
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let state = states.entry(key.clone()).or_insert(FetchRepoState {
-                cache: None,
-                inflight: None,
-            });
-            if let Some((at, resolved)) = &state.cache
-                && at.elapsed() < REQUIRED_FETCH_CACHE_TTL
-            {
-                FetchPlan::Cached(resolved.clone())
-            } else if let Some(inflight) = state.inflight.clone() {
+            let state = states
+                .entry(key.clone())
+                .or_insert(FetchRepoState { inflight: None });
+            if let Some(inflight) = state.inflight.clone() {
                 FetchPlan::Join(inflight)
             } else {
                 let inflight = Arc::new(InFlightFetch {
@@ -3020,7 +3002,6 @@ async fn required_fetch_and_resolve(base_repo: &Path) -> Result<ResolvedBase, Po
             }
         };
         match plan {
-            FetchPlan::Cached(resolved) => return Ok(resolved),
             FetchPlan::Lead(inflight) => {
                 let outcome = perform_required_fetch_and_resolve(base_repo).await;
                 let shared = match &outcome {
@@ -3036,9 +3017,6 @@ async fn required_fetch_and_resolve(base_repo: &Path) -> Result<ResolvedBase, Po
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if let Some(state) = states.get_mut(&key) {
                         state.inflight = None;
-                        if let Ok(resolved) = &shared {
-                            state.cache = Some((Instant::now(), resolved.clone()));
-                        }
                     }
                 }
                 if let Ok(mut slot) = inflight.result.lock() {
@@ -3069,7 +3047,15 @@ fn shared_fetch_result(shared: SharedFetchResult) -> Result<ResolvedBase, PoolEr
     shared.map_err(|error| PoolError::new(error.code, error.message))
 }
 
-/// Required fetch first, then resolve remote default. No HEAD fallback.
+/// Confirm origin's default branch with origin itself, then fetch and resolve
+/// exactly that branch. A local `origin/HEAD` never chooses the branch: it can
+/// name a branch origin renamed or deleted, and `remote set-head --auto`
+/// cannot repair it while the new branch was never fetched.
+///
+/// The returned oid is the remote-tracking ref this confirmation left behind:
+/// origin's tip as `ls-remote` advertised it when that ref already held it,
+/// otherwise the tip this fetch downloaded (origin may have moved on between
+/// the two). It is the tip origin had during this confirmation, nothing newer.
 async fn perform_required_fetch_and_resolve(base_repo: &Path) -> Result<ResolvedBase, PoolError> {
     #[cfg(test)]
     {
@@ -3080,99 +3066,14 @@ async fn perform_required_fetch_and_resolve(base_repo: &Path) -> Result<Resolved
             .entry(key)
             .or_insert(0) += 1;
     }
-    required_origin_fetch(base_repo).await?;
-
-    let _ = git(
-        base_repo,
-        &["remote", "set-head", "origin", "--auto"],
-        GIT_FETCH_TIMEOUT,
-    )
-    .await;
-
-    let base_ref = if let Ok(branch) = git(
-        base_repo,
-        &[
-            "symbolic-ref",
-            "--quiet",
-            "--short",
-            "refs/remotes/origin/HEAD",
-        ],
-        GIT_LOCAL_TIMEOUT,
-    )
-    .await
-    {
-        branch
-    } else {
-        let mut found = None;
-        for candidate in ["origin/main", "origin/master"] {
-            if git(
-                base_repo,
-                &["rev-parse", "--verify", "--quiet", candidate],
-                GIT_LOCAL_TIMEOUT,
-            )
-            .await
-            .is_ok()
-            {
-                found = Some(candidate.to_string());
-                break;
-            }
-        }
-        found.ok_or_else(|| {
-            PoolError::new(
-                PoolErrorCode::BaseRefUnresolved,
-                "could not resolve origin default branch after fetch",
-            )
-        })?
-    };
-
-    let oid = git(
-        base_repo,
-        &["rev-parse", "--verify", &base_ref],
-        GIT_LOCAL_TIMEOUT,
-    )
-    .await
-    .map_err(|_| {
-        PoolError::new(
-            PoolErrorCode::BaseRefUnresolved,
-            "could not resolve base oid",
-        )
-    })?;
-    Ok(ResolvedBase { base_ref, oid })
-}
-
-/// `git fetch` on a pool base can lose a lock or a brief network blip,
-/// especially when the checkout already has many linked worktrees. Fetch
-/// only the default branch — a full `origin` download races every other
-/// remote-tracking lock on a busy Workstation checkout — and retry instead
-/// of failing the whole :new lease.
-async fn required_origin_fetch(base_repo: &Path) -> Result<(), PoolError> {
-    let spec = origin_default_fetch_spec(base_repo).await;
     let mut last_error = GitCommandError::from(GitRunError::Failed);
     for attempt in 1..=GIT_FETCH_ATTEMPTS {
-        let result = match spec.as_deref() {
-            Some(branch) => {
-                // This remote-tracking ref is a cache of origin, including rewritten history.
-                // Force only this ref; local branches and leased worktrees stay untouched.
-                let refspec = format!("+refs/heads/{branch}:refs/remotes/origin/{branch}");
-                git(
-                    base_repo,
-                    &["fetch", "--no-tags", "origin", &refspec],
-                    GIT_FETCH_TIMEOUT,
-                )
-                .await
-            }
-            None => {
-                git(
-                    base_repo,
-                    &["fetch", "--no-tags", "origin"],
-                    GIT_FETCH_TIMEOUT,
-                )
-                .await
-            }
-        };
-        match result {
-            Ok(_) => return Ok(()),
-            Err(error) => last_error = error,
+        // Each attempt asks origin again: the branch itself may have changed
+        // or vanished since the previous attempt.
+        match confirm_origin_default_once(base_repo).await {
+            Ok(resolved) => return Ok(resolved),
+            Err(ConfirmError::Git(error)) => last_error = error,
+            Err(ConfirmError::Pool(error)) => return Err(error),
         }
         // A refused credential or a missing repository does not change on retry.
         if matches!(last_error.kind, GitRunError::Auth | GitRunError::NotFound) {
@@ -3212,53 +3113,102 @@ fn required_fetch_error(error: GitCommandError, space_scoped: bool) -> PoolError
     )
 }
 
-/// Prefer an already-known `origin/HEAD`, else one `ls-remote --symref`.
-/// The returned name is only used as a fetch refspec, never interpolated
-/// into a shell.
-async fn origin_default_fetch_spec(base_repo: &Path) -> Option<String> {
-    if let Ok(symbolic) = git(
-        base_repo,
-        &[
-            "symbolic-ref",
-            "--quiet",
-            "--short",
-            "refs/remotes/origin/HEAD",
-        ],
-        GIT_LOCAL_TIMEOUT,
-    )
-    .await
-        && let Some(branch) = symbolic.strip_prefix("origin/") {
-            let branch = branch.trim();
-            if is_safe_fetch_branch(branch) {
-                return Some(branch.to_string());
-            }
-        }
-    let output = git(
+enum ConfirmError {
+    /// A Git command against origin failed; retried, then reported verbatim.
+    Git(GitCommandError),
+    /// Origin answered, and the answer cannot be used; retrying cannot help.
+    Pool(PoolError),
+}
+
+async fn confirm_origin_default_once(base_repo: &Path) -> Result<ResolvedBase, ConfirmError> {
+    let advertised = git(
         base_repo,
         &["ls-remote", "--symref", "origin", "HEAD"],
         GIT_FETCH_TIMEOUT,
     )
     .await
-    .ok()?;
-    parse_ls_remote_head_branch(&output)
+    .map_err(ConfirmError::Git)?;
+    let (branch, advertised_oid) = parse_ls_remote_head(&advertised).ok_or_else(|| {
+        ConfirmError::Pool(PoolError::new(
+            PoolErrorCode::BaseRefUnresolved,
+            "could not resolve origin default branch: origin advertises none with a commit",
+        ))
+    })?;
+    // Only fetch and resolve this one ref: every branch-specific step below
+    // reads the branch origin named just now.
+    let tracking = format!("refs/remotes/origin/{branch}");
+    let tracking_commit = format!("{tracking}^{{commit}}");
+    let held = git(
+        base_repo,
+        &["rev-parse", "--verify", "--quiet", &tracking_commit],
+        GIT_LOCAL_TIMEOUT,
+    )
+    .await
+    .ok();
+    if held.as_deref() != Some(advertised_oid.as_str()) {
+        // The remote-tracking ref is a cache of origin, including rewritten
+        // history: force only this ref; local branches and leased worktrees
+        // stay untouched.
+        let refspec = format!("+refs/heads/{branch}:{tracking}");
+        git(
+            base_repo,
+            &["fetch", "--no-tags", "origin", &refspec],
+            GIT_FETCH_TIMEOUT,
+        )
+        .await
+        .map_err(ConfirmError::Git)?;
+    }
+    let oid = git(
+        base_repo,
+        &["rev-parse", "--verify", &tracking_commit],
+        GIT_LOCAL_TIMEOUT,
+    )
+    .await
+    .map_err(|_| {
+        ConfirmError::Pool(PoolError::new(
+            PoolErrorCode::BaseRefUnresolved,
+            format!("could not resolve origin/{branch} after fetch"),
+        ))
+    })?;
+    // Keep the local default-branch note in step for Git tools run inside the
+    // checkout. Nothing on this path reads it back, so a lost race is harmless.
+    let _ = git(
+        base_repo,
+        &["symbolic-ref", "refs/remotes/origin/HEAD", &tracking],
+        GIT_LOCAL_TIMEOUT,
+    )
+    .await;
+    Ok(ResolvedBase {
+        base_ref: format!("origin/{branch}"),
+        oid,
+    })
 }
 
-fn parse_ls_remote_head_branch(output: &str) -> Option<String> {
+/// Origin's default branch and its tip from `git ls-remote --symref origin HEAD`.
+/// The branch name is only used as a fetch refspec, never interpolated into a
+/// shell.
+pub(crate) fn parse_ls_remote_head(output: &str) -> Option<(String, String)> {
+    let mut branch = None;
+    let mut oid = None;
     for line in output.lines() {
         let line = line.trim();
-        let Some(rest) = line.strip_prefix("ref:") else {
-            continue;
-        };
-        let name = rest.split(['\t', ' ']).find(|part| {
-            let part = part.trim();
-            !part.is_empty() && part != "HEAD"
-        })?;
-        let branch = name.trim().strip_prefix("refs/heads/")?;
-        if is_safe_fetch_branch(branch) {
-            return Some(branch.to_string());
+        if let Some(rest) = line.strip_prefix("ref:") {
+            let mut parts = rest.split(['\t', ' ']).map(str::trim).filter(|part| !part.is_empty());
+            let (Some(name), Some("HEAD")) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            branch = name
+                .strip_prefix("refs/heads/")
+                .filter(|name| is_safe_fetch_branch(name))
+                .map(str::to_string);
+        } else if let Some((value, "HEAD")) = line.split_once('\t').map(|(v, n)| (v.trim(), n.trim()))
+            && matches!(value.len(), 40 | 64)
+            && value.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            oid = Some(value.to_ascii_lowercase());
         }
     }
-    None
+    Some((branch?, oid?))
 }
 
 fn is_safe_fetch_branch(name: &str) -> bool {
