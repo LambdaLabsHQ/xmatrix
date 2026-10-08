@@ -216,3 +216,18 @@ test("new versions inherit only private review fields and use manual release", a
   assert.equal(created.data.attributes.demoAccountPassword, "SENSITIVE_TEST_SENTINEL");
   assert.equal(created.data.relationships.appStoreVersion.data.id, "new-version");
 });
+
+
+test("retry after creating a version but before creating review details recovers from the prior version", async () => {
+  const draft = { id: "version", attributes: { versionString: "1.0.200", appVersionState: "PREPARE_FOR_SUBMISSION" } };
+  const previous = { id: "previous", attributes: { versionString: "1.0.199", appVersionState: "READY_FOR_DISTRIBUTION" } };
+  const { api, writes } = fixture({ versions: [draft, previous] });
+  const original = api.request;
+  api.request = async (path, method = "GET", data) => {
+    if (path === "/v1/appStoreVersions/version/appStoreReviewDetail") throw new AppleApiError(404);
+    return original(path, method, data);
+  };
+  assert.equal((await submitRelease(api, args)).outcome, "submitted");
+  assert.equal(writes.some((row) => row.path === "/v1/appStoreVersions" && row.method === "POST"), false);
+  assert.ok(writes.find((row) => row.path === "/v1/appStoreReviewDetails"));
+});

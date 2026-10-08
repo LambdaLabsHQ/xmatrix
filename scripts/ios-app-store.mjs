@@ -99,9 +99,16 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   }
   // Contact/login facts stay at Apple. Never read them from public metadata.
   // New-version creation requires an existing review configuration to inherit.
-  const source = target ?? versions.find((row) => SUBMITTED.has(state(row)));
-  if (!source) throw new Error("Configure the first App Store version and private review details at Apple before enabling submission.");
-  const review = (await api.request(`/v1/appStoreVersions/${source.id}/appStoreReviewDetail`)).data;
+  const candidates = [target, ...versions.filter((row) => row.id !== target?.id && SUBMITTED.has(state(row)))
+    .sort((left, right) => compareVersions(right.attributes.versionString, left.attributes.versionString))].filter(Boolean);
+  let review;
+  for (const candidate of candidates.slice(0, 10)) {
+    try {
+      review = (await api.request(`/v1/appStoreVersions/${candidate.id}/appStoreReviewDetail`)).data;
+      if (review) break;
+    } catch (error) { if (!(error instanceof AppleApiError) || error.status !== 404) throw error; }
+  }
+  if (!review) throw new Error("Configure private App Review details at Apple before enabling submission.");
   const details = review.attributes;
   const notes = privateNotes ? `${privateNotes}\n\nRelease: ${version} (${buildNumber}).` : details.notes;
   if (typeof notes !== "string" || !notes.trim() || notes.length > 4000) throw new Error("Private App Review notes are missing or exceed Apple's limit.");
