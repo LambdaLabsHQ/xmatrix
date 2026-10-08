@@ -45,6 +45,19 @@ function InvocationRuntimeDetails({ activity, view, unavailable }: {
   </>;
 }
 
+function RepositoryBaselineDetails({ baseline }: { baseline: NonNullable<AgentLaunchActivity["repositoryBaseline"]> }) {
+  return <div className="app-invocation-description">
+    <p>Checkout base: <code>{baseline.baseRef} @ {baseline.baseOid}</code></p>
+    <p>{baseline.confirmedAt ? `Confirmed ${baseline.confirmedAt} (UTC).` : "Original confirmation time unavailable."}</p>
+    {baseline.historyRewritten === true && <p>The previous tip of this same remote branch was replaced or rolled back.</p>}
+    {baseline.remote && <p>Remote snapshot: <code>{baseline.remote.baseRef} @ {baseline.remote.baseOid}</code><br />
+      Confirmed {baseline.remote.confirmedAt} (UTC).</p>}
+    {baseline.relationship === "diverged" && <p>The recorded base is outside the confirmed remote history. The checkout was preserved.</p>}
+    {baseline.relationship === "ancestor" && <p>The recorded base is an ancestor of this remote snapshot.</p>}
+    {baseline.relationship === "unknown" && <p>Could not confirm whether the recorded base belongs to the current remote history.</p>}
+  </div>;
+}
+
 export function MentionContinuationChip({ record, unavailable }: { record: SerializedAgentContinuation; unavailable?: boolean }) {
   const view = continuationView(record, unavailable);
   const label = record.sourceName + record.sourceMention.slice(record.sourceName.length + 1);
@@ -61,6 +74,7 @@ export function MentionContinuationChip({ record, unavailable }: { record: Seria
     subtitle={`${record.kind === "reborn" ? "Restart" : `Handoff to @${record.targetName}`} · ${record.activity?.hostName || "Selected machine"}`}
     details={<>
       <InvocationRuntimeDetails activity={view.terminal ? undefined : record.activity} view={view} unavailable={unavailable} />
+      {record.activity?.repositoryBaseline && <RepositoryBaselineDetails baseline={record.activity.repositoryBaseline} />}
       <code>Successor: {record.runId}</code><code>Predecessor: {record.sourceRunId}</code>
     </>} />;
 }
@@ -100,6 +114,7 @@ export function MentionInvocationChip({ label, labelContent, announcement, image
     details={<>
       {decision && <RoutingDecisionBoard decision={decision} evidenceOnly />}
       <InvocationRuntimeDetails activity={view.terminal ? undefined : activity} view={view} unavailable={unavailable} />
+      {activity?.repositoryBaseline && <RepositoryBaselineDetails baseline={activity.repositoryBaseline} />}
       {launch.attempt > 0 && <p className="app-invocation-description">Command delivery retries: {launch.attempt}</p>}
     </>} />;
 }

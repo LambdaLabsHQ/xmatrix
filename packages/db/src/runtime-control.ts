@@ -1,4 +1,4 @@
-import { localLlmUsage } from "@xmatrix/protocol";
+import { cleanRepositoryBaseline, localLlmUsage } from "@xmatrix/protocol";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { readFirstMessageLaunchChoices } from "./first-message-launch-choice.js";
 import { initialMessageSource } from "./runtime-initial-input.js";
@@ -198,8 +198,10 @@ function invocationRunActivity(row: QueryResultRow): AgentLaunchActivity | undef
   if (!row.run_status) return undefined;
   const runMetadata = metadata(row, "run_metadata_json");
   const progress = readInvocationProgress(runMetadata.invocationProgress);
+  const repositoryBaseline = cleanRepositoryBaseline(runMetadata.repositoryBaseline);
   return {
       runStatus: String(row.run_status),
+      ...(repositoryBaseline ? { repositoryBaseline } : {}),
       ...(row.instance_status ? { instanceStatus: String(row.instance_status) } : {}),
       ...(typeof runMetadata.hostname === "string" || typeof runMetadata.hostName === "string" || typeof runMetadata.hostId === "string"
         ? { hostName: String(runMetadata.hostname || runMetadata.hostName || runMetadata.hostId).slice(0, 160) } : {}),

@@ -1,4 +1,4 @@
-import { sha256Hex } from "@xmatrix/protocol";
+import { sha256Hex, type RepositoryBaseline } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
 import { humanizeMachineRunFailureDetail, machineStopFailureCode } from "./machine-run-failure";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
@@ -82,4 +82,27 @@ export async function machineStopResultNoticeCommand(input: MachineStopResultNot
 
 export async function publishMachineStopResultNotice(env: Env, input: MachineStopResultNotice): Promise<void> {
   await appendChannelMessage(env, input.channelId, await machineStopResultNoticeCommand(input));
+}
+
+/** Once per checkout/base in this Channel, including report replays and later
+ * reborns. Only immutable base facts enter the command; remote tips change. */
+export async function repositoryBaselineNoticeCommand(input: {
+  channelId: string; ownerUserId: string; ownerEmail: string; baseline: RepositoryBaseline;
+}) {
+  if (input.baseline.relationship !== "diverged" || !input.baseline.noticeKey || !input.baseline.remote) {
+    throw new TypeError("A repository continuity notice requires proven divergence");
+  }
+  const digest = await sha256Hex(`${input.channelId}\0${input.baseline.noticeKey}`);
+  return {
+    commandId: `repository-baseline-notice:${digest}`, messageId: `system:repository-baseline:${digest}`,
+    channelId: input.channelId, ...systemNoticeAuthor(input), messageKind: "xmatrix.system.repository-continuity",
+    body: `This continued task's recorded base ${input.baseline.baseRef} @ ${input.baseline.baseOid} is no longer an ancestor of the confirmed remote default branch. The checkout and uncommitted work have been preserved. Before publishing, check the current remote history and avoid reintroducing removed commits.`,
+    residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
+      source: "repository_baseline", noticeKey: input.baseline.noticeKey,
+      baseRef: input.baseline.baseRef, baseOid: input.baseline.baseOid } },
+  };
+}
+
+export async function publishRepositoryBaselineNotice(env: Env, input: Parameters<typeof repositoryBaselineNoticeCommand>[0]): Promise<void> {
+  await appendChannelMessage(env, input.channelId, await repositoryBaselineNoticeCommand(input));
 }

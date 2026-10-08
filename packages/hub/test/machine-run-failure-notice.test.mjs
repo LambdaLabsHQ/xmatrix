@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { machineRunFailureNoticeCommand, machineStopResultNoticeCommand } from "../src/machine-run-failure-notice.ts";
+import { machineRunFailureNoticeCommand, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand } from "../src/machine-run-failure-notice.ts";
 
 const base = { runId: "run-1", channelId: "channel-1", agentName: "grok", ownerUserId: "owner",
   ownerEmail: "owner@example.test", machineId: "machine:a", hostId: "cursor" };
+
+test("continuity notices have immutable commands across remote changes and later reborns", async () => {
+  const baseline = { baseRef: "origin/main", baseOid: "a".repeat(40), noticeKey: "b".repeat(64), relationship: "diverged",
+    remote: { baseRef: "origin/trunk", baseOid: "c".repeat(40), confirmedAt: "2026-10-08T10:00:00Z" } };
+  const first = await repositoryBaselineNoticeCommand({ ...base, baseline });
+  const later = await repositoryBaselineNoticeCommand({ ...base, runId: "run-2", agentName: "codex", baseline: {
+    ...baseline, remote: { ...baseline.remote, baseOid: "d".repeat(40) } } });
+  assert.deepEqual(later, first, "stable command and message deduplicate without payload conflicts");
+  assert.equal(first.residual.appMetadata.xmatrixProvenance, "system_fact");
+  assert.match(first.body, /checkout and uncommitted work have been preserved/u);
+  await assert.rejects(repositoryBaselineNoticeCommand({ ...base, baseline: { ...baseline, relationship: "unknown" } }));
+});
 
 test("Machine notices name the Machine as its owner named it, never its hostname", async () => {
   const start = await machineRunFailureNoticeCommand({ ...base, machineName: "Grok Bot Machine",

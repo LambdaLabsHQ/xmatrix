@@ -165,6 +165,8 @@ struct DaemonRepoPoolBinding {
     slot_id: String,
     base_repo: PathBuf,
     resumed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    baseline: Option<repo_pool::RepositoryBaseline>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
