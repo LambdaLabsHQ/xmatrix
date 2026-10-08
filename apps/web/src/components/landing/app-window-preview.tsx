@@ -9,7 +9,6 @@ import { buildTimeline } from "@/components/dashboard/workspace-shell-recovered"
 import { humanProfileFromSpaceMember } from "@/components/dashboard/human-profile-summary";
 import type { SpaceChannelCatalog } from "@/components/dashboard/use-channel-catalog-paging";
 import type { TimelineJumpHandle } from "@/components/dashboard/workspace-message-timeline";
-import type { SpacePlanBilling } from "@/components/dashboard/space-plan-mark";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { useAuth } from "@/lib/auth-context";
 
@@ -138,10 +137,6 @@ function registration(harness: string): AgentRegistrationSummary {
 /** `readerId` is whoever is signed in on this browser, which keys the catalog read. */
 function previewQueryClient(readerId: string) {
   const client = new QueryClient();
-  client.setQueryData<SpacePlanBilling>(
-    xmatrixQueryKeys.domain({ userId: viewer.id }, "billing", [space.id]),
-    { plan: "pro" },
-  );
   client.setQueryData(
     xmatrixQueryKeys.domain({ userId: readerId }, "agent-registration-catalog", [space.id]),
     { capabilities: [], registrations: [registration("claude"), registration("codex")] },

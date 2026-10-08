@@ -317,43 +317,6 @@ html[data-app-theme="wood"] .xmatrix-app .app-space-agent-used-label {
   opacity: 0.68;
 }
 
-/* ---- Space plan: the plan mark ----
-   The mark is `COUNT_CHIP_MATERIAL_CLASS` plus ink. It deliberately invents no
-   material: every chip-scale element in the app wears the selected channel
-   row's liquid glass, and a bespoke gilt recipe would be a second chip
-   material. Brass is the theme's own accent, so it survives the monochrome
-   sweep in globals.css that flattens `amber-*` utilities to grey — which is
-   also why the ink is a token here rather than a Tailwind colour class.
-   Note the display is set here, not with the `inline-flex` utility: the glass
-   rules exclude `.inline-flex`, so that class would strip the chip's glass. */
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-space-plan-mark {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  height: 1rem;
-  padding: 0 0.4375rem;
-  color: var(--m-plan-free-ink) !important;
-  font-size: 0.5625rem;
-  font-weight: 800;
-  letter-spacing: 0.09em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-space-plan-mark[data-plan="pro"] {
-  color: var(--m-plan-pro-ink) !important;
-}
-
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-space-plan-mark[data-state="ending"] {
-  color: var(--m-plan-ending-ink) !important;
-}
-
-/* Blocked outranks the plan: a Space that cannot send says so whichever plan
-   it is on, so this rule follows the per-plan ones rather than preceding them. */
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-space-plan-mark[data-state="blocked"] {
-  color: var(--m-plan-blocked-ink) !important;
-}
-
 /* ---- plan cards (Settings → Billing) ----
    A paid plan is a LiquidGlassCard on a WoodPanel (the shared primitives, as
    on the details plank), black text with the plan's
