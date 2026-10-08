@@ -98,8 +98,3 @@ export function subscribeResume(listener: Listener): () => void {
     }
   };
 }
-
-/** Whether a request made now can reach the network and anyone is looking. */
-export function pageCanUseNetwork(): boolean {
-  return typeof document !== "undefined" && !document.hidden && navigator.onLine !== false;
-}
