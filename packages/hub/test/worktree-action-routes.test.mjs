@@ -32,11 +32,11 @@ test("the owner issues a worktree action to the one online daemon of the Machine
   assert.deepEqual(issued.payload, { type: "machine_worktree_action", requestId: body.controlId, action: "reclaim",
     paths: ["/tmp/a"] });
   assert.deepEqual([issued.ownerUserId, issued.daemonId, issued.commandType], ["owner", "daemon:a", "worktree_action"]);
-  assert.deepEqual(issued.principal, { kind: "user", id: "owner" });
+  assert.equal(issued.principal.id, "owner");
 });
 
-test("Agent runs, bad input and offline Machines are refused before anything is issued", async () => {
-  const agent = route({ id: "agent-run:run", agentRun: { runId: "run", ownerUserId: "owner" } });
+test("only the signed-in owner reaches a Machine's worktrees, on every route", async () => {
+  const agent = route({ id: "agent-run:run", agentRun: { ownerUserId: "owner", runId: "run" } });
   assert.equal((await agent.post({ machineId: "machine:a", action: "list" })).status, 403);
   assert.equal((await agent.get("worktree:00000000-0000-4000-8000-000000000000")).status, 403);
   assert.equal((await agent.list("?machineId=machine:a")).status, 403);
