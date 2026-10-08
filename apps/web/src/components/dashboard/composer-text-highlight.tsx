@@ -157,23 +157,33 @@ function useSoftCaret(textareaRef: RefObject<HTMLTextAreaElement | null>, mirror
       composing = event.type === "compositionstart";
       place();
     };
+    // A key or click moves the selection right after its listeners run, but
+    // selectionchange can arrive a frame later; place again before that paint.
+    let frame = 0;
+    const soon = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(place);
+    };
     place();
     document.addEventListener("selectionchange", place);
+    input.addEventListener("keydown", soon);
+    input.addEventListener("mousedown", soon);
     input.addEventListener("selectionchange", place);
     input.addEventListener("focus", place);
     input.addEventListener("blur", place);
-    input.addEventListener("input", place);
     input.addEventListener("scroll", place);
     input.addEventListener("compositionstart", compose);
     input.addEventListener("compositionend", compose);
     const observer = new ResizeObserver(place);
     observer.observe(input);
     return () => {
+      cancelAnimationFrame(frame);
       document.removeEventListener("selectionchange", place);
+      input.removeEventListener("keydown", soon);
+      input.removeEventListener("mousedown", soon);
       input.removeEventListener("selectionchange", place);
       input.removeEventListener("focus", place);
       input.removeEventListener("blur", place);
-      input.removeEventListener("input", place);
       input.removeEventListener("scroll", place);
       input.removeEventListener("compositionstart", compose);
       input.removeEventListener("compositionend", compose);
