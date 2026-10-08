@@ -128,13 +128,8 @@ export async function executeFirstMessageDecision(input: {
   const choose = registrationLaunchChooser(input.evaluate);
   const read = (onHarness?: (harness: string) => Promise<void>) => repository.readHarnessToStart({
     actorUserId: input.actorUserId, body: input.body, ...(onHarness ? { onHarness } : {}) }, choose);
-  if (!input.window) {
-    try { return { claimed: true, harness: await read() }; }
-    catch (error) {
-      if (error instanceof RegistrationAccessError && error.code === START_INTENT_DECLINED) return { claimed: true };
-      throw error;
-    }
-  }
+  // Both authors persist the same decision before the system summon can be
+  // authorized. The database gives Agent publications an immediate deadline.
   return decideFirstMessageLaunch({ ...input, read, choices: new PostgresFirstMessageLaunchChoiceRepository(input.database, {
     spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch }) });
 }
