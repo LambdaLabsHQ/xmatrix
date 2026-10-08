@@ -507,6 +507,22 @@ export interface MachineDaemonHarnessActionResultReport {
   relayLease?: MachineDaemonCommandLease;
 }
 
+export interface MachineDaemonWorktreeActionCommand {
+  type: "machine_worktree_action";
+  requestId: string;
+  action: import("../worktree-management.js").WorktreeAction;
+  /** Only on `reclaim`. */
+  paths?: string[];
+  relayLease?: MachineDaemonCommandLease;
+}
+
+export interface MachineDaemonWorktreeActionResultReport {
+  type: "machine_worktree_action_result";
+  requestId: string;
+  result: import("../worktree-management.js").WorktreeActionResult;
+  relayLease?: MachineDaemonCommandLease;
+}
+
 export interface MachineDaemonQuotaProbeResultReport {
   type: "machine_quota_probe_result";
   requestId: string;
@@ -516,6 +532,7 @@ export interface MachineDaemonQuotaProbeResultReport {
 
 export type MachineDaemonClientMessage =
   | MachineDaemonHarnessActionResultReport
+  | MachineDaemonWorktreeActionResultReport
   | MachineDaemonQuotaProbeResultReport
   | MachineDaemonConnectMessage
   | { type: "ping"; requestId?: string }
@@ -546,6 +563,7 @@ type MachineDaemonShutdown = { reason?: string } & { type: "shutdown_requested" 
 
 export type MachineDaemonServerMessage =
   | MachineDaemonHarnessActionCommand
+  | MachineDaemonWorktreeActionCommand
   | MachineDaemonQuotaProbeCommand
   | MachineDaemonError
   | MachineDaemonPong

@@ -115,6 +115,7 @@ fn replay_result_matches_command(
         ),
         Some("machine_quota_probe") => ("machine_quota_probe_result", &["requestId"]),
         Some("machine_harness_action") => ("machine_harness_action_result", &["requestId"]),
+        Some("machine_worktree_action") => ("machine_worktree_action_result", &["requestId"]),
         _ => return Ok(false),
     };
     if result_type != Some(expected_result_type)
@@ -174,7 +175,8 @@ fn command_admission_report(command: &MachineDaemonCommand) -> error::Result<Mac
             ..
         } => (request_id.clone(), None, Some(channel_id.clone())),
         MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
-        | MachineDaemonCommand::MachineHarnessAction { request_id, .. } => {
+        | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
+        | MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id.clone(), None, None)
         }
     };
@@ -244,6 +246,9 @@ fn prepare_command_effect(
         MachineDaemonCommand::MachineQuotaProbe { request_id, .. } => (request_id, "quota_probe"),
         MachineDaemonCommand::MachineHarnessAction { request_id, .. } => {
             (request_id, "harness_action")
+        }
+        MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
+            (request_id, "worktree_action")
         }
     };
     let mut payload = serde_json::to_value(command)?;
@@ -455,6 +460,38 @@ where
     })
 }
 
+/// Renew an owner action's lease while it runs; `None` when it cannot be held.
+async fn hold_owner_action_lease(
+    hub_url: &str,
+    relay: &SharedMachineDaemonConnection,
+    request_id: &str,
+    lease: &MachineDaemonCommandLease,
+    label: &str,
+) -> Option<DaemonCommandLeaseHeartbeat> {
+    let heartbeat = match relay.machine_credential() {
+        Ok(credential) => {
+            DaemonCommandLeaseHeartbeat::start(
+                hub_url,
+                &credential,
+                relay.clone(),
+                request_id,
+                lease,
+                false,
+                DaemonSpawnDelivery::Socket,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    match heartbeat {
+        Ok(heartbeat) => Some(heartbeat),
+        Err(error) => {
+            eprintln!("{} {label} lease could not be held: {error}", "⚠".yellow().bold());
+            None
+        }
+    }
+}
+
 /// An install may outlive the short admission lease. Renew it for the whole
 /// action, or the Hub would redeliver the command and the still-`Admitted`
 /// effect would run the recipe a second time. A redelivery that arrives while
@@ -476,31 +513,7 @@ async fn execute_leased_harness_action(
     };
     let _in_flight = runtime_daemon_harness_action::claim_request(&request_id)?;
     let lease = relay_lease.as_ref()?;
-    let heartbeat = match relay.machine_credential() {
-        Ok(credential) => {
-            DaemonCommandLeaseHeartbeat::start(
-                hub_url,
-                &credential,
-                relay.clone(),
-                &request_id,
-                lease,
-                false,
-                DaemonSpawnDelivery::Socket,
-            )
-            .await
-        }
-        Err(error) => Err(error),
-    };
-    let _heartbeat = match heartbeat {
-        Ok(heartbeat) => heartbeat,
-        Err(error) => {
-            eprintln!(
-                "{} harness action lease could not be held: {error}",
-                "⚠".yellow().bold()
-            );
-            return None;
-        }
-    };
+    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "harness action").await?;
     // Re-reading inventory or a registry changes nothing a redelivery could repeat.
     let result = if matches!(
         action,
@@ -530,6 +543,41 @@ async fn execute_leased_harness_action(
             eprintln!("Harness inventory report deferred: {error}");
         }
     Some(MachineDaemonReport::MachineHarnessActionResult {
+        request_id,
+        result,
+        relay_lease,
+    })
+}
+
+/// Listing sizes every tree and reclaim snapshots un-landed work, both of
+/// which outlast the short admission lease; renew it for the whole action. A
+/// redelivery of a reclaim is harmless: trees already gone are reported kept.
+async fn execute_leased_worktree_action(
+    hub_url: &str,
+    relay: &SharedMachineDaemonConnection,
+    live_cwds: std::collections::HashSet<std::path::PathBuf>,
+    command: MachineDaemonCommand,
+) -> Option<MachineDaemonReport> {
+    let MachineDaemonCommand::MachineWorktreeAction {
+        request_id,
+        action,
+        paths,
+        relay_lease,
+    } = command
+    else {
+        return None;
+    };
+    let lease = relay_lease.as_ref()?;
+    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "worktree action").await?;
+    use xmatrix_repo_pool::machine_worktree_actions::{WorktreeActionKind, execute_worktree_action};
+    let kind = match action {
+        machine_daemon_connection::WorktreeAction::List => WorktreeActionKind::List,
+        machine_daemon_connection::WorktreeAction::Reclaim => WorktreeActionKind::Reclaim,
+        machine_daemon_connection::WorktreeAction::AutoReclaimOn => WorktreeActionKind::AutoReclaimOn,
+        machine_daemon_connection::WorktreeAction::AutoReclaimOff => WorktreeActionKind::AutoReclaimOff,
+    };
+    let result = execute_worktree_action(kind, paths.as_deref().unwrap_or_default(), &live_cwds).await;
+    Some(MachineDaemonReport::MachineWorktreeActionResult {
         request_id,
         result,
         relay_lease,
@@ -2048,6 +2096,8 @@ async fn cmd_daemon_connected(
             "machine_harness_login_v1",
             // A stop may push the Run's whole checkout to a handoff branch.
             "machine_handoff_export_v1",
+            // The owner lists and reclaims this machine's git worktrees.
+            "machine_worktree_action_v1",
         ],
     });
     if let Some(platform) = runtime_daemon_harness_action::daemon_platform() {
@@ -2093,6 +2143,7 @@ async fn cmd_daemon_connected(
             "machine_harness_release_v1".to_string(),
             "machine_harness_login_v1".to_string(),
             "machine_handoff_export_v1".to_string(),
+            "machine_worktree_action_v1".to_string(),
         ],
     );
     if let Some(activation) = activation.clone() {
@@ -2621,6 +2672,24 @@ async fn cmd_daemon_connected(
                             };
                             if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
                                 eprintln!("{} failed to report harness action result: {error}", "⚠".yellow().bold());
+                            }
+                        });
+                    }
+                    MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineWorktreeAction { .. }) => {
+                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let live_cwds: std::collections::HashSet<std::path::PathBuf> = run_registry
+                            .lock()
+                            .await
+                            .values()
+                            .filter_map(|child| child.cwd.clone())
+                            .collect();
+                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { hub_url, relay, effect_journal, effect_id } = context;
+                            let Some(report) = execute_leased_worktree_action(&hub_url, &relay, live_cwds, command).await else {
+                                return;
+                            };
+                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                                eprintln!("{} failed to report worktree action result: {error}", "⚠".yellow().bold());
                             }
                         });
                     }

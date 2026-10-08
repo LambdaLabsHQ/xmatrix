@@ -16,6 +16,15 @@ export type {
   HarnessManagement,
 } from "./harness-management.js";
 export {
+  MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult,
+  WORKTREE_ACTION_CLAIM_TTL_MS, WORKTREE_ACTION_SETTLE_MS, WORKTREE_ACTION_TIMEOUT_MS, WORKTREE_ACTIONS,
+  WORKTREE_INVENTORY_TREES_MAX, WORKTREE_ORIGINS, WORKTREE_RECLAIM_PATHS_MAX, XMATRIX_WORKTREE_ORIGINS,
+} from "./worktree-management.js";
+export type {
+  MachineWorktreeEntry, WorktreeAction, WorktreeActionRequest, WorktreeActionResult, WorktreeActionStatus,
+  WorktreeInventory, WorktreeOrigin,
+} from "./worktree-management.js";
+export {
   APP_CONNECTOR_PROVIDER_MANIFESTS, GITHUB_DEFAULT_REPOSITORY_FEATURES,
   GITHUB_REPOSITORY_FEATURE_LABELS, GITHUB_REPOSITORY_FEATURES, githubRequiredCapabilities,
   SENTRY_PUBLIC_INTEGRATION_SCOPES,
