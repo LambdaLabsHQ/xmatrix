@@ -72,7 +72,7 @@ test('harness and machine are chosen together: an idle capable harness beats a b
   const even = await choose({});
   assert.deepEqual([even.key.harness, even.key.machineId], ['codex', 'idle']);
   assert.deepEqual(even.parameterEvidence.placement.ranking.map(item => [item.harness, item.machineId, item.frontier]),
-    [['codex', 'idle', true], ['codex', 'busy', false], ['claude', 'busy', false]]);
+    [['codex', 'idle', true], ['codex', 'busy', true], ['claude', 'busy', false]]);
   // A strong fit for claude still loses to its scarce headroom on the balanced profile.
   const preferred = await choose({ fit_0: 2 });
   assert.deepEqual([preferred.key.harness, preferred.key.machineId], ['codex', 'idle']);
@@ -148,6 +148,28 @@ test('headroom is the scarcest of CPU, memory and provider quota; unknown is not
   assert.equal(room(at({ observedAt: 'now', cpuUsagePercent: 50 })), 0.5);
   assert.equal(environmentHeadroom(at(undefined)), undefined);
   assert.equal(environmentHeadroom(candidates[0]), undefined);
+});
+
+test('quota counts by its pace: equally fit, the account whose quota resets soonest unspent runs it', () => {
+  const now = Date.parse('2026-10-08T22:00:00Z');
+  const at = hours => new Date(now + hours * 3_600_000).toISOString();
+  const account = (harness, window) => ({ ...candidates[0], key: { ...candidates[0].key, harness },
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100 - window.usedPercent, assumed: false, windows: [window] },
+      machineResources: { observedAt: 'now', cpuLogicalCount: 8, loadAverage: [2, 0, 0] } } });
+  // 50% of a 5h window resetting within the hour beats 80% of a week with six days to go.
+  const soon = account('claude', { label: '5h', usedPercent: 50, resetAt: at(1) });
+  const later = account('codex', { label: '1w', usedPercent: 20, resetAt: at(144) });
+  const ranked = jointRanking([later, soon], () => 1 / 3, now);
+  assert.deepEqual(ranked.map(item => [item.candidate.key.harness, Math.round(item.quotaPace * 100) / 100]),
+    [['claude', 2.5], ['codex', 0.93]]);
+  // Spending ahead of its reset makes an account short of quota: 30% of a week
+  // left with five days to go caps headroom at its pace.
+  const ahead = account('codex', { label: '1w', usedPercent: 70, resetAt: at(120) });
+  assert.equal(Math.round(environmentHeadroom(ahead, now) * 1000) / 1000, 0.42);
+  // Fit still comes first: a strong fit on a slower account wins.
+  assert.equal(jointRanking([soon, later], candidate => candidate.key.harness === 'codex' ? 2 / 3 : 1 / 3, now)[0]
+    .candidate.key.harness, 'codex');
 });
 
 test('with equal fit the work runs where the most headroom is; then the fewest outstanding Runs; then candidate order', async () => {

@@ -94,6 +94,55 @@ export function currentRoutingQuotaWindows(value: unknown, now: number): Routing
   }).slice(0, ROUTING_QUOTA_MAX_WINDOWS);
 }
 
+const QUOTA_WINDOW_UNIT_MS: Record<string, number> = {
+  m: 60_000, h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000, mo: 30 * 86_400_000 };
+
+/** A window's length from its label (`5h`, `1w`, `1mo`), NaN when the label names none. */
+function routingQuotaWindowLength(label: string | undefined): number {
+  const match = /^(\d+)(mo|m|h|d|w)$/u.exec((label ?? "").trim().toLowerCase());
+  return match ? Number(match[1]) * QUOTA_WINDOW_UNIT_MS[match[2]!]! : NaN;
+}
+
+/**
+ * How fast an account may spend against its provider's pace: each window's
+ * remaining share divided by the share of that window still to run before it
+ * resets. At 1 the window is spent exactly by its reset; above 1 what is left
+ * is lost at the reset unless it is used, so it is the cheaper quota to spend;
+ * below 1 it runs out first. Every window caps spending, so the tightest one
+ * counts (Cursor, which spends Auto or API by model: the better of the two).
+ * A window with no known length or reset counts its remaining share alone; a
+ * window without a length of its own (Cursor's Auto and API) takes that of a
+ * named window resetting at the same time.
+ *
+ * `remainingPercent` is the provider's verdict on the whole account: none left
+ * is no pace, and an account served past its windows (credits) keeps that
+ * small share instead of the windows' zero.
+ */
+export function routingQuotaPace(quota: { remainingPercent: number; windows?: readonly RoutingQuotaWindow[] },
+  now: number): number {
+  if (!(quota.remainingPercent > 0)) return 0;
+  const windows = currentRoutingQuotaWindows(quota.windows ?? [], now);
+  const lengths = new Map(windows.flatMap(window => {
+    const length = routingQuotaWindowLength(window.label);
+    return Number.isFinite(length) && window.resetAt ? [[window.resetAt, length] as const] : [];
+  }));
+  const pace = (window: RoutingQuotaWindow) => {
+    const remaining = (100 - window.usedPercent) / 100;
+    const reset = window.resetAt ? Date.parse(window.resetAt) : NaN;
+    const named = routingQuotaWindowLength(window.label);
+    const length = Number.isFinite(named) ? named : window.resetAt ? lengths.get(window.resetAt) ?? NaN : NaN;
+    if (!Number.isFinite(reset) || !Number.isFinite(length)) return remaining;
+    return remaining / Math.min(1, (reset - now) / length);
+  };
+  const label = (window: RoutingQuotaWindow) => (window.label ?? "").trim().toLowerCase();
+  const pools = windows.filter(window => label(window) === "auto" || label(window) === "api");
+  const cursorPools = new Set(pools.map(label)).size === 2;
+  const paces = (cursorPools ? pools : windows).map(pace);
+  const windowsPace = !paces.length ? undefined
+    : cursorPools ? Math.max(...paces) : Math.min(...paces);
+  return windowsPace === undefined || windowsPace === 0 ? quota.remainingPercent / 100 : windowsPace;
+}
+
 function record(value: unknown, allowed: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid quota probe object");
   const row = value as Record<string, unknown>;
