@@ -91,6 +91,9 @@ test("missing Machine identity never creates a duplicate desktop row from its ho
   await expect(rows).toHaveCount(2);
   await expect(rows.getByTestId("this-machine-tag")).toHaveCount(0);
   await expect(page.getByText("Update xMatrix to identify this computer", { exact: false })).toBeVisible();
+  await page.setViewportSize({ width: 393, height: 852 });
+  await expect(page.getByText("Update xMatrix to identify this computer", { exact: false })).toBeHidden();
+  await expect(rows).toHaveCount(2);
 });
 
 test("a retired UUID cannot create a duplicate row beside the same computer's Laptop record", async ({ page }) => {
