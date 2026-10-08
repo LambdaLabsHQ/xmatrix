@@ -131,6 +131,13 @@ test.describe("desktop channel selection", () => {
     const before = await caret.boundingBox();
     await textarea.pressSequentially("hi");
     await expect.poll(async () => (await caret.boundingBox())!.x).toBeGreaterThan(before!.x + 5);
+    // The caret jumps with the selection; no easing trails behind it.
+    expect(await caret.evaluate((node) => getComputedStyle(node).transitionDuration)).toBe("0s");
+    const typed = (await caret.boundingBox())!.x;
+    await textarea.press("ArrowLeft");
+    const moved = await caret.evaluate((node) => new Promise<number>((resolve) =>
+      requestAnimationFrame(() => resolve(node.getBoundingClientRect().x))));
+    expect(moved).toBeLessThan(typed - 1);
 
     await textarea.evaluate((node) => node.dispatchEvent(new CompositionEvent("compositionstart")));
     await expect(caret).toBeHidden();
