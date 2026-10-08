@@ -19,8 +19,9 @@ const PAST_DUE_GRACE_MS = 7 * 24 * 60 * 60 * 1_000;
 const STRIPE_SUBSCRIPTION_STATUSES = ["trialing", "active", "past_due", "incomplete", "incomplete_expired",
   "unpaid", "canceled", "paused"] as const;
 
-/** A Stripe subscription as a provider event reports it, keyed to the Space it bills. */
-export interface StripeSubscriptionFact {
+/** A verified provider snapshot, keyed to the Space it bills. */
+export interface BillingSubscriptionFact {
+  billingProvider?: "stripe" | "apple";
   id: string;
   customerId: string;
   priceId: string;
@@ -32,6 +33,8 @@ export interface StripeSubscriptionFact {
   billingOwnerUserId: string;
   checkoutIntentId?: string;
 }
+
+export type StripeSubscriptionFact = BillingSubscriptionFact & { billingProvider?: "stripe" };
 
 export class BillingControlError extends DetailedControlError {
   override name = "BillingControlError";
@@ -80,6 +83,11 @@ function ownerRequest(input: { requestId: string; spaceId: string; actorUserId: 
     actorUserId: text(input.actorUserId, "actorUserId") };
 }
 
+async function lockBillingSpace(tx: DatabaseTransaction, spaceId: string) {
+  await tx.query({ name: "billing_space_mutex_v1", text: "SELECT space_id FROM data.spaces WHERE space_id=$1 FOR UPDATE",
+    values: [spaceId], maxRows: 1 });
+}
+
 async function requireOwner(tx: DatabaseTransaction, spaceId: string, userId: string): Promise<void> {
   const rows = await tx.query({
     name: "billing_require_owner_v1",
@@ -93,6 +101,7 @@ async function requireOwner(tx: DatabaseTransaction, spaceId: string, userId: st
 }
 
 function subscriptionEntitled(row: QueryResultRow | undefined, now: number): boolean {
+  if (row?.billing_provider === "apple" && (!row.current_period_end || new Date(row.current_period_end as string | Date).getTime() <= now)) return false;
   return row?.status === "active" || row?.status === "trialing" ||
     (row?.status === "past_due" && row.grace_until &&
       new Date(row.grace_until as Date | string).getTime() > now);
@@ -137,6 +146,7 @@ async function summary(
   return {
     plan: entitled ? "pro" : "free",
     subscription: subscription ? {
+      billingProvider: subscription.billing_provider ?? "stripe",
       status: subscription.status, seatQuantity: Number(subscription.seat_quantity),
       currentPeriodEnd: subscription.current_period_end,
       cancelAtPeriodEnd: subscription.cancel_at_period_end === true,
@@ -201,15 +211,30 @@ export class PostgresBillingRepository {
       await requireOwner(tx, spaceId, actorUserId);
       const rows = await tx.query<QueryResultRow>({
         name: "billing_portal_reference_v1",
-        text: `SELECT provider_customer_id,provider_subscription_id
+        text: `SELECT billing_provider,provider_customer_id,provider_subscription_id
           FROM data.space_billing_subscriptions WHERE space_id = $1 LIMIT 1`,
         values: [spaceId], maxRows: 1,
       });
       if (!rows[0]) throw new BillingControlError(
         "billing_subscription_not_found", 404, "This Space has no billing subscription",
       );
+      if (rows[0].billing_provider === "apple") throw new BillingControlError(
+        "apple_managed_subscription", 409, "Manage this subscription in the App Store");
       return { customerId: rows[0].provider_customer_id,
         subscriptionId: rows[0].provider_subscription_id };
+    });
+  }
+
+  async appleSubscriptionReference(input: { requestId: string; spaceId: string; actorUserId: string }) {
+    const { requestId, spaceId, actorUserId } = ownerRequest(input);
+    return this.spaces.transaction(requestId, "billing.apple-reference", spaceId, async (tx) => {
+      await requireOwner(tx, spaceId, actorUserId);
+      const rows = await tx.query<{ provider_subscription_id: string }>({ name: "billing_apple_reference_v1",
+        text: "SELECT provider_subscription_id FROM data.space_billing_subscriptions WHERE space_id=$1 AND billing_provider='apple' LIMIT 1",
+        values: [spaceId], maxRows: 1 });
+      const match = /^apple:(Production|Sandbox):([0-9]{1,100})$/.exec(rows[0]?.provider_subscription_id ?? "");
+      if (!match) throw new BillingControlError("apple_subscription_not_found", 404, "This Space has no App Store subscription");
+      return { environment: match[1], originalTransactionId: match[2] };
     });
   }
 
@@ -237,11 +262,13 @@ export class PostgresBillingRepository {
 
   async createCheckoutIntent(input: {
     requestId: string; commandId: string; spaceId: string; actorUserId: string;
-    interval: "month" | "year"; priceId: string; seatQuantity: number;
+    interval: "month" | "year"; priceId: string; seatQuantity: number; billingProvider?: "stripe" | "apple";
   }) {
     const { requestId, spaceId, actorUserId } = ownerRequest(input);
     const commandId = text(input.commandId, "commandId");
     const priceId = text(input.priceId, "priceId");
+    const provider = input.billingProvider ?? "stripe";
+    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && input.seatQuantity !== 1)) throw new BillingControlError("invalid_billing_checkout", 400, "Billing provider or seat quantity is invalid");
     if (!Number.isSafeInteger(input.seatQuantity) || input.seatQuantity < 1 ||
         input.seatQuantity > 99 || (input.interval !== "month" && input.interval !== "year")) {
       throw new BillingControlError("invalid_billing_checkout", 400, "Billing checkout inputs are invalid");
@@ -250,15 +277,16 @@ export class PostgresBillingRepository {
     const now = new Date().toISOString();
     const placement = await this.spaces.resolve(requestId, "billing.checkout.create", spaceId);
     const result = await this.spaces.transaction(requestId, "billing.checkout.create", placement, async (tx) => {
+      await lockBillingSpace(tx, spaceId);
+      await requireOwner(tx, spaceId, actorUserId);
       const prior = await replay(tx, spaceId, commandId, "billing-create-checkout-intent", requestDigest);
       if (prior) return prior;
-      await requireOwner(tx, spaceId, actorUserId);
       const subscriptions = await tx.query<QueryResultRow>({
         name: "billing_checkout_subscription_v1",
-        text: "SELECT status,grace_until FROM data.space_billing_subscriptions WHERE space_id = $1 FOR UPDATE",
+        text: "SELECT billing_provider,status,grace_until,current_period_end FROM data.space_billing_subscriptions WHERE space_id = $1 FOR UPDATE",
         values: [spaceId], maxRows: 1,
       });
-      if (subscriptionEntitled(subscriptions[0], Date.parse(now))) throw new BillingControlError(
+      if (subscriptionEntitled(subscriptions[0], Date.parse(now)) || (subscriptions[0] && !["canceled", "incomplete_expired"].includes(String(subscriptions[0].status)))) throw new BillingControlError(
         "billing_subscription_active", 409, "This Space already has an active Pro subscription",
       );
       const seats = await tx.query<QueryResultRow & { count: string | number }>({
@@ -268,7 +296,7 @@ export class PostgresBillingRepository {
         values: [spaceId], maxRows: 1,
       });
       const used = Number(seats[0]?.count ?? 0);
-      if (input.seatQuantity < used) throw new BillingControlError(
+      if (input.seatQuantity < used || (provider === "apple" && used !== 1)) throw new BillingControlError(
         "billing_seat_quantity_too_low", 409,
         "Choose at least as many seats as current billable members", false, { usedSeats: used },
       );
@@ -281,7 +309,7 @@ export class PostgresBillingRepository {
       });
       const existing = await tx.query<QueryResultRow>({
         name: "billing_checkout_active_v1",
-        text: `SELECT checkout_intent_id,billing_owner_user_id,billing_interval,provider_price_id,
+        text: `SELECT billing_provider,checkout_intent_id,billing_owner_user_id,billing_interval,provider_price_id,
             seat_quantity,status,provider_checkout_session_id,expires_at
           FROM data.space_billing_checkout_intents
           WHERE space_id = $1 AND status IN ('pending','created') AND expires_at > $2
@@ -292,7 +320,7 @@ export class PostgresBillingRepository {
       let result: Record<string, unknown>;
       let intentId: string;
       if (row) {
-        if (row.billing_owner_user_id !== actorUserId || row.billing_interval !== input.interval ||
+        if ((row.billing_provider ?? "stripe") !== provider || row.billing_owner_user_id !== actorUserId || row.billing_interval !== input.interval ||
             row.provider_price_id !== priceId || Number(row.seat_quantity) !== input.seatQuantity) {
           throw new BillingControlError(
             "billing_checkout_in_progress", 409,
@@ -310,10 +338,10 @@ export class PostgresBillingRepository {
           text: `INSERT INTO data.space_billing_checkout_intents
             (checkout_intent_id,space_id,billing_owner_user_id,plan,billing_interval,
              provider_price_id,seat_quantity,status,provider_checkout_session_id,
-             created_at,expires_at,completed_at,updated_at)
-            VALUES ($1,$2,$3,'pro',$4,$5,$6,'pending',NULL,$7,$8,NULL,$7)`,
+             created_at,expires_at,completed_at,updated_at,billing_provider)
+            VALUES ($1,$2,$3,'pro',$4,$5,$6,'pending',NULL,$7,$8,NULL,$7,$9)`,
           values: [intentId, spaceId, actorUserId, input.interval, priceId,
-            input.seatQuantity, now, expiresAt], maxRows: 0,
+            input.seatQuantity, now, expiresAt, provider], maxRows: 0,
         });
         result = { intent: { id: intentId, spaceId, interval: input.interval,
           seatQuantity: input.seatQuantity, expiresAt } };
@@ -432,7 +460,7 @@ export class PostgresBillingRepository {
   async applyProviderEvent(input: {
     requestId: string; commandId: string; providerEventId: string; eventType: string;
     payloadDigest: string; eventCreatedAt: string;
-    subscription: StripeSubscriptionFact;
+    subscription: BillingSubscriptionFact;
   }) {
     const requestId = text(input.requestId, "requestId", 200);
     const commandId = text(input.commandId, "commandId");
@@ -441,6 +469,8 @@ export class PostgresBillingRepository {
     const payloadDigest = text(input.payloadDigest, "payloadDigest", 128);
     const eventCreatedAt = text(input.eventCreatedAt, "eventCreatedAt", 64);
     const subscription = input.subscription;
+    const provider = subscription.billingProvider ?? "stripe";
+    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && (subscription.quantity !== 1 || !subscription.currentPeriodEnd))) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
     const spaceId = text(subscription.spaceId, "subscription.spaceId");
     const ownerUserId = text(subscription.billingOwnerUserId, "subscription.billingOwnerUserId");
     const subscriptionId = text(subscription.id, "subscription.id");
@@ -452,22 +482,21 @@ export class PostgresBillingRepository {
         subscription.quantity > 99) {
       throw new BillingControlError("invalid_billing_event", 400, "Billing provider event is invalid");
     }
-    const spaces = await this.database.transaction(
-      { requestId, operation: "billing.provider-event.locate" },
-      (tx) => tx.query({
-        name: "billing_provider_event_space_v1",
-        text: "SELECT space_id FROM data.spaces WHERE space_id = $1 LIMIT 1",
-        values: [spaceId], maxRows: 1,
-      }),
-    );
-    if (!spaces[0]) return { ignoredMissingSpace: true };
+    if (provider === "stripe") {
+      const spaces = await this.database.transaction(
+        { requestId, operation: "billing.provider-event.locate" },
+        (tx) => tx.query({
+          name: "billing_provider_event_space_v1",
+          text: "SELECT space_id FROM data.spaces WHERE space_id = $1 LIMIT 1",
+          values: [spaceId], maxRows: 1,
+        }),
+      );
+      if (!spaces[0]) return { ignoredMissingSpace: true };
+    }
     const requestDigest = await hash(input);
     const now = new Date().toISOString();
     return this.spaces.transaction(requestId, "billing.provider-event.apply", spaceId, async (tx) => {
-      const priorCommand = await replay(
-        tx, spaceId, commandId, "billing-apply-provider-event", requestDigest,
-      );
-      if (priorCommand) return priorCommand;
+      await lockBillingSpace(tx, spaceId);
       const owners = await tx.query<QueryResultRow & { role: string }>({
         name: "billing_provider_event_owner_v1",
         text: "SELECT role FROM data.space_members WHERE space_id = $1 AND user_id = $2 LIMIT 1",
@@ -477,6 +506,10 @@ export class PostgresBillingRepository {
         "invalid_billing_event", 400,
         "Billing subscription metadata is not bound to the current Space owner",
       );
+      const priorCommand = await replay(
+        tx, spaceId, commandId, "billing-apply-provider-event", requestDigest,
+      );
+      if (priorCommand) return priorCommand;
       const receipts = await tx.query<QueryResultRow>({
         name: "billing_provider_event_receipt_v1",
         text: `SELECT payload_digest FROM data.space_billing_webhook_events
@@ -505,6 +538,12 @@ export class PostgresBillingRepository {
         text: "SELECT * FROM data.space_billing_subscriptions WHERE space_id = $1 FOR UPDATE",
         values: [spaceId], maxRows: 1,
       });
+      if (provider === "apple" && ["active", "trialing"].includes(subscription.status)) {
+        const seats = await tx.query<{ count: string | number }>({ name: "apple_subscription_seats_v1",
+          text: "SELECT COUNT(*) AS count FROM data.space_members WHERE space_id=$1 AND role IN ('owner','admin','member')",
+          values: [spaceId], maxRows: 1 });
+        if (Number(seats[0]?.count ?? 0) !== 1) throw new BillingControlError("apple_single_seat_required", 409, "App Store Pro requires exactly one human seat in this Space");
+      }
       const existing = existingRows[0];
       const incomingCanEntitle = ["active", "trialing", "past_due"].includes(subscription.status);
       if (existing && existing.provider_subscription_id !== subscriptionId &&
@@ -514,7 +553,9 @@ export class PostgresBillingRepository {
           "This Space already has a different active billing subscription",
         );
       }
-      const stale = existing &&
+      const unrelatedTerminal = existing &&
+        (existing.provider_subscription_id !== subscriptionId || (existing.billing_provider ?? "stripe") !== provider) && !incomingCanEntitle;
+      const stale = unrelatedTerminal || existing &&
         new Date(existing.provider_event_created_at as Date | string).getTime() > Date.parse(eventCreatedAt);
       const expiresAt = new Date(Date.parse(now) + WEBHOOK_TTL_MS).toISOString();
       await tx.query({
@@ -540,10 +581,11 @@ export class PostgresBillingRepository {
           text: `INSERT INTO data.space_billing_subscriptions
             (space_id,billing_owner_user_id,provider_customer_id,provider_subscription_id,
              provider_price_id,plan,status,seat_quantity,current_period_end,cancel_at_period_end,
-             grace_until,provider_event_created_at,version,created_at,updated_at)
-            VALUES ($1,$2,$3,$4,$5,'pro',$6,$7,$8,$9,$10,$11,1,$12,$12)
+             grace_until,provider_event_created_at,version,created_at,updated_at,billing_provider)
+            VALUES ($1,$2,$3,$4,$5,'pro',$6,$7,$8,$9,$10,$11,1,$12,$12,$13)
             ON CONFLICT (space_id) DO UPDATE SET
               billing_owner_user_id = EXCLUDED.billing_owner_user_id,
+              billing_provider = EXCLUDED.billing_provider,
               provider_customer_id = EXCLUDED.provider_customer_id,
               provider_subscription_id = EXCLUDED.provider_subscription_id,
               provider_price_id = EXCLUDED.provider_price_id,status = EXCLUDED.status,
@@ -555,7 +597,7 @@ export class PostgresBillingRepository {
               updated_at = EXCLUDED.updated_at`,
           values: [spaceId, ownerUserId, customerId, subscriptionId, priceId,
             subscription.status, subscription.quantity, subscription.currentPeriodEnd,
-            subscription.cancelAtPeriodEnd, graceUntil, eventCreatedAt, now], maxRows: 0,
+            subscription.cancelAtPeriodEnd, graceUntil, eventCreatedAt, now, provider], maxRows: 0,
         });
         if (subscription.checkoutIntentId) await tx.query({
           name: "billing_provider_event_checkout_complete_v1",

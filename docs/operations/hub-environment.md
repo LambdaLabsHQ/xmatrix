@@ -38,6 +38,7 @@ Leave unset to keep the feature off.
 
 | Name | Kind | What it does |
 | --- | --- | --- |
+| `APPLE_SUBSCRIPTIONS_CONFIG` | secret | Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases. |
 | `CONNECTOR_DINGTALK_COMPANY_CONFIG` | secret | Verified company-console JSON: suite-ticket protocol, sync-http delivery, numeric suiteId, developerCorpId, appId and approved templateId/templateField. Requires complete native suite keys; unset keeps company routes and actions unavailable. |
 | `DIAGNOSTICS_AE` | binding | Analytics Engine dataset for client diagnostics. Unset: diagnostics are dropped. |
 | `DIAGNOSTICS_HASH_SECRET` | secret | Key that pseudonymizes users in diagnostics; defaults to BETTER_AUTH_SECRET. |

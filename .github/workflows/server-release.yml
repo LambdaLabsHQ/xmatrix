@@ -204,6 +204,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           XMATRIX_SECRET_CATALOG_KEY: ${{ secrets.XMATRIX_SECRET_CATALOG_KEY }}
+          APPLE_SUBSCRIPTIONS_CONFIG: ${{ secrets.APPLE_SUBSCRIPTIONS_CONFIG }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_PRO_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_PRO_MONTHLY_PRICE_ID }}
@@ -285,6 +286,11 @@ jobs:
           }));
           if (payload.XMATRIX_SECRET_CATALOG_KEY.trim().length < 32) {
             throw new Error("Production catalog key must contain at least 32 characters");
+          }
+          if (process.env.APPLE_SUBSCRIPTIONS_CONFIG) {
+            const file = require("node:path").join(process.env.GITHUB_WORKSPACE || process.cwd(), "packages/protocol/dist/apple-billing-config.js");
+            require(file).parseAppleSubscriptionConfig(process.env.APPLE_SUBSCRIPTIONS_CONFIG);
+            payload.APPLE_SUBSCRIPTIONS_CONFIG = process.env.APPLE_SUBSCRIPTIONS_CONFIG;
           }
           const billing = [
             "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
