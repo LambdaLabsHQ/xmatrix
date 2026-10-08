@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { Client } from "pg";
 import { readRegistrationQuotaProbeTargets, recordRegistrationQuotaProbeResult, recordRegistrationUsageLimit,
-  REGISTRATION_QUOTA_POOL_SQL } from "../dist/agent-registration-quota-probe.js";
+  registrationQuotaReading, REGISTRATION_QUOTA_POOL_SQL } from "../dist/agent-registration-quota-probe.js";
 
 import { observeRegistrationQuota, readRegistrationQuotaState, registrationQuotaKey } from "../dist/registration-quota-state.js";
 
@@ -199,6 +199,16 @@ integration("registration quota probe targets are the Space's authorized, singly
     assert.equal(retainedProjection.get(registrationQuotaKey(key)).quotaState, "exhausted",
       "retained window detail cannot clear an authoritative usage-limit hold");
     assert.equal(retained.rows[0].account_json, null, "a prior allowed verdict cannot contradict the refusal");
+    const availableWindows = windows.map(window => ({ ...window, usedPercent: 20 }));
+    await sql(`UPDATE control.registration_quota_observations SET windows_json=$1::jsonb
+      WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`, [JSON.stringify(availableWindows)]);
+    await limit({ harness: "claude" });
+    const routingHold = await sql(`SELECT source,remaining,observed_at::text,expires_at::text,windows_json
+      FROM control.registration_quota_observations WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
+    assert.equal(registrationQuotaReading(routingHold.rows[0]).remainingPercent, 0,
+      "retained nonempty windows cannot replace the daemon's authoritative hold");
+    assert.equal(registrationQuotaReading({ ...routingHold.rows[0], source: "provider" }).remainingPercent, 80,
+      "provider samples still recompute headroom from their own windows");
     await sql(`UPDATE control.registration_quota_observations SET observed_at=now()-interval '2 seconds',
       expires_at=now()-interval '1 second' WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
     await limit({ harness: "claude" });

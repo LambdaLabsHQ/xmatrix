@@ -29,14 +29,15 @@ export function currentRegistrationQuotaJoin(alias: string): string {
  * When `windows_json` is present, headroom is recomputed with
  * `routingQuotaObservation` (Cursor Auto/API: better pool without a model) so a
  * stored `remaining` collapsed by Math.min across pools cannot keep refusing
- * Auto launches; Agents still shows every stored window. */
+ * Auto launches; Agents still shows every stored window. A daemon usage-limit
+ * hold keeps its stored remaining share; retained windows are display detail. */
 export function registrationQuotaReading(row: {
-  remaining?: unknown; observed_at?: unknown; expires_at?: unknown;
+  source?: unknown; remaining?: unknown; observed_at?: unknown; expires_at?: unknown;
   windows_json?: unknown; account_json?: unknown;
 } | undefined):
   { remainingPercent: number; observedAt: string; expiresAt: string } | undefined {
   const observedAt = typeof row?.observed_at === "string" ? row.observed_at : undefined;
-  if (observedAt && row?.windows_json != null) {
+  if (observedAt && row?.source !== "daemon" && row?.windows_json != null) {
     const stored = Array.isArray(row.windows_json) ? row.windows_json : [];
     const quotaUsages = stored.flatMap((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
