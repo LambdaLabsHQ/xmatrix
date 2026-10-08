@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { type AppConnectorCompletionDynamicSource, type UpsertAppConnectorConnectionRequest } from "@xmatrix/protocol";
 import { deliveryProven, GITHUB_SIGNATURE } from "./connectors/delivery-proof";
 import type { Env } from "./types";
+import { ServiceUnavailable } from "./error-contract";
 import { daemonStopTargets, issueDaemonStopsForArchivedChannelTree } from "./product-agent-intervention-authority-adapter";
 import { armSpaceDeletionClock } from "./space-deletion-clock";
 import { checkAppConnection } from "./app-connection-check";
@@ -154,8 +155,8 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       console.error("Space deletion clock was not armed", {
         spaceId, error: error instanceof Error ? error.message : String(error),
       });
-      return c.json({ error: "Space deletion was recorded but its purge is not scheduled yet; retry",
-        code: "space_deletion_clock_unavailable", retryable: true }, 503);
+      throw new ServiceUnavailable("space_deletion_clock_unavailable",
+        "Space deletion was recorded but its purge is not scheduled yet; retry");
     }
     return c.json({ ok: true, deletion });
   }));
