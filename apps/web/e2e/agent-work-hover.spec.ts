@@ -283,3 +283,26 @@ test.describe("mobile agent controls", () => {
     expect(avatarBox!.y + avatarBox!.height).toBeLessThanOrEqual(composerBox!.y - 10);
   });
 });
+
+test("a stretching disc pushes the Instances after it aside", async ({ page }) => {
+  const instance = ACTIVE_AGENT_CHANNEL.memberPresence["agent:codex"].instances[0];
+  const idle = (n: number) => ({ ...instance, id: `instance-codex-${n}`, channelInstanceId: String(n), label: `codex:${n}`,
+    status: "online", activity: undefined });
+  await openWorkspaceWithStubs(page, {
+    spaces: [E2E_SPACE],
+    channels: [{ ...ACTIVE_AGENT_CHANNEL, memberPresence: { "agent:codex": {
+      ...ACTIVE_AGENT_CHANNEL.memberPresence["agent:codex"], status: "online", activity: undefined, instances: [idle(1), idle(2)] } } }],
+  });
+  const first = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+  const second = page.getByRole("button", { name: /Open Codex.*codex:2/ });
+  const restingLeft = (await second.boundingBox())!.x;
+  await first.hover();
+  const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
+  await expect(toolbar).toBeVisible();
+  await expect.poll(async () => {
+    const [toolbarBox, secondBox] = await Promise.all([toolbar.boundingBox(), second.boundingBox()]);
+    return toolbarBox && secondBox ? secondBox.x - (toolbarBox.x + toolbarBox.width) : -1;
+  }).toBeGreaterThanOrEqual(0);
+  await page.mouse.move(5, 5);
+  await expect.poll(async () => Math.round((await second.boundingBox())!.x)).toBe(Math.round(restingLeft));
+});
