@@ -1,3 +1,4 @@
+import { reportClientDefect } from "./client-defect-report";
 import { XMatrixApiError, isTransientFailure } from "./query/api-client";
 
 /**
@@ -15,6 +16,8 @@ export interface UserFacingError {
   retryable: boolean;
   /** The Hub's error code, for a person reporting the problem. */
   reference?: string;
+  /** The Hub's report of this failure, which finds its log. */
+  report?: string;
 }
 
 /**
@@ -44,6 +47,8 @@ const DESKTOP_IPC_ERROR = /^Error invoking remote method '[^']+': (?:[A-Za-z]*Er
 
 const OFFLINE = "Check your connection and try again.";
 const BUSY = "xMatrix is busy right now. Try again in a moment.";
+const STILL_OFFLINE = "xMatrix still can't be reached after several tries. Check your connection.";
+const STILL_UNAVAILABLE = "xMatrix is still unavailable after several tries. Try again later, and report it if it keeps happening.";
 const DEFECT = "Something went wrong on our side. Try again, and report it if it keeps happening.";
 const CLIENT_DEFECT = "Something went wrong. Try again, and report it if it keeps happening.";
 
@@ -61,6 +66,9 @@ function sentence(text: string): string {
 }
 
 function apiReason(error: XMatrixApiError): { reason: string; retryable: boolean } {
+  if (error.persistent && isTransientFailure(error)) {
+    return { reason: error.status === 0 ? STILL_OFFLINE : STILL_UNAVAILABLE, retryable: true };
+  }
   if (error.status === 0) return { reason: OFFLINE, retryable: true };
   if (error.status === 504) return { reason: "xMatrix took too long to answer. Try again.", retryable: true };
   if (isTransientFailure(error)) return { reason: BUSY, retryable: true };
@@ -91,7 +99,8 @@ export function describeError(error: unknown, action: string): UserFacingError |
   if (error instanceof XMatrixApiError) {
     const { reason, retryable } = apiReason(error);
     const reference = error.code !== "request_failed" ? error.code : error.status ? `HTTP ${error.status}` : undefined;
-    return { message: `${headline} ${reason}`, retryable, ...(reference ? { reference } : {}) };
+    return { message: `${headline} ${reason}`, retryable, ...(reference ? { reference } : {}),
+      ...(error.reference ? { report: error.reference } : {}) };
   }
   if (error instanceof UserFacingProblem) {
     return { message: `${headline} ${sentence(error.message)}`, retryable: error.retryable };
@@ -103,6 +112,7 @@ export function describeError(error: unknown, action: string): UserFacingError |
   const desktop = error instanceof Error ? DESKTOP_IPC_ERROR.exec(error.message) : null;
   if (desktop?.[1]) return { message: `${headline} ${sentence(desktop[1])}`, retryable: true };
   console.error(`[xmatrix] ${action}`, error);
+  reportClientDefect(action, error);
   return { message: `${headline} ${CLIENT_DEFECT}`, retryable: true };
 }
 
