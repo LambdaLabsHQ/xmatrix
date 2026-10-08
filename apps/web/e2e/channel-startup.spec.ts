@@ -153,11 +153,11 @@ test.describe("Native startup", () => {
           return states.at(-1);
         });
         await expect.poll(lastTabState).toEqual({
-          visible: true, activeView: "messages", spaceId: E2E_SPACE.id, userId: "e2e-user",
+          visible: true, activeView: "messages", spaceId: E2E_SPACE.id, userId: "e2e-user", statusLive: false,
         });
         await page.locator('[data-mobile-channel-row-id="channel-general"]').tap();
         await expect.poll(lastTabState).toEqual({
-          visible: false, activeView: "messages", spaceId: E2E_SPACE.id, userId: "e2e-user",
+          visible: false, activeView: "messages", spaceId: E2E_SPACE.id, userId: "e2e-user", statusLive: false,
         });
       }
     });
