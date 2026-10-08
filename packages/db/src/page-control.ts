@@ -1521,11 +1521,12 @@ export class PostgresPageRepository {
    * The Agents on each page now, for the page tree and the page itself:
    * every Agent live in a conversation whose current Run read or edited the
    * page (its link was seen after the Instance started), with the section it
-   * last touched. Derived, never stored; only pages and conversations this
-   * reader may open are described.
+   * last touched; and how many conversations are about each page, as its
+   * margin counts them. Derived, never stored; only pages and conversations
+   * this reader may open are described.
    */
   async agentsOnPages(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
-    Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[] }> }> {
+    Promise<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; conversations: number }> }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.agents", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
@@ -1549,6 +1550,19 @@ export class PostgresPageRepository {
           LIMIT ${MAX_LINKS}`,
         values: [spaceId, actor.userId], maxRows: MAX_LINKS,
       });
+      const counted = await tx.query<QueryResultRow & { page_id: string; conversations: string | number }>({
+        name: "page_conversation_counts_v1",
+        text: `SELECT pl.page_id, count(DISTINCT pl.conversation_id) AS conversations
+          FROM data.page_links pl
+          JOIN data.channels c ON c.space_id=pl.space_id AND c.channel_id=pl.conversation_id
+          WHERE pl.space_id=$1
+            AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
+              principalKindSql: "'user'", principalIdSql: "$2" })}
+          GROUP BY pl.page_id`,
+        values: [spaceId, actor.userId], maxRows: MAX_PAGES,
+      });
+      const conversationsOf = new Map(counted.filter((row) => readable.has(row.page_id))
+        .map((row) => [row.page_id, Number(row.conversations)]));
       const visible = rows.filter((row) => readable.has(row.page_id));
       const presence = await loadChannelAgentPresence(tx, spaceId, visible.map((row) => row.conversation_id));
       const byPage = new Map<string, PageTreeAgent[]>();
@@ -1571,7 +1585,9 @@ export class PostgresPageRepository {
           }
         }
       }
-      return { pages: [...byPage].map(([pageId, agents]) => ({ pageId, agents })) };
+      const pageIds = new Set([...byPage.keys(), ...conversationsOf.keys()]);
+      return { pages: [...pageIds].map((pageId) => ({ pageId, agents: byPage.get(pageId) ?? [],
+        conversations: conversationsOf.get(pageId) ?? 0 })) };
     });
   }
 }
