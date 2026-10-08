@@ -1,4 +1,6 @@
-import { PAGE_DOCUMENT_FRAGMENT, mergePageText, pageAuthorColor, pageChangedBlocks } from "@xmatrix/protocol";
+import {
+  PAGE_DOCUMENT_FRAGMENT, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections, type PageEditResult,
+} from "@xmatrix/protocol";
 import {
   canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema,
 } from "@xmatrix/protocol/page-document";
@@ -84,13 +86,15 @@ export interface RestingAgent { clientId: number; state: Record<string, unknown>
 export interface PageSessionPorts {
   loadHead(principal: PageSessionPrincipal): Promise<PageHead>;
   loadRevision(principal: PageSessionPrincipal, revision: number): Promise<string>;
-  /** Commits a revision; returns the committed revision and the page head. */
-  commit(principal: PageSessionPrincipal, input: PageCommitInput):
-    Promise<{ revision: number; kind: string; headRevision: number }>;
+  /** Commits a revision; returns the committed revision, the page head, and the Automations it moved. */
+  commit(principal: PageSessionPrincipal, input: PageCommitInput): Promise<PageSessionCommit>;
   persist(state: PageSessionState): Promise<void>;
   send(connectionId: string, data: Uint8Array): void;
   broadcast(data: Uint8Array, exceptConnectionId?: string): void;
 }
+
+/** A committed revision as the repository answers it. */
+export type PageSessionCommit = Omit<PageEditResult, "removedSections">;
 
 export interface PageSessionPresent {
   name: string;
@@ -446,7 +450,7 @@ export class PageSession {
     this.settle();
     await this.persist();
     this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
-      headRevision: result.headRevision, author: author.label }));
+      headRevision: result.headRevision, author: author.label, detachedAutomations: result.detachedAutomations }));
     return { revision: result.revision, kind: result.kind };
   }
 
@@ -530,14 +534,14 @@ export class PageSession {
    */
   submitEdit(principal: PageSessionPrincipal, input: {
     baseRevision: number; body: string; conversationIds: string[];
-  }): Promise<{ revision: number; kind: string; headRevision: number }> {
+  }): Promise<PageEditResult> {
     return this.serial(async () => {
       if (!this.base) throw new Error("page session is not loaded");
       if (principal.kind === "agent" && this.base.agentSuggestOnly) {
         const result = await this.ports.commit(principal, { baseRevision: input.baseRevision, body: input.body,
           conversationIds: input.conversationIds, coAuthors: [], blockIds: [] });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return result;
+        return { ...result, removedSections: [] };
       }
       // Pending human edits commit under their own authors first.
       await this.commitNow();
@@ -568,7 +572,7 @@ export class PageSession {
       if (result.kind === "suggestion") {
         this.base = { ...this.base, agentSuggestOnly: true };
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return result;
+        return { ...result, removedSections: [] };
       }
       this.base = { ...this.base, revision: result.headRevision, body: merged.text };
       // One transaction, so edits people make meanwhile can never shift its positions. It is
@@ -582,8 +586,8 @@ export class PageSession {
       this.settle();
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
-        headRevision: result.headRevision, author: principal.label }));
-      return result;
+        headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
+      return { ...result, removedSections: pageRemovedSections(current, merged.text) };
     });
   }
 
