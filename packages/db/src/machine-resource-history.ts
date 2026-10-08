@@ -114,8 +114,9 @@ export async function maintainMachineResourceHistory(database: AuthorityDatabase
 }): Promise<{ rolledUp: number; prunedSamples: number; prunedHours: number }> {
   const now = new Date(input.now ?? Date.now());
   return database.transaction({ requestId: input.requestId, operation: "machine.resource-history-maintain" }, async (tx) => {
-    const rolled = await tx.query<QueryResultRow>({ name: "machine_resource_history_rollup_v1", text: `
-      INSERT INTO data.machine_resource_hourly (owner_user_id,machine_id,hour_start,sample_count,
+    // Each statement answers one count row: query results are capped at 10000 rows.
+    const rolled = await tx.query<QueryResultRow>({ name: "machine_resource_history_rollup_v2", text: `
+      WITH written AS (INSERT INTO data.machine_resource_hourly (owner_user_id,machine_id,hour_start,sample_count,
         cpu_usage_percent_avg,cpu_usage_percent_max,load_average_1m_avg,load_average_1m_max,
         memory_used_percent_avg,memory_used_percent_max,swap_used_percent_avg,disk_used_percent_max)
       SELECT owner_user_id, machine_id, date_trunc('hour',observed_at), count(*),
@@ -138,16 +139,17 @@ export async function maintainMachineResourceHistory(database: AuthorityDatabase
         memory_used_percent_max=EXCLUDED.memory_used_percent_max,
         swap_used_percent_avg=EXCLUDED.swap_used_percent_avg,
         disk_used_percent_max=EXCLUDED.disk_used_percent_max
-      RETURNING 1`,
-    values: [now.toISOString(), ROLLUP_HOURS], maxRows: 1_000_000 });
-    const prunedSamples = await tx.query<QueryResultRow>({ name: "machine_resource_history_prune_samples_v1", text: `
-      DELETE FROM data.machine_resource_samples WHERE ctid IN (SELECT ctid FROM data.machine_resource_samples
-        WHERE observed_at<$1::timestamptz - make_interval(hours => $2) LIMIT $3) RETURNING 1`,
-    values: [now.toISOString(), MACHINE_RESOURCE_MINUTE_RETENTION_HOURS, PRUNE_BATCH], maxRows: PRUNE_BATCH });
-    const prunedHours = await tx.query<QueryResultRow>({ name: "machine_resource_history_prune_hours_v1", text: `
-      DELETE FROM data.machine_resource_hourly WHERE ctid IN (SELECT ctid FROM data.machine_resource_hourly
-        WHERE hour_start<$1::timestamptz - make_interval(hours => $2) LIMIT $3) RETURNING 1`,
-    values: [now.toISOString(), MACHINE_RESOURCE_HOURLY_RETENTION_HOURS, PRUNE_BATCH], maxRows: PRUNE_BATCH });
-    return { rolledUp: rolled.length, prunedSamples: prunedSamples.length, prunedHours: prunedHours.length };
+      RETURNING 1) SELECT count(*)::int AS n FROM written`,
+    values: [now.toISOString(), ROLLUP_HOURS], maxRows: 1 });
+    const prunedSamples = await tx.query<QueryResultRow>({ name: "machine_resource_history_prune_samples_v2", text: `
+      WITH pruned AS (DELETE FROM data.machine_resource_samples WHERE ctid IN (SELECT ctid FROM data.machine_resource_samples
+        WHERE observed_at<$1::timestamptz - make_interval(hours => $2) LIMIT $3) RETURNING 1) SELECT count(*)::int AS n FROM pruned`,
+    values: [now.toISOString(), MACHINE_RESOURCE_MINUTE_RETENTION_HOURS, PRUNE_BATCH], maxRows: 1 });
+    const prunedHours = await tx.query<QueryResultRow>({ name: "machine_resource_history_prune_hours_v2", text: `
+      WITH pruned AS (DELETE FROM data.machine_resource_hourly WHERE ctid IN (SELECT ctid FROM data.machine_resource_hourly
+        WHERE hour_start<$1::timestamptz - make_interval(hours => $2) LIMIT $3) RETURNING 1) SELECT count(*)::int AS n FROM pruned`,
+    values: [now.toISOString(), MACHINE_RESOURCE_HOURLY_RETENTION_HOURS, PRUNE_BATCH], maxRows: 1 });
+    return { rolledUp: Number(rolled[0]?.n ?? 0), prunedSamples: Number(prunedSamples[0]?.n ?? 0),
+      prunedHours: Number(prunedHours[0]?.n ?? 0) };
   });
 }
