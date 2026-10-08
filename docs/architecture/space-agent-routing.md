@@ -650,8 +650,9 @@ distribution, selected-option probability and rubric version. Failed semantic ch
 by the invocation deadline; they do not create a second source of launch authority.
 
 Native one-click installation currently supports Codex, OpenCode, Pi, GitHub
-Copilot CLI, Gemini CLI, Qwen Code, Junie and OpenClaw via a native-owned npm
-package allowlist. It requires installed Node.js/npm, runs as
+Copilot CLI, Gemini CLI, Qwen Code, Junie, OpenClaw, Qoder CLI, CodeBuddy Code,
+Auggie, Cline, Kilo, Factory Droid, Command Code, Autohand Code, Reasonix and
+DimCode via a native-owned npm package allowlist. It requires installed Node.js/npm, runs as
 the current user, has a bounded process-tree lifetime and never enrolls or signs
 in the runtime automatically. Other presets retain their existing manual setup.
 The [official Codex CLI documentation](https://developers.openai.com/codex/cli)
