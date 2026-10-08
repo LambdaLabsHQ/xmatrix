@@ -80,6 +80,11 @@ it. Both contend on the same row, so only one decision wins. The winning harness
 is summoned by an `@<harness>` reply whose id derives from the first message, so
 an idempotent retry does not create a new launch.
 
+An Agent's mention-free first message in an unnamed conversation uses the same
+durable decision and summon. Its owner is checked through the source Instance's
+registration binding. It has no Human picker window: the database deadline is
+immediate, and the routing model claims the decision before the summon is posted.
+
 Launch options represent authorized executable registrations/harnesses, not every
 entry in the target catalog. Options carry explicit funding provenance; adding a
 service descriptor cannot enable paid consumption. Jev recommendation does not

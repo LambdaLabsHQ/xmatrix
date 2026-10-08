@@ -105,6 +105,7 @@ try {
     "packages/db/test/client-postgres.test.mjs",
     "packages/db/test/page-control-postgres.test.mjs",
     "packages/db/test/agent-registration-launch-postgres.test.mjs", "packages/db/test/agent-lifecycle-cleanup.test.mjs",
+    "packages/db/test/first-message-launch-choice-postgres.test.mjs",
     "packages/db/test/legacy-hostname-retirement-postgres.test.mjs",
     "packages/db/test/agent-registration-control-postgres.test.mjs",
     "packages/db/test/secret-request-postgres.test.mjs",
