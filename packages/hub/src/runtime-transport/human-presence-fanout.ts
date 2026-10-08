@@ -142,7 +142,7 @@ function presencePrincipalForChannel(
 }
 
 /** Which live fanout reads a Channel; it names the read in database observation. */
-export type HumanFanoutPurpose = "human-presence" | "agent-presence" | "registration-quota" | "member-read";
+export type HumanFanoutPurpose = "human-presence" | "agent-presence" | "member-read";
 
 /**
  * A Channel as one Human reads it, with the hint naming an open Channel's

@@ -725,6 +725,16 @@ export function localLlmUsage(usage: LlmUsage | undefined): LlmUsage | undefined
   return Object.keys(local).length ? local : undefined;
 }
 
+/** Keep per-Instance accounting; replace all account fields from the authoritative pool. */
+export function withRegistrationQuota(local: LlmUsage | undefined, quota: LlmUsage | undefined): LlmUsage {
+  return { ...localLlmUsage(local), quotaState: quota?.quotaState ?? (quota?.quotaSource === "provider_api" ? "observed" : "unknown"),
+    ...(quota?.quotaObservedAt ? { quotaObservedAt: quota.quotaObservedAt } : {}),
+    ...(quota?.quotaSource === "provider_api" && quota.quotaState !== "unknown" ? {
+      quotaSource: quota.quotaSource, quotaUsages: quota.quotaUsages,
+      ...(quota.quotaAccount ? { quotaAccount: quota.quotaAccount } : {}),
+    } : {}) };
+}
+
 /** A provider read time small enough to store and parse. Anything else is not a reading. */
 export function parseQuotaObservedAt(value: unknown): string | undefined {
   return typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value))

@@ -1,5 +1,6 @@
 import { isPlainRecord as isRecord } from "../plain-record.js";
 import { utf8ByteLength } from "../hex.js";
+import type { AgentRegistrationKey } from "../agent-registration.js";
 import type {
   AgentLifecycleLayer,
   AgentLifecycleReason,
@@ -7,6 +8,7 @@ import type {
   AgentLifecycleStatus,
   AuthUser,
   ChannelMessage,
+  LlmUsage,
   MessageSender,
   ObservabilityEvent,
   SerializedAgent,
@@ -106,6 +108,20 @@ export type HumanWorkspaceResourceChangedMessage = {
   revision: number;
 };
 
+/**
+ * A registration's account quota was read again and changed. Every Agent this
+ * client shows under the registration takes it the way a Channel read would
+ * have projected it (`withRegistrationQuota`): the account fields are
+ * replaced and each Instance keeps its own counters. It is sent to the user
+ * whose machine was probed or whose Agent reported; others see the reading on
+ * the presence cards of the Agents they watch.
+ */
+type HumanRegistrationQuotaMessage = {
+  type: "registration_quota";
+  registration: AgentRegistrationKey;
+  usage: LlmUsage;
+};
+
 export type HumanTraceAccessServerMessage =
   | { type: "trace_access_requested"; grant: TraceAccessGrant }
   | { type: "trace_access_updated"; grant: TraceAccessGrant };
@@ -123,6 +139,7 @@ export type HumanServerMessage =
   | { type: "presence"; online: boolean; agent: SerializedAgent }
   | { type: "enhanced_presence"; agent: SerializedAgent }
   | HumanPresenceDigestMessage
+  | HumanRegistrationQuotaMessage
   | {
       type: "agent_lifecycle";
       ts: string;
