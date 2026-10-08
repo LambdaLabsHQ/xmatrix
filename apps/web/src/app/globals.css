@@ -5372,12 +5372,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     --mobile-topbar-space: calc(var(--mobile-topbar-offset) + var(--mobile-topbar-height));
     /* Wood that floats on the paper (the bar's sign, the +) has one look: a
        lit top and left rim, a dark bottom and right rim, and a shadow cast
-       evenly around it rather than down. */
+       down onto the paper. */
     --app-wood-plank-cast: inset 0 1px 0 oklch(1 0 0 / 0.45),
       inset 1px 0 0 oklch(1 0 0 / 0.18),
       inset 0 -1px 0 oklch(0 0 0 / 0.3),
       inset -1px 0 0 oklch(0 0 0 / 0.18),
-      0 0 16px -2px oklch(0 0 0 / 0.3);
+      0 12px 22px -12px oklch(0 0 0 / 0.5);
     /* How much of the bottom of a mobile surface the tab bar covers. Every
        mobile scroller reserves this one value instead of restating a height,
        because which bar is down there depends on the client: mobile web draws
