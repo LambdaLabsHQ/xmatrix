@@ -165,6 +165,8 @@ struct DaemonRepoPoolBinding {
     slot_id: String,
     base_repo: PathBuf,
     resumed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    baseline: Option<repo_pool::RepositoryBaseline>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -334,6 +336,10 @@ struct DaemonSpawnRequest {
     identity_id: Option<String>,
     /// The registration's instructions (see `MachineSpawnAgent`).
     role_initial_prompt: Option<String>,
+    /// The registration's working mode (see `MachineSpawnAgent`).
+    working_mode: Option<String>,
+    /// The Space's rules page (see `MachineSpawnAgent`).
+    space_rules_page_id: Option<String>,
     resume: bool,
     resume_instance_id: Option<String>,
     resume_session_key: Option<String>,
@@ -383,6 +389,8 @@ impl DaemonSpawnRequest {
             agent_name,
             identity_id,
             role_initial_prompt,
+            working_mode,
+            space_rules_page_id,
             resume,
             resume_instance_id,
             resume_session_key,
@@ -428,6 +436,8 @@ impl DaemonSpawnRequest {
             agent_name,
             identity_id,
             role_initial_prompt,
+            working_mode,
+            space_rules_page_id,
             resume: resume.unwrap_or(false),
             resume_instance_id,
             resume_session_key,

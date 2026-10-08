@@ -1,4 +1,6 @@
-import { PAGE_DOCUMENT_FRAGMENT, mergePageText, pageAuthorColor, pageChangedBlocks } from "@xmatrix/protocol";
+import {
+  PAGE_DOCUMENT_FRAGMENT, mergePageText, pageAuthorColor, pageChangedBlocks, pageRemovedSections, type PageEditResult,
+} from "@xmatrix/protocol";
 import {
   canonicalPageMarkdown, markdownToPageDoc, pageDocBlockAt, pageDocToMarkdown, pageSchema,
 } from "@xmatrix/protocol/page-document";
@@ -84,13 +86,15 @@ export interface RestingAgent { clientId: number; state: Record<string, unknown>
 export interface PageSessionPorts {
   loadHead(principal: PageSessionPrincipal): Promise<PageHead>;
   loadRevision(principal: PageSessionPrincipal, revision: number): Promise<string>;
-  /** Commits a revision; returns the committed revision and the page head. */
-  commit(principal: PageSessionPrincipal, input: PageCommitInput):
-    Promise<{ revision: number; kind: string; headRevision: number }>;
+  /** Commits a revision; returns the committed revision, the page head, and the Automations it moved. */
+  commit(principal: PageSessionPrincipal, input: PageCommitInput): Promise<PageSessionCommit>;
   persist(state: PageSessionState): Promise<void>;
   send(connectionId: string, data: Uint8Array): void;
   broadcast(data: Uint8Array, exceptConnectionId?: string): void;
 }
+
+/** A committed revision as the repository answers it. */
+export type PageSessionCommit = Omit<PageEditResult, "removedSections">;
 
 export interface PageSessionPresent {
   name: string;
@@ -191,6 +195,10 @@ export class PageSession {
   private ended = false;
 
   constructor(private readonly ports: PageSessionPorts) {
+    // Awareness expires stale states on a 3 s interval, and a pending timer
+    // keeps the Durable Object from hibernating: every open tab would bill
+    // its whole wall-clock time. Stale states expire on arrival instead.
+    clearInterval(this.awareness._checkInterval);
     this.awareness.setLocalState(null);
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       this.version++;
@@ -319,6 +327,15 @@ export class PageSession {
     }
   }
 
+  /** Drops states nobody renewed within Awareness's timeout, as its interval would have. */
+  private dropOutdated(): void {
+    const now = Date.now();
+    const outdated = [...this.awareness.meta].filter(([clientId, meta]) =>
+      this.awareness.states.has(clientId) && now - meta.lastUpdated >= awarenessProtocol.outdatedTimeout)
+      .map(([clientId]) => clientId);
+    if (outdated.length) awarenessProtocol.removeAwarenessStates(this.awareness, outdated, "timeout");
+  }
+
   connect(connection: PageSessionConnection): void {
     this.connections.set(connection.id, connection);
     const encoder = encoding.createEncoder();
@@ -326,6 +343,7 @@ export class PageSession {
     syncProtocol.writeSyncStep1(encoder, this.doc);
     this.ports.send(connection.id, encoding.toUint8Array(encoder));
     this.renewAgents(0);
+    this.dropOutdated();
     const states = [...this.awareness.getStates().keys()];
     if (states.length) {
       const aware = encoding.createEncoder();
@@ -367,6 +385,7 @@ export class PageSession {
     } else if (type === PAGE_MESSAGE_AWARENESS) {
       awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), connectionId);
       this.renewAgents(AGENT_RENEW_MS);
+      this.dropOutdated();
     }
   }
 
@@ -431,7 +450,7 @@ export class PageSession {
     this.settle();
     await this.persist();
     this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
-      headRevision: result.headRevision, author: author.label }));
+      headRevision: result.headRevision, author: author.label, detachedAutomations: result.detachedAutomations }));
     return { revision: result.revision, kind: result.kind };
   }
 
@@ -515,14 +534,14 @@ export class PageSession {
    */
   submitEdit(principal: PageSessionPrincipal, input: {
     baseRevision: number; body: string; conversationIds: string[];
-  }): Promise<{ revision: number; kind: string; headRevision: number }> {
+  }): Promise<PageEditResult> {
     return this.serial(async () => {
       if (!this.base) throw new Error("page session is not loaded");
       if (principal.kind === "agent" && this.base.agentSuggestOnly) {
         const result = await this.ports.commit(principal, { baseRevision: input.baseRevision, body: input.body,
           conversationIds: input.conversationIds, coAuthors: [], blockIds: [] });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return result;
+        return { ...result, removedSections: [] };
       }
       // Pending human edits commit under their own authors first.
       await this.commitNow();
@@ -553,7 +572,7 @@ export class PageSession {
       if (result.kind === "suggestion") {
         this.base = { ...this.base, agentSuggestOnly: true };
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return result;
+        return { ...result, removedSections: [] };
       }
       this.base = { ...this.base, revision: result.headRevision, body: merged.text };
       // One transaction, so edits people make meanwhile can never shift its positions. It is
@@ -567,8 +586,8 @@ export class PageSession {
       this.settle();
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
-        headRevision: result.headRevision, author: principal.label }));
-      return result;
+        headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
+      return { ...result, removedSections: pageRemovedSections(current, merged.text) };
     });
   }
 
@@ -614,7 +633,7 @@ export class PageSession {
     });
   }
 
-  /** Stops the awareness timer and releases the document. */
+  /** Releases the awareness and the document. */
   destroy(): void {
     this.awareness.destroy();
     this.doc.destroy();

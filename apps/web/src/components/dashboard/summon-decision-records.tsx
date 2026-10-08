@@ -49,7 +49,7 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
     try {
       const response = await fetcher(`${route}${after ? `?after=${encodeURIComponent(after)}` : ""}`, { cache: "no-store" });
       if (!response.ok) throw new Error(response.status === 403 || response.status === 404
-        ? "Jev's decisions are visible only to the summoning user." : "Jev's decisions could not be loaded.");
+        ? "Routing decisions are visible only to the summoning user." : "Routing decisions could not be loaded.");
       const result = await response.json() as { records: DecisionRecord[]; nextCursor: string | null };
       const read = await Promise.all(result.records.slice(0, MAX_DETAILS).map(async record => {
         const key = `${route}?refId=${encodeURIComponent(record.refId)}`;
@@ -63,7 +63,7 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
       }));
       setRecords(previous => after ? [...(previous ?? []), ...read] : read);
       setCursor(result.nextCursor);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "Jev's decisions could not be loaded."); }
+    } catch (failure) { setError(failure instanceof Error ? failure.message : "Routing decisions could not be loaded."); }
     finally { setBusy(false); }
   }, [fetcher, route]);
   useEffect(() => { if (user && enabled) void load(null); }, [enabled, load, user]);
@@ -95,16 +95,16 @@ const ROW = "grid grid-cols-[16px_4.75rem_minmax(0,1fr)_auto_12px] items-center 
  *  question, its answer and how sure it was. A row opens to the options it
  *  weighed; "Input" opens what it read. */
 export function JevDecisionSection({ decisions }: { decisions: JevReading[] }) {
-  return <>{decisions.map(decision => <section key={decision.decisionId} aria-label={`Jev's decision${decision.summon ? ` for ${decision.summon}` : ""}`}
+  return <>{decisions.map(decision => <section key={decision.decisionId} aria-label={`Routing decision${decision.summon ? ` for ${decision.summon}` : ""}`}
     className="mt-3 border-t border-border pt-3">
     <details className="group/input">
       <summary className="flex cursor-pointer list-none items-center justify-between text-[11px] text-muted-foreground [&::-webkit-details-marker]:hidden">
-        <span className="font-semibold uppercase tracking-wide">Jev</span>
+        <span className="font-semibold uppercase tracking-wide">Routing</span>
         <span className="flex items-center gap-1">Input<ChevronRight size={12} className="transition-transform group-open/input:rotate-90" /></span>
       </summary>
       <JevInput decision={decision} />
     </details>
-    <ol className="m-0 mt-1 list-none p-0" aria-label="Jev's answers">
+    <ol className="m-0 mt-1 list-none p-0" aria-label="Routing answers">
       {decision.questions.map(question => <JevAnswer key={question.key} question={question} />)}
       {decision.failure && <li className={ROW}><Mark failed /><span className="text-muted-foreground">Failed</span>
         <span className="truncate text-destructive">{decision.failure}</span></li>}
@@ -150,6 +150,8 @@ function JevAnswer({ question }: { question: JevQuestion }) {
             {option.detail && <span className="col-span-3 line-clamp-2 break-words text-[11px] text-muted-foreground">{option.detail}</span>}
           </li>)}
         </ol>
+        {question.model && <p className="m-0 px-2 text-[11px] leading-snug text-muted-foreground">
+          <span className="font-semibold">Decided by: </span>{question.model}</p>}
         {question.instructions && <p className="m-0 px-2 text-[11px] leading-snug text-muted-foreground" title={question.instructions}>
           <span className="font-semibold">Asked: </span><span className="line-clamp-2 inline">{question.instructions}</span></p>}
       </div>
@@ -163,7 +165,7 @@ export function JevDecisionFiles({ state }: { state: JevDecisionState }) {
   const refs = state.decisions.flatMap(decision => decision.refs);
   if (!refs.length && !state.cursor) return null;
   return <p className="app-invocation-description">
-    Jev records (kept 30 days):{" "}
+    Routing records (kept 30 days):{" "}
     {refs.map((refId, index) => <span key={refId}>{index > 0 && " · "}
       <a className="underline" href={`${state.route}?refId=${encodeURIComponent(refId)}`} download="summon-decision.json">
         {refId.endsWith(":started") ? "input" : refId.endsWith(":failed") ? "failure" : "result"}

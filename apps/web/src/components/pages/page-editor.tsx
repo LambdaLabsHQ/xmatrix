@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { pageDocBlockAt, pageDocBlocks, pageSchema, type PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
-  BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2, List, ListChecks, ListOrdered,
-  MessageSquarePlus, Minus, PenLine, Pilcrow, Quote, Sparkles, Table, Users,
+  BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
+  List, ListChecks, ListOrdered, MessageSquarePlus, Minus, PenLine, Pilcrow, Quote, Sparkles, Table, Users,
 } from "lucide-react";
 import { EditorState, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey } from "y-prosemirror";
-import type { SerializedAutomation } from "@xmatrix/protocol";
+import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
+import type { ReadGitHubFile } from "./page-github-file-embeds";
 import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
@@ -89,7 +90,27 @@ const INSERT_ITEMS: InsertItem[] = [
   { label: "Code", hint: "```", keywords: "code snippet", icon: <Code2 />, run: setBlockKind("code") },
   { label: "Table", hint: "3 × 3", keywords: "table grid", icon: <Table />, run: insertTable },
   { label: "Divider", hint: "---", keywords: "divider rule line hr", icon: <Minus />, run: insertRule },
+  { label: "GitHub file", hint: "Embed", keywords: "github file embed repository code markdown", icon: <FileCode2 />,
+    run: (_state, dispatch, editor) => {
+      if (dispatch) editor?.dom.dispatchEvent(new CustomEvent("xmatrix-embed-github-file", { bubbles: true }));
+      return true;
+    } },
 ];
+
+/** Puts a GitHub file's embed at the caret: a link the editor draws with the file below it (pages-live-document.md §6.5). */
+function embedGitHubFile(text: string): Command | null {
+  const reference = gitHubFileReferenceFrom(text);
+  if (!reference) return null;
+  return (state, dispatch) => {
+    if (dispatch) {
+      const link = pageSchema.marks.link.create({ href: gitHubFileReferenceHref(reference) });
+      // Labelled with the file's name; the embed's header names its repository and path.
+      const name = reference.path.slice(reference.path.lastIndexOf("/") + 1);
+      dispatch(state.tr.replaceSelectionWith(pageSchema.text(name, [link]), false));
+    }
+    return true;
+  };
+}
 
 function matchingItems(query: string): InsertItem[] {
   const needle = query.toLowerCase();
@@ -113,7 +134,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null }: {
+  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readGitHubFile }: {
   session: PageLiveSession;
   canEdit: boolean;
   onBlockChange?: (blockId: string) => void;
@@ -145,6 +166,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   onReady?: () => void;
   /** The page as this reader last had it on screen, as markdown: what changed since is shown as it is read. */
   readerBaseline?: string | null;
+  /** Reads a GitHub file the page embeds, through the Hub. */
+  readGitHubFile?: ReadGitHubFile;
 }) {
   const frame = useRef<HTMLDivElement | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
@@ -163,6 +186,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   heading.current = headingActions ?? { canEdit };
   const ready = useRef(onReady);
   ready.current = onReady;
+  const readFile = useRef(readGitHubFile);
+  readFile.current = readGitHubFile;
   const anchorsChange = useRef(onAnchorOffsets);
   anchorsChange.current = onAnchorOffsets;
   const presenceOf = useRef<CursorPresence>(cursorPresence ?? (() => "active"));
@@ -189,6 +214,9 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const [toolbar, setToolbar] = useState<Toolbar | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [linkDraft, setLinkDraft] = useState<string | null>(null);
+  // A GitHub file link being pasted to embed, and why the last one was not a file.
+  const [fileDraft, setFileDraft] = useState<string | null>(null);
+  const [fileDraftError, setFileDraftError] = useState(false);
   // The passage being asked about, kept while the question is typed (the editor loses its selection).
   const [asking, setAsking] = useState<{ mode: "ask" | "change"; blockId: string; left: number; top: number;
     anchor: { quote: string; from: unknown; to: unknown } } | null>(null);
@@ -254,6 +282,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         focusConversation: (conversationId) => focusConversation.current?.(conversationId),
         headingActions: () => heading.current,
         cursorPresence: () => presenceOf.current,
+        readGitHubFile: () => readFile.current,
       }) }),
       nodeViews,
       editable: () => editable.current,
@@ -357,8 +386,16 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     const onEdit = (event: Event) => {
       setLinkDraft((event as CustomEvent<{ href?: string }>).detail?.href ?? "");
     };
+    const onEmbed = () => {
+      setFileDraft("");
+      setFileDraftError(false);
+    };
     node.addEventListener("xmatrix-edit-link", onEdit);
-    return () => node.removeEventListener("xmatrix-edit-link", onEdit);
+    node.addEventListener("xmatrix-embed-github-file", onEmbed);
+    return () => {
+      node.removeEventListener("xmatrix-edit-link", onEdit);
+      node.removeEventListener("xmatrix-embed-github-file", onEmbed);
+    };
   }, []);
 
   useEffect(() => {
@@ -381,6 +418,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   const selectionMenu = toolbar && !toolbar.empty && toolbar.focused && current && toolbar.kind !== "code" && selectionActions
     ? place(current.state.selection.from) : null;
   const linkAtPos = linkDraft !== null && current ? place(current.state.selection.from) : null;
+  const fileAtPos = fileDraft !== null && current ? place(current.state.selection.from) : null;
   const slash = canEdit && toolbar?.slash && toolbar.focused ? toolbar.slash : null;
   const slashItems = slash ? matchingItems(slash.query) : [];
   const slashAt = slash && slashItems.length ? place(slash.from) : null;
@@ -415,6 +453,32 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
           {toolbar?.link && (
             <button type="button" className="text-sm text-muted-foreground"
               onClick={() => { run(setLink("")); setLinkDraft(null); }}>Remove</button>
+          )}
+        </form>
+        </div>
+      )}
+      {fileDraft !== null && (
+        <div className={fileAtPos ? "absolute z-30" : "mb-2"}
+          style={fileAtPos ? { left: Math.max(0, fileAtPos.left - 8), top: fileAtPos.top - 6, transform: "translateY(-100%)" } : undefined}>
+        <form className="flex w-[min(32rem,80vw)] flex-col gap-1 rounded-lg border border-border bg-popover p-2"
+          data-testid="page-embed-github-file"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const command = embedGitHubFile(fileDraft);
+            if (!command) { setFileDraftError(true); return; }
+            run(command);
+            setFileDraft(null);
+          }}>
+          <div className="flex items-center gap-2">
+            <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+            <input autoFocus value={fileDraft} onChange={(event) => { setFileDraft(event.target.value); setFileDraftError(false); }}
+              placeholder="Paste a link to a file on GitHub" aria-label="GitHub file link"
+              className="min-w-0 flex-1 bg-transparent text-sm focus:outline-none"
+              onKeyDown={(event) => { if (event.key === "Escape") { setFileDraft(null); view.current?.focus(); } }} />
+            <button type="submit" className="text-sm font-semibold">Embed</button>
+          </div>
+          {fileDraftError && (
+            <p className="text-xs text-muted-foreground">Paste a file link, like https://github.com/owner/repo/blob/main/README.md</p>
           )}
         </form>
         </div>

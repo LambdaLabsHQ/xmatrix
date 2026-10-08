@@ -405,7 +405,7 @@ async fn cmd_secret_exec(
         .map(|(secret_ref, _)| secret_ref)
         .collect::<Vec<_>>();
     let response = match read_run_secrets(hub_url, token, &refs).await {
-        Err(CliError::Http(message)) if secret_request_still_open(&message) => {
+        Err(error) if error.http_message().is_some_and(secret_request_still_open) => {
             for (secret_ref, env_name) in &mappings {
                 let request = SecretAddRequest {
                     secret_ref: secret_ref.clone(),
@@ -700,7 +700,7 @@ async fn request_secret_and_wait(
                     .next()
                     .map(|secret| request.env_name.clone().unwrap_or(secret.env_name)));
             }
-            Err(CliError::Http(message)) if secret_request_still_open(&message) => {}
+            Err(error) if error.http_message().is_some_and(secret_request_still_open) => {}
             Err(error) => return Err(error),
         }
         if std::time::Instant::now() >= deadline {

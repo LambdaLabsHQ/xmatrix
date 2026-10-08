@@ -14,6 +14,7 @@ import canonicalVersion from "../../../../version.json" with { type: "json" };
 import { getDesktopBridge } from "./desktop/bridge";
 import { xmatrixHubOrigin } from "./query/api-client";
 import { ClientAdmissionCache } from "./client-admission-cache";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 type CompatibilityResult = { identity: ClientCompatibilityIdentity; decision: ClientCompatibilityDecision };
 const admissionCache = new ClientAdmissionCache<CompatibilityResult>();
@@ -60,7 +61,7 @@ export async function checkAppCompatibility(): Promise<CompatibilityResult> {
 }
 
 async function requestAppCompatibility(identity: ClientCompatibilityIdentity): Promise<CompatibilityResult> {
-  const response = await fetch("/api/client-compatibility", {
+  const response = await xmatrixRawResponse("/api/client-compatibility", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(identity),
@@ -117,16 +118,22 @@ export function openAppUpgradeWall(): void {
   window.location.replace("/upgrade-required");
 }
 
-export function handleHumanSocketCompatibilityClose(
-  closeCode: number,
-  reconnect: () => void,
-): boolean {
-  if (closeCode !== CLIENT_UPGRADE_REQUIRED_CLOSE_CODE && closeCode !== 1006) return false;
-  void humanSocketRequiresUpgrade(closeCode).then((upgradeRequired) => {
-    if (upgradeRequired) openAppUpgradeWall();
-    else reconnect();
-  });
-  return true;
+/**
+ * What a closed Human socket does next. A close that may mean this app is too
+ * old asks the Hub first, and opens the upgrade wall instead of redialling.
+ */
+const UPGRADE_CHECK_TIMEOUT_MS = 10_000;
+
+export async function humanSocketCloseDecision(closeCode: number): Promise<"reconnect" | "stop"> {
+  if (closeCode !== CLIENT_UPGRADE_REQUIRED_CLOSE_CODE && closeCode !== 1006) return "reconnect";
+  // A check stuck on a half-dead network must not hold the redial forever.
+  const upgradeRequired = await Promise.race([
+    humanSocketRequiresUpgrade(closeCode),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), UPGRADE_CHECK_TIMEOUT_MS)),
+  ]);
+  if (!upgradeRequired) return "reconnect";
+  openAppUpgradeWall();
+  return "stop";
 }
 
 function compatibilityDecision(value: unknown): ClientCompatibilityDecision | undefined {

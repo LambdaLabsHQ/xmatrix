@@ -22,7 +22,7 @@ function shellFunction(name) {
  * in its own session, which is what a cron job, CI runner, or daemon-spawned
  * install looks like: no controlling terminal, but /dev/tty still passes -r.
  */
-function fakeXmatrix(loggedIn) {
+function fakeXmatrix(loggedIn, loginFails = false) {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "xmatrix-install-test-"));
   const callLog = path.join(workDir, "calls.log");
   const fakeBin = path.join(workDir, "xmatrix");
@@ -33,6 +33,7 @@ function fakeXmatrix(loggedIn) {
       "#!/bin/sh",
       `echo "$@" >> "${callLog}"`,
       `[ "$1" = "whoami" ] && exit ${loggedIn === undefined || loggedIn ? 0 : 1}`,
+      `[ "$1" = "login" ] && exit ${loginFails ? 1 : 0}`,
       "exit 0",
       "",
     ].join("\n"),
@@ -42,12 +43,13 @@ function fakeXmatrix(loggedIn) {
   return { workDir, callLog, fakeBin };
 }
 
-function runSetupDaemon({ osName = "macos", loggedIn = false } = {}) {
-  const { workDir, callLog, fakeBin } = fakeXmatrix(loggedIn);
+function runSetupDaemon({ osName = "macos", loggedIn = false, connect, loginFails = false } = {}) {
+  const { workDir, callLog, fakeBin } = fakeXmatrix(loggedIn, loginFails);
 
   const harness = [
     "set -u",
     `OS_NAME="${osName}"`,
+    ...(connect ? [`CONNECT_ID="${connect}"`] : []),
     'info() { echo "INFO: $*"; }',
     'step() { echo "STEP: $*"; }',
     'error() { echo "ERROR: $*"; }',
@@ -91,6 +93,18 @@ test("an existing login is reused instead of prompting for a new one", unixOnly,
   assert.match(run.stdout, /Using the existing xMatrix login/);
   assert.doesNotMatch(run.calls, /login/);
   assert.match(run.stdout, /STARTUP_ENTRY_INSTALLED/);
+});
+
+test("a setup command signs in through its page even with a session, and a failure still installs", unixOnly, () => {
+  const connected = runSetupDaemon({ loggedIn: true, connect: "0123456789abcdef0123456789abcdef" });
+  assert.match(connected.calls, /^login --connect 0123456789abcdef0123456789abcdef$/m);
+  assert.match(connected.stdout, /Approve this terminal on the xMatrix page/);
+  assert.match(connected.stdout, /STARTUP_ENTRY_INSTALLED/);
+
+  const failed = runSetupDaemon({ connect: "0123456789abcdef0123456789abcdef", loginFails: true });
+  assert.equal(failed.status, 0, failed.stderr);
+  assert.match(failed.stdout, /Resume with: xmatrix login --connect 0123456789abcdef0123456789abcdef/);
+  assert.match(failed.stdout, /STARTUP_ENTRY_INSTALLED/);
 });
 
 test("an unsupported platform skips daemon setup without touching the binary", unixOnly, () => {

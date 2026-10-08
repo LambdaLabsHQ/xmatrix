@@ -105,6 +105,30 @@ not probe Hub membership or restart a live daemon because its reverse-delivery
 socket is reconnecting; the Machine Daemon connection actor owns that bounded
 backoff and fresh-socket catch-up lifecycle.
 
+The CLI and its daemons follow the Hub's transient-failure contract. A Hub
+outage is HTTP `503` with `{ error, code, retryable: true }` and `Retry-After`
+in seconds; a socket error frame carries `failure.retryable`, and a Durable
+Object that a deploy reset, dropped or overloaded reaches a socket as the
+retryable code `service_restarting`. Everything else is a real rejection.
+
+- The shared HTTP client sends a request up to three times when the Hub says
+  `retryable: true` (any method; the Hub says so only where a replay is safe),
+  or, for GET and HEAD only, when a 502/503/504 carries `Retry-After` and no
+  verdict. Each wait honours `Retry-After`, capped at 30 seconds, plus jitter.
+  A connect failure is replayed once and a 429 is waited out once, as before.
+  The client has a 10-second connect timeout and no whole-request timeout.
+- A refusal keeps its status, code and `retryable` verdict in the CLI error;
+  its text is the Hub's message, as before.
+- Every Hub socket loop (Human, Machine Daemon, Agent Instance) and the
+  long-lived registration retries share one backoff: exponential from one
+  second, capped at 30, with equal jitter. It starts over only after a
+  connection stays up for 30 seconds, not when a handshake succeeds.
+- The Machine Daemon's first registration waits out transient failures in
+  credential enrollment, the socket connect and the handshake within its
+  60-second ready budget instead of failing; a refusal still fails it at once.
+- A session refresh that met an outage is reported as transient and says the
+  session was kept; only the Hub's refusal reads `Session refresh failed`.
+
 If no daemon process exists, the Desktop app should start the known OS-managed
 daemon first:
 
@@ -170,3 +194,76 @@ Startup checkpoint history is bounded to 16 first observations from the current 
 ## Execution and reply evidence
 
 Wrapper execution-phase updates cannot set `delivered=true`. The retained legacy field is false for these writes and is not a Channel commit receipt. A delivered bit alone does not make a local process terminal. Machine lifecycle authority classifies execution from explicit phases, completion and exit evidence independently from reply delivery; scheduled execution retains its explicit phase requirement. Final reply receipts and recovery are a separate, still-incomplete contract. Deploy the Hub/DB classification before publishing this CLI semantic change because older servers treated `delivered=false` as execution failure.
+
+## Repository snapshot preparation
+
+Every fresh repo-pool lease confirms its base with origin before creating a
+worktree. One `git ls-remote --symref origin HEAD` names origin's default
+branch and its tip; the daemon then fetches and resolves exactly that branch
+(`+refs/heads/<branch>:refs/remotes/origin/<branch>`) and skips the download
+when the remote-tracking ref already holds the advertised tip. A local
+`origin/HEAD` never chooses the branch, so a renamed or deleted default branch
+cannot leave new leases on a stale ref; the local note is rewritten to the
+confirmed branch afterwards.
+
+Only leases that run at the same moment share one confirmation; a finished
+confirmation is never reused, so a lease started after a merge sees it. The base
+oid is origin's tip as this confirmation observed it (if origin moves between
+`ls-remote` and the fetch, the fetched tip is used), not a promise about
+anything later. If origin cannot be reached or advertises no default branch
+with a commit, preparation fails with that cause and no worktree is created.
+
+The forced refspec lets a remote history rewrite or rollback replace the
+remote-tracking ref. Local branches, uncommitted files, and existing leased
+worktrees remain unchanged, and existing retained Runs keep their checkout on
+resume. Legacy remote-repo run worktrees confirm the default branch the same
+way.
+
+Invocation details show the actual checkout base branch and full commit OID,
+with its confirmation time in UTC. A reused object store is not a reused
+confirmation. The observation is a remote snapshot at that time, not a claim
+that the branch cannot move before the Agent starts. History replacement is
+reported only when the same branch had a known previous tip, both objects and
+complete ancestry are available, and that tip is not an ancestor of the new
+tip. First observations, default-branch changes and shallow/missing history do
+not prove a rewrite; Git stderr is not used for this decision.
+
+A continued repo-pool task keeps its recorded base and checkout. During its
+launch the daemon confirms the current remote default once, outside the pool
+manifest lock, and tests the recorded base rather than the Run's HEAD. Normal
+unmerged commits are not divergence. Failed confirmation, missing objects,
+shallow history and ancestry command errors produce unknown evidence, without
+resetting or preventing the old task from continuing. Only a proven negative
+ancestry result produces a continuity warning: once in the Channel per
+checkout/base, and once in the Agent's durably admitted initial input.
+Report/spawn replays preserve those identities. This adds no Run page polling.
+Original confirmation times missing from older tasks remain unavailable.
+
+Baseline evidence and notification receipts are bounded private records beside
+the v1 pool manifest; the manifest and Git ownership rules are unchanged. Older
+daemons ignore the new evidence and older Hubs ignore the optional spawn
+metadata. Deploy the Hub and Web support before the CLI to make the evidence
+and warning visible. Presentation evidence grants no repository or Run authority.
+
+The shared Git object store, remote-tracking reflogs and retained tasks may
+keep commits removed from origin. Following a rewritten branch does not purge
+those objects or remove secrets from the local machine. Rotate exposed
+credentials and use an explicit owner-controlled cleanup when necessary; this
+feature supplies no secret-removal operation and performs no automatic GC or
+old-task cleanup.
+
+## Startup failure diagnostics
+
+The daemon preserves the originating failure text through the Channel startup
+notice and invocation diagnostics. Git retry classification is separate from its
+stderr: a rejected fetch reports `non-fast-forward`, rather than replacing it
+with a network/permissions suggestion. Codes remain stable for existing clients.
+Credentials are redacted before transport; Channel presentation additionally
+redacts machine-private absolute paths, strips control characters, and bounds
+text to 2,000 characters. Redaction preserves subsequent lines and the actual
+cause. Generic text is used only when no cause was supplied. Internal database
+errors retain their existing diagnostic-reference boundary.
+
+This requires Hub support to display the cause and a CLI release to retain Git
+stderr. Old CLIs cannot recover a cause they already discarded. Existing failure
+messages are historical records and are not rewritten.

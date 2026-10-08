@@ -1,4 +1,4 @@
-import { PostgresPageRepository } from "@xmatrix/db";
+import { ControlError, PostgresPageRepository } from "@xmatrix/db";
 import {
   publishGitHubCheckRun, readGitHubPullRequestForReview, readGitHubPullRequestHead,
   type AppConnectorConnectionView, type GitHubPullRequestForReview,
@@ -133,9 +133,7 @@ export async function startPreReview(env: Env, input: {
   });
 }
 
-export class PreReviewError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) { super(message); }
-}
+export class PreReviewError extends ControlError {}
 
 /**
  * The review conversation's verdict, published as `xmatrix/pre-review` on the

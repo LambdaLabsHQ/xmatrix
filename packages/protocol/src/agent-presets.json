@@ -1140,6 +1140,1050 @@
     }
   },
   {
+    "id": "qoder",
+    "displayName": "Qoder CLI",
+    "description": "Qoder CLI through the generic ACP backend (`qodercli --acp`, the vendor's native ACP server).",
+    "runtime": "qodercli",
+    "avatarUrl": "/agent-vendors/qoder.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--acp"],
+    "launcherNames": ["qodercli", "qodercli.exe", "qodercli.cmd", "qodercli.bat", "qoder", "qoder.exe", "qoder.cmd", "qoder.bat"],
+    "classicConfigDirs": ["~/.qoder"],
+    "installHint": "npm install -g @qoder-ai/qodercli",
+    "management": {
+      "version": {
+        "command": "qodercli",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@qoder-ai/qodercli@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@qoder-ai/qodercli@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@qoder-ai/qodercli@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@qoder-ai/qodercli@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@qoder-ai/qodercli"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@qoder-ai/qodercli"]
+        }
+      },
+      "login": {
+        "flow": "device_code",
+        "start": {
+          "command": "qodercli",
+          "args": ["login"]
+        },
+        "urlRegex": "(https://qoder\\.com/device/\\S+)",
+        "status": {
+          "command": "qodercli",
+          "args": ["status", "-o", "json"],
+          "signedInRegex": "\"logged_in\"\\s*:\\s*true"
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "@qoder-ai/qodercli"
+      },
+      "sources": ["https://docs.qoder.com/cli/quick-start", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "codebuddy",
+    "displayName": "CodeBuddy Code",
+    "description": "Tencent CodeBuddy Code through the generic ACP backend (`codebuddy --acp`, the vendor's native ACP server).",
+    "runtime": "codebuddy",
+    "avatarUrl": "/agent-vendors/codebuddy.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--acp"],
+    "launcherNames": ["codebuddy", "codebuddy.exe", "codebuddy.cmd", "codebuddy.bat", "cbc", "cbc.exe", "cbc.cmd", "cbc.bat"],
+    "classicConfigDirs": ["~/.codebuddy"],
+    "installHint": "npm install -g @tencent-ai/codebuddy-code",
+    "management": {
+      "version": {
+        "command": "codebuddy",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@tencent-ai/codebuddy-code@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@tencent-ai/codebuddy-code@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@tencent-ai/codebuddy-code@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@tencent-ai/codebuddy-code@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@tencent-ai/codebuddy-code"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@tencent-ai/codebuddy-code"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "@tencent-ai/codebuddy-code"
+      },
+      "sources": ["https://cnb.cool/codebuddy/codebuddy-code", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "omp",
+    "displayName": "Oh My Pi",
+    "description": "Oh My Pi through the generic ACP backend (`omp acp`, the vendor's native ACP server; runs on Bun).",
+    "runtime": "omp",
+    "avatarUrl": "/agent-vendors/omp.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["omp", "omp.exe", "omp.cmd", "omp.bat"],
+    "classicConfigDirs": ["~/.omp"],
+    "installHint": "bun install -g @oh-my-pi/pi-coding-agent",
+    "management": {
+      "version": {
+        "command": "omp",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bun",
+          "args": ["install", "-g", "@oh-my-pi/pi-coding-agent@latest"]
+        },
+        "windows": {
+          "command": "bun",
+          "args": ["install", "-g", "@oh-my-pi/pi-coding-agent@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "bun",
+          "args": ["install", "-g", "@oh-my-pi/pi-coding-agent@latest"]
+        },
+        "windows": {
+          "command": "bun",
+          "args": ["install", "-g", "@oh-my-pi/pi-coding-agent@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "bun",
+          "args": ["remove", "-g", "@oh-my-pi/pi-coding-agent"]
+        },
+        "windows": {
+          "command": "bun",
+          "args": ["remove", "-g", "@oh-my-pi/pi-coding-agent"]
+        }
+      },
+      "login": {
+        "flow": "url_paste_code",
+        "start": {
+          "command": "omp",
+          "args": ["login", "openai-codex"]
+        },
+        "urlRegex": "Open this URL in your browser:\\s*(https://auth\\.openai\\.com/\\S+)",
+        "rejectedRegex": "Paste the authorization code \\(or full redirect URL\\):"
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Bun global install; `omp update` updates in place. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "@oh-my-pi/pi-coding-agent"
+      },
+      "sources": ["https://omp.sh", "https://github.com/can1357/oh-my-pi"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "auggie",
+    "displayName": "Auggie",
+    "description": "Augment Code Auggie CLI through the generic ACP backend (`auggie --acp`, the vendor's native ACP server).",
+    "runtime": "auggie",
+    "avatarUrl": "/agent-vendors/auggie.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--acp"],
+    "launcherNames": ["auggie", "auggie.exe", "auggie.cmd", "auggie.bat"],
+    "classicConfigDirs": ["~/.augment"],
+    "installHint": "npm install -g @augmentcode/auggie",
+    "management": {
+      "version": {
+        "command": "auggie",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@augmentcode/auggie@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@augmentcode/auggie@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@augmentcode/auggie@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@augmentcode/auggie@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@augmentcode/auggie"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@augmentcode/auggie"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "env",
+            "key": "AUGMENT_DISABLE_AUTO_UPDATE",
+            "enabled": null,
+            "disabled": "1"
+          }
+        ]
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "@augmentcode/auggie"
+      },
+      "sources": ["https://docs.augmentcode.com/cli/overview", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "cline",
+    "displayName": "Cline",
+    "description": "Cline CLI through the generic ACP backend (`cline --acp`, the vendor's native ACP server).",
+    "runtime": "cline",
+    "avatarUrl": "/agent-vendors/cline.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--acp"],
+    "launcherNames": ["cline", "cline.exe", "cline.cmd", "cline.bat"],
+    "classicConfigDirs": ["~/.cline"],
+    "installHint": "npm install -g cline",
+    "management": {
+      "version": {
+        "command": "cline",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "cline@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "cline@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "cline@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "cline@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "cline"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "cline"]
+        }
+      },
+      "login": {
+        "flow": "device_code",
+        "start": {
+          "command": "cline",
+          "args": ["auth", "cline"]
+        },
+        "urlRegex": "(https://authkit\\.cline\\.bot/device\\S*)",
+        "codeRegex": "Enter this code in your browser:\\s*([A-Z0-9]{4}-[A-Z0-9]{4})"
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "cline"
+      },
+      "sources": ["https://docs.cline.bot/cline-cli/overview", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "kilo",
+    "displayName": "Kilo",
+    "description": "Kilo Code CLI through the generic ACP backend (`kilo acp`, the vendor's native ACP server).",
+    "runtime": "kilo",
+    "avatarUrl": "/agent-vendors/kilo.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["kilo", "kilo.exe", "kilo.cmd", "kilo.bat", "kilocode", "kilocode.exe", "kilocode.cmd", "kilocode.bat"],
+    "classicConfigDirs": ["~/.config/kilo", "~/.local/share/kilo"],
+    "installHint": "npm install -g @kilocode/cli",
+    "management": {
+      "version": {
+        "command": "kilo",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@kilocode/cli@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@kilocode/cli@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "@kilocode/cli@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "@kilocode/cli@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@kilocode/cli"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "@kilocode/cli"]
+        }
+      },
+      "login": {
+        "flow": "device_code",
+        "start": {
+          "command": "kilo",
+          "args": ["auth", "login", "-p", "kilo"]
+        },
+        "urlRegex": "Go to:\\s*(https://\\S+)",
+        "codeRegex": "enter code:\\s*([A-Z0-9]{4}-[A-Z0-9]{4})",
+        "status": {
+          "command": "kilo",
+          "args": ["auth", "list"],
+          "signedInRegex": "\\b[1-9]\\d* credentials?\\b"
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "@kilocode/cli"
+      },
+      "sources": ["https://kilo.ai/docs/cli", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "droid",
+    "displayName": "Factory Droid",
+    "description": "Factory Droid through the generic ACP backend (`droid exec --output-format acp-daemon`, the vendor's native ACP server).",
+    "runtime": "droid",
+    "avatarUrl": "/agent-vendors/droid.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["exec", "--output-format", "acp-daemon"],
+    "launcherNames": ["droid", "droid.exe", "droid.cmd", "droid.bat"],
+    "classicConfigDirs": ["~/.factory"],
+    "installHint": "npm install -g droid",
+    "management": {
+      "version": {
+        "command": "droid",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "droid@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "droid@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "droid@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "droid@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "droid"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "droid"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "env",
+            "key": "DROID_DISABLE_AUTO_UPDATE",
+            "enabled": null,
+            "disabled": "true"
+          }
+        ]
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "droid"
+      },
+      "sources": ["https://docs.factory.ai/cli/getting-started/quickstart", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "devin",
+    "displayName": "Devin",
+    "description": "Devin CLI through the generic ACP backend (`devin acp`, the vendor's native ACP server).",
+    "runtime": "devin",
+    "avatarUrl": "/agent-vendors/devin.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["devin", "devin.exe", "devin.cmd", "devin.bat"],
+    "classicConfigDirs": ["~/.config/devin", "~/.local/share/devin"],
+    "installHint": "curl -fsSL https://cli.devin.ai/install.sh | bash",
+    "management": {
+      "version": {
+        "command": "devin",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://cli.devin.ai/install.sh | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://cli.devin.ai/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "devin",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "devin",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "login": {
+        "flow": "url_paste_code",
+        "terminal": true,
+        "start": {
+          "command": "devin",
+          "args": ["auth", "login", "--force-manual-token-flow"]
+        },
+        "urlRegex": "Visit (https://app\\.devin\\.ai/auth/cli/\\S+)"
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "`devin update` checks and installs; `devin uninstall` also removes data, so it is not offered."
+      },
+      "sources": ["https://docs.devin.ai/cli", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "commandcode",
+    "displayName": "Command Code",
+    "description": "Command Code through the generic ACP backend (`command-code acp`, the vendor's native ACP server).",
+    "runtime": "command-code",
+    "avatarUrl": "/agent-vendors/commandcode.png",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["command-code", "command-code.exe", "command-code.cmd", "command-code.bat", "commandcode", "commandcode.exe", "commandcode.cmd", "commandcode.bat"],
+    "classicConfigDirs": ["~/.commandcode"],
+    "installHint": "npm install -g command-code",
+    "management": {
+      "version": {
+        "command": "command-code",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "command-code@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "command-code@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "command-code@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "command-code@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "command-code"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "command-code"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "flag",
+            "disabled": "--no-auto-update"
+          }
+        ],
+        "notes": "Background updates run unless a session passes --no-auto-update."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "command-code"
+      },
+      "sources": ["https://commandcode.ai/docs", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "jcode",
+    "displayName": "jcode",
+    "description": "jcode through the generic ACP backend (`jcode acp`, the vendor's native ACP server).",
+    "runtime": "jcode",
+    "avatarUrl": "/agent-vendors/jcode.png",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["jcode", "jcode.exe", "jcode.cmd", "jcode.bat"],
+    "classicConfigDirs": ["~/.jcode"],
+    "installHint": "curl -fsSL https://jcode.sh/install | bash",
+    "management": {
+      "version": {
+        "command": "jcode",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "bash",
+          "args": ["-c", "curl -fsSL https://jcode.sh/install | bash"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://jcode.sh/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "jcode",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "jcode",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "login": {
+        "flow": "device_code",
+        "start": {
+          "command": "jcode",
+          "args": ["account", "login"]
+        },
+        "urlRegex": "(https://jcode\\.sh/account\\?flow=\\S+)",
+        "status": {
+          "command": "jcode",
+          "args": ["account", "status"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [
+          {
+            "kind": "flag",
+            "disabled": "--no-update"
+          }
+        ],
+        "notes": "jcode checks for updates on start unless --no-update is passed."
+      },
+      "sources": ["https://jcode.sh", "https://github.com/1jehuang/jcode"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "prime",
+    "displayName": "Prime Agent",
+    "description": "Prime Intellect Prime Agent through the generic ACP backend (`prime-agent --mode acp`, the vendor's native ACP server).",
+    "runtime": "prime-agent",
+    "avatarUrl": "/agent-vendors/prime.png",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--mode", "acp"],
+    "launcherNames": ["prime-agent", "prime-agent.exe", "prime-agent.cmd", "prime-agent.bat"],
+    "classicConfigDirs": ["~/.prime"],
+    "installHint": "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh",
+    "management": {
+      "version": {
+        "command": "prime-agent",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "sh",
+          "args": ["-c", "curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh"]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://app.primeintellect.ai/prime-agent/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "prime-agent",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "prime-agent",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "`prime-agent update` installs the latest release on the current channel."
+      },
+      "sources": ["https://github.com/PrimeIntellect-ai/prime-agent"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "trae",
+    "displayName": "TraeCode CLI",
+    "description": "TraeCode CLI through the generic ACP backend (`traecli acp serve`, the vendor's native ACP server).",
+    "runtime": "traecli",
+    "avatarUrl": "/agent-vendors/trae.png",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp", "serve"],
+    "launcherNames": ["traecli", "traecli.exe", "traecli.cmd", "traecli.bat"],
+    "classicConfigDirs": ["~/.config/trae_cli", "~/Library/Application Support/trae_cli"],
+    "installHint": "sh -c \"$(curl -L https://trae.cn/trae-cli/install.sh)\"",
+    "management": {
+      "version": {
+        "command": "traecli",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "sh",
+          "args": ["-c", "sh -c \"$(curl -L https://trae.cn/trae-cli/install.sh)\""]
+        },
+        "windows": {
+          "command": "powershell",
+          "args": ["-NoProfile", "-Command", "irm 'https://trae.cn/trae-cli/install.ps1' | iex"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "traecli",
+          "args": ["update"]
+        },
+        "windows": {
+          "command": "traecli",
+          "args": ["update"]
+        }
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "automatic",
+        "defaultEnabled": true,
+        "controls": [],
+        "interactiveOnly": true,
+        "notes": "The interactive CLI upgrades itself on start; no documented switch."
+      },
+      "sources": ["https://docs.trae.cn/cli_get-started-with-trae-cli", "https://docs.trae.cn/cli_acp"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "antigravity",
+    "displayName": "Google Antigravity",
+    "description": "Google Antigravity through the generic ACP backend (`agy_acp_server.par`, Google's standalone ACP server).",
+    "runtime": "agy_acp_server.par",
+    "avatarUrl": "/agent-vendors/antigravity.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["--uid="],
+    "launcherNames": ["agy_acp_server.par"],
+    "classicConfigDirs": ["~/.gemini"],
+    "installHint": "Download the Antigravity ACP server for your platform from https://antigravity.google/docs/ide/extensions and put agy_acp_server.par on PATH",
+    "management": {
+      "version": null,
+      "install": {
+        "unix": null,
+        "windows": null
+      },
+      "update": {
+        "unix": null,
+        "windows": null
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "manual",
+        "controls": [],
+        "notes": "Google ships the ACP server as a versioned archive with no installer or updater."
+      },
+      "sources": ["https://antigravity.google/docs/ide/extensions", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"],
+      "checkedAt": "2026-10-08",
+      "notes": "Standalone archive from dl.google.com; no CLI version command."
+    }
+  },
+  {
+    "id": "autohand",
+    "displayName": "Autohand Code",
+    "description": "Autohand Code through the generic ACP backend (`autohand-acp`, Autohand's ACP adapter for its CLI).",
+    "runtime": "autohand-acp",
+    "avatarUrl": "/agent-vendors/autohand.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": [],
+    "launcherNames": ["autohand-acp", "autohand-acp.exe", "autohand-acp.cmd", "autohand-acp.bat"],
+    "classicConfigDirs": ["~/.autohand"],
+    "installHint": "npm install -g autohand-cli @autohandai/autohand-acp",
+    "management": {
+      "version": {
+        "command": "autohand",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "autohand-cli@latest", "@autohandai/autohand-acp@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "autohand-cli@latest", "@autohandai/autohand-acp@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "autohand-cli@latest", "@autohandai/autohand-acp@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "autohand-cli@latest", "@autohandai/autohand-acp@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "autohand-cli", "@autohandai/autohand-acp"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "autohand-cli", "@autohandai/autohand-acp"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "autohand-cli"
+      },
+      "sources": ["https://autohand.ai/cli/", "https://github.com/autohandai/autohand-acp", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "amp",
+    "displayName": "Amp",
+    "description": "Amp through the generic ACP backend (`amp-acp`, the ACP-registry adapter for the Amp CLI).",
+    "runtime": "amp-acp",
+    "avatarUrl": "/agent-vendors/amp.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": [],
+    "launcherNames": ["amp-acp", "amp-acp.exe", "amp-acp.cmd", "amp-acp.bat"],
+    "classicConfigDirs": ["~/.config/amp", "~/.local/share/amp"],
+    "installHint": "npm install -g @sourcegraph/amp, then install amp-acp from https://github.com/tao12345666333/amp-acp/releases",
+    "management": {
+      "version": {
+        "command": "amp",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": null,
+        "windows": null
+      },
+      "update": {
+        "unix": null,
+        "windows": null
+      },
+      "uninstall": {
+        "unix": null,
+        "windows": null
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "The amp-acp adapter is a GitHub release binary with no installer; Amp itself updates through npm."
+      },
+      "sources": ["https://github.com/tao12345666333/amp-acp", "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "reasonix",
+    "displayName": "Reasonix",
+    "description": "Reasonix through the generic ACP backend (`reasonix acp`, the vendor's native ACP server).",
+    "runtime": "reasonix",
+    "avatarUrl": "/agent-vendors/reasonix.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["reasonix", "reasonix.exe", "reasonix.cmd", "reasonix.bat"],
+    "classicConfigDirs": ["~/.reasonix"],
+    "installHint": "npm install -g reasonix",
+    "management": {
+      "version": {
+        "command": "reasonix",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "reasonix@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "reasonix@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "reasonix@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "reasonix@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "reasonix"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "reasonix"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "reasonix"
+      },
+      "sources": ["https://github.com/esengine/DeepSeek-Reasonix/blob/studio/docs/ACP.md", "https://github.com/esengine/DeepSeek-Reasonix/blob/studio/docs/CONFIG_PATHS.md", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
+    "id": "dimcode",
+    "displayName": "DimCode",
+    "description": "DimCode through the generic ACP backend (`dimcode acp`, the vendor's native ACP server).",
+    "runtime": "dimcode",
+    "avatarUrl": "/agent-vendors/dimcode.svg",
+    "defaultArgs": [],
+    "backend": "acp",
+    "acpArgs": ["acp"],
+    "launcherNames": ["dimcode", "dimcode.exe", "dimcode.cmd", "dimcode.bat"],
+    "classicConfigDirs": ["~/.dimcode"],
+    "installHint": "npm install -g dimcode",
+    "management": {
+      "version": {
+        "command": "dimcode",
+        "args": ["--version"],
+        "regex": "([0-9]+(?:\\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)"
+      },
+      "install": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "dimcode@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "dimcode@latest"]
+        }
+      },
+      "update": {
+        "unix": {
+          "command": "npm",
+          "args": ["install", "-g", "dimcode@latest"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["install", "-g", "dimcode@latest"]
+        }
+      },
+      "uninstall": {
+        "unix": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "dimcode"]
+        },
+        "windows": {
+          "command": "npm",
+          "args": ["uninstall", "-g", "dimcode"]
+        }
+      },
+      "autoUpdate": {
+        "behavior": "unknown",
+        "controls": [],
+        "notes": "Package-manager install: update through the same package manager. No verified automatic-install switch."
+      },
+      "latest": {
+        "kind": "npm",
+        "package": "dimcode"
+      },
+      "sources": ["https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json", "https://docs.npmjs.com/cli/commands/npm-uninstall"],
+      "checkedAt": "2026-10-08"
+    }
+  },
+  {
     "id": "custom",
     "displayName": "Custom",
     "description": "A custom terminal agent runtime.",

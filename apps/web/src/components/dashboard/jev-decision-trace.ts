@@ -1,5 +1,5 @@
 /**
- * Jev's retained decision records, read back as what it was asked and what it
+ * xMatrix routing's retained decision records, read back as what it was asked and what it
  * answered. The Hub stores one record when a reading starts (its whole input)
  * and one when it ends (the answers, or why it failed); both carry the same
  * decision id, so a reading is the pair.
@@ -16,7 +16,8 @@ export type JevOption = {
   selected: boolean;
 };
 
-export type JevQuestion = { key: string; label: string; instructions?: string; options: JevOption[] };
+/** `model`: the routing model that answered this step, when the record names it. */
+export type JevQuestion = { key: string; label: string; instructions?: string; model?: string; options: JevOption[] };
 
 export type JevContextMessage = { sentAt?: string; body: string };
 
@@ -77,10 +78,31 @@ function describeOption(handle: string, criteria: unknown): Pick<JevOption, "tit
   return { title: handle, detail: raw };
 }
 
-function questionsOf(input: Json | undefined, answers: Json | undefined): JevQuestion[] {
+/** A fit score: the harness it rates (the JSON its instructions end with)
+ *  and its ordered levels, the one nearest the score being the answer. */
+function scoreQuestion(key: string, question: Json, levels: unknown[], answer: Json | undefined, model: string | undefined): JevQuestion {
+  const instructions = text(question.instructions);
+  let rated: Json | undefined;
+  try { rated = object(JSON.parse(instructions?.slice(instructions.indexOf("{")) ?? "")); } catch { rated = undefined; }
+  const harness = text(rated?.harness);
+  const probabilities = object(answer?.probabilities) ?? {};
+  const score = typeof answer?.score === "number" && Number.isFinite(answer.score) ? Math.round(answer.score) : undefined;
+  const options = levels.map((level, index) => {
+    const [title, ...detail] = (text(level) ?? `Level ${index}`).split(": ");
+    const probability = probabilities[String(index)];
+    return { handle: String(index), title: title!, ...(detail.length ? { detail: detail.join(": ") } : {}), selected: score === index,
+      ...(typeof probability === "number" && Number.isFinite(probability) ? { probability } : {}) };
+  });
+  return { key, label: harness ? `Fit · ${harness}` : "Fit", ...(instructions ? { instructions } : {}), ...(model ? { model } : {}), options };
+}
+
+function questionsOf(input: Json | undefined, answers: Json | undefined, model: string | undefined): JevQuestion[] {
   const questions = object(input?.questions) ?? {};
   return Object.entries(questions).flatMap(([key, value]) => {
     const question = object(value);
+    if (question?.type === "score" && Array.isArray(question.criteria)) {
+      return [scoreQuestion(key, question, question.criteria, object(answers?.[key]), model)];
+    }
     const criteria = object(question?.criteria);
     if (!question || !criteria) return [];
     const answer = object(answers?.[key]);
@@ -93,7 +115,7 @@ function questionsOf(input: Json | undefined, answers: Json | undefined): JevQue
     // The answer first, then the rest by how strongly Jev weighed them.
     options.sort((left, right) => Number(right.selected) - Number(left.selected) ||
       (right.probability ?? -1) - (left.probability ?? -1));
-    return [{ key, label: questionLabel(key), instructions: text(question.instructions), options }];
+    return [{ key, label: questionLabel(key), instructions: text(question.instructions), ...(model ? { model } : {}), options }];
   });
 }
 
@@ -127,7 +149,7 @@ export function jevReadings(records: Array<{ refId: string; payload: unknown }>)
       channel: text(channel?.name),
       context: messages,
       contextTruncated: context?.historyTruncated === true,
-      questions: questionsOf(input, object(finished?.answers)),
+      questions: questionsOf(input, object(finished?.answers), text(finished?.model)),
     } satisfies JevReading;
   }).sort((left, right) => (Date.parse(left.at ?? "") || 0) - (Date.parse(right.at ?? "") || 0));
 }

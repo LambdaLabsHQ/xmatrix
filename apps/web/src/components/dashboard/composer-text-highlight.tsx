@@ -2,6 +2,8 @@
 
 import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { neighbourRoom, planMentionBands, type MentionBandInput, type MentionFragment } from "./composer-mention-bands";
+import { composerHintParts } from "./composer-hints";
+import type { DraftSummonIntent } from "@xmatrix/protocol";
 import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
 const MIRRORED_STYLE_KEYS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "fontStretch",
@@ -12,8 +14,15 @@ const MIRRORED_STYLE_KEYS = ["fontFamily", "fontSize", "fontWeight", "fontStyle"
 
 /** Paint only backgrounds behind the native textarea. Text, selection and IME
  * remain owned by that textarea; this projection never writes to the draft. */
-export function ComposerTextHighlight({ value, textareaRef, mentionIndex, currentUserIdentityId, references }: {
+export function ComposerTextHighlight({ value, textareaRef, mentionIndex, currentUserIdentityId, references, hint,
+  summonReadings, summonReadingPending }: {
   value: string;
+  /** Jev's reading of each summon while the author types, matched to its band by text. */
+  summonReadings?: ReadonlyArray<DraftSummonIntent>;
+  summonReadingPending?: boolean;
+  /** Shown where the text would start while the draft is empty, caret or not:
+   * the empty paste anchor fills a focused textarea, so its own placeholder never shows. */
+  hint?: string;
   /** Picked channel and page references, painted like the chips they send as. */
   references?: ReadonlyArray<{ start: number; end: number; text: string }>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -30,9 +39,15 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
     const picked = (references ?? []).filter((reference) => value.slice(reference.start, reference.end) === reference.text &&
       !mentions.some((span) => span.start < reference.end && reference.start < span.end))
       .map(({ start, end }): ComposerMentionSpan => ({ start, end, kind: "reference" }));
-    return picked.length ? [...mentions, ...picked].sort((a, b) => a.start - b.start) : mentions;
+    const all = picked.length ? [...mentions, ...picked].sort((a, b) => a.start - b.start) : mentions;
+    return all.map((span) => {
+      if ((span.kind !== "summon" && span.kind !== "agent") || span.forced || span.invalid) return span;
+      const reading = summonReadings?.find((item) => item.start === span.start && value.slice(item.start, item.end) === item.mention);
+      if (reading) return { ...span, intent: reading.choice === "summon" ? "summon" as const : "declined" as const };
+      return span.kind === "summon" && summonReadingPending ? { ...span, intent: "reading" as const } : span;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, mentionIndex, currentUserIdentityId, referenceKey]);
+  }, [value, mentionIndex, currentUserIdentityId, referenceKey, summonReadings, summonReadingPending]);
   useLayoutEffect(() => {
     const input = textareaRef.current;
     const mirror = mirrorRef.current;
@@ -77,14 +92,25 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
   const pieces = spans.flatMap((span, index) => {
     const plain = value.slice(offset, span.start);
     offset = span.end;
-    return [plain, <span key={span.start} data-mention={index}>{value.slice(span.start, span.end)}</span>];
+    return [plain, <span key={span.start} data-mention={index} data-start={span.start}>{value.slice(span.start, span.end)}</span>];
   });
   return <div ref={mirrorRef} aria-hidden="true" data-testid="composer-text-highlight"
     className="pointer-events-none absolute left-0 top-0 overflow-hidden whitespace-pre-wrap break-words text-transparent"
     style={{ borderColor: "transparent", borderStyle: "solid", boxSizing: "border-box", overflowWrap: "break-word" }}>
     <div ref={layerRef} className="app-composer-mention-bands" />
-    {pieces}{value.slice(offset)}{"\n"}
+    {pieces}{value.slice(offset)}
+    {hint ? <ComposerHint hint={hint} /> : null}{"\n"}
   </div>;
+}
+
+/** Faint words after the trigger they teach; keyed by text so each change rises in. */
+function ComposerHint({ hint }: { hint: string }) {
+  const parts = composerHintParts(hint);
+  if (!parts) return <span data-testid="composer-hint" className="app-composer-hint">{hint}</span>;
+  return <span key={hint} data-testid="composer-hint" className="app-composer-hint" data-rotating="true"
+    data-summon={parts.trigger === "@" ? "true" : undefined}>
+    <span className="app-composer-hint-trigger">{parts.trigger}</span>{parts.rest}
+  </span>;
 }
 
 /**
@@ -197,6 +223,8 @@ function paintMentionBands(mirror: HTMLElement, layer: HTMLElement, spans: reado
     toggleData(element, "forced", span.forced);
     toggleData(element, "invalid", span.invalid);
     toggleData(element, "self", span.self);
+    if (span.intent) element.dataset.intent = span.intent;
+    else delete element.dataset.intent;
   }
   for (const element of previous.values()) if (!keep.has(element)) element.remove();
 }

@@ -46,11 +46,9 @@ export const HUMAN_HANDLE_MAX_LENGTH = 32;
 export const HUMAN_DISPLAY_NAME_MAX_LENGTH = 200;
 
 /**
- * Names the product answers to itself. `xmatrix` is load-bearing rather than
- * decorative — the Hub routes `@xmatrix` to the management delegate by a
- * hardcoded pattern, so a person holding that handle would be unaddressable
- * and would make every message mentioning them summon an agent. The rest are
- * reserved on the same principle before anyone can claim them.
+ * Names the product answers to itself. `xmatrix` is the name system notices
+ * and connector room links speak under, so no person may hold it. The rest
+ * are reserved on the same principle before anyone can claim them.
  */
 export const RESERVED_HUMAN_HANDLES: readonly string[] = [
   "auto",

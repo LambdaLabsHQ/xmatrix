@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -10,33 +10,59 @@ import {
   HUB_SUITE_LEDGER_JOB,
   LEDGER_JOBS,
   RECORDED_WORKFLOWS,
+  currentLedgerKey,
   ledgerJobOf,
-  ledgerKey,
   ledgerRef,
   passedLedgerJobs,
   remoteCommits,
   subjectMatchesRun,
   unzipSingleFile,
 } from "./ci-ledger.mjs";
+import { stampVersionText, versionedPaths } from "./version.mjs";
 
-const tree = (entries) => entries.map(([blob, file]) => `100644 blob ${blob}\t${file}`).join("\0") + "\0";
+const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
-test("a version-only bump keeps the key; any other change moves it", () => {
-  const listing = tree([["aaa", "version.json"], ["bbb", "packages/hub/src/a.ts"]]);
-  const before = ledgerKey(listing, { "version.json": '{ "version": "0.16.340" }\n' }, "0.16.340");
-  // The bumped file has a new blob id, which the key must not see.
-  const bumped = ledgerKey(tree([["ccc", "version.json"], ["bbb", "packages/hub/src/a.ts"]]),
-    { "version.json": '{ "version": "0.16.341" }\n' }, "0.16.341");
-  assert.equal(bumped, before);
-  const edited = ledgerKey(tree([["aaa", "version.json"], ["ddd", "packages/hub/src/a.ts"]]),
-    { "version.json": '{ "version": "0.16.340" }\n' }, "0.16.340");
-  assert.notEqual(edited, before);
-  // A versioned file changing anything besides the version is a real change.
-  const reshaped = ledgerKey(listing, { "version.json": '{ "version": "0.16.340", "x": 1 }\n' }, "0.16.340");
-  assert.notEqual(reshaped, before);
-  // Renames and mode changes are content too.
-  assert.notEqual(ledgerKey(tree([["aaa", "version.json"], ["bbb", "packages/hub/src/b.ts"]]),
-    { "version.json": '{ "version": "0.16.340" }\n' }, "0.16.340"), before);
+test("the key is the content tree, and a release commit reuses its source's", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "xmatrix-ledger-key-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  try {
+    git("init", "--quiet", "--initial-branch=main");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("config", "commit.gpgsign", "false");
+    for (const file of versionedPaths) {
+      mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      writeFileSync(path.join(root, file), readFileSync(path.join(repoRoot, file), "utf8"));
+    }
+    writeFileSync(path.join(root, "a.ts"), "a\n");
+    git("add", "--all");
+    git("commit", "--quiet", "--message", "source");
+    const source = git("rev-parse", "HEAD");
+    const commit = (message, edit) => {
+      edit();
+      git("commit", "--quiet", "--all", "--message", message);
+      return git("rev-parse", "HEAD");
+    };
+    const stamp = (version) => () => {
+      for (const file of versionedPaths) {
+        const target = path.join(root, file);
+        writeFileSync(target, stampVersionText(file, readFileSync(target, "utf8"), version));
+      }
+    };
+    assert.equal(currentLedgerKey(source, root), git("rev-parse", `${source}^{tree}`));
+    const release = commit("Release 99.0.0", stamp("99.0.0"));
+    assert.equal(currentLedgerKey(release, root), currentLedgerKey(source, root));
+    // Anything besides the stamp is new content with its own key.
+    git("checkout", "--quiet", "--detach", source);
+    const edited = commit("Release 99.0.1", () => {
+      stamp("99.0.1")();
+      writeFileSync(path.join(root, "a.ts"), "b\n");
+    });
+    assert.equal(currentLedgerKey(edited, root), git("rev-parse", `${edited}^{tree}`));
+    assert.notEqual(currentLedgerKey(edited, root), currentLedgerKey(source, root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a run vouches only for the commit it could have tested", () => {

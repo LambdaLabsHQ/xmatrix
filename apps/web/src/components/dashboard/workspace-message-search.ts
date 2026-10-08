@@ -1,4 +1,5 @@
 import { WEB_PROXY_ROUTES, type MessageSearchPage, type PageSearchHit } from "@xmatrix/protocol";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 /**
  * Message search runs on the Hub: it scans the newest readable messages of the
@@ -10,10 +11,16 @@ export async function searchWorkspaceMessages(input: {
   spaceId: string;
   query: string;
   resumeToken?: string;
+  /** Only this conversation and its threads. */
+  channelId?: string;
+  /** The Hub's author filter: `user:<id>` or `agent:<name>`. */
+  from?: string;
 }): Promise<MessageSearchPage> {
   const params = new URLSearchParams({ spaceId: input.spaceId, query: input.query });
   if (input.resumeToken) params.set("cursor", input.resumeToken);
-  const response = await fetch(`${WEB_PROXY_ROUTES.message_search}?${params}`, {
+  if (input.channelId) params.set("channelId", input.channelId);
+  if (input.from) params.set("from", input.from);
+  const response = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.message_search}?${params}`, {
     headers: { Authorization: `Bearer ${input.token}` },
     cache: "no-store",
   });
@@ -28,7 +35,7 @@ export async function searchWorkspacePages(input: {
   query: string;
 }): Promise<{ results: PageSearchHit[] }> {
   const params = new URLSearchParams({ query: input.query });
-  const response = await fetch(`${WEB_PROXY_ROUTES.space_pages(input.spaceId)}/search?${params}`, {
+  const response = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.space_pages(input.spaceId)}/search?${params}`, {
     headers: { Authorization: `Bearer ${input.token}` },
     cache: "no-store",
   });

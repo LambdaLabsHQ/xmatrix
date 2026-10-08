@@ -3,7 +3,7 @@ const test = require("node:test");
 const { compileTsModules } = require("./compile-ts-modules.cjs");
 
 const compiled = compileTsModules(__dirname, ["agent-quota-usage"]);
-const { agentUsageReadings, formatResetIn } = compiled.exports;
+const { agentUsageReadings, agentUsageGlance, formatResetIn } = compiled.exports;
 
 test.after(compiled.dispose);
 
@@ -58,4 +58,17 @@ test("the provider's verdict on the account follows its windows", () => {
   const refused = { ...quota([{ label: "5h", usedPercent: 20 }]), account: { allowed: false } };
   assert.deepEqual(agentUsageReadings(refused, now).slice(1),
     [{ key: "account", label: "Provider", value: "Refusing requests", high: true }]);
+});
+
+test("list glance keeps all measured windows with compact labels and reset context", () => {
+  assert.deepEqual(agentUsageGlance(quota([
+    { label: "1w", usedPercent: 93, resetAt: at(90) },
+    { label: "5h", usedPercent: 40.4, resetAt: at(45) },
+  ]), now), [
+    { key: "5h:0", label: "5h", percent: 40, detail: "5-hour window: 40% used · resets in 45m" },
+    { key: "1w:1", label: "1w", percent: 93, detail: "Weekly: 93% used · resets in 1h 30m" },
+  ]);
+  assert.deepEqual(agentUsageGlance(undefined, now), []);
+  assert.deepEqual(agentUsageGlance({ ...quota(undefined), account: { credits: { unlimited: true } } }, now),
+    [{ key: "quota", label: "Quota", percent: 86, detail: "Quota: 86% used" }]);
 });

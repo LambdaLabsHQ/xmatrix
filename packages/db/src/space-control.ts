@@ -1,9 +1,10 @@
+import { appendMetadataRevision, metadataRevision } from "./channel-metadata-revisions.js";
 import { DetailedControlError } from "./control-error.js";
 import type { DatabaseRequestContext } from "./context.js";
 import { readsOnly } from "./space-roles.js";
 import { lockTransfer, requireTransferAdmin, transferSnapshot, transferView, validateTransfer, type TransferRole, type TransferRow } from "./channel-transfer.js";
 import type { QueryResultRow } from "pg";
-import { channelVisibilityScope, ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, parseManagementPrompt, portableNameKey, TERMINAL_RUN_STATUS_SQL, withoutRetiredManagementConfig, sha256Hex , utf8ByteLength } from "@xmatrix/protocol";
+import { channelVisibilityScope, ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, portableNameKey, TERMINAL_RUN_STATUS_SQL, sha256Hex , utf8ByteLength } from "@xmatrix/protocol";
 import { spaceBilling, type BillingRejection, type SpaceBillingPolicy } from "@xmatrix/billing";
 import { commandDigest as digest } from "./command-digest.js";
 import { readSpaceCommandReplay, storeSpaceCommandReplay } from "./command-replay.js";
@@ -102,15 +103,6 @@ export interface CreatePostgresChannel {
   creatorAgentInstanceId?: string;
 }
 
-export interface UpdatePostgresSpaceManagementConfig {
-  requestId: string;
-  commandId: string;
-  spaceId: string;
-  actorUserId: string;
-  expectedVersion?: number;
-  patch: Record<string, unknown>;
-}
-
 interface PostgresChannelMutationBase {
   requestId: string;
   commandId: string;
@@ -118,6 +110,8 @@ interface PostgresChannelMutationBase {
   at: string;
   channelId: string;
   expectedVersion?: number;
+  expectedRevision?: number;
+  actorRunId?: string;
 }
 
 export type PostgresChannelMutation = PostgresChannelMutationBase & {
@@ -129,6 +123,7 @@ export type PostgresChannelMutation = PostgresChannelMutationBase & {
    * name that is still automatic; any other rename makes the name a person's.
    */
   automaticName?: boolean;
+  restoreRevision?: number;
   topic?: string | null;
   summary?: string | null;
   /**
@@ -136,7 +131,6 @@ export type PostgresChannelMutation = PostgresChannelMutationBase & {
    * summary written without one keeps no source rather than an earlier one.
    */
   summaryAuthor?: { runId: string; agentName: string; throughMessageId?: string };
-  managementMetadata?: Record<string, unknown>;
   spaceId?: string;
   moveTree?: Array<{ channelId: string; expectedVersion: number }>;
 };
@@ -394,18 +388,6 @@ async function commitSpaceCommand(
     ttlMs: IDEMPOTENCY_TTL_MS });
 }
 
-function managementConfig(row: QueryResultRow | undefined): Record<string, unknown> {
-  if (!row) return {
-    enabled: false,
-    sideEffectsEnabled: true,
-    identityName: "xMatrix",
-    defaultChannelVisibility: "management-visible",
-    configVersion: 0,
-  };
-  return { ...withoutRetiredManagementConfig(row.config_json as Record<string, unknown>),
-    configVersion: Number(row.version) };
-}
-
 function memberPermissions(row: QueryResultRow | undefined): Record<string, unknown> {
   return {
     agentCreation: row?.agent_creation_policy === "admins" ? "admins" : "members",
@@ -417,7 +399,6 @@ function serializeSpace(
   row: SpaceRow,
   members: readonly MemberRow[],
   policy: QueryResultRow | undefined,
-  config: QueryResultRow | undefined,
   pendingJoinRequestCount?: number,
 ): Record<string, unknown> {
   return {
@@ -440,7 +421,6 @@ function serializeSpace(
     })),
     ...(pendingJoinRequestCount === undefined ? {} : { pendingJoinRequestCount }),
     memberPermissions: memberPermissions(policy),
-    managementAgent: managementConfig(config),
     ...(row.metadata_json ? { metadata: row.metadata_json } : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
@@ -674,6 +654,10 @@ async function moveChannelSpaceFacts(
   channelIds: readonly string[],
 ): Promise<void> {
   const values = [sourceSpaceId, targetSpaceId, channelIds];
+  for (const table of ["channel_metadata_revisions", "channel_about_inputs"] as const) {
+    await transaction.query({ name: `channel_move_${table}_v1`,
+      text: `UPDATE data.${table} ${CHANNEL_MOVE_FACT_SQL}`, values, maxRows: 0 });
+  }
   // Reborn history follows its Channel; releaseChannelTreeForMove has already
   // ended any of it that was still in progress.
   await transaction.query({
@@ -1527,149 +1511,6 @@ export class PostgresSpaceControlRepository {
     };
   }
 
-  async getSpaceManagementConfig(input: {
-    requestId: string;
-    spaceId: string;
-    principal: SpaceControlPrincipal;
-  }): Promise<{ managementAgent: Record<string, unknown>; version: number }> {
-    const { requestId, spaceId, principalId } = userScope(
-      input, "only users may read Space management config",
-    );
-    return this.inSpace(requestId, "space.management-config.get", spaceId, async (transaction) => {
-      const memberships = await transaction.query({
-        name: "space_management_config_member_v1",
-        text: "SELECT user_id FROM data.space_members WHERE space_id = $1 AND user_id = $2 LIMIT 1",
-        values: [spaceId, principalId], maxRows: 1,
-      });
-      if (!memberships[0]) throw new SpaceControlError("space_not_found", 404, "Space not found");
-      const rows = await transaction.query<QueryResultRow & {
-        config_json: Record<string, unknown>; version: string | number;
-      }>({
-        name: "space_management_config_get_v1",
-        text: `SELECT config_json, version FROM data.space_management_configs
-          WHERE space_id = $1 LIMIT 1`,
-        values: [spaceId], maxRows: 1,
-      });
-      const version = Number(rows[0]?.version ?? 0);
-      const stored = rows[0]?.config_json ?? {
-        enabled: false,
-        sideEffectsEnabled: true,
-        identityName: "xMatrix",
-        defaultChannelVisibility: "management-visible",
-      };
-      return { managementAgent: { ...withoutRetiredManagementConfig(stored), configVersion: version }, version };
-    });
-  }
-
-  async updateSpaceManagementConfig(
-    input: UpdatePostgresSpaceManagementConfig,
-  ): Promise<Record<string, unknown>> {
-    const { requestId, commandId, actorUserId, spaceId } = actorCommand(input);
-    const allowed = new Set([
-      "enabled", "sideEffectsEnabled", "prompt",
-      "managementChannelId", "defaultChannelVisibility",
-    ]);
-    if (Object.keys(input.patch).some((key) => !allowed.has(key)) ||
-        (input.expectedVersion !== undefined &&
-          (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0))) {
-      throw new SpaceControlError("invalid_management_config", 400, "management config is invalid");
-    }
-    for (const key of ["enabled", "sideEffectsEnabled"] as const) {
-      if (input.patch[key] !== undefined && typeof input.patch[key] !== "boolean") {
-        throw new SpaceControlError("invalid_management_config", 400, `${key} must be a boolean`);
-      }
-    }
-    for (const key of ["prompt", "managementChannelId"] as const) {
-      const value = input.patch[key];
-      if (value !== undefined && value !== null && typeof value !== "string") {
-        throw new SpaceControlError(
-          "invalid_management_config", 400, `${key} must be a string or null`,
-        );
-      }
-    }
-    if (typeof input.patch.prompt === "string") {
-      const error = parseManagementPrompt(input.patch.prompt).error;
-      if (error) throw new SpaceControlError("invalid_management_prompt", 400, error);
-    }
-    if (input.patch.defaultChannelVisibility !== undefined &&
-        !["management-visible", "metadata-only", "excluded"]
-          .includes(String(input.patch.defaultChannelVisibility))) {
-      throw new SpaceControlError(
-        "invalid_management_config", 400, "defaultChannelVisibility is invalid",
-      );
-    }
-    const requestDigest = await digest(input);
-    const now = new Date().toISOString();
-    return this.inSpace(requestId, "space.management-config.update", spaceId, async (transaction) => {
-      const replay = await idempotentReplay(
-        transaction, spaceId, commandId, "update-space-management-config", requestDigest,
-      );
-      if (replay) return replay;
-      await requireSpaceAdmin(transaction, "space_management_config_admin_v1", spaceId, actorUserId);
-      const rows = await transaction.query<QueryResultRow & {
-        config_json: Record<string, unknown>; version: string | number;
-      }>({
-        name: "space_management_config_lock_v1",
-        text: `SELECT config_json, version FROM data.space_management_configs
-          WHERE space_id = $1 FOR UPDATE`,
-        values: [spaceId], maxRows: 1,
-      });
-      const currentVersion = Number(rows[0]?.version ?? 0);
-      if (input.expectedVersion !== undefined && input.expectedVersion !== currentVersion) {
-        throw new SpaceControlError(
-          "management_config_version_conflict", 409,
-          `management config is at version ${currentVersion}; re-read it and retry`,
-        );
-      }
-      const next: Record<string, unknown> = {
-        enabled: false,
-        sideEffectsEnabled: true,
-        defaultChannelVisibility: "management-visible",
-        ...withoutRetiredManagementConfig(rows[0]?.config_json ?? {}),
-        ...input.patch,
-        identityName: "xMatrix",
-        updatedAt: now,
-        updatedBy: actorUserId,
-      };
-      delete next.configVersion;
-      if (next.prompt === null || typeof next.prompt === "string" && !next.prompt.trim()) delete next.prompt;
-      if (next.managementChannelId === null || next.managementChannelId === "") delete next.managementChannelId;
-      else if (next.managementChannelId !== undefined) next.managementChannelId = bounded(next.managementChannelId, "managementChannelId", 120);
-      if (next.managementChannelId) {
-        const channels = await transaction.query({
-          name: "space_management_config_channel_v1",
-          text: `SELECT channel_id FROM data.channels WHERE channel_id = $1 AND space_id = $2
-            LIMIT 1`,
-          values: [next.managementChannelId, spaceId], maxRows: 1,
-        });
-        if (!channels[0]) throw new SpaceControlError(
-          "invalid_management_channel", 400,
-          "managementChannelId must reference an active Channel in this Space",
-        );
-      }
-      const version = currentVersion + 1;
-      await transaction.query({
-        name: "space_management_config_upsert_v1",
-        text: `INSERT INTO data.space_management_configs
-          (space_id, config_json, version, updated_at, updated_by_user_id)
-          VALUES ($1,$2::jsonb,$3,$4,$5) ON CONFLICT (space_id) DO UPDATE SET
-            config_json = EXCLUDED.config_json, version = EXCLUDED.version,
-            updated_at = EXCLUDED.updated_at, updated_by_user_id = EXCLUDED.updated_by_user_id`,
-        values: [spaceId, JSON.stringify(next), version, now, actorUserId], maxRows: 0,
-      });
-      const commitSequence = await requiredControlHead(transaction, {
-        name: "space_management_config_head_v1", spaceId, at: now,
-      });
-      const result = { managementAgent: { ...next, configVersion: version }, version };
-      await commitSpaceCommand(transaction, {
-        name: "space_management_config_outbox_v1", spaceId, commitSequence, aggregateKind: "space",
-        aggregateId: spaceId, commandId, commandKind: "update-space-management-config", requestDigest, result,
-        at: now,
-      });
-      return result;
-    });
-  }
-
   private async hydrateSpaces(
     transaction: DatabaseTransaction,
     spaces: readonly SpaceRow[],
@@ -1695,12 +1536,6 @@ export class PostgresSpaceControlRepository {
         FROM data.space_member_creation_policies WHERE space_id = ANY($1::text[]) LIMIT 200`,
       values: [ids], maxRows: 200,
     });
-    const configs = await transaction.query({
-      name: "space_management_configs_hydrate_v1",
-      text: `SELECT space_id, config_json, version
-        FROM data.space_management_configs WHERE space_id = ANY($1::text[]) LIMIT 200`,
-      values: [ids], maxRows: 200,
-    });
     const pendingCounts = viewerUserId ? await transaction.query<QueryResultRow & {
       space_id: string; pending_join_request_count: string | number;
     }>({
@@ -1722,7 +1557,6 @@ export class PostgresSpaceControlRepository {
       space,
       members.filter((member) => member.space_id === space.space_id),
       policies.find((policy) => policy.space_id === space.space_id),
-      configs.find((config) => config.space_id === space.space_id),
       pendingCountBySpace.get(space.space_id),
     ));
   }
@@ -1925,6 +1759,48 @@ export class PostgresSpaceControlRepository {
       }) : [];
       return { channel, openChannelHumanMemberIdsBySpace: members.length
         ? { [spaceId]: members.map((member) => `user:${member.user_id}`) } : {} };
+    });
+  }
+
+  async metadataHistory(input: { requestId: string; spaceId: string; channelId: string;
+    principal: SpaceControlPrincipal; beforeRevision?: number; revision?: number; inputId?: string; limit?: number }) {
+    const { requestId, spaceId, principalId } = principalScope(input);
+    const limit = input.limit ?? 20;
+    if ([input.beforeRevision,input.revision,input.inputId].filter(value => value !== undefined).length > 1 ||
+        (input.inputId !== undefined && (!input.inputId || input.inputId.length > 300)) ||
+        !Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
+        [input.beforeRevision,input.revision].some((n) => n !== undefined && (!Number.isSafeInteger(n) || n < 0))) {
+      throw new SpaceControlError("invalid_command", 400, "Invalid metadata history bounds");
+    }
+    return this.inSpace(requestId, "channel.metadata-history", spaceId, async (tx) => {
+      const visible = await tx.query<ChannelRow>({ name: "channel_metadata_history_access_v1",
+        text: `SELECT c.* FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$2
+          AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
+            principalKindSql: "$3", principalIdSql: "$4", channelAboutSessionRead: true })} FOR SHARE OF c`,
+        values: [spaceId,input.channelId,input.principal.kind,principalId], maxRows: 1 });
+      if (!visible[0]) throw new SpaceControlError("channel_not_found", 404, "Channel not found");
+      if (input.inputId) {
+        const sources = await tx.query({ name: "channel_metadata_input_read_v1",
+          text: `SELECT input.space_id,input.origin_space_id,input.channel_id,input.input_id,input.run_id,
+            input.metadata_revision,input.snapshot_json,input.created_at,
+            (SELECT COALESCE(jsonb_agg(CASE WHEN EXISTS (SELECT 1 FROM data.messages current
+              WHERE current.channel_id=input.channel_id AND current.message_id=ref->>'messageId'
+                AND current.content_hash=ref->>'contentHash'
+                AND current.deleted_at IS NULL AND current.recalled_at IS NULL)
+              THEN ref ELSE (ref-'payloadBundleBase64'-'payloadRef') || '{"contentUnavailable":true}'::jsonb END
+              ORDER BY ordinal),'[]'::jsonb)
+              FROM jsonb_array_elements(input.references_json) WITH ORDINALITY refs(ref,ordinal)) AS references_json
+            FROM data.channel_about_inputs input WHERE input.channel_id=$1 AND input.input_id=$2`,
+          values: [input.channelId,input.inputId], maxRows: 1 });
+        return { input: sources[0] ?? null };
+      }
+      const revisions = await tx.query({ name: "channel_metadata_history_read_v1",
+        text: `SELECT * FROM data.channel_metadata_revisions WHERE channel_id=$1
+          AND ($2::bigint IS NULL OR revision<$2) AND ($3::bigint IS NULL OR revision=$3)
+          ORDER BY revision DESC LIMIT $4`,
+        values: [input.channelId,input.beforeRevision ?? null,input.revision ?? null,limit + 1], maxRows: limit + 1 });
+      return { currentRevision: metadataRevision(visible[0].metadata_json),
+        revisions: revisions.slice(0,limit), hasMore: revisions.length > limit };
     });
   }
 
@@ -3080,6 +2956,29 @@ export class PostgresSpaceControlRepository {
       });
       if (!admins[0] && !transfer) throw new SpaceControlError("forbidden", 403, "Space admin required");
 
+      if (input.actorRunId) {
+        const actor = await transaction.query<QueryResultRow & { metadata_json: Record<string, unknown> }>({
+          name: "channel_metadata_actor_run_v1", text: `SELECT metadata_json FROM data.runs
+            WHERE run_id=$1 AND owner_user_id=$2 AND status IN (${ACTIVE_RUN_STATUS_SQL}) FOR SHARE`,
+          values: [input.actorRunId,actorUserId], maxRows: 1 });
+        if (!actor[0] || (actor[0].metadata_json.routedAs === "management_channel_about" &&
+            input.summaryAuthor?.runId !== input.actorRunId)) throw new SpaceControlError(
+          "channel_about_scope_invalid", 403, "Run cannot use an unscoped metadata writer");
+      }
+      if (input.summaryAuthor && (input.mode !== undefined || input.topic !== undefined ||
+          input.spaceId !== undefined ||
+          input.restoreRevision !== undefined || (input.name !== undefined && !input.automaticName))) {
+        throw new SpaceControlError("channel_about_scope_invalid", 403, "About may only update its summary and automatic name");
+      }
+      if (input.expectedRevision !== undefined && metadataRevision(root.metadata_json) !== input.expectedRevision) {
+        throw new SpaceControlError("metadata_revision_conflict", 409, "Channel metadata revision conflict");
+      }
+      if (input.restoreRevision !== undefined) {
+        if (!Number.isSafeInteger(input.restoreRevision) || input.restoreRevision < 0 ||
+            input.expectedRevision === undefined || input.name !== undefined || input.summary !== undefined ||
+            input.spaceId !== undefined || input.summaryAuthor) throw new SpaceControlError(
+          "invalid_command", 400, "Restore requires restoreRevision and expectedRevision only");
+      }
       let entityVersion = Number(root.version);
       let affected: ChannelRow[] = [];
       let movedToSpaceId: string | null = null;
@@ -3183,14 +3082,6 @@ export class PostgresSpaceControlRepository {
             else rootMetadata.summary = input.summary.trim();
             await recordSummarySource(transaction, rootMetadata, root.space_id, channelId, input, at);
           }
-          if (input.managementMetadata !== undefined) {
-            rootMetadata.xmatrixManagement = {
-              ...(typeof rootMetadata.xmatrixManagement === "object" &&
-                rootMetadata.xmatrixManagement !== null && !Array.isArray(rootMetadata.xmatrixManagement)
-                ? rootMetadata.xmatrixManagement as Record<string, unknown> : {}),
-              ...input.managementMetadata,
-            };
-          }
           explicitProjectionMutations = [];
           for (const row of moveRows) {
             const isRoot = row.channel_id === channelId;
@@ -3204,6 +3095,9 @@ export class PostgresSpaceControlRepository {
               version,
               updated_at: at,
             };
+            if (isRoot && (input.name !== undefined || input.summary !== undefined)) {
+              await appendMetadataRevision(transaction, root, nextRow, input);
+            }
             const changed = await transaction.query({
               name: "channel_move_row_v2",
               text: `UPDATE data.channels SET space_id = $2,
@@ -3249,9 +3143,23 @@ export class PostgresSpaceControlRepository {
         if (movedToSpaceId) {
           // The exact tree was already updated above.
         } else {
-        const nextName = input.name === undefined ? root.name : bounded(input.name, "name");
+        let nextName = input.name === undefined ? root.name : bounded(input.name, "name");
         const nextMode = input.mode ?? root.mode;
         const nextMetadata = { ...root.metadata_json };
+        if (input.restoreRevision !== undefined) {
+          const restored = await transaction.query<QueryResultRow & { name: string; summary: string | null;
+            auto_name: boolean; summary_source_json: unknown }>({ name: "channel_metadata_restore_read_v1",
+            text: `SELECT name,summary,auto_name,summary_source_json FROM data.channel_metadata_revisions
+              WHERE channel_id=$1 AND revision=$2`, values: [channelId,input.restoreRevision], maxRows: 1 });
+          if (!restored[0]) throw new SpaceControlError("not_found", 404, "Metadata revision not found");
+          nextName = restored[0].name;
+          if (restored[0].summary === null) delete nextMetadata.summary;
+          else nextMetadata.summary = restored[0].summary;
+          if (restored[0].auto_name) nextMetadata.autoName = true;
+          else delete nextMetadata.autoName;
+          if (restored[0].summary_source_json === null) delete nextMetadata.summarySource;
+          else nextMetadata.summarySource = restored[0].summary_source_json;
+        }
         if (input.name !== undefined) {
           if (input.automaticName && nextMetadata.autoName !== true) {
             throw new SpaceControlError("channel_named_by_person", 409, "Someone named this conversation");
@@ -3267,14 +3175,9 @@ export class PostgresSpaceControlRepository {
           else nextMetadata.summary = input.summary.trim();
           await recordSummarySource(transaction, nextMetadata, root.space_id, channelId, input, at);
         }
-        if (input.managementMetadata !== undefined) {
-          nextMetadata.xmatrixManagement = {
-            ...(typeof nextMetadata.xmatrixManagement === "object" &&
-              nextMetadata.xmatrixManagement !== null &&
-              !Array.isArray(nextMetadata.xmatrixManagement)
-              ? nextMetadata.xmatrixManagement as Record<string, unknown> : {}),
-            ...input.managementMetadata,
-          };
+        if (input.name !== undefined || input.summary !== undefined || input.restoreRevision !== undefined) {
+          await appendMetadataRevision(transaction, root,
+            { ...root, name: nextName, metadata_json: nextMetadata }, input);
         }
         entityVersion += 1;
         const updated = await transaction.query<ChannelRow>({

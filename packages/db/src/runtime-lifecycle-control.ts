@@ -1,9 +1,11 @@
+import { cleanRepositoryBaseline, type RepositoryBaseline } from "@xmatrix/protocol";
 import { storeScopedCommandReplay } from "./command-replay.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { acknowledgeMachineExecution, recordMessageExecutions } from "./runtime-message-executions.js";
 import type { QueryResultRow } from "pg";
 import {
   automationRunIdentity,
+  publicMachineStartupFailure,
   isTerminalRunStatus,
   machineExecutionCompleted,
   scheduledMachineExecutionCompleted,
@@ -121,7 +123,8 @@ async function commit(tx: DatabaseTransaction, input: { spaceId: string; command
 
 function failureDetail(payload: Record<string, unknown>): string {
   for (const field of ["runStatusDetail", "error", "status", "statusPhase"] as const) {
-    if (typeof payload[field] === "string" && payload[field].trim()) return payload[field].trim().slice(0, 1_000);
+    const failure = publicMachineStartupFailure(payload[field]);
+    if (failure) return failure.summary;
   }
   return "Machine Daemon did not complete the Agent Run successfully";
 }
@@ -155,7 +158,8 @@ async function channelAboutFollowUp(tx: DatabaseTransaction, runId: string) {
       AND metadata_json->>'channelAboutTriggerRequestId'=$3 LIMIT 1`,
   values: [run.channel_id, runId, pending], maxRows: 1 });
   return duplicate[0] ? undefined : { spaceId, channelId: String(run.channel_id), requestId: pending,
-    successorOfRunId: runId, actorUserId: actor };
+    successorOfRunId: runId, actorUserId: actor,
+    ...(typeof body.channelAboutPendingMessageId === "string" ? { triggerMessageId: body.channelAboutPendingMessageId } : {}) };
 }
 
 export interface MachineLifecycleInput {
@@ -170,6 +174,7 @@ export interface MachineLifecycleInput {
   payload: Record<string, unknown>;
   recoverableLaunchFailure?: boolean;
   repoPool?: Record<string, string>;
+  repositoryBaseline?: RepositoryBaseline;
   preserveInstanceForReborn?: boolean;
 }
 
@@ -313,7 +318,9 @@ export class PostgresMachineLifecycleRepository {
       // applying that authenticated report makes no further status transition.
       const spawnFailure = eventType === "machine_spawn_result" && payload.ok !== true &&
         input.recoverableLaunchFailure !== true;
-      if ((eventType === "machine_run_exited" || spawnFailure || stopNotice) &&
+      const baselineNotice = eventType === "machine_spawn_result" && payload.ok === true &&
+        input.repositoryBaseline?.relationship === "diverged" && input.repositoryBaseline.noticeKey !== undefined;
+      if ((eventType === "machine_run_exited" || spawnFailure || stopNotice || baselineNotice) &&
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
         const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v5", text: `SELECT
           r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json->>'routedAs' AS routed_as,r.metadata_json,
@@ -340,6 +347,9 @@ export class PostgresMachineLifecycleRepository {
               metadata(context!).executionCancellation !== undefined)) { /* no Channel notice */ }
         // A stop's Channel feedback is the daemon's actual termination result;
         // a scheduled occurrence keeps its own ledger instead.
+        else if (baselineNotice && cleanRepositoryBaseline(metadata(context!).repositoryBaseline)?.noticeKey === input.repositoryBaseline?.noticeKey) {
+          Object.assign(value, { repositoryBaselineNoticeContext: { ...notice, baseline: input.repositoryBaseline } });
+        }
         else if (stopNotice) {
           const runMetadata = metadata(context!);
           const stopRequest = runMetadata.stopRequest;
@@ -456,6 +466,7 @@ export class PostgresMachineLifecycleRepository {
         ...(previousProgress.wrapperReadyAt ? { wrapperReadyAt: previousProgress.wrapperReadyAt } : {}),
         ...terminalProgress,
       } } : {}), ...(input.repoPool ? { repoPool: input.repoPool } : {}),
+      ...(cleanRepositoryBaseline(input.repositoryBaseline) ? { repositoryBaseline: cleanRepositoryBaseline(input.repositoryBaseline) } : {}),
       ...(spawnResult ? { spawnResult } : {}),
       ...(input.eventType === "machine_spawn_result" && input.payload.ok === true && input.registryCausal
         ? { daemonRegistry: { schemaVersion: 1,

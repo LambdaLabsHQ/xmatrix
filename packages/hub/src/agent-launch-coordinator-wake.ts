@@ -1,3 +1,4 @@
+import { ServiceUnavailable } from "./error-contract";
 import type { Env } from "./types";
 
 /**
@@ -7,16 +8,19 @@ import type { Env } from "./types";
  */
 export async function wakeAgentLaunchCoordinator(env: Pick<Env, "RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL">,
   channelId: string): Promise<void> {
-  const response = await wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId });
+  // A thrown wake (the coordinator reset by a deploy) is the same handover
+  // failure as a refused one: the committed work waits for the retry.
+  const response = await wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId })
+    .catch(() => { throw new AgentLaunchHandoverUnavailable(); });
   if (!response.ok) throw new AgentLaunchHandoverUnavailable(response.status);
 }
 
 /** The Channel coordinator could not be told about committed work. The
  *  request that committed it must fail so its idempotent retry tells it. */
-export class AgentLaunchHandoverUnavailable extends Error {
-  readonly code = "agent_launch_handover_unavailable";
+export class AgentLaunchHandoverUnavailable extends ServiceUnavailable {
   constructor(status?: number) {
-    super(`Agent Launch Channel coordinator is unavailable${status ? ` (${status})` : ""}`);
+    super("agent_launch_handover_unavailable",
+      `Agent Launch Channel coordinator is unavailable${status ? ` (${status})` : ""}`);
   }
 }
 

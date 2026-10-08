@@ -51,9 +51,6 @@ function route(kind: "human" | "agent", handler: (c: Context<{ Bindings: Env }>,
         code: "human_required" }, 403);
       return c.json(await handler(c, user, user.agentRun!), 200, NO_STORE);
     } catch (error) {
-      if (error instanceof SpaceSecretError) {
-        return c.json({ error: error.message, code: error.code }, error.status as 400, NO_STORE);
-      }
       return requestErrorResponse(c, error);
     }
   };
@@ -98,7 +95,9 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     const append = await secretRequestAppend(card, !!current, { id: run.ownerUserId, email: user.email });
     const { messageId } = append;
     await appendChannelMessage(c.env, run.channelId, append).catch((error: unknown) => {
-      if (error instanceof ControlError) throw new SpaceSecretError("secret_request_failed", error.status, error.message);
+      if (error instanceof ControlError) {
+        throw new SpaceSecretError("secret_request_failed", error.status, error.message, error.retryable);
+      }
       throw error;
     });
     return { readable: false, messageId, request: card };

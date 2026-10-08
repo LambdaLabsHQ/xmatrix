@@ -266,3 +266,28 @@ test("future parameter choices complete for any harness and preserve other tags"
     .some(candidate => candidate.launchTags?.parameters), false);
   assert.equal(autoLaunchCandidates(undefined, { model: "other" }, [registration]).some(candidate => candidate.launchTags?.parameters), false);
 });
+
+
+test("machine field completion excludes directories carrying a machine constraint", () => {
+  const catalog = [{ ...registrations[0], machineName: "srv1234567" }];
+  const choices = autoLaunchCandidates(targets, { harness: "codex" }, catalog);
+  for (const value of ["", "s", "srv", "srv123", "srv1234567"]) {
+    const body = "@codex machine:" + value;
+    const active = findLaunchFieldCompletion(body, body.length);
+    const matches = filterLaunchCandidates(choices, active.query);
+    assert.deepEqual(matches.map(row => row.name), ["machine:srv1234567"]);
+    assert.equal(completeLaunchFragment(body, active, matches[0].launchTags).value,
+      "@codex machine:srv1234567 ");
+  }
+});
+
+test("a machine selected by name keeps that machine's remaining field choices", () => {
+  const selected = { harness: "codex", machine: "Mac" };
+  const choices = autoLaunchCandidates(targets, selected, registrations);
+  assert.ok(choices.some(row => row.launchTags.pwd === "/work/my project"));
+  assert.ok(choices.some(row => row.launchTags.model === "test-model"));
+  assert.ok(choices.some(row => row.launchTags.effort === "high"));
+  assert.equal(choices.some(row => row.launchField === "machine"), false);
+  const other = autoLaunchCandidates(targets, { ...selected, machine: "Other" }, registrations);
+  assert.equal(other.some(row => ["pwd", "model", "effort"].includes(row.launchField)), false);
+});

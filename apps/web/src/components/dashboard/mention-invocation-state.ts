@@ -95,8 +95,9 @@ export function summonIntentNote(decision: PresentedRoutingDecision | undefined)
   const intent = decision?.parameters?.intent;
   if (!intent) return undefined;
   if (intent.source === "author") return "launch:force";
+  if (intent.source === "draft") return "Previewed before send";
   const probability = intent.probabilities.summon;
-  return Number.isFinite(probability) ? `Jev · ${Math.round(probability * 100)}%` : "Jev";
+  return Number.isFinite(probability) ? `xMatrix · ${Math.round(probability * 100)}%` : "xMatrix";
 }
 
 /** Selecting an environment, starting it, then the first turn. */
@@ -109,7 +110,7 @@ export function summonView(launch: SerializedAgentLaunch, records: readonly Seri
   return { ...startupView({
     ...(intent ? { before: { label: intent === "launch:force" ? "Started on the author's request" : "Read as a request",
       note: intent, at: decision?.evaluatedAt, state: "done" as const } } : {}),
-    lead: { label: decision?.source === "jev" ? "Jev selected an environment" : "Environment selected", at: decision?.evaluatedAt, state: "done" },
+    lead: { label: "Environment selected", at: decision?.evaluatedAt, state: "done" },
     startup: [
       { label: "Machine accepted", status: launch.daemonOffline ? "Queuing" : "Dispatching", at: launch.admittedAt,
         waiting: launch.daemonOffline ? "The command is queued until the selected machine reconnects."

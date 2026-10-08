@@ -1,4 +1,7 @@
+import type { Page } from "@playwright/test";
+
 import { expect, test } from "./fixtures";
+import { fixtureJson, fixtureRequestBodies } from "./in-page-api-fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 /* A desktop list leads with its +: its first row, full width and square like
@@ -6,10 +9,11 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, installPageTreeStubs, open
 
 test.use(E2E_DESKTOP_CONTEXT);
 
+const stubPageCreate = (page: Page) => fixtureJson(page, "page-create", /\/api\/xmatrix\/spaces\/[^/]+\/pages$/u,
+  { page: { pageId: "p-new", parentPageId: null, title: "Untitled", position: "Z", accessMode: "open", headRevision: 1,
+    agentSuggestOnly: false, canEdit: true, updatedAt: "2026-09-27T12:00:00.000Z" } }, { method: "POST" });
+
 test("the conversation list leads with New conversation, lit while the draft is open", async ({ page }) => {
-  // The owner already dismissed the management-assistant notice, so the list starts at its +.
-  await page.addInitScript((key) => window.localStorage.setItem(key, "1"),
-    `xmatrix:management-setup-dismissed:${E2E_SPACE.id}`);
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
 
   const create = page.locator(".app-sidebar .app-list-create");
@@ -73,21 +77,22 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
 
-  const prompts: string[] = [];
-  page.on("dialog", (dialog) => { prompts.push(dialog.message()); void dialog.dismiss(); });
+  // Ctrl+N makes an untitled page at once, as Notion does; it is named on the page.
+  await stubPageCreate(page);
   await page.keyboard.press("Control+n");
-  await expect.poll(() => prompts).toEqual(["Title of the new page"]);
+  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Untitled", parentPageId: null }]);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByTestId("new-conversation")).toBeHidden();
 });
 
-test("the agent list leads with New agent, and an agent, its machines and the + are one height", async ({ page }) => {
+test("the agent list leads with Manage machines, and an agent, its machines and the + are one height", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
     registrations: [{ key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness: "codex" },
       displayName: "codex", machineName: "My Mac", models: [] }] });
   await page.locator(".app-rail").getByRole("button", { name: "Agents", exact: true }).click();
 
   const create = page.locator(".app-tool-list .app-list-create");
-  await expect(create).toHaveAccessibleName("New agent");
+  await expect(create).toHaveAccessibleName("Manage machines");
   const heading = page.locator(".app-tool-list-group-title").first();
   const machine = page.locator(".app-tool-list-row").first();
   await expect(machine).toBeVisible();
@@ -109,8 +114,8 @@ test("a page row makes a page under it from its own +, shown while the row is ho
   await row.hover();
   await expect(create).toHaveCSS("opacity", "1");
 
-  const prompts: string[] = [];
-  page.on("dialog", (dialog) => { prompts.push(dialog.message()); void dialog.dismiss(); });
+  await stubPageCreate(page);
   await create.click();
-  await expect.poll(() => prompts).toEqual(["Title of the new sub-page"]);
+  await expect.poll(() => fixtureRequestBodies(page, "page-create")).toEqual([{ title: "Untitled", parentPageId: "p-home" }]);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });

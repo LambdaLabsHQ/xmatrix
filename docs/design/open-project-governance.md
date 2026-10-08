@@ -61,6 +61,10 @@ person's role is their level, and the capabilities follow from it.
   dialog: only owners and admins edit this page). Only maintainers edit it; everyone can read it.
 - The triage Agent and Jev apply it by meaning. There are no filters or flags
   derived from it.
+- It is also the Space's rules for every Agent. Each launch and handoff names
+  the page by id (`spaceRulesPageId` on the spawn); the launch prompt tells the
+  Agent to read it with `xmatrix page read` and to follow it over its default
+  working mode. Only the id travels, so no page text is copied into a Run.
 - Every moderation action (a triage outcome, a promotion, a removal) is
   recorded with who did it and why, and the person affected can reply in the
   conversation where it happened.

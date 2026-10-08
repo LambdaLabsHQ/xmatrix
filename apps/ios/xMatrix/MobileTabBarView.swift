@@ -4,6 +4,9 @@ import UIKit
 struct MobileTabState {
     var visible: Bool = false
     var activeView: String = "pages"
+    /// An Agent in the Space is working now: the Status pulse runs, as the
+    /// web dock's does.
+    var statusLive: Bool = false
 }
 
 extension Notification.Name {
@@ -63,17 +66,17 @@ enum DockGeometry {
 /// destination of its own.
 enum MobileTabView: String, CaseIterable {
     // Pages come first: they are how the Space stands. The order and labels
-    // match the web dock; machines, schedules and the other tools live in More.
+    // match the web dock; agents, machines, schedules and the other tools live in More.
     case pages = "pages"
     case messages = "messages"
-    case agents = "agents"
+    case status = "status"
     case more = "more"
 
     var label: String {
         switch self {
         case .pages: return "Pages"
         case .messages: return "Channels"
-        case .agents: return "Agents"
+        case .status: return "Status"
         case .more: return "More"
         }
     }
@@ -82,23 +85,22 @@ enum MobileTabView: String, CaseIterable {
         switch self {
         case .pages: return "book.fill"
         case .messages: return "bubble.left.and.bubble.right.fill"
-        case .agents: return "cpu"
+        case .status: return "waveform.path.ecg"
         case .more: return "ellipsis"
         }
     }
 
     /// The tab that owns a web view, as the web dock's `dockTabOf` decides:
-    /// Pages, Channels and Agents own themselves; every other view is in More.
+    /// Pages, Channels and Status own themselves; every other view, Agents
+    /// included, is in More.
     static func tab(for activeView: String) -> Self {
         switch activeView {
         case "pages":
             return .pages
         case "messages":
             return .messages
-        // `roles` is the Agents view's retired name; web builds served before
-        // the rename still report it. Remove once those are gone.
-        case "agents", "roles":
-            return .agents
+        case "status":
+            return .status
         default: return .more
         }
     }
@@ -218,6 +220,7 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
             placementPasses += 1
         }
         reportDockBand()
+        applyStatusPulse()
     }
 
     /// Moves the system platter so its visible capsule is concentric with the
@@ -328,6 +331,75 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
         let tab = MobileTabView.tab(for: state.activeView)
         guard let index = mobileTabViews.firstIndex(of: tab), let items = tabBar.items else { return }
         tabBar.selectedItem = items[index]
+        applyStatusPulse()
+    }
+
+    /// While an Agent works, a break runs along the Status line left to right,
+    /// the web dock's pulse. UITabBar takes no animation for an item, so the
+    /// break is a mask swept over the item's symbol; if UIKit's layout hides
+    /// the symbol from us, the line just stays whole.
+    private func applyStatusPulse() {
+        let live = mobileTabState.visible && mobileTabState.statusLive && !UIAccessibility.isReduceMotionEnabled
+        for imageView in statusSymbolViews() {
+            let mask = imageView.layer.mask as? CAGradientLayer
+            guard live else {
+                if mask?.name == Self.statusPulseMaskName { imageView.layer.mask = nil }
+                continue
+            }
+            if let mask, mask.name == Self.statusPulseMaskName {
+                mask.frame = imageView.bounds
+            } else {
+                imageView.layer.mask = Self.statusPulseMask(frame: imageView.bounds)
+            }
+        }
+    }
+
+    /// The symbol views UIKit draws for the Status item, found by the slot
+    /// they sit in across the visible capsule.
+    private func statusSymbolViews() -> [UIImageView] {
+        guard let index = mobileTabViews.firstIndex(of: .status) else { return [] }
+        let dock = glassPlatter(in: tabBar) ?? tabBar
+        let slot = dock.bounds.width / CGFloat(mobileTabViews.count)
+        guard slot > 1 else { return [] }
+        var matches: [UIImageView] = []
+        func walk(_ candidate: UIView) {
+            if let imageView = candidate as? UIImageView, imageView.image?.isSymbolImage == true,
+               imageView.bounds.width > 1 {
+                let center = imageView.convert(CGPoint(x: imageView.bounds.midX, y: imageView.bounds.midY), to: dock)
+                if Int(center.x / slot) == index { matches.append(imageView) }
+            }
+            candidate.subviews.forEach(walk)
+        }
+        walk(tabBar)
+        return matches
+    }
+
+    private static let statusPulseMaskName = "xmatrix.statusPulse"
+
+    /// Opaque everywhere but a band a sixth of the symbol wide, which travels
+    /// from off the left edge to off the right every two seconds.
+    private static func statusPulseMask(frame: CGRect) -> CAGradientLayer {
+        let mask = CAGradientLayer()
+        mask.name = statusPulseMaskName
+        mask.frame = frame
+        mask.startPoint = CGPoint(x: 0, y: 0.5)
+        mask.endPoint = CGPoint(x: 1, y: 0.5)
+        let opaque = UIColor.black.cgColor
+        let clear = UIColor.clear.cgColor
+        mask.colors = [opaque, opaque, clear, clear, opaque, opaque]
+        let band = 0.16
+        func stops(at start: Double) -> [NSNumber] {
+            [-0.5, start, start, start + band, start + band, 1.5].map { NSNumber(value: $0) }
+        }
+        mask.locations = stops(at: -band)
+        let sweep = CABasicAnimation(keyPath: "locations")
+        sweep.fromValue = stops(at: -band)
+        sweep.toValue = stops(at: 1)
+        sweep.duration = 2
+        sweep.repeatCount = .infinity
+        sweep.isRemovedOnCompletion = false
+        mask.add(sweep, forKey: "sweep")
+        return mask
     }
 
     func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {

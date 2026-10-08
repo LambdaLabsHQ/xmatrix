@@ -96,18 +96,11 @@ export interface AppConnectorProviderManifest {
     description: string;
     requiredCapabilities?: string[];
     /**
-     * What the action does to the provider (§3.5). A `write` action runs from a
-     * Human's own command; an Agent may run it only where the Channel's policy
-     * is `allow`. Absent means a Channel-local action such as subscribe.
+     * What the action does to the provider (§3.5). Every action runs for a
+     * Human or an Agent unless a Space admin denies it in the Channel. Absent
+     * means a Channel-local action such as subscribe.
      */
     effect?: "read" | "write";
-    /**
-     * `deny`: nobody runs the action in a Channel until a Space admin allows it
-     * there (the action is opted in per Channel, not just for Agents).
-     * `allow`: an Agent runs the write action in a Channel by default, and a
-     * Space admin can still deny it there.
-     */
-    defaultPolicy?: "allow" | "deny";
     /** How to write the command after `@<provider>:<action>`, shown in completion and help. */
     usage?: string;
     completion?: {
@@ -383,9 +376,8 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
       {
         id: "comment",
         effect: "write",
-        defaultPolicy: "deny",
         label: "Comment on issue or PR",
-        description: "Create an approved GitHub issue or pull request timeline comment.",
+        description: "Create a GitHub issue or pull request timeline comment.",
         completion: {
           trailingDelimiter: ":",
           arguments: GITHUB_ORGANIZATION_REPOSITORY_REF_ARGUMENT,
@@ -394,9 +386,8 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
       {
         id: "create_issue",
         effect: "write",
-        defaultPolicy: "deny",
         label: "Create issue",
-        description: "Create an approved GitHub issue in a configured repository.",
+        description: "Create a GitHub issue in a configured repository.",
         completion: {
           trailingDelimiter: ":",
           arguments: GITHUB_ORGANIZATION_REPOSITORY_ARGUMENT,
@@ -405,9 +396,8 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
       {
         id: "close_issue",
         effect: "write",
-        defaultPolicy: "deny",
         label: "Close issue or PR",
-        description: "Close an approved GitHub issue or pull request.",
+        description: "Close a GitHub issue or pull request.",
         completion: {
           trailingDelimiter: ":",
           arguments: GITHUB_ORGANIZATION_REPOSITORY_REF_ARGUMENT,
@@ -416,9 +406,8 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
       {
         id: "reopen_issue",
         effect: "write",
-        defaultPolicy: "deny",
         label: "Reopen issue or PR",
-        description: "Reopen an approved GitHub issue or pull request.",
+        description: "Reopen a GitHub issue or pull request.",
         completion: {
           trailingDelimiter: ":",
           arguments: GITHUB_ORGANIZATION_REPOSITORY_REF_ARGUMENT,
@@ -427,9 +416,8 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
       {
         id: "review",
         effect: "write",
-        defaultPolicy: "deny",
         label: "Review pull request",
-        description: "Submit an approved GitHub pull request review.",
+        description: "Submit a GitHub pull request review.",
         completion: {
           trailingDelimiter: ":",
           arguments: GITHUB_ORGANIZATION_REPOSITORY_REF_ARGUMENT,
@@ -439,7 +427,7 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
         id: "merge",
         effect: "write",
         label: "Merge pull request",
-        description: "Merge a GitHub pull request with the connected GitHub App. A Human's command runs it in any channel; an Agent needs the channel's allow policy.",
+        description: "Merge a GitHub pull request with the connected GitHub App.",
         completion: {
           trailingDelimiter: ":",
           arguments: GITHUB_ORGANIZATION_REPOSITORY_REF_ARGUMENT,
@@ -448,9 +436,8 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
       {
         id: "rerun_failed_jobs",
         effect: "write",
-        defaultPolicy: "deny",
         label: "Rerun failed workflow jobs",
-        description: "Rerun only failed jobs in a numeric GitHub Actions run. Requires explicit Actions write access for this Channel.",
+        description: "Rerun only failed jobs in a numeric GitHub Actions run. Requires the GitHub App's Actions write permission.",
         requiredCapabilities: ["github.actions.write"],
         completion: {
           trailingDelimiter: ":",
@@ -460,9 +447,8 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
       {
         id: "dispatch_workflow",
         effect: "write",
-        defaultPolicy: "deny",
         label: "Dispatch workflow",
-        description: "Dispatch a named workflow at an explicit ref with optional bounded JSON inputs. Requires explicit Actions write access for this Channel.",
+        description: "Dispatch a named workflow at an explicit ref with optional bounded JSON inputs. Requires the GitHub App's Actions write permission.",
         requiredCapabilities: ["github.actions.write"],
         completion: {
           trailingDelimiter: ":",

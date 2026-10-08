@@ -4,6 +4,7 @@ import type { FirstMessageLaunchChoiceRow } from "./first-message-launch-choice-
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
+import { messageAuthoredForActor } from "./message-invocation-selections.js";
 
 /** Who decided a first message's launch: its author within the window, or Jev after it. */
 export type FirstMessageLaunchChooser = "author" | "jev";
@@ -33,7 +34,12 @@ export class PostgresFirstMessageLaunchChoiceRepository {
     return this.transaction(input.requestId, "first-message-launch.open", async tx => {
       const source = await firstMessage(tx, this.placement.spaceId, input.channelId, input.messageId);
       if (!source) throw new RegistrationAccessError("launch_choice_unavailable", 409);
-      const row = await insertChoice(tx, this.placement.spaceId, input.channelId, input.messageId, input.authorUserId, source.sent_at);
+      if (!await messageAuthoredForActor(tx, { spaceId: this.placement.spaceId, channelId: input.channelId,
+        messageId: input.messageId, authorKind: source.author_kind, authorId: source.author_id, actorUserId: input.authorUserId })) {
+        throw new RegistrationAccessError("launch_choice_forbidden", 403);
+      }
+      const row = await insertChoice(tx, this.placement.spaceId, input.channelId, input.messageId, input.authorUserId,
+        source.sent_at, source.author_kind === "agent" ? 0 : FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS);
       return { deadlineAt: iso(row.deadline_at), ...(row.chosen_by ? { chosenBy: row.chosen_by as FirstMessageLaunchChooser } : {}) };
     });
   }
@@ -111,12 +117,12 @@ export class PostgresFirstMessageLaunchChoiceRepository {
         RETURNING message_id`,
       values: [input.channelId, input.messageId, chosen ? "start" : "none", chosen, input.by, input.actorUserId], maxRows: 1 });
       if (rows[0]) return { claimed: true };
-      const current = (await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_claim_read_v1", text: `SELECT
-        choice,chosen_harness,chosen_by,deadline_at<=clock_timestamp() AS closed FROM data.first_message_launch_choices
+      const current = (await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_claim_read_v2", text: `SELECT
+        author_user_id,choice,chosen_harness,chosen_by,deadline_at<=clock_timestamp() AS closed FROM data.first_message_launch_choices
         WHERE channel_id=$1 AND message_id=$2`, values: [input.channelId, input.messageId], maxRows: 1 }))[0];
       if (!current) throw new RegistrationAccessError("launch_choice_unavailable", 409);
       if (current.choice === null && !current.closed) throw new RegistrationAccessError("launch_choice_window_open", 409);
-      return { claimed: current.chosen_by === input.by && current.chosen_harness === chosen };
+      return { claimed: current.author_user_id === input.actorUserId && current.chosen_by === input.by && current.chosen_harness === chosen };
     });
   }
 
@@ -130,11 +136,11 @@ export class PostgresFirstMessageLaunchChoiceRepository {
   }
 }
 
-/** The Channel's first message, from a Human, unedited and still shown. */
+/** The Channel's first message, from a Human or Agent, unedited and still shown. */
 async function firstMessage(tx: DatabaseTransaction, spaceId: string, channelId: string, messageId: string) {
-  return (await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_source_v1", text: `SELECT author_id,sent_at,body_hash
+  return (await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_source_v2", text: `SELECT author_kind,author_id,sent_at,body_hash
     FROM data.messages WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 AND timeline_sequence=1
-      AND author_kind='user' AND edited_at IS NULL AND recalled_at IS NULL AND deleted_at IS NULL`,
+      AND author_kind IN ('user','agent') AND edited_at IS NULL AND recalled_at IS NULL AND deleted_at IS NULL`,
   values: [spaceId, channelId, messageId], maxRows: 1 }))[0];
 }
 
@@ -142,18 +148,20 @@ async function firstMessage(tx: DatabaseTransaction, spaceId: string, channelId:
 async function authorMessage(tx: DatabaseTransaction, spaceId: string,
   input: { channelId: string; messageId: string; actorUserId: string }, bodyHash: string) {
   const source = await firstMessage(tx, spaceId, input.channelId, input.messageId);
-  if (!source || source.author_id !== input.actorUserId) throw new RegistrationAccessError("launch_choice_forbidden", 403);
+  if (!source || source.author_kind !== "user" || source.author_id !== input.actorUserId) {
+    throw new RegistrationAccessError("launch_choice_forbidden", 403);
+  }
   if (source.body_hash !== bodyHash) throw new RegistrationAccessError("launch_choice_stale", 409);
   return source;
 }
 
 async function insertChoice(tx: DatabaseTransaction, spaceId: string, channelId: string, messageId: string,
-  authorUserId: string, sentAt: unknown) {
+  authorUserId: string, sentAt: unknown, holdLimitMs = FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS) {
   await tx.query({ name: "first_message_launch_open_v1", text: `INSERT INTO data.first_message_launch_choices
     (channel_id,message_id,space_id,author_user_id,deadline_at,created_at,updated_at)
     VALUES ($1,$2,$3,$4,$5::timestamptz+make_interval(secs => $6::double precision/1000),clock_timestamp(),clock_timestamp())
     ON CONFLICT (channel_id,message_id) DO NOTHING`,
-  values: [channelId, messageId, spaceId, authorUserId, sentAt, FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS], maxRows: 0 });
+  values: [channelId, messageId, spaceId, authorUserId, sentAt, holdLimitMs], maxRows: 0 });
   const row = (await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_open_read_v2", text: `SELECT deadline_at,choice,chosen_by,author_user_id,clock_timestamp()<deadline_at AS open
     FROM data.first_message_launch_choices WHERE channel_id=$1 AND message_id=$2 FOR UPDATE`,
   values: [channelId, messageId], maxRows: 1 }))[0]!;

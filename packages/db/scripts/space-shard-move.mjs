@@ -20,6 +20,8 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "channel_content_counters",
   "channel_message_sequences",
   "channels",
+  "channel_metadata_revisions",
+  "channel_about_inputs",
   "content_closure_heads",
   "content_gc_candidates",
   "content_objects",
@@ -29,8 +31,6 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "delivery_cursors",
   "first_message_launch_choices",
   "idempotency_keys",
-  "management_actions",
-  "management_work_items",
   "message_annotations",
   "message_attachment_refs",
   "message_attachments",
@@ -59,7 +59,6 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "space_control_heads",
   "space_invites",
   "space_join_requests",
-  "space_management_configs",
   "space_member_creation_policies",
   "space_members",
   "space_secrets",
@@ -70,7 +69,6 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
 ]);
 
 export const INDIRECT_MOVABLE_SPACE_TABLES = Object.freeze([
-  "management_work_item_transitions",
 ]);
 
 // These facts are Space-related but their authorities are not yet fleet-routed.
@@ -120,7 +118,6 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
   "natural_key_counters",
   "natural_key_reservations",
   "runs",
-  "space_management_snapshots",
   // A Space being deleted, or its completed audit record, stays on its shard.
   "space_deletions",
   "trace_access_grants",
@@ -158,6 +155,8 @@ export const GLOBAL_DATA_TABLES = Object.freeze([
   "machine_daemon_commands",
   "machine_daemon_control_audit",
   "machine_daemons",
+  "machine_resource_hourly",
+  "machine_resource_samples",
   "machine_run_routes",
   "machine_run_terminal_reports",
   "machines",
@@ -211,17 +210,14 @@ const BLOCKER_QUERIES = Object.freeze({
   run_secret_approvals: "space_id = $1",
   natural_key_counters: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
   natural_key_reservations: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
-  space_management_snapshots: "space_id = $1",
   trace_access_grants: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
   workspaces:
     "workspace_id IN (SELECT workspace_id FROM data.runs WHERE channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1) AND workspace_id IS NOT NULL)",
 });
 
-const SELECTORS = Object.freeze({
-  ...Object.fromEntries(MOVABLE_SPACE_TABLES.map((table) => [table, "space_id = $1"])),
-  management_work_item_transitions:
-    "work_item_id IN (SELECT work_item_id FROM data.management_work_items WHERE space_id = $1)",
-});
+const SELECTORS = Object.freeze(
+  Object.fromEntries(MOVABLE_SPACE_TABLES.map((table) => [table, "space_id = $1"])),
+);
 
 function required(value, name) {
   const result = value?.trim();

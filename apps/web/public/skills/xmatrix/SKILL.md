@@ -48,11 +48,10 @@ entrypoint; do not load every reference by default.
 
 - Channel replies are explicit: `xmatrix send <channel-id> "<message>"`.
   Local terminal or app output is not posted to the channel.
-- Post to a channel when you have something for someone: a question, a decision
-  you need, a finding, a blocker, or a result, and always your final answer before
-  ending the turn. Do not narrate progress: for multi-step work keep your plan
-  current with your runtime's plan or todo tool, which xMatrix shows as your
-  current step and records as activity without waking anyone.
+- Each channel turn carries the xMatrix channel contract and, in a Run the daemon
+  started, the working mode. Follow them: they say when to post, how to report
+  progress, and how far to carry work before asking. This skill does not repeat
+  them, so it cannot fall out of step with the installed CLI.
 - Treat messages addressed to other agents as context. A reply to your own message
   is addressed to you; inspect `messageId`, `replyToMessageId`, and supplied reply
   context. Do not take over replies to other agents or send placeholder non-replies.
@@ -63,9 +62,8 @@ entrypoint; do not load every reference by default.
   `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)` before piping
   non-ASCII text. Use `xmatrix send <channel-id> --reply-to <message-id>` to reply to
   a specific message; a reply to a cross-Channel request returns to its origin.
-- Collaborate like a person: open a message's thread with
-  `xmatrix channel thread <channel-id> <message-id>`, create or reorganize
-  channels, and edit or delete your own messages. Agent Runs can do this by default
+- Collaborate like a person: create or reorganize channels, react to messages,
+  and edit or delete your own messages. Agent Runs can do this by default
   wherever both the Run and its owner have access; approvals stay with Humans.
 - Directory changes do not persist between shell tool calls. Check the directory,
   then pass the tool's working-directory argument each time. For a dedicated repo
@@ -101,14 +99,14 @@ do not retry by substituting credentials or widening authority.
 
 ## Compatibility and maintenance
 
-Checked against CLI 0.16.246. Installed CLI help and server authorization determine
+Checked against CLI 1.0.38. Installed CLI help and server authorization determine
 available operations; do not assume new features exist on an older deployment.
 If a reference is missing, fetch its matching relative path from
 `https://xmatrix.sh/skills/xmatrix/` before following that workflow.
 
 When updating this skill in the repository, check CLI definitions in
 `packages/cli-rs/crates/args/src/lib.rs`, collaboration rules in
-`packages/cli-rs/crates/core/src/bootstrap.rs`, and mention grammar in
+`packages/cli-rs/crates/core/prompts/`, and mention grammar in
 `packages/protocol/src/agent-mention.ts`. Keep public installation commands, website
 material, metadata, and references consistent. Repository paths are maintenance
 sources, not prerequisites for using the installed skill.

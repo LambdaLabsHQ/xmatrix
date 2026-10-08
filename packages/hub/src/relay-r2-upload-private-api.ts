@@ -3,6 +3,7 @@ import { immutableContentObjectKey, lowercaseHex , utf8ByteLength } from "@xmatr
 // PostgreSQL content stores intent/ref metadata; this module owns only bounded
 // request parsing and R2 I/O.
 import { ControlError, PostgresContentRepository } from "@xmatrix/db";
+import { transientError } from "./error-contract";
 import { createPostgresAuthorityDatabase, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import {
   POSTGRES_AUTHORITY_TIMEOUTS,
@@ -11,7 +12,6 @@ import {
 } from "./postgres-authority-http";
 import {
   RELAY_R2_UPLOAD_CHECKSUM_HEADER,
-  RelayR2UploadGatewayError,
   executeRelayR2UploadGatewayRequest,
   type RelayPrivateR2UploadPort,
   type RelayR2LiveUploadIntentContext,
@@ -44,17 +44,14 @@ export interface RelayR2UploadPrincipal {
   id: string;
 }
 
-export class RelayR2UploadPrivateApiError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) {
-    super(message);
-    this.name = "RelayR2UploadPrivateApiError";
-  }
+export class RelayR2UploadPrivateApiError extends ControlError {
+  override name = "RelayR2UploadPrivateApiError";
 }
 
 type JsonRecord = Record<string, unknown>;
 
-function fail(code: string, status: number, message: string): never {
-  throw new RelayR2UploadPrivateApiError(code, status, message);
+function fail(code: string, status: number, message: string, retryable = false): never {
+  throw new RelayR2UploadPrivateApiError(code, status, message, retryable);
 }
 
 function record(value: unknown): JsonRecord {
@@ -110,14 +107,20 @@ async function json(request: Request): Promise<JsonRecord> {
   }
 }
 
-/** One content authority call: its rejection keeps its code and status; any other failure is an outage. */
+/**
+ * One content authority call: its rejection keeps its code, status and retry
+ * policy; any other failure is the authority being unavailable, retryable only
+ * when it is a transient outage.
+ */
 async function contentCall(call: () => Promise<unknown>): Promise<JsonRecord> {
   let value: unknown;
   try {
     value = await call();
   } catch (error) {
-    if (error instanceof ControlError) fail(error.code, error.status, "blob authority rejected the request");
-    fail("authority_unavailable", 503, "blob authority is unavailable");
+    if (error instanceof ControlError) {
+      fail(error.code, error.status, "blob authority rejected the request", error.retryable);
+    }
+    fail("authority_unavailable", 503, "blob authority is unavailable", transientError(error));
   }
   return record(value);
 }
@@ -412,14 +415,4 @@ export async function handleRelayR2BlobRefRelease(input: {
     principal: principal(input.principal),
   }));
   return Response.json(released, { headers: { "cache-control": "private, no-store" } });
-}
-
-export function relayR2UploadPrivateApiErrorResponse(error: unknown): Response | undefined {
-  if (error instanceof RelayR2UploadPrivateApiError || error instanceof RelayR2UploadGatewayError) {
-    return Response.json({ error: error.message, code: error.code }, {
-      status: error.status,
-      headers: { "cache-control": "private, no-store", "x-content-type-options": "nosniff" },
-    });
-  }
-  return undefined;
 }

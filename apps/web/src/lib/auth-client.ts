@@ -7,6 +7,7 @@ import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import type { AuthUser } from "@/lib/auth-context";
 import { classifyAuthClientFailure } from "@/lib/auth-error-policy";
 import { isTransientAuthStatus } from "@/lib/auth-session-policy";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 export interface WebAuthSession {
   access_token: string;
@@ -164,7 +165,7 @@ async function postAuthRequest(
   body: Record<string, string>,
   fallbackMessage: string
 ): Promise<void> {
-  const response = await fetch(route, {
+  const response = await xmatrixRawResponse(route, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -241,7 +242,7 @@ export async function signOutBetterAuth(): Promise<void> {
 }
 
 async function fetchBetterAuthJwt(): Promise<string | null> {
-  const response = await fetch(`${getAuthBaseUrl()}/api/auth/token`, {
+  const response = await xmatrixRawResponse(`${getAuthBaseUrl()}/api/auth/token`, {
     credentials: "include",
     cache: "no-store",
   }).catch((error) => {

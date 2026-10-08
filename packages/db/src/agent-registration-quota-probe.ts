@@ -29,14 +29,15 @@ export function currentRegistrationQuotaJoin(alias: string): string {
  * When `windows_json` is present, headroom is recomputed with
  * `routingQuotaObservation` (Cursor Auto/API: better pool without a model) so a
  * stored `remaining` collapsed by Math.min across pools cannot keep refusing
- * Auto launches; Agents still shows every stored window. */
+ * Auto launches; Agents still shows every stored window. A daemon usage-limit
+ * hold keeps its stored remaining share; retained windows are display detail. */
 export function registrationQuotaReading(row: {
-  remaining?: unknown; observed_at?: unknown; expires_at?: unknown;
+  source?: unknown; remaining?: unknown; observed_at?: unknown; expires_at?: unknown;
   windows_json?: unknown; account_json?: unknown;
 } | undefined):
   { remainingPercent: number; observedAt: string; expiresAt: string } | undefined {
   const observedAt = typeof row?.observed_at === "string" ? row.observed_at : undefined;
-  if (observedAt && row?.windows_json != null) {
+  if (observedAt && row?.source !== "daemon" && row?.windows_json != null) {
     const stored = Array.isArray(row.windows_json) ? row.windows_json : [];
     const quotaUsages = stored.flatMap((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
@@ -218,13 +219,15 @@ const REGISTRATION_USAGE_LIMIT_MAX_HOLD = "7 days";
  * limit used up: its pool reads empty until the reported reset, so routing and
  * handoff pass it over. A later provider probe replaces the reading. Returns
  * when the pool is held until, or undefined when nothing was written: the
- * registration has no environment on that machine, or a newer reading stands. */
+ * registration has no environment on that machine, or a newer reading stands.
+ * Retain unexpired provider window detail for display; the hold remains the
+ * routing fact and cannot identify a window the provider never named. */
 export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; harness: string; resetsAt?: string;
 }): Promise<{ quotaPoolId: string; limitedUntil: string } | undefined> {
   const resetsAt = input.resetsAt && Number.isFinite(Date.parse(input.resetsAt))
     ? new Date(input.resetsAt).toISOString() : null;
-  const rows = await tx.query<QueryResultRow>({ name: "registration_usage_limit_observe_v2", text: `WITH pool AS (
+  const rows = await tx.query<QueryResultRow>({ name: "registration_usage_limit_observe_v3", text: `WITH pool AS (
       SELECT e.owner_user_id,${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id,
         LEAST(GREATEST(COALESCE($4::timestamptz,statement_timestamp()+interval '${REGISTRATION_USAGE_LIMIT_DEFAULT_HOLD}'),
           statement_timestamp()+interval '${REGISTRATION_USAGE_LIMIT_MIN_HOLD}'),
@@ -235,7 +238,9 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
       (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,windows_json,account_json)
       SELECT owner_user_id,quota_pool_id,0,statement_timestamp(),expires_at,'daemon',NULL,NULL FROM pool
     ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET remaining=EXCLUDED.remaining,observed_at=EXCLUDED.observed_at,
-      expires_at=EXCLUDED.expires_at,source=EXCLUDED.source,windows_json=EXCLUDED.windows_json,
+      expires_at=EXCLUDED.expires_at,source=EXCLUDED.source,
+      windows_json=CASE WHEN registration_quota_observations.expires_at>statement_timestamp()
+        THEN registration_quota_observations.windows_json ELSE NULL END,
       account_json=EXCLUDED.account_json
       WHERE EXCLUDED.observed_at>=registration_quota_observations.observed_at
     RETURNING quota_pool_id,expires_at`,

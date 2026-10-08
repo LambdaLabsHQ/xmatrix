@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+use crate::backoff::Backoff;
 use crate::error::{CliError, Result};
 use crate::http;
 
@@ -84,6 +85,9 @@ pub(crate) async fn connect_endpoint(
 pub(crate) struct ConnectionFailure {
     pub reason: String,
     pub upgrade_required: bool,
+    /// The Hub could not be reached or answered with a passing failure, as
+    /// opposed to refusing this client.
+    pub transient: bool,
 }
 
 pub(crate) async fn connect_domain(
@@ -96,11 +100,13 @@ pub(crate) async fn connect_domain(
         Ok(Ok(stream)) => Ok(stream),
         Ok(Err(error)) => Err(ConnectionFailure {
             upgrade_required: matches!(&error, CliError::UpgradeRequired(_)),
+            transient: error.is_transient() || matches!(&error, CliError::Io(_)),
             reason: error.to_string(),
         }),
         Err(_) => Err(ConnectionFailure {
             reason: timeout_reason.into(),
             upgrade_required: false,
+            transient: true,
         }),
     }
 }
@@ -109,7 +115,9 @@ pub(crate) struct ConnectionOptions<'a> {
     pub component: http::ClientComponent,
     pub timeout: Duration,
     pub timeout_reason: &'a str,
-    pub reconnect_max: Duration,
+    /// Keep retrying a transient failure before the first connection instead
+    /// of failing the initial waiter; the caller's ready timeout bounds it.
+    pub retry_initial_transient: bool,
 }
 
 /// Domain connection admission preserves one initial ready waiter and the
@@ -119,7 +127,7 @@ pub(crate) async fn connect_with_reconnect<T, E>(
     options: ConnectionOptions<'_>,
     ready: &mut Option<tokio::sync::oneshot::Sender<std::result::Result<T, String>>>,
     events: &tokio::sync::mpsc::UnboundedSender<E>,
-    backoff: &mut Duration,
+    backoff: &mut Backoff,
     event_types: ReconnectEvents<E>,
 ) -> std::result::Result<Option<ClientWebSocket>, ()> {
     match connect_domain(
@@ -131,6 +139,10 @@ pub(crate) async fn connect_with_reconnect<T, E>(
     .await
     {
         Ok(stream) => Ok(Some(stream)),
+        Err(failure) if failure.transient && options.retry_initial_transient && ready.is_some() => {
+            retry_initial_transient(&failure.reason, backoff).await;
+            Ok(None)
+        }
         Err(failure) => {
             if handle_connection_failure(
                 ready,
@@ -138,7 +150,6 @@ pub(crate) async fn connect_with_reconnect<T, E>(
                 failure.reason,
                 failure.upgrade_required,
                 backoff,
-                options.reconnect_max,
                 event_types,
             )
             .await
@@ -151,23 +162,28 @@ pub(crate) async fn connect_with_reconnect<T, E>(
     }
 }
 
-/// Handshake read failures end the initial waiter; established sockets pause
-/// before retrying without emitting a domain event or advancing backoff.
+/// A transient failure before the first connection: reported, then waited
+/// out, leaving the initial waiter to the next attempt.
+pub(crate) async fn retry_initial_transient(reason: &str, backoff: &mut Backoff) {
+    eprintln!(
+        "⚠ {reason}; retrying in up to {}s",
+        backoff.ceiling().as_secs().max(1)
+    );
+    backoff.wait().await;
+}
+
+/// Handshake read failures end the initial waiter; established sockets back
+/// off before retrying without emitting a domain event.
 pub(crate) async fn fail_handshake_or_wait<T>(
     ready: &mut Option<tokio::sync::oneshot::Sender<std::result::Result<T, String>>>,
     reason: &str,
-    backoff: Duration,
+    backoff: &mut Backoff,
 ) -> bool {
     if fail_initial_ready(ready, reason) {
         return true;
     }
-    tokio::time::sleep(backoff).await;
+    backoff.wait().await;
     false
-}
-
-pub(crate) async fn wait_before_reconnect(backoff: &mut Duration, max: Duration) {
-    tokio::time::sleep(*backoff).await;
-    *backoff = (*backoff * 2).min(max);
 }
 
 pub(crate) struct ReconnectEvents<E> {
@@ -182,8 +198,7 @@ pub(crate) async fn handle_connection_failure<T, E>(
     events: &tokio::sync::mpsc::UnboundedSender<E>,
     reason: String,
     fatal: bool,
-    backoff: &mut Duration,
-    max: Duration,
+    backoff: &mut Backoff,
     event_types: ReconnectEvents<E>,
 ) -> bool {
     if fail_initial_ready(ready, &reason) {
@@ -198,7 +213,7 @@ pub(crate) async fn handle_connection_failure<T, E>(
     if fatal {
         return true;
     }
-    wait_before_reconnect(backoff, max).await;
+    backoff.wait().await;
     false
 }
 

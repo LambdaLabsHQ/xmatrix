@@ -9,13 +9,18 @@
 
 import type { Hono } from "hono";
 import {
+  ADMIN_AUDIT_HUB_ROUTE,
   ADMIN_HUMAN_HANDLE_BACKFILL_HUB_ROUTE,
   ADMIN_OVERVIEW_HUB_ROUTE,
+  ADMIN_USER_DETAIL_HUB_ROUTE,
+  adminAuditLimit,
   adminHandleBackfillLimit,
   adminOverviewActivityDays,
   adminOverviewRowLimit,
   adminOverviewUserLimit,
+  type AdminAuditAction,
   type AdminPlatformOverview,
+  type AdminUserDetail,
 } from "@xmatrix/protocol";
 
 import { PLATFORM_ADMIN_REQUIRED_MESSAGE, resolvePlatformAdmin } from "./admin-platform-access";
@@ -31,7 +36,9 @@ import {
   jsonErrors,
 } from "./index-shared";
 import type { Env } from "./types";
-import { authDirectoryAdminUsers, authDirectoryEmails } from "./auth-authority";
+import { type AuthDirectoryAdminUsers, authDirectoryAdminUser, authDirectoryAdminUsers, authDirectoryEmails } from "./auth-authority";
+import { listAdminAudit, recordAdminAudit } from "./admin-audit";
+import { readPostgresAdminUserDetail } from "./postgres-admin-user-detail";
 import {
   channelMessageResponse,
   repairAgentSenderSnapshots,
@@ -94,6 +101,26 @@ async function requirePlatformAdmin(
   return authUser;
 }
 
+/**
+ * Prove the caller is an operator and record what they are about to read or
+ * do. A request whose audit row cannot be written is refused.
+ */
+async function auditedPlatformAdmin(
+  request: Request,
+  env: Env,
+  action: AdminAuditAction,
+  target?: { kind: string; id: string },
+): Promise<Awaited<ReturnType<typeof requireAuth>>> {
+  const authUser = await requirePlatformAdmin(request, env);
+  await recordAdminAudit(env, {
+    actorUserId: authUser.id,
+    ...(authUser.email ? { actorEmail: authUser.email } : {}),
+    action,
+    ...(target ? { targetKind: target.kind, targetId: target.id } : {}),
+  });
+  return authUser;
+}
+
 async function requirePartitionOperator(request: Request, env: Env): Promise<void> {
   if (await operatorTokenAuthorizes(request, env)) return;
   await requirePlatformAdmin(request, env);
@@ -130,8 +157,9 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
   }));
 
   app.post("/api/admin/channel-family-partitions/:channelId/repair-agent-senders", (c) => jsonErrors(c, async () => {
-    const authUser = await requirePlatformAdmin(c.req.raw, c.env);
     const channelId = c.req.param("channelId");
+    const authUser = await auditedPlatformAdmin(c.req.raw, c.env, "agent-senders.repair",
+      { kind: "channel", id: channelId });
     const body = await c.req.json<Record<string, unknown>>();
     return channelMessageResponse(() => repairAgentSenderSnapshots(c.env, {
       ...body,
@@ -141,27 +169,64 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
   }));
 
   app.get(ADMIN_OVERVIEW_HUB_ROUTE, (c) => jsonErrors(c, async () => {
-    await requirePlatformAdmin(c.req.raw, c.env);
+    await auditedPlatformAdmin(c.req.raw, c.env, "overview.read");
     const input = {
       now: new Date().toISOString(),
       spaceLimit: adminOverviewRowLimit(c.req.query("spaceLimit")),
       userLimit: adminOverviewUserLimit(c.req.query("userLimit")),
       activityDays: adminOverviewActivityDays(c.req.query("activityDays")),
     };
-    const overview = await readPostgresAdminOverview(c.env, input);
+    const [overview, directory] = await Promise.all([
+      readPostgresAdminOverview(c.env, input),
+      authDirectoryAdminUsers(c.env, input.now, input.userLimit).catch(() => null),
+    ]);
     if (!overview) {
       return c.json({ error: "Platform overview is unavailable" }, 502);
     }
 
     return c.json(
-      { overview: await withDirectoryUsers(overview, c.env, input.userLimit) },
+      { overview: await withDirectoryUsers(overview, c.env, directory) },
       200,
       { "cache-control": "private, no-store" },
     );
   }));
 
+  app.get(ADMIN_USER_DETAIL_HUB_ROUTE, (c) => jsonErrors(c, async () => {
+    const userId = c.req.param("userId");
+    await auditedPlatformAdmin(c.req.raw, c.env, "user.read", { kind: "user", id: userId });
+    const now = new Date().toISOString();
+    const [identity, shards] = await Promise.all([
+      authDirectoryAdminUser(c.env, userId, now),
+      readPostgresAdminUserDetail(c.env, userId, now),
+    ]);
+    if (!identity && shards.spaces.length === 0 && shards.machines.length === 0) {
+      return c.json({ error: "User not found" }, 404);
+    }
+    const detail: AdminUserDetail = {
+      generatedAt: now,
+      user: {
+        ...(identity?.user ?? { userId, agentRegistrations: 0, machines: 0, messages: 0, spaces: 0, ownedSpaces: 0 }),
+        spaces: shards.spaces.length,
+        ownedSpaces: shards.spaces.filter((space) => space.role === "owner").length,
+        agentRegistrations: shards.agents.length,
+        machines: shards.machines.length,
+        messages: shards.messages.total,
+        ...(shards.messages.lastMessageAt ? { lastMessageAt: shards.messages.lastMessageAt } : {}),
+      },
+      sessions: identity?.sessions ?? [],
+      ...shards,
+    };
+    return c.json({ detail }, 200, { "cache-control": "private, no-store" });
+  }));
+
+  app.get(ADMIN_AUDIT_HUB_ROUTE, (c) => jsonErrors(c, async () => {
+    await auditedPlatformAdmin(c.req.raw, c.env, "audit.read");
+    const events = await listAdminAudit(c.env, adminAuditLimit(c.req.query("limit")));
+    return c.json({ events }, 200, { "cache-control": "private, no-store" });
+  }));
+
   app.post(ADMIN_HUMAN_HANDLE_BACKFILL_HUB_ROUTE, (c) => jsonErrors(c, async () => {
-    await requirePlatformAdmin(c.req.raw, c.env);
+    await auditedPlatformAdmin(c.req.raw, c.env, "handles.backfill");
     const report = await backfillHumanHandles(
       c.env,
       adminHandleBackfillLimit(c.req.query("limit")),
@@ -200,13 +265,8 @@ async function withDirectoryLabels(
 async function withDirectoryUsers(
   overview: AdminPlatformOverview,
   env: Env,
-  userLimit: number,
+  directory: AuthDirectoryAdminUsers | null,
 ): Promise<AdminPlatformOverview> {
-  const directory = await authDirectoryAdminUsers(
-    env,
-    overview.generatedAt,
-    userLimit,
-  ).catch(() => null);
   if (!directory ||
       (directory.access.registeredUsers === 0 && overview.totals.users > 0)) {
     return withDirectoryLabels(overview, env);

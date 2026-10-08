@@ -3,8 +3,6 @@ import { test } from "node:test";
 
 import {
   channelAboutRequestId,
-  productMessagePostCommitAuthorPolicy,
-  productMessagePostCommitShouldWakeConversation,
   dispatchProductMessageLaunches,
   productMessageControlFinishesBeforeResponse,
   summonFirstMessageHarness,
@@ -76,19 +74,6 @@ test("naming a machine is a card hint; quota and an offline machine still post",
     ["registration_quota_exhausted", "registration_daemon_offline"]);
 });
 
-test("Human and Agent authors share lifecycle and intervention interpretation", () => {
-  assert.deepEqual(productMessagePostCommitAuthorPolicy("agent"), {
-    interpretAgentIntervention: true,
-    interpretAgentLifecycle: true,
-    interpretHumanConversationWake: false,
-  });
-  assert.deepEqual(productMessagePostCommitAuthorPolicy("user"), {
-    interpretAgentIntervention: true,
-    interpretAgentLifecycle: true,
-    interpretHumanConversationWake: true,
-  });
-});
-
 test("direct text never bypasses an explicit registration selection or a failed authority read", async () => {
   const input = { env: {}, channelId: "channel", messageId: "message",
     senderKind: "user", senderId: "human", actorUserId: "human", body: "@codex repo:owner/repo task" };
@@ -151,15 +136,6 @@ test("an Agent's harness shout launches through its derived registration selecti
     registration: async value => { calls.push(value.actorUserId); return { mode: "composite", selectionCount: 1, prepared: [{ launchId: "l" }] }; },
   }), true);
   assert.deepEqual(calls, ["owner"], "the Agent's owner is the launch actor");
-});
-
-test("Agent control messages never degrade into ordinary conversation wakes", () => {
-  assert.equal(productMessagePostCommitShouldWakeConversation("user", "@codex:12:stop"), false);
-  assert.equal(productMessagePostCommitShouldWakeConversation("user", "/kill all"), false);
-  assert.equal(productMessagePostCommitShouldWakeConversation("user", "@grok:new:owner/repo Hi"), false);
-  assert.equal(productMessagePostCommitShouldWakeConversation("user", "@codex:once:/srv Hi"), false);
-  assert.equal(productMessagePostCommitShouldWakeConversation("user", "@codex:12 hello"), true);
-  assert.equal(productMessagePostCommitShouldWakeConversation("agent", "ordinary reply"), false);
 });
 
 test("Channel About runs after the first message and again on each fifth message", () => {

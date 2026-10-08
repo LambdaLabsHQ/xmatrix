@@ -1,5 +1,5 @@
 import type { ConnectorEvent } from "./provider";
-import { createSignedJsonReceiver } from "./hmac";
+import { createSignedJsonReceiver } from "./delivery-proof";
 import { connectorEvent, excerpt, lowerHeader, record, safeUrl, sourceToken, text } from "./event-format";
 
 /*
@@ -14,7 +14,7 @@ const ISSUE_FEATURES: Record<string, string> = {
 };
 
 export const receiveSentryDelivery = createSignedJsonReceiver({
-  name: "Sentry", secretField: "clientSecret", signatureHeader: "sentry-hook-signature",
+  name: "Sentry", secretField: "clientSecret", proof: { header: "sentry-hook-signature" },
 }, (delivery, payload) => {
   const resource = lowerHeader(delivery.headers, "sentry-hook-resource");
   const action = text(payload.action);

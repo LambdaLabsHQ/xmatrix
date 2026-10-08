@@ -51,7 +51,7 @@ test("the author's three seconds start when Jev's reading appears, and a pick se
   const card = page.locator(".launch-choice");
   // The author may pick at once, but nothing counts down before Jev's reading.
   await expect(card.getByRole("button", { name: "Start claude" })).toBeEnabled();
-  await expect(card).toContainText("Jev is reading");
+  await expect(card).toContainText("xMatrix is reading");
   await expect(card.locator(".launch-choice-count")).toHaveCount(0);
   expect(await fixtureRequestBodies(page, "first-choice")).toEqual([]);
   await shot(page, "launch-choice-reading");
@@ -59,7 +59,7 @@ test("the author's three seconds start when Jev's reading appears, and a pick se
   // Jev's reading arrives: the author's three seconds start, and the Hub is told.
   await launches(page, [open({ recommendation: { start: true, harness: "codex" } })]);
   await page.clock.runFor(700);
-  await expect(card.getByRole("button", { name: "Start codex (Jev's pick)" })).toHaveAttribute("data-recommended", "true");
+  await expect(card.getByRole("button", { name: "Start codex (xMatrix's pick)" })).toHaveAttribute("data-recommended", "true");
   // Far enough ahead that a loaded runner has not already passed it.
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 250));
   await expect(card.locator(".launch-choice-count")).toHaveText(/^[23]$/u);
@@ -90,14 +90,14 @@ test("unchosen, Jev's reading decides: conversation starts nothing and says so q
   const card = page.locator(".launch-choice");
   await expect(card).toHaveAttribute("data-state", "none");
   await expect(card).toContainText("No Agent started");
-  await expect(card).toContainText("Jev read this as conversation");
+  await expect(card).toContainText("xMatrix read this as conversation");
   await shot(page, "launch-choice-none");
 
   await launches(page, [openChoice({ recommendation: { start: true, harness: "codex" },
     choice: { start: true, harness: "codex", by: "jev", at: deadlineAt } })]);
   await page.reload();
   await expect(card).toHaveAttribute("data-state", "chosen");
-  await expect(card).toContainText("Jev's pick");
+  await expect(card).toContainText("xMatrix's pick");
   await shot(page, "launch-choice-jev-chosen");
 });
 
@@ -148,7 +148,7 @@ test("reopened after Jev could not read it, the card says why and never counts d
   await fixtureJson(page, "late-shown", `**/api/xmatrix/channels/channel-general/messages/${messageId}/launch-choice`, { claimed: false });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const failed = page.locator(".launch-choice[data-state='none']");
-  await expect(failed).toContainText("Jev could not select a registered environment.");
+  await expect(failed).toContainText("xMatrix could not select a registered environment.");
   await expect(failed.getByRole("button")).toHaveCount(0);
   expect(await fixtureRequestBodies(page, "late-shown")).toEqual([]);
 });

@@ -46,6 +46,22 @@ test("Reborn preparation keeps the exact original workspace", async () => {
   }
 });
 
+test("an automatic wake rechecks rest under the source lock after a handoff stop", async () => {
+  for (const rest of ["sleeping", "interrupted", "stopped", "wake_failed", null]) {
+    const f = fixture();
+    f.input.kind = "wake";
+    f.previous.rest_state = rest;
+    if (["sleeping", "interrupted"].includes(rest)) {
+      await prepareReborn(f.tx, f.input, "owner", "space", "2026-10-07T00:00:00Z");
+      assert.equal(f.writes.length, 1);
+    } else {
+      await assert.rejects(prepareReborn(f.tx, f.input, "owner", "space", "2026-10-07T00:00:00Z"),
+        error => error.code === "instance_not_resting");
+      assert.equal(f.writes.length, 0, "a stale wake candidate must not prepare a successor");
+    }
+  }
+});
+
 test("Reborn advancement fences workspace, session and ordinal changes before creating a successor", async () => {
   for (const mutate of [
     p => { p.workspace_canonical_cwd = "/different"; },

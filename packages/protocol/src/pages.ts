@@ -41,6 +41,25 @@ export interface PageRevision {
   createdAt: string;
 }
 
+/** An Automation a page edit detached or attached (docs/design/pages-live-document.md §6.1). */
+export interface PageAutomationAnchorChange { automationId: string; name: string }
+
+/**
+ * A whole-document page edit as committed, and what it did besides its text:
+ * the Automations whose reference it removed (now paused) or brought back
+ * (resumed), and the top sections it removed. The writer is told at once, as
+ * an edit that drops sections is otherwise silent.
+ */
+export interface PageEditResult {
+  revision: number;
+  kind: PageRevision["kind"];
+  headRevision: number;
+  detachedAutomations: PageAutomationAnchorChange[];
+  attachedAutomations: PageAutomationAnchorChange[];
+  /** Titles of the depth 1 and 2 headings the edit removed or renamed. */
+  removedSections: string[];
+}
+
 /**
  * What anyone reading a section should know besides its text
  * (docs/design/pages-live-document.md §3): when and where it last changed,
@@ -93,6 +112,24 @@ export interface PageTreeAgent {
   activity: "viewing" | "editing";
   /** The section it last read or edited; empty is the whole page. */
   blockId: string;
+  /** That section's heading, while the page still has it. */
+  section?: string;
+}
+
+/**
+ * A page in the tree: who is on it now, and its open discussions (their
+ * outcome not yet written into the page) as this reader sees them.
+ */
+export interface PageTreeActivity {
+  pageId: string;
+  agents: PageTreeAgent[];
+  discussions: {
+    open: number;
+    /** Open discussions with messages this reader has not read, among those they have opened. */
+    unread: number;
+    /** The newest message in any of them. */
+    latest: PageConversation["lastMessage"];
+  };
 }
 
 /** An Agent live in a conversation linked to a section: `busy` is working on a turn. */
@@ -171,6 +208,25 @@ export interface PageAwareness {
 export interface PageDocument extends PageSummary {
   body: string;
   revisionInfo: PageRevision;
+}
+
+/**
+ * A GitHub file a page embeds (`xmatrix:github-file/…`), as the Hub read it
+ * through the Space's GitHub connection a moment ago; never stored.
+ */
+export interface PageGitHubFile {
+  /** `owner/repo`. */
+  repository: string;
+  path: string;
+  /** The ref the embed pins; null for the default branch. */
+  ref: string | null;
+  /** The blob GitHub served. */
+  sha: string;
+  size: number;
+  htmlUrl: string | null;
+  /** The file as UTF-8 text, cut when `truncated`; null for a binary file or one too large for GitHub to inline. */
+  text: string | null;
+  truncated: boolean;
 }
 
 /** One page whose title or current text contains a Ctrl+F query. */

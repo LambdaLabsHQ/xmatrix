@@ -184,4 +184,24 @@ integration("search candidates cover only readable live messages, newest first, 
   const outsider = await repository.searchCandidates({ requestId: `${id}-outsider`, spaceId: space,
     principal: { kind: "user", id: `outsider-${id}` }, limit: 50 });
   assert.deepEqual(outsider, [], "a non-member reads nothing");
+  const inChannel = await repository.searchCandidates({ requestId: `${id}-in`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, channelId: seeded.channel, limit: 50 });
+  assert.deepEqual(inChannel.map((candidate) => candidate.messageId), ids,
+    "a Channel filter includes its readable threads and excludes the closed thread");
+  assert.ok(inChannel.some((candidate) => candidate.channelId === seeded.thread));
+  const inThread = await repository.searchCandidates({ requestId: `${id}-in-thread`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, channelId: seeded.thread, limit: 50 });
+  assert.equal(inThread.length, 4);
+  assert.ok(inThread.every((candidate) => candidate.channelId === seeded.thread),
+    "a thread filter does not include its parent conversation");
+  const inClosedThread = await repository.searchCandidates({ requestId: `${id}-in-closed`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, channelId: `closed-thread-${id}`, limit: 50 });
+  assert.deepEqual(inClosedThread, [], "a Channel filter cannot grant access");
+  const byAuthor = await repository.searchCandidates({ requestId: `${id}-from`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, authorKind: "user", authorId: seeded.author, limit: 50 });
+  assert.ok(byAuthor.length > 0 && byAuthor.every((candidate) => candidate.authorId === seeded.author),
+    "an author filter keeps only that author's messages");
+  const byStranger = await repository.searchCandidates({ requestId: `${id}-from-none`, spaceId: space,
+    principal: { kind: "user", id: seeded.reader }, authorKind: "user", authorId: `nobody-${id}`, limit: 50 });
+  assert.deepEqual(byStranger, [], "an author with no messages finds nothing");
 }));

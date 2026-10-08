@@ -8,12 +8,18 @@ import { parseRegistrationResourceLimits, type RegistrationResourceLimits } from
 export type SpaceAgentRoutingSettings = Omit<AgentRoutingDeclaration,
   "availability" | "availableUntil" | "capabilities" | "modelAliases">;
 
+/** How far the Agent carries work before it stops to ask a human. Absent
+ * means autonomous: finish by the repository's own rules, through release. */
+export type AgentWorkingMode = "autonomous" | "cautious";
+export const AGENT_WORKING_MODES: readonly AgentWorkingMode[] = ["autonomous", "cautious"];
+
 /** Space settings deliberately exclude installation, executable, backend,
  * process environment, raw credentials and sandbox-authority fields. */
 export interface SpaceAgentConfiguration {
   model?: string;
   reasoningEffort?: string;
   instructions?: string;
+  workingMode?: AgentWorkingMode;
   workspaceReferences: string[];
   routing?: SpaceAgentRoutingSettings;
 }
@@ -33,7 +39,7 @@ function routingSettings(value: unknown): SpaceAgentRoutingSettings {
 const RETIRED_CONFIGURATION_FIELDS = ["role", "secretReferences"] as const;
 
 export function parseSpaceAgentConfiguration(value: unknown): SpaceAgentConfiguration {
-  const row = configurationFields(value, ["model", "reasoningEffort", "instructions", "workspaceReferences",
+  const row = configurationFields(value, ["model", "reasoningEffort", "instructions", "workingMode", "workspaceReferences",
     "routing", ...RETIRED_CONFIGURATION_FIELDS], "Space Agent configuration");
   const text = (field: string, max: number) => {
     const item = row[field];
@@ -43,7 +49,12 @@ export function parseSpaceAgentConfiguration(value: unknown): SpaceAgentConfigur
     return { [field]: item };
   };
   const resources = parseRegistrationResourceLimits({ workspaces: row.workspaceReferences, models: [], capabilities: [] });
+  const workingMode = row.workingMode;
+  if (workingMode !== undefined && !AGENT_WORKING_MODES.includes(workingMode as AgentWorkingMode)) {
+    throw new Error("Invalid Space Agent workingMode");
+  }
   return { ...text("model", 160), ...text("reasoningEffort", 80), ...text("instructions", 8_000),
+    ...(workingMode === undefined ? {} : { workingMode: workingMode as AgentWorkingMode }),
     workspaceReferences: resources.workspaces,
     ...(row.routing === undefined ? {} : { routing: routingSettings(row.routing) }) };
 }

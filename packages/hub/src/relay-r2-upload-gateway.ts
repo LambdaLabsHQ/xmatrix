@@ -1,3 +1,4 @@
+import { ControlError } from "@xmatrix/db";
 import { immutableContentObjectKey } from "@xmatrix/protocol";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const INTENT_ID_PATTERN = /^[A-Za-z0-9:_-]{1,160}$/u;
@@ -12,15 +13,11 @@ export type RelayR2UploadGatewayErrorCode =
   | "object_conflict"
   | "storage_unavailable";
 
-export class RelayR2UploadGatewayError extends Error {
-  readonly code: RelayR2UploadGatewayErrorCode;
-  readonly status: number;
-
-  constructor(code: RelayR2UploadGatewayErrorCode, status: number, message: string) {
-    super(message);
-    this.name = "RelayR2UploadGatewayError";
-    this.code = code;
-    this.status = status;
+export class RelayR2UploadGatewayError extends ControlError {
+  declare readonly code: RelayR2UploadGatewayErrorCode;
+  override name = "RelayR2UploadGatewayError";
+  constructor(code: RelayR2UploadGatewayErrorCode, status: number, message: string, retryable = false) {
+    super(code, status, message, retryable);
   }
 }
 
@@ -83,8 +80,8 @@ export interface RelayR2VerifiedUpload {
   disposition: "created" | "existing";
 }
 
-function fail(code: RelayR2UploadGatewayErrorCode, status: number, message: string): never {
-  throw new RelayR2UploadGatewayError(code, status, message);
+function fail(code: RelayR2UploadGatewayErrorCode, status: number, message: string, retryable = false): never {
+  throw new RelayR2UploadGatewayError(code, status, message, retryable);
 }
 
 function validatePath(request: Request, gatewayPath: string): void {
@@ -176,7 +173,7 @@ async function safeHead(
   try {
     return await bucket.head(key);
   } catch {
-    fail("storage_unavailable", 503, "private object storage is unavailable");
+    fail("storage_unavailable", 503, "private object storage is unavailable", true);
   }
 }
 
@@ -264,6 +261,6 @@ export async function executeRelayR2UploadGatewayRequest(input: {
     return verified(input.intent, finalized.metadata, finalized.outcome === "created" ? "created" : "existing");
   } catch (error) {
     if (error instanceof RelayR2UploadGatewayError) throw error;
-    fail("storage_unavailable", 503, "private object storage is unavailable");
+    fail("storage_unavailable", 503, "private object storage is unavailable", true);
   }
 }

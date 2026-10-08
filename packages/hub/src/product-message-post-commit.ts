@@ -1,12 +1,11 @@
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
-import type { ChannelAttachment } from "@xmatrix/protocol";
+import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
 import { parseMessageInteraction, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES } from "@xmatrix/protocol";
 import {
   dispatchProductAgentMentionsAfterAuthorityMessage,
   dispatchProductChannelAbout,
-  dispatchProductManagementAgentMentionAfterAuthorityMessage,
   dispatchProductNewConversationStart,
   dispatchProductAgentSystemNotice,
   type ProductAgentMentionAuthorityEnv,
@@ -62,6 +61,8 @@ export interface ProductMessagePostCommitInput {
   scheduleBackground?: (task: Promise<unknown>) => void;
   /** Set by the append when this message replies to a cross-Channel link. */
   replyOrigin?: CrossChannelReplyOrigin;
+  /** Jev's reading of each summon while its Human author typed it. */
+  draftIntents?: DraftSummonIntent[];
 }
 
 /**
@@ -73,27 +74,6 @@ export function channelAboutRequestId(channelId: string, sequence: number | unde
   if (sequence === 1) return `channel-about:${channelId}:0`;
   if (!Number.isInteger(sequence) || sequence! < 5 || sequence! % 5 !== 0) return undefined;
   return `channel-about:${channelId}:${Math.floor(sequence! / 5)}`;
-}
-
-export function productMessagePostCommitAuthorPolicy(senderKind: ProductMessagePostCommitInput["senderKind"]): {
-  interpretAgentIntervention: true;
-  interpretAgentLifecycle: true;
-  interpretHumanConversationWake: boolean;
-} {
-  return {
-    interpretAgentIntervention: true,
-    interpretAgentLifecycle: true,
-    interpretHumanConversationWake: senderKind === "user",
-  };
-}
-
-export function productMessagePostCommitShouldWakeConversation(
-  senderKind: ProductMessagePostCommitInput["senderKind"],
-  body: string,
-): boolean {
-  const plan = parseMessageInteraction(body);
-  return senderKind === "user" && !plan.refused && !plan.stop && plan.controls.length === 0 &&
-    plan.launches.length === 0 && plan.reborn.length === 0 && plan.handoff.length === 0;
 }
 
 /**
@@ -288,7 +268,6 @@ export async function dispatchProductMessagePostCommit(
       logPostCommitFailure("Message supersession judgment failed", input, error);
     }));
   }
-  const authorPolicy = productMessagePostCommitAuthorPolicy(input.senderKind);
   const interaction = parseMessageInteraction(input.body);
   const lifecycleMention = interaction.reborn.length > 0 || interaction.handoff.length > 0;
   if (lifecycleMention) {
@@ -356,6 +335,7 @@ export async function dispatchProductMessagePostCommit(
         env: input.env,
         channelId: input.channelId,
         requestId: aboutRequestId,
+        triggerMessageId: input.messageId,
         actorUserId: input.actorUserId,
         ...(input.sequence === 1 ? { automaticNameOnly: true } : {}),
       }).catch((error) => {
@@ -368,23 +348,15 @@ export async function dispatchProductMessagePostCommit(
       }),
     );
   }
-  if (authorPolicy.interpretAgentIntervention && interaction.stop) {
+  if (interaction.stop) {
     tasks.push(dispatchProductAgentInterventionAfterAuthorityMessage(input).catch((error) => {
       logPostCommitFailure("Product agent intervention orchestration failed", input, error);
     }));
   }
-  if (authorPolicy.interpretAgentIntervention && interaction.controls.length) {
+  if (interaction.controls.length) {
     tasks.push(dispatchProductAgentControlAfterAuthorityMessage(input).catch((error) => {
       logPostCommitFailure("Product agent model/effort switch failed", input, error);
     }));
-  }
-  if (authorPolicy.interpretHumanConversationWake &&
-      productMessagePostCommitShouldWakeConversation(input.senderKind, input.body)) {
-    tasks.push(
-      dispatchProductManagementAgentMentionAfterAuthorityMessage(input).catch((error) => {
-        logPostCommitFailure("Product management agent mention orchestration failed", input, error);
-      }),
-    );
   }
   if (productMessageWakesRestingInstances(input.body)) {
     tasks.push(dispatchRestingInstanceWake(input).catch((error) => {
@@ -392,7 +364,7 @@ export async function dispatchProductMessagePostCommit(
     }));
   }
   const skipCreateInstanceMentions = await dispatchProductMessageLaunches(input);
-  if (authorPolicy.interpretAgentLifecycle && lifecycleMention) {
+  if (lifecycleMention) {
     tasks.push(
       dispatchProductAgentMentionsAfterAuthorityMessage({
         ...postCommitTaskInput(input),

@@ -103,9 +103,9 @@ jobs:
   # commit for the components this train ships: the same partitions, layout,
   # caches and content ledger as pull request CI, on whichever fleet
   # XMATRIX_RUNNER_FLEET selects. On the repository's own machines they take
-  # the release test runners, so a train never waits behind PR CI. Identical
-  # content (a squash merge of the PR's tested tree, a version-only bump)
-  # already passed these exact partitions and is not run again.
+  # the release test runners, so a train never waits behind PR CI. The release
+  # commit is keyed by its source's tree (scripts/ci-ledger.mjs), so partitions
+  # main already passed are not run again.
   ci:
     needs: plan
     if: needs.plan.outputs.scope != ''

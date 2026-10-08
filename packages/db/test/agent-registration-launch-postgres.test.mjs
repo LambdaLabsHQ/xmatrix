@@ -39,6 +39,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
     }
     await sql(`ALTER TABLE data.instances ADD COLUMN IF NOT EXISTS presentation_json jsonb NOT NULL DEFAULT '{}'::jsonb;
       CREATE TABLE data.space_members (space_id text,user_id text,role text);
+      CREATE TABLE data.spaces (space_id text PRIMARY KEY,metadata_json jsonb);
+      CREATE TABLE data.pages (space_id text,page_id text);
       CREATE TABLE data.channels (channel_id text,space_id text,mode text,metadata_json jsonb,version bigint,archived_at timestamptz);
       CREATE TABLE data.channel_access (channel_id text,space_id text,subject_kind text,subject_id text);
       CREATE TABLE data.messages (space_id text,channel_id text,message_id text,author_kind text,author_id text,
@@ -61,6 +63,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const placement = { spaceId: "space", shardId: "test", placementEpoch: 1 };
     const limits = { workspaces: ["workspace"], models: ["model"], secrets: [], capabilities: [], maxConcurrent: 4 };
     await sql(`INSERT INTO data.space_members VALUES ('space','owner','owner'),('space','caller','member');
+      INSERT INTO data.spaces VALUES ('space','{"governancePageId":"p-rules"}');
+      INSERT INTO data.pages VALUES ('space','p-rules');
       INSERT INTO data.channels VALUES ('channel','space','open','{}',1,NULL);
       INSERT INTO data.agent_registration_authority VALUES ('space','composite',repeat('a',64),1,now());
       INSERT INTO data.agent_registrations VALUES ('owner','machine','codex',1,now(),now());
@@ -123,6 +127,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(run.owner_user_id, "owner");
     const launch = (await sql(`SELECT * FROM data.agent_launches`)).rows[0];
     assert.deepEqual(launch.spawn_payload_json.registration.key, key);
+    assert.equal(launch.spawn_payload_json.spaceRulesPageId, "p-rules");
     const sessionKey = `resume:owner:channel:${replay.instanceId}`;
     assert.equal(run.metadata_json.resumeSessionKey, sessionKey);
     assert.equal(launch.spawn_payload_json.resumeSessionKey, sessionKey);
@@ -286,9 +291,19 @@ integration("launch survives a hostname change with stale Workspace metadata and
         supportedReasoningEfforts: [{ reasoningEffort: "high", description: "Thorough" }] }],
     }, parameterLaunch.instanceId]);
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["machine_routing_effort_v1"]'::jsonb`);
+    await source("preview-declined");
+    const declined = await launches.dispatchFromMessage({ commandId: "preview-declined", actorUserId: "caller",
+      channelId: "channel", sourceMessageId: "preview-declined", body,
+      draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "explanation" }] },
+      async () => assert.fail("a confirmed non-request allocates no launch and asks no question"));
+    assert.equal(declined.selectionCount, 1);
+    assert.deepEqual(declined.prepared, []);
+    assert.equal(declined.rejected[0].code, "summon_intent_explanation");
     await source("dispatch-source");
     const dispatched = await launches.dispatchFromMessage({ commandId: "dispatch", actorUserId: "caller",
-      channelId: "channel", sourceMessageId: "dispatch-source", body }, async ({ candidates, sourceSequence }) => {
+      channelId: "channel", sourceMessageId: "dispatch-source", body,
+      draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "summon" }] }, async ({ candidates, sourceSequence, summon }) => {
+        assert.equal(summon.readInDraft, true);
         const boundary = await sql("SELECT timeline_sequence FROM data.messages WHERE message_id=$1", ["dispatch-source"]);
         assert.equal(sourceSequence, Number(boundary.rows[0].timeline_sequence));
         assert.deepEqual(candidates[0].observations.quota, { remainingPercent: 100, assumed: true });
@@ -358,26 +373,24 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(resumedPayload.exitAfterInitialMessage, undefined);
     assert.equal((await sql(`SELECT count(*)::int AS count FROM data.runs WHERE run_id=$1`, [resumed.runId])).rows[0].count, 1);
 
-    // Any input launches with no source message; a management Run gets its Space directory.
+    // Any input launches with no source message; with no repository chosen it
+    // works in a managed directory of its own.
     const inputBody = "Organize this Space";
     const managedChoice = async ({ candidates }) => ({ key: candidates[0].key, model: "model" });
-    await assert.rejects(launches.dispatchInput({ commandId: "management-old-daemon", actorUserId: "caller", channelId: "channel",
-      body: inputBody, management: { spaceId: "space" } }, managedChoice),
+    await assert.rejects(launches.dispatchInput({ commandId: "input-old-daemon", actorUserId: "caller", channelId: "channel",
+      body: inputBody }, managedChoice),
     error => error.code === "registration_managed_route_unavailable", "a daemon without the capability is never sent one");
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_managed_v1"]'::jsonb`);
-    const inputRequest = { commandId: "management-input", actorUserId: "caller", channelId: "channel", body: inputBody,
-      runId: "run:management-input", instanceId: "instance:management-input",
-      runMetadata: { routedAs: "management_assistant_mention", managementSpaceId: "space" },
-      management: { spaceId: "space" } };
+    const inputRequest = { commandId: "space-input", actorUserId: "caller", channelId: "channel", body: inputBody,
+      runId: "run:space-input", instanceId: "instance:space-input" };
     const managed = await launches.dispatchInput(inputRequest, async ({ candidates, tags, managedWorkspace, sourceSequence }) => {
       assert.equal(managedWorkspace, true);
       assert.equal(sourceSequence, undefined);
       assert.deepEqual(tags, { });
-      assert.deepEqual(candidates[0].workspaces, [], "a management Run is never offered a repository");
       return { key: candidates[0].key, model: "model" };
     });
-    assert.equal(managed.runId, "run:management-input");
-    assert.equal(managed.instanceId, "instance:management-input");
+    assert.equal(managed.runId, "run:space-input");
+    assert.equal(managed.instanceId, "instance:space-input");
     assert.equal(managed.agentName, "Codex");
     assert.equal(managed.hostId, "renamed-host");
     // Even when the source's quota reads healthy, its exact registration must
@@ -390,37 +403,36 @@ integration("launch survives a hostname change with stale Workspace metadata and
       channelId: "channel", body: "continue", excludeSourceInstanceId: managed.instanceId },
     async () => assert.fail("another owner cannot name this predecessor")),
     error => error.code === "instance_not_found");
-    const inputIntent = (await sql(`SELECT * FROM data.registration_launch_intents WHERE command_id='management-input'`)).rows[0];
+    const inputIntent = (await sql(`SELECT * FROM data.registration_launch_intents WHERE command_id='space-input'`)).rows[0];
     assert.equal(inputIntent.source_message_id, null);
     assert.equal(inputIntent.source_revision, null);
     const inputLaunch = (await sql(`SELECT trigger_id,spawn_payload_json FROM data.agent_launches WHERE launch_id=$1`,
       [managed.launchId])).rows[0];
-    assert.equal(inputLaunch.trigger_id, "management-input");
+    assert.equal(inputLaunch.trigger_id, "space-input");
     const inputPayload = inputLaunch.spawn_payload_json;
     assert.equal(inputPayload.prompt, inputBody);
     assert.equal(inputPayload.sourceMessageId, undefined);
     assert.equal(inputPayload.context.initialMessageSource, undefined);
     assert.equal(inputPayload.exitAfterInitialMessage, undefined);
-    assert.equal(inputPayload.managementSpaceId, "space");
     assert.equal(inputPayload.remoteRepo, undefined);
-    assert.equal(inputPayload.workspace.metadata.syntheticManagementWorkspace, true);
-    assert.equal(inputPayload.workspace.metadata.managementProjectionKind, "channel",
-      "every management Run reads on demand; released daemons mirror no Space for it");
     assert.match(inputPayload.workspace.canonicalCwd, /^\.xmatrix-management\/registration-/u);
+    // An ordinary managed directory: the daemon places it by its key, and no
+    // Space projection or management flag rides along.
+    assert.equal(inputPayload.managementSpaceId, inputPayload.workspace.canonicalCwd.slice(".xmatrix-management/".length));
+    assert.equal(inputPayload.workspace.metadata.syntheticManagedWorkspace, true);
+    assert.equal(inputPayload.workspace.metadata.syntheticManagementWorkspace, undefined);
+    assert.equal(inputPayload.workspace.metadata.managementProjectionKind, undefined);
     assert.deepEqual(inputPayload.registration.resources.workspaces, []);
-    const inputRun = (await sql(`SELECT metadata_json FROM data.runs WHERE run_id='run:management-input'`)).rows[0].metadata_json;
-    assert.equal(inputRun.routedAs, "management_assistant_mention");
-    assert.equal(inputRun.managementSpaceId, "space");
+    const inputRun = (await sql(`SELECT metadata_json FROM data.runs WHERE run_id='run:space-input'`)).rows[0].metadata_json;
+    assert.equal(inputRun.routedAs, undefined);
+    assert.equal(inputRun.managementSpaceId, undefined);
     assert.equal(inputRun.sourceMessageId, undefined);
-    // A management prompt's summon constrains the choice; a location condition is refused.
+    // The caller's own summon constrains the choice.
     let offeredTags;
-    await launches.dispatchInput({ ...inputRequest, commandId: "management-constrained", runId: "run:management-constrained",
-      instanceId: "instance:management-constrained", tags: { harness: "codex", model: "model" } },
+    await launches.dispatchInput({ ...inputRequest, commandId: "input-constrained", runId: "run:input-constrained",
+      instanceId: "instance:input-constrained", tags: { harness: "codex", model: "model" } },
     async ({ candidates, tags }) => { offeredTags = tags; return { key: candidates[0].key, model: "model" }; });
     assert.deepEqual(offeredTags, { harness: "codex", model: "model" });
-    await assert.rejects(launches.dispatchInput({ ...inputRequest, commandId: "management-located", tags: { pwd: "/repo" } },
-      async () => assert.fail("a refused constraint never reaches selection")),
-    error => error.code === "invalid_registration_launch");
     const inputReplay = await launches.dispatchInput(inputRequest, async () => assert.fail("replay must not select again"));
     assert.equal(inputReplay.launchId, managed.launchId);
     // #3270: work that needs GitHub runs only where the daemon shows a usable
@@ -447,43 +459,32 @@ integration("launch survives a hostname change with stale Workspace metadata and
       WHERE command_id='needs-github'`)).rows[0].launch_request_json;
     assert.deepEqual(githubIntent.requiredHostCapabilities, ["github"]);
     assert.equal(inputReplay.reused, true);
-    await assert.rejects(launches.dispatchInput({ ...inputRequest, commandId: "management-repo" },
-      async ({ candidates }) => ({ key: candidates[0].key, model: "model", workspaceReference: "workspace" })),
-    error => error.code === "registration_selection_invalid");
-    await assert.rejects(launches.dispatchInput({ ...inputRequest, commandId: "management-retired-lifetime", oneshot: "off" },
+    await assert.rejects(launches.dispatchInput({ ...inputRequest, commandId: "input-retired-lifetime", oneshot: "off" },
       async () => assert.fail("retired input must not reach selection")),
     error => error.code === "invalid_registration_launch");
 
-    // One persistent delegate per Channel: a serving delegate is reused, not relaunched.
-    await sql(`CREATE TABLE data.space_management_configs (space_id text PRIMARY KEY,version bigint,config_json jsonb);
-      INSERT INTO data.space_management_configs VALUES ('space',3,'{"enabled":true}')`);
-    const delegateRequest = { commandId: "delegate-1", actorUserId: "caller", channelId: "channel", body: "Wake up",
-      initialMessageId: "message", management: { spaceId: "space" },
-      runMetadata: { routedAs: "management_assistant_mention", managementSpaceId: "space", managementConfigGeneration: 3 },
-      coalesce: { routedAs: "management_assistant_mention", configGeneration: 3 } };
-    const delegate = await launches.dispatchInput(delegateRequest,
-      async ({ candidates }) => ({ key: candidates[0].key, model: "model" }));
-    assert.equal(delegate.coalesced, undefined);
-    const delegatePayload = (await sql(`SELECT spawn_payload_json FROM data.agent_launches WHERE launch_id=$1`,
-      [delegate.launchId])).rows[0].spawn_payload_json;
-    assert.equal(delegatePayload.sourceMessageId, "message", "the Run acknowledges the message it answers");
-    assert.equal(delegatePayload.context.initialMessageSource.messageId, "message");
-    assert.equal(delegatePayload.exitAfterInitialMessage, undefined);
-    await sql(`UPDATE data.instances SET status='online' WHERE instance_id=$1`, [delegate.instanceId]);
-    const reused = await launches.dispatchInput({ ...delegateRequest, commandId: "delegate-2" },
-      async () => assert.fail("a serving delegate needs no selection"));
-    assert.equal(reused.coalesced, true);
-    assert.equal(reused.runId, delegate.runId);
-    assert.equal((await sql(`SELECT count(*)::int AS count FROM data.registration_launch_intents WHERE command_id='delegate-2'`)).rows[0].count, 0);
-    await assert.rejects(launches.dispatchInput({ ...delegateRequest, commandId: "delegate-stale",
-      coalesce: { ...delegateRequest.coalesce, configGeneration: 2 } }, async () => assert.fail("stale generation")),
-    error => error.code === "management_generation_changed");
-    // A Channel About session: a background Run with no Channel Instance, one per Channel.
+    // An input that answers a message acknowledges it; it is not a fence.
+    const answer = await launches.dispatchInput({ commandId: "answer-1", actorUserId: "caller", channelId: "channel",
+      body: "Wake up", initialMessageId: "message" }, managedChoice);
+    assert.equal(answer.coalesced, undefined);
+    const answerPayload = (await sql(`SELECT spawn_payload_json FROM data.agent_launches WHERE launch_id=$1`,
+      [answer.launchId])).rows[0].spawn_payload_json;
+    assert.equal(answerPayload.sourceMessageId, "message", "the Run acknowledges the message it answers");
+    assert.equal(answerPayload.context.initialMessageSource.messageId, "message");
+    assert.equal(answerPayload.exitAfterInitialMessage, undefined);
+    // A Channel About session: a background Run with no Channel Instance, one
+    // per Channel, launched through ordinary registration with no Space
+    // management configuration at all.
+    assert.equal((await sql(`SELECT to_regclass('data.space_management_configs') AS t`)).rows[0].t, null);
     const aboutRequest = { commandId: "about-1", actorUserId: "caller", channelId: "channel", body: "Refresh About",
-      management: { spaceId: "space" },
-      runMetadata: { routedAs: "management_channel_about", managementSpaceId: "space", managementConfigGeneration: 3 },
-      aboutSession: { triggerRequestId: "about-trigger-1", configGeneration: 3 } };
-    const about = await launches.dispatchInput(aboutRequest, managedChoice);
+      runMetadata: { routedAs: "management_channel_about", managementSpaceId: "space" },
+      aboutSession: { triggerRequestId: "about-trigger-1" } };
+    const about = await launches.dispatchInput(aboutRequest, async ({ candidates, tags, managedWorkspace }) => {
+      assert.equal(managedWorkspace, true);
+      assert.deepEqual(tags, { });
+      assert.deepEqual(candidates[0].workspaces, [], "an About session is never offered a repository");
+      return { key: candidates[0].key, model: "model" };
+    });
     // Its key is the Channel's k-th About Run, which also stands in the Instance slot.
     assert.equal(about.runId, "channel:about#1");
     assert.equal(about.instanceId, about.runId);
@@ -492,23 +493,46 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(aboutRun.runtimeSessionId, about.instanceId);
     assert.equal(aboutRun.channelWriteAllowed, false);
     assert.equal(aboutRun.channelAboutPendingRequestId, "about-trigger-1");
+    assert.equal(aboutRun.routedAs, "management_channel_about");
+    assert.equal(aboutRun.managementSpaceId, "space");
+    assert.equal(aboutRun.managementConfigGeneration, undefined);
     const aboutPayload = (await sql(`SELECT spawn_payload_json FROM data.agent_launches WHERE launch_id=$1`, [about.launchId])).rows[0].spawn_payload_json;
     assert.equal(aboutPayload.registration.instanceId, about.instanceId);
+    // Its private directory reads its Channel on demand under its real Space id.
+    assert.equal(aboutPayload.managementSpaceId, "space");
+    assert.equal(aboutPayload.remoteRepo, undefined);
+    assert.equal(aboutPayload.sourceMessageId, undefined);
+    assert.equal(aboutPayload.workspace.metadata.syntheticManagementWorkspace, true);
+    assert.equal(aboutPayload.workspace.metadata.managementProjectionKind, "channel",
+      "an About session reads on demand; released daemons mirror no Space for it");
+    assert.equal(aboutPayload.workspace.metadata.syntheticManagedWorkspace, undefined);
+    assert.match(aboutPayload.workspace.canonicalCwd, /^\.xmatrix-management\/registration-/u);
+    assert.deepEqual(aboutPayload.registration.resources.workspaces, []);
     const joined = await launches.dispatchInput({ ...aboutRequest, commandId: "about-2",
-      aboutSession: { triggerRequestId: "about-trigger-2", configGeneration: 3 } }, async () => assert.fail("a serving session needs no selection"));
+      aboutSession: { triggerRequestId: "about-trigger-2" } }, async () => assert.fail("a serving session needs no selection"));
     assert.equal(joined.coalesced, true);
     assert.equal(joined.runId, about.runId);
     assert.equal((await sql(`SELECT metadata_json->>'channelAboutPendingRequestId' AS pending FROM data.runs WHERE run_id=$1`,
       [about.runId])).rows[0].pending, "about-trigger-2", "the new trigger waits as the session's pending refresh");
     await assert.rejects(launches.dispatchInput({ ...aboutRequest, commandId: "about-successor-wrong",
-      aboutSession: { triggerRequestId: "about-trigger-9", configGeneration: 3, successorOfRunId: about.runId } }, managedChoice),
+      aboutSession: { triggerRequestId: "about-trigger-9", successorOfRunId: about.runId } }, managedChoice),
     error => error.code === "about_successor_mismatch", "a successor follows only a terminal predecessor");
     // A session that finished its turn reads no further trigger: the next one
     // starts a fresh session and hands the finished one back for its daemon to end.
     await sql(`UPDATE data.runs SET status='running',
       metadata_json=metadata_json || '{"invocationProgress":{"phase":"turn_completed"}}'::jsonb WHERE run_id=$1`, [about.runId]);
+    // An About session works only in its private directory: a location
+    // condition or a chosen repository is refused before anything launches.
+    await assert.rejects(launches.dispatchInput({ ...aboutRequest, commandId: "about-located", tags: { pwd: "/repo" },
+      aboutSession: { triggerRequestId: "about-trigger-located" } },
+    async () => assert.fail("a refused constraint never reaches selection")),
+    error => error.code === "invalid_registration_launch");
+    await assert.rejects(launches.dispatchInput({ ...aboutRequest, commandId: "about-repo",
+      aboutSession: { triggerRequestId: "about-trigger-repo" } },
+    async ({ candidates }) => ({ key: candidates[0].key, model: "model", workspaceReference: "workspace" })),
+    error => error.code === "registration_selection_invalid");
     const fresh = await launches.dispatchInput({ ...aboutRequest, commandId: "about-3",
-      aboutSession: { triggerRequestId: "about-trigger-3", configGeneration: 3 } }, managedChoice);
+      aboutSession: { triggerRequestId: "about-trigger-3" } }, managedChoice);
     assert.equal(fresh.coalesced, undefined);
     assert.equal(fresh.runId, "channel:about#2");
     const finished = (await sql(`SELECT r.status, r.metadata_json, b.owner_user_id FROM data.runs r
@@ -518,17 +542,10 @@ integration("launch survives a hostname change with stale Workspace metadata and
       machineOwnerUserId: finished.owner_user_id, machineId: finished.metadata_json.machineId,
       hostId: finished.metadata_json.hostname, executionKey: finished.metadata_json.executionKey }]);
     const nextTrigger = await launches.dispatchInput({ ...aboutRequest, commandId: "about-4",
-      aboutSession: { triggerRequestId: "about-trigger-4", configGeneration: 3 } }, async () => assert.fail("the fresh session serves"));
+      aboutSession: { triggerRequestId: "about-trigger-4" } }, async () => assert.fail("the fresh session serves"));
     assert.equal(nextTrigger.coalesced, true);
     assert.equal(nextTrigger.runId, fresh.runId);
     assert.equal(nextTrigger.retiredAboutSessions.length, 1, "the finished session is handed back until it ends");
-    // A delegate of an older generation is fenced, and a new one launches.
-    await sql(`UPDATE data.space_management_configs SET version=4`);
-    const next = await launches.dispatchInput({ ...delegateRequest, commandId: "delegate-3",
-      coalesce: { ...delegateRequest.coalesce, configGeneration: 4 } },
-    async ({ candidates }) => ({ key: candidates[0].key, model: "model" }));
-    assert.equal(next.coalesced, undefined);
-    assert.equal((await sql(`SELECT status FROM data.runs WHERE run_id=$1`, [delegate.runId])).rows[0].status, "stopped");
 
     await sql(`UPDATE data.space_agent_registrations SET configuration_json=jsonb_set(configuration_json,
       '{workspaceReferences}','["workspace","repo:owner/project"]')`);
@@ -860,6 +877,9 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(Object.hasOwn(repoWake.run_input_json.metadata, 'connectorRepositoryAuthorization'), false);
     const wakeIntent = (await sql(`SELECT * FROM data.agent_reborn_intents WHERE intent_id=$1`,
       [woke.woken.find(item => item.instanceId === sleeper.instanceId).intentId])).rows[0];
+    await assert.rejects(new PostgresRuntimeRepository(database).stopRestingInstances({ requestId: "handoff-pending-wake",
+      channelId: "channel", actorUserId: "caller", handoffSource: { instanceId: sleeper.instanceId, runId: sleeper.runId } }),
+      error => error.code === "reborn_pending", "a pending wake must refuse the cross-machine handoff");
     assert.equal(wakeIntent.actor_user_id, "owner", "a wake acts as the Instance's owner, whoever posted");
     assert.equal(wakeIntent.stop_required, false, "a resting predecessor has no process to stop");
     assert.equal(wakeIntent.kind, "wake", "a wake is recorded as a wake, not a reborn");

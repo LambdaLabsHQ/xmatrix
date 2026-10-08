@@ -1,4 +1,5 @@
 import { WEB_PROXY_ROUTES, type SerializedChannel } from "@xmatrix/protocol";
+import { xmatrixRawResponse } from "../../lib/query/api-client";
 
 /**
  * A conversation's name until xMatrix names it from what it is about: the
@@ -29,7 +30,7 @@ export async function createConversation(input: {
   memberName: string;
   mode: "open" | "closed";
 } & ({ body: string } | { name: string; metadata: Record<string, string> })): Promise<SerializedChannel> {
-  const response = await fetch(WEB_PROXY_ROUTES.channels, {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channels, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${input.token}`,
@@ -62,7 +63,7 @@ export async function startConversation(input: {
   body: string;
 }): Promise<SerializedChannel> {
   const channel = await createConversation({ ...input, mode: "open" });
-  const response = await fetch(WEB_PROXY_ROUTES.channel_messages(channel.id), {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_messages(channel.id), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${input.token}`,

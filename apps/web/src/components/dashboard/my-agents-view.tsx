@@ -3,7 +3,7 @@
 import { useState, type ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Cpu,
+  Bot,
   Loader2,
   Plus,
   RotateCcw,
@@ -11,14 +11,18 @@ import {
 } from "lucide-react";
 import {
   WEB_PROXY_ROUTES,
+  AGENT_PRESETS,
   agentPresetAvatarUrl,
   normalizeAgentPresetRuntime,
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
+  type AgentWorkingMode,
   type SerializedChannel,
-  type SerializedSpace,
 } from "@xmatrix/protocol";
 
+import { harnessSpaceSwitch } from "./harness-space-switch";
+import { useInstalledHarnesses } from "./use-installed-harnesses";
+import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
 import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
 import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
@@ -30,13 +34,13 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
+import { AGENT_USAGE_REFRESH_MS, agentUsageGlance, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
 import { HarnessSignInSection } from "./harness-sign-in";
 import { IdentityAvatar } from "./identity-avatar";
 import { MachineGlyph } from "./machine-glyph";
-import { MeterReadingList } from "./machine-load-panel";
+import { MachineLoadGlanceBars, MeterReadingList } from "./machine-load-panel";
 import { machineOs } from "./machine-os";
 import {
   MY_AGENT_ACTION_LABEL,
@@ -49,7 +53,6 @@ import {
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
-import { spaceMemberCanCreate } from "./space-member-permissions";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
@@ -63,8 +66,15 @@ const ACTION_ICON: Record<MyAgentAction, ComponentType<{ className?: string }>> 
 };
 
 const ACTION_CONSEQUENCE: Record<MyAgentAction, string> = {
-  configure: "Name and default model",
+  configure: "Name, default model, working mode and instructions",
   restore: "Offer this agent to the Space again",
+};
+
+/** What each working mode tells the Agent, in one line. The full text is in
+ * `packages/cli-rs/crates/core/prompts/working-mode-*.md`. */
+const WORKING_MODE_HINT: Record<AgentWorkingMode, string> = {
+  autonomous: "Finishes work by the repository's rules, through merge and release",
+  cautious: "Asks before larger changes, merging or releasing",
 };
 
 const INPUT_CLASS =
@@ -79,20 +89,18 @@ export function MyAgentsView({
   spaceId,
   token,
   currentUserId,
-  currentSpace,
   channels,
   error,
-  onOpenAgentCreate,
+  onOpenMachines,
   onOpenConversation,
 }: {
   spaceId: string | null;
   token: string | undefined;
   currentUserId: string;
-  currentSpace: SerializedSpace | null;
   /** The Space's conversations the reader has, to name where an agent runs. */
   channels: readonly SerializedChannel[];
   error: string | null;
-  onOpenAgentCreate: () => void;
+  onOpenMachines: () => void;
   onOpenConversation: (channelId: string) => void;
 }) {
   const ready = Boolean(spaceId && token);
@@ -104,7 +112,8 @@ export function MyAgentsView({
   const [switching, setSwitching] = useState<{ id: string; on: boolean } | null>(null);
   const [item, select] = useToolItem();
 
-  const canCreateAgent = spaceMemberCanCreate(currentSpace, currentUserId, "agentCreation");
+  const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
+  const newCandidates = fleet.candidates.filter((candidate) => !candidate.registration);
 
   function act(registration: AgentRegistrationSummary, action: MyAgentAction) {
     const id = registrationTupleId(registration.key);
@@ -127,6 +136,7 @@ export function MyAgentsView({
     rows: group.locations.filter(registrationListed).map((registration) => ({
       registration,
       harness: group.harness,
+      usage: agentUsageGlance(registration.live?.quota, now),
       id: registrationTupleId(registration.key),
       activity: registrationActivity(registration, { conversationTitle, now }),
       ...registrationRowTitle(registration),
@@ -138,10 +148,10 @@ export function MyAgentsView({
   const shown = chosen ?? (item ? undefined : rows[0]);
 
   const list = (
-    <ToolList title="Agents" createLead="avatar" create={{ label: "New agent", onCreate: onOpenAgentCreate, disabled: !canCreateAgent }}>
+    <ToolList title="Agents" createLead="avatar" create={{ label: "Manage machines", onCreate: onOpenMachines }}>
       {error && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{error}</p>}
       {!ready ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see the agents registered in it.</p>
+        <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents and installed harnesses.</p>
       ) : catalog.isError ? (
         <div className="space-y-2 px-4 md:px-5">
           <p role="alert" className="text-sm text-destructive">{registrationCatalogErrorText(catalog.error)}</p>
@@ -150,7 +160,7 @@ export function MyAgentsView({
       ) : !catalog.data ? (
         <ListSkeleton label="Loading agents" rows={4} className="px-4 md:px-5" />
       ) : rows.length === 0 ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">No agents yet.</p>
+        <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
       ) : groups.map((group) => (
         <ToolListGroup key={group.harness} title={group.harness} count={group.rows.length} identity
           icon={<IdentityAvatar kind="agent" label={group.harness}
@@ -163,12 +173,17 @@ export function MyAgentsView({
               onSelect={() => { select(row.id); setEditingId(null); }}
               leading={<span className="app-tool-state-icon" data-state={row.activity.state} aria-hidden="true">
                 <MachineGlyph os={machineOs(row.registration.live?.machine.platform)} className="size-4" /></span>}
+              trailing={<MachineLoadGlanceBars glance={row.usage}
+                testId="agent-usage-glance" label={row.usage.map((reading) => reading.detail).join(", ")} />}
               title={row.title}
               end={row.registration.key.ownerUserId === currentUserId ? undefined : row.registration.ownerName}
               subtitle={row.machineInLine ? `${row.registration.machineName} · ${row.activity.line}` : row.activity.line} />
           ))}
         </ToolListGroup>
       ))}
+      {ready && (newCandidates.length > 0 || fleet.daemons.isError) && <ToolListGroup title="Installed on your machines" count={newCandidates.length}>
+        <div className="px-4 md:px-5"><InstalledHarnessSwitchList fleet={fleet} onlyNew /></div>
+      </ToolListGroup>}
     </ToolList>
   );
 
@@ -176,9 +191,11 @@ export function MyAgentsView({
   if (shown) {
     const { registration, id, activity, harness, title, machineInLine } = shown;
     const status = registrationStatus(registration);
-    const allActions = registrationActions(registration);
-    const toggle = registrationSwitch(registration);
-    const busy = command.pendingId === id;
+    const ownerPreset = registration.key.ownerUserId === currentUserId
+      ? AGENT_PRESETS.find((preset) => preset.id === harness) : undefined;
+    const toggle = ownerPreset ? harnessSpaceSwitch(registration) : registrationSwitch(registration);
+    const allActions = registrationActions(registration).filter((action) => action !== "restore" || !ownerPreset);
+    const busy = command.pendingId === id || Boolean(fleet.pending) || fleet.enablingAll;
     const live = registration.live;
     const seen = formatRelativeAge(live?.machine.lastSeenAt, now);
     const machineState = !live ? null : live.machine.online ? "online" : seen ? `offline, seen ${seen}` : "offline";
@@ -219,12 +236,16 @@ export function MyAgentsView({
             const on = pending ? pending.on : toggle.on;
             return (
               <label className="flex items-center gap-2 text-sm font-semibold"
-                title={on ? "Turning it off stops its running work in this Space" : "Let it take work in this Space"}>
+                title={on ? "Turning it off stops its running work" : "Let it take work"}>
                 <Switch checked={on} disabled={busy || Boolean(pending)} label={`Enabled: ${registration.displayName}`}
                   onChange={() => void (async () => {
                     setSwitching({ id, on: !toggle.on });
                     try {
-                      for (const kind of toggle.changes) if (!(await command.run(registration.key, { kind }))) return;
+                      if (ownerPreset) {
+                        if (!(await fleet.set(registration.key, ownerPreset, !toggle.on))) return;
+                      } else {
+                        for (const kind of toggle.changes) if (!(await command.run(registration.key, { kind }))) return;
+                      }
                       await catalog.refetch();
                     } finally {
                       setSwitching(null);
@@ -236,14 +257,10 @@ export function MyAgentsView({
           })()}
         </>}
       >
+        {fleet.error && <p role="alert" className={noticeClass("alert", "rounded-lg p-3")}>{fleet.error}</p>}
         {command.notice && (
           <p role="status" className={noticeClass(command.notice.error ? "alert" : "settled", "rounded-lg p-3")}>{command.notice.text}</p>
         )}
-        {!canCreateAgent && currentSpace ? (
-          <p className="text-sm text-muted-foreground">
-            Only owners and admins can add agents to {currentSpace.name}. Existing agents remain available.
-          </p>
-        ) : null}
         {editingId === id && token && (
           <ToolDetailSection title="Settings">
             <RegistrationEditor
@@ -307,9 +324,9 @@ export function MyAgentsView({
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (
-      <ToolDetailEmpty icon={<Cpu />} title="No agents yet">
-        <p>Add an agent with New agent, or from the machine that runs it with xmatrix agent add.</p>
-        <Button size="sm" variant="outline" disabled={!canCreateAgent} onClick={onOpenAgentCreate}><Plus /> New agent</Button>
+      <ToolDetailEmpty icon={<Bot />} title={newCandidates.length ? "Enable an installed harness" : "Connect your agents"}>
+        <p>Turn on an installed harness in the list, or install one from Machines.</p>
+        <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> Manage machines</Button>
       </ToolDetailEmpty>
     );
   }
@@ -356,6 +373,8 @@ function RegistrationEditor({
     <RegistrationEditorForm
       initialName={details.data.displayName}
       initialModel={details.data.configuration?.model ?? ""}
+      initialWorkingMode={details.data.configuration?.workingMode ?? "autonomous"}
+      initialInstructions={details.data.configuration?.instructions ?? ""}
       busy={busy}
       onCancel={onCancel}
       onSave={onSave}
@@ -367,27 +386,33 @@ function RegistrationEditor({
 type RegistrationEditorActions = {
   busy: boolean;
   onCancel: () => void;
-  onSave: (change: { displayName: string; model: string }) => void;
+  onSave: (change: { displayName: string; model: string; workingMode: AgentWorkingMode; instructions: string }) => void;
 };
 
 function RegistrationEditorForm({
   initialName,
   initialModel,
+  initialWorkingMode,
+  initialInstructions,
   busy,
   onCancel,
   onSave,
 }: {
   initialName: string;
   initialModel: string;
+  initialWorkingMode: AgentWorkingMode;
+  initialInstructions: string;
 } & RegistrationEditorActions) {
   const [displayName, setDisplayName] = useState(initialName);
   const [model, setModel] = useState(initialModel);
+  const [workingMode, setWorkingMode] = useState(initialWorkingMode);
+  const [instructions, setInstructions] = useState(initialInstructions);
   return (
     <form
-      className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+      className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
       onSubmit={(event) => {
         event.preventDefault();
-        onSave({ displayName, model });
+        onSave({ displayName, model, workingMode, instructions });
       }}
     >
       <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
@@ -408,6 +433,30 @@ function RegistrationEditorForm({
           placeholder="Harness default"
           onChange={(event) => setModel(event.target.value)}
           className={INPUT_CLASS}
+        />
+      </label>
+      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        Working mode
+        <select
+          value={workingMode}
+          disabled={busy}
+          title={WORKING_MODE_HINT[workingMode]}
+          onChange={(event) => setWorkingMode(event.target.value as AgentWorkingMode)}
+          className={INPUT_CLASS}
+        >
+          <option value="autonomous">Autonomous</option>
+          <option value="cautious">Cautious</option>
+        </select>
+      </label>
+      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground sm:col-span-3">
+        Instructions
+        <textarea
+          value={instructions}
+          disabled={busy}
+          rows={4}
+          placeholder="What this Agent should always do, in this Space"
+          onChange={(event) => setInstructions(event.target.value)}
+          className={`${INPUT_CLASS} h-auto py-2 normal-case tracking-normal font-normal`}
         />
       </label>
       <div className="flex gap-2">

@@ -41,6 +41,6 @@ test("every native iOS tab names a web view the router recognizes", () => {
   const swift = readDashboardSource("../../../../ios/xMatrix/MobileTabBarView.swift");
   const tabEnum = swift.slice(swift.indexOf("enum MobileTabView"), swift.indexOf("var label"));
   const rawValues = [...tabEnum.matchAll(/case \w+ = "([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(rawValues, ["pages", "messages", "agents", "more"]);
+  assert.deepEqual(rawValues, ["pages", "messages", "status", "more"]);
   for (const view of rawValues) assert.equal(isAppView(view), true, view);
 });

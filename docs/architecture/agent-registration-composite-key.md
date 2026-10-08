@@ -465,11 +465,13 @@ name and no launch path compares the two. The allowed models of a registration
 are its Space configuration models intersected with the owner grant, the Space
 policy and the physical environment, compared literally.
 
-- An empty list (nothing declared) allows no model override. The runtime
-  default is the only option: the launch requests no model resource and omits
+- An empty list (nothing declared) allows no model override. Jev skips the
+  model/effort question: the launch requests no model resource and omits
   both `context.requestedModel` and `context.requestedEffort`, and the runtime
-  chooses its own defaults. The decision evidence labels this choice `Harness
-  default`. An explicit `model:` or `effort:` tag cannot be satisfied.
+  chooses its own defaults. `registration-parameters-v9` evidence omits the
+  model selection and model/effort choice, so no model tag is filled in the UI.
+  Earlier evidence remains readable. An explicit `model:` or `effort:` tag
+  cannot be satisfied.
 - A non-empty list is the complete allowed set. Jev chooses among the observed
   runtime catalog entries it allows (an owner alias maps an allowed model to
   the runtime's model id), or among the allowed models themselves when the

@@ -1,3 +1,4 @@
+import { recordAboutInput } from "./channel-metadata-revisions.js";
 import { authorizeDingTalkEffect, finishDingTalkEffect, type DingTalkEffectAuthority } from "./dingtalk-effect-authority.js";
 import { requireAgentChannelAccess } from "./agent-channel-access.js";
 import type { QueryResultRow } from "pg";
@@ -64,10 +65,6 @@ export interface PostgresMessageAgentRunIdentity {
    *  from and the message it was handling there, both read from the Run's own
    *  records. Never taken from the caller. */
   origin?: { channelId: string; runId: string; messageId?: string };
-  managementDelegate?: {
-    spaceId: string;
-    configGeneration: number;
-  };
 }
 
 export interface PreparedPostgresMessageAppend {
@@ -483,22 +480,10 @@ async function effectiveAppendPrincipal(
   if (metadata.routedAs === "management_channel_about") throw new MessageAuthorityError(
     "agent_run_forbidden", 403, "Channel About Runs cannot post Channel messages",
   );
-  if (metadata.routedAs === "management_assistant_mention") {
-    const config = (await transaction.query<QueryResultRow>({
-      name: "message_management_delegate_config_v2",
-      text: `SELECT config_json,version FROM data.space_management_configs
-        WHERE space_id=$1 LIMIT 1 FOR SHARE`,
-      values: [input.spaceId], maxRows: 1,
-    }))[0];
-    const management = config?.config_json as Record<string, unknown> | undefined;
-    const generation = metadata.managementConfigGeneration;
-    if (metadata.managementSpaceId !== input.spaceId || !Number.isSafeInteger(generation) ||
-        generation !== Number(config?.version) || management?.enabled !== true) {
-      throw new MessageAuthorityError("management_delegate_message_forbidden", 403,
-        "Management message requires the exact configured management Run generation");
-    }
-    agentRunIdentity.managementDelegate = { spaceId: input.spaceId, configGeneration: generation as number };
-  }
+  // The retired management delegate; a Run started before it was retired posts nothing.
+  if (metadata.routedAs === "management_assistant_mention") throw new MessageAuthorityError(
+    "agent_run_forbidden", 403, "The xMatrix management agent is retired",
+  );
   if (run.channel_id !== input.channelId) {
     await requireAgentChannelAccess(transaction, {
       spaceId: input.spaceId, channelId: input.channelId, agentId: input.principal.id,
@@ -732,6 +717,11 @@ export interface MessageSearchCandidatesInput {
   principal: MessagePrincipal;
   /** Continue strictly after (older than) this search rank. */
   beforeRank?: string;
+  /** Only this Channel and its threads. */
+  channelId?: string;
+  /** Only messages this author wrote; an Agent is matched by its sender name. */
+  authorKind?: "user" | "agent";
+  authorId?: string;
   limit: number;
 }
 
@@ -781,10 +771,15 @@ export interface MessageHistoryPage {
   principalAckedSequence: number;
   contentRevision: number;
   historyHeadSequence: number;
+  aboutInput?: { inputId: string; expectedRevision: number };
 }
 
 type HistoryPageRow = QueryResultRow & {
   history_authorized: boolean | null;
+  channel_name?: string;
+  channel_metadata?: Record<string, unknown>;
+  channel_updated_at?: Date | string;
+  about_run_id?: string | null;
   acknowledged_sequence: string | number | null;
   content_revision: string | number | null;
   history_head_sequence: string | number | null;
@@ -1322,8 +1317,7 @@ export class PostgresMessageRepository {
         }, "message_append");
         authorizedPrincipal = authorized.principal;
         runOwnerUserId = authorized.runOwnerUserId;
-        origin = authorized.agentRunIdentity?.managementDelegate
-          ? undefined : authorized.agentRunIdentity?.origin;
+        origin = authorized.agentRunIdentity?.origin;
         await messageChannelCapability(transaction, {
           spaceId, channelId, principal: authorizedPrincipal,
         }, "message_append");
@@ -2636,15 +2630,22 @@ export class PostgresMessageRepository {
       throw new MessageAuthorityError("invalid_request", 400, "Search candidate limit is invalid");
     }
     const beforeRank = input.beforeRank === undefined ? null : bounded(input.beforeRank, "beforeRank");
+    const channelId = input.channelId === undefined ? null : bounded(input.channelId, "channelId");
+    const authorKind = input.authorKind ?? null;
+    if (authorKind !== null && authorKind !== "user" && authorKind !== "agent") {
+      throw new MessageAuthorityError("invalid_request", 400, "Search author is invalid");
+    }
+    const authorId = authorKind === "user" ? bounded(input.authorId, "authorId") : null;
     const placement = await this.placement(input.requestId, "message.search", spaceId);
     const rows = await this.database.transaction({
       requestId: input.requestId, operation: "message.search", statement: "single_read",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
     }, (transaction) => transaction.query<QueryResultRow>({
-      name: "message_search_candidates_v2",
+      name: "message_search_candidates_v3",
       text: `WITH readable AS MATERIALIZED (
           SELECT c.channel_id FROM data.channels c
-          WHERE c.space_id=$1 AND ${channelCapabilityPredicate({ capability: "message_content_read",
+          WHERE c.space_id=$1 AND ($6::text IS NULL OR c.channel_id=$6 OR (c.metadata_json->>'kind'='thread' AND c.metadata_json->>'threadRootChannelId'=$6))
+            AND ${channelCapabilityPredicate({ capability: "message_content_read",
             channelAlias: "c", principalKindSql: "$2::text", principalIdSql: "$3::text" })}
         )
         SELECT m.message_id,m.channel_id,m.timeline_sequence,m.entity_version,m.search_rank_sequence,
@@ -2653,8 +2654,9 @@ export class PostgresMessageRepository {
         WHERE m.space_id=$1 AND m.channel_id IN (SELECT channel_id FROM readable)
           AND m.deleted_at IS NULL AND m.recalled_at IS NULL
           AND ($4::text IS NULL OR m.search_rank_sequence < $4)
+          AND ($7::text IS NULL OR m.author_kind=$7) AND ($8::text IS NULL OR m.author_id=$8)
         ORDER BY m.search_rank_sequence DESC LIMIT $5`,
-      values: [spaceId, input.principal.kind, principalId, beforeRank, limit],
+      values: [spaceId, input.principal.kind, principalId, beforeRank, limit, channelId, authorKind, authorId],
       maxRows: limit,
     }));
     return rows.map((row) => ({
@@ -2772,8 +2774,12 @@ export class PostgresMessageRepository {
                 AND reply.message_id<>thread.root_message_id
               ORDER BY reply.timeline_sequence DESC LIMIT 2) reply_row
           ) preview ON TRUE
-        ), history_metadata AS (
+        ), history_metadata AS MATERIALIZED (
           SELECT COALESCE(granted.authorized, FALSE) AS history_authorized,
+            context.name AS channel_name,context.metadata_json AS channel_metadata,
+            context.updated_at AS channel_updated_at,
+            (SELECT run_id FROM data.runs WHERE $7='agent' AND run_id=$8 AND channel_id=$2
+              AND metadata_json->>'routedAs'='management_channel_about' AND granted.authorized) AS about_run_id,
             CASE WHEN granted.authorized THEN COALESCE((SELECT acknowledged_sequence
               FROM data.delivery_cursors
               WHERE space_id=$1 AND channel_id=$2 AND subject_id=$10 LIMIT 1), 0) END
@@ -2785,9 +2791,11 @@ export class PostgresMessageRepository {
               FROM data.messages WHERE space_id = $1 AND channel_id = $2), 0) END
               AS history_head_sequence
           FROM (SELECT 1) one LEFT JOIN authorized_channel granted ON TRUE
+          LEFT JOIN data.channels context ON context.space_id=$1 AND context.channel_id=$2 AND granted.authorized
         )
         SELECT meta.history_authorized,meta.acknowledged_sequence,meta.content_revision,
-          meta.history_head_sequence,page.*,thread.thread_channel_id,thread.thread_updated_at,
+          meta.history_head_sequence,meta.channel_name,meta.channel_metadata,meta.channel_updated_at,meta.about_run_id,
+          page.*,thread.thread_channel_id,thread.thread_updated_at,
           thread.reply_count,thread.reply_rows
         FROM history_metadata meta
         LEFT JOIN history_page page ON meta.history_authorized
@@ -2816,7 +2824,23 @@ export class PostgresMessageRepository {
     const threadSummaries = new Map(threadRows.map((row) => [
       row.root_message_id, serializeThreadSummary(row),
     ]));
+    const aboutInput = head?.about_run_id ? await this.database.transaction({
+      requestId, operation: "message.history.about-input",
+      placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
+    }, (tx) => recordAboutInput(tx, {
+      channel: { space_id: spaceId, channel_id: channelId, name: head.channel_name!,
+        metadata_json: head.channel_metadata!, updated_at: head.channel_updated_at! },
+      runId: head.about_run_id!, contentRevision: Number(head.content_revision),
+      references: page.map((row) => ({ messageId: row.message_id, channelId: row.channel_id,
+        sequence: Number(row.timeline_sequence), entityVersion: Number(row.entity_version),
+        contentHash: row.content_hash, payloadKind: row.payload_kind, payloadRef: row.payload_ref,
+        recordDigest: row.record_digest, bodyHash: row.body_hash,
+        // Bundled records are stored inline rather than in a separately fetchable object.
+        ...(row.payload_bundle_base64 ? { payloadBundleBase64: row.payload_bundle_base64,
+          codecId: row.codec_id, payloadSchemaVersion: row.payload_schema_version } : {}) })),
+    })) : undefined;
     return {
+      ...(aboutInput ? { aboutInput } : {}),
       messages: page.map((row) => {
         const message = serializeMessage(row);
         const threadSummary = threadSummaries.get(row.message_id);

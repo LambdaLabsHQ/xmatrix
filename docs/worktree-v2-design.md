@@ -263,6 +263,8 @@ Execution directories are not an unbounded cache.
 - Durable `.xmatrix-run-worktree-bindings.json` entries whose paths are gone are pruned.
 - New `run-*` materialization and **new** repo-pool slot creation fail closed when free space is below `XMATRIX_WORKTREE_DISK_MIN_BYTES` (default 5 GiB). Below `XMATRIX_WORKTREE_DISK_WARN_BYTES` (default 20 GiB) the daemon first runs a pressure sweep (`keep=0` for ended `run-*`, 1-day named TTL) and may evict surplus **Available** pool slots while keeping one warm slot per repo.
 - Pressure never hands a **Retained** slot to another session. It lowers the resting-eviction floor to ten minutes, so a resting session's tree is recorded and removed sooner; its reborn rehydrates it.
+- Trees xMatrix did not create are found through git, not by directory: every repository the machine knows (managed checkouts, pool bases, repositories behind `~/.codex/worktrees` and `~/.cursor/worktrees`, live run cwds) is asked for its `git worktree list`. Each tree is labelled `repo-pool`, `run-worktree`, `claude-code` (`<repo>/.claude/worktrees/*`), `codex`, `cursor` or `manual`. `xmatrix machine worktrees` lists them.
+- Only `repo-pool` and `run-worktree` trees are reclaimed by default. The rest are reclaimed only after the owner runs `xmatrix machine worktrees auto-reclaim on` (stored as `foreignAutoReclaim` in `worktree-policy.json`), with the named-tree floor above, the same lock and snapshot gates (snapshots under `refs/xmatrix/snapshot/foreign/<origin>/<dir>-<digest>`), and never while any process on the machine has its cwd inside the tree. `xmatrix machine worktrees reclaim [--origin …] [--idle-days N] [--dry-run]` does the same once, by hand.
 
 ### 4.6 Relation to legacy `run-*` trees
 

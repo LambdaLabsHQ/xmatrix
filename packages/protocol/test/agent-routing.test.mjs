@@ -176,7 +176,7 @@ test('a bound Machine is kept by name and a broken one does not hide the decisio
 
 test('a failed selection always renders its cause', () => {
   assert.match(routingDecisionCopy({ source: 'jev-unavailable', rows: [], failureCode: 'timeout' }).verdict,
-    /Cause \(timeout\): Jev did not answer/);
+    /Cause \(timeout\): xMatrix did not answer/);
   assert.match(routingDecisionCopy({ source: 'jev-unavailable', rows: [] }).verdict, /Cause: not recorded/);
   assert.equal(parsePresentedRoutingDecision({ source: 'jev-unavailable', failureCode: 'jev_auth_failed' }).failureCode, 'jev_auth_failed');
   assert.equal(parsePresentedRoutingDecision({ source: 'jev-unavailable', failureCode: 'x\ny' }).failureCode, undefined);

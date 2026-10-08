@@ -145,19 +145,17 @@ test("a reconnect that offers its own waterline is work, never orientation", asy
   assert.deepEqual(intents(batch), ["work", "work"]);
 });
 
-test("catch-up acknowledges Auto and management assignments without handing observers new work", async () => {
+test("catch-up acknowledges Auto summons without handing observers new work", async () => {
   const corpus = CORPUS.map((message) => message.sequence === 18
     ? { ...message, body: "@auto repo:owner/repo audit", metadata: { xmatrixProvenance: "scheduled_automation" } }
-    : message.sequence === 19
-      ? { ...message, body: "Review and merge", metadata: { xmatrixManagement: true, managementMessageKind: "assignment" } }
-      : message);
+    : message);
   const history = port(17, corpus);
   const runtime = session("sleeping-observer");
   const batch = await history.join(runtime, {
     type: "join_channel", channelId: CHANNEL_ID, historyLimit: 0,
   });
   assert.deepEqual(replayed(batch), [18, 19, 20]);
-  assert.deepEqual(intents(batch), ["context", "context", "work"]);
+  assert.deepEqual(intents(batch), ["context", "work", "work"]);
   assert.deepEqual(replayed(await history.replay(runtime, {
     type: "replay_channel_history", channelId: CHANNEL_ID, historyLimit: 50,
   })), []);

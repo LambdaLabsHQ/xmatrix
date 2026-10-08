@@ -21,7 +21,7 @@ import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message
 import { agentAvatarUrlFromMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
   supersededByOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage } from "@xmatrix/protocol";
 import { REDACTED_CONTENT_HASH, productGatewayAttachmentKind } from "./product-message-command";
-import { XMATRIX_MANAGEMENT_AVATAR_URL, XMATRIX_MANAGEMENT_LABEL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import {
   decodeRelayV2MessagePayloadBundle,
   prepareRelayV2MessageRecord,
@@ -86,7 +86,7 @@ function record(value: unknown, field: string): Record<string, unknown> {
 /** How xMatrix's own messages present their author. */
 const XMATRIX_MESSAGE_SENDER_SNAPSHOT = {
   identityId: `system:${XMATRIX_SYSTEM_AUTHOR_ID}`, kind: "system", userId: "", email: "",
-  label: XMATRIX_MANAGEMENT_LABEL, name: XMATRIX_MANAGEMENT_LABEL, avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL,
+  label: XMATRIX_SYSTEM_LABEL, name: XMATRIX_SYSTEM_LABEL, avatarUrl: XMATRIX_SYSTEM_AVATAR_URL,
 };
 
 function principal(value: unknown): MessagePrincipal {
@@ -134,31 +134,19 @@ function postgresSenderSnapshot(
     identityId, kind: "agent", agentId: identity.id, label: instanceLabel ?? identity.name,
     name: identity.name, agentName: identity.name, runtime: identity.runtime,
     userId: identity.ownerUserId,
-    ...(runIdentity && !runIdentity.managementDelegate ? { registration: runIdentity.registration } : {}),
+    ...(runIdentity ? { registration: runIdentity.registration } : {}),
     ...(runIdentity ? {
       instanceId: runIdentity.instanceId,
       channelInstanceId,
       instanceLabel,
     } : {}),
-    ...(runIdentity?.origin && !runIdentity.managementDelegate ? {
+    ...(runIdentity?.origin ? {
       originChannelId: runIdentity.origin.channelId,
       ...(runIdentity.origin.messageId ? { originMessageId: runIdentity.origin.messageId } : {}),
     } : {}),
     ...(identity.ownerEmail ? { email: identity.ownerEmail } : {}),
     ...(avatarUrl ? { avatarUrl } : {}),
     profileVersion: identity.version,
-    ...(runIdentity?.managementDelegate ? {
-      identityId: "xmatrix:management",
-      label: XMATRIX_MANAGEMENT_LABEL, name: XMATRIX_MANAGEMENT_LABEL,
-      agentName: XMATRIX_MANAGEMENT_LABEL, instanceLabel: XMATRIX_MANAGEMENT_LABEL,
-      avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL,
-      xmatrixManagementDelegate: {
-        agentId: identity.id, agentName: identity.name,
-        runId: runIdentity.runId, instanceId: runIdentity.instanceId,
-        managementSpaceId: runIdentity.managementDelegate.spaceId,
-        managementConfigGeneration: runIdentity.managementDelegate.configGeneration,
-      },
-    } : {}),
   };
 }
 
@@ -345,16 +333,17 @@ async function postgresMessageQueryContextFromDependencies(
 export function postgresMessageFailure(error: unknown): {
   status: number;
   body: { error: string; code: string; retryable: boolean };
-  /** A database outage rather than a decided rejection. */
+  /** A transient outage, answered as a retryable 503 with `Retry-After`, rather than a decided rejection. */
   outage: boolean;
 } {
   // Every message operation first resolves its Channel through Space control,
   // which answers an unknown Channel with a 404 of its own. That is the
-  // caller's fact to see, not a failed request.
+  // caller's fact to see, not a failed request; a Space moving shards is a
+  // retryable 503 of its own.
   if (error instanceof MessageAuthorityError || error instanceof ContentControlError ||
-      (error instanceof SpaceControlError && error.status < 500)) {
+      (error instanceof SpaceControlError && (error.status < 500 || error.retryable))) {
     return { status: error.status, body: { error: error.message, code: error.code, retryable: error.retryable },
-      outage: false };
+      outage: error.retryable && error.status === 503 };
   }
   console.error("PostgreSQL message authority failed", error);
   const outage = retryablePostgresFailure(error);
@@ -662,8 +651,11 @@ export async function postgresMessageHistory(
     selected.push(message);
     pageBytes += bytes;
   }
+  if (result.aboutInput && selected.length !== candidates.length) throw new MessageAuthorityError(
+    "about_history_page_budget", 413, "About history page exceeds byte budget; retry with a smaller limit");
   const messages = forward ? selected : selected.slice().reverse();
   return {
+    ...(result.aboutInput ? { aboutInput: result.aboutInput } : {}),
     channelId,
     messages,
     hasMore: result.hasMore || selected.length < candidates.length,
@@ -742,7 +734,8 @@ export function postgresProductMessage(message: Record<string, unknown>): Record
       annotations: message.annotations,
       ...(!message.recalledAt && supersededByOf(message.annotations)
         ? { supersededBy: supersededByOf(message.annotations) } : {}),
-      attachments: Array.isArray(message.attachments)
+      // A withdrawn message withdraws its files too: their bytes already answer 404.
+      attachments: message.recalledAt || message.deletedAt ? [] : Array.isArray(message.attachments)
         ? message.attachments.map((attachment: Record<string, unknown>) => ({
             ...attachment,
             channelId: message.channelId,
@@ -1124,21 +1117,28 @@ function searchSenderLabel(snapshot: Record<string, unknown> | undefined): strin
   return "";
 }
 
-/** One candidate's hit for a lower-cased needle: body, then an attachment name, then the sender label. */
+/**
+ * One candidate's hit for a lower-cased needle: body, then an attachment name,
+ * then the sender label. An empty needle matches every message (a filter-only
+ * search); `agentName` keeps only an Agent's messages sent under that name.
+ */
 export function matchMessageSearchCandidate(
   candidate: MessageSearchCandidate,
   needle: string,
+  agentName?: string,
 ): MessageSearchHit | null {
   const bundle = candidate.payloadBundleBase64
     ? decodeRelayV2MessagePayloadBundle(base64UrlDecodeBytes(candidate.payloadBundleBase64))
     : undefined;
+  const senderLabel = searchSenderLabel(bundle?.senderSnapshot);
+  if (agentName !== undefined && !searchAgentNameMatches(bundle?.senderSnapshot, agentName)) return null;
   const body = bundle?.body ?? candidate.legacyBody ?? "";
   const bodyAt = body.toLocaleLowerCase().indexOf(needle);
   const attachmentName = bodyAt < 0
     ? (candidate.attachmentNames ?? []).find((name) => name.toLocaleLowerCase().includes(needle)) ?? ""
     : "";
   const senderAt = bodyAt < 0 && !attachmentName
-    ? searchSenderLabel(bundle?.senderSnapshot).toLocaleLowerCase().indexOf(needle) : -1;
+    ? senderLabel.toLocaleLowerCase().indexOf(needle) : -1;
   if (bodyAt < 0 && !attachmentName && senderAt < 0) return null;
   const field = bodyAt >= 0 ? "body" : attachmentName ? "attachment" : "sender";
   return {
@@ -1153,7 +1153,18 @@ export function matchMessageSearchCandidate(
     channelId: candidate.channelId,
     messageId: candidate.messageId,
     timelineSequence: candidate.timelineSequence,
+    senderLabel,
+    sentAt: candidate.sentAt,
   };
+}
+
+/** An Agent's messages carry its name in the sender snapshot; its Instances do not share an author id. */
+function searchAgentNameMatches(snapshot: Record<string, unknown> | undefined, agentName: string): boolean {
+  const wanted = agentName.toLocaleLowerCase();
+  return ["agentName", "name"].some((key) => {
+    const value = snapshot?.[key];
+    return typeof value === "string" && value.toLocaleLowerCase() === wanted;
+  });
 }
 
 /**
@@ -1163,13 +1174,21 @@ export function matchMessageSearchCandidate(
  */
 export async function postgresMessageSearch(
   env: Env,
-  input: { spaceId: string; query: string; resumeToken?: string; principal: AuthorityPrincipal },
+  input: {
+    spaceId: string; query: string; resumeToken?: string; principal: AuthorityPrincipal;
+    /** Only this Channel and its threads. */
+    channelId?: string;
+    /** Only this author's messages: a person by user id, an Agent by name. */
+    from?: { kind: "user"; userId: string } | { kind: "agent"; name: string };
+  },
   dependencies: PostgresMessageDependencies = {},
 ): Promise<MessageSearchPage> {
   const needle = input.query.trim().toLocaleLowerCase();
-  if (!needle || needle.length > 200) {
+  // A filter alone is a search: every message in the Channel, or by the author.
+  if ((!needle && !input.channelId && !input.from) || needle.length > 200) {
     throw new MessageAuthorityError("invalid_request", 400, "Search query is invalid");
   }
+  const agentName = input.from?.kind === "agent" ? input.from.name : undefined;
   const repository = new PostgresMessageRepository(
     dependencies.database ?? database(env), dependencies.requestScoped === true,
   );
@@ -1184,12 +1203,15 @@ export async function postgresMessageSearch(
       spaceId: bounded(input.spaceId, "spaceId"),
       principal: principal(input.principal),
       beforeRank,
+      ...(input.channelId ? { channelId: input.channelId } : {}),
+      ...(input.from ? { authorKind: input.from.kind } : {}),
+      ...(input.from?.kind === "user" ? { authorId: input.from.userId } : {}),
       limit: requested,
     });
     for (const candidate of candidates) {
       scanned += 1;
       beforeRank = candidate.searchRankSequence;
-      const hit = matchMessageSearchCandidate(candidate, needle);
+      const hit = matchMessageSearchCandidate(candidate, needle, agentName);
       if (hit) results.push(hit);
       if (results.length >= MESSAGE_SEARCH_RESULT_LIMIT) break;
     }

@@ -76,3 +76,18 @@ function windowReadings(quota: NonNullable<AgentRegistrationLiveState["quota"]>,
     high: window.usedPercent >= HIGH_USE_PERCENT,
   }));
 }
+
+/** Compact provider windows for the same glance bars used by Machine rows. */
+export function agentUsageGlance(quota: AgentRegistrationLiveState["quota"], now: number) {
+  const shortLabels: Record<string, string> = {
+    "2-hour window": "2h", "5-hour window": "5h", Daily: "1d", Weekly: "1w", Monthly: "1mo",
+  };
+  return agentUsageReadings(quota, now)
+    .filter((reading) => reading.fraction !== undefined)
+    .map((reading) => ({
+      key: reading.key,
+      label: shortLabels[reading.label] ?? reading.label,
+      percent: Math.round(reading.fraction! * 100),
+      detail: `${reading.label}: ${reading.value}${reading.detail ? ` · ${reading.detail}` : ""}`,
+    }));
+}

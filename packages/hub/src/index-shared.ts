@@ -1,4 +1,4 @@
-import { privateJsonResponse } from "./private-json-response";
+import { PRIVATE_JSON_HEADERS, privateJsonResponse } from "./private-json-response";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { agentBillingReadRoute, BillingReadAccessDenied } from "./billing-read-access";
@@ -46,12 +46,10 @@ import {
   RELAY_R2_BLOB_REF_PATH,
   RELAY_R2_BLOB_REF_RELEASE_PATH,
   RELAY_R2_UPLOAD_INTENT_PATH,
-  relayR2UploadPrivateApiErrorResponse,
   type RelayR2UploadPrincipal,
 } from "./relay-r2-upload-private-api";
 import {
   RELAY_V2_MESSAGE_ATTACHMENT_PRODUCT_MEDIA_PATH,
-  relayR2PrivateApiErrorResponse,
 } from "./relay-r2-private-api";
 import { agentRunUploadScopeId } from "./agent-run-upload-scope";
 import { automationDatumFromPayload } from "./relay-authority-schedule-occurrence";
@@ -59,8 +57,7 @@ import { base64UrlEncodeValue } from "./relay-v2-primitives";
 import { AgentRunDelegationError, requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { reportError } from "@xmatrix/protocol/error-reporting";
 import { AgentChannelAccessError, ControlError } from "@xmatrix/db";
-import { postgresControlErrorResponse } from "./postgres-authority-http";
-import { postgresRetryAfterSeconds, retryablePostgresFailure } from "./postgres-error-classification";
+import { domainFailure, failureResponse, transientFailure, type RequestFailure } from "./error-contract";
 import { machineDaemonCommand } from "./machines";
 import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
 import { runtimeRepository } from "./runtime";
@@ -499,7 +496,7 @@ export function agentRunHttpRouteAllowed(
   if (agentBillingReadRoute(request, principal)) return true;
   const path = new URL(request.url).pathname;
   if (principal.runKind === "channel-about-session") {
-    const history = /^\/api\/channels\/([^/]+)\/history$/.exec(path);
+    const history = /^\/api\/channels\/([^/]+)\/(?:history|metadata-history)$/.exec(path);
     if (request.method === "GET" && history) {
       try {
         return decodeURIComponent(history[1]) === principal.channelId;
@@ -516,6 +513,8 @@ export function agentRunHttpRouteAllowed(
       return false;
     }
   }
+  if (request.method === "GET" && /^\/api\/channels\/[^/]+\/metadata-history$/.test(path)) return true;
+  if (request.method === "POST" && /^\/api\/channels\/[^/]+\/metadata-restore$/.test(path)) return true;
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/messages\/[^/]+\/decision-evidence$/.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/join$/.test(path)) return true;
   // The route stops the run itself, and refuses any Channel but its own.
@@ -524,18 +523,18 @@ export function agentRunHttpRouteAllowed(
   // Saves a credential the Run already holds into its Space: the route proves
   // the live Run and refuses an alias the Space already has.
   if (request.method === "POST" && path === HUB_ROUTES.secrets &&
-      !principal.managementSpaceId && principal.channelWriteAllowed !== false) return true;
+      principal.channelWriteAllowed !== false) return true;
   // Its Space's secrets the Run may read now: every `auto` one, and each
   // `ask` one a Space admin approved for it.
   if (request.method === "POST" && path === HUB_ROUTES.run_secrets &&
-      !principal.managementSpaceId && principal.channelWriteAllowed !== false) return true;
+      principal.channelWriteAllowed !== false) return true;
   // Ask a Space admin, on a card in its Channel, for a secret it may not read yet.
   if (request.method === "POST" && path === HUB_ROUTES.secret_requests &&
-      !principal.managementSpaceId && principal.channelWriteAllowed !== false) return true;
+      principal.channelWriteAllowed !== false) return true;
   // Connector actions as MCP tools: each call runs in the Run's own Channel
   // under that Channel's action policy (docs/design/connector-platform.md §3.5).
   if (request.method === "POST" && path === HUB_ROUTES.connectors_mcp &&
-      !principal.managementSpaceId && principal.channelWriteAllowed !== false) return true;
+      principal.channelWriteAllowed !== false) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   // Channel memory authorizes the exact Run in the repository: read where both
@@ -548,7 +547,7 @@ export function agentRunHttpRouteAllowed(
   // the owner's alone, so the decision route never admits a Run.
   // Pages authorize the exact Run in the repository, with its owner's page
   // access: Agents read, edit, arrange, restore and publish pages as the owner may.
-  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes)?)?$/u.test(path)) return true;
+  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file)?)?$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages$/u.test(path)) return true;
   if (["PUT", "PATCH", "DELETE"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:revisions\/[^/]+\/promote|purge)$/u.test(path)) return true;
@@ -600,24 +599,6 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/history$/.test(path)) {
     return true;
   }
-  if (
-    request.method === "GET" &&
-    /^\/api\/spaces\/[^/]+\/management-agent$/.test(path)
-  ) {
-    return true;
-  }
-  if (
-    request.method === "GET" &&
-    /^\/api\/spaces\/[^/]+\/management\/channels(\/[^/]+)?$/.test(path)
-  ) {
-    return true;
-  }
-  if (
-    request.method === "PATCH" &&
-    /^\/api\/spaces\/[^/]+\/management\/channels\/[^/]+\/visibility$/.test(path)
-  ) {
-    return true;
-  }
   const canWriteAttachments = principal.permissions.includes(
     AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE,
   );
@@ -655,31 +636,9 @@ export function agentRunHttpRouteAllowed(
   ) return true;
   if (request.method !== "POST") return false;
   return (
-    /^\/api\/spaces\/[^/]+\/management\/operations$/.test(path) ||
     (principal.channelWriteAllowed && /^\/api\/channels\/[^/]+\/messages$/.test(path)) ||
     path === RELAY_V2_MESSAGE_ATTACHMENT_PRODUCT_MEDIA_PATH
   );
-}
-
-/**
- * The acting Agent Run, when it is this Space's management Run; any other
- * caller is refused. With `humanAllowed`, a human session passes too (and the
- * result is undefined), while an Agent Run must still manage this Space.
- */
-export function requireSpaceManagementRun(user: AuthUser, spaceId: string): AgentRunPrincipal;
-export function requireSpaceManagementRun(
-  user: AuthUser,
-  spaceId: string,
-  options: { humanAllowed: true },
-): AgentRunPrincipal | undefined;
-export function requireSpaceManagementRun(
-  user: AuthUser,
-  spaceId: string,
-  options: { humanAllowed?: boolean } = {},
-): AgentRunPrincipal | undefined {
-  const principal = user.agentRun;
-  if (principal ? principal.managementSpaceId === spaceId : options.humanAllowed) return principal;
-  throw new PermissionFailure("A matching xMatrix management run is required");
 }
 
 export function requireHumanAuth(user: AuthUser): AuthUser {
@@ -752,7 +711,6 @@ export function automationAgentContext(principal: AgentRunPrincipal): Record<str
     channelId: principal.channelId,
     machineId: principal.machineId,
     hostId: principal.hostId,
-    ...(principal.managementSpaceId ? { managementSpaceId: principal.managementSpaceId } : {}),
   };
 }
 
@@ -839,55 +797,51 @@ export function relayR2PrivateErrorResponse(error: unknown): Response {
       409,
     );
   }
-  const privateApiError = relayR2PrivateApiErrorResponse(error);
-  if (privateApiError) return privateApiError;
-  const uploadError = relayR2UploadPrivateApiErrorResponse(error);
-  if (uploadError) return uploadError;
-  const status = requestErrorStatus(error);
-  return privateJsonResponse(
-    status === 401
-      ? { error: (error as Error).message, code: "not_authenticated" }
-      : status === 403
-        ? { error: (error as Error).message, code: "forbidden" }
-      : { error: "Private object service is temporarily unavailable", code: "private_storage_unavailable" },
-    status,
-  );
+  const failure = requestFailure(error);
+  // A domain rejection keeps its own status and code; only an outage is the storage being unavailable.
+  if (error instanceof ControlError) return failureResponse(failure, PRIVATE_JSON_HEADERS);
+  if (failure.status === 401 || failure.status === 403) {
+    return privateJsonResponse({ error: failure.body.error,
+      code: failure.status === 401 ? "not_authenticated" : "forbidden" }, failure.status);
+  }
+  const transient = failure.status === 503;
+  return failureResponse({ ...failure, body: {
+    error: transient ? "Private object service is temporarily unavailable" : "Private object service failed",
+    code: "private_storage_unavailable", retryable: transient,
+  } }, PRIVATE_JSON_HEADERS);
 }
 
 export function requestErrorStatus(error: unknown): ContentfulStatusCode {
-  if (error instanceof ControlError) return error.status as ContentfulStatusCode;
-  if (error instanceof AuthFailure) {
-    return 401;
-  }
-  if (error instanceof PermissionFailure || error instanceof BillingReadAccessDenied) {
-    return 403;
-  }
-  if ((error as Error).message === "Invalid or expired auth token") return 401;
-  // An outage the driver says a replay can survive; a defect stays a reported 500.
-  if (retryablePostgresFailure(error)) {
-    console.error("PostgreSQL is unavailable", error);
-    return 503;
-  }
-  // Every failure answered as a 500 is unexpected; it is reported, not only answered.
-  reportError(error);
-  return 500;
+  return requestFailure(error).status as ContentfulStatusCode;
 }
 
 /**
- * A route's failure as JSON: a domain rejection under its own status and code,
- * a refused session under its message, a database outage as retryable, and
- * anything else as an internal error whose detail stays in the report.
+ * A failure under the Hub's one error contract: a domain rejection under its
+ * own status and code, a refused session under its message, an outage as a
+ * retryable 503, and anything else as an internal error whose detail stays in
+ * the report.
  */
-export function requestErrorResponse(c: Context, error: unknown): Response {
-  if (error instanceof ControlError) return postgresControlErrorResponse(error);
-  const status = requestErrorStatus(error);
-  if (status === 503) {
-    return c.json({ error: "PostgreSQL is unavailable", code: "postgres_unavailable", retryable: true }, status,
-      { "retry-after": String(postgresRetryAfterSeconds(error)) });
+export function requestFailure(error: unknown): RequestFailure {
+  if (error instanceof ControlError) return domainFailure(error);
+  const message = (error as Error | undefined)?.message ?? "";
+  if (error instanceof AuthFailure || message === "Invalid or expired auth token") {
+    return { status: 401, body: { error: message }, headers: {} };
   }
-  return status === 500
-    ? c.json({ error: "Internal error", code: "internal_error", retryable: false }, status)
-    : c.json({ error: (error as Error).message }, status);
+  if (error instanceof PermissionFailure || error instanceof BillingReadAccessDenied) {
+    return { status: 403, body: { error: message }, headers: {} };
+  }
+  // An outage the driver or runtime says a replay can survive; a defect stays a reported 500.
+  const transient = transientFailure(error);
+  if (transient) return transient;
+  // Every failure answered as a 500 is unexpected; it is reported, not only answered.
+  reportError(error);
+  return { status: 500, body: { error: "Internal error", code: "internal_error", retryable: false }, headers: {} };
+}
+
+/** A route's failure as JSON under `requestFailure`. */
+export function requestErrorResponse(c: Context, error: unknown): Response {
+  const failure = requestFailure(error);
+  return c.json(failure.body, failure.status as ContentfulStatusCode, failure.headers);
 }
 
 /** Runs a route's work, answering its failures, thrown or rejected, as `requestErrorResponse`. */

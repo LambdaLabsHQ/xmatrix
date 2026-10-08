@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import { failureResponse } from "./error-contract";
 import { relayResponse } from "./private-response";
 import { crossSpaceRetryOwner } from "./cross-space-read";
 import { agentRunDelegationDenied } from "./agent-run-channel-delegation";
@@ -29,10 +30,11 @@ import { machineHostnameObservation } from "./machine-hostname-observation";
 import { signMachineDaemonCredential } from "./connections/machine-daemon/auth";
 import { applyMachineDaemonSpawnLaunchResult, dispatchMachineDaemonRunLifecycleReplica, machineSpawnRegistryEvidenceMatches } from "./index-routes-machine-daemon-admission";
 import { RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH } from "./runtime-transport/relay-runtime-product-adapter";
-import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestErrorStatus, productCommandId, clientKey, internalClientHeaders, isLoginRateLimited, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
+import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, isLoginRateLimited, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
 import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space-instances";
-import { registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
+import { linkGitHubInstallation, registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
+import { completeGitHubConnectAuthorization, githubConnectReturnUrl, isGitHubConnectState } from "./github-connect-authorization";
 import { registerMachineExecutionRoutes } from "./index-routes-machine-executions";
 import { registerReplyRecoveryRoutes } from "./index-routes-reply-recovery";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
@@ -87,7 +89,7 @@ async function deviceAuthResponse(c: Context<{ Bindings: Env }>, action: "start"
   const internalUrl = new URL(`/internal/device-auth/${action}`, c.req.url);
   const response = await getDeviceAuthBroker(c.env).fetch(new Request(internalUrl.toString(), {
     method: "POST", headers: internalClientHeaders(c.req.raw, authorization ? { authorization } : undefined),
-    ...(action === "start" ? {} : { body: await c.req.text() }),
+    body: await c.req.text(),
   }));
   return relayResponse(response, { "cache-control": "no-store" });
 }
@@ -223,9 +225,10 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     try {
       authUser = await verifyAuthToken(token, c.env);
     } catch (error) {
-      const status = requestErrorStatus(error);
-      await logAuthMetric({ routeGroup: "exchange_session", status, outcome: "invalid_token" });
-      return c.json({ error: (error as Error).message }, status);
+      const failure = requestFailure(error);
+      await logAuthMetric({ routeGroup: "exchange_session", status: failure.status,
+        outcome: failure.status === 401 ? "invalid_token" : "verification_unavailable" });
+      return failureResponse(failure);
     }
 
     if (mockAuthUserForToken(token, c.env)) {
@@ -341,6 +344,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
           error: transient
             ? "Authentication service is temporarily unavailable."
             : (error as Error).message || "Failed to refresh session",
+          ...(transient ? { retryable: true } : {}),
         },
         status,
       );
@@ -378,6 +382,12 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
         authProvider: "better-auth",
       });
       return withAuthCors(c.json({ error: "Better Auth is not configured" }, 503), c.req.raw, c.env);
+    }
+    if (c.req.path === "/api/auth/callback/github" && isGitHubConnectState(c.req.query("state"))) {
+      // Connecting GitHub shares the App's registered callback with account linking.
+      return await completeGitHubConnectAuthorization(c.env, c.req.raw,
+        (spaceId, userId, installationId) => linkGitHubInstallation(c.env, spaceId, userId, installationId))
+        .catch(() => c.redirect(githubConnectReturnUrl(c.env, "failed"), 302));
     }
     let response: Response;
     try {
@@ -815,8 +825,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       const reportChannelId = runLifecycleChannelId ||
         (typeof completed.runLifecycleChannelId === "string" ? completed.runLifecycleChannelId : "");
       if (reportChannelId) {
-        try { await wakeAgentLaunchCoordinator(c.env, reportChannelId); }
-        catch { return c.json({ error: "Agent Launch Channel coordinator is unavailable" }, 503); }
+        await wakeAgentLaunchCoordinator(c.env, reportChannelId);
       }
     } else if (runLifecycleChannelId && runId &&
         (eventType === "machine_run_exited" || eventType === "machine_stop_result")) {
@@ -827,8 +836,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       });
       // The stopped predecessor unblocks its durable reborn successor.
       if (eventType === "machine_stop_result" && completed.runLifecycleStopPurpose === "reborn-predecessor") {
-        try { await wakeAgentLaunchCoordinator(c.env, runLifecycleChannelId); }
-        catch { return c.json({ error: "Agent Launch Channel coordinator is unavailable" }, 503); }
+        await wakeAgentLaunchCoordinator(c.env, runLifecycleChannelId);
       }
     }
     return c.json({ ok: true });

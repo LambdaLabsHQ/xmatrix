@@ -196,6 +196,10 @@ pub enum Commands {
         /// Name this Machine before starting its daemon; required for a new headless login.
         #[arg(long, env = "XMATRIX_MACHINE_NAME")]
         machine_name: Option<String>,
+        /// Connect this machine with the setup command copied from xMatrix: approve the
+        /// terminal on that page; the machine is named after its hostname unless named already.
+        #[arg(long, env = "XMATRIX_CONNECT", value_name = "SETUP_ID")]
+        connect: Option<String>,
     },
     /// Remove stored credentials for the selected environment
     Logout {
@@ -397,12 +401,6 @@ pub enum Commands {
         #[command(subcommand)]
         command: PageCommand,
     },
-    /// Run the xMatrix space management runtime
-    Management {
-        /// Boxed: the management surface is much larger than every other command.
-        #[command(subcommand)]
-        command: Box<ManagementCommand>,
-    },
     /// Create and manage Channel Automations
     Automation {
         #[command(subcommand)]
@@ -502,49 +500,6 @@ pub enum AutomationCommand {
     },
 }
 
-#[derive(Subcommand)]
-pub enum ManagementCommand {
-    /// Search active or archived channels across metadata, bindings, loops, and messages
-    Channels {
-        /// Space ID managed by this run
-        #[arg(long)]
-        space: String,
-        /// Search query; empty lists channels
-        #[arg(long, default_value = "")]
-        query: String,
-        /// Maximum matches
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
-        /// Print machine-readable JSON
-        #[arg(long)]
-        json: bool,
-    },
-    /// Inspect one authoritative channel detail view
-    Channel {
-        /// Space ID managed by this run
-        #[arg(long)]
-        space: String,
-        /// Stable channel ID
-        #[arg(long)]
-        channel: String,
-        /// Number of tail messages to include
-        #[arg(long, default_value_t = 50)]
-        message_limit: u32,
-        /// Print machine-readable JSON
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-impl ManagementCommand {
-    /// The `--space` a command names, so it can be resolved to an id first.
-    pub fn space_mut(&mut self) -> &mut String {
-        match self {
-            Self::Channels { space, .. } | Self::Channel { space, .. } => space,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,7 +560,7 @@ mod tests {
         Cli::command().debug_assert();
         let login = Cli::try_parse_from(["xmatrix", "login", "--machine-name", "Laptop"]).unwrap();
         assert!(
-            matches!(login.command, Some(Commands::Login { machine_name: Some(name) }) if name == "Laptop")
+            matches!(login.command, Some(Commands::Login { machine_name: Some(name), .. }) if name == "Laptop")
         );
         let setup = Cli::try_parse_from(["xmatrix", "setup", "daemon", "--machine-name", "Laptop"])
             .unwrap();
@@ -614,6 +569,15 @@ mod tests {
         );
         assert!(
             Cli::try_parse_from(["xmatrix", "workspace", "register", "--host", "Laptop"]).is_err()
+        );
+    }
+
+    #[test]
+    fn login_takes_the_setup_command_from_xmatrix() {
+        let login =
+            Cli::try_parse_from(["xmatrix", "login", "--connect", "0123456789abcdef"]).unwrap();
+        assert!(
+            matches!(login.command, Some(Commands::Login { connect: Some(id), machine_name: None }) if id == "0123456789abcdef")
         );
     }
 
@@ -846,24 +810,6 @@ mod tests {
                 }
             })
         ));
-    }
-
-    #[test]
-    fn channel_management_read_parses() {
-        let cli =
-            Cli::try_parse_from(["xmatrix", "channel", "management-read", "channel-1", "off"])
-                .expect("channel management-read should parse");
-        let Some(Commands::Channel {
-            command:
-                ChannelCommand::ManagementRead {
-                    channel_id,
-                    state: ManagementReadState::Off,
-                },
-        }) = cli.command
-        else {
-            panic!("expected channel management-read command");
-        };
-        assert_eq!(channel_id, "channel-1");
     }
 
     #[test]
@@ -1332,52 +1278,116 @@ mod tests {
     }
 
     #[test]
-    fn channel_about_reads_summary_and_name_from_files() {
-        let cli = Cli::try_parse_from([
-            "xmatrix",
-            "channel",
-            "about",
-            "channel-1",
-            "--summary-file",
-            "about.md",
-            "--name-file",
-            "name.txt",
-            "--through",
-            "m-9",
-        ])
-        .expect("about should accept file inputs");
+    fn metadata_history_and_restore_have_bounded_explicit_revision_arguments() {
+        assert!(
+            Cli::try_parse_from(["xmatrix", "channel", "history", "c", "--authoritative"]).is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-history",
+                "c",
+                "--revision",
+                "0"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-history",
+                "c",
+                "--input",
+                "input-id"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-history",
+                "c",
+                "--limit",
+                "101"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-restore",
+                "c",
+                "--revision",
+                "0"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "metadata-restore",
+                "c",
+                "--revision",
+                "0",
+                "--expected-revision",
+                "2"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "about",
+                "c",
+                "--summary",
+                "text",
+                "--expected-revision",
+                "2"
+            ])
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn channel_about_accepts_direct_text_or_one_json_stdin_input() {
+        let about = |extra: &[&str]| {
+            let mut argv = vec!["xmatrix", "channel", "about", "channel-1"];
+            argv.extend_from_slice(extra);
+            Cli::try_parse_from(argv)
+        };
+        let cli = about(&["--stdin", "--through", "m-9", "--expected-revision", "2"])
+            .expect("about should accept JSON stdin");
         let Some(Commands::Channel {
             command:
                 ChannelCommand::About {
                     summary,
-                    summary_file,
                     name,
-                    name_file,
+                    stdin,
                     through,
+                    expected_revision,
                     ..
                 },
         }) = cli.command
         else {
             panic!("expected channel about command");
         };
+        assert!(stdin);
         assert_eq!(summary, None);
-        assert_eq!(summary_file, Some(PathBuf::from("about.md")));
         assert_eq!(name, None);
-        assert_eq!(name_file, Some(PathBuf::from("name.txt")));
         assert_eq!(through.as_deref(), Some("m-9"));
-    }
-
-    #[test]
-    fn channel_about_needs_exactly_one_source_per_field() {
-        let about = |extra: &[&str]| {
-            let mut argv = vec!["xmatrix", "channel", "about", "channel-1"];
-            argv.extend_from_slice(extra);
-            Cli::try_parse_from(argv)
-        };
-        assert!(about(&["--summary", "text"]).is_ok());
+        assert_eq!(expected_revision, Some(2));
+        assert!(about(&["--summary", "中文摘要", "--name", "频道标题"]).is_ok());
         assert!(about(&[]).is_err());
-        assert!(about(&["--summary", "text", "--summary-file", "a.md"]).is_err());
-        assert!(about(&["--summary", "text", "--name", "n", "--name-file", "n.txt"]).is_err());
+        assert!(about(&["--stdin", "--summary", "text"]).is_err());
+        assert!(about(&["--stdin", "--name", "name"]).is_err());
+        assert!(about(&["--summary-file", "a.md"]).is_err());
+        assert!(about(&["--summary", "text", "--name-file", "n.txt"]).is_err());
     }
 }
 
@@ -1449,6 +1459,47 @@ pub enum MachineCommand {
     /// Let automatic assignment place work on this Machine, or keep it out:
     /// off, Agents start here only when someone names it (`machine:<name>`)
     AutoAssign { state: OnOff },
+    /// List every git worktree on this Machine by who created it, and manage
+    /// reclaim of the ones xMatrix did not create
+    Worktrees {
+        #[command(subcommand)]
+        command: Option<MachineWorktreesCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum MachineWorktreesCommand {
+    /// List linked worktrees by origin (the default)
+    List {
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Let the daemon reclaim idle worktrees xMatrix did not create (Claude
+    /// Code, Codex, Cursor, hand-made). Off by default; xMatrix's own trees
+    /// are always reclaimed
+    AutoReclaim { state: OnOff },
+    /// Reclaim idle worktrees xMatrix did not create now. Un-landed work is
+    /// committed and pinned under refs/xmatrix/snapshot/foreign/ first
+    Reclaim {
+        /// Only trees of this origin (repeatable)
+        #[arg(long, value_enum)]
+        origin: Vec<ForeignWorktreeOrigin>,
+        /// Only trees untouched for at least this many days
+        #[arg(long, default_value_t = 7)]
+        idle_days: u64,
+        /// Show what would be reclaimed without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ForeignWorktreeOrigin {
+    ClaudeCode,
+    Codex,
+    Cursor,
+    Manual,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -1734,7 +1785,7 @@ pub enum ChannelCommand {
         /// Channel mode: open or closed
         #[arg(long, default_value = "open")]
         mode: String,
-        /// Channel topic shown with the channel. The Summary itself is maintained by Jev.
+        /// Channel topic shown with the channel. The Summary itself is maintained by xMatrix.
         #[arg(long = "topic", alias = "summary")]
         summary: Option<String>,
         /// Optional channel name. Without one, the conversation is named from
@@ -1794,30 +1845,47 @@ pub enum ChannelCommand {
         name: Vec<String>,
     },
     /// Replace a channel's About summary (the channel's own About session only).
-    /// For non-ASCII text on Windows, prefer --summary-file and --name-file:
-    /// UTF-8 files never pass through the shell's code page.
+    /// Submit text directly, or pipe a JSON object with summary and optional name
+    /// to --stdin. No intermediate files are read.
     About {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
         /// The new About summary
-        #[arg(
-            long,
-            required_unless_present = "summary_file",
-            conflicts_with = "summary_file"
-        )]
+        #[arg(long, required_unless_present = "stdin", conflicts_with = "stdin")]
         summary: Option<String>,
-        /// Read the new About summary from a UTF-8 file
-        #[arg(long, value_name = "PATH")]
-        summary_file: Option<PathBuf>,
         /// Name a channel nobody has named yet
-        #[arg(long, conflicts_with = "name_file")]
+        #[arg(long, conflicts_with = "stdin")]
         name: Option<String>,
-        /// Read the name for a channel nobody has named yet from a UTF-8 file
-        #[arg(long, value_name = "PATH")]
-        name_file: Option<PathBuf>,
+        /// Read a UTF-8 JSON object containing summary and optional name from stdin
+        #[arg(long)]
+        stdin: bool,
         /// The newest message the summary covers
         #[arg(long)]
         through: Option<String>,
+        /// Revision printed by the authoritative history read
+        #[arg(long)]
+        expected_revision: Option<u64>,
+    },
+    /// Read immutable title / About revisions and their recorded input
+    MetadataHistory {
+        channel_id: String,
+        #[arg(long)]
+        before_revision: Option<u64>,
+        #[arg(long, conflicts_with_all = ["before_revision", "input"])]
+        revision: Option<u64>,
+        /// Inspect one input id listed in a revision's source
+        #[arg(long, conflicts_with = "before_revision")]
+        input: Option<String>,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: u32,
+    },
+    /// Restore a title / About by appending a new revision
+    MetadataRestore {
+        channel_id: String,
+        #[arg(long)]
+        revision: u64,
+        #[arg(long)]
+        expected_revision: u64,
     },
     /// Move a channel to another Space; human admins of both Spaces confirm it
     Move {
@@ -1850,13 +1918,6 @@ pub enum ChannelCommand {
         /// Desired worktree isolation state
         state: WorktreeState,
     },
-    /// Control whether the management assistant can read this channel
-    ManagementRead {
-        /// Channel ID or xmatrix.sh channel URL
-        channel_id: String,
-        /// Read setting for the management assistant
-        state: ManagementReadState,
-    },
     /// Send a message to a channel
     Send(SendArgs),
     /// Show all available message history for a channel
@@ -1864,6 +1925,10 @@ pub enum ChannelCommand {
     History {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
+
+        /// Bypass the daemon cache and record About input at the Hub
+        #[arg(long)]
+        authoritative: bool,
     },
     /// Open a simple line-based channel chat with manual refresh
     Chat {
@@ -1885,18 +1950,6 @@ pub enum ChannelVisibilityState {
 pub enum WorktreeState {
     On,
     Off,
-    Inherit,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-pub enum ManagementReadState {
-    /// The assistant can read messages in this channel
-    On,
-    /// The assistant can see activity only, not message text
-    Activity,
-    /// The assistant cannot read this channel
-    Off,
-    /// Use the space default
     Inherit,
 }
 
@@ -2618,35 +2671,17 @@ mod registration_argument_tests {
     use clap::Parser;
 
     #[test]
-    fn management_channel_discovery_commands_parse() {
-        let channels = Cli::try_parse_from([
-            "xmatrix",
-            "management",
-            "channels",
-            "--space",
-            "space-1",
-            "--query",
-            "verification",
-            "--json",
-        ])
-        .expect("management channels should parse");
-        let Some(Commands::Management { command }) = channels.command else {
-            panic!("expected a management command");
-        };
-        let ManagementCommand::Channels {
-            space,
-            query,
-            limit: 50,
-            json: true,
-        } = *command
-        else {
-            panic!("expected management channels command");
-        };
-        assert_eq!(space, "space-1");
-        assert_eq!(query, "verification");
+    fn retired_management_commands_do_not_parse() {
+        // Not a built-in any more: it falls through to the external passthrough.
+        assert!(matches!(
+            Cli::try_parse_from(["xmatrix", "management", "channels", "--space", "space-1"])
+                .expect("unknown commands fall through to the passthrough")
+                .command,
+            Some(Commands::External(_))
+        ));
         assert!(
-            Cli::try_parse_from(["xmatrix", "management", "agents", "--space", "space-1"]).is_err(),
-            "Agents are listed with `xmatrix agent list`"
+            Cli::try_parse_from(["xmatrix", "channel", "management-read", "channel-1", "off"])
+                .is_err()
         );
     }
 

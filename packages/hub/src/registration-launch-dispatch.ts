@@ -4,12 +4,12 @@ import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
 import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1, isAutoHandoffSuccessor } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags } from "@xmatrix/protocol";
+import type { AutoLaunchTags, DraftSummonIntent } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresSpacePlacementDirectory, PostgresRuntimeRepository, RegistrationAccessError, type AuthorityDatabase,
   PostgresFirstMessageLaunchChoiceRepository,
-  type RegistrationManagementLaunch, type RegistrationLaunchCoalesce, type RegistrationAboutSession,
+  type RegistrationAboutSession,
   type ChannelAboutSessionStopTarget,
 } from "@xmatrix/db";
 import { dispatchPreparedAgentLaunchWake } from "./product-agent-mention-authority-adapter";
@@ -39,6 +39,7 @@ export async function executeRegistrationLaunchDispatch(input: {
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
   /** The author's "launch anyway" for one summon Jev read as a non-request. */
   forceMention?: string;
+  draftIntents?: DraftSummonIntent[];
 }) {
   const { placement, repository } = await channelLaunchRepository(input);
   const result = await repository.dispatchFromMessage(input, input.evaluate ? registrationLaunchChooser(input.evaluate, registrationLaunchContextReader({
@@ -61,7 +62,7 @@ interface RegistrationInputLaunch {
   runId: string; instanceId: string; launchId: string; agentName: string; hostId: string; reused: boolean;
   /** Channel About sessions that finished their turn and still run; the caller stops them. */
   retiredAboutSessions?: ChannelAboutSessionStopTarget[];
-  /** An existing delegate already serves the Channel; nothing was launched. */
+  /** An About session already serves the Channel; nothing was launched. */
   coalesced?: boolean;
 }
 
@@ -70,8 +71,8 @@ interface RegistrationInputRequest {
   /** Exclude the stable registration bound to this predecessor Instance. */
   excludeSourceInstanceId?: string;
   commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
-  runId?: string; instanceId?: string; management?: RegistrationManagementLaunch;
-  coalesce?: RegistrationLaunchCoalesce; initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
+  runId?: string; instanceId?: string;
+  initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
   aboutSession?: RegistrationAboutSession;
   /** Capabilities the work needs; those a daemon can prove gate where it runs. */
   requiredCapabilities?: readonly string[];
@@ -128,13 +129,8 @@ export async function executeFirstMessageDecision(input: {
   const choose = registrationLaunchChooser(input.evaluate);
   const read = (onHarness?: (harness: string) => Promise<void>) => repository.readHarnessToStart({
     actorUserId: input.actorUserId, body: input.body, ...(onHarness ? { onHarness } : {}) }, choose);
-  if (!input.window) {
-    try { return { claimed: true, harness: await read() }; }
-    catch (error) {
-      if (error instanceof RegistrationAccessError && error.code === START_INTENT_DECLINED) return { claimed: true };
-      throw error;
-    }
-  }
+  // Both authors persist the same decision before the system summon can be
+  // authorized. The database gives Agent publications an immediate deadline.
   return decideFirstMessageLaunch({ ...input, read, choices: new PostgresFirstMessageLaunchChoiceRepository(input.database, {
     spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch }) });
 }
@@ -327,7 +323,7 @@ export async function executeRegistrationUsageLimitHold(input: {
 
 interface MessageLaunch {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string;
-  commandId: string; forceMention?: string;
+  commandId: string; forceMention?: string; draftIntents?: DraftSummonIntent[];
 }
 
 interface MessageLaunchResult {
@@ -366,6 +362,7 @@ async function dispatchFromMessage(input: MessageLaunch, dependencies: MessageLa
 
 export async function dispatchRegistrationLaunchesAfterMessage(input: {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string;
+  draftIntents?: DraftSummonIntent[];
   scheduleBackground?: (task: Promise<unknown>) => void;
 }, dependencies: MessageLaunchDependencies = {},
 ): Promise<{ selectionCount: number; prepared: Array<{ launchId: string }>; rejected?: Array<{ code: string }> }> {

@@ -1,6 +1,48 @@
 import { expect, test } from "@playwright/test";
 
 for (const width of [393, 820, 1440]) {
+  test(`navigation logo glass follows scrolling at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    const glass = page.locator(".site-navbar-brand-glass");
+    await expect(glass).toHaveCSS("opacity", "0");
+
+    // The final small scroll back to zero must not retain partial opacity.
+    await page.evaluate(() => window.scrollTo(0, 2));
+    await expect.poll(() => glass.evaluate((element) => Number(getComputedStyle(element).opacity))).toBeGreaterThan(0);
+    await page.evaluate(() => window.scrollTo(0, 1));
+    await expect.poll(() => glass.evaluate((element) => Number(getComputedStyle(element).opacity))).toBeCloseTo(1 / 120, 5);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(glass).toHaveCSS("opacity", "0");
+
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await expect(glass).toHaveCSS("opacity", "1");
+    // Finish the smooth scroll initiated by this test before navigating home.
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(600);
+    const surface = glass.locator('[data-material="liquid-glass-pill"]');
+    await expect(surface).toBeVisible();
+    await expect.poll(() => surface.evaluate((element) => getComputedStyle(element).backdropFilter)).toContain("url(");
+    const logo = page.getByRole("link", { name: "xMatrix home", exact: true });
+    const logoBounds = (await logo.boundingBox())!;
+    const glassBounds = (await glass.boundingBox())!;
+    expect(glassBounds.x).toBeLessThanOrEqual(logoBounds.x);
+    expect(glassBounds.y).toBeLessThanOrEqual(logoBounds.y);
+    expect(glassBounds.x + glassBounds.width).toBeGreaterThanOrEqual(logoBounds.x + logoBounds.width);
+    expect(glassBounds.y + glassBounds.height).toBeGreaterThanOrEqual(logoBounds.y + logoBounds.height);
+    await expect(logo).toBeVisible();
+    await logo.click();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(glass).toHaveCSS("opacity", "0");
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.evaluate(() => window.scrollTo(0, 25));
+    await expect(glass).toHaveCSS("opacity", "1");
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(glass).toHaveCSS("opacity", "0");
+  });
+}
+
+for (const width of [393, 820, 1440]) {
   test(`public navigation does not obscure content at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
 
@@ -19,14 +61,14 @@ for (const width of [393, 820, 1440]) {
         await header.getByRole("button", { name: "Open navigation menu" }).click();
         const sheet = page.locator(".site-nav-sheet");
         await expect(sheet).toBeVisible();
-        await sheet.getByRole("link", { name: "How it Works", exact: true }).click();
+        await sheet.getByRole("link", { name: "Setup", exact: true }).click();
         await expect(sheet).toBeHidden();
       } else {
-        await header.getByRole("link", { name: "How it Works", exact: true }).click();
+        await header.getByRole("link", { name: "Setup", exact: true }).click();
       }
 
       await expect(page).toHaveURL(/\/#how-it-works$/);
-      const title = page.getByRole("heading", { name: "Connect your workspace", exact: true });
+      const title = page.getByRole("heading", { name: "Install xMatrix", exact: true });
       // Sticky header stays put; land the installation panel just below it.
       await title.evaluate((element) => {
         const panel = element.closest('[data-material="wood-panel"]')!;

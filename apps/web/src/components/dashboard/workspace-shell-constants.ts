@@ -2,6 +2,7 @@
 import type { ComponentType } from "react";
 import {
   Bell,
+  Bot,
   Cpu,
   Database,
   Hash,
@@ -22,7 +23,14 @@ export const EMPTY_CHANNEL_HISTORY: ChannelMessage[] = [];
 
 export const AGENT_REFRESH_INTERVAL_MS = 60000;
 
-export const RELAY_PUSH_PING_INTERVAL_MS = 120000;
+/**
+ * The Hub answers this exact frame itself (a WebSocket auto-response), without
+ * waking the Durable Object that holds the socket, so a short interval costs
+ * nothing and a socket the OS dropped is replaced within seconds.
+ */
+export { HUMAN_HEARTBEAT_PING } from "@xmatrix/protocol";
+export const RELAY_PUSH_PING_INTERVAL_MS = 25_000;
+export const RELAY_PUSH_PONG_TIMEOUT_MS = 10_000;
 
 export const HUMAN_FOCUS_STABILITY_MS = 50;
 
@@ -186,8 +194,8 @@ export const COUNT_CHIP_MATERIAL_CLASS =
   "app-shared-chip rounded-full app-material-liquid-pill app-liquid-glass-surface app-liquid-glass-fill";
 
 export const EVENT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  agent_connected: Cpu,
-  agent_disconnected: Cpu,
+  agent_connected: Bot,
+  agent_disconnected: Bot,
   channel_mention: Bell,
   channel_attention_updated: Bell,
   msg_routed: MessageSquare,

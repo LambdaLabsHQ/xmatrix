@@ -173,6 +173,8 @@ export type AppView =
   | "profile"
   | "settings"
   | "admin"
+  /** Every result of one search; its address names the search. */
+  | "search"
   | "more";
 
 
@@ -220,6 +222,7 @@ export const viewLabels: Record<AppView, string> = {
   profile: "Profile",
   settings: "Settings",
   admin: "Platform admin",
+  search: "Search",
   more: "More",
 };
 
@@ -264,6 +267,7 @@ export function isAppView(value: string | null): value is AppView {
     value === "profile" ||
     value === "settings" ||
     value === "admin" ||
+    value === "search" ||
     value === "more"
   );
 }
@@ -330,6 +334,15 @@ export function pagesViewPath(spacePath: string, pageId: string | null, conversa
 /** A list destination's address names the item open in it (`?item=<key>`), so it can be shared. */
 export function toolItemPath(viewPath: string, item: string | null): string {
   return item ? `${viewPath}?item=${encodeURIComponent(item)}` : viewPath;
+}
+
+/**
+ * Platform admin's address also names its open user and each table's search,
+ * sort, and page, so a filtered view can be shared: it keeps its whole query.
+ */
+export function adminViewPath(viewPath: string, location: string): string {
+  const query = parseAppLocation(location).searchParams.toString();
+  return query ? `${viewPath}?${query}` : viewPath;
 }
 
 /** The item a list destination's address names; the reverse of `toolItemPath`. */

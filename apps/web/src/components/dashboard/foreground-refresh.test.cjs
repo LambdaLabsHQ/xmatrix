@@ -2,7 +2,8 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
 test("foreground refresh coalesces resume signals, skips hidden/offline pages, and cleans up", async (t) => {
-  const { listenForForegroundRefresh } = await import("./foreground-refresh.ts");
+  require("./typescript-require.cjs").installTypeScriptRequire();
+  const { listenForForegroundRefresh } = require("./foreground-refresh.ts");
   const win = new EventTarget();
   const doc = Object.assign(new EventTarget(), { hidden: true });
   let now = 0;

@@ -19,6 +19,11 @@ repository/path canonicalization, human-name matching and Markdown context remai
 owned by their existing shared protocol modules. Retired launch spellings remain
 recognizable for rejection and historical display only.
 
+Composer field completion matches the field a candidate inserts. A `pwd:`
+choice may also bind its machine, but it is offered only for `pwd:`, never
+for `machine:`. Machine constraints match either the stable machine ID or
+the owner-assigned name through the shared machine-tag selection rule.
+
 `parseMessageInteraction` produces the message's interpretation plan. Whole-message
 controls are exclusive with ordinary launches. Model/effort batches retain their
 all-lines-or-none rule and eight-statement limit. Handoff consumes its successor
@@ -74,6 +79,11 @@ authoritative. An author can claim only before it; Jev can claim only at or afte
 it. Both contend on the same row, so only one decision wins. The winning harness
 is summoned by an `@<harness>` reply whose id derives from the first message, so
 an idempotent retry does not create a new launch.
+
+An Agent's mention-free first message in an unnamed conversation uses the same
+durable decision and summon. Its owner is checked through the source Instance's
+registration binding. It has no Human picker window: the database deadline is
+immediate, and the routing model claims the decision before the summon is posted.
 
 Launch options represent authorized executable registrations/harnesses, not every
 entry in the target catalog. Options carry explicit funding provenance; adding a

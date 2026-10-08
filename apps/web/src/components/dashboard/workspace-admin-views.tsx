@@ -60,7 +60,6 @@ import {
   noteChannelContentRevision,
   parseChannelContentRevision,
 } from "@/lib/relay-v2/channel-content-revision";
-import { mergeSpaceSnapshot } from "./workspace-space-snapshot";
 import type { SpaceJoinRequest } from "@/components/dashboard/space-join-requests";
 import { HumanProfileSummary } from "@/components/dashboard/human-profile-summary";
 import {
@@ -178,7 +177,7 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
-import { xmatrixApiRequest, requireResponseOk } from "@/lib/query/api-client";
+import { xmatrixApiRequest, requireResponseOk, xmatrixRawResponse } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
@@ -188,7 +187,6 @@ import type {
   ChannelCatalogSyncMetadata,
   ChannelMessage,
   ChannelMemberPresence,
-  ManagementChannelVisibility,
   ObservabilityEvent,
   SerializedAgent,
   SerializedAgentInstance,
@@ -914,14 +912,6 @@ export function SettingsView({
   return <SectionedToolView title="Settings" sections={sections} />;
 }
 
-export type ManagementAgentPatch = {
-  enabled?: boolean;
-  sideEffectsEnabled?: boolean;
-  /** Null restores the platform template. */
-  prompt?: string | null;
-  defaultChannelVisibility?: ManagementChannelVisibility;
-};
-
 export interface SpaceMemberActions {
   onDecideJoinRequest: (spaceId: string, requestId: string, approve: boolean) => Promise<void>;
   onCreateSpaceInviteCode: (
@@ -937,10 +927,6 @@ export interface SpaceMemberActions {
     userId: string,
     role: SpaceInviteRole
   ) => Promise<SpaceMemberActionResult>;
-  onUpdateSpaceManagementAgent: (
-    spaceId: string,
-    patch: ManagementAgentPatch
-  ) => Promise<void>;
   onUpdateSpaceMemberPermissions: (
     spaceId: string,
     patch: Partial<SpaceMemberPermissions>
@@ -955,206 +941,21 @@ export interface SpaceMemberActions {
 }
 
 
-export function SpaceManagementAgentCard({
-  space,
-  canManage,
-  setupHighlight,
-  onUpdate,
-  onDismissSetup,
-}: {
-  space: SerializedSpace;
-  canManage: boolean;
-  setupHighlight: boolean;
-  onUpdate: (
-    spaceId: string,
-    patch: ManagementAgentPatch
-  ) => Promise<void>;
-  onDismissSetup: () => void;
-}) {
-  const config = space.managementAgent;
-  const enabled = config?.enabled === true;
-  const sideEffectsEnabled = config?.sideEffectsEnabled !== false;
-  const savedPrompt = config?.prompt ?? "";
-  const [promptDraft, setPromptDraft] = useState<string | null>(null);
-  const prompt = promptDraft ?? savedPrompt;
-  const [pending, setPending] = useState(false);
-  const [cardError, setCardError] = useState<string | null>(null);
-  const defaultReadMode = config?.defaultChannelVisibility || "management-visible";
-  const needsSetup = canManage && !enabled;
-  const promptChanged = promptDraft !== null && promptDraft !== savedPrompt;
-  async function submit(patch: ManagementAgentPatch) {
-    if (pending) return;
-    setPending(true);
-    setCardError(null);
-    try {
-      await onUpdate(space.id, patch);
-      if (patch.prompt !== undefined) setPromptDraft(null);
-      if (setupHighlight && patch.enabled) onDismissSetup();
-    } catch (err) {
-      setCardError((err as Error).message);
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <div
-      className={cn(
-        "mt-4 border-t border-border/60 pt-4",
-        needsSetup && "border-primary/40",
-        setupHighlight && needsSetup && "border-l-2 border-l-primary pl-3"
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-black">
-            {needsSetup ? "Set up xMatrix" : "xMatrix assistant"}
-          </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Where xMatrix runs when it answers <code>@xMatrix</code> and keeps Channel summaries current.
-            Write a summon such as <code>@auto harness:codex</code>.
-          </p>
-        </div>
-        <span
-          className={cn(
-            "app-status-chip shrink-0 px-3 py-1 text-xs font-bold",
-            COUNT_CHIP_MATERIAL_CLASS
-          )}
-        >
-          {enabled ? (sideEffectsEnabled ? "enabled" : "read-only") : needsSetup ? "not set up" : "off"}
-        </span>
-      </div>
-      {canManage ? (
-        <div className="mt-3 grid grid-cols-3 items-center gap-2 sm:flex sm:flex-wrap">
-          <textarea
-            value={prompt}
-            disabled={pending}
-            autoFocus={setupHighlight && needsSetup}
-            onChange={(event) => setPromptDraft(event.target.value)}
-            aria-label={`xMatrix prompt for ${space.name}`}
-            placeholder="@auto harness:codex"
-            rows={8}
-            spellCheck={false}
-            className="col-span-3 min-h-40 w-full rounded border border-border bg-card px-2 py-1.5 font-mono text-xs outline-none disabled:opacity-60"
-          />
-          <button
-            type="button"
-            disabled={pending || (enabled && !promptChanged)}
-            onClick={() =>
-              void submit({
-                ...(enabled ? {} : { enabled: true }),
-                ...(promptChanged ? { prompt: promptDraft!.trim() ? promptDraft : null } : {}),
-              })
-            }
-            className={cn(
-              "h-8 min-w-0 rounded border border-border bg-card px-2 text-xs font-bold hover:text-primary disabled:cursor-not-allowed disabled:opacity-60 sm:shrink-0 sm:px-3",
-              !enabled && "col-span-3"
-            )}
-          >
-            {pending ? "Saving…" : enabled ? "Save prompt" : "Enable"}
-          </button>
-          {config?.prompt !== undefined ? (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void submit({ prompt: null })}
-              className={actionClass({ variant: "secondary", size: "sm" }, "min-w-0 sm:shrink-0 sm:px-3")}
-              title="Use the platform template again"
-            >
-              Reset to template
-            </button>
-          ) : null}
-          {enabled ? (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void submit({ sideEffectsEnabled: !sideEffectsEnabled })}
-              className={actionClass({ variant: "secondary", size: "sm" }, "min-w-0 sm:shrink-0 sm:px-3")}
-              title={
-                sideEffectsEnabled
-                  ? "Pause every management side effect while preserving read-only diagnosis and audit access"
-                  : "Resume Hub-authorized management side effects"
-              }
-            >
-              {sideEffectsEnabled ? "Pause actions" : "Resume actions"}
-            </button>
-          ) : null}
-          {enabled ? (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void submit({ enabled: false })}
-              className={actionClass({ variant: "secondary", size: "sm" }, "min-w-0 sm:shrink-0 sm:px-3")}
-            >
-              Disable
-            </button>
-          ) : null}
-          {enabled && !sideEffectsEnabled ? (
-            <p className={noticeClass("attention", "col-span-3 w-full text-xs font-bold")}>
-              The management fuse is active. xMatrix can still inspect events and audit records,
-              but Hub rejects every side effect.
-            </p>
-          ) : null}
-          <label className="col-span-3 flex min-w-0 flex-1 items-center gap-2 text-xs font-bold text-muted-foreground">
-            Default
-            <div className="min-w-0 flex-1">
-              <GlassSelect
-                value={defaultReadMode}
-                disabled={pending}
-                aria-label={`Management assistant default read mode for ${space.name}`}
-                options={[
-                  { value: "management-visible", label: "Read channels" },
-                  { value: "metadata-only", label: "Activity only" },
-                  { value: "excluded", label: "Off by default" },
-                ]}
-                onChange={(value) =>
-                  void submit({
-                    defaultChannelVisibility: value as ManagementChannelVisibility,
-                  })
-                }
-                className="h-8 rounded bg-card px-2 text-xs font-bold text-foreground"
-              />
-            </div>
-          </label>
-          {setupHighlight && needsSetup ? (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={onDismissSetup}
-              className="h-8 shrink-0 rounded px-2 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-60"
-            >
-              Skip for now
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Only owners and admins can change this.
-        </p>
-      )}
-      {cardError ? <p className="mt-2 text-xs text-destructive">{cardError}</p> : null}
-    </div>
-  );
-}
-
 export function TeamView({
   token,
   user,
   currentSpace,
   error,
-  managementSetupSpaceId,
   joinRequestsBySpace,
   onDecideJoinRequest,
   onCreateSpaceInviteCode,
   onInviteSpaceMembers,
   onUpdateSpaceMemberRole,
   onRemoveSpaceMember,
-  onUpdateSpaceManagementAgent,
   onUpdateSpaceMemberPermissions,
   onUpdateSpacePreferredLanguage,
   onDeleteSpace,
   onRestoreSpace,
-  onDismissManagementSetup,
   spaces,
   creatingSpace,
   onCreateSpace,
@@ -1164,10 +965,8 @@ export function TeamView({
   user: { id: string; email: string; name?: string; avatarUrl?: string };
   currentSpace: SerializedSpace | null;
   error: string | null;
-  managementSetupSpaceId: string | null;
   joinRequestsBySpace: Record<string, SpaceJoinRequest[]>;
 
-  onDismissManagementSetup: () => void;
   spaces: SerializedSpace[];
   creatingSpace: boolean;
   onCreateSpace: (name: string) => Promise<SerializedSpace | undefined>;
@@ -1371,13 +1170,6 @@ export function TeamView({
                   <div className="mt-3 text-xs text-muted-foreground">
                     {space.members.length} {space.members.length === 1 ? "member" : "members"}
                   </div>
-                  <SpaceManagementAgentCard
-                    space={space}
-                    canManage={canManage}
-                    setupHighlight={space.id === managementSetupSpaceId}
-                    onUpdate={onUpdateSpaceManagementAgent}
-                    onDismissSetup={onDismissManagementSetup}
-                  />
                   {canManage ? (
                     <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:flex">
                       <span className="font-bold">Language / 语言</span>
@@ -1883,7 +1675,7 @@ export async function fetchChannelCatalog(
   let res: Response;
   try {
     res = await runWorkspaceFetchWithRetry(() =>
-      fetch(route, {
+      xmatrixRawResponse(route, {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
         signal: workspaceAttemptSignal(sequenceSignal),
@@ -2000,6 +1792,21 @@ export async function fetchSpaces(token: string, signal?: AbortSignal): Promise<
   return sortSpaces(data.spaces || []);
 }
 
+/* The Spaces a signed-in person lands with. Someone with none is given their
+   own, so the first screen is a Space they can act in rather than an empty
+   app; the Hub creates it only for an account that has no Space at all. */
+export async function fetchSpacesForLanding(
+  token: string,
+  signal?: AbortSignal,
+): Promise<SerializedSpace[]> {
+  const spaces = await fetchSpaces(token, signal);
+  if (spaces.length > 0) return spaces;
+  const data = await xmatrixApiRequest<{ space?: SerializedSpace | null }>({
+    url: WEB_PROXY_ROUTES.personal_space, token, method: "POST", signal,
+  });
+  return data.space ? [data.space] : fetchSpaces(token, signal);
+}
+
 export async function fetchProjects(
   token: string,
   signal?: AbortSignal,
@@ -2041,7 +1848,7 @@ export async function patchAutomation(
   automationId: string,
   input: AutomationUpdateRequest
 ): Promise<SerializedAutomation> {
-  const res = await fetch(WEB_PROXY_ROUTES.automation(automationId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automationId), {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2068,7 +1875,7 @@ export async function setAutomationPaused(
   const route = paused
     ? WEB_PROXY_ROUTES.automation_pause(automation.id)
     : WEB_PROXY_ROUTES.automation_resume(automation.id);
-  const res = await fetch(route, {
+  const res = await xmatrixRawResponse(route, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ expectedVersion: automation.version }),
@@ -2080,7 +1887,7 @@ export async function setAutomationPaused(
 }
 
 export async function removeAutomation(token: string, automation: SerializedAutomation): Promise<void> {
-  const res = await fetch(WEB_PROXY_ROUTES.automation(automation.id), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automation.id), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ expectedVersion: automation.version }),
@@ -2093,7 +1900,7 @@ export async function registerWorkspace(
   token: string,
   candidate: DesktopWorkspaceCandidate
 ): Promise<SerializedWorkspace> {
-  const res = await fetch(WEB_PROXY_ROUTES.workspaces, {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.workspaces, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2122,7 +1929,7 @@ export async function registerWorkspace(
 }
 
 export async function deleteWorkspace(token: string, workspace: SerializedWorkspace): Promise<void> {
-  const res = await fetch(WEB_PROXY_ROUTES.workspaces, {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.workspaces, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ machineId: workspace.machineId, canonicalCwd: workspace.canonicalCwd }),
@@ -2160,7 +1967,7 @@ export async function fetchChannelHistory(
   if (options.afterSequence !== undefined) {
     params.set("afterSequence", String(options.afterSequence));
   }
-  const res = await fetch(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
+  const res = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
     signal: options.signal
@@ -2229,7 +2036,7 @@ export async function syncChannelReadCursor(
   channelId: string,
   sequence: number
 ): Promise<ChannelReadStateUpdate | undefined> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_read(channelId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_read(channelId), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2255,7 +2062,7 @@ export async function reactToChannelMessage(
   messageId: string,
   emoji: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message_reactions(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_reactions(channelId, messageId), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2274,7 +2081,7 @@ export async function updateChannelMessage(
   messageId: string,
   body: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2292,7 +2099,7 @@ export async function recallChannelMessage(
   channelId: string,
   messageId: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
@@ -2790,7 +2597,7 @@ export function replaceSpace(spaces: SerializedSpace[], space: SerializedSpace):
   const exists = spaces.some((current) => current.id === space.id);
   const next = exists
     ? spaces.map((current) =>
-        current.id === space.id ? mergeSpaceSnapshot(current, space) : current
+        current.id === space.id ? space : current
       )
     : [...spaces, space];
   return sortSpaces(next);
@@ -2843,7 +2650,6 @@ export function channelReadSequenceFromEvent(event: ObservabilityEvent): number 
 
 export { normalizeChannelSearchText } from "./workspace-shell-search-model";
 
-export { mergeWorkspaceSearchResults } from "./workspace-shell-search-model";
 
 export { channelReadCountsStorageKey } from "./workspace-shell-search-model";
 
