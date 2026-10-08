@@ -24,6 +24,8 @@ const FIELD_ROW = 44;
 const PHONE_FIELD_ROW = 48;
 /** Below this width the panel is the phone's whole search screen. */
 const PHONE_WIDTH = 640;
+/** A phone's top-bar button is centred this far in from the panel's side. */
+const PHONE_COLUMN = 32;
 /** Space kept between the panel and the window's edges. */
 const EDGE = 8;
 /** The top edge may come closer: the field row centres on a top-band control. */
@@ -35,6 +37,8 @@ const MAX_HEIGHT = 560;
 const PANEL_MATERIAL = { blur: 16 } as const;
 
 type PanelPlacement = { top: number; right: number; width: number; maxHeight: number; row: number;
+  /** How far in from each side the leading and trailing glyph columns are centred. */
+  column: number;
   /** A phone's panel runs down to the keyboard or the screen's foot. */
   fill: boolean };
 
@@ -54,19 +58,22 @@ function visibleSearchAnchor(): DOMRect | null {
  * right edge reaches just past it, so the close button lands where the
  * magnifier was. Without an anchor on screen it takes the window's top right.
  * On a phone it spans the screen and reaches down to the keyboard: search is
- * the whole screen there, not a card over it.
+ * the whole screen there, not a card over it. Its sides keep the phone's
+ * margin, the one the top bar's controls and the dock keep, so the glyph
+ * columns sit as far in as the top bar's button centre does.
  */
-export function searchPanelPlacement(anchor: Pick<DOMRect, "top" | "right" | "height"> | null,
+export function searchPanelPlacement(anchor: Pick<DOMRect, "top" | "right" | "width" | "height"> | null,
   viewport: { width: number; height: number }): PanelPlacement {
   const fill = viewport.width < PHONE_WIDTH;
   const row = fill ? PHONE_FIELD_ROW : FIELD_ROW;
-  const width = fill ? viewport.width - 2 * EDGE : Math.min(WIDTH, viewport.width - 2 * EDGE);
-  const inset = anchor ? Math.max(0, (row - anchor.height) / 2) : 0;
-  const anchorRight = anchor ? anchor.right + inset : viewport.width - EDGE;
-  const right = Math.max(EDGE, Math.min(viewport.width - anchorRight, viewport.width - width - EDGE));
+  const column = fill ? PHONE_COLUMN : row / 2;
+  const anchorRight = anchor ? anchor.right - anchor.width / 2 + column : viewport.width - EDGE;
+  const margin = Math.max(EDGE, viewport.width - anchorRight);
+  const width = fill ? viewport.width - 2 * margin : Math.min(WIDTH, viewport.width - 2 * EDGE);
+  const right = Math.max(EDGE, Math.min(margin, viewport.width - width - EDGE));
   const top = Math.max(TOP_EDGE, anchor ? anchor.top + anchor.height / 2 - row / 2 : EDGE);
   const room = viewport.height - top - EDGE;
-  return { top, right, width, maxHeight: fill ? room : Math.min(MAX_HEIGHT, room), row, fill };
+  return { top, right, width, maxHeight: fill ? room : Math.min(MAX_HEIGHT, room), row, column, fill };
 }
 
 export function SearchPanel({
@@ -140,7 +147,8 @@ export function SearchPanel({
         className={cn("app-search-panel-frame fixed flex", !placement && "invisible")}
         style={placement ? { top: placement.top, right: placement.right, width: placement.width,
           maxHeight: placement.maxHeight, ...(placement.fill ? { height: placement.maxHeight } : {}),
-          "--app-search-panel-row": `${placement.row}px` } as React.CSSProperties : undefined}
+          "--app-search-panel-row": `${placement.row}px`,
+          "--app-search-panel-column": `${placement.column}px` } as React.CSSProperties : undefined}
       >
         <LiquidGlassCard
           role="dialog"
@@ -148,9 +156,9 @@ export function SearchPanel({
           aria-label={title}
           material={PANEL_MATERIAL}
           className="app-search-panel flex min-h-0 w-full flex-col text-foreground"
-          style={placement ? { transformOrigin: `calc(100% - ${placement.row / 2}px) ${placement.row / 2}px` } : undefined}
+          style={placement ? { transformOrigin: `calc(100% - ${placement.column}px) ${placement.row / 2}px` } : undefined}
         >
-          <div className="app-search-panel-field flex shrink-0 items-center gap-2">
+          <div className="app-search-panel-field flex shrink-0 items-center gap-3">
             <Search className="size-4 shrink-0 text-muted-foreground" />
             {chips}
             <input

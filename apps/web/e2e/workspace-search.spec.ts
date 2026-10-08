@@ -199,20 +199,39 @@ test("the search panel drops from the control that opened it, one glass with not
 test.describe("on a phone", () => {
   test.use(E2E_MOBILE_CONTEXT);
 
-  test("search is the whole screen, down to its foot, with text iOS will not zoom", async ({ page }) => {
+  test("search is the whole screen, down to its foot, its columns on the top bar's", async ({ page }) => {
     await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
     await stubMessageSearch(page);
     await page.goto(`/app/${E2E_SPACE.id}/channels`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: "Search workspace" }).filter({ visible: true }).first().click();
+    const anchor = page.locator("[data-search-anchor]").filter({ visible: true }).first();
+    await expect.poll(() => anchor.boundingBox()).not.toBeNull();
+    const control = (await anchor.boundingBox())!;
+    await anchor.click();
     const panel = page.getByRole("dialog", { name: "Search workspace" });
-    await expect(panel).toBeVisible();
-    await expect(page.locator("[data-workspace-search-input]")).toBeFocused();
+    const input = page.locator("[data-workspace-search-input]");
+    await expect(input).toBeFocused();
+    await page.keyboard.type("deploy");
+    await expect(panel.getByText("deploy the hub (1)")).toBeVisible();
     await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/u);
     const box = (await panel.boundingBox())!;
     const viewport = page.viewportSize()!;
-    expect(box.x).toBeCloseTo(8, 0);
-    expect(box.x + box.width).toBeCloseTo(viewport.width - 8, 0);
+    const centre = (b: { x: number; width: number }) => b.x + b.width / 2;
+    // Edge to edge with the phone's margin, down to the screen's foot.
+    expect(box.x).toBeCloseTo(viewport.width - (box.x + box.width), 0);
     expect(box.y + box.height).toBeCloseTo(viewport.height - 8, 0);
-    expect(await page.locator("[data-workspace-search-input]").evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+    // The close button is where the top bar's search button was.
+    const close = (await panel.getByRole("button", { name: "Close search" }).boundingBox())!;
+    expect(centre(close)).toBeCloseTo(centre(control), 0);
+    // The field's magnifier and text start on the rows' icon and text columns; ↵ sits under the close button.
+    const glyph = (await page.locator(".app-search-panel-field > svg").boundingBox())!;
+    const rowIcon = (await page.locator(".app-search-panel-row > svg").first().boundingBox())!;
+    const inputBox = (await input.boundingBox())!;
+    const rowText = (await page.locator(".app-search-panel-row > span").first().boundingBox())!;
+    const hint = (await page.locator(".app-search-panel-hint").boundingBox())!;
+    expect(glyph.x).toBeCloseTo(rowIcon.x, 0);
+    expect(inputBox.x).toBeCloseTo(rowText.x, 0);
+    expect(centre(hint)).toBeCloseTo(centre(close), 0);
+    expect(centre(glyph) - box.x).toBeCloseTo(box.x + box.width - centre(close), 0);
+    expect(await input.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
   });
 });
