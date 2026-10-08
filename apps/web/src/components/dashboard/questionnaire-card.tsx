@@ -6,10 +6,10 @@
 // as a reply the Run hands to that request, so the harness continues its turn.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { ArrowUp, Check, HelpCircle } from "lucide-react";
+import { ArrowUp, Check, Circle, CircleDot, Pencil, Square, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { actionClass } from "@/components/ui/action-tone";
-import { COUNT_CHIP_MATERIAL_CLASS } from "./workspace-shell-constants";
+import { ToolDetailSection } from "./tool-split";
 import type { TimelineItem } from "./workspace-shell-message-model";
 
 const QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
@@ -104,17 +104,25 @@ export function questionnaireMetadata(metadata: Record<string, unknown> | undefi
   };
 }
 
-/** The answer each card in the loaded timeline already got, by card message id. */
-const AnsweredQuestionnaires = createContext<ReadonlyMap<string, string>>(new Map());
+/** The answers each card in the loaded timeline already got, by card message id. */
+const AnsweredQuestionnaires = createContext<ReadonlyMap<string, Record<string, string[]>>>(new Map());
+
+function answersOf(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([id, values]) => [
+    id,
+    Array.isArray(values) ? values.map(trimmed).filter(Boolean) : [],
+  ]));
+}
 
 export function AnsweredQuestionnairesProvider({ timeline, children }: { timeline: readonly TimelineItem[]; children: ReactNode }) {
   const answered = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, Record<string, string[]>>();
     for (const item of timeline) {
       const metadata = item.metadata;
       if (metadata?.kind !== QUESTIONNAIRE_ANSWER_KIND) continue;
       const cardId = trimmed(metadata.questionnaireMessageId);
-      if (cardId && !map.has(cardId)) map.set(cardId, item.body);
+      if (cardId && !map.has(cardId)) map.set(cardId, answersOf(metadata.answers));
     }
     return map;
   }, [timeline]);
@@ -130,11 +138,12 @@ export function QuestionnaireMessage({
   message: TimelineItem;
   onAnswer: (message: TimelineItem, answer: QuestionnaireAnswer) => Promise<boolean>;
 }) {
-  const answeredBody = useContext(AnsweredQuestionnaires).get(message.messageId ?? "");
+  const recorded = useContext(AnsweredQuestionnaires).get(message.messageId ?? "");
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, string>>({});
-  const [sent, setSent] = useState(false);
-  const answered = sent || answeredBody !== undefined;
+  const [sent, setSent] = useState<Record<string, string[]> | null>(null);
+  // Once answered, the card shows the answer it got and takes no other.
+  const answers = recorded ?? sent;
 
   function answerFor(question: QuestionnaireQuestion): string[] {
     const ids = selected[question.id] ?? [];
@@ -143,7 +152,7 @@ export function QuestionnaireMessage({
     return typed ? [...labels, typed] : labels;
   }
 
-  const canSubmit = !answered && questionnaire.questions.every((question) => answerFor(question).length > 0);
+  const canSubmit = !answers && questionnaire.questions.every((question) => answerFor(question).length > 0);
 
   function toggle(question: QuestionnaireQuestion, option: QuestionnaireOption) {
     setSelected((current) => {
@@ -166,98 +175,142 @@ export function QuestionnaireMessage({
   }
 
   function submit() {
-    const answers: Record<string, string[]> = {};
+    const picked: Record<string, string[]> = {};
     const lines = questionnaire.questions.map((question) => {
-      answers[question.id] = answerFor(question);
-      const value = answers[question.id].join(", ");
+      picked[question.id] = answerFor(question);
+      const value = picked[question.id].join(", ");
       return questionnaire.questions.length === 1 ? value : `${question.label}: ${value}`;
     });
-    setSent(true);
+    setSent(picked);
     // A failed send reopens the card; the channel shows why.
-    void onAnswer(message, { body: lines.join("\n"), requestKey: questionnaire.requestKey, answers }).then((posted) => {
-      if (!posted) setSent(false);
+    void onAnswer(message, { body: lines.join("\n"), requestKey: questionnaire.requestKey, answers: picked }).then((posted) => {
+      if (!posted) setSent(null);
     });
   }
 
-  const multiple = questionnaire.questions.some((question) => question.selectionMode === "multiple");
+  const lone = questionnaire.questions.length === 1 ? questionnaire.questions[0] : undefined;
+  const title = [`${questionnaire.harness ?? "Agent"} asks`, lone?.header].filter(Boolean).join(" · ");
   return (
-    <div className="mt-2 max-w-3xl border border-border bg-background p-3" data-questionnaire-card={answered ? "answered" : "open"}>
-      <div className="mb-2 flex items-center gap-2 text-sm font-black">
-        <HelpCircle className="size-4 text-primary" />
-        <span>{questionnaire.harness ? `${questionnaire.harness} asks` : "Question"}</span>
-        <span className={cn("px-1.5 py-0.5 text-[11px] font-bold uppercase text-muted-foreground", COUNT_CHIP_MATERIAL_CLASS)}>
-          {multiple ? "multi" : "single"}
-        </span>
-      </div>
-      <div className="space-y-3">
-        {questionnaire.questions.map((question) => (
-          <fieldset key={question.id} className="min-w-0" disabled={answered}>
-            {question.header && question.header !== question.label ? (
-              <div className="text-[11px] font-bold uppercase text-muted-foreground">{question.header}</div>
-            ) : null}
-            <legend className="mb-1 text-sm font-bold">{question.label}</legend>
-            {question.options.length > 0 ? (
-              <div className="grid gap-1.5">
-                {question.options.map((option) => {
-                  const checked = (selected[question.id] ?? []).includes(option.id);
-                  return (
-                    <label
-                      key={option.id}
-                      className={cn(
-                        "flex min-w-0 cursor-pointer items-start gap-2 border border-border px-2.5 py-2 text-sm transition hover:bg-muted/60",
-                        checked && "border-primary bg-primary/10",
-                        answered && "cursor-default hover:bg-transparent"
-                      )}
-                    >
-                      <input
-                        type={question.selectionMode === "multiple" ? "checkbox" : "radio"}
-                        name={`${message.messageId || message.id}:${question.id}`}
-                        checked={checked}
-                        onChange={() => toggle(question, option)}
-                        className="mt-0.5 size-4 shrink-0 accent-primary"
-                      />
-                      <span className="min-w-0">
-                        <span className="block break-words font-bold">{option.label}</span>
-                        {option.description && (
-                          <span className="mt-0.5 block break-words text-xs text-muted-foreground">{option.description}</span>
-                        )}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            ) : null}
-            {question.allowOther ? (
-              <input
-                type="text"
-                value={other[question.id] ?? ""}
-                onChange={(event) => typeOther(question, event.target.value)}
-                placeholder={question.options.length > 0 ? "Other…" : "Your answer"}
-                aria-label={`${question.label}: ${question.options.length > 0 ? "other answer" : "answer"}`}
-                className="mt-1.5 h-8 w-full min-w-0 border border-border bg-background px-2.5 text-sm outline-none focus:border-primary"
-              />
-            ) : null}
-          </fieldset>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        {answered ? (
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-bold text-muted-foreground">
-            <Check className="size-3.5 shrink-0" strokeWidth={2.5} />
-            <span className="truncate">{answeredBody ? `Answered: ${answeredBody}` : "Answered"}</span>
+    <div className="mt-1 max-w-2xl" data-questionnaire-card={answers ? "answered" : "open"}>
+      <ToolDetailSection
+        title={title}
+        action={answers ? (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground">
+            <Check className="size-3.5" strokeWidth={2.5} />
+            Answered
           </span>
         ) : (
-          <button
-            type="button"
-            disabled={!canSubmit}
-            onClick={submit}
-            className={actionClass({ variant: "primary", size: "sm" })}
-          >
+          <button type="button" disabled={!canSubmit} onClick={submit} className={actionClass({ variant: "secondary", size: "sm" })}>
             <ArrowUp className="size-3.5" strokeWidth={2.5} />
             Send answer
           </button>
         )}
-      </div>
+      >
+        <div className="space-y-3">
+          {questionnaire.questions.map((question) => (
+            <QuestionLines
+              key={question.id}
+              question={question}
+              header={lone ? undefined : question.header}
+              group={`${message.messageId || message.id}:${question.id}`}
+              picked={selected[question.id] ?? []}
+              typed={other[question.id] ?? ""}
+              answer={answers ? (answers[question.id] ?? []) : undefined}
+              onToggle={(option) => toggle(question, option)}
+              onType={(value) => typeOther(question, value)}
+            />
+          ))}
+        </div>
+      </ToolDetailSection>
     </div>
+  );
+}
+
+/** One question: its prompt, then its options as paper lines. */
+function QuestionLines({ question, header, group, picked, typed, answer, onToggle, onType }: {
+  question: QuestionnaireQuestion;
+  header?: string;
+  group: string;
+  picked: string[];
+  typed: string;
+  /** What the card was answered with; the lines no longer take input. */
+  answer?: string[];
+  onToggle: (option: QuestionnaireOption) => void;
+  onType: (value: string) => void;
+}) {
+  const multiple = question.selectionMode === "multiple";
+  const Off = multiple ? Square : Circle;
+  const On = multiple ? SquareCheck : CircleDot;
+  const known = new Set(question.options.map((option) => option.label));
+  const typedAnswer = answer?.filter((value) => !known.has(value)).join(", ");
+  return (
+    <fieldset className="min-w-0" disabled={Boolean(answer)}>
+      <legend className="text-[15px] font-bold leading-snug">
+        {header ? <span className="mr-1.5 text-xs font-black uppercase tracking-wide text-muted-foreground">{header}</span> : null}
+        {question.label}
+      </legend>
+      <ul className="app-tool-lines mt-1">
+        {question.options.map((option) => {
+          const chosen = answer ? answer.includes(option.label) : picked.includes(option.id);
+          const Mark = chosen ? On : Off;
+          return (
+            <li key={option.id}>
+              <label
+                className={cn(
+                  "flex w-full min-w-0 items-center gap-3 py-2.5 text-left",
+                  answer ? "cursor-default" : "cursor-pointer",
+                  answer && !chosen && "opacity-45"
+                )}
+              >
+                <input
+                  type={multiple ? "checkbox" : "radio"}
+                  name={group}
+                  checked={chosen}
+                  onChange={() => onToggle(option)}
+                  className="sr-only"
+                />
+                <span className="app-tool-state-icon" data-state={chosen ? "running" : "offline"} aria-hidden="true">
+                  <Mark className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={cn("block truncate", chosen ? "font-black" : "font-semibold")}>{option.label}</span>
+                  {option.description ? (
+                    <span className="block truncate text-xs text-muted-foreground">{option.description}</span>
+                  ) : null}
+                </span>
+                {chosen ? <Check className="size-3.5 shrink-0" strokeWidth={2.5} aria-hidden="true" /> : null}
+              </label>
+            </li>
+          );
+        })}
+        {answer ? (
+          typedAnswer ? (
+            <li>
+              <span className="flex w-full min-w-0 items-center gap-3 py-2.5">
+                <span className="app-tool-state-icon" data-state="running" aria-hidden="true"><Pencil className="size-4" /></span>
+                <span className="min-w-0 flex-1 truncate font-black">{typedAnswer}</span>
+                <Check className="size-3.5 shrink-0" strokeWidth={2.5} aria-hidden="true" />
+              </span>
+            </li>
+          ) : null
+        ) : question.allowOther ? (
+          <li>
+            <label className="flex w-full min-w-0 items-center gap-3 py-2.5">
+              <span className="app-tool-state-icon" data-state={typed.trim() ? "running" : "offline"} aria-hidden="true">
+                <Pencil className="size-4" />
+              </span>
+              <input
+                type="text"
+                value={typed}
+                onChange={(event) => onType(event.target.value)}
+                placeholder={question.options.length > 0 ? "Other…" : "Your answer"}
+                aria-label={`${question.label}: ${question.options.length > 0 ? "other answer" : "answer"}`}
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+            </label>
+          </li>
+        ) : null}
+      </ul>
+    </fieldset>
   );
 }

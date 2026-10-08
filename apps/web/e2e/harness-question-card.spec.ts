@@ -61,7 +61,7 @@ async function openChannel(page: import("@playwright/test").Page, messages: unkn
 test("a harness question card answers its request with the picked option", async ({ page }) => {
   await openChannel(page, [questionCard]);
   const card = page.locator('[data-questionnaire-card="open"]');
-  await expect(card.getByText("Codex asks", { exact: true })).toBeVisible();
+  await expect(card.getByRole("heading", { name: "Codex asks · Branch" })).toBeVisible();
   const send = card.getByRole("button", { name: "Send answer" });
   await expect(send).toBeDisabled();
 
@@ -99,7 +99,9 @@ test("an answered card stays closed and shows its answer", async ({ page }) => {
     },
   }]);
   const card = page.locator('[data-questionnaire-card="answered"]');
-  await expect(card.getByText("Answered: staging")).toBeVisible();
+  // The typed answer shows as the chosen line; the options stay, unpicked.
+  await expect(card.getByText("staging", { exact: true })).toBeVisible();
+  await expect(card.getByRole("radio", { name: /release/ })).not.toBeChecked();
   await expect(card.getByRole("button", { name: "Send answer" })).toHaveCount(0);
-  await expect(card.getByRole("textbox")).toBeDisabled();
+  await expect(card.getByRole("textbox")).toHaveCount(0);
 });
