@@ -130,6 +130,39 @@ folded, and who posted. Jev only answers choice, score and boolean
 questions, and the Hub has no text-generation dependency; this digest needs
 none.
 
+### 3.6 A pull request reports back
+
+An Agent that opened a pull request used to learn its fate only by watching
+GitHub from its own process: a watch without a timeout waited forever when
+CI never started, and a Run that slept or was restarted lost the watch
+without knowing. Only Claude Code can start a turn by itself when a
+background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
+
+- **Subscription.** When the Hub records a `pull_request` entry it subscribes
+  the conversation to that pull request, as the Run's owner, through the
+  Space's GitHub connection: an ordinary source relation of kind `issue`,
+  `github:issue:<owner>/<repo>#<n>`, with the features `pulls`, `comments`,
+  `reviews` and `checks`. It is listed in the conversation's Subscriptions
+  with the repository subscriptions. A pull request the connection does not
+  reach is not subscribed; the entry is recorded either way.
+- **What is said.** Others' merge or close, others' submitted reviews and
+  new comments, and one CI verdict per settling of the head commit: when a
+  check suite completes and every suite with check runs has finished, the
+  Hub reads the commit's checks once and posts `CI passed` or `CI failed`
+  with the failed checks. Two suites reporting the same settling post one
+  message; a rerun that settles again posts a new one. The author's own
+  pushes, comments, reviews and merge are not said: the Agent did them.
+- **Delivery.** These are GitHub's posts in the conversation (sender kind
+  `app`). They are work for live Instances but never interrupt a running
+  turn, and they wake resting Instances like any message would
+  ([`instance-sleep.md`](../instance-sleep.md) §3). An Agent may therefore end
+  its turn once its pull request's CI has started and continue when the
+  verdict arrives.
+- **End.** The subscription is removed when the pull request closes,
+  whether or not the close was said.
+- **Privacy.** A private repository's events reach only conversations people
+  outside the Space cannot read, as for repository subscriptions.
+
 ## 4. Rendering
 
 ### 4.1 Web timeline

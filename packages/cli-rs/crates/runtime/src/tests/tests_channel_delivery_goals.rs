@@ -211,6 +211,20 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
         None,
         Some("agent:self")
     ));
+    // A connected app's post queues behind the turn whichever hop carried it.
+    let mut verdict = test_channel_message("m7", "chan-a", "CI failed on acme/app#7");
+    verdict.from.kind = "app".to_string();
+    let app_replay =
+        AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
+            message: verdict,
+            ack_required: Some(true),
+            delivery_intent: None,
+        });
+    assert!(!event_requests_active_turn_interrupt(
+        &app_replay,
+        Some("chan-a"),
+        Some("agent:self")
+    ));
 }
 
 #[test]

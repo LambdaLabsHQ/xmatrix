@@ -16,8 +16,10 @@ export interface ChannelConnectorCommand {
 
 const REPOSITORY_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 
+/* What a row names: `owner/repo` for a repository, `owner/repo#7` for the
+   pull request a Run opened here. */
 export function githubSubscriptionRepository(source: string): string {
-  return source.replace(/^github:repo:/iu, "");
+  return source.replace(/^github:(?:repo|issue):/iu, "");
 }
 
 export function githubSubscriptionSource(repository: string): string {

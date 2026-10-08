@@ -8,7 +8,8 @@ import {
  * A port that records each command as `{ family, input, context }`
  * in `commands` and answers it with `respond`; history is inert.
  */
-export function recordingAgentInstancePort({ respond = () => ({}), signals = { async publish() {} } } = {}) {
+export function recordingAgentInstancePort({ respond = () => ({}), signals = { async publish() {} },
+  pullRequestOpened } = {}) {
   const commands = [];
   const port = new PostgresAgentInstancePort({
     atomicInstanceConnect: true,
@@ -35,6 +36,7 @@ export function recordingAgentInstancePort({ respond = () => ({}), signals = { a
       },
     },
     signals,
+    ...(pullRequestOpened ? { pullRequestOpened } : {}),
   });
   return { port, commands };
 }

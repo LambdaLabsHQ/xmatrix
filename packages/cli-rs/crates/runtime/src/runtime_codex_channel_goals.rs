@@ -205,7 +205,11 @@ fn event_requests_active_turn_interrupt_with_replay(
     let authored_here = message.from.kind == "agent"
         && own_identity_id
             .is_some_and(|identity| message.from.identity_id.as_deref() == Some(identity));
-    !(authored_here || (replayed && message.from.kind == "agent"))
+    // A connected app's post (a pull request's CI verdict) is news, never
+    // steering: the hub does not flag it live, and replay queues it the same way.
+    !(authored_here
+        || message.from.kind == "app"
+        || (replayed && message.from.kind == "agent"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

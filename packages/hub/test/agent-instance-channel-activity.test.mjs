@@ -9,8 +9,8 @@ import { recordingAgentInstancePort } from "./support/agent-instance-port.mjs";
  * and neither send path lets a caller supply metadata only the Hub may write.
  */
 
-function harness() {
-  const { port, commands } = recordingAgentInstancePort({ respond: () => ({ sequence: 7 }) });
+function harness(options = {}) {
+  const { port, commands } = recordingAgentInstancePort({ respond: () => ({ sequence: 7 }), ...options });
   const session = {
     principal: {
       ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1",
@@ -41,6 +41,33 @@ test("a plan report becomes a Hub-written activity entry under the Run's proof",
     { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" });
   assert.equal(input.residual.appMetadata.xmatrixProvenance, "activity");
   assert.equal(input.residual.appMetadata.xmatrixActivity.kind, "plan");
+});
+
+test("an opened pull request subscribes the conversation it was opened in, as the Run's owner", async () => {
+  const opened = [];
+  const { commands, port, session } = harness({ pullRequestOpened: async (input) => { opened.push(input); } });
+  await port.execute(session, {
+    type: "channel_activity", requestId: "r-3", channelId: "channel",
+    activity: { kind: "pull_request", url: "https://github.com/LambdaLabsHQ/xmatrix/pull/189" },
+  });
+  assert.equal(commands[0].input.body, "↗ Opened pull request LambdaLabsHQ/xmatrix#189");
+  assert.deepEqual(opened, [{ spaceId: "space", channelId: "channel", ownerUserId: "owner",
+    repository: "LambdaLabsHQ/xmatrix", number: 189, commandId: "activity:r-3" }]);
+  await port.execute(session, {
+    type: "channel_activity", requestId: "r-4", channelId: "channel",
+    activity: { kind: "plan", completed: ["Open the pull request"], steps: [] },
+  });
+  assert.equal(opened.length, 1, "a plan report subscribes nothing");
+});
+
+test("a failed subscription still records the pull request", async () => {
+  const { commands, port, session } = harness({ pullRequestOpened: async () => { throw new Error("down"); } });
+  const reply = await port.execute(session, {
+    type: "channel_activity", requestId: "r-5", channelId: "channel",
+    activity: { kind: "pull_request", url: "https://github.com/a/b/pull/1" },
+  });
+  assert.equal(reply.type, "channel_message_dispatched");
+  assert.equal(commands.length, 1);
 });
 
 test("a malformed or padded report is refused before anything is written", async () => {
