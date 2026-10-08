@@ -133,4 +133,5 @@ test("homepage display headings use the self-hosted Manrope face", () => {
   assert.match(siteCss, /\.site-display \{\s*font-family: var\(--font-site-display-family\);/);
   assert.match(heroSource, /<h1 className="site-display /);
   assert.doesNotMatch(heroSource, /tracking-\[-0\.055em\]/);
+  assert.match(heroSource, /preload\("\/fonts\/manrope-latin-wght-normal\.woff2", \{ as: "font"/);
 });

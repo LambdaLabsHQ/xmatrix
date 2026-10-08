@@ -1,9 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { preload } from "react-dom";
 import { WoodPanel } from "@/components/ui/material-surfaces";
 
 export function Hero() {
+  // The display face must be in before the first scroll: a late swap reflows
+  // the page mid smooth-scroll and leaves it a few pixels off the top.
+  preload("/fonts/manrope-latin-wght-normal.woff2", { as: "font", type: "font/woff2", crossOrigin: "anonymous" });
   return (
     <section className="site-hero landing-hero relative box-border min-h-svh w-full overflow-hidden px-6 pb-16 pt-20 md:flex md:items-center md:py-24">
       <div className="pointer-events-none relative mx-auto mb-8 aspect-square w-[calc(100%+3rem)] -translate-x-6 overflow-hidden md:absolute md:inset-0 md:mb-0 md:aspect-auto md:w-auto md:translate-x-0">
