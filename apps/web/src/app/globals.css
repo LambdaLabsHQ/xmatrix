@@ -3213,8 +3213,9 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 .xmatrix-app .app-agent-work-instance-name {
   max-width: 12rem;
   overflow: hidden;
-  padding-inline: 0.5rem 0.625rem;
-  border-right: 1px solid color-mix(in oklch, var(--border) 72%, var(--foreground) 28%);
+  /* The glass is the panel's one edge: space and weight, not rules,
+     set the name, the note and the controls apart. */
+  padding-inline: 0.5rem 0.75rem;
   color: var(--foreground);
   font-size: 0.6875rem;
   font-weight: 750;
@@ -3240,12 +3241,15 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   width: 0;
   min-width: max(100%, 15rem);
   margin: 0;
-  padding: 0.375rem 0.5rem 0.4375rem;
-  border-bottom: 1px solid color-mix(in oklch, var(--border) 72%, var(--foreground) 28%);
+  padding: 0.375rem 0.5rem 0.125rem;
   font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.xmatrix-app .app-agent-work-usage-line:not(.text-destructive) {
+  color: var(--muted-foreground);
 }
 
 .xmatrix-app .app-agent-work-action-menu[data-mode="handoff"] {
@@ -3258,7 +3262,6 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   display: flex;
   align-items: center;
   padding-bottom: 0.125rem;
-  border-bottom: 1px solid color-mix(in oklch, var(--border) 72%, var(--foreground) 28%);
 }
 
 .xmatrix-app .app-agent-work-picker-label {
