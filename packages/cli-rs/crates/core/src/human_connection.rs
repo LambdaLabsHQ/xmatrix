@@ -5,7 +5,8 @@ use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::connection_error::durable_object_runtime_reset;
+use crate::backoff::Backoff;
+use crate::connection_error::frame_hub_restarting;
 use crate::error::{CliError, Result};
 use crate::http::{self, CLIENT_COMPATIBILITY_PROTOCOL_VERSION, ClientComponent};
 use crate::protocol::{AuthUser, ChannelMessage};
@@ -136,7 +137,7 @@ async fn handle_human_connection_failure(
     events: &mpsc::UnboundedSender<HumanConnectionEvent>,
     reason: String,
     fatal: bool,
-    backoff: &mut Duration,
+    backoff: &mut Backoff,
 ) -> bool {
     crate::websocket::handle_connection_failure(
         ready,
@@ -144,7 +145,6 @@ async fn handle_human_connection_failure(
         reason,
         fatal,
         backoff,
-        RECONNECT_MAX,
         human_reconnect_events(),
     )
     .await
@@ -162,7 +162,7 @@ async fn run_human_connection(
     let mut ready_tx = Some(ready_tx);
     let mut focused_channel_id: Option<String> = None;
     let mut connected_once = false;
-    let mut backoff = RECONNECT_BASE;
+    let mut backoff = Backoff::new(RECONNECT_BASE, RECONNECT_MAX);
     let connection_url = derive_connection_url_for_owner(&hub_url, &owner_user_id);
 
     loop {
@@ -172,7 +172,7 @@ async fn run_human_connection(
                 component: ClientComponent::Cli,
                 timeout: CONNECT_TIMEOUT,
                 timeout_reason: "Human connection timed out",
-                reconnect_max: RECONNECT_MAX,
+                retry_initial_transient: false,
             },
             &mut ready_tx,
             &event_tx,
@@ -228,7 +228,9 @@ async fn run_human_connection(
         {
             Ok(text) => text,
             Err(reason) => {
-                if crate::websocket::fail_handshake_or_wait(&mut ready_tx, &reason, backoff).await {
+                if crate::websocket::fail_handshake_or_wait(&mut ready_tx, &reason, &mut backoff)
+                    .await
+                {
                     return;
                 }
                 continue;
@@ -239,11 +241,13 @@ async fn run_human_connection(
             Ok(user) => user,
             Err(rejection) => {
                 let reason = rejection.message;
-                if durable_object_runtime_reset(&reason) {
+                // The Hub said a later attempt may succeed: an outage, not a
+                // refusal, so even the first connection keeps trying.
+                if rejection.retryable {
                     let _ = event_tx.send(HumanConnectionEvent::Disconnected {
-                        reason: format!("Human Hub runtime reset: {reason}"),
+                        reason: format!("Human Hub briefly unavailable: {reason}"),
                     });
-                    crate::websocket::wait_before_reconnect(&mut backoff, RECONNECT_MAX).await;
+                    backoff.wait().await;
                     continue;
                 }
                 if crate::websocket::fail_initial_ready(&mut ready_tx, &reason) {
@@ -253,8 +257,11 @@ async fn run_human_connection(
                 // The same token would be refused again: renew it, or stop.
                 if rejection.auth {
                     match renewed_token(&hub_url, &token).await {
-                        Some(renewed) => token = renewed,
-                        None => {
+                        Renewal::Renewed(renewed) => token = renewed,
+                        // The Hub could not be asked: the session may be
+                        // fine, so keep it and try again after the backoff.
+                        Renewal::Unavailable => {}
+                        Renewal::Refused => {
                             let _ = event_tx.send(HumanConnectionEvent::Error {
                                 message: "The xMatrix session expired; run `xmatrix login` and reconnect.".into(),
                             });
@@ -262,14 +269,14 @@ async fn run_human_connection(
                         }
                     }
                 }
-                crate::websocket::wait_before_reconnect(&mut backoff, RECONNECT_MAX).await;
+                backoff.wait().await;
                 continue;
             }
         };
 
         let reconnected = connected_once;
         connected_once = true;
-        backoff = RECONNECT_BASE;
+        let connected_at = std::time::Instant::now();
         if let Some(sender) = ready_tx.take() {
             let _ = sender.send(Ok(()));
         }
@@ -320,9 +327,9 @@ async fn run_human_connection(
                             if let Ok(text) = message.into_text()
                                 && let Some(event) = parse_human_server_event(text.as_ref()) {
                                     if let HumanConnectionEvent::Error { message } = &event
-                                        && durable_object_runtime_reset(message)
+                                        && frame_hub_restarting(text.as_ref())
                                     {
-                                        break format!("Human Hub runtime reset: {message}");
+                                        break format!("Human Hub restarting: {message}");
                                     }
                                     let _ = event_tx.send(event);
                                 }
@@ -346,7 +353,8 @@ async fn run_human_connection(
         let _ = event_tx.send(HumanConnectionEvent::Disconnected {
             reason: disconnect_reason,
         });
-        crate::websocket::wait_before_reconnect(&mut backoff, RECONNECT_MAX).await;
+        backoff.reset_if_healthy(connected_at.elapsed());
+        backoff.wait().await;
     }
 }
 
@@ -365,29 +373,43 @@ where
     write.send(Message::Text(message.to_string().into())).await
 }
 
+enum Renewal {
+    Renewed(String),
+    /// The refresh met an outage; it says nothing about the session.
+    Unavailable,
+    Refused,
+}
+
 /// A token the Hub may accept after it refused `current`: the saved session's,
 /// when another process already renewed it, or a freshly refreshed one.
-async fn renewed_token(hub_url: &str, current: &str) -> Option<String> {
-    let saved = crate::config::load_session_for_hub(hub_url).await?;
+async fn renewed_token(hub_url: &str, current: &str) -> Renewal {
+    let Some(saved) = crate::config::load_session_for_hub(hub_url).await else {
+        return Renewal::Refused;
+    };
     if saved.token != current {
-        return Some(saved.token);
+        return Renewal::Renewed(saved.token);
     }
-    crate::auth::refresh_cli_session(&saved)
-        .await
-        .ok()
-        .map(|session| session.token)
+    match crate::auth::refresh_cli_session(&saved).await {
+        Ok(session) => Renewal::Renewed(session.token),
+        Err(error) if error.is_transient() => Renewal::Unavailable,
+        Err(_) => Renewal::Refused,
+    }
 }
 
 struct HandshakeRejection {
     message: String,
     /// The Hub refused the credential itself (`human_auth_invalid`).
     auth: bool,
+    /// The Hub called the failure transient (`failure.retryable`).
+    retryable: bool,
 }
 
 fn parse_human_connected(text: &str) -> std::result::Result<AuthUser, HandshakeRejection> {
     #[derive(Deserialize)]
     struct Failure {
         code: String,
+        #[serde(default)]
+        retryable: bool,
     }
     #[derive(Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
@@ -405,11 +427,15 @@ fn parse_human_connected(text: &str) -> std::result::Result<AuthUser, HandshakeR
         Ok(Handshake::HumanConnected { user }) => Ok(user),
         Ok(Handshake::Error { message, failure }) => Err(HandshakeRejection {
             message,
-            auth: failure.is_some_and(|failure| failure.code == HUMAN_AUTH_INVALID),
+            auth: failure
+                .as_ref()
+                .is_some_and(|failure| failure.code == HUMAN_AUTH_INVALID),
+            retryable: failure.is_some_and(|failure| failure.retryable),
         }),
         Err(error) => Err(HandshakeRejection {
             message: format!("Invalid Human connection handshake: {error}"),
             auth: false,
+            retryable: false,
         }),
     }
 }
@@ -481,6 +507,26 @@ mod tests {
             assert!(
                 !parse_human_connected(other).expect_err("rejected").auth,
                 "{other}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_retryable_handshake_failure_is_an_outage() {
+        let restarting = parse_human_connected(
+            r#"{"type":"error","message":"Could not connect this session","failure":{"code":"service_restarting","retryable":true}}"#,
+        )
+        .expect_err("rejected");
+        assert!(restarting.retryable && !restarting.auth);
+        for refused in [
+            r#"{"type":"error","message":"Sign in again","failure":{"code":"human_auth_invalid","retryable":false}}"#,
+            r#"{"type":"error","message":"Durable Object reset because its code was updated."}"#,
+        ] {
+            assert!(
+                !parse_human_connected(refused)
+                    .expect_err("rejected")
+                    .retryable,
+                "{refused}"
             );
         }
     }

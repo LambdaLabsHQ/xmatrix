@@ -17,7 +17,7 @@ fn catalog_timeout_names_the_failed_boundary() {
         });
         let error =
             response_status_error(reqwest::StatusCode::SERVICE_UNAVAILABLE, &body.to_string());
-        assert!(matches!(error, CliError::Http(detail)
+        assert!(matches!(error.http_message(), Some(detail)
             if detail == format!("Channel catalog is temporarily unavailable (boundary: {boundary})")));
     }
 }
@@ -38,13 +38,13 @@ fn unknown_or_missing_boundary_is_not_rendered() {
         });
         let error =
             response_status_error(reqwest::StatusCode::SERVICE_UNAVAILABLE, &body.to_string());
-        assert!(matches!(error, CliError::Http(detail) if detail == "unavailable"));
+        assert!(error.http_message() == Some("unavailable"));
     }
     let error = response_status_error(
         reqwest::StatusCode::SERVICE_UNAVAILABLE,
         r#"{"error":"unavailable","code":"channel_catalog_timeout"}"#,
     );
-    assert!(matches!(error, CliError::Http(detail) if detail == "unavailable"));
+    assert!(error.http_message() == Some("unavailable"));
 }
 
 #[test]
@@ -54,9 +54,7 @@ fn other_refusals_keep_their_status_and_message() {
         reqwest::StatusCode::FORBIDDEN,
         reqwest::StatusCode::BAD_REQUEST,
     ] {
-        assert!(
-            matches!(response_status_error(status, body), CliError::Http(detail) if detail == "refused")
-        );
+        assert!(response_status_error(status, body).http_message() == Some("refused"));
     }
     assert!(
         matches!(response_status_error(reqwest::StatusCode::UPGRADE_REQUIRED, body),
@@ -66,5 +64,5 @@ fn other_refusals_keep_their_status_and_message() {
         reqwest::StatusCode::SERVICE_UNAVAILABLE,
         r#"{"error":"unavailable","code":"postgres_unavailable","boundary":"directory"}"#,
     );
-    assert!(matches!(error, CliError::Http(detail) if detail == "unavailable"));
+    assert!(error.http_message() == Some("unavailable"));
 }

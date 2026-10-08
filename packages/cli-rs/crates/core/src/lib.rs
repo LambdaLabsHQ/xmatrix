@@ -7,6 +7,7 @@ pub mod agent_trace_read;
 pub mod agent_trace_store;
 pub mod attachment_cache;
 pub mod auth;
+pub mod backoff;
 pub mod bootstrap;
 pub mod channel_read_context;
 pub mod config;
