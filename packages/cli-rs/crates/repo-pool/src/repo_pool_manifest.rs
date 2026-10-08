@@ -745,6 +745,27 @@ fn load_manifest_at(pool_root: &Path) -> Result<Option<RepoPoolManifest>, PoolEr
     Ok(Some(manifest))
 }
 
+/// Owner-private auxiliary pool evidence, with no symlink/reparse following
+/// and a bound checked both before and after reading.
+fn read_private_pool_record(path: &Path, kind: &'static str) -> Result<Option<Vec<u8>>, PoolError> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(PoolError::new(PoolErrorCode::Io, format!("cannot stat {kind}"))),
+        Ok(meta) => meta,
+    };
+    ensure_regular_file_no_reparse(path, &meta)?;
+    if meta.len() > MAX_MANIFEST_BYTES as u64 {
+        return Err(PoolError::new(PoolErrorCode::ManifestCorrupt, format!("{kind} exceeds size limit")));
+    }
+    let mut raw = Vec::new();
+    open_existing_control_file(path)?.take(MAX_MANIFEST_BYTES as u64 + 1).read_to_end(&mut raw)
+        .map_err(|_| PoolError::new(PoolErrorCode::Io, format!("cannot read {kind}")))?;
+    if raw.len() > MAX_MANIFEST_BYTES {
+        return Err(PoolError::new(PoolErrorCode::ManifestCorrupt, format!("{kind} grew beyond size limit")));
+    }
+    Ok(Some(raw))
+}
+
 fn write_private_pool_record(
     temp_path: &Path,
     final_path: &Path,

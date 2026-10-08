@@ -68,28 +68,9 @@ const MAX_BASELINE_RECEIPTS: usize = 512;
 
 fn load_baseline_receipts(layout: &RepoPoolLayout) -> Result<Vec<BaselineReceipt>, PoolError> {
     let path = layout.pool_root().join(BASELINE_RECEIPTS_FILE);
-    let meta = match std::fs::symlink_metadata(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => {
-            return Err(PoolError::new(
-                PoolErrorCode::Io,
-                "cannot stat baseline evidence",
-            ));
-        }
-        Ok(meta) => meta,
+    let Some(raw) = read_private_pool_record(&path, "baseline evidence")? else {
+        return Ok(Vec::new());
     };
-    ensure_regular_file_no_reparse(&path, &meta)?;
-    if meta.len() > MAX_MANIFEST_BYTES as u64 {
-        return Err(PoolError::new(
-            PoolErrorCode::ManifestCorrupt,
-            "baseline evidence exceeds size limit",
-        ));
-    }
-    let mut raw = Vec::new();
-    open_existing_control_file(&path)?
-        .take(MAX_MANIFEST_BYTES as u64 + 1)
-        .read_to_end(&mut raw)
-        .map_err(|_| PoolError::new(PoolErrorCode::Io, "cannot read baseline evidence"))?;
     let records: Vec<BaselineReceipt> = serde_json::from_slice(&raw)
         .map_err(|_| PoolError::new(PoolErrorCode::ManifestCorrupt, "invalid baseline evidence"))?;
     if records.len() > MAX_BASELINE_RECEIPTS {
