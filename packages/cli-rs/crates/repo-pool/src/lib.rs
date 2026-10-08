@@ -3,6 +3,7 @@
 #![deny(warnings)]
 
 mod failure_detail;
+pub mod machine_worktrees;
 pub mod repo_pool;
 pub mod run_worktree;
 

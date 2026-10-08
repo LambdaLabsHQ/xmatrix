@@ -16,9 +16,12 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 use fs2::FileExt;
 
-use xmatrix_cli_args::{MachineCommand, MachineSupervisorCommand, OnOff};
+use xmatrix_cli_args::{
+    ForeignWorktreeOrigin, MachineCommand, MachineSupervisorCommand, MachineWorktreesCommand, OnOff,
+};
 use xmatrix_cli_core::config;
 use xmatrix_cli_core::error::{self, CliError};
+use xmatrix_repo_pool::machine_worktrees::{self, MachineWorktree, WorktreeOrigin};
 #[cfg(windows)]
 use xmatrix_windows_continuity::{
     ActivationJournal, ArtifactIdentity, JOURNAL_SCHEMA, JournalPayload, sha256_file,
@@ -66,6 +69,119 @@ pub async fn cmd_config(
     Ok(())
 }
 
+async fn cmd_machine_worktrees(command: Option<MachineWorktreesCommand>) -> error::Result<()> {
+    let known: Vec<std::path::PathBuf> = std::env::current_dir().into_iter().collect();
+    match command.unwrap_or(MachineWorktreesCommand::List { json: false }) {
+        MachineWorktreesCommand::List { json } => {
+            let trees = machine_worktrees::machine_worktrees(&known).await;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&trees)?);
+                return Ok(());
+            }
+            print_worktrees(&trees);
+            let auto = match machine_worktrees::foreign_auto_reclaim_enabled() {
+                Ok(true) => "on".to_string(),
+                Ok(false) => "off".to_string(),
+                Err(error) => format!("unreadable ({error})"),
+            };
+            println!(
+                "\nxMatrix reclaims repo-pool and run worktrees itself. Automatic reclaim of the others is {auto} (xmatrix machine worktrees auto-reclaim on|off)."
+            );
+        }
+        MachineWorktreesCommand::AutoReclaim { state } => {
+            let on = state == OnOff::On;
+            machine_worktrees::set_foreign_auto_reclaim(on)
+                .map_err(|error| CliError::Io(std::io::Error::other(error)))?;
+            if on {
+                println!(
+                    "The daemon now reclaims worktrees xMatrix did not create once they sit untouched for the named-tree floor (7 days, 1 day when the disk is low). Un-landed work is pinned under refs/xmatrix/snapshot/foreign/ first."
+                );
+            } else {
+                println!("The daemon now only lists worktrees xMatrix did not create.");
+            }
+        }
+        MachineWorktreesCommand::Reclaim {
+            origin,
+            idle_days,
+            dry_run,
+        } => {
+            let origins: Vec<WorktreeOrigin> = origin
+                .into_iter()
+                .map(|origin| match origin {
+                    ForeignWorktreeOrigin::ClaudeCode => WorktreeOrigin::ClaudeCode,
+                    ForeignWorktreeOrigin::Codex => WorktreeOrigin::Codex,
+                    ForeignWorktreeOrigin::Cursor => WorktreeOrigin::Cursor,
+                    ForeignWorktreeOrigin::Manual => WorktreeOrigin::Manual,
+                })
+                .collect();
+            let trees = machine_worktrees::machine_worktrees(&known).await;
+            let outcome = machine_worktrees::reclaim_foreign_worktrees(
+                &trees,
+                &std::collections::HashSet::new(),
+                (!origins.is_empty()).then_some(origins.as_slice()),
+                std::time::Duration::from_secs(idle_days.saturating_mul(24 * 60 * 60)),
+                !dry_run,
+            )
+            .await;
+            let verb = if dry_run {
+                "Would reclaim"
+            } else {
+                "Reclaimed"
+            };
+            println!("{verb} {} worktree(s).", outcome.reclaimed.len());
+            for path in &outcome.reclaimed {
+                let note = if outcome.snapshotted.contains(path) {
+                    " (un-landed work snapshotted)"
+                } else {
+                    ""
+                };
+                println!("  {}{note}", path.display());
+            }
+            for path in &outcome.in_use {
+                println!("  in use, kept: {}", path.display());
+            }
+            for (path, reason) in &outcome.skipped {
+                println!("  skipped {}: {reason}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_worktrees(trees: &[MachineWorktree]) {
+    if trees.is_empty() {
+        println!("No linked worktrees found.");
+        return;
+    }
+    let mut origin = None;
+    for tree in trees {
+        if origin != Some(tree.origin) {
+            origin = Some(tree.origin);
+            let count = trees
+                .iter()
+                .filter(|other| other.origin == tree.origin)
+                .count();
+            println!("{} ({count})", tree.origin.label());
+        }
+        let idle = match (tree.missing, tree.idle_secs) {
+            (true, _) => "missing".to_string(),
+            (false, Some(secs)) if secs >= 24 * 60 * 60 => format!("{}d", secs / (24 * 60 * 60)),
+            (false, Some(secs)) => format!("{}h", secs / (60 * 60)),
+            (false, None) => "?".to_string(),
+        };
+        let lock = if tree.locked.is_some() {
+            "  [locked]"
+        } else {
+            ""
+        };
+        println!(
+            "  {idle:>7}  {}  {}{lock}",
+            tree.path.display(),
+            tree.branch.as_deref().unwrap_or("(detached)")
+        );
+    }
+}
+
 pub async fn cmd_machine(hub_url: &str, command: MachineCommand) -> error::Result<()> {
     match command {
         MachineCommand::Identity => {
@@ -85,6 +201,7 @@ pub async fn cmd_machine(hub_url: &str, command: MachineCommand) -> error::Resul
             }
         }
         MachineCommand::Supervisor { command } => cmd_machine_supervisor(hub_url, command).await?,
+        MachineCommand::Worktrees { command } => cmd_machine_worktrees(command).await?,
         MachineCommand::Rename { name } => {
             let session = config::load_session_for_hub(hub_url).await.ok_or_else(|| {
                 CliError::Auth("Renaming a Machine requires a login. Run: xmatrix login".into())

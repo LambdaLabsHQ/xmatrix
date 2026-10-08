@@ -1459,6 +1459,47 @@ pub enum MachineCommand {
     /// Let automatic assignment place work on this Machine, or keep it out:
     /// off, Agents start here only when someone names it (`machine:<name>`)
     AutoAssign { state: OnOff },
+    /// List every git worktree on this Machine by who created it, and manage
+    /// reclaim of the ones xMatrix did not create
+    Worktrees {
+        #[command(subcommand)]
+        command: Option<MachineWorktreesCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum MachineWorktreesCommand {
+    /// List linked worktrees by origin (the default)
+    List {
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Let the daemon reclaim idle worktrees xMatrix did not create (Claude
+    /// Code, Codex, Cursor, hand-made). Off by default; xMatrix's own trees
+    /// are always reclaimed
+    AutoReclaim { state: OnOff },
+    /// Reclaim idle worktrees xMatrix did not create now. Un-landed work is
+    /// committed and pinned under refs/xmatrix/snapshot/foreign/ first
+    Reclaim {
+        /// Only trees of this origin (repeatable)
+        #[arg(long, value_enum)]
+        origin: Vec<ForeignWorktreeOrigin>,
+        /// Only trees untouched for at least this many days
+        #[arg(long, default_value_t = 7)]
+        idle_days: u64,
+        /// Show what would be reclaimed without changing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ForeignWorktreeOrigin {
+    ClaudeCode,
+    Codex,
+    Cursor,
+    Manual,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]

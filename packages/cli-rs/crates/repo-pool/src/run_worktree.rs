@@ -73,7 +73,7 @@ thread_local! {
 const LOCK_REASON_PREFIX: &str = "xmatrix-run:";
 const BINDINGS_FILE_NAME: &str = ".xmatrix-run-worktree-bindings.json";
 
-const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const GIT_LOCAL_TIMEOUT: Duration = Duration::from_secs(20);
 /// Legacy hard wall-clock used by quiet/non-progress git helpers that must
 /// still bound network ops (for example `remote set-head --auto`).
 const GIT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -982,7 +982,8 @@ pub async fn gc_run_worktrees(
     .await
 }
 
-/// Reclaim ended trees, and sweep the repo-pool slots (L1) alongside them.
+/// Reclaim ended trees, and sweep the repo-pool slots (L1) alongside them,
+/// then any other linked tree on the machine when the owner allowed it.
 /// The pool sweep is not gated on the watermark: one slot carries a whole
 /// checkout plus its build output, so waiting for the volume to fall under the
 /// warn mark reclaims far too late. Pressure only lowers the warm-cache budget.
@@ -1007,6 +1008,19 @@ pub async fn reclaim_worktree_storage_if_needed(
     repo_pool::log_pool_reclaim_outcome(
         &repo_pool::reclaim_pool_slots(pool_liveness, keep_idle).await,
     );
+    // Trees xMatrix did not create wait the same named-tree floor, and only
+    // once the owner turned their reclaim on.
+    let foreign_min_idle = if under_pressure {
+        PRESSURE_NAMED_TTL.min(named_orphan_min_age())
+    } else {
+        named_orphan_min_age()
+    };
+    if let Some(foreign) =
+        crate::machine_worktrees::reclaim_foreign_worktrees_if_enabled(live_cwds, foreign_min_idle)
+            .await
+    {
+        crate::machine_worktrees::log_foreign_reclaim_outcome(&foreign);
+    }
     outcome
 }
 
@@ -1141,6 +1155,21 @@ fn prune_stale_bindings(root: &Path, apply: bool) -> Result<Vec<String>, String>
 /// `refs/xmatrix/snapshot/<dir>` before removal, so no un-landed work is ever
 /// lost. Any git failure skips the tree conservatively.
 pub async fn reclaim_run_worktree(path: &Path, apply: bool) -> Result<bool, String> {
+    let dir_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .ok_or_else(|| "worktree path has no directory name".to_string())?;
+    reclaim_linked_worktree(path, apply, &dir_name).await
+}
+
+/// [`reclaim_run_worktree`] with the snapshot pinned to
+/// `refs/xmatrix/snapshot/<snapshot_name>`. Trees the daemon did not create
+/// can share a directory name, so they pass a name that cannot collide.
+pub(crate) async fn reclaim_linked_worktree(
+    path: &Path,
+    apply: bool,
+    snapshot_name: &str,
+) -> Result<bool, String> {
     if let Some(reason) = worktree_lock_reason(path).await?
         && !reason.starts_with(LOCK_REASON_PREFIX)
     {
@@ -1184,11 +1213,7 @@ pub async fn reclaim_run_worktree(path: &Path, apply: bool) -> Result<bool, Stri
             )
             .await?;
         }
-        let dir_name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .ok_or_else(|| "worktree path has no directory name".to_string())?;
-        let snapshot_ref = format!("refs/xmatrix/snapshot/{dir_name}");
+        let snapshot_ref = format!("refs/xmatrix/snapshot/{snapshot_name}");
         git(
             path,
             &["update-ref", &snapshot_ref, "HEAD"],
@@ -1273,7 +1298,7 @@ pub fn log_gc_outcome(outcome: &RunWorktreeGcOutcome) {
     );
 }
 
-async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+pub(crate) async fn git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     command_output("git", args, repo_pool::git_command(cwd, args), timeout).await
 }
 
