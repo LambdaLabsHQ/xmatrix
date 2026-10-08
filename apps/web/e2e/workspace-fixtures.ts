@@ -228,6 +228,11 @@ export async function installWorkspaceStubs(
   const automationResponses = buildAutomationResponses(fixtures);
   await installApiFixtures(page);
   await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
+  const setupIntentId = "0123456789abcdef0123456789abcdef";
+  const setupIntent = { intentId: setupIntentId, spaceId: fixtures.spaces?.[0]?.id ?? E2E_SPACE.id,
+    expiresAt: "2099-01-01T00:00:00.000Z", phase: "waiting", registeredHarnesses: [] };
+  await fixtureJson(page, "setup-intent-create", "**/api/xmatrix/setup-intents", setupIntent, { method: "POST" });
+  await fixtureJson(page, "setup-intent-read", `**/api/xmatrix/setup-intents/${setupIntentId}`, setupIntent);
   await fixtureJson(page, "client-compatibility", /\/api\/(?:xmatrix\/)?client-compatibility(?:\?.*)?$/, {
     compatible: true,
     code: "compatible",

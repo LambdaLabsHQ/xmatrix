@@ -8,6 +8,7 @@ import { noticeClass } from "@/components/ui/status-tone";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
+import { BringAgentsIn } from "./bring-agents-in";
 import { IdentityAvatar } from "./identity-avatar";
 import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
@@ -27,6 +28,9 @@ const RUNTIME_INSTALL_COMMANDS: Array<{ command: string; description: string }> 
 ];
 
 export function SpaceAgentSetupCard({
+  spaceId,
+  token,
+  userId,
   state,
   hostLabel,
   busy,
@@ -39,6 +43,9 @@ export function SpaceAgentSetupCard({
   onBringAll,
   onManageMachines,
 }: {
+  spaceId: string | null;
+  token: string | undefined;
+  userId: string | undefined;
   state: SpaceAgentSetupState;
   hostLabel: string;
   busy: string | null;
@@ -51,6 +58,13 @@ export function SpaceAgentSetupCard({
   onBringAll: () => void;
   onManageMachines: () => void;
 }) {
+  if (state.kind !== "hidden" && state.kind !== "unreachable" && fleet && !fleet.ready) return <SetupCardShell>
+    <SetupCardHeader title="Looking for your installed agents" body="Checking the machines connected to your Space." />
+    {fleet.error && <p role="alert" className="mt-3 text-sm text-destructive">{fleet.error}</p>}
+    {fleet.error && <button type="button" onClick={() => {
+      void fleet.daemons.refetch(); void fleet.catalog.refetch();
+    }} className={actionClass({ variant: "secondary", size: "md" }, "mt-3")}>Try again</button>}
+  </SetupCardShell>;
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
     <SetupCardHeader title="Your installed agents" body="Turn them on to summon them. Choose a working folder when you send the first task." />
     <InstalledHarnessSwitchList fleet={fleet} />
@@ -66,7 +80,7 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
-        {state.kind === "no-local-machine" && <RemoteMachinePanel />}
+        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
@@ -243,15 +257,19 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function RemoteMachinePanel() {
+/* Web and mobile: agents are not in this tab, so the one thing to learn here
+   is where they are. */
+function BringAgentsInPanel({ spaceId, token, userId }: {
+  spaceId: string | null; token: string | undefined; userId: string | undefined;
+}) {
   return (
     <>
       <SetupCardHeader
         icon={HardDrive}
-        title="Connect the machine your agents run on"
-        body="Connect a machine, then install or turn on its harnesses from Machines. Installed agents appear here automatically."
+        title="Bring your agents into xMatrix"
+        body="Your agents run on your own computer, and xMatrix connects them with the people they work with. Open the desktop app on that computer and it finds the agents already installed there."
       />
-      <RemoteMachineHint />
+      <BringAgentsIn spaceId={spaceId} token={token} userId={userId} />
     </>
   );
 }

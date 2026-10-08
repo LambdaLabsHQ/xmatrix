@@ -51,6 +51,7 @@ import {
 import { daemonPresenceLabel } from "./machine-daemon-presence";
 import { MachineLoadGlance, MachineLoadPanel } from "./machine-load-panel";
 import { MachineHarnessPanel } from "./machine-harness-panel";
+import { BringAgentsIn } from "./bring-agents-in";
 import { MachineGlyph } from "./machine-glyph";
 import { machineOs } from "./machine-os";
 import {
@@ -795,6 +796,8 @@ export function MachinesView({
   const [assignBusy, setAssignBusy] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [item, select] = useToolItem();
+  const { user } = useAuth();
+  const connecting = item === CONNECT_MACHINE_ITEM;
   // Load samples expire after 90 seconds; re-judge freshness between refreshes.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -879,12 +882,12 @@ export function MachinesView({
   const thisRecord = listed.find(isThis);
   // This machine is a row like any other; until the Hub lists it, it leads the list under its own name.
   const ordered = thisMachine && !identityUnavailable && !thisRecord ? [null, ...listed] : listed;
-  const chosenKey = item ?? defaultItem ?? null;
+  const chosenKey = connecting ? null : item ?? defaultItem ?? null;
   const showingThis = Boolean(thisMachine) && (chosenKey === THIS_MACHINE_ITEM
     || Boolean(thisRecord && chosenKey === thisRecord.id));
   const chosen = showingThis ? null : listed.find((machine) => machine.id === chosenKey);
-  const shown = showingThis ? null : chosen ?? (thisMachine ? null : listed[0]);
-  const showThisBeside = Boolean(thisMachine) && !showingThis && !chosen;
+  const shown = showingThis || connecting ? null : chosen ?? (thisMachine ? null : listed[0]);
+  const showThisBeside = Boolean(thisMachine) && !showingThis && !chosen && !connecting;
   // This machine is said, not boxed: in ink at the head of its quiet line, where every other Machine says less.
   // Called what its OS calls it: This Mac, This PC; any other OS is "This Machine", capitalised alike.
   const thisOs = thisMachine ? machineOs(thisMachine.platform) : "unknown";
@@ -900,12 +903,15 @@ export function MachinesView({
     : machine.lastSeenAt ? `Offline · seen ${relativeTime(machine.lastSeenAt)}` : "Offline";
 
   const list = (
-    <ToolList title="Machines">
+    <ToolList title="Machines" create={token && spaceId ? { label: "Connect a machine",
+      onCreate: () => select(CONNECT_MACHINE_ITEM), active: connecting } : null}>
       {error && <p role="alert" className="px-5 pb-2 text-xs font-medium text-destructive md:px-6">{error}</p>}
       {identityUnavailable && <p role="status" className="px-5 pb-2 text-xs text-muted-foreground md:px-6">
         Update xMatrix to identify this computer and show its controls on the registered Machine.
       </p>}
       <ul>
+        {token && spaceId && <ToolListRow phoneOnly selected={connecting}
+          onSelect={() => select(CONNECT_MACHINE_ITEM)} leading={<Plus />} title="Connect a machine" />}
         {loading && ordered.length === 0 ? (
           <li className="list-none px-5 md:px-6"><ListSkeleton label="Loading machines" rows={4} /></li>
         ) : ordered.length === 0 ? (
@@ -943,7 +949,14 @@ export function MachinesView({
   const pageMachine = showingThis || showThisBeside ? thisRecord ?? null : shown;
   const local = Boolean(thisMachine) && (showingThis || showThisBeside);
   let detail: React.ReactNode = null;
-  if (pageMachine || local) {
+  if (connecting || (!loading && ordered.length === 0 && token && spaceId)) {
+    detail = (
+      <ToolDetail title="Connect a machine" onBack={() => select(null)} backLabel="Machines">
+        <p className="text-sm text-muted-foreground">Agents run on your own machines. Connect one, then bring its installed agents into this Space.</p>
+        <BringAgentsIn spaceId={spaceId ?? null} token={token ?? undefined} userId={user?.id} />
+      </ToolDetail>
+    );
+  } else if (pageMachine || local) {
     const machine = pageMachine;
     const host = machine ? hostOf(machine) : undefined;
     const name = machine ? nameOf(machine) : thisMachine!.name;
@@ -1072,11 +1085,15 @@ export function MachinesView({
     );
   }
 
-  return <ToolSplit label="Machines" open={Boolean(item)} list={list} detail={detail} />;
+  // With no machine yet, a phone opens on connecting one.
+  const noMachines = !loading && ordered.length === 0 && Boolean(token && spaceId);
+  return <ToolSplit label="Machines" open={Boolean(item) || noMachines} list={list} detail={detail} />;
 }
 
 /** The address key of the desktop app's own machine in the Machines list. */
 export const THIS_MACHINE_ITEM = "this-machine";
+/** Machines' "Connect a machine": one command, then the machine and its agents, live. */
+const CONNECT_MACHINE_ITEM = "connect";
 
 export interface AppConnectorConfigurationDraft {
   repository: string;
