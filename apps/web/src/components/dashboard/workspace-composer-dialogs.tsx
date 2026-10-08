@@ -2497,7 +2497,8 @@ export function ToolSurface({
         token={token}
         spaceId={currentSpace?.id}
         defaultItem={view === "local" ? THIS_MACHINE_ITEM : undefined}
-        thisMachine={desktopAvailable ? {
+        thisMachine={desktopAvailable && desktopContext
+          && !["ios", "android"].includes(desktopContext.platform) ? {
           machineId: desktopContext?.machineId,
           name: "Unnamed machine",
           online: desktopDaemonStatus?.state === "running",
