@@ -7499,7 +7499,15 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-composer-mention-band[data-intent="summon"] { --band-ink: oklch(0.62 0.16 285); --band-fill: color-mix(in oklab, var(--band-ink) 18%, transparent); }
 .app-composer-mention-band[data-intent="declined"] { --band-ink: var(--muted-foreground); --band-fill: color-mix(in oklab, var(--band-ink) 7%, transparent); }
 .app-composer-mention-band[data-intent="reading"] { opacity: 0.55; }
-.app-composer-summon-hint { padding: 2px 0 0; font-size: 11px; line-height: 1.4; color: var(--muted-foreground); }
+.app-composer-summon-declined {
+  position: absolute; pointer-events: auto; padding: 0; border: 0; background: transparent; cursor: help;
+  border-bottom: 1.5px dotted var(--muted-foreground); border-radius: 2px;
+}
+.app-composer-summon-declined:hover,
+.app-composer-summon-declined[data-popup-open] { border-bottom-color: var(--foreground); }
+.app-composer-summon-declined:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.app-composer-summon-popup { font-size: 14px; }
+.app-composer-summon-explanation { margin: 12px 0; font-size: 15px; line-height: 1.5; }
 .app-composer-mention-band[data-invalid="true"] { --band-ink: var(--destructive); --band-fill: color-mix(in oklab, var(--band-ink) 14%, transparent); }
 .app-composer-mention-band[data-entering="true"] { animation: composer-mention-band-in 160ms ease-out; }
 @keyframes composer-mention-band-in { from { opacity: 0; } }

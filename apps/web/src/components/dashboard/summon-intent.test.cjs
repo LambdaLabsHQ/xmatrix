@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { declinedIntent, draftSummonRanges, draftSummonHint, draftSummonReadingsForDisplay, readingIntentUntil, INTENT_READING_WINDOW_MS } = require("./summon-intent.ts");
+const { declinedIntent, draftSummonRanges, forceDraftSummon, draftSummonReadingsForDisplay, readingIntentUntil, INTENT_READING_WINDOW_MS } = require("./summon-intent.ts");
 const { summonView, summonIntentNote } = require("./mention-invocation-state.ts");
 
 test("only the three intent refusals read as a declined summon", () => {
@@ -27,8 +27,6 @@ test("picked Agent previews include its following conditions and retain duplicat
   const ranges = draftSummonRanges(body, [{ start: 0, end: 7, text: "@Review" },
     { start: at, end: at + 7, text: "@Review" }]);
   assert.deepEqual(ranges, [{ start: 0, end: 16 }, { start: at, end: at + 7 }]);
-  assert.match(draftSummonHint({ mention: "@Review", choice: "summon" }), /starts on send/);
-  assert.match(draftSummonHint({ mention: "@Review", choice: "explanation" }), /won't start.*launch:force/);
 });
 
 test("the reading shimmer is bounded by the reading window and ignores bad clocks", () => {
@@ -72,4 +70,24 @@ test("preview offsets project through picked references without conflating dupli
   assert.deepEqual(draftSummonReadingsForDisplay(readings, body), [
     { ...readings[0], start: 6, end: 12 }, { ...readings[1], start: 18, end: 24 }]);
   assert.deepEqual(draftSummonReadingsForDisplay(readings, "no mentions"), []);
+});
+
+
+test("Start anyway writes force only after the selected declined summon and refuses stale offsets", () => {
+  const body = "@codex explains @codex repo:a/b";
+  const reading = { start: 16, end: body.length, mention: "@codex repo:a/b", choice: "explanation" };
+  assert.deepEqual(forceDraftSummon(body, reading), { body: `${body} launch:force`, caret: body.length + 13 });
+  assert.equal(forceDraftSummon(`prefix ${body}`, reading), undefined);
+  assert.equal(forceDraftSummon(body, { ...reading, start: -1 }), undefined);
+});
+
+test("Start anyway separates the force condition from punctuation after the address", () => {
+  const { parseAutoLaunchMentions } = require("@xmatrix/protocol");
+  for (const body of ["@claude, was the heading", "@claude; then the report"]) {
+    const next = forceDraftSummon(body, { start: 0, end: 7, mention: "@claude", choice: "explanation" });
+    const [mention] = parseAutoLaunchMentions(next.body);
+    assert.equal(mention.tags.launch, "force");
+    assert.equal(mention.error, undefined);
+    assert.equal(next.body.slice(next.caret), body.slice(7));
+  }
 });

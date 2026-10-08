@@ -76,7 +76,7 @@ test("a just-sent summon shows Jev reading it, and the shimmer ends on its own",
   await expect(pending).not.toContainText("xMatrix is reading");
 });
 
-test("the composer previews summon intent inline and sends the exact reading", async ({ page }) => {
+test("the composer previews summon intent on its address without a caption and sends the exact reading", async ({ page }) => {
   await install(page, "hello", {});
   const mention = "@claude repo:owner/xmatrix";
   const reading = { start: 0, end: mention.length, mention, choice: "summon" };
@@ -87,8 +87,8 @@ test("the composer previews summon intent inline and sends the exact reading", a
   const draft = `${mention} fix the flaky test`;
   await input.fill(draft);
   await expect(page.locator(".app-composer-summon-pill")).toHaveCount(0);
-  const hint = page.getByTestId("composer-summon-hint");
-  await expect(hint).toHaveText("@claude starts on send");
+  await expect(page.getByTestId("composer-summon-hint")).toHaveCount(0);
+  await expect(page.getByTestId("composer-summon-declined")).toHaveCount(0);
   await expect(page.locator('.app-composer-mention-band[data-intent="summon"]').first()).toBeVisible();
   await page.screenshot({ path: "test-results/summon-intent-composer.png", clip: { x: 0, y: 500, width: 1280, height: 400 } });
   await input.press("Enter");
@@ -106,20 +106,25 @@ test("changed drafts discard the old reading and forced summons skip preview", a
   });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const input = page.locator("textarea.composer-textarea").first();
-  const hint = page.getByTestId("composer-summon-hint");
   await input.fill("@claude fix it");
-  await expect(hint).toHaveText("@claude starts on send");
+  await expect(page.locator('.app-composer-mention-band[data-intent="summon"]').first()).toBeVisible();
   await fixtureRule(page, { id: "draft-decline", pattern: "**/api/xmatrix/channels/channel-general/summon-intent",
     responder: { kind: "static", delayMs: 500, json: {
       readings: [{ start: 0, end: 7, mention: "@claude", choice: "explanation" }],
     } } });
   await input.fill("@claude was the heading");
-  await expect(hint).not.toContainText("starts on send");
-  await expect(hint).toContainText("won't start");
+  await expect(page.locator('.app-composer-mention-band[data-intent="summon"]')).toHaveCount(0);
+  await expect(page.getByTestId("composer-summon-declined")).toBeVisible();
   await expect(page.locator('.app-composer-mention-band[data-intent="declined"]').first()).toBeVisible();
   await page.screenshot({ path: "test-results/summon-intent-composer-declined.png", clip: { x: 0, y: 500, width: 1280, height: 400 } });
-  await input.fill("@claude launch:force fix it");
-  await expect(hint).toHaveCount(0);
+  await page.getByTestId("composer-summon-declined").click();
+  const options = page.getByRole("dialog");
+  await expect(options).toContainText("xMatrix thinks this sentence is not asking to start an Agent.");
+  await expect(page.getByTestId("composer-summon-hint")).toHaveCount(0);
+  await page.screenshot({ path: "test-results/summon-intent-composer-options.png", clip: { x: 0, y: 500, width: 1280, height: 400 } });
+  await options.getByRole("button", { name: "Start anyway" }).click();
+  await expect(input).toHaveValue("@claude launch:force was the heading");
+  await expect(page.getByTestId("composer-summon-declined")).toHaveCount(0);
   await expect(page.locator('.app-composer-mention-band[data-forced="true"]').first()).toBeVisible();
   expect((await fixtureRequestBodies(page, "draft-decline")).length).toBe(1);
 });
@@ -148,9 +153,41 @@ test("an unavailable preview leaves sending usable with the ordinary intent chec
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const input = page.locator("textarea.composer-textarea").first();
   await input.fill("@claude fix it");
-  await expect(page.getByTestId("composer-summon-hint")).toContainText("Preview unavailable");
+  await expect.poll(async () => (await fixtureRequestBodies(page, "failed-preview")).length).toBe(1);
+  await expect(page.getByTestId("composer-summon-hint")).toHaveCount(0);
   await input.press("Enter");
   await expect.poll(async () => (await fixtureRequestBodies(page, "fallback-send")).length).toBe(1);
   const [sent] = await fixtureRequestBodies(page, "fallback-send") as Array<{ summonIntents?: unknown[] }>;
   expect(sent.summonIntents).toBeUndefined();
+});
+
+
+test("declined options anchor to the exact mobile mention and Start anyway changes only that occurrence", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await install(page, "hello", {});
+  const body = "@claude fix it; @claude was the heading";
+  const start = body.lastIndexOf("@claude");
+  await fixtureJson(page, "mobile-draft", "**/api/xmatrix/channels/channel-general/summon-intent", {
+    readings: [{ start: 0, end: 7, mention: "@claude", choice: "summon" },
+      { start, end: start + 7, mention: "@claude", choice: "explanation" }],
+  });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const input = page.locator("textarea.composer-textarea").first();
+  await input.fill(body);
+  const trigger = page.getByTestId("composer-summon-declined");
+  await expect(trigger).toHaveCount(1);
+  await expect(trigger).toHaveAttribute("data-start", String(start));
+  const triggerBox = await trigger.boundingBox();
+  const mentionBox = await page.locator(`[data-mention][data-start="${start}"]`).boundingBox();
+  expect(Math.abs(triggerBox!.x - mentionBox!.x)).toBeLessThan(1);
+  expect(Math.abs(triggerBox!.y - mentionBox!.y)).toBeLessThan(1);
+  await trigger.click();
+  const options = page.getByRole("dialog");
+  await expect(options).toBeVisible();
+  const popupBox = await options.boundingBox();
+  expect(popupBox!.x).toBeGreaterThanOrEqual(0);
+  expect(popupBox!.x + popupBox!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: "test-results/summon-intent-composer-options-mobile.png" });
+  await options.getByRole("button", { name: "Start anyway" }).click();
+  await expect(input).toHaveValue("@claude fix it; @claude launch:force was the heading");
 });
