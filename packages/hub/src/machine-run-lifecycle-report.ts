@@ -67,7 +67,7 @@ export async function machineRunLifecycleReport(
   });
   if (input.eventType === "machine_spawn_result" && payload.ok !== true &&
       isRecoverableLaunchFailure(payload.error)) {
-    await wakeAgentLaunchCoordinator(env, text(input.channelId, "channelId", 300));
+    await wakeAgentLaunchCoordinator(env, text(input.channelId, "channelId", 300), ["runTerminal", "reborn"]);
   }
   const ownerEmail = (ownerUserId: unknown) => typeof input.ownerEmail === "string"
     ? input.ownerEmail : `${String(ownerUserId)}@unknown.invalid`;

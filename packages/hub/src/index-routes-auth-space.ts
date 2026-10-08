@@ -825,7 +825,7 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       const reportChannelId = runLifecycleChannelId ||
         (typeof completed.runLifecycleChannelId === "string" ? completed.runLifecycleChannelId : "");
       if (reportChannelId) {
-        await wakeAgentLaunchCoordinator(c.env, reportChannelId);
+        await wakeAgentLaunchCoordinator(c.env, reportChannelId, ["runTerminal", "reborn"]);
       }
     } else if (runLifecycleChannelId && runId &&
         (eventType === "machine_run_exited" || eventType === "machine_stop_result")) {
@@ -836,7 +836,11 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       });
       // The stopped predecessor unblocks its durable reborn successor.
       if (eventType === "machine_stop_result" && completed.runLifecycleStopPurpose === "reborn-predecessor") {
-        await wakeAgentLaunchCoordinator(c.env, runLifecycleChannelId);
+        await wakeAgentLaunchCoordinator(c.env, runLifecycleChannelId, ["reborn"]);
+      } else if (eventType === "machine_stop_result") {
+        // A host answered a stop: a registration stop parked on it can settle
+        // now. Best effort — the parked stop is also re-checked on its own.
+        await wakeAgentLaunchCoordinator(c.env, runLifecycleChannelId, ["registrationStop"]).catch(() => undefined);
       }
     }
     return c.json({ ok: true });

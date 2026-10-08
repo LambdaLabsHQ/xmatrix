@@ -187,6 +187,7 @@ export { MachineIdentityAdoptionError, adoptLegacyMachineIds } from "./machine-i
 export {
   PostgresAutomationRepository,
   AutomationControlError,
+  CHANNEL_AUTOMATION_WAKE_SQL,
 } from "./automation-control.js";
 export {
   PostgresSchedulerControlRepository,
