@@ -87,7 +87,7 @@ fn env_duration(name: &str) -> Option<Duration> {
 ///
 /// Bounded on purpose — one `read_dir` of the slot root plus the worktree's
 /// index. A working agent touches at least one of them long before this floor.
-fn slot_idle_for(path: &Path) -> Option<Duration> {
+pub(crate) fn slot_idle_for(path: &Path) -> Option<Duration> {
     let mut newest = std::fs::metadata(path).ok()?.modified().ok()?;
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
@@ -534,6 +534,15 @@ pub(crate) async fn reclaim_pool_slots(
         return PoolReclaimOutcome::default();
     };
     reclaim_pool_slots_at(&root, live, keep_idle).await
+}
+
+/// The base repository each pool under `pools_root` is pinned to, so a
+/// machine-wide inventory can ask those repositories for every linked tree.
+pub(crate) fn pool_base_repos_at(pools_root: &Path) -> Vec<PathBuf> {
+    pool_layouts_at(pools_root)
+        .iter()
+        .filter_map(peek_pinned_base_repo)
+        .collect()
 }
 
 /// The warm-cache budget a routine sweep should use.

@@ -3,8 +3,11 @@
 #![deny(warnings)]
 
 mod failure_detail;
+pub mod machine_worktrees;
 pub mod repo_pool;
 pub mod run_worktree;
+#[cfg(test)]
+mod test_support;
 
 #[cfg(test)]
 include!("../../core/tests/support/process_env.rs");
