@@ -332,7 +332,7 @@ use super::{
     DAEMON_CONTROL_POLL_RETRY_MAX_MS, DAEMON_CONTROL_REQUEST_TIMEOUT_MS, DaemonRequestAgentContext,
     DaemonRoutingWorkspace, DaemonRunChild, DaemonRunRegistry, DaemonRunStatusMarker,
     DaemonSpawnClaim, DaemonSpawnInflight, DaemonSpawnResultParts, GoalCommand,
-    HeadlessRuntimeBoundary, InboundChannelMessage, LONG_LIVED_REGISTER_RETRY_MAX_MS,
+    HeadlessRuntimeBoundary, InboundChannelMessage, LONG_LIVED_REGISTER_RETRY_MAX,
     PersistedDaemonRun, ZcodeAppSession, acp_args_from_json, acp_backend_matches,
     acp_cancel_notification, acp_initialize_params, acp_message_id_matches,
     acp_model_catalog_from_value, acp_select_permission_option_id, acp_session_new_params,
@@ -369,7 +369,7 @@ use super::{
     is_bounded_retryable_session_register_error, is_claude_code_agent, is_claude_launcher_token,
     is_grok_tool, is_retryable_initial_register_error, is_retryable_relay_operation_error,
     is_zcode_tool, load_codex_resume_session_id, next_daemon_control_poll_retry_delay_ms,
-    next_long_lived_register_retry_delay_ms, parse_goal_command, parse_initial_spawn_context,
+    parse_goal_command, parse_initial_spawn_context,
     persist_daemon_run_status_marker, protocol, read_daemon_run_status_marker, redact_data_urls,
     refresh_daemon_run_status_heartbeat, rehydrate_daemon_run_registry_from_persisted_runs,
     release_daemon_spawn_claim, remove_daemon_run_child, render_initial_message_attachment_lines,
@@ -909,15 +909,28 @@ fn initial_channel_replay_retry_classifies_transient_relay_failures_only() {
 
 #[test]
 fn long_lived_register_retry_delay_caps() {
-    assert_eq!(next_long_lived_register_retry_delay_ms(1_000), 2_000);
-    assert_eq!(
-        next_long_lived_register_retry_delay_ms(LONG_LIVED_REGISTER_RETRY_MAX_MS),
-        LONG_LIVED_REGISTER_RETRY_MAX_MS
-    );
-    assert_eq!(
-        next_long_lived_register_retry_delay_ms(LONG_LIVED_REGISTER_RETRY_MAX_MS + 1),
-        LONG_LIVED_REGISTER_RETRY_MAX_MS
-    );
+    let mut backoff = super::long_lived_register_backoff();
+    for _ in 0..12 {
+        let delay = backoff.next_delay();
+        assert!(delay <= LONG_LIVED_REGISTER_RETRY_MAX, "{delay:?}");
+    }
+    assert_eq!(backoff.ceiling(), LONG_LIVED_REGISTER_RETRY_MAX);
+}
+
+#[test]
+fn initial_register_retries_a_hub_outage_but_not_its_refusal() {
+    let hub = |status: u16, retryable: bool| {
+        CliError::HttpStatus(Box::new(xmatrix_cli_core::error::HttpStatusError {
+            status,
+            code: None,
+            retryable,
+            message: "Machine Daemon credential enrollment failed: xMatrix is restarting; try again"
+                .into(),
+        }))
+    };
+    assert!(is_retryable_initial_register_error(&hub(503, true)));
+    assert!(!is_retryable_initial_register_error(&hub(503, false)));
+    assert!(!is_retryable_initial_register_error(&hub(403, false)));
 }
 
 #[test]

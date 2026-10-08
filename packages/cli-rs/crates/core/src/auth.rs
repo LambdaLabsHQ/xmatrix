@@ -460,7 +460,7 @@ pub async fn refresh_cli_session(session: &CliSession) -> Result<CliSession> {
             }
             return Err(CliError::Auth(format!("Session refresh failed: {err}")));
         }
-        Err(err) => return Err(CliError::Auth(format!("Session refresh failed: {err}"))),
+        Err(err) => return Err(refresh_failure(err)),
     };
 
     save_session(
@@ -490,7 +490,7 @@ async fn recover_cli_session_from_access_token(session: &CliSession) -> Result<C
 pub async fn refresh_session_in_memory(session: &CliSession) -> Result<CliSession> {
     let response = refresh_auth_response(session)
         .await
-        .map_err(|err| CliError::Auth(format!("Session refresh failed: {err}")))?;
+        .map_err(refresh_failure)?;
 
     Ok(CliSession {
         token: response.token,
@@ -501,6 +501,20 @@ pub async fn refresh_session_in_memory(session: &CliSession) -> Result<CliSessio
         updated_at: unix_now_secs().to_string(),
         expires_at: crate::config::renewed_session_expires_at(),
     })
+}
+
+/// A refresh that could not reach the Hub, or that the Hub answered with a
+/// retryable outage, says nothing about the session: it stays a transient
+/// error so callers keep the session and try again. Only a refusal reads as a
+/// failed refresh.
+fn refresh_failure(err: CliError) -> CliError {
+    if err.is_transient() {
+        CliError::RelayTransient(format!(
+            "Session refresh could not complete because xMatrix is unreachable or restarting; the session was kept: {err}"
+        ))
+    } else {
+        CliError::Auth(format!("Session refresh failed: {err}"))
+    }
 }
 
 struct SessionRefreshLock {
@@ -631,5 +645,34 @@ mod tests {
                 .expect("callback payload should parse");
 
         assert_eq!(payload.refresh_token.as_deref(), Some("refresh"));
+    }
+
+    fn hub_refusal(status: u16, retryable: bool, message: &str) -> CliError {
+        CliError::HttpStatus(Box::new(crate::error::HttpStatusError {
+            status,
+            code: None,
+            retryable,
+            message: message.into(),
+        }))
+    }
+
+    #[test]
+    fn an_outage_during_refresh_does_not_read_as_a_failed_session() {
+        let outage = refresh_failure(hub_refusal(503, true, "xMatrix is restarting; try again"));
+        assert!(matches!(outage, CliError::RelayTransient(_)), "{outage:?}");
+        assert!(outage.is_transient());
+        assert!(!outage.to_string().contains("Session refresh failed"));
+
+        let refused = refresh_failure(hub_refusal(401, false, "Invalid refresh token"));
+        assert!(matches!(refused, CliError::Auth(_)));
+        assert_eq!(
+            refused.to_string(),
+            "Session refresh failed: Invalid refresh token"
+        );
+        // A 503 the Hub did not call retryable is still its answer.
+        assert!(matches!(
+            refresh_failure(hub_refusal(503, false, "Internal error")),
+            CliError::Auth(_)
+        ));
     }
 }

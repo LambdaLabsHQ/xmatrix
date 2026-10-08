@@ -105,6 +105,30 @@ not probe Hub membership or restart a live daemon because its reverse-delivery
 socket is reconnecting; the Machine Daemon connection actor owns that bounded
 backoff and fresh-socket catch-up lifecycle.
 
+The CLI and its daemons follow the Hub's transient-failure contract. A Hub
+outage is HTTP `503` with `{ error, code, retryable: true }` and `Retry-After`
+in seconds; a socket error frame carries `failure.retryable`, and a Durable
+Object that a deploy reset, dropped or overloaded reaches a socket as the
+retryable code `service_restarting`. Everything else is a real rejection.
+
+- The shared HTTP client sends a request up to three times when the Hub says
+  `retryable: true` (any method; the Hub says so only where a replay is safe),
+  or, for GET and HEAD only, when a 502/503/504 carries `Retry-After` and no
+  verdict. Each wait honours `Retry-After`, capped at 30 seconds, plus jitter.
+  A connect failure is replayed once and a 429 is waited out once, as before.
+  The client has a 10-second connect timeout and no whole-request timeout.
+- A refusal keeps its status, code and `retryable` verdict in the CLI error;
+  its text is the Hub's message, as before.
+- Every Hub socket loop (Human, Machine Daemon, Agent Instance) and the
+  long-lived registration retries share one backoff: exponential from one
+  second, capped at 30, with equal jitter. It starts over only after a
+  connection stays up for 30 seconds, not when a handshake succeeds.
+- The Machine Daemon's first registration waits out transient failures in
+  credential enrollment, the socket connect and the handshake within its
+  60-second ready budget instead of failing; a refusal still fails it at once.
+- A session refresh that met an outage is reported as transient and says the
+  session was kept; only the Hub's refusal reads `Session refresh failed`.
+
 If no daemon process exists, the Desktop app should start the known OS-managed
 daemon first:
 
