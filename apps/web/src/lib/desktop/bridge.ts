@@ -112,6 +112,8 @@ export type DesktopBridge = {
   /** iOS native shell controls the bottom tab dock instead of the web-rendered one. */
   setMobileTabState?: (state: {
     visible: boolean; activeView: string; spaceId?: string | null; userId?: string | null;
+    /** An Agent in the Space is working now: the Status pulse runs. */
+    statusLive?: boolean;
   }) => Promise<void>;
   /** A tab the user picked; `spaceId` when that tab must follow the Space the user is in. */
   onMobileTabChange?: (listener: (event: { view: string; spaceId?: string }) => void) => () => void;
