@@ -46,6 +46,10 @@ integration("launch survives a hostname change with stale Workspace metadata and
       CREATE TABLE data.messages (space_id text,channel_id text,message_id text,author_kind text,author_id text,
         body_hash text,entity_version bigint,invocation_input_version bigint,timeline_sequence bigint,
         agent_invocation_targets_json jsonb,edited_at timestamptz,deleted_at timestamptz,recalled_at timestamptz);
+      CREATE TABLE data.delivery_cursors (space_id text,subject_id text,channel_id text,acknowledged_sequence bigint,
+        version bigint,updated_at timestamptz,PRIMARY KEY (space_id,subject_id,channel_id));
+      CREATE TABLE data.message_attention_revisions (space_id text,subject_id text,channel_id text,revision bigint,
+        updated_at timestamptz,PRIMARY KEY (space_id,subject_id,channel_id));
       CREATE TABLE data.first_message_launch_choices (space_id text,channel_id text,message_id text,author_user_id text,choice text);
       CREATE TABLE data.machine_daemons (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,
         capabilities_json jsonb,connection_epoch bigint);
@@ -696,6 +700,12 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(advanced.spawnPayload.identityId, replay.instanceId);
     assert.equal(advanced.spawnPayload.resume, true);
     assert.equal(advanced.spawnPayload.context.requestedModel, "provider/model");
+    // The reborn answers its own message; the backlog from while it was stopped is not replayed to it.
+    const head = (await sql(`SELECT MAX(timeline_sequence)::bigint AS sequence FROM data.messages
+      WHERE space_id='space' AND channel_id='channel'`)).rows[0].sequence;
+    const cursor = (await sql(`SELECT acknowledged_sequence FROM data.delivery_cursors
+      WHERE space_id='space' AND subject_id=$1 AND channel_id='channel'`, [`agent:${replay.instanceId}`])).rows[0];
+    assert.equal(String(cursor?.acknowledged_sequence), String(head));
     const cold = await launches.dispatchInput({ commandId: 'local-runtime-default', actorUserId: 'caller',
       channelId: 'channel', body: 'Continue in the registered directory' }, async ({ candidates }) => ({
         key: candidates[0].key, model: '', workspaceReference: 'workspace', useRuntimeDefaultModel: true }));
