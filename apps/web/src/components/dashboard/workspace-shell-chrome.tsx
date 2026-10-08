@@ -71,7 +71,6 @@ import {
   CircleHelp,
   Clock,
   Bot,
-  Gauge,
   HardDrive,
   Hash,
   MessagesSquare,
@@ -142,6 +141,7 @@ export function WorkspaceRail({
   onLogout,
   onReportIssue,
   pendingJoinRequestCount,
+  statusLive,
   updateControl,
 }: {
   activeView: AppView;
@@ -156,6 +156,8 @@ export function WorkspaceRail({
   onReportIssue?: () => void;
   /** People waiting on this admin in the current Space. */
   pendingJoinRequestCount?: number;
+  /** An Agent in the Space is working now: the Status pulse runs. */
+  statusLive?: boolean;
   /** The desktop app's update bead, above the bottom actions. */
   updateControl?: React.ReactNode;
 }) {
@@ -192,7 +194,8 @@ export function WorkspaceRail({
           label="Channels"
           onClick={() => onChangeView("messages")}
         />
-        <RailButton active={activeView === "status"} icon={Gauge} label="Status" onClick={() => onChangeView("status")} />
+        <RailButton active={activeView === "status"} icon={statusLive ? StatusPulseIconLive : StatusPulseIcon} label="Status"
+          onClick={() => onChangeView("status")} />
         <RailButton active={activeView === "machines" || activeView === "local"} icon={HardDrive} label="Machines" onClick={() => onChangeView("machines")} />
         <RailButton active={activeView === "automation"} icon={Clock} label="Schedules" onClick={() => onChangeView("automation")} />
         <RailButton active={activeView === "agents"} icon={Bot} label="Agents" onClick={() => onChangeView("agents")} />
@@ -298,17 +301,20 @@ export function CreateFab({ action }: { action: CreateAction | null }) {
 export function MobileTabDock({
   activeView,
   hidden,
+  statusLive,
   onChangeView,
 }: {
   activeView: AppView;
   hidden?: boolean;
+  /** An Agent in the Space is working now: the Status pulse runs. */
+  statusLive?: boolean;
   onChangeView: (view: AppView) => void;
 }) {
   if (hidden) return null;
   const items: Array<{ view: AppView; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { view: "pages", label: "Pages", icon: BookOpen },
     { view: "messages", label: "Channels", icon: MessagesSquare },
-    { view: "status", label: "Status", icon: Gauge },
+    { view: "status", label: "Status", icon: statusLive ? StatusPulseIconLive : StatusPulseIcon },
     { view: "more", label: "More", icon: MoreHorizontal },
   ];
 
@@ -397,6 +403,28 @@ export function GlobalSearchBar({ spaceName, searching, onOpenSearch }: {
       </LiquidGlassPill>
     </div>
   );
+}
+
+/** Lucide's Activity line, drawn by hand so its trace can run. */
+const STATUS_PULSE_PATH = "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2";
+
+/**
+ * Status: a pulse line. While an Agent in the Space works, a break runs along
+ * it left to right, the way a monitor redraws its trace; at rest the line is
+ * whole.
+ */
+export function StatusPulseIcon({ className, live = false }: { className?: string; live?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"
+      strokeLinejoin="round" className={cn("app-status-pulse", className)} data-live={live || undefined}
+      aria-hidden="true">
+      <path d={STATUS_PULSE_PATH} pathLength={1} />
+    </svg>
+  );
+}
+
+function StatusPulseIconLive({ className }: { className?: string }) {
+  return <StatusPulseIcon className={className} live />;
 }
 
 export function RailButton({

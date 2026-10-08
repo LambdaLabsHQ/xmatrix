@@ -8411,6 +8411,24 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   .xmatrix-app .app-handoff-arrow .app-handoff-head { animation: none; }
 }
 
+/* Status pulse: while an Agent works, a break runs along the line left to
+   right. The path is drawn right to left and the dash period is its whole
+   length, so the climbing offset carries one gap across and wraps seamlessly.
+   At rest, and under reduced motion, the line is whole. */
+.xmatrix-app .app-status-pulse[data-live] path {
+  stroke-dasharray: 0.84 0.16;
+  animation: app-status-pulse-break 2s linear infinite;
+}
+
+@keyframes app-status-pulse-break {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xmatrix-app .app-status-pulse[data-live] path { stroke-dasharray: none; animation: none; }
+}
+
 /* First-message launch choice: a quiet brass card under a new conversation's
    first message. Solid fills only — no wood, no glass. The bottom rule drains
    over the three-second window; Jev's pick wears a brass edge and tag. */
