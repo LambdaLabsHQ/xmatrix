@@ -81,7 +81,6 @@ import {
   FileText,
   PlugZap,
   Plus,
-  Search,
   Settings,
   Share,
   Share2,
@@ -89,6 +88,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { SearchGlyph } from "@/components/ui/search-glyph";
 import { useConversationPages } from "@/components/pages/conversation-page-cards";
 
 import {
@@ -352,31 +352,33 @@ export function MobileTabDock({
   );
 }
 
-/** The global search entry for destinations without a conversation header. */
-export function GlobalSearchBar({ spaceName, searching, onOpenSearch }: {
-  spaceName: string;
+/**
+ * The global search entry for destinations without a conversation header: the
+ * same bare magnifier a conversation header ends with, at the window's top right.
+ */
+export function GlobalSearchBar({ searching, onOpenSearch }: {
   searching: boolean;
   onOpenSearch: () => void;
 }) {
   const shortcut = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform) ? "⌘F" : "Ctrl+F";
-  const capsuleRef = useRef<HTMLElement | null>(null);
-  useGlobalSearchClearance(capsuleRef);
+  const iconRef = useRef<HTMLButtonElement | null>(null);
+  useGlobalSearchClearance(iconRef);
   return (
     <div className="app-global-bar hidden md:flex">
-      <LiquidGlassPill
-        ref={capsuleRef}
-        as="button"
+      <button
+        ref={iconRef}
         type="button"
         title={`Search (${shortcut})`}
         aria-label="Search"
         onClick={onOpenSearch}
         data-search-anchor=""
-        className={cn("app-global-search flex items-center gap-2 text-left", searching && "invisible")}
+        className={cn(
+          "app-global-search flex size-8 items-center justify-center text-muted-foreground hover:text-foreground",
+          searching && "invisible"
+        )}
       >
-        <Search className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">Search {spaceName}</span>
-        <span className="app-global-search-shortcut shrink-0">{shortcut}</span>
-      </LiquidGlassPill>
+        <SearchGlyph className="size-4" />
+      </button>
     </div>
   );
 }
@@ -609,7 +611,7 @@ export function TopWorkspaceBar({
           data-search-anchor=""
           className="app-mobile-search-icon flex size-11 items-center justify-center text-muted-foreground sm:hidden"
         >
-          <Search className="size-5" />
+          <SearchGlyph className="size-5" />
         </button>
       )}
       {/* Empty on a plank, where it would only push the search glyph off the content line. */}
@@ -1348,7 +1350,7 @@ export function ChannelHeader({
             data-search-anchor=""
             className="app-channel-search hidden size-8 shrink-0 items-center justify-center rounded border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground md:flex"
           >
-            <Search className="size-4" />
+            <SearchGlyph className="size-4" />
           </button>
         )}
       </div>
