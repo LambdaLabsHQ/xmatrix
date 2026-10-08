@@ -26,6 +26,8 @@ const INVENTORY_TREES_MAX: usize = 1_000;
 /// time are listed without a size rather than holding the answer back.
 const SIZE_BUDGET: Duration = Duration::from_secs(90);
 const PROBE_CONCURRENCY: usize = 8;
+/// Serialized trees per listing, under the protocol's 768 KiB result bound.
+const LISTING_BYTES_MAX: usize = 640 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorktreeActionKind {
@@ -98,12 +100,12 @@ async fn list(live_cwds: &HashSet<PathBuf>) -> Result<Value, String> {
     let foreign_auto_reclaim = machine_worktrees::foreign_auto_reclaim_enabled()?;
     let known: Vec<PathBuf> = live_cwds.iter().cloned().collect();
     let mut trees = machine_worktrees(&known).await;
-    let truncated = trees.len() > INVENTORY_TREES_MAX;
+    let mut truncated = trees.len() > INVENTORY_TREES_MAX;
     trees.truncate(INVENTORY_TREES_MAX);
     let busy = busy_dirs(live_cwds);
     let deadline = Instant::now() + SIZE_BUDGET;
     let probes = probe_trees(&trees, deadline).await;
-    let entries: Vec<Value> = trees
+    let mut entries: Vec<Value> = trees
         .iter()
         .zip(probes)
         .map(|(tree, (size, unlanded))| {
@@ -129,6 +131,13 @@ async fn list(live_cwds: &HashSet<PathBuf>) -> Result<Value, String> {
             entry
         })
         .collect();
+    // One answer travels as one WebSocket message; keep it well under the Hub's limit.
+    let mut bytes: usize = entries.iter().map(|entry| entry.to_string().len() + 1).sum();
+    while bytes > LISTING_BYTES_MAX {
+        let Some(entry) = entries.pop() else { break };
+        bytes -= entry.to_string().len() + 1;
+        truncated = true;
+    }
     let mut inventory = json!({
         "capturedAt": time::OffsetDateTime::now_utc()
             .replace_nanosecond(0)
