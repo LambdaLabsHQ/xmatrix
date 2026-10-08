@@ -22,6 +22,7 @@ import {
 } from "./auth-session-policy";
 import { getDesktopBridge } from "./desktop/bridge";
 import { XMatrixQueryProvider } from "./query/query-provider";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 export { AUTH_TOKEN_REJECTED_EVENT };
 
@@ -360,7 +361,7 @@ async function persistNativeSession(payload: AuthResponse): Promise<void> {
     return;
   }
 
-  const response = await fetch(WEB_PROXY_ROUTES.native_session, {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -376,7 +377,7 @@ async function clearNativeSession(): Promise<void> {
     return;
   }
 
-  await fetch(WEB_PROXY_ROUTES.native_session, {
+  await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     method: "DELETE",
   }).catch(() => null);
 }
@@ -386,7 +387,7 @@ async function loadNativeSessionState(): Promise<Omit<AuthState, "loading">> {
     return { session: null, user: null };
   }
 
-  const response = await fetch(WEB_PROXY_ROUTES.native_session, {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     cache: "no-store",
   }).catch((error) => {
     if (isTransientNetworkSessionError(error)) {

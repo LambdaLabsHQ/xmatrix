@@ -14,6 +14,8 @@ export class XMatrixApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly retryable: boolean;
+  /** The server's Retry-After, when it named one. */
+  readonly retryAfterMs?: number;
   readonly details?: unknown;
 
   constructor(input: {
@@ -21,6 +23,7 @@ export class XMatrixApiError extends Error {
     status: number;
     code?: string;
     retryable?: boolean;
+    retryAfterMs?: number;
     details?: unknown;
   }) {
     super(input.message);
@@ -28,6 +31,7 @@ export class XMatrixApiError extends Error {
     this.status = input.status;
     this.code = input.code || "request_failed";
     this.retryable = input.retryable === true;
+    this.retryAfterMs = input.retryAfterMs;
     this.details = input.details;
   }
 }
@@ -41,6 +45,7 @@ export class XMatrixRawResponseError extends XMatrixApiError {
       status: error.status,
       code: error.code,
       retryable: error.retryable,
+      retryAfterMs: error.retryAfterMs,
       details: error.details,
     });
     this.name = "XMatrixRawResponseError";
@@ -58,19 +63,43 @@ export function xmatrixHubOrigin(): string {
   }
 }
 
-async function errorFromResponse(response: Response): Promise<XMatrixApiError> {
+/** Statuses a gateway in front of the Hub answers while the Hub restarts or is unreachable. */
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+const MAX_RETRY_AFTER_MS = 30_000;
+
+/** Retry-After as delta-seconds or an HTTP date, in milliseconds from now. */
+export function retryAfterMs(value: string | null | undefined, nowMs = Date.now()): number | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const ms = /^\d+(?:\.\d+)?$/u.test(trimmed) ? Number(trimmed) * 1_000 : Date.parse(trimmed) - nowMs;
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, MAX_RETRY_AFTER_MS) : undefined;
+}
+
+/**
+ * A failed response as the one error every client path classifies. The Hub
+ * labels its own failures `retryable`; a gateway status without the Hub's
+ * error body never reached the Hub's logic, so it is transient too.
+ */
+export async function errorFromResponse(response: Response): Promise<XMatrixApiError> {
   const payload = await response.clone().json().catch(() => ({})) as XMatrixErrorPayload;
+  const fromHub = typeof payload.code === "string" || typeof payload.retryable === "boolean";
   return new XMatrixApiError({
     message: payload.error || payload.message || `Request failed (${response.status})`,
     status: response.status,
     code: payload.code,
-    retryable: payload.retryable,
+    retryable: fromHub ? payload.retryable : GATEWAY_STATUSES.has(response.status),
+    retryAfterMs: retryAfterMs(response.headers.get("retry-after")),
     details: payload.details,
   });
 }
 
-function throwTransportError(cause: unknown): never {
-  if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+/**
+ * A request that got no answer. The caller ending it (its abort or its own
+ * deadline) is the caller's outcome and passes through unchanged; anything
+ * else is the network, and transient.
+ */
+function throwTransportError(cause: unknown, signal: AbortSignal | null | undefined): never {
+  if (signal?.aborted || (cause instanceof DOMException && cause.name === "AbortError")) throw cause;
   throw new XMatrixApiError({
     message: cause instanceof Error ? cause.message : "Network request failed",
     status: 0,
@@ -107,7 +136,7 @@ export async function xmatrixApiRequest<T>(input: {
       cache: "no-store",
     });
   } catch (cause) {
-    throwTransportError(cause);
+    throwTransportError(cause, input.signal);
   }
   noteRejectedToken(response.status, Boolean(input.token));
   if (!response.ok) throw await errorFromResponse(response);
@@ -127,7 +156,7 @@ export async function xmatrixRawResponse(
     noteRejectedToken(response.status, sendsBearer(input, init));
     return response;
   } catch (cause) {
-    throwTransportError(cause);
+    throwTransportError(cause, init?.signal ?? (input instanceof Request ? input.signal : undefined));
   }
 }
 
@@ -153,11 +182,26 @@ function sendsBearer(input: RequestInfo | URL, init?: RequestInit): boolean {
   return /^bearer\s/iu.test(headers.get("authorization") ?? "");
 }
 
-export function shouldRetryXMatrixQuery(failureCount: number, error: unknown): boolean {
-  if (failureCount >= 2) return false;
+/**
+ * The one client rule for a failure worth replaying (docs/architecture/client-resilience.md):
+ * the request never got an answer, the server asked us to slow down, or the
+ * server said the failure is transient. Anything else is a real answer.
+ */
+export function isTransientFailure(error: unknown): boolean {
   if (!(error instanceof XMatrixApiError)) return false;
   if (error.status === 0 || error.status === 408 || error.status === 429) return true;
   return error.status >= 500 && error.retryable;
+}
+
+export function shouldRetryXMatrixQuery(failureCount: number, error: unknown): boolean {
+  return failureCount < 2 && isTransientFailure(error);
+}
+
+/** The server's Retry-After when it named one, else jittered exponential backoff. */
+export function xmatrixRetryDelayMs(failureCount: number, error: unknown): number {
+  if (error instanceof XMatrixApiError && error.retryAfterMs !== undefined) return error.retryAfterMs;
+  const ceiling = Math.min(MAX_RETRY_AFTER_MS, 1_000 * 2 ** failureCount);
+  return ceiling / 2 + Math.random() * (ceiling / 2);
 }
 
 /** Preserve the plain Error contract of raw-response command consumers. */

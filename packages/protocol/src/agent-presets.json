@@ -1322,6 +1322,15 @@
           "args": ["remove", "-g", "@oh-my-pi/pi-coding-agent"]
         }
       },
+      "login": {
+        "flow": "url_paste_code",
+        "start": {
+          "command": "omp",
+          "args": ["login", "openai-codex"]
+        },
+        "urlRegex": "Open this URL in your browser:\\s*(https://auth\\.openai\\.com/\\S+)",
+        "rejectedRegex": "Paste the authorization code \\(or full redirect URL\\):"
+      },
       "autoUpdate": {
         "behavior": "unknown",
         "controls": [],
@@ -1657,6 +1666,15 @@
       "uninstall": {
         "unix": null,
         "windows": null
+      },
+      "login": {
+        "flow": "url_paste_code",
+        "terminal": true,
+        "start": {
+          "command": "devin",
+          "args": ["auth", "login", "--force-manual-token-flow"]
+        },
+        "urlRegex": "Visit (https://app\\.devin\\.ai/auth/cli/\\S+)"
       },
       "autoUpdate": {
         "behavior": "unknown",

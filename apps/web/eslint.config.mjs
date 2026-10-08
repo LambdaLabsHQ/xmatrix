@@ -40,36 +40,35 @@ const config = [
     },
   },
   {
-    files: [
-      "src/app/**/*.tsx",
-      "src/components/**/*.tsx",
-      "src/components/**/use-*.ts",
+    // Every client request goes through the transport in src/lib/query
+    // (docs/architecture/client-resilience.md): it is what turns a dropped
+    // connection into a failure the shared retry rule recognises. A direct
+    // fetch skips that and surfaces the browser's "Failed to fetch".
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      // The transport itself.
+      "src/lib/query/api-client.ts",
+      // Server code: Next route handlers and the Worker's Hub proxy hop.
+      "src/app/api/**",
+      "src/lib/xmatrix-proxy.ts",
+      "src/lib/native-session.ts",
+      "src/lib/pages/public-page.ts",
+      "src/lib/github-release.ts",
+      "src/lib/relay-v2/message-attachment-upload-proxy.ts",
     ],
     rules: {
       "no-restricted-globals": [
         "error",
         {
           name: "fetch",
-          message: "React HTTP server state must use a typed fetcher through TanStack Query.",
+          message: "Use the xMatrix transport (src/lib/query/api-client.ts) so transient failures are classified and retried.",
         },
       ],
-    },
-  },
-  {
-    // Reviewed protocol/transport boundaries. These files do not use HTTP as
-    // ordinary React server state; keep this list explicit and small.
-    files: [
-      "src/app/login/page.tsx",
-      "src/components/dashboard/workspace-admin-views.tsx",
-      "src/components/dashboard/workspace-composer-dialogs.tsx",
-      "src/components/dashboard/workspace-message-timeline.tsx",
-      "src/components/dashboard/workspace-shell-formatters.tsx",
-      "src/components/dashboard/workspace-shell-helpers.tsx",
-      "src/components/dashboard/workspace-shell-helpers-extra.tsx",
-      "src/components/dashboard/workspace-shell-recovered.tsx",
-    ],
-    rules: {
-      "no-restricted-globals": "off",
+      "no-restricted-properties": [
+        "error",
+        { object: "window", property: "fetch", message: "Use the xMatrix transport (src/lib/query/api-client.ts)." },
+        { object: "globalThis", property: "fetch", message: "Use the xMatrix transport (src/lib/query/api-client.ts)." },
+      ],
     },
   },
   {

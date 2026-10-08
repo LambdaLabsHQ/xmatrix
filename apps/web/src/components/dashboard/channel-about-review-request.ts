@@ -1,12 +1,13 @@
 import { WEB_PROXY_ROUTES, type SerializedChannel } from "@xmatrix/protocol";
 
 import { runIdempotentMutationFetchWithRetry } from "./workspace-refresh-policy";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 export async function requestChannelAboutReview(input: {
   token: string;
   channel: SerializedChannel;
 }): Promise<void> {
-  const response = await runIdempotentMutationFetchWithRetry(() => fetch(
+  const response = await runIdempotentMutationFetchWithRetry(() => xmatrixRawResponse(
     WEB_PROXY_ROUTES.space_channel_about(input.channel.spaceId),
     {
       method: "POST",

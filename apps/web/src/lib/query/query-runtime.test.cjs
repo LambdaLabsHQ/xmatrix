@@ -124,3 +124,31 @@ test("cancelQueries aborts the Query-owned request signal", async () => {
   await assert.rejects(pending, (error) => error?.message === "CancelledError");
   client.clear();
 });
+
+test("one transient rule: no answer, slow down, or the Hub's own label", async () => {
+  const { isTransientFailure, errorFromResponse, xmatrixRetryDelayMs, xmatrixRawResponse } = require("./api-client.ts");
+  const hub = (status, body, headers) => new Response(JSON.stringify(body), { status, headers });
+  assert.equal(isTransientFailure(await errorFromResponse(hub(503, { error: "x", code: "service_restarting", retryable: true }))), true);
+  assert.equal(isTransientFailure(await errorFromResponse(hub(500, { error: "x", code: "internal_error", retryable: false }))), false);
+  assert.equal(isTransientFailure(await errorFromResponse(new Response("<html>", { status: 502 }))), true, "a gateway page never reached the Hub");
+  assert.equal(isTransientFailure(await errorFromResponse(new Response("", { status: 500 }))), false);
+  assert.equal(isTransientFailure(new TypeError("x is not a function")), false);
+
+  const paced = await errorFromResponse(hub(503, { error: "x", code: "postgres_unavailable", retryable: true }, { "retry-after": "4" }));
+  assert.equal(xmatrixRetryDelayMs(0, paced), 4_000, "the server's pace wins");
+  const delay = xmatrixRetryDelayMs(2, new XMatrixApiError({ status: 0, message: "x" }));
+  assert.ok(delay >= 2_000 && delay <= 4_000, `jittered backoff, got ${delay}`);
+
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw new TypeError("Failed to fetch"); };
+    await assert.rejects(xmatrixRawResponse("/x"), (error) => error.status === 0 && isTransientFailure(error));
+    const deadline = new AbortController();
+    deadline.abort(new DOMException("caller deadline", "TimeoutError"));
+    globalThis.fetch = async (_input, init) => { throw init.signal.reason; };
+    await assert.rejects(xmatrixRawResponse("/x", { signal: deadline.signal }),
+      (error) => error.name === "TimeoutError", "the caller's own deadline passes through unchanged");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
