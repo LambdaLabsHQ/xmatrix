@@ -1,38 +1,73 @@
-//! An About file must be one this Run wrote. A session that applies its About
-//! before its own write succeeded would otherwise save whatever an earlier
-//! session left at the same path, which is another Channel's summary and name.
+//! Direct text input for the Channel's database-backed About. No local files.
 
-use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
+use serde::Deserialize;
+use tokio::io::AsyncReadExt;
 use xmatrix_cli_core::error::{self, CliError};
+use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
 
-/// Set by the daemon on every Run it spawns, in Unix milliseconds.
-const RUN_SPAWNED_AT_ENV: &str = "XMATRIX_RUN_SPAWNED_AT_MILLIS";
+const MAX_STDIN_BYTES: usize = 64 * 1024;
 
-/// Refuse an About file last written before this Run was spawned. Outside a
-/// daemon-spawned Run there is no start to compare with, and nothing to refuse.
-pub(crate) fn ensure_written_by_this_run(path: &Path, file_flag: &str) -> error::Result<()> {
-    let Some(spawned_at) = std::env::var(RUN_SPAWNED_AT_ENV)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-    else {
-        return Ok(());
-    };
-    let modified = std::fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .map_err(|error| CliError::Launch(format!("read {}: {error}", path.display())))?;
-    if written_before(modified, spawned_at) {
-        return Err(CliError::Launch(format!(
-            "{file_flag} {} was last written before this Run started, so it is not this Run's text; nothing was saved. Write the file again and apply it once that write has succeeded.",
-            path.display()
-        )));
-    }
-    Ok(())
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AboutInput {
+    pub summary: String,
+    pub name: Option<String>,
 }
 
-fn written_before(modified: SystemTime, spawned_at_millis: u64) -> bool {
-    modified < UNIX_EPOCH + Duration::from_millis(spawned_at_millis)
+pub(crate) async fn read(
+    summary: Option<String>,
+    name: Option<String>,
+    stdin: bool,
+) -> error::Result<AboutInput> {
+    if stdin {
+        let mut bytes = Vec::new();
+        tokio::io::stdin()
+            .take((MAX_STDIN_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|error| CliError::Launch(format!("read About stdin: {error}")))?;
+        return parse_stdin(bytes);
+    }
+    validate(
+        AboutInput {
+            summary: summary.unwrap_or_default(),
+            name,
+        },
+        TextSource::Argument,
+    )
+}
+
+fn parse_stdin(bytes: Vec<u8>) -> error::Result<AboutInput> {
+    if bytes.len() > MAX_STDIN_BYTES {
+        return Err(CliError::Launch(
+            "About JSON stdin exceeds 64 KiB; nothing was sent".into(),
+        ));
+    }
+    let json = text_input::decode_utf8_input(bytes, "About stdin")?;
+    let input = serde_json::from_str(&json).map_err(|_| {
+        // Do not echo input values or JSON fragments in an error.
+        CliError::Launch(
+            "About stdin must be a JSON object with string summary and optional string name; no other fields are accepted. Nothing was sent".into(),
+        )
+    })?;
+    validate(input, TextSource::Stdin)
+}
+
+fn validate(input: AboutInput, source: TextSource) -> error::Result<AboutInput> {
+    let routes = TextRoutes {
+        stdin: true,
+        file_flag: None,
+    };
+    text_input::ensure_text_intact("channel About summary", &input.summary, source, routes)?;
+    if input.summary.trim().is_empty() {
+        return Err(CliError::Launch(
+            "channel About summary is required; nothing was sent".into(),
+        ));
+    }
+    if let Some(name) = &input.name {
+        text_input::ensure_text_intact("channel name", name, source, routes)?;
+    }
+    Ok(input)
 }
 
 #[cfg(test)]
@@ -40,11 +75,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_file_from_before_the_run_is_not_its_text() {
-        let spawned_at = 1_791_446_185_000;
-        let at = |millis| UNIX_EPOCH + Duration::from_millis(millis);
-        assert!(written_before(at(spawned_at - 1), spawned_at));
-        assert!(!written_before(at(spawned_at), spawned_at));
-        assert!(!written_before(at(spawned_at + 60_000), spawned_at));
+    fn unicode_summary_and_title_travel_together_without_files() {
+        for json in [
+            r#"{"summary":"中文摘要","name":"频道标题"}"#,
+            r#"{"summary":"\u4e2d\u6587\u6458\u8981","name":"\u9891\u9053\u6807\u9898"}"#,
+        ] {
+            let input = parse_stdin(json.as_bytes().to_vec()).unwrap();
+            assert_eq!(input.summary, "中文摘要");
+            assert_eq!(input.name.as_deref(), Some("频道标题"));
+        }
+        assert!(
+            parse_stdin(br#"{"summary":"Summary"}"#.to_vec())
+                .unwrap()
+                .name
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bad_or_unsupported_input_never_becomes_a_hub_update() {
+        for json in [
+            "not json",
+            r#"{"name":"title"}"#,
+            r#"{"summary":42}"#,
+            r#"{"summary":" "}"#,
+            r#"{"summary":"s","name":42}"#,
+            r#"{"summary":"s","channelId":"foreign-channel"}"#,
+            r#"{"summary":"s","expectedRevision":42}"#,
+            r#"{"summary":"s","summary-file":"old.txt"}"#,
+            r#"{"summary":"first","summary":"second"}"#,
+            r#"{"summary":"\ufffd"}"#,
+            r#"{"summary":"s","name":"\ufffd"}"#,
+        ] {
+            assert!(parse_stdin(json.as_bytes().to_vec()).is_err(), "{json}");
+        }
+        assert!(parse_stdin(vec![0xff]).is_err());
+        assert!(parse_stdin(vec![b' '; MAX_STDIN_BYTES + 1]).is_err());
     }
 }
