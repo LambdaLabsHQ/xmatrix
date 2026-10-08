@@ -3,6 +3,7 @@ import { fixtureJson, fixtureRequests } from "./in-page-api-fixtures";
 import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
+  E2E_MOBILE_CONTEXT,
   E2E_NOW,
   E2E_SPACE,
   installPageTreeStubs,
@@ -193,4 +194,25 @@ test("the search panel drops from the control that opened it, one glass with not
     await panel.getByRole("button", { name: "Close search" }).click();
     await expect(panel).toHaveCount(0);
   }
+});
+
+test.describe("on a phone", () => {
+  test.use(E2E_MOBILE_CONTEXT);
+
+  test("search is the whole screen, down to its foot, with text iOS will not zoom", async ({ page }) => {
+    await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+    await stubMessageSearch(page);
+    await page.goto(`/app/${E2E_SPACE.id}/channels`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Search workspace" }).filter({ visible: true }).first().click();
+    const panel = page.getByRole("dialog", { name: "Search workspace" });
+    await expect(panel).toBeVisible();
+    await expect(page.locator("[data-workspace-search-input]")).toBeFocused();
+    await expect.poll(() => panel.evaluate((node) => getComputedStyle(node).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/u);
+    const box = (await panel.boundingBox())!;
+    const viewport = page.viewportSize()!;
+    expect(box.x).toBeCloseTo(8, 0);
+    expect(box.x + box.width).toBeCloseTo(viewport.width - 8, 0);
+    expect(box.y + box.height).toBeCloseTo(viewport.height - 8, 0);
+    expect(await page.locator("[data-workspace-search-input]").evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+  });
 });

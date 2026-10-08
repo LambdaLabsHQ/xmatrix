@@ -2467,7 +2467,6 @@ body:has(.app-search-overlay) [data-search-anchor] {
 }
 
 .xmatrix-app .app-search-panel {
-  --app-search-panel-row: 2.75rem;
   border-radius: calc(var(--app-search-panel-row) / 2);
   animation: app-search-panel-in 260ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
@@ -2537,6 +2536,25 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 .xmatrix-app .app-search-panel-status {
   padding: 0.5rem 0.625rem;
   font-size: 0.75rem;
+}
+
+/* A phone: 16px text, or iOS zooms the page when the field takes focus. */
+@media (max-width: 639px) {
+  html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-search-panel-input {
+    font-size: 1rem;
+  }
+
+  .xmatrix-app .app-search-panel-row .text-\[13px\] {
+    font-size: 0.9375rem;
+  }
+
+  .xmatrix-app .app-search-panel-row .text-\[11px\] {
+    font-size: 0.75rem;
+  }
+
+  .xmatrix-app .app-search-panel-empty {
+    font-size: 0.875rem;
+  }
 }
 
 @media (hover: hover) {
