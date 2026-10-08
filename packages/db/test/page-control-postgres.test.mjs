@@ -523,6 +523,7 @@ integration("the page tree shows each page's Agents: live in a conversation whos
     const r = () => crypto.randomUUID();
     const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: r() });
     const onPages = async (principal) => Object.fromEntries((await call("agentsOnPages", { principal })).pages
+      .filter(({ agents }) => agents.length > 0)
       .map(({ pageId, agents }) => [pageId, agents.map(({ instanceId, name, status, conversationId, activity, blockId }) =>
         ({ instanceId, name, status, conversationId, activity, blockId }))]));
 
@@ -543,6 +544,13 @@ integration("the page tree shows each page's Agents: live in a conversation whos
       [company.pageId]: [{ ...live, activity: "viewing", blockId: "" }],
       [project.pageId]: [{ ...live, activity: "editing", blockId: "status" }],
     });
+
+    // Each page counts the conversations about it that this reader may open.
+    const counts = async (principal) => Object.fromEntries((await call("agentsOnPages", { principal })).pages
+      .map(({ pageId, conversations }) => [pageId, conversations]));
+    assert.deepEqual(await counts(member), { [company.pageId]: 1, [project.pageId]: 1 },
+      "the closed conversation is not counted for a member who cannot open it");
+    assert.deepEqual(await counts(owner), { [company.pageId]: 1, [project.pageId]: 1, [quiet.pageId]: 1 });
 
     await client.query("UPDATE data.instances SET status='busy' WHERE instance_id=$1", [ids.instance]);
     assert.equal((await onPages(member))[project.pageId][0].status, "busy");

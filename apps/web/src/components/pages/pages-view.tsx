@@ -32,9 +32,6 @@ import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/t
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
 import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
 import { discussionDraft, discussionTitle } from "@/components/dashboard/selection-discussion";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
@@ -78,40 +75,34 @@ export function usePageTree(spaceId: string | null, token: string) {
   });
 }
 
-/** The Agents reading or editing each page from a live Run, as Channel rows show theirs. */
+interface PageTreeActivity {
+  /** The Agents reading or editing each page from a live Run. */
+  agents: Map<string, PageTreeAgent[]>;
+  /** How many conversations are about each page, as its margin counts them. */
+  conversations: Map<string, number>;
+}
+
 function usePageAgents(spaceId: string | null, token: string) {
   const { user } = useAuth();
   return useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-tree-agents", [spaceId]),
     enabled: Boolean(spaceId && token && user?.id), staleTime: 5_000, refetchInterval: 15_000,
-    queryFn: ({ signal }) => pageApi.agents(spaceId!, token, signal)
-      .then((result) => new Map(result.pages.map((page) => [page.pageId, page.agents]))),
+    queryFn: ({ signal }) => pageApi.agents(spaceId!, token, signal).then((result): PageTreeActivity => ({
+      agents: new Map(result.pages.map((page) => [page.pageId, page.agents])),
+      conversations: new Map(result.pages.map((page) => [page.pageId, page.conversations ?? 0])),
+    })),
   });
 }
 
-const TREE_AVATARS = 3;
-const NO_AGENTS = new Map<string, PageTreeAgent[]>();
+const NO_ACTIVITY: PageTreeActivity = { agents: new Map(), conversations: new Map() };
 
-// The Agents on a page stay icon-sized beside its title.
-function PageAgentAvatars({ agents }: { agents: readonly PageTreeAgent[] }) {
-  // Busy Agents first: they are the ones working on the page right now.
-  const sorted = [...agents].sort((a, b) => Number(b.status === "busy") - Number(a.status === "busy"));
-  const hidden = sorted.length - TREE_AVATARS;
+// A page's conversations beside its title, as the page's own header counts them; who is on it is the second line.
+function PageConversationCount({ count }: { count: number }) {
   return (
-    <div className="app-channel-agent-avatars flex shrink-0 items-center -space-x-1.5 px-0.5" data-testid="page-tree-agents">
-      {sorted.slice(0, TREE_AVATARS).map((agent) => (
-        <IdentityAvatar key={`${agent.instanceId}:${agent.conversationId}`} kind="agent"
-          label={`${agent.name} (${agent.activity})`} status={agent.status} imageUrl={agent.avatarUrl}
-          initials={agent.avatarUrl ? avatarInitials(agent.name) : undefined}
-          size="xs" showKindBadge={false} className="app-channel-agent-avatar rounded-full" />
-      ))}
-      {hidden > 0 && (
-        <span className={cn("app-channel-presence-overflow flex size-5 items-center justify-center text-[9px] font-bold",
-          COUNT_CHIP_MATERIAL_CLASS)}>
-          +{hidden}
-        </span>
-      )}
-    </div>
+    <span className="app-page-row-conversations flex shrink-0 items-center gap-1 px-0.5 text-xs tabular-nums text-muted-foreground"
+      data-testid="page-tree-conversations" aria-label={`${count} conversation${count === 1 ? "" : "s"}`}>
+      <MessageSquare className="size-3.5" aria-hidden="true" />{count}
+    </span>
   );
 }
 
@@ -152,8 +143,8 @@ function PageTreeRow({ depth, selected, open, onToggle, expandHidden, children }
   );
 }
 
-function TreeNode({ page, childrenOf, agentsOf, depth, selectedPageId, onSelect, onPrefetch, onCreateChild }: {
-  page: PageSummary; childrenOf: Map<string | null, PageSummary[]>; agentsOf: Map<string, PageTreeAgent[]>; depth: number;
+function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect, onPrefetch, onCreateChild }: {
+  page: PageSummary; childrenOf: Map<string | null, PageSummary[]>; activity: PageTreeActivity; depth: number;
   selectedPageId: string | null; onSelect: (pageId: string) => void; onPrefetch: (pageId: string) => void;
   /** Makes a page under this one, from the row itself. */
   onCreateChild?: (pageId: string) => void;
@@ -161,7 +152,8 @@ function TreeNode({ page, childrenOf, agentsOf, depth, selectedPageId, onSelect,
   const children = childrenOf.get(page.pageId) ?? [];
   const [open, setOpen] = useState(true);
   const selected = page.pageId === selectedPageId;
-  const agents = agentsOf.get(page.pageId) ?? [];
+  const agents = activity.agents.get(page.pageId) ?? [];
+  const conversations = activity.conversations.get(page.pageId) ?? 0;
   return (
     <li>
       <PageTreeRow depth={depth} selected={selected} open={open}
@@ -176,7 +168,7 @@ function TreeNode({ page, childrenOf, agentsOf, depth, selectedPageId, onSelect,
           </span>
           <span className="app-list-row-meta truncate">{pageRowMeta(page, agents)}</span>
         </button>
-        {agents.length > 0 && <PageAgentAvatars agents={agents} />}
+        {conversations > 0 && <PageConversationCount count={conversations} />}
         {/* Shown while the row is hovered; a touch screen has no hover, so there it stays. */}
         {onCreateChild && (
           <button type="button" aria-label="New sub-page" title="New sub-page"
@@ -189,7 +181,7 @@ function TreeNode({ page, childrenOf, agentsOf, depth, selectedPageId, onSelect,
       {open && children.length > 0 && (
         <ul>
           {children.map((child) => (
-            <TreeNode key={child.pageId} page={child} childrenOf={childrenOf} agentsOf={agentsOf} depth={depth + 1}
+            <TreeNode key={child.pageId} page={child} childrenOf={childrenOf} activity={activity} depth={depth + 1}
               selectedPageId={selectedPageId} onSelect={onSelect} onPrefetch={onPrefetch} onCreateChild={onCreateChild} />
           ))}
         </ul>
@@ -259,8 +251,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
   layout?: "sidebar" | "phone";
 }) {
   const tree = usePageTree(spaceId, token);
-  const agents = usePageAgents(spaceId, token);
-  const agentsOf = agents.data ?? NO_AGENTS;
+  const activity = usePageAgents(spaceId, token).data ?? NO_ACTIVITY;
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -324,7 +315,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
         {/* The list always meets the plank with a section's name, never a bare row. */}
         {roots.length > 0 && <ListSectionHeading label="All pages" />}
         <ul>{roots.map((page) => (
-          <TreeNode key={page.pageId} page={page} childrenOf={childrenOf} agentsOf={agentsOf} depth={0}
+          <TreeNode key={page.pageId} page={page} childrenOf={childrenOf} activity={activity} depth={0}
             selectedPageId={selectedPageId} onSelect={onSelectPage} onPrefetch={prefetch}
             onCreateChild={creation.creating ? undefined : (pageId) => void creation.create(pageId)} />
         ))}</ul>
@@ -728,7 +719,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
   // The Agents whose live Run read or edited the page stay on it while that Run lives, as in
   // the tree; a live session only shows an Agent at the moment it reads or edits (§3.2).
   const pageAgents = usePageAgents(spaceId, token);
-  const liveOnPage = useMemo(() => pageAgents.data?.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
+  const liveOnPage = useMemo(() => pageAgents.data?.agents.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
   const staying = useMemo(() => liveOnPage.filter((agent) =>
     !presence.some(({ state }) => liveRunOf(state, [agent]))), [liveOnPage, presence]);
   // An Agent's caret rests at its last edit while its Run lives, dimmed while the Run is not working;
