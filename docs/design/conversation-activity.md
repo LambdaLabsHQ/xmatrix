@@ -145,6 +145,10 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   `reviews` and `checks`. It is listed in the conversation's Subscriptions
   with the repository subscriptions. A pull request the connection does not
   reach is not subscribed; the entry is recorded either way.
+  Webhook routes require the subscription creator's current user permission
+  to append to that Channel. Legacy Agent creators and revoked or read-only
+  users do not dispatch events or attempt subscription cleanup; their stored
+  relations remain unchanged. Each write still rechecks its own permission.
 - **What is said.** Others' merge or close, others' submitted reviews and
   new comments, and one CI verdict per settling of the head commit: when a
   check suite completes and every suite with check runs has finished, the

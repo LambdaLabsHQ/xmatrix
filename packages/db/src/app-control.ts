@@ -4,6 +4,7 @@ import { ControlError } from "./control-error.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import {
+  channelCapabilityPredicate,
   requireChannelCapability,
   type ChannelCapabilityGrant,
 } from "./channel-capability-policy.js";
@@ -353,7 +354,7 @@ export class PostgresAppRepository {
     const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v4", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v5", text: `SELECT
         r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
@@ -361,6 +362,8 @@ export class PostgresAppRepository {
           AND channel.space_id=r.space_id
         WHERE c.provider_id='github' AND c.status='configured'
           AND r.source_kind IN ('repository','issue') AND lower(r.source_ref)=ANY($2::text[])
+          AND ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "channel",
+            principalKindSql: "'user'", principalIdSql: "r.created_by" })}
           AND jsonb_typeof(r.features_json)='array' AND r.features_json ? $4
           AND (c.metadata_json->>'installationId'=$1 OR EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(CASE
