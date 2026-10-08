@@ -733,7 +733,8 @@ export function postgresProductMessage(message: Record<string, unknown>): Record
       annotations: message.annotations,
       ...(!message.recalledAt && supersededByOf(message.annotations)
         ? { supersededBy: supersededByOf(message.annotations) } : {}),
-      attachments: Array.isArray(message.attachments)
+      // A withdrawn message withdraws its files too: their bytes already answer 404.
+      attachments: message.recalledAt || message.deletedAt ? [] : Array.isArray(message.attachments)
         ? message.attachments.map((attachment: Record<string, unknown>) => ({
             ...attachment,
             channelId: message.channelId,
