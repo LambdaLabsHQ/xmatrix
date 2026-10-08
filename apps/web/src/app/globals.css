@@ -7791,8 +7791,8 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   align-items: flex-start;
 }
 
-html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > .app-channel-agent-avatars {
-  margin-top: 2px;
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > .app-page-row-conversations {
+  height: 24px;
 }
 
 /* The chevron's 20px mark and the +'s 16px one, centred on the 24px title line. */
