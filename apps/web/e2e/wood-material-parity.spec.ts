@@ -46,7 +46,9 @@ for (const view of ['profile', 'activity', 'more']) {
           ? [element.className.toString()] : [];
       }));
     expect(surfaces).toEqual([]);
-    expect(await page.locator('.app-topbar').evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('wood.webp');
+    // A dock root's bar carries its wood on the Space sign; a pushed screen's bar is the board.
+    const wood = page.locator('.app-topbar.app-mobile-tab-root-bar :is(.app-mobile-space-trigger, .app-mobile-title), .app-topbar:not(.app-mobile-tab-root-bar)');
+    expect(await wood.first().evaluate((node) => getComputedStyle(node).backgroundImage)).toContain('wood.webp');
   });
 }
 
