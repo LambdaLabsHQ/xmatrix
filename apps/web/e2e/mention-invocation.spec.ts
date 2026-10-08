@@ -924,7 +924,8 @@ test("@auto shows the Agent and machine routing chose, and why, in one row", asy
   await expect(jev.getByText(/^Fit/)).toHaveCount(0);
   await expect(dialog.getByRole("list", { name: "Invocation progress" })).not.toContainText("Machine selected");
   // Three are shown; the rest are one click away.
-  await expect(agent.getByRole("listitem")).toHaveCount(3);
-  await jev.getByRole("button", { name: "1 more" }).click();
-  await expect(agent.getByRole("listitem")).toHaveCount(4);
+  const chips = agent.locator("li:not(.contents)");
+  await expect(chips).toHaveCount(3);
+  await jev.getByRole("button", { name: "+1" }).click();
+  await expect(chips).toHaveCount(4);
 });
