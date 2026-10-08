@@ -185,6 +185,10 @@ pub struct HarnessLogin {
     pub rejected_regex: Option<String>,
     #[serde(default)]
     pub status: Option<LoginStatus>,
+    /// Run the sign-in in a pseudo-terminal: its prompt refuses to read from
+    /// a pipe.
+    #[serde(default)]
+    pub terminal: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
