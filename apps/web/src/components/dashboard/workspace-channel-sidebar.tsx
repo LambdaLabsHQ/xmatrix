@@ -68,7 +68,6 @@ import {
 
 import { ChannelRowPreview } from "./channel-row-preview";
 import { MentionMark } from "./mention-mark";
-import { SpacePlanBadge } from "./space-plan-badge";
 import { CONVERSATION_QUERY, INTAKE_QUERY, type SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
 import { AppView, MOBILE_CHANNEL_ACTION_LONG_PRESS_MS, MOBILE_CHANNEL_ACTION_MOVE_TOLERANCE_PX } from "./workspace-shell-navigation";
@@ -707,25 +706,10 @@ export function SidebarSpaceHeader({
                   className="app-space-switcher-name-pending"
                 />
               ) : (
-                /* The name gives up width before the mark does: a Space with
-                   a long name must still show which plan it is on. */
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="app-space-switcher-name min-w-0 truncate font-black">
-                    {currentSpace?.name || "xMatrix"}
-                  </span>
-                  {currentSpace && (
-                    /* The rename control is an overlay pinned to the right of
-                       this row, and it lands exactly where the mark would sit.
-                       The margin is on the mark rather than on the row so that
-                       a Space whose plan has not been read yet — which renders
-                       no mark — gives up none of its name width for a slot
-                       nothing occupies. */
-                    <SpacePlanBadge
-                      userId={currentUserId}
-                      spaceId={currentSpace.id}
-                      className="mr-7"
-                    />
-                  )}
+                /* The rename control is an overlay pinned to the right of
+                   this row, so a long name stops short of it. */
+                <span className={cn("app-space-switcher-name min-w-0 truncate font-black", currentSpace && "mr-7")}>
+                  {currentSpace?.name || "xMatrix"}
                 </span>
               )}
             </span>

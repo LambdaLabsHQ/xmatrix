@@ -34,6 +34,11 @@ pub(crate) fn claude_stream_extra_args(
         // Echo each submitted user message back on stdout (`isReplay:true`) so
         // the reader can confirm the turn was accepted.
         "--replay-user-messages".to_string(),
+        // Without a permission prompt tool headless Claude withholds
+        // AskUserQuestion; with one it asks us (`can_use_tool`), and the
+        // runtime shows the question as a card.
+        "--permission-prompt-tool".to_string(),
+        "stdio".to_string(),
     ];
     if let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) {
         args.extend(["--model".to_string(), model.to_string()]);
