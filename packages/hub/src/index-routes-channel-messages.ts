@@ -8,7 +8,7 @@ import { LIVE_RUN_LAUNCH_FIELDS, liveRunIsAdmitted, snapshotLiveRunFromProductGa
 import { type AuthUser } from "./auth";
 import { agentMessagePresentationForLiveBinding, loadLiveAgentPresenceFromRuntime } from "./runtime-transport/agent-presence-snapshot";
 import { runtimeCellsForChannel } from "./runtime-transport/runtime-route-directory-delivery";
-import { agentRunDelegationFailure, requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
+import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { dispatchProductMessagePostCommit, productMessageControlFinishesBeforeResponse } from "./product-message-post-commit";
 import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake";
 import { productMessageSenderPresentation } from "./message-sender-presentation";
@@ -465,8 +465,6 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         };
       return channelMessageResponse(() => channelMessageCommand(c.env, channelId, "message-attachment", command));
     } catch (error) {
-      const delegationFailure = agentRunDelegationFailure(error);
-      if (delegationFailure) return delegationFailure;
       return requestErrorResponse(c, error);
     }
   });

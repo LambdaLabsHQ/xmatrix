@@ -11,7 +11,6 @@ import {
 } from "./postgres-authority-http";
 import {
   RELAY_R2_UPLOAD_CHECKSUM_HEADER,
-  RelayR2UploadGatewayError,
   executeRelayR2UploadGatewayRequest,
   type RelayPrivateR2UploadPort,
   type RelayR2LiveUploadIntentContext,
@@ -44,11 +43,8 @@ export interface RelayR2UploadPrincipal {
   id: string;
 }
 
-export class RelayR2UploadPrivateApiError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) {
-    super(message);
-    this.name = "RelayR2UploadPrivateApiError";
-  }
+export class RelayR2UploadPrivateApiError extends ControlError {
+  override name = "RelayR2UploadPrivateApiError";
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -412,14 +408,4 @@ export async function handleRelayR2BlobRefRelease(input: {
     principal: principal(input.principal),
   }));
   return Response.json(released, { headers: { "cache-control": "private, no-store" } });
-}
-
-export function relayR2UploadPrivateApiErrorResponse(error: unknown): Response | undefined {
-  if (error instanceof RelayR2UploadPrivateApiError || error instanceof RelayR2UploadGatewayError) {
-    return Response.json({ error: error.message, code: error.code }, {
-      status: error.status,
-      headers: { "cache-control": "private, no-store", "x-content-type-options": "nosniff" },
-    });
-  }
-  return undefined;
 }

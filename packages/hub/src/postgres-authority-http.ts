@@ -1,4 +1,5 @@
 import { utf8ByteLength } from "@xmatrix/protocol";
+import { privateJsonResponse } from "./private-json-response";
 import { ControlError, DetailedControlError, createAuthorityDatabase, type AuthorityDatabase } from "@xmatrix/db";
 
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
@@ -44,7 +45,7 @@ export function postgresControlErrorResponse(
   extra: Record<string, unknown> = {},
 ): Response {
   const details = error instanceof DetailedControlError && error.details ? { details: error.details } : {};
-  return postgresAuthorityJson({
+  return privateJsonResponse({
     error: error.message, code: error.code, retryable: error.retryable, ...details, ...extra,
   }, error.status);
 }
