@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import type { ChannelMessage } from "@xmatrix/protocol";
 import { RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES } from "@xmatrix/protocol/relay-v2/message-attachment";
-import rootPackage from "../../../../../package.json";
 
 export const HISTORY_REFRESH_INTERVAL_MS = 30000;
 /** When to re-read a channel's presence after one of its Instances went offline. */
@@ -77,8 +76,6 @@ export const TIMELINE_VIRTUAL_MIN_OVERSCAN_ITEMS = 2;
 export const MESSAGE_JUMP_SETTLE_FRAMES = 12;
 
 export const EVENT_LIMIT = 200;
-
-export const XMATRIX_RELEASE_VERSION = rootPackage.version;
 
 export const XMATRIX_SYSTEM_AVATAR_URL = "/brand/xmatrix-management-icon.png";
 

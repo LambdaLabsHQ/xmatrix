@@ -13,7 +13,6 @@ import {
   COLLAPSED_MESSAGE_PREVIEW_LINES,
   COLLAPSIBLE_MESSAGE_LENGTH,
   COLLAPSIBLE_MESSAGE_LINES,
-  XMATRIX_RELEASE_VERSION,
   IMAGE_ATTACHMENT_TYPES,
   MARKDOWN_ATTACHMENT_TYPES,
 } from "./workspace-shell-constants";
@@ -1035,9 +1034,12 @@ export function isChannelAttentionSummary(value: unknown): value is NonNullable<
   );
 }
 
-export function releaseVersionStatus(version: string | undefined): "current" | "outdated" | "unknown" {
-  if (!version) return "unknown";
-  return compareReleaseVersions(version, XMATRIX_RELEASE_VERSION) < 0 ? "outdated" : "current";
+export function releaseVersionStatus(
+  version: string | undefined,
+  latestVersion: string | undefined,
+): "current" | "outdated" | "unknown" {
+  if (!version || !latestVersion) return "unknown";
+  return compareReleaseVersions(version, latestVersion) < 0 ? "outdated" : "current";
 }
 
 export function formatVersion(version: string): string {

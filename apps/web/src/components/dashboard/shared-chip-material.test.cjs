@@ -44,7 +44,7 @@ test("display labels across dashboard surfaces reuse the shared chip material", 
     ["workspace-shell-recovered.tsx", "app-status-chip-badge"],
     ["workspace-admin-views.tsx", "secretAccessChipClass(entry.access)"],
     ["workspace-admin-views.tsx", "{spaceRoleFor(space, user.id)}"],
-    ["workspace-admin-views.tsx", "This component is older than web/hub"],
+    ["workspace-admin-views.tsx", "The latest stable release is"],
   ];
 
   for (const [file, marker] of labels) assertMaterialNear(file, marker);
