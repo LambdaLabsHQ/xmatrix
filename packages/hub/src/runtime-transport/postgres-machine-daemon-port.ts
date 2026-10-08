@@ -40,6 +40,7 @@ import { recordAgentLaunchStage } from "../postgres-observability";
 import { isRecoverableLaunchFailure } from "../live-run-admission";
 import { boundedOccurrenceAt } from "../bounded-occurrence-time";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
+import { wakeMachineChannels } from "../registration-authority-wake";
 import { machineDaemonCommand } from "../machines";
 import { machineRunLifecycleReport } from "../machine-run-lifecycle-report";
 import { updateAgentLaunch } from "../runtime";
@@ -93,6 +94,8 @@ export interface PostgresMachineDaemonPortDependencies {
   /** Retain work that outlives the frame that started it. */
   keepAlive?(task: Promise<unknown>): void;
   quotaChanged?(route: { ownerUserId: string; machineId: string }): Promise<void>;
+  /** The daemon connected: wake the Channels whose work waits on this Machine. */
+  machineConnected?(route: { ownerUserId: string; machineId: string }): Promise<unknown>;
 }
 
 /** Machine Daemon composition whose durable effects are PostgreSQL commands on the owner's Machine and its Runs. */
@@ -112,6 +115,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       daemonCommand: (command) => machineDaemonCommand(input.env, command),
       runLifecycleReport: (report) => machineRunLifecycleReport(input.env, report),
       launchUpdate: (update) => updateAgentLaunch(input.env, update),
+      machineConnected: (route) => wakeMachineChannels(input.env, route),
       terminateInstance: input.terminateInstance,
       quotaChanged: input.quotaChanged,
       dispatchChannelAboutFollowUp: (followUp) => dispatchProductChannelAbout({
@@ -145,6 +149,11 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         !Array.isArray(result.activation)
       ? result.activation as Record<string, unknown>
       : undefined;
+    // The connect is committed; waking its Channels must not delay or fail it.
+    const woken = this.dependencies.machineConnected?.({ ownerUserId: principal.ownerUserId,
+      machineId: principal.machineId })?.catch((error: unknown) => console.warn(
+      "Machine reconnect could not wake its Channels", { errorCode: error instanceof Error ? error.name : "unknown" }));
+    if (woken) this.dependencies.keepAlive?.(woken);
     return {
       principal,
       connected: {
