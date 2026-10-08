@@ -18,6 +18,12 @@ import {
 } from "./agent-launch-postgres.fixture.mjs";
 
 /** A registration's live presence in a Channel: its members are its Instances. */
+/** The Agent cards a Human frame carries: one live report, or a second's digest of them. */
+function presenceCards(message) {
+  return message.type === "enhanced_presence" ? [message.agent]
+    : message.type === "presence_digest" ? message.agents : [];
+}
+
 function registrationPresence(channel, key) {
   const members = Object.values(channel?.memberPresence ?? {}).filter(member =>
     member.registration?.ownerUserId === key.ownerUserId && member.registration.machineId === key.machineId &&
@@ -350,18 +356,15 @@ test("a historical instance reborn mention reuses its durable session key after 
       },
     };
     agent.ws.send(JSON.stringify(presentation));
+    // A status report reaches viewers as the Agent's card, which the client patches its Channel from.
+    const reported = (instance) => instance.id === resumed.resumeInstanceId && instance.channelId === channelId &&
+      instance.model === "gpt-5.6-sol" && instance.effort === "xhigh";
     const liveUpdate = await human.inbox.waitFor(
-      (message) => message.type === "channel_updated" &&
-        message.channel?.id === channelId &&
-        registrationPresence(message.channel, registration).instances.some(
-          (instance) => instance.model === "gpt-5.6-sol" && instance.effort === "xhigh",
-        ),
+      (message) => presenceCards(message).some((card) => card.instances?.some(reported)),
       "reborn presentation update",
     );
-    assert.equal(
-      registrationPresence(liveUpdate.channel, registration).usage.quotaUsages[0].percent,
-      30,
-    );
+    const liveInstance = presenceCards(liveUpdate).flatMap((card) => card.instances ?? []).find(reported);
+    assert.equal(liveInstance.usage.quotaUsages[0].percent, 30);
 
     // A newly opened app must receive the already-live Agent presentation on
     // its first verified focus, without waiting for another Agent heartbeat.
@@ -446,10 +449,9 @@ test("a historical instance reborn mention reuses its durable session key after 
       ],
     }));
     await human.inbox.waitFor(
-      (message) => message.type === "channel_updated" &&
-        registrationPresence(message.channel, registration).instances?.some(
-          (instance) => instance.model === "gpt-5.7",
-        ),
+      (message) => presenceCards(message).some((card) => card.instances?.some(
+        (instance) => instance.id === resumed.resumeInstanceId && instance.model === "gpt-5.7",
+      )),
       "advanced reborn presentation",
     );
     const retried = await postChannelMessage(

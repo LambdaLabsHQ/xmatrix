@@ -1,5 +1,6 @@
-import { readOwnerRegistrationQuotaState, registrationQuotaKey, type RegistrationQuotaReading } from "@xmatrix/db";
-import { withRegistrationQuota } from "@xmatrix/protocol";
+import { readOwnerRegistrationQuotaState, readRegistrationQuotaState, registrationQuotaKey,
+  type RegistrationQuotaReading } from "@xmatrix/db";
+import { sameAgentRegistration, withRegistrationQuota } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
   AgentRegistrationKey,
@@ -74,6 +75,8 @@ export function createProductionRelayRuntimeProductPortFactory(
     readChannel?: HumanFanoutChannelReader;
     /** Every registration of one owner with its quota reading; PostgreSQL by default. */
     readOwnerQuota?: (ownerUserId: string) => Promise<readonly RegistrationQuotaReading[]>;
+    /** One registration's quota reading; PostgreSQL by default. */
+    readQuota?: (registration: AgentRegistrationKey) => Promise<LlmUsage | undefined>;
     /** The Agent Instance socket's Run and Instance facts; PostgreSQL by default. */
     runtime?: AgentInstanceRuntime;
     /** How Agent sockets read Channel history; PostgreSQL by default. */
@@ -114,6 +117,42 @@ export function createProductionRelayRuntimeProductPortFactory(
     publishedQuotaReadings.set(key, digest);
     deliver(userId, { type: "registration_quota", registration, usage });
   };
+  const readQuota = options.readQuota ?? (async (registration: AgentRegistrationKey) =>
+    (await readRegistrationQuotaState(runtimeDirectory(env), [registration], crypto.randomUUID()))
+      .get(registrationQuotaKey(registration)));
+  /* A status report from a working Agent is the frequent case. It reuses what
+     the Instance's last Channel read said about who may see it and its quota,
+     and reads nothing: joining and leaving read the Channel again, a catalog
+     change in its Space forgets the audience, and the quota is read again
+     when the Instance reports a newer provider reading or a minute passes. */
+  const presenceAudiences = new Map<string, PresenceAudience>();
+  const rememberAudience = (instanceId: string, audience: PresenceAudience) => {
+    presenceAudiences.delete(instanceId);
+    if (presenceAudiences.size >= 1024) presenceAudiences.delete(presenceAudiences.keys().next().value!);
+    presenceAudiences.set(instanceId, audience);
+  };
+  const rememberQuota = (registration: AgentRegistrationKey, quota: LlmUsage | undefined) => {
+    for (const audience of presenceAudiences.values()) {
+      if (!audience.registration || !sameAgentRegistration(audience.registration, registration)) continue;
+      audience.quota = quota;
+      audience.quotaReadAt = Date.now();
+    }
+  };
+  const audienceQuota = async (audience: PresenceAudience, session: Readonly<AgentInstanceRuntimeSession>) => {
+    if (!audience.registration) return audience.quota;
+    const reported = reportedQuotaAt(session);
+    if (reported <= audience.quotaCheckedThrough && Date.now() - audience.quotaReadAt < PRESENCE_QUOTA_TTL_MS) {
+      return audience.quota;
+    }
+    try {
+      rememberQuota(audience.registration, await readQuota(audience.registration));
+    } catch {
+      // The reading held stays shown; the next report tries again.
+      return audience.quota;
+    }
+    audience.quotaCheckedThrough = Math.max(audience.quotaCheckedThrough, reported);
+    return audience.quota;
+  };
 
   return {
     human: () => PostgresHumanPort.fromEnv({ env }),
@@ -142,7 +181,16 @@ export function createProductionRelayRuntimeProductPortFactory(
         });
         return [];
       });
-      for (const { registration, usage } of readings) publishQuota(ownerUserId, registration, usage, deliver);
+      for (const { registration, usage } of readings) {
+        rememberQuota(registration, usage);
+        publishQuota(ownerUserId, registration, usage, deliver);
+      }
+    },
+    onChannelCatalogChanged: (spaceId) => {
+      // Who may see a Channel of this Space may have changed: read it again.
+      for (const [instanceId, audience] of presenceAudiences) {
+        if (audience.spaceId === spaceId) presenceAudiences.delete(instanceId);
+      }
     },
     onAgentPresenceChange: async ({
       reason, session, status: reportedStatus, liveHumanSessions, deliver, deliverAgentPresence, machineReachable,
@@ -159,6 +207,26 @@ export function createProductionRelayRuntimeProductPortFactory(
       const { status, offlineReason } = reason === "disconnect"
         ? { status: reportedStatus, offlineReason: undefined }
         : shown(session, reportedStatus);
+      const ownerUserId = session.principal.ownerUserId;
+      const known = reason === "update" ? presenceAudiences.get(session.run.instanceId) : undefined;
+      if (reason === "disconnect") presenceAudiences.delete(session.run.instanceId);
+      if (known && known.channelId === session.run.channelId && Date.now() - known.readAt < PRESENCE_AUDIENCE_TTL_MS) {
+        // A status report: the card alone carries it, and every viewer's
+        // client patches its Channel from the card.
+        const accountQuota = await audienceQuota(known, session);
+        if (known.registration) publishQuota(ownerUserId, known.registration, accountQuota, deliver);
+        const card = humanEnhancedPresenceFrame(session, status, offlineReason, accountQuota);
+        const recipients: ChannelAgentPresenceRecipient[] = [];
+        for (const userId of [ownerUserId, ...known.viewers]) {
+          deliverAgentPresence(userId, session.run.channelId, card, undefined);
+          recipients.push({ userId, digest: true, card: true, channel: false, immediate: [] });
+        }
+        scheduleAgentPresenceAcrossCells({
+          env, scheduleBackground: options.scheduleBackground, runtimeSelf: options.runtimeSelf,
+          channelId: session.run.channelId, reason, card: card.agent, recipients,
+        });
+        return;
+      }
       const live = liveAgentFanout.sessions().filter(candidate => candidate.run.instanceId !== session.run.instanceId);
       const payload = await readChannel(session.run.channelId, session.principal.ownerUserId, "agent-presence");
       const accountQuota = payload ? channelInstanceQuota(payload.channel, session.run.instanceId) : undefined;
@@ -173,9 +241,11 @@ export function createProductionRelayRuntimeProductPortFactory(
       const registration = payload && Object.values(payload.channel.memberPresence ?? {}).flatMap(presence =>
         presence.kind === "agent" && presence.instances?.some(instance => instance.id === session.run.instanceId)
           ? [presence.registration] : [])[0];
-      const ownerUserId = session.principal.ownerUserId;
       // This read is the registration's current reading; the owner's other Agents under it take it too.
-      if (registration) publishQuota(ownerUserId, registration, accountQuota, deliver);
+      if (registration) {
+        rememberQuota(registration, accountQuota);
+        publishQuota(ownerUserId, registration, accountQuota, deliver);
+      }
       const remoteRecipients: ChannelAgentPresenceRecipient[] = [];
       const remember = (recipient: ChannelAgentPresenceRecipient) => {
         remoteRecipients.push(recipient);
@@ -247,6 +317,14 @@ export function createProductionRelayRuntimeProductPortFactory(
         payload.channel,
         payload.openChannelHumanMemberIdsBySpace,
       );
+      if (reason !== "disconnect") {
+        rememberAudience(session.run.instanceId, {
+          channelId: session.run.channelId, spaceId: payload.channel.spaceId, readAt: Date.now(),
+          viewers: visibleHumanUserIds(humanMemberIds).filter(userId => userId !== ownerUserId),
+          ...(registration ? { registration } : {}),
+          quota: accountQuota, quotaReadAt: Date.now(), quotaCheckedThrough: reportedQuotaAt(session),
+        });
+      }
       const channel = channelForSharedPresenceFanout(
         overlayHumanPresenceOnChannel(
           payload.channel,
@@ -276,6 +354,30 @@ export function createProductionRelayRuntimeProductPortFactory(
       fanOut(channel);
     },
   };
+}
+
+/** One live Instance's viewers and quota as its last Channel read gave them. */
+interface PresenceAudience {
+  channelId: string;
+  spaceId: string;
+  readAt: number;
+  /** The Humans other than the owner who may see the Channel. */
+  viewers: readonly string[];
+  registration?: AgentRegistrationKey;
+  quota: LlmUsage | undefined;
+  quotaReadAt: number;
+  /** The newest provider reading the Instance had reported when the quota was last read. */
+  quotaCheckedThrough: number;
+}
+
+/** A backstop: a catalog change in the Space forgets an audience at once. */
+const PRESENCE_AUDIENCE_TTL_MS = 10 * 60_000;
+const PRESENCE_QUOTA_TTL_MS = 60_000;
+
+/** When the Instance's own provider reading was taken, if it reported one. */
+function reportedQuotaAt(session: Readonly<AgentInstanceRuntimeSession>): number {
+  const at = Date.parse(session.presentation?.usage?.quotaObservedAt ?? "");
+  return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
 }
 
 /**
