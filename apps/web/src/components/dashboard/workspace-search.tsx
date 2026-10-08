@@ -2,8 +2,9 @@
 
 /**
  * Search in a Space, reached by ⌘F or a search control. The panel that drops
- * from that control is where a search starts: it opens a place by name, previews the first messages and pages,
- * and its first row opens every result on the search page. Pressed inside a
+ * from that control is where a search starts: it opens a place by name,
+ * previews the first messages and pages, and its first row opens every result
+ * on the search page. Pressed inside a
  * conversation, ⌘F starts with `in:` that conversation; Backspace takes it off.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
