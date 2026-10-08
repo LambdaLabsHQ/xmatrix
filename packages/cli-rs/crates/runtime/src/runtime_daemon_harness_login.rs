@@ -146,19 +146,24 @@ fn answer(
     answer
 }
 
+/// Append output, keeping only its most recent part.
+fn keep(output: &Mutex<Vec<u8>>, bytes: &[u8]) {
+    if let Ok(mut output) = output.lock() {
+        output.extend_from_slice(bytes);
+        if output.len() > 2 * OUTPUT_KEEP {
+            let excess = output.len() - OUTPUT_KEEP;
+            output.drain(..excess);
+        }
+    }
+}
+
 async fn pump(mut reader: impl AsyncRead + Unpin, output: Arc<Mutex<Vec<u8>>>) {
     let mut chunk = [0u8; 4096];
     while let Ok(read) = reader.read(&mut chunk).await {
         if read == 0 {
             return;
         }
-        if let Ok(mut output) = output.lock() {
-            output.extend_from_slice(&chunk[..read]);
-            if output.len() > 2 * OUTPUT_KEEP {
-                let excess = output.len() - OUTPUT_KEEP;
-                output.drain(..excess);
-            }
-        }
+        keep(&output, &chunk[..read]);
     }
 }
 
@@ -169,13 +174,7 @@ fn pump_blocking(mut reader: Box<dyn Read + Send>, output: Arc<Mutex<Vec<u8>>>) 
         if read == 0 {
             return;
         }
-        if let Ok(mut output) = output.lock() {
-            output.extend_from_slice(&chunk[..read]);
-            if output.len() > 2 * OUTPUT_KEEP {
-                let excess = output.len() - OUTPUT_KEEP;
-                output.drain(..excess);
-            }
-        }
+        keep(&output, &chunk[..read]);
     }
 }
 
@@ -270,10 +269,15 @@ async fn start(preset: &AgentPreset, login: &HarnessLogin) -> HarnessActionResul
     let output = Arc::new(Mutex::new(Vec::new()));
     let (exit_tx, exited) = watch::channel(None);
     let (stop, stopped) = oneshot::channel::<()>();
+    let ends = Ends {
+        output: output.clone(),
+        exit_tx,
+        stopped,
+    };
     let spawned = if login.terminal {
-        spawn_in_terminal(&program, login, output.clone(), exit_tx, stopped)
+        spawn_in_terminal(&program, login, ends)
     } else {
-        spawn_piped(&program, login, output.clone(), exit_tx, stopped)
+        spawn_piped(&program, login, ends)
     };
     let input = match spawned {
         Ok(input) => input,
@@ -322,14 +326,19 @@ async fn start(preset: &AgentPreset, login: &HarnessLogin) -> HarnessActionResul
     }
 }
 
+/// Where a started sign-in reports: its output, its exit, and the owner's stop.
+struct Ends {
+    output: Arc<Mutex<Vec<u8>>>,
+    exit_tx: watch::Sender<Option<Option<i32>>>,
+    stopped: oneshot::Receiver<()>,
+}
+
 /// Start the sign-in with piped I/O. Its supervisor owns the process: it ends
 /// with the process, on a cancel, or when the code would have expired.
 fn spawn_piped(
     program: &std::path::Path,
     login: &HarnessLogin,
-    output: Arc<Mutex<Vec<u8>>>,
-    exit_tx: watch::Sender<Option<Option<i32>>>,
-    mut stopped: oneshot::Receiver<()>,
+    mut ends: Ends,
 ) -> Result<Input, String> {
     let name = &login.start.command;
     let mut command = harness_command(program, &login.start.args);
@@ -345,10 +354,10 @@ fn spawn_piped(
         }
     };
     if let Some(stdout) = child.stdout.take() {
-        tokio::spawn(pump(stdout, output.clone()));
+        tokio::spawn(pump(stdout, ends.output.clone()));
     }
     if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(pump(stderr, output));
+        tokio::spawn(pump(stderr, ends.output));
     }
     let stdin = child
         .stdin
@@ -357,12 +366,12 @@ fn spawn_piped(
     tokio::spawn(async move {
         let code = tokio::select! {
             status = child.wait() => status.ok().and_then(|status| status.code()),
-            _ = &mut stopped => None,
+            _ = &mut ends.stopped => None,
             () = tokio::time::sleep(SESSION_TTL) => None,
         };
         let _ = tree.terminate();
         let _ = child.kill().await;
-        let _ = exit_tx.send(Some(code));
+        let _ = ends.exit_tx.send(Some(code));
     });
     Ok(Input::Pipe(stdin))
 }
@@ -372,10 +381,14 @@ fn spawn_piped(
 fn spawn_in_terminal(
     program: &std::path::Path,
     login: &HarnessLogin,
-    output: Arc<Mutex<Vec<u8>>>,
-    exit_tx: watch::Sender<Option<Option<i32>>>,
-    mut stopped: oneshot::Receiver<()>,
+    ends: Ends,
 ) -> Result<Input, String> {
+    let Ends {
+        output,
+        exit_tx,
+        stopped,
+    } = ends;
+    let mut stopped = stopped;
     let name = &login.start.command;
     let home = dirs::home_dir().map(|home| home.to_string_lossy().into_owned());
     let env: Vec<(String, String)> = login
@@ -743,14 +756,12 @@ mod tests {
         let output = Arc::new(Mutex::new(Vec::new()));
         let (exit_tx, mut exited) = watch::channel(None);
         let (_stop, stopped) = oneshot::channel::<()>();
-        let mut input = spawn_in_terminal(
-            std::path::Path::new("/bin/sh"),
-            &login,
-            output.clone(),
+        let ends = Ends {
+            output: output.clone(),
             exit_tx,
             stopped,
-        )
-        .unwrap();
+        };
+        let mut input = spawn_in_terminal(std::path::Path::new("/bin/sh"), &login, ends).unwrap();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         while prompt(&login, &plain_output(&snapshot(&output))).is_none() {
             assert!(tokio::time::Instant::now() < deadline, "no link printed");
