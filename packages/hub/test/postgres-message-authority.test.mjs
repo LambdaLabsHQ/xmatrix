@@ -401,6 +401,17 @@ test("a recalled message is presented under its author's name, not a raw id", ()
   assert.equal(unknown.from.label, "gone");
 });
 
+test("a recalled message no longer names the files it carried", () => {
+  const attachments = [{ id: "a1", name: "salaries.xlsx", mimeType: "text/plain", size: 3,
+    version: 1, contentHash: "a".repeat(64) }];
+  const recalled = postgresProductMessage({ messageId: "r", channelId: "c", sequence: 1,
+    sentAt: "2026-10-08T04:46:00.000Z", recalledAt: "2026-10-08T04:47:00.000Z", attachments });
+  assert.deepEqual(recalled.attachments, []);
+  const kept = postgresProductMessage({ messageId: "k", channelId: "c", sequence: 2,
+    sentAt: "2026-10-08T04:46:00.000Z", attachments });
+  assert.equal(kept.attachments[0].name, "salaries.xlsx");
+});
+
 test("PostgreSQL history supplies attachment kinds and exact copy coordinates to CLI and Web", () => {
   const attachments = [
     ["image/png", "image"], ["video/mp4", "video"],
