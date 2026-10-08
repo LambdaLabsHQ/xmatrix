@@ -5,6 +5,7 @@ export interface GitHubSubscriptionRoute {
   installationId: string;
   sourceRef: string;
   sourceKind: "repository" | "issue";
+  createdAt: string;
   spaceId: string;
   channelId: string;
   connectionId: string;
