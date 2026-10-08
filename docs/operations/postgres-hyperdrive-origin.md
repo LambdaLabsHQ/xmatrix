@@ -9,12 +9,22 @@ AWS region as the Worker placement hint. It is a deliberate single-node cluster
 ## Connection budget
 
 The origin allows 50 connections, 3 of them reserved for superusers. Both
-shards share it. Hyperdrive limits are soft and can overshoot during
-failures, so `scripts/production-hyperdrive-prepare.mjs` pins them at 30
-(primary) and 10 (shard 1), leaving room for migrations, operators and the
-provider's exporter. Any other Hyperdrive configuration pointing at the same
-origin counts against the same 50; delete retired ones rather than leaving
-them idle.
+shards share it, and the provider's own sessions (`pscale_admin`,
+`pscale_exporter`) hold about 4. Hyperdrive limits are soft: on 2026-10-08 the
+primary pool held 36 connections against a limit of 30, and with 30 + 10
+configured the origin refused every other login (`remaining connection slots
+are reserved for roles with the SUPERUSER attribute`), which failed release
+verification and Hyperdrive's own reconnects. So
+`scripts/production-hyperdrive-prepare.mjs` pins them at 24 (primary) and 8
+(shard 1): an overshoot of that size still leaves room for migrations,
+release verification and operators. Any other Hyperdrive configuration
+pointing at the same origin counts against the same 50; delete retired ones
+rather than leaving them idle.
+
+To see who holds the origin, read `pg_stat_activity` grouped by `usename`
+(the runtime secret can, while a slot is free) and sum
+`hyperdrivePoolSizesAdaptiveGroups.max.currentPoolSize` over `poolShardId` per
+minute: the per-shard maximum alone hides the overshoot.
 
 ## Roles
 
