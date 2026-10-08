@@ -138,6 +138,23 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/webmasters"], secretRefs: [] },
   },
+  {
+    ...actionConnector({
+      id: "googleadsense", name: "Google AdSense", kind: "observability",
+      description: "Read AdSense accounts, sites and earnings reports for the accounts the connected Google account can see. Read-only.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/adsense.readonly"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS],
+      actions: [
+        readAction("list_accounts", "List accounts", "List the AdSense accounts of the connected Google account with their state and time zone.", "*"),
+        readAction("list_sites", "List sites", "List the sites of an account with their approval state.", "<pub-…>"),
+        readAction("report", "Earnings report", "Estimated earnings, page views, page RPM, impressions and clicks. Defaults: by=date days=7 limit=50.",
+          "<pub-…> [by=date,domain,site,country,platform,page,month|none] [days=1-1095] [limit=1-250]"),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/adsense.readonly"], secretRefs: [] },
+  },
   eventConnector({
     id: "webhook",
     name: "Webhook",
