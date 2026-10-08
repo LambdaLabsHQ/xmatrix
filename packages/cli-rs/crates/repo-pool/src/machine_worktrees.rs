@@ -133,7 +133,7 @@ impl InventoryRoots {
     }
 }
 
-fn canonical(path: &Path) -> PathBuf {
+pub(crate) fn canonical(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
@@ -413,7 +413,7 @@ fn snapshot_name(tree: &MachineWorktree) -> String {
 /// started outside xMatrix are not in the daemon's registry, but their cwd
 /// still sits in the tree they use.
 #[cfg(target_os = "linux")]
-fn process_cwds() -> Vec<PathBuf> {
+pub(crate) fn process_cwds() -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
     };
@@ -432,7 +432,7 @@ fn process_cwds() -> Vec<PathBuf> {
 /// Other platforms offer no cheap cwd listing; the idle floor alone guards
 /// trees no xMatrix run is registered in.
 #[cfg(not(target_os = "linux"))]
-fn process_cwds() -> Vec<PathBuf> {
+pub(crate) fn process_cwds() -> Vec<PathBuf> {
     Vec::new()
 }
 

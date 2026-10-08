@@ -11,10 +11,12 @@ import type {
   MachineDaemonQuotaProbeCommand,
   MachineDaemonHarnessActionCommand,
   MachineDaemonStopCommand,
+  MachineDaemonWorktreeActionCommand,
   MachineDaemonWorktreeCleanupCommand,
 } from "@xmatrix/protocol/connections/machine-daemon";
 import type { SerializedMachineDaemon } from "@xmatrix/protocol";
-import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, parseHarnessActionRequest, parseRoutingQuotaProbeRequest,
+import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_WORKTREE_ACTION_CAPABILITY, parseHarnessActionRequest,
+  parseRoutingQuotaProbeRequest, parseWorktreeActionRequest,
   withMachineSpawnHarness, sha256Hex } from "@xmatrix/protocol";
 
 import {
@@ -57,6 +59,7 @@ const COMPLETION_EVENTS = new Set([
   "machine_recover_reply_result",
   "machine_quota_probe_result",
   "machine_harness_action_result",
+  "machine_worktree_action_result",
 ]);
 const PRIVATE_AUDIT_FIELDS = new Set([
   "token",
@@ -226,6 +229,10 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     if (message.type === "machine_harness_action_result" &&
         !session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) {
       throw new Error("Harness action result does not come from a capable connection");
+    }
+    if (message.type === "machine_worktree_action_result" &&
+        !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
+      throw new Error("Worktree action result does not come from a capable connection");
     }
     if (message.type === "machine_quota_probe_result" &&
         (!session.capabilities.includes("machine_quota_probe_v2") ||
@@ -509,7 +516,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
   async claimCommands(
     session: Readonly<MachineDaemonRuntimeSession>,
     commandTypes: readonly ("spawn" | "stop" | "cleanup" | "request_resolve" | "recover_reply" | "quota_probe" |
-      "harness_action")[] = [
+      "harness_action" | "worktree_action")[] = [
       "spawn", "stop", "cleanup", "request_resolve",
     ],
   ): Promise<readonly MachineDaemonServerMessage[]> {
@@ -522,11 +529,14 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         action: "claim",
         eventType: undefined,
         commandTypes: [...commandTypes.filter(type => (type !== "quota_probe" || session.capabilities.includes("machine_quota_probe_v2")) &&
-            (type !== "harness_action" || session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY))),
+            (type !== "harness_action" || session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) &&
+            (type !== "worktree_action" || session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY))),
           ...(session.capabilities.includes("reply_recovery_v1") && !commandTypes.includes("recover_reply") ? ["recover_reply"] : []),
           ...(session.capabilities.includes("machine_quota_probe_v2") && !commandTypes.includes("quota_probe") ? ["quota_probe"] : []),
           ...(session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY) && !commandTypes.includes("harness_action")
-            ? ["harness_action"] : [])],
+            ? ["harness_action"] : []),
+          ...(session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY) && !commandTypes.includes("worktree_action")
+            ? ["worktree_action"] : [])],
         // Reverse push is primary; lease covers in-flight host execution until
         // complete. Delivery failure must release (see deliverPendingOnce), not rely on
         // shortening this window for bounded HTTP recovery.
@@ -551,6 +561,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       }
       if (command.type === "machine_harness_action" && !session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) {
         throw new Error("Harness action command does not match a capable connection");
+      }
+      if (command.type === "machine_worktree_action" && !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
+        throw new Error("Worktree action command does not match a capable connection");
       }
       const requestId = requiredString(
         command.requestId,
@@ -623,6 +636,7 @@ async function causalSnapshotCommandId(
 type MachineCommandLease = MachineDaemonCommandLease;
 type MachineDaemonLeasedCommand =
   | MachineDaemonHarnessActionCommand
+  | MachineDaemonWorktreeActionCommand
   | MachineDaemonQuotaProbeCommand
   | MachineDaemonRecoverReplyCommand
   | MachineDaemonSpawnCommand
@@ -834,6 +848,14 @@ function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
     }
     return { type, requestId, presetId: action.presetId, action: action.action,
       ...(action.code === undefined ? {} : { code: action.code }) };
+  }
+  if (type === "machine_worktree_action") {
+    const action = parseWorktreeActionRequest(payload);
+    if (action.requestId !== requestId || Object.keys(payload).some(key =>
+        !["type", "requestId", "action", "paths", "relayLease"].includes(key))) {
+      throw new Error("PostgreSQL returned an invalid worktree action command");
+    }
+    return { type, requestId, action: action.action, ...(action.paths ? { paths: action.paths } : {}) };
   }
   if (type === "machine_quota_probe") {
     const probe = parseRoutingQuotaProbeRequest(payload.probe);

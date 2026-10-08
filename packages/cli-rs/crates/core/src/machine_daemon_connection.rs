@@ -554,6 +554,27 @@ pub enum MachineDaemonCommand {
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+    /// The owner lists or reclaims the git worktrees on this Machine. Paths
+    /// name trees from a listing; the daemon reclaims only trees it finds
+    /// registered with git itself, behind its own gates.
+    MachineWorktreeAction {
+        request_id: String,
+        action: WorktreeAction,
+        /// Only on `reclaim`.
+        #[serde(default)]
+        paths: Option<Vec<String>>,
+        #[serde(default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeAction {
+    List,
+    Reclaim,
+    AutoReclaimOn,
+    AutoReclaimOff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -735,6 +756,13 @@ pub enum MachineDaemonReport {
     MachineHarnessActionResult {
         request_id: String,
         result: HarnessActionResult,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
+    /// The protocol's `WorktreeActionResult`, built by the repo-pool inventory.
+    MachineWorktreeActionResult {
+        request_id: String,
+        result: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -959,7 +987,8 @@ impl MachineDaemonCommand {
             | Self::MachineRecoverReply { relay_lease, .. }
             | Self::MachineWorktreeCleanup { relay_lease, .. }
             | Self::MachineQuotaProbe { relay_lease, .. }
-            | Self::MachineHarnessAction { relay_lease, .. } => relay_lease.as_ref(),
+            | Self::MachineHarnessAction { relay_lease, .. }
+            | Self::MachineWorktreeAction { relay_lease, .. } => relay_lease.as_ref(),
         }
     }
 }
@@ -2755,6 +2784,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
         | "machine_request_resolve"
         | "machine_quota_probe"
         | "machine_harness_action"
+        | "machine_worktree_action"
         | "machine_recover_reply"
         | "machine_worktree_cleanup" => Some(
             match serde_json::from_value::<MachineDaemonCommand>(value) {
