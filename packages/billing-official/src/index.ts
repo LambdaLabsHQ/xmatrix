@@ -30,11 +30,22 @@ async function seatAdmission(
   transaction: BillingTransaction,
   { spaceId, now }: { spaceId: string; now: string },
 ): Promise<BillingRejection | null> {
+  await transaction.query({ name: "official_space_billing_mutex_v1",
+    text: "SELECT space_id FROM data.spaces WHERE space_id=$1 FOR UPDATE", values: [spaceId], maxRows: 1 });
+  const pendingApple = await transaction.query({ name: "official_space_apple_pending_v1",
+    text: `SELECT checkout_intent_id FROM data.space_billing_checkout_intents WHERE space_id=$1
+      AND billing_provider='apple' AND status IN ('pending','created') AND expires_at>$2 LIMIT 1`,
+    values: [spaceId, now], maxRows: 1 });
+  if (pendingApple.length) return { code: "billing_checkout_in_progress", status: 409,
+    message: "Complete the pending single-seat App Store purchase before adding billable members" };
   const subscription = (await transaction.query<SubscriptionRow>({
     name: "official_space_seat_subscription_v1",
-    text: `SELECT status,grace_until,seat_quantity FROM data.space_billing_subscriptions
+    text: `SELECT CASE WHEN billing_provider='apple' AND
+        (current_period_end IS NULL OR current_period_end <= $2::timestamptz)
+        THEN 'canceled' ELSE status END AS status,grace_until,seat_quantity
+      FROM data.space_billing_subscriptions
       WHERE space_id = $1 FOR UPDATE`,
-    values: [spaceId], maxRows: 1,
+    values: [spaceId, now], maxRows: 1,
   }))[0];
   if (graceActive(subscription, now)) return PAST_DUE_READ_ONLY;
   const paid = subscription?.status === "active" || subscription?.status === "trialing";
@@ -100,7 +111,10 @@ export const spaceBilling: SpaceBillingPolicy = {
     // The exact Free counter advances in the publishing statement itself, so
     // its row lock is not held across another round trip.
     ctes: `subscription AS MATERIALIZED (
-        SELECT status,grace_until,seat_quantity FROM data.space_billing_subscriptions
+        SELECT CASE WHEN billing_provider='apple' AND
+          (current_period_end IS NULL OR current_period_end <= $6::timestamptz)
+          THEN 'canceled' ELSE status END AS status,grace_until,seat_quantity
+        FROM data.space_billing_subscriptions
         WHERE space_id=$2 LIMIT 1
       ), prior_usage AS MATERIALIZED (
         SELECT free_message_count FROM data.space_billing_usage WHERE space_id=$2 LIMIT 1

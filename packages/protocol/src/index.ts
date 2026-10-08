@@ -543,3 +543,5 @@ export {
 export * from "./setup-intent.js";
 export { cleanRepositoryBaseline } from "./repository-baseline.js";
 export type { RepositoryBaseline } from "./repository-baseline.js";
+
+export { parseAppleSubscriptionConfig, type AppleSubscriptionConfig } from "./apple-billing-config.js";
