@@ -23,6 +23,7 @@ for (const tab of ["channels", "status", "pages"]) {
     await expect(bar).toHaveCSS("background-image", "none");
     await expect(bar).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(panel).toHaveText("Lambda Labs");
+    await expect(panel.locator("svg.app-mobile-space-glyph")).toBeVisible();
     const material = await panel.evaluate((el) => {
       const style = getComputedStyle(el);
       return { image: style.backgroundImage, filter: style.backdropFilter };

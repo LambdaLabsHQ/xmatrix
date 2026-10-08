@@ -6349,6 +6349,15 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     box-shadow: var(--app-wood-chrome-shadow);
   }
 
+  /* The Space glyph is cut into the sign like its name: same ink, same lip. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-mobile-tab-root-bar svg.app-mobile-space-glyph {
+    width: 1.375rem;
+    height: 1.375rem;
+    margin-right: 0.25rem;
+    stroke-width: 2.5;
+    filter: drop-shadow(0 1px 0 oklch(0.97 0.03 85 / 0.55));
+  }
+
   /* Summary and linked pages are about the conversation, not part of it: a
      band of slightly darker paper under the wood board, closed by a hairline,
      so the message stream visibly starts below it. No card frame, glass or

@@ -779,6 +779,7 @@ export function TopWorkspaceBar({
                   <Building className="app-mobile-space-trigger-caret size-4" />
                 </span>
               )}
+              {currentSpace && tabRoot && <Building className="app-mobile-space-glyph shrink-0" aria-hidden="true" />}
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-1">
                   <span className="app-mobile-bar-title min-w-0 truncate text-sm font-black leading-tight">{mobileTitle}</span>
@@ -805,6 +806,7 @@ export function TopWorkspaceBar({
         ) : (
           <div className={cn("app-mobile-title min-w-0", showBack && "app-mobile-channel-heading")}>
             <p className="flex min-w-0 items-center gap-1.5 truncate text-sm font-black" title={mobileTitle}>
+              {tabRoot && <Building className="app-mobile-space-glyph shrink-0" aria-hidden="true" />}
               <span className="app-mobile-bar-title min-w-0 truncate">{mobileTitle}</span>
             </p>
             {mobileSubtitle && (
