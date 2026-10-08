@@ -197,7 +197,7 @@ export type {
 } from "./launch-parameter-evidence.js";
 export {
   currentRoutingQuotaWindows, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
-  ROUTING_QUOTA_MAX_WINDOWS, ROUTING_QUOTA_PROBE_MAX_TARGETS, routingQuotaProbeObservations,
+  ROUTING_QUOTA_MAX_WINDOWS, ROUTING_QUOTA_PROBE_MAX_TARGETS, routingQuotaPace, routingQuotaProbeObservations,
   routingQuotaWindows,
 } from "./agent-routing-quota-probe.js";
 export type {

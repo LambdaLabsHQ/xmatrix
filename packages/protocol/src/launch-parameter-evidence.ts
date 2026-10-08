@@ -7,10 +7,12 @@ export interface LaunchDecisionStage { inputDigest: string; selected: string; pr
 export interface LaunchHarnessFit { score: number; probabilities: Record<string, number> }
 
 /** One environment as the joint selection weighed it. `fit` and `headroom`
- * are on 0..1 (headroom below 0 when overloaded, absent when unmeasured). */
+ * are on 0..1 (headroom below 0 when overloaded, absent when unmeasured);
+ * `quotaPace` is its account's spend rate against the provider's pace, 1 on
+ * pace (absent from decisions made before it was weighed). */
 export interface LaunchPlacementCandidate {
   harness: string; machineId: string; machineName?: string;
-  fit: number; headroom?: number; frontier: boolean; utility: number;
+  fit: number; headroom?: number; quotaPace?: number; frontier: boolean; utility: number;
 }
 
 /** Public decision evidence contains opaque workspace handles, never private directory catalogs. */
@@ -97,11 +99,11 @@ function parsePlacement(value: unknown): LaunchParameterEvidence["placement"] | 
       item.machineName !== undefined && (typeof item.machineName !== "string" || !item.machineName ||
         item.machineName.length > 200 || hasControlCharacter(item.machineName)) ||
       !unit(item.fit, 0, 1) || item.headroom !== undefined && !unit(item.headroom, -1_000, 1) ||
-      typeof item.frontier !== "boolean" || !unit(item.utility, -1_000, 2)) return null;
+      item.quotaPace !== undefined && !unit(item.quotaPace, 0, 1e12) || typeof item.frontier !== "boolean" || !unit(item.utility, -1_000, 2)) return null;
     ranking.push({ harness: item.harness, machineId: item.machineId,
       ...(item.machineName !== undefined ? { machineName: item.machineName as string } : {}),
       fit: item.fit, ...(item.headroom !== undefined ? { headroom: item.headroom as number } : {}),
-      frontier: item.frontier, utility: item.utility });
+      ...(item.quotaPace !== undefined ? { quotaPace: item.quotaPace as number } : {}), frontier: item.frontier, utility: item.utility });
   }
   return { profile: "balanced", ranking };
 }

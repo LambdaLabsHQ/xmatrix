@@ -30,7 +30,8 @@ function JointPlacement({ parameters }: { parameters: LaunchParameterEvidence })
       {parameters.placement.ranking.map((item, index) => <li key={`${index}:${item.harness}:${item.machineId}`}>
         {routingHarnessLabel(item.harness)} on {item.machineName || "Unnamed machine"} · fit {percent(item.fit)} ·
         headroom {item.headroom === undefined ? "unmeasured" : percent(item.headroom)}
-        {item.frontier ? "" : " · outweighed on both"}</li>)}
+        {item.quotaPace === undefined ? "" : ` · quota pace ${item.quotaPace.toFixed(2)}×`}
+        {item.frontier ? "" : " · outweighed"}</li>)}
     </ol>}
   </div>;
 }
