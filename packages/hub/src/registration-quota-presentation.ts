@@ -1,18 +1,7 @@
-import { localLlmUsage } from "@xmatrix/protocol";
+import { withRegistrationQuota } from "@xmatrix/protocol";
 import { readRegistrationQuotaState, registrationQuotaKey, type AuthorityDatabase,
   type RegistrationQuotaKey } from "@xmatrix/db";
 import type { LlmUsage, SerializedChannel } from "@xmatrix/protocol";
-
-/** Keep per-Instance accounting; replace all account fields from the authoritative pool. */
-export function withRegistrationQuota(local: LlmUsage | undefined, quota: LlmUsage | undefined): LlmUsage | undefined {
-  return { ...localLlmUsage(local), quotaState: quota?.quotaState ?? (quota?.quotaSource === "provider_api" ? "observed" : "unknown"),
-    ...(quota?.quotaObservedAt ? { quotaObservedAt: quota.quotaObservedAt } : {}),
-    ...(quota?.quotaSource === "provider_api" && quota.quotaState !== "unknown" ? {
-      quotaSource: quota.quotaSource, quotaUsages: quota.quotaUsages,
-      ...(quota.quotaAccount ? { quotaAccount: quota.quotaAccount } : {}),
-    } : {}) };
-
-}
 
 /** Channels passed here have already been authorized and their registration keys are server-derived. */
 export async function projectRegistrationQuota(database: AuthorityDatabase,

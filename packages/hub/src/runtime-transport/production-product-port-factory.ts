@@ -1,12 +1,16 @@
-import { withRegistrationQuota, channelInstanceQuota } from "../registration-quota-presentation";
+import { readOwnerRegistrationQuotaState, registrationQuotaKey, type RegistrationQuotaReading } from "@xmatrix/db";
+import { withRegistrationQuota } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
+  AgentRegistrationKey,
   AgentStatus,
   ChannelMessage,
   LlmUsage,
   SerializedAgent,
   SerializedChannel,
 } from "@xmatrix/protocol";
+import { channelInstanceQuota } from "../registration-quota-presentation";
+import { runtimeDirectory } from "../runtime";
 import type { AgentInstanceServerMessage } from "@xmatrix/protocol/connections/agent-instance";
 import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
 import type { Env } from "../types";
@@ -68,6 +72,8 @@ export function createProductionRelayRuntimeProductPortFactory(
   options: {
     /** How presence fanout reads a Channel as a Human; PostgreSQL by default. */
     readChannel?: HumanFanoutChannelReader;
+    /** Every registration of one owner with its quota reading; PostgreSQL by default. */
+    readOwnerQuota?: (ownerUserId: string) => Promise<readonly RegistrationQuotaReading[]>;
     /** The Agent Instance socket's Run and Instance facts; PostgreSQL by default. */
     runtime?: AgentInstanceRuntime;
     /** How Agent sockets read Channel history; PostgreSQL by default. */
@@ -90,8 +96,24 @@ export function createProductionRelayRuntimeProductPortFactory(
     controlWaiters,
   );
   const signals = createSignalPort(signalRouter, liveAgentFanout, controlWaiters);
+  const readOwnerQuota = options.readOwnerQuota ??
+    ((ownerUserId: string) => readOwnerRegistrationQuotaState(runtimeDirectory(env), ownerUserId, crypto.randomUUID()));
   // Delivery deduplication only. Readings always come from the directory authority.
   const publishedQuotaReadings = new Map<string, string>();
+  /* A registration's reading reaches this cell's user once per change, and
+     the client applies it to every Agent it shows under the registration.
+     Other people's sockets live in their own cells: they see the reading on
+     the presence cards of the Agents they watch. */
+  const publishQuota = (userId: string, registration: AgentRegistrationKey, quota: LlmUsage | undefined,
+    deliver: (userId: string, message: HumanServerMessage) => boolean) => {
+    const key = `${userId}\n${registrationQuotaKey(registration)}`;
+    const usage = withRegistrationQuota(undefined, quota);
+    const digest = JSON.stringify(usage);
+    if (publishedQuotaReadings.get(key) === digest) return;
+    if (publishedQuotaReadings.size >= 512) publishedQuotaReadings.delete(publishedQuotaReadings.keys().next().value!);
+    publishedQuotaReadings.set(key, digest);
+    deliver(userId, { type: "registration_quota", registration, usage });
+  };
 
   return {
     human: () => PostgresHumanPort.fromEnv({ env }),
@@ -112,8 +134,16 @@ export function createProductionRelayRuntimeProductPortFactory(
       ...(options.runtime ? { runtime: options.runtime } : {}),
     }),
     onHumanPresenceChange: createHumanPresenceFanout({ readChannel }),
-    onRegistrationQuotaChange: async input => fanoutRegistrationQuota({ ...input,
-      live: liveAgentFanout.sessions(), readChannel }),
+    onRegistrationQuotaChange: async ({ ownerUserId, deliver }) => {
+      // A probe of one machine can move a pool the owner's other machines share.
+      const readings = await readOwnerQuota(ownerUserId).catch((error: unknown) => {
+        console.warn("Registration quota read after a probe failed", {
+          errorCode: error instanceof Error ? error.name : "unknown",
+        });
+        return [];
+      });
+      for (const { registration, usage } of readings) publishQuota(ownerUserId, registration, usage, deliver);
+    },
     onAgentPresenceChange: async ({
       reason, session, status: reportedStatus, liveHumanSessions, deliver, deliverAgentPresence, machineReachable,
     }) => {
@@ -143,15 +173,9 @@ export function createProductionRelayRuntimeProductPortFactory(
       const registration = payload && Object.values(payload.channel.memberPresence ?? {}).flatMap(presence =>
         presence.kind === "agent" && presence.instances?.some(instance => instance.id === session.run.instanceId)
           ? [presence.registration] : [])[0];
-      const quotaKey = registration ? JSON.stringify([registration.ownerUserId, registration.machineId, registration.harness]) : undefined;
-      const digest = JSON.stringify(withRegistrationQuota(undefined, accountQuota));
-      if (quotaKey && publishedQuotaReadings.get(quotaKey) !== digest) {
-        if (publishedQuotaReadings.size >= 512) publishedQuotaReadings.delete(publishedQuotaReadings.keys().next().value!);
-        publishedQuotaReadings.set(quotaKey, digest);
-        await fanoutRegistrationQuota({ ownerUserId: session.principal.ownerUserId, machineId: session.run.machineId,
-          skipChannelId: session.run.channelId, live, readChannel, liveHumanSessions, deliver });
-      }
       const ownerUserId = session.principal.ownerUserId;
+      // This read is the registration's current reading; the owner's other Agents under it take it too.
+      if (registration) publishQuota(ownerUserId, registration, accountQuota, deliver);
       const remoteRecipients: ChannelAgentPresenceRecipient[] = [];
       const remember = (recipient: ChannelAgentPresenceRecipient) => {
         remoteRecipients.push(recipient);
@@ -546,36 +570,4 @@ function agentLifecycleOfflineFrame(session: Readonly<AgentInstanceRuntimeSessio
     instanceId: session.run.instanceId,
     channelInstanceId: session.run.channelInstanceId || "1",
   };
-}
-
-/** Refresh the owner's live/focused Channels, including shared pools across machines.
- * The Channel read authorizes recipients and resolves each Instance's own harness. */
-async function fanoutRegistrationQuota(input: {
-  ownerUserId: string; machineId: string; skipChannelId?: string;
-  live: readonly Readonly<AgentInstanceRuntimeSession>[]; readChannel: HumanFanoutChannelReader;
-  liveHumanSessions: readonly import("./human-live-presence").LiveHumanSessionSnapshot[];
-  deliver: (userId: string, message: HumanServerMessage) => boolean;
-}): Promise<void> {
-  const channels = [...new Set([...input.live.filter(session => session.principal.ownerUserId === input.ownerUserId &&
-    session.run.channelId !== input.skipChannelId).map(session => session.run.channelId), ...input.liveHumanSessions.flatMap(session =>
-      session.focusedChannelId && session.focusedChannelId !== input.skipChannelId ? [session.focusedChannelId] : [])])];
-  for (let offset = 0; offset < channels.length; offset += 4) {
-    await Promise.all(channels.slice(offset, offset + 4).map(async channelId => {
-      const payload = await input.readChannel(channelId, input.ownerUserId, "registration-quota");
-      if (!payload || !Object.values(payload.channel.memberPresence ?? {}).some(presence => presence.kind === "agent" &&
-          presence.registration?.ownerUserId === input.ownerUserId)) return;
-      const members = humanMemberIdsForChannel(payload.channel, payload.openChannelHumanMemberIdsBySpace);
-      let channel = payload.channel;
-      for (const session of input.live) {
-        if (session.run.channelId !== channelId || !channelHasComputedAgentInstance(channel, session.run.instanceId)) continue;
-        const existing = Object.values(channel.memberPresence ?? {}).flatMap(presence => presence.instances ?? [])
-          .find(instance => instance.id === session.run.instanceId);
-        channel = overlayAgentPresenceOnChannel(channel, { reason: "update", session,
-          ...(existing?.offlineReason === "machine_offline" ? { status: "offline", offlineReason: "machine_offline" } : {}) });
-      }
-      const frame: HumanServerMessage = { type: "channel_updated", channel: channelForSharedPresenceFanout(
-        overlayHumanPresenceOnChannel(channel, input.liveHumanSessions, members)) };
-      for (const userId of visibleHumanUserIds(members)) input.deliver(userId, frame);
-    }));
-  }
 }

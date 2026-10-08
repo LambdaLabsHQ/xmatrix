@@ -193,6 +193,7 @@ import { useShellDialogs } from "./use-shell-dialogs";
 import { useChannelPins } from "./use-channel-pins";
 import { useChannelReadSync } from "./use-channel-read-sync";
 import { createRealtimeFrameBatcher, humanFrameBatchKey } from "./realtime-frame-batcher";
+import { patchChannelsRegistrationQuota } from "./registration-quota-patch";
 
 export function useWorkspaceShellState({ children }: { children?: React.ReactNode }) {
 
@@ -1616,6 +1617,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           // The same cards as enhanced_presence, a second's worth at once.
           setAgents((current) => message.agents.reduce(replaceAgent, current));
           setChannels((current) => message.agents.reduce(patchChannelsAgentPresenceFromAgent, current));
+          break;
+        case "registration_quota":
+          setChannels((current) => patchChannelsRegistrationQuota(current, message.registration, message.usage));
           break;
         case "channel_created":
           setChannels((current) => replaceChannel(current, message.channel));

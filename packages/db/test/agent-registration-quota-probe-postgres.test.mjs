@@ -5,7 +5,8 @@ import { Client } from "pg";
 import { readRegistrationQuotaProbeTargets, recordRegistrationQuotaProbeResult, recordRegistrationUsageLimit,
   registrationQuotaReading, REGISTRATION_QUOTA_POOL_SQL } from "../dist/agent-registration-quota-probe.js";
 
-import { observeRegistrationQuota, readRegistrationQuotaState, registrationQuotaKey } from "../dist/registration-quota-state.js";
+import { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaState,
+  registrationQuotaKey } from "../dist/registration-quota-state.js";
 
 integration("registration quota probe targets are the Space's authorized, singly-hosted registrations", async () => {
   assert.ok(url);
@@ -131,6 +132,12 @@ integration("registration quota probe targets are the Space's authorized, singly
     const shared = { ...key, machineId: "shared-machine" };
     const both = await readRegistrationQuotaState(database, [key, shared], "explicit-shared-pool");
     assert.deepEqual(both.get(registrationQuotaKey(key)), both.get(registrationQuotaKey(shared)));
+    // One read gives the owner every registration with what a read by key gives it, a shared pool on each machine.
+    const owned = await readOwnerRegistrationQuotaState(database, "owner", "owner-read");
+    const byKey = await readRegistrationQuotaState(database, owned.map(({ registration }) => registration), "by-key");
+    for (const { registration, usage } of owned) assert.deepEqual(usage, byKey.get(registrationQuotaKey(registration)));
+    assert.ok(owned.some(({ registration }) => registrationQuotaKey(registration) === registrationQuotaKey(shared)));
+    assert.ok(owned.every(({ registration }) => registration.ownerUserId === "owner"), "another owner's registrations stay out");
     await sql(`UPDATE control.registration_quota_observations SET expires_at=now()-interval '1 second',
       observed_at=now()-interval '2 seconds' WHERE quota_pool_id='shared-claude'`);
     const expired = (await readRegistrationQuotaState(database, [key], "expired")).get(registrationQuotaKey(key));

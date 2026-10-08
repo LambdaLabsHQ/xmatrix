@@ -267,7 +267,8 @@ export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessAc
 export { readLatestWorktreeListing, readWorktreeActionStatus } from "./machine-worktree-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
-export { observeRegistrationQuota, readRegistrationQuotaState, registrationQuotaKey, type RegistrationQuotaKey } from "./registration-quota-state.js";
+export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaState, registrationQuotaKey,
+  type RegistrationQuotaKey, type RegistrationQuotaReading } from "./registration-quota-state.js";
 
 export { PostgresDiscordLifecycleRepository } from "./discord-installation-lifecycle.js";
 export { PostgresSentryEventRepository, validateSentryEventIdentity, type SentryEventIdentity, type SentryEventKey, type SentryEventJob } from "./sentry-event-control.js";
