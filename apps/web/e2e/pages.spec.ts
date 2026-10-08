@@ -131,7 +131,7 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
     pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-codex", name: "codex:1", status: "idle",
       conversationId: E2E_CHANNEL.id, activity: "viewing", blockId: "notes" }, { instanceId: "i-claude", name: "claude:2",
-      status: "busy", conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "status" }] }],
+      status: "busy", conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "status" }], conversations: 1 }],
   });
 
   const server = pageDocument(BODY);
@@ -171,6 +171,10 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   const tree = browser.getByTestId("page-tree");
   await expect(tree).toContainText("Company");
   await expect(tree).toContainText("Relay");
+  // A page's row counts its conversations; who is on it is its second line, not a row of faces.
+  await expect(tree.getByTestId("page-tree-conversations")).toHaveAccessibleName("1 conversation");
+  await expect(tree.locator(".identity-avatar-face")).toHaveCount(0);
+  await expect(tree).toContainText("claude:2 editing");
   // The first page opens by default; count the sessions of the page we switch to.
   await expect.poll(() => connections).toBeGreaterThan(0);
   connections = 0;

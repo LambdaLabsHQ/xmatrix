@@ -94,7 +94,7 @@ export const pageApi = {
       token, signal,
     }),
   agents: (spaceId: string, token: string, signal?: AbortSignal) =>
-    xmatrixApiRequest<{ pages: Array<{ pageId: string; agents: PageTreeAgent[] }> }>({
+    xmatrixApiRequest<{ pages: Array<{ pageId: string; agents: PageTreeAgent[]; conversations?: number }> }>({
       url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
   // A page's Automations (docs/design/pages-live-document.md §6).
   automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
