@@ -549,7 +549,7 @@ integration("the page tree shows each page's Agents: live in a conversation whos
     const discussions = async (principal) => Object.fromEntries((await call("agentsOnPages", { principal })).pages
       .filter((page) => page.discussions.length > 0).map(({ pageId, discussions }) => [pageId, discussions]));
     assert.deepEqual(await discussions(member), {}, "reading or editing a page opens no discussion");
-    const anchor = { quote: "Shipped", from: null, to: null };
+    const anchor = { quote: "Shipped", from: { assoc: 0 }, to: { assoc: 0 } };
     await call("link", { principal: owner, pageId: project.pageId, conversationId: ids.open, blockId: "status",
       source: "manual", anchor });
     const { link: closed } = await call("link", { principal: owner, pageId: quiet.pageId, conversationId: ids.closed,

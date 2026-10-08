@@ -78,7 +78,7 @@ test("a page's links describe their conversations, and its sections name the Age
     assert.equal((await tree())?.discussions.open ?? 0, 0, "a section's conversation is not an open discussion");
     const discussed = await worker.fetch(`/api/spaces/${encodeURIComponent(spaceId)}/page-links`, { method: "POST",
       headers: auth, body: JSON.stringify({ conversationId: channelId, pageId: page.pageId, blockId: "release",
-        anchor: { quote: "Not yet", from: null, to: null } }) });
+        anchor: { quote: "Not yet", from: { assoc: 0 }, to: { assoc: 0 } } }) });
     assert.equal(discussed.status, 200, await discussed.clone().text());
     const { discussions } = await tree();
     assert.equal(discussions.open, 1);
