@@ -8,7 +8,8 @@
  */
 
 import { useMemo, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { SearchGlyph } from "@/components/ui/search-glyph";
 
 import { GlassSelect } from "@/components/ui/glass-select";
 import { Input } from "@/components/ui/input";
@@ -165,7 +166,7 @@ export function AdminTable<Row>({
       <div className="app-admin-table-tools flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-border/60 px-3 md:gap-x-3">
         {search && (
           <div className={cn("relative", phone && "w-full")}>
-            <Search className="pointer-events-none absolute left-0 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <SearchGlyph className="pointer-events-none absolute left-0 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(event) => { setQuery(event.target.value); setPage(""); }}

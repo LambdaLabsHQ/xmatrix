@@ -9,7 +9,8 @@
  */
 import { useLayoutEffect, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
-import { Search, X } from "lucide-react";
+import { X } from "lucide-react";
+import { SearchGlyph } from "@/components/ui/search-glyph";
 import { cn } from "@/lib/utils";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { useEscapeDismiss } from "./use-overlay-dismiss";
@@ -159,7 +160,7 @@ export function SearchPanel({
           style={placement ? { transformOrigin: `calc(100% - ${placement.column}px) ${placement.row / 2}px` } : undefined}
         >
           <div className="app-search-panel-field flex shrink-0 items-center gap-3">
-            <Search className="size-4 shrink-0 text-muted-foreground" />
+            <SearchGlyph className="size-4 shrink-0 text-muted-foreground" />
             {chips}
             <input
               ref={inputRef}
