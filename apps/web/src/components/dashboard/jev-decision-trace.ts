@@ -78,10 +78,31 @@ function describeOption(handle: string, criteria: unknown): Pick<JevOption, "tit
   return { title: handle, detail: raw };
 }
 
+/** A fit score: the harness it rates (the JSON its instructions end with)
+ *  and its ordered levels, the one nearest the score being the answer. */
+function scoreQuestion(key: string, question: Json, levels: unknown[], answer: Json | undefined, model: string | undefined): JevQuestion {
+  const instructions = text(question.instructions);
+  let rated: Json | undefined;
+  try { rated = object(JSON.parse(instructions?.slice(instructions.indexOf("{")) ?? "")); } catch { rated = undefined; }
+  const harness = text(rated?.harness);
+  const probabilities = object(answer?.probabilities) ?? {};
+  const score = typeof answer?.score === "number" && Number.isFinite(answer.score) ? Math.round(answer.score) : undefined;
+  const options = levels.map((level, index) => {
+    const [title, ...detail] = (text(level) ?? `Level ${index}`).split(": ");
+    const probability = probabilities[String(index)];
+    return { handle: String(index), title: title!, ...(detail.length ? { detail: detail.join(": ") } : {}), selected: score === index,
+      ...(typeof probability === "number" && Number.isFinite(probability) ? { probability } : {}) };
+  });
+  return { key, label: harness ? `Fit · ${harness}` : "Fit", ...(instructions ? { instructions } : {}), ...(model ? { model } : {}), options };
+}
+
 function questionsOf(input: Json | undefined, answers: Json | undefined, model: string | undefined): JevQuestion[] {
   const questions = object(input?.questions) ?? {};
   return Object.entries(questions).flatMap(([key, value]) => {
     const question = object(value);
+    if (question?.type === "score" && Array.isArray(question.criteria)) {
+      return [scoreQuestion(key, question, question.criteria, object(answers?.[key]), model)];
+    }
     const criteria = object(question?.criteria);
     if (!question || !criteria) return [];
     const answer = object(answers?.[key]);

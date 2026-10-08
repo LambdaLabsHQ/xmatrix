@@ -160,7 +160,7 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
 
 export const DECISION_ANSWER_ISSUES = ["answers_missing", "answer_missing", "choice_missing",
   "choice_not_offered", "distribution_missing", "distribution_mismatch", "distribution_invalid",
-  "choice_distribution_conflict", "unexpected_answer"] as const;
+  "choice_distribution_conflict", "unexpected_answer", "score_invalid"] as const;
 export type DecisionAnswerIssue = typeof DECISION_ANSWER_ISSUES[number];
 export type DecisionAnswerFailure = { questionKey?: string;
   issue: DecisionAnswerIssue };
@@ -189,6 +189,7 @@ function parameterAnswerMessage(detail: DecisionAnswerFailure): string {
     distribution_invalid: "had invalid probabilities",
     choice_distribution_conflict: "did not select its highest-probability option",
     unexpected_answer: "included an unexpected option",
+    score_invalid: "did not give a score on the offered levels",
   };
   return `xMatrix's ${subject} ${issue[detail.issue]}. No launch was allocated.`;
 }

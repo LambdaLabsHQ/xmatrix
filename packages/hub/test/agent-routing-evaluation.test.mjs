@@ -192,3 +192,15 @@ test('empty option sets fail before spending a model call', async () => {
   request.questions.model.criteria = {};
   await assert.rejects(evaluateRoutingChoices(request, async () => assert.fail('no options')), /Invalid routing question/);
 });
+
+test('a score answer lies on the offered levels and keeps its level distribution', async () => {
+  const request = { state: { message: 'Fix tests' }, questions: { fit: { type: 'score', instructions: 'Rate', criteria: ['no', 'ok', 'good', 'asked'] } } };
+  const result = await evaluateRoutingChoices(request, async () => ({ answers: { fit: { score: 2.2, probabilities: { 1: .1, 2: .6, 3: .3, extra: 1 } } } }));
+  assert.deepEqual(result.fit, { score: 2.2, probabilities: { 1: .1, 2: .6, 3: .3 } });
+  for (const score of [-1, 3.5, Number.NaN, '2']) {
+    await assert.rejects(evaluateRoutingChoices(request, async () => ({ answers: { fit: { score } } })),
+      error => error.code === 'invalid_answer' && error.answerFailure.issue === 'score_invalid' && error.answerFailure.questionKey === 'fit');
+  }
+  await assert.rejects(evaluateRoutingChoices({ ...request, questions: { fit: { ...request.questions.fit, criteria: ['only'] } } },
+    async () => assert.fail('no call')), /Invalid routing question/);
+});

@@ -137,13 +137,14 @@ test("tagged Auto workspace launch completes daemon spawn, mock Agent registrati
         FROM data.content_refs r JOIN data.content_objects o
           ON o.space_id=r.space_id AND o.object_id=r.child_object_id
         WHERE r.owner_kind='summon_decision' AND r.owner_id=$1 ORDER BY r.ref_id`, [summoningMessage.messageId]);
-      assert.equal(stored.rows.length, 4, "both actual Jev stages persist input and success before spawn");
-      assert.equal(stored.rows.filter(row => row.ref_id.endsWith(':started')).length, 2);
-      assert.equal(stored.rows.filter(row => row.ref_id.endsWith(':succeeded')).length, 2);
+      // No declared models: one Jev call reads intent, location and fit together.
+      assert.equal(stored.rows.length, 2, "the Jev call persists input and success before spawn");
+      assert.equal(stored.rows.filter(row => row.ref_id.endsWith(':started')).length, 1);
+      assert.equal(stored.rows.filter(row => row.ref_id.endsWith(':succeeded')).length, 1);
       assert.ok(stored.rows.every(row => row.root_set_id.startsWith('channel-user:') && row.storage_key.startsWith('restricted/')));
       const evidenceUrl = `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(summoningMessage.messageId)}/decision-evidence`;
       const listing = await json(await worker.fetch(evidenceUrl, { headers: auth }));
-      assert.equal(listing.records.length, 4);
+      assert.equal(listing.records.length, 2);
       const runToken = await mintAgentRunToken(worker, daemon, command, channelId);
       const agentAuth = { Authorization: `Bearer ${runToken}` };
       const agentListing = await json(await worker.fetch(evidenceUrl, { headers: agentAuth }));
@@ -220,13 +221,14 @@ test("tagged Auto workspace launch completes daemon spawn, mock Agent registrati
         const content = new PostgresContentRepository(maintenance, "shard-0");
         const spaceId = (await evidenceDatabase.query('SELECT space_id FROM data.channels WHERE channel_id=$1', [channelId])).rows[0].space_id;
         assert.ok(await content.nextDecisionMaintenance({ requestId: randomUUID(), spaceId }) <= Date.now());
-        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 2 })).expired, 2);
-        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 2 })).expired, 2);
-        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 2 })).expired, 0);
+        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 1 })).expired, 1);
+        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 1 })).expired, 1);
+        assert.equal((await content.expireDecisionRefs({ requestId: randomUUID(), spaceId, limit: 1 })).expired, 0);
         assert.ok(await content.nextDecisionMaintenance({ requestId: randomUUID(), spaceId }) > Date.now());
         const nominations = await evidenceDatabase.query(`SELECT * FROM data.content_gc_candidates
           WHERE space_id=$1 AND reason='decision-expired'`, [spaceId]);
-        assert.equal(nominations.rows.length, 3);
+        // Two expired records; the first one's object is still held by the retained copies.
+        assert.equal(nominations.rows.length, 1);
         assert.equal((await evidenceDatabase.query("SELECT ref_id FROM data.content_refs WHERE ref_id='retained-other-owner'")).rows.length, 1);
         assert.ok(nominations.rows.every(row => row.status === 'pending' && new Date(row.not_before).getTime() > Date.now()));
         assert.equal((await evidenceDatabase.query("SELECT ref_id FROM data.content_refs WHERE ref_id='retained-current-decision'")).rows.length, 1);
