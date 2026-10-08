@@ -497,6 +497,10 @@ export function areChannelSidebarPropsEqual(previous: ChannelSidebarProps, next:
   );
 }
 
+function prefersReducedMotion() {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}
+
 export function SidebarSpaceHeader({
   spaces,
   currentSpaceId,
@@ -522,6 +526,15 @@ export function SidebarSpaceHeader({
   // with it — "xMatrix" reads as a workspace the user does not have.
   const currentSpacePending = Boolean(currentSpaceId) && !currentSpace;
   const [open, setOpen] = useState(false);
+  /* Closing keeps the panel's glass until its rows have collapsed back into
+     the header, so they never show bare over the list. The collapse ends on
+     the grid's own transitionend; without motion there is none to wait for. */
+  const [wasOpen, setWasOpen] = useState(open);
+  const [closing, setClosing] = useState(false);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    setClosing(!open && !prefersReducedMotion());
+  }
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState("");
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -687,7 +700,7 @@ export function SidebarSpaceHeader({
            because glass forces its own position to relative. */
         <div className="app-space-switcher-anchor relative">
         <div className="app-space-switcher-float absolute inset-x-0 top-0">
-        <div className={cn("app-space-switcher-shell relative", open && "app-space-switcher-shell-open")}>
+        <div className={cn("app-space-switcher-shell relative", (open || closing) && "app-space-switcher-shell-open", open && "app-space-switcher-shell-opening")}>
           <button
             type="button"
             aria-haspopup="listbox"
@@ -711,15 +724,15 @@ export function SidebarSpaceHeader({
             )}
             <ChevronDown className={cn("app-space-switcher-chevron ml-auto size-4 shrink-0 transition-transform", open && "rotate-180")} />
           </button>
-          {/* Opening grows the glass down with its content; closing is
-              immediate, because the glass leaves with the open state and
-              rows still fading out would show bare over the list. */}
           <div
-            className={cn("grid", open && "transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none")}
+            className="grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none"
             style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none" }}
             aria-hidden={!open}
+            onTransitionEnd={(event) => {
+              if (event.target === event.currentTarget && event.propertyName === "grid-template-rows" && !open) setClosing(false);
+            }}
           >
-            <div className="min-h-0 overflow-hidden">
+            <div className="app-space-switcher-body min-h-0 overflow-hidden">
               <div className="app-space-switcher-menu" role="listbox">
                 {spaces.map((space) => renderSpaceRow(space))}
                 {spaces.length === 0 && (
