@@ -66,7 +66,7 @@ export async function dispatchProductGitHubWebhook(input: {
   /* A private repository's events reach only Channels people outside the
      Space cannot read; unstated privacy counts as private. */
   const repositoryPublic = githubRepositoryIsPublic(input.payload.repository);
-  const routes = await resolveRoutes(input.env, installationId, repository.sourceRef);
+  const routes = await resolveRoutes(input.env, installationId, repository.sourceRef, feature);
   const body = githubWebhookMessageBody(input.event, input.payload, repository);
   let delivered = 0;
   for (let offset = 0; offset < routes.length; offset += 8) {

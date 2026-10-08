@@ -328,17 +328,22 @@ export class PostgresAppRepository {
     });
   }
 
+  /** The Channels subscribed to `feature` of a repository: an event no
+   * subscription takes (most of a busy repository's CI traffic) finds none
+   * here instead of being read out connection by connection. */
   async githubSubscriptionRoutes(input: {
     requestId: string;
     installationId: string;
     sourceRef: string;
+    feature: string;
     limit: number;
   }): Promise<PostgresGitHubSubscriptionRoute[]> {
     const installationId = text(input.installationId, "installationId", 100);
+    const feature = text(input.feature, "feature", 40);
     const { sourceRef, limit } = routeRead(input);
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v2", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v3", text: `SELECT
         r.space_id,r.channel_id,r.connection_id,r.created_by
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
@@ -346,13 +351,14 @@ export class PostgresAppRepository {
           AND channel.space_id=r.space_id
         WHERE c.provider_id='github' AND c.status='configured'
           AND r.source_kind='repository' AND lower(r.source_ref)=$2
+          AND jsonb_typeof(r.features_json)='array' AND r.features_json ? $4
           AND (c.metadata_json->>'installationId'=$1 OR EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(CASE
               WHEN jsonb_typeof(c.metadata_json->'installationIds')='array'
               THEN c.metadata_json->'installationIds' ELSE '[]'::jsonb END) AS linked(value)
             WHERE linked.value=$1))
         ORDER BY r.channel_id,r.space_id,r.connection_id LIMIT $3`,
-      values: [installationId, sourceRef, limit], maxRows: limit });
+      values: [installationId, sourceRef, limit, feature], maxRows: limit });
       return rows.map((row) => ({ installationId, sourceRef,
         spaceId: String(row.space_id), channelId: String(row.channel_id),
         connectionId: String(row.connection_id), authorityRootUserId: String(row.created_by) }));
