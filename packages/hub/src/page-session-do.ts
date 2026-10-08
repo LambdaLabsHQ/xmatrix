@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import { PageControlError, PostgresPageRepository, type PagePrincipal } from "@xmatrix/db";
+import { ControlError, PageControlError, PostgresPageRepository, type PagePrincipal } from "@xmatrix/db";
+import { postgresControlErrorResponse } from "./postgres-authority-http";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import {
@@ -220,9 +221,7 @@ export class RelayPageSession extends DurableObject<Env> {
       }
       return Response.json({ error: "Not found" }, { status: 404 });
     } catch (error) {
-      if (error instanceof PageControlError) {
-        return Response.json({ error: error.message, code: error.code }, { status: error.status });
-      }
+      if (error instanceof ControlError) return postgresControlErrorResponse(error);
       console.error("page session request failed", error);
       // The Hub's console logs are not always kept, so the editor sees what failed.
       const reason = error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 300) : "unknown error";

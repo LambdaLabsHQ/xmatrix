@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { crossSpaceReadErrorResponse, crossSpaceRetryOwner } from "../src/cross-space-read.ts";
+import { crossSpaceRetryOwner } from "../src/cross-space-read.ts";
+import { postgresControlErrorResponse } from "../src/postgres-authority-http.ts";
 import { CrossSpaceReadError } from "@xmatrix/db";
 import { AGENT_RUN as run } from "./support/agent-run-routes.mjs";
 
@@ -29,11 +30,10 @@ test("a Run without an exact Instance cannot be granted a read outside its Space
 });
 
 test("a missing grant answers with the way to ask for one", async () => {
-  const response = crossSpaceReadErrorResponse(new CrossSpaceReadError("cross_space_read_grant_required", 403,
+  const response = postgresControlErrorResponse(new CrossSpaceReadError("cross_space_read_grant_required", 403,
     "ask its owner with `xmatrix access request <channel>`"));
   assert.equal(response.status, 403);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(await response.json(), { error: "ask its owner with `xmatrix access request <channel>`",
     code: "cross_space_read_grant_required", retryable: false });
-  assert.equal(crossSpaceReadErrorResponse(new Error("other")), null);
 });
