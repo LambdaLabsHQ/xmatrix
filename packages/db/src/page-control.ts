@@ -3,6 +3,7 @@ import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, page
 import { canonicalPageMarkdown, pageChangedDocBlocks } from "@xmatrix/protocol/page-document";
 import { readsOnly } from "./space-roles.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
+import { ControlError } from "./control-error.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
@@ -256,7 +257,9 @@ export async function inActiveSpace<T>(database: AuthorityDatabase,
   const placement = await new PostgresSpacePlacementDirectory(database).find({ requestId, operation }, spaceId);
   if (!placement) throw new ErrorType("space_not_found", 404);
   if (placement.state !== "active" || placement.targetShardId !== null) {
-    throw new ErrorType("space_placement_unavailable", 503);
+    // A Space that is moving shards is back in moments: say so, whichever
+    // domain asked, so every client retries it like the other controls do.
+    throw new ControlError("space_placement_unavailable", 503, "Space placement is unavailable", true);
   }
   return database.transaction({ requestId, operation,
     placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } }, callback);

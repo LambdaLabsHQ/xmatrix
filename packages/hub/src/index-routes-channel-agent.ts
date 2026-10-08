@@ -662,7 +662,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       const current = await getChannel(c.env, { channelId, principal });
       return c.json({ ok: true, channel: await channelWithLiveHumanPresence(current, sessions) });
     } catch (error) {
-      if (error instanceof AgentChannelAccessError) return c.json({ error: error.message, code: error.code },
+      if (error instanceof AgentChannelAccessError) return c.json({ error: error.message, code: error.code, retryable: error.retryable },
         error.status as 400 | 403 | 404 | 409 | 500 | 503);
       return requestErrorResponse(c, error);
     }
