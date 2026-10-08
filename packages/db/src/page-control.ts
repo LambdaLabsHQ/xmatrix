@@ -1320,13 +1320,14 @@ export class PostgresPageRepository {
         throw new PageControlError("page_purge_admin_only", 403);
       }
       await this.page(tx, spaceId, actor, pageId, "read");
-      const rows = await tx.query<QueryResultRow & { revision: string }>({
-        name: "page_purge_v1",
-        text: `UPDATE data.page_revisions SET body=replace(body,$3,$4)
-          WHERE space_id=$1 AND page_id=$2 AND strpos(body,$3) > 0 RETURNING revision::text`,
-        values: [spaceId, pageId, needle, replacement], maxRows: 100_000,
+      // One count row: query results are capped at 10000 rows and a page may have more revisions.
+      const rows = await tx.query<QueryResultRow & { n: number }>({
+        name: "page_purge_v2",
+        text: `WITH redacted AS (UPDATE data.page_revisions SET body=replace(body,$3,$4)
+          WHERE space_id=$1 AND page_id=$2 AND strpos(body,$3) > 0 RETURNING 1) SELECT count(*)::int AS n FROM redacted`,
+        values: [spaceId, pageId, needle, replacement], maxRows: 1,
       });
-      return { redactedRevisions: rows.length };
+      return { redactedRevisions: Number(rows[0]?.n ?? 0) };
     });
   }
 

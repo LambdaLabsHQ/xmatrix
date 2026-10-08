@@ -113,9 +113,10 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   }));
 
   app.post(HUB_ROUTES.secret_request_status, route("human", async (c, user) => {
-    const input = await body(c);
-    return repository(c.env).requestStatus({ userId: user.id, runId: String(input.runId ?? ""),
-      channelId: String(input.channelId ?? ""), secretRef: String(input.secretRef ?? "") });
+    const card = parseSecretRequestCard(await body(c));
+    if (!card) throw new SpaceSecretError("invalid_request", 400, "Invalid secret request");
+    return repository(c.env).requestStatus({ userId: user.id, runId: card.runId, channelId: card.channelId,
+      secretRef: card.secretRef });
   }));
 }
 

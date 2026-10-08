@@ -292,8 +292,9 @@ export function createProductAgentMentionAuthorityPort(input: {
         channelId, body });
     },
 
-    reportDiagnostic(diagnostic) {
-      console.error("Product agent mention operation failed", diagnostic);
+    reportDiagnostic({ stage, error, ...where }) {
+      // Stage and code lead the message, so error reporting groups each cause once and names it.
+      console.error(`Product agent mention ${stage} failed: ${error}`, JSON.stringify(where));
     },
   };
 }

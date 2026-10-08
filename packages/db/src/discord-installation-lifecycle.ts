@@ -52,9 +52,11 @@ export class PostgresDiscordLifecycleRepository {
           WHERE (app_client_id,user_id) IN (SELECT app_client_id,user_id FROM data.app_discord_revocations
             WHERE app_client_id=$1 AND expires_at<statement_timestamp() ORDER BY expires_at,user_id LIMIT 100 FOR UPDATE SKIP LOCKED)`,
         values: [input.appClientId], maxRows: 0 });
-        const capacity = await tx.query<QueryResultRow>({ name: "discord_revocation_capacity_v1", text: `SELECT user_id
-          FROM data.app_discord_revocations WHERE app_client_id=$1 LIMIT 10001`, values: [input.appClientId], maxRows: 10001 });
-        if (capacity.length >= 10000 && !capacity.some(row => row.user_id === input.userId)) {
+        // One count row: query results are capped at 10000 rows.
+        const [capacity] = await tx.query<QueryResultRow>({ name: "discord_revocation_capacity_v2", text: `SELECT count(*)::int AS n,
+          coalesce(bool_or(user_id=$2),false) AS present FROM (SELECT user_id FROM data.app_discord_revocations
+          WHERE app_client_id=$1 LIMIT 10001) bounded`, values: [input.appClientId, input.userId], maxRows: 1 });
+        if (Number(capacity?.n ?? 0) >= 10000 && capacity?.present !== true) {
           throw new AppControlError("storage_backpressure", 503, "Discord revocation capacity reached", true);
         }
         await tx.query({ name: "discord_revocation_record_v1", text: `INSERT INTO data.app_discord_revocations

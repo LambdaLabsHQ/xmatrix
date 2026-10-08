@@ -801,6 +801,8 @@ export class PostgresSpaceControlRepository {
         if (attempt >= 2 || !error || typeof error !== "object" ||
             !("code" in error) || error.code !== "40001") throw error;
       }
+      // Writers of one Space advance the same control head; an immediate replay meets them again.
+      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * (20 + Math.random() * 40)));
     }
   }
 
