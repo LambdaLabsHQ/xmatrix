@@ -77,6 +77,23 @@ test("ACP-native harnesses are registry entries with a launcher, ACP argv and ic
     kiro: ["kiro-cli", ["acp"]],
     hermes: ["hermes", ["acp"]],
     openclaw: ["openclaw", ["acp"]],
+    qoder: ["qodercli", ["--acp"]],
+    codebuddy: ["codebuddy", ["--acp"]],
+    omp: ["omp", ["acp"]],
+    auggie: ["auggie", ["--acp"]],
+    cline: ["cline", ["--acp"]],
+    kilo: ["kilo", ["acp"]],
+    droid: ["droid", ["exec", "--output-format", "acp-daemon"]],
+    devin: ["devin", ["acp"]],
+    commandcode: ["command-code", ["acp"]],
+    jcode: ["jcode", ["acp"]],
+    prime: ["prime-agent", ["--mode", "acp"]],
+    trae: ["traecli", ["acp", "serve"]],
+    antigravity: ["agy_acp_server.par", ["--uid="]],
+    autohand: ["autohand-acp", []],
+    amp: ["amp-acp", []],
+    reasonix: ["reasonix", ["acp"]],
+    dimcode: ["dimcode", ["acp"]],
   };
   for (const [id, [runtime, acpArgs]] of Object.entries(expected)) {
     const preset = agentPresetById(id);
@@ -93,6 +110,16 @@ test("ACP-native harnesses are registry entries with a launcher, ACP argv and ic
   assert.equal(normalizeAgentPresetRuntime("vibe"), "vibe");
   assert.equal(agentLaunchExecutable("vibe"), "vibe-acp");
   assert.equal(agentLaunchExecutable("kiro"), "kiro-cli");
+  // Adapter-backed harnesses: the vendor CLI's own name launches the adapter,
+  // and vendor aliases resolve to the same preset.
+  assert.equal(agentLaunchExecutable("amp"), "amp-acp");
+  assert.equal(normalizeAgentPresetRuntime("amp"), "amp");
+  assert.equal(agentLaunchExecutable("commandcode"), "command-code");
+  assert.equal(normalizeAgentPresetRuntime("cbc"), "codebuddy");
+  assert.equal(normalizeAgentPresetRuntime("kilocode"), "kilo");
+  assert.equal(normalizeAgentPresetRuntime("qoder.cmd"), "qoder");
+  // Windows' `cmd` is never mistaken for Command Code's short alias.
+  assert.equal(agentPresetForLauncher("cmd.exe"), undefined);
 });
 
 test("normalizeAgentPresetRuntime derives every alias from the registry", () => {

@@ -215,7 +215,10 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
 Presets with a sign-in today: codex, claude, copilot, cursor, grok, hermes,
 kimi, kiro, opencode and zcode. gemini, goose and openclaw sign in only inside an
 interactive terminal; pi, vibe, junie and qwen have no official headless sign-in
-(API keys or their TUI).
+(API keys or their TUI). qoder, codebuddy, omp, auggie, cline, kilo, droid, devin,
+commandcode, jcode, prime, trae, antigravity, autohand, amp, reasonix and dimcode
+sign in through their own CLI or the ACP `authenticate` methods they advertise;
+none has a verified headless sign-in yet.
 
 See [Machines and CLI management](harness-management-cli.md) for user commands and confirmation behavior.
 

@@ -97,7 +97,16 @@ The full grammar is in [docs/agent-operation-syntax.md](docs/agent-operation-syn
 | `@junie` | Junie | `@kiro` | Kiro CLI |
 | `@vibe` | Mistral Vibe | `@hermes` | Hermes Agent |
 | `@openclaw` | OpenClaw | `@pi` | Pi |
-| `@zcode` | ZCode | `custom` | Any CLI you register |
+| `@zcode` | ZCode | `@qoder` | Qoder CLI |
+| `@codebuddy` | CodeBuddy Code | `@omp` | Oh My Pi |
+| `@auggie` | Auggie | `@cline` | Cline |
+| `@kilo` | Kilo | `@droid` | Factory Droid |
+| `@devin` | Devin | `@commandcode` | Command Code |
+| `@jcode` | jcode | `@prime` | Prime Agent |
+| `@trae` | TraeCode CLI | `@antigravity` | Google Antigravity |
+| `@autohand` | Autohand Code | `@amp` | Amp |
+| `@reasonix` | Reasonix | `@dimcode` | DimCode |
+| `custom` | Any CLI you register | | |
 
 `xmatrix harness list` shows which ones are installed on a machine, and `xmatrix harness install <name>` installs one with its official recipe. The presets live in [`packages/protocol/src/agent-presets.json`](packages/protocol/src/agent-presets.json).
 

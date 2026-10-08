@@ -444,6 +444,71 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             &["acp"][..],
             ".openclaw",
         ),
+        ("qodercli", "qoder", "Qoder CLI", &["--acp"][..], ".qoder"),
+        (
+            "cbc",
+            "codebuddy",
+            "CodeBuddy Code",
+            &["--acp"][..],
+            ".codebuddy",
+        ),
+        ("omp", "omp", "Oh My Pi", &["acp"][..], ".omp"),
+        ("auggie", "auggie", "Auggie", &["--acp"][..], ".augment"),
+        ("cline", "cline", "Cline", &["--acp"][..], ".cline"),
+        ("kilocode", "kilo", "Kilo", &["acp"][..], ".config/kilo"),
+        (
+            "droid",
+            "droid",
+            "Factory Droid",
+            &["exec", "--output-format", "acp-daemon"][..],
+            ".factory",
+        ),
+        ("devin", "devin", "Devin", &["acp"][..], ".config/devin"),
+        (
+            "command-code",
+            "commandcode",
+            "Command Code",
+            &["acp"][..],
+            ".commandcode",
+        ),
+        ("jcode", "jcode", "jcode", &["acp"][..], ".jcode"),
+        (
+            "prime-agent",
+            "prime",
+            "Prime Agent",
+            &["--mode", "acp"][..],
+            ".prime",
+        ),
+        (
+            "traecli",
+            "trae",
+            "TraeCode CLI",
+            &["acp", "serve"][..],
+            ".config/trae_cli",
+        ),
+        (
+            "agy_acp_server.par",
+            "antigravity",
+            "Google Antigravity",
+            &["--uid="][..],
+            ".gemini",
+        ),
+        (
+            "autohand-acp",
+            "autohand",
+            "Autohand Code",
+            &[][..],
+            ".autohand",
+        ),
+        ("amp-acp", "amp", "Amp", &[][..], ".config/amp"),
+        (
+            "reasonix",
+            "reasonix",
+            "Reasonix",
+            &["acp"][..],
+            ".reasonix",
+        ),
+        ("dimcode", "dimcode", "DimCode", &["acp"][..], ".dimcode"),
     ] {
         let config = AcpVendorConfig::generic(tool);
         assert_eq!(config.display_name, display_name, "{tool}");
@@ -546,7 +611,7 @@ fn claude_presence_frame_carries_the_effort_chip_and_command() {
 fn presentation_declares_quota_and_context_meter_tags_from_reported_usage() {
     let adapter = agent_presentation_adapter_for_runtime("claude");
     let facts = AgentPresentationFacts {
-        usage: Some(    protocol::LlmUsage {
+        usage: Some(protocol::LlmUsage {
             context_used_tokens: Some(40_000),
             context_window_tokens: Some(200_000),
             quota_usages: Some(vec![
