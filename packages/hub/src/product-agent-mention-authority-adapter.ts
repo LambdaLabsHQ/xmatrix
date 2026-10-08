@@ -156,6 +156,13 @@ export function createProductAgentMentionAuthorityPort(input: {
     actorUserId: input.actorUserId, ...handoff,
   });
   const principal = { kind: "user" as const, id: input.actorUserId };
+  /** A prepared reborn or handoff is the Channel coordinator's to carry: tell it before answering. */
+  const handedToReborn = async (channelId: string, result: { intentId?: unknown; state?: unknown },
+    failure: "registration_reborn_failed" | "registration_handoff_failed") => {
+    if (typeof result.intentId !== "string") throw new RegistrationAccessError(failure, 502);
+    await wakeAgentLaunchCoordinator(input.env, channelId, ["reborn"]);
+    return { intentId: result.intentId, state: String(result.state) };
+  };
 
   return {
     launchRegistrationInput: (launch) => dispatchRegistrationInput({
@@ -199,17 +206,13 @@ export function createProductAgentMentionAuthorityPort(input: {
         commandId: `registration-reborn:${sourceMessageId}:${sourceInstanceId}`.slice(0, 200),
         actorUserId: input.actorUserId, channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt,
       }) as { intentId?: unknown; state?: unknown };
-      if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_reborn_failed", 502);
-      await wakeAgentLaunchCoordinator(input.env, channelId, ["reborn"]);
-      return { intentId: result.intentId, state: String(result.state) };
+      return handedToReborn(channelId, result, "registration_reborn_failed");
     },
 
     async prepareRegisteredHandoff({ channelId, sourceInstanceId, sourceMessageId, sourceMention, successorHarness, prompt }) {
       const result = await handoffPrepare({ channelId, sourceInstanceId, sourceMessageId, sourceMention,
         successorHarness, prompt });
-      if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_handoff_failed", 502);
-      await wakeAgentLaunchCoordinator(input.env, channelId, ["reborn"]);
-      return { intentId: result.intentId, state: String(result.state) };
+      return handedToReborn(channelId, result, "registration_handoff_failed");
     },
 
     async prepareRegisteredAutoHandoff({ channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt }) {
