@@ -4,7 +4,7 @@ App connectors route app context into xMatrix channels through typed provider ma
 
 ## Current Providers
 
-- Google Cloud provides operations context, direct project gross-cost reports, billing-export cost/credit analysis, public SKU descriptions and daily API request counts
+- Google Cloud provides operations context, direct project gross-cost reports, billing-export cost/credit analysis, public SKU descriptions, daily or credential/method API request counts, secret-free key metadata and historical audit-principal summaries
   and Monitoring incident routing. A supported API can be enabled through a
   separate policy-controlled action; OAuth does not override Google IAM.
   Connection, IAM, commands and notification setup are documented in
