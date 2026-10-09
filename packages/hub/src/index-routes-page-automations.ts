@@ -6,6 +6,7 @@ import type { Context, Hono } from "hono";
 import type { AuthUser } from "./auth";
 import { githubConnectionInstallationFor } from "./app-connectors";
 import { automationEvaluatorBinding } from "./automation-evaluator-binding";
+import { effectivelyRestricted } from "./automation-occurrence-conversation";
 import {
   commandPayload, expressionPayload, hubBoundary, type AutomationRecord,
 } from "./index-routes-automation";
@@ -21,7 +22,8 @@ import { findAppConnection } from "./apps";
 
 /**
  * A page's Automations (docs/design/pages-live-document.md §6). Each belongs
- * to its page and runs in a conversation of its own; its section is wherever
+ * to its page; a conversation of its own times it, and each occurrence runs
+ * in a fresh conversation linked to its section. Its section is wherever
  * the page's text references it. Whoever can edit the page manages them,
  * people and Agents alike, and always as a Human: an Agent acts as its owner,
  * so what it sets up keeps running after its Run ends. An Automation is
@@ -61,18 +63,6 @@ async function editablePage(env: Env, spaceId: string, pageId: string, authUser:
       "This page takes an Agent's changes as suggestions; ask a person to change its Automations");
   }
   return page;
-}
-
-/** A page restricted itself or through an ancestor keeps its Automations' conversations closed. */
-async function effectivelyRestricted(env: Env, spaceId: string, pageId: string, userId: string): Promise<boolean> {
-  const { pages } = await new PostgresPageRepository(database(env)).tree({ requestId: crypto.randomUUID(),
-    spaceId, principal: { kind: "user", id: userId } });
-  const byId = new Map(pages.map((page) => [page.pageId, page]));
-  for (let page = byId.get(pageId), depth = 0; page && depth < 64; page = page.parentPageId
-    ? byId.get(page.parentPageId) : undefined, depth++) {
-    if (page.accessMode === "restricted") return true;
-  }
-  return false;
 }
 
 /** The page's Automations, each with the section its reference is in now (none when detached). */

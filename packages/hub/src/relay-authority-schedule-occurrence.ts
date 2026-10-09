@@ -46,6 +46,7 @@ export interface ScheduleOccurrenceLifecycle {
   finishMessage(
     occurrence: AutomationOccurrenceRow,
     automation: AutomationExecutionRow,
+    channelId: string,
     now: string,
   ): Promise<void>;
   assertPrepared(input: {
