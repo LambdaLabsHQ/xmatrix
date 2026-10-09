@@ -3,6 +3,7 @@ import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { erasePrivateAccountRows } from "./account-deletion-cleanup.js";
 import { DetailedControlError } from "./control-error.js";
 import { issueAccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";
+import { eraseAccountMessageProfiles, type PrepareErasedMessageProfile } from "./account-message-profile-erasure.js";
 
 export class AccountDeletionError extends DetailedControlError {
   override name = "AccountDeletionError";
@@ -68,7 +69,8 @@ export async function accountDeletionBlockers(tx: DatabaseTransaction, userId: s
 
 export class PostgresAccountDeletionRepository {
   constructor(private readonly directory: AuthorityDatabase,
-    private readonly shards: readonly AuthorityDatabase[], private readonly shardIds: readonly string[]) {
+    private readonly shards: readonly AuthorityDatabase[], private readonly shardIds: readonly string[],
+    private readonly prepareMessageProfile?: PrepareErasedMessageProfile) {
     if (directory.cacheMode !== "disabled" || !shards.length || shards.length > 5 || shardIds.length !== shards.length || new Set(shardIds).size !== shardIds.length ||
         shards.some((db) => db.cacheMode !== "disabled")) {
       throw new AccountDeletionError("account_deletion_unavailable", 503, "Account deletion authority is unavailable");
@@ -129,7 +131,7 @@ export class PostgresAccountDeletionRepository {
   async pending(): Promise<string[]> {
     return this.directory.transaction({ requestId: crypto.randomUUID(), operation: "account-deletion.pending" }, async (tx) =>
       (await tx.query<{ user_id: string }>({ name: "account_deletion_pending_v1", text: `SELECT user_id
-        FROM control.account_deletion_requests WHERE (state IN ('preparing','committed') OR (state='blocked' AND NOT fences_cleared) OR (state='completed' AND avatar_sweep_after<=clock_timestamp() AND committed_at>clock_timestamp()-interval '1 day'))
+        FROM control.account_deletion_requests WHERE (state IN ('preparing','committed') OR (state='blocked' AND NOT fences_cleared) OR (state='completed' AND (historical_profile_cleanup_done IS NOT TRUE OR (avatar_sweep_after<=clock_timestamp() AND committed_at>clock_timestamp()-interval '1 day'))))
           AND (lease_until IS NULL OR lease_until<clock_timestamp()) ORDER BY updated_at LIMIT 2`, maxRows: 2 })).map(x => x.user_id));
   }
 
@@ -155,18 +157,24 @@ export class PostgresAccountDeletionRepository {
     await this.assertFleet();
     const lease = crypto.randomUUID();
     const job = await this.directory.transaction({ requestId: lease, operation: "account-deletion.claim" }, async (tx) =>
-      (await tx.query<{ request_id: string; state: AccountDeletionState; avatar_cleanup_done: boolean }>({
+      (await tx.query<{ request_id: string; state: AccountDeletionState; avatar_cleanup_done: boolean; historical_profile_cleanup_done: boolean | null }>({
         name: "account_deletion_claim_v1", text: `UPDATE control.account_deletion_requests
           SET lease_token=$2,lease_until=clock_timestamp()+interval '2 minutes',updated_at=clock_timestamp()
-          WHERE user_id=$1 AND (state IN ('preparing','committed') OR (state='blocked' AND NOT fences_cleared) OR (state='completed' AND avatar_sweep_after<=clock_timestamp() AND committed_at>clock_timestamp()-interval '1 day'))
+          WHERE user_id=$1 AND (state IN ('preparing','committed') OR (state='blocked' AND NOT fences_cleared) OR (state='completed' AND (historical_profile_cleanup_done IS NOT TRUE OR (avatar_sweep_after<=clock_timestamp() AND committed_at>clock_timestamp()-interval '1 day'))))
             AND (lease_until IS NULL OR lease_until<clock_timestamp())
-          RETURNING request_id,state,avatar_cleanup_done`, values: [userId,lease], maxRows: 1 }))[0]);
+          RETURNING request_id,state,avatar_cleanup_done,historical_profile_cleanup_done`, values: [userId,lease], maxRows: 1 }))[0]);
     if (!job) return;
     try {
       if (job.state === "completed") {
+        let profiles = job.historical_profile_cleanup_done;
+        if(!profiles) {
+          profiles=true;
+          for(let i=0;i<this.shards.length;i++) profiles=(await eraseAccountMessageProfiles(
+            this.directory,this.shards[i],this.shardIds[i],userId,this.prepareMessageProfile))&&profiles;
+        }
         const empty = await eraseAvatars(userId);
         await this.directory.transaction({requestId:lease,operation:"account-deletion.avatar-sweep"},tx=>tx.query({
-          name:"account_deletion_avatar_sweep_v1",text:"UPDATE control.account_deletion_requests SET avatar_sweep_after=clock_timestamp()+interval '15 minutes',avatar_cleanup_done=$3 WHERE user_id=$1 AND lease_token=$2",values:[userId,lease,empty],maxRows:0}));
+          name:"account_deletion_avatar_sweep_v2",text:"UPDATE control.account_deletion_requests SET avatar_sweep_after=clock_timestamp()+interval '15 minutes',avatar_cleanup_done=$3,historical_profile_cleanup_done=$4 WHERE user_id=$1 AND lease_token=$2",values:[userId,lease,empty,profiles],maxRows:0}));
         return;
       }
       if (job.state === "blocked") { await this.unfence(userId,job.request_id,lease); return; }
@@ -210,7 +218,7 @@ export class PostgresAccountDeletionRepository {
         if (!committed) return;
       }
       let complete = true;
-      for (const db of this.shards) {
+      for (const [i,db] of this.shards.entries()) {
         const cleaned = await db.transaction({ requestId: lease, operation: "account-deletion.erase" }, async (tx) => {
           await lockAccountDeletion(tx,userId);
           await tx.query({ name: "account_deletion_commit_fence_v1", text:`INSERT INTO data.account_deletion_fences(user_id,request_id,committed) VALUES($1,$2,true)
@@ -219,19 +227,21 @@ export class PostgresAccountDeletionRepository {
           if (done) await tx.query({name:"account_deletion_cleaned_v1",text:"UPDATE data.account_deletion_fences SET cleaned=true WHERE user_id=$1 AND request_id=$2",values:[userId,job.request_id],maxRows:0});
           return done;
         });
-        complete = complete && cleaned;
+        const messages=await eraseAccountMessageProfiles(this.directory,db,this.shardIds[i],userId,this.prepareMessageProfile);
+        complete = complete && cleaned && messages;
       }
       const avatars = job.avatar_cleanup_done || await eraseAvatars(userId);
       await this.directory.transaction({requestId:lease,operation:"account-deletion.finish"},async tx=>{
         await tx.query({name:"account_deletion_finish_v1",text:`UPDATE control.account_deletion_requests
           SET avatar_cleanup_done=$3,state=CASE WHEN $4 THEN 'completed' ELSE state END,
             completed_at=CASE WHEN $4 THEN COALESCE(completed_at,clock_timestamp()) ELSE completed_at END,
+            historical_profile_cleanup_done=$4,
             avatar_sweep_after=CASE WHEN $4 THEN clock_timestamp()+interval '15 minutes' ELSE avatar_sweep_after END,
             lease_until=NULL,updated_at=clock_timestamp() WHERE user_id=$1 AND lease_token=$2`,values:[userId,lease,avatars,complete&&avatars],maxRows:0});
       });
     } finally {
       await this.directory.transaction({requestId:lease,operation:"account-deletion.release"},tx=>tx.query({
-        name:"account_deletion_release_v1",text:"UPDATE control.account_deletion_requests SET lease_until=NULL WHERE user_id=$1 AND lease_token=$2",values:[userId,lease],maxRows:0}));
+        name:"account_deletion_release_v2",text:"UPDATE control.account_deletion_requests SET lease_until=NULL,updated_at=clock_timestamp() WHERE user_id=$1 AND lease_token=$2",values:[userId,lease],maxRows:0}));
     }
   }
 

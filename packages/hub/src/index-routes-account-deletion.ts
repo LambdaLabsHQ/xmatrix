@@ -10,12 +10,13 @@ import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorResp
 import { changeMembership, deleteSpace } from "./spaces";
 import { deploymentPinnedSpace, finishScheduledSpaceDeletion } from "./space-deletion-effects";
 import type { Env } from "./types";
+import { prepareErasedAccountMessageProfile } from "./account-message-profile-erasure";
 
 function repository(env: Env) {
   if (authAuthority(env) !== "postgres") throw new AccountDeletionError(
     "account_deletion_unavailable",503,"This deployment does not support in-app account deletion");
   const fleet = createPostgresAuthorityFleet(env, { applicationName:"xmatrix-account-deletion", ...POSTGRES_AUTHORITY_TIMEOUTS });
-  return new PostgresAccountDeletionRepository(fleet.directoryDatabase, fleet.physicalShards.map(s=>s.database), fleet.physicalShards.map(s=>s.shardId));
+  return new PostgresAccountDeletionRepository(fleet.directoryDatabase, fleet.physicalShards.map(s=>s.database), fleet.physicalShards.map(s=>s.shardId),prepareErasedAccountMessageProfile);
 }
 async function input(request: Request): Promise<Record<string, unknown>> {
   const bytes=await readBoundedRequestBody(request,2048);
