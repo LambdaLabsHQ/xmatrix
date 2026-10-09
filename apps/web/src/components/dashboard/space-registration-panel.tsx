@@ -10,13 +10,13 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import { ErrorPanel } from "./workspace-admin-views";
-
-const INSTALL_COMMAND = "xmatrix agent add <harness> --space <space-id>";
+import { agentAddCommand } from "./space-agent-setup-card";
 
 export function SpaceRegistrationPanel({ spaceId, token }: { spaceId: string; token: string }) {
   const catalog = useAgentRegistrationCatalog(spaceId, token, Boolean(spaceId && token));
   const command = useRegistrationCommand(spaceId, token, () => void catalog.refetch());
-  const { copy, copied } = useCopyToClipboard(INSTALL_COMMAND);
+  const installCommand = agentAddCommand(spaceId);
+  const { copy, copied } = useCopyToClipboard(installCommand);
   const registrations = catalog.data?.registrations ?? [];
   return (
     <div className="mt-5">
@@ -26,7 +26,7 @@ export function SpaceRegistrationPanel({ spaceId, token }: { spaceId: string; to
         body="Add an installed harness to the Space with the machine owner's CLI. Owner and machine labels distinguish locations."
       />
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <code className="text-xs">{INSTALL_COMMAND}</code>
+        <code className="text-xs">{installCommand}</code>
         <button type="button" className={actionClass({ variant: "secondary", size: "sm" })}
           onClick={() => void copy()}>
           {copied ? "Copied" : "Copy add command"}

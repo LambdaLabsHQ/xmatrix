@@ -1,13 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
-import { Check, CloudOff, Copy, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
+import { Check, CloudOff, Copy, Download, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
 import { noticeClass } from "@/components/ui/status-tone";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
+import { cn } from "@/lib/utils";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { IdentityAvatar } from "./identity-avatar";
+import { useNow } from "./agent-work-intent";
+import {
+  connectStep, defaultInstallPlatform, listNames, setupInstallCommand,
+  type ConnectStep, type InstallPlatform,
+} from "./connect-machine";
+import { useSetupIntent } from "./use-setup-intent";
 import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
 import type {
@@ -25,8 +33,18 @@ const RUNTIME_INSTALL_COMMANDS: Array<{ command: string; description: string }> 
   { command: "npm i -g @openai/codex", description: "Codex" },
 ];
 
+/* What runs `xmatrix agent add` for this Space on another machine. The
+   Space id is filled in: a placeholder would send the reader looking for an
+   id the Web shows nowhere. */
+export function agentAddCommand(spaceId: string | null | undefined): string {
+  return `xmatrix agent add claude --space ${spaceId || "<space-id>"}`;
+}
+
 export function SpaceAgentSetupCard({
   state,
+  spaceId,
+  token,
+  userId,
   hostLabel,
   busy,
   error,
@@ -39,6 +57,9 @@ export function SpaceAgentSetupCard({
   onManageMachines,
 }: {
   state: SpaceAgentSetupState;
+  spaceId: string | null;
+  token: string | undefined;
+  userId: string | undefined;
   hostLabel: string;
   busy: string | null;
   error: string | null;
@@ -65,7 +86,7 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {state.kind === "unreachable" && <UnreachablePanel onRetry={onRetryAgents} />}
-        {state.kind === "no-local-machine" && <RemoteMachinePanel />}
+        {state.kind === "no-local-machine" && <BringAgentsInPanel spaceId={spaceId} token={token} userId={userId} />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}
@@ -242,17 +263,114 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function RemoteMachinePanel() {
+/* Web and mobile: agents are not in this tab, so the one thing to learn here
+   is where they are. The desktop app finds the ones already installed; any
+   other machine connects with one command approved on this page. */
+function BringAgentsInPanel({ spaceId, token, userId }: {
+  spaceId: string | null; token: string | undefined; userId: string | undefined;
+}) {
   return (
     <>
       <SetupCardHeader
         icon={HardDrive}
-        title="Connect the machine your agents run on"
-        body="Connect a machine, then install or turn on its harnesses from Machines. Installed agents appear here automatically."
+        title="Bring your agents into xMatrix"
+        body="Your agents run on your own computer, and xMatrix connects them with the people they work with. Open the desktop app on that computer and it finds the agents already installed there."
       />
+      <a href="/download" className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
+        <Download className="size-4" />
+        Download xMatrix
+      </a>
+      <ConnectMachine spaceId={spaceId} token={token} userId={userId} />
       <RemoteMachineHint />
     </>
   );
+}
+
+/* One command for the machine, then what happened to it, as it happens: the
+   terminal asking to be approved, the machine coming online and the agents it
+   has. Once they are reported, the installed-agent switches take over. */
+export function ConnectMachine({ spaceId, token, userId, centered = false }: {
+  spaceId: string | null; token: string | undefined; userId: string | undefined; centered?: boolean;
+}) {
+  const intent = useSetupIntent(spaceId, token, userId);
+  const [platform, setPlatform] = useState<InstallPlatform>(() =>
+    typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent));
+  const now = useNow(1_000);
+  const command = intent.intentId ? setupInstallCommand(intent.intentId, platform) : null;
+  const { copied, copy } = useCopyToClipboard(command ?? "");
+  const step = intent.status ? connectStep(intent.status, now - intent.shownAt) : null;
+  return (
+    <div className="mt-4" data-testid="connect-machine">
+      <p className="text-sm text-muted-foreground">Or run this on the computer your agents use:</p>
+      <div className={cn("mt-2 flex min-w-0 flex-wrap items-center gap-2", centered && "justify-center")}>
+        <code className="min-w-0 rounded bg-muted px-2 py-1 font-mono text-xs [overflow-wrap:anywhere]">
+          {command ?? "Preparing a command…"}
+        </code>
+        <button type="button" disabled={!command} onClick={() => void copy()}
+          className={actionClass({ variant: "secondary", size: "sm" })}>
+          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
+        className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:underline">
+        {platform === "windows" ? "On macOS or Linux?" : "On Windows?"}
+      </button>
+      {step && <ConnectStepLine step={step} busy={intent.busy} centered={centered}
+        onApprove={(code) => void intent.approve(code)} onDecline={() => void intent.decline()} />}
+      {intent.error && <p role="alert" className="mt-2 text-sm text-destructive">{intent.error}</p>}
+    </div>
+  );
+}
+
+function ConnectStepLine({ step, busy, centered, onApprove, onDecline }: {
+  step: ConnectStep; busy: boolean; centered: boolean;
+  onApprove: (userCode: string) => void; onDecline: () => void;
+}) {
+  const row = cn("flex min-w-0 flex-wrap items-center gap-2 text-sm", centered && "justify-center");
+  const waiting = <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />;
+  const done = <Check className="size-4 shrink-0 text-primary" />;
+  switch (step.kind) {
+    case "waiting":
+      return (
+        <div role="status" className="mt-3 text-sm text-muted-foreground">
+          <p className={row}>{waiting} Waiting for the command…</p>
+          {step.hint === "check-terminal" && <p className="mt-1">Nothing yet? The terminal says what went wrong.</p>}
+          {step.hint === "try-desktop" && <p className="mt-1">Still nothing? The desktop app connects without a terminal.</p>}
+        </div>
+      );
+    case "approval":
+      return (
+        <div role="status" className={cn(row, "mt-3")}>
+          <span><strong>{step.hostname}</strong> wants to connect with code{" "}
+            <code className="font-mono font-semibold">{step.userCode}</code>.
+            Approve it only if the terminal shows the same code.</span>
+          <button type="button" disabled={busy} onClick={() => onApprove(step.userCode)}
+            className={actionClass({ variant: "primary", size: "sm" })}>Approve</button>
+          <button type="button" disabled={busy} onClick={onDecline}
+            className={actionClass({ variant: "quiet", size: "sm" })}>Not mine</button>
+        </div>
+      );
+    case "connecting":
+      return <p role="status" className={cn(row, "mt-3")}>{waiting} {step.hostname} is signing in…</p>;
+    case "looking":
+      return <p role="status" className={cn(row, "mt-3")}>{done} {step.machineName} is connected. Looking for agents…</p>;
+    case "found":
+      return (
+        <p role="status" className={cn(row, "mt-3")}>
+          {done} {step.machineName} is connected. Found {listNames(step.harnesses.map((harness) => harness.name))}.
+        </p>
+      );
+    case "none-installed":
+      return (
+        <div role="status" className="mt-3 text-sm">
+          <p className={row}>{done} {step.machineName} is connected, but no agent is installed there yet.</p>
+          <p className="mt-1 text-muted-foreground">
+            Install one there, for example <code className="font-mono text-xs">{RUNTIME_INSTALL_COMMANDS[0]!.command}</code>
+          </p>
+        </div>
+      );
+  }
 }
 
 /* The remote path from the landing page: a machine with no GUI (a server, a
