@@ -245,7 +245,9 @@ Sentry `read_issue:WEB-1A` (or a numeric group id) reads one issue and its lates
 event from the configured organization. Short ids require one lookup; numeric
 ids use two GETs. The excerpt includes title/status/culprit/platform, event UTC
 time, release version, component/environment, SDK and browser/runtime name/version,
-and whether the browser defect endpoint captured it (without its action text), plus at most
+and whether the browser defect endpoint captured it. Its action is included only
+when it exactly matches the fixed application copy allowlist; dynamic names and
+unknown action text are omitted. The excerpt also includes at most
 three exceptions, each with the last 20 stack frames (module, function, filename
 and line/column only). Exception `type` and `value` are included when they are
 strings (including Sentry's annotated truncated-string form); a missing type or
