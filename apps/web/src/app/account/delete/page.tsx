@@ -115,7 +115,7 @@ export default function AccountDeletionPage() {
     <h1 className="text-3xl font-bold">Delete account</h1>
     {receipt ? <section aria-live="polite" className="space-y-4">
       <h2 className="text-xl font-semibold">{state === "completed" ? "Your account has been deleted" : state === "blocked" ? "Deletion was not started" : "Account deletion is processing"}</h2>
-      <p>{state === "completed" ? "Your sign-in credentials, profile and private account settings have been removed. Old sign-in credentials cannot regain access. Shared work retained by other Spaces follows their retention policy." : state === "blocked" ? "A Space, subscription or active execution still needs attention. Your account has not been deleted." : "Once committed, this request cannot be cancelled. Keep this tab to check the result; an interrupted cleanup resumes automatically."}</p>
+      <p>{state === "completed" ? "Your sign-in credentials, profile and private account settings have been removed. Old sign-in credentials cannot regain access. Shared work retained by other Spaces follows their retention policy." : state === "blocked" ? "A Space or active execution still needs attention. Your account has not been deleted." : "Once committed, this request cannot be cancelled. Keep this tab to check the result; an interrupted cleanup resumes automatically."}</p>
       <button className={actionClass({variant:"secondary",size:"md"})} onClick={() => void checkReceipt()}>Check status</button>
       {state === null && user && <form className="space-y-3" onSubmit={event=>{event.preventDefault();void submit();}}>
         <p>If delivery failed, confirm again to retry the same request. This retains your existing receipt.</p>

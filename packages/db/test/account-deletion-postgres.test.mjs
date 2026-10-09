@@ -29,6 +29,8 @@ integration("deletion erases only the confirmed identity, revokes it, and cannot
   const f=await fixture();
   try{
     await f.run(`INSERT INTO data.machines(owner_user_id,machine_id,name) VALUES('delete-user','machine-a','Personal laptop'),('other-user','machine-b','Other laptop')`);
+    await f.run(`INSERT INTO data.human_profiles(user_id,display_name,bio,handle_is_temporary,profile_version,updated_at)
+      VALUES('delete-user','Private name','Private bio',false,1,now()),('other-user','Other name','Other bio',false,1,now())`);
     assert.deepEqual(await f.repo.preview("delete-user"),{blockers:[]});
     await assert.rejects(f.repo.begin({...f.proof,email:"other-user@example.test"}),{code:"account_deletion_confirmation"});
     await f.repo.begin(f.proof);
@@ -48,6 +50,9 @@ integration("deletion erases only the confirmed identity, revokes it, and cannot
     const machines=await f.run("SELECT name,retired_at FROM data.machines WHERE owner_user_id='delete-user'");
     assert.deepEqual(machines,[]);
     assert.equal((await f.run("SELECT name FROM data.machines WHERE owner_user_id='other-user'"))[0].name,"Other laptop");
+    assert.deepEqual(await f.run("SELECT user_id,display_name,bio FROM data.human_profiles"),[{user_id:"other-user",display_name:"Other name",bio:"Other bio"}]);
+    await assert.rejects(f.run(`INSERT INTO data.human_profiles(user_id,display_name,handle_is_temporary,profile_version,updated_at)
+      VALUES('delete-user','Late profile',false,2,now())`),/closing or deleted/);
     await assert.rejects(f.run(`INSERT INTO control.auth_users(id,name,email,created_at,updated_at)
       VALUES('delete-user','Resurrected','new@example.test',now(),now())`),/closing or deleted/);
     await assert.rejects(f.run(`INSERT INTO control.apple_account_tokens(app_account_token,space_id,owner_user_id)
@@ -115,10 +120,37 @@ integration("a Space restore preserves other members without resurrecting a dele
   const spaces=new PostgresSpaceControlRepository(f.db,"shard-0");
   await spaces.createSpace({requestId:randomUUID(),commandId:randomUUID(),spaceId:"shared-space",ownerUserId:"other-user",name:"Shared work"});
   await spaces.mutateMembership({requestId:randomUUID(),commandId:randomUUID(),actorUserId:"other-user",userId:"delete-user",spaceId:"shared-space",kind:"space_member_put",role:"member",at:new Date().toISOString()});
+  await f.run("UPDATE data.space_members SET email='private@example.test',display_name='Private name',avatar_url='https://example.test/private-avatar' WHERE user_id='delete-user'");
   await spaces.mutateSpace({requestId:randomUUID(),commandId:randomUUID(),actorUserId:"other-user",spaceId:"shared-space",kind:"space_delete",at:new Date().toISOString()});
+  await f.run(`INSERT INTO data.space_deletions(space_id,space_name,owner_user_id,requested_at,purge_after,state,members_json,automations_json,version,updated_at)
+    SELECT 'scheduled-'||n,space_name,owner_user_id,requested_at,purge_after,state,members_json,automations_json,version,updated_at
+      FROM data.space_deletions CROSS JOIN generate_series(1,5) n WHERE space_id='shared-space'`);
   await f.repo.begin(f.proof);await f.repo.advance("delete-user",async()=>true);
+  await expectState(f,"committed");
+  assert.equal((await f.run(`SELECT count(*)::int n FROM data.space_deletions WHERE members_json @> '[{"userId":"delete-user"}]'::jsonb`))[0].n,1);
+  await f.repo.advance("delete-user",async()=>true);await expectState(f,"completed");
+  assert.deepEqual((await f.run("SELECT members_json FROM data.space_deletions WHERE space_id='shared-space'"))[0].members_json.map(m=>m.userId),["other-user"]);
   await spaces.restoreSpace({requestId:randomUUID(),commandId:randomUUID(),actorUserId:"other-user",spaceId:"shared-space",at:new Date().toISOString()});
   assert.deepEqual((await f.run("SELECT user_id FROM data.space_members WHERE space_id='shared-space' ORDER BY user_id")).map(x=>x.user_id),["other-user"]);
+ }finally{await f.close();}
+});
+
+integration("deletion scrubs join-request profiles in bounded passes and fences stale profile writes",async()=>{
+ const f=await fixture();try{
+  await f.run(`INSERT INTO data.space_join_requests(join_request_id,space_id,invite_id,user_id,role,status,email,display_name,avatar_url,version,created_at)
+    SELECT 'request-'||n,'shared-space-'||n,'invite','delete-user','member','pending','private@example.test','Private name','https://example.test/private-avatar',1,now()
+      FROM generate_series(1,501) n`);
+  await f.run(`INSERT INTO data.space_join_requests(join_request_id,space_id,invite_id,user_id,role,status,email,display_name,avatar_url,version,created_at)
+    VALUES('other-request','shared-space','invite','other-user','member','approved','other@example.test','Other name','https://example.test/other-avatar',1,now())`);
+  await f.repo.begin(f.proof);await f.repo.advance("delete-user",async()=>true);
+  await expectState(f,"committed");
+  assert.equal((await f.run("SELECT count(*)::int n FROM data.space_join_requests WHERE user_id='delete-user' AND email IS NOT NULL"))[0].n,1);
+  await f.repo.advance("delete-user",async()=>true);await expectState(f,"completed");
+  assert.equal((await f.run("SELECT count(*)::int n FROM data.space_join_requests WHERE user_id='delete-user' AND (email IS NOT NULL OR display_name IS NOT NULL OR avatar_url IS NOT NULL)"))[0].n,0);
+  assert.equal((await f.run("SELECT count(*)::int n FROM data.space_join_requests WHERE user_id='delete-user'"))[0].n,501);
+  assert.deepEqual((await f.run("SELECT email,display_name,avatar_url,status FROM data.space_join_requests WHERE user_id='other-user'"))[0],{email:"other@example.test",display_name:"Other name",avatar_url:"https://example.test/other-avatar",status:"approved"});
+  await assert.rejects(f.run(`INSERT INTO data.space_join_requests(join_request_id,space_id,invite_id,user_id,role,status,email,version,created_at)
+    VALUES('late-request','shared-space','invite','delete-user','member','pending','private@example.test',1,now())`),/closing or deleted/);
  }finally{await f.close();}
 });
 

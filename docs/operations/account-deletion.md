@@ -40,6 +40,12 @@ at most 100 objects/pass. Uploads recheck revocation and compensate in-flight wr
 bounded post-completion sweep runs for one day. Shared work and billing/audit records are
 not treated as private account settings.
 
+Private Human Profile projections are erased. Join-request audit rows retain their
+opaque identity and decision, but email, display name and avatar are cleared in batches
+of 500. Scheduled Space restore snapshots remove only the deleted member, at most five
+snapshots per pass; other members and shared work remain unchanged. Admission fences
+reject stale join/profile inserts, including UPSERTs, after deletion.
+
 ## Recovery and verification
 
 Cron resumes at most two pending jobs per invocation. A failed shard or avatar operation
