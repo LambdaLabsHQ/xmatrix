@@ -30,23 +30,37 @@ function foldable(item: TimelineItem): boolean {
   return Boolean(item.supersededBy) || Boolean(timelineItemActivity(item));
 }
 
-function sameTags(previous: TimelineItem, next: TimelineItem): boolean {
-  const chips = (item: TimelineItem) =>
-    (item.senderStatusChips ?? []).map((chip) => `${chip.id}=${chip.value ?? ""}`).join("|");
-  return previous.senderGitBranch === next.senderGitBranch &&
-    previous.senderOwnerLabel === next.senderOwnerLabel &&
-    previous.senderMachineLabel === next.senderMachineLabel &&
-    previous.senderMachineId === next.senderMachineId &&
-    previous.senderMachineOwnerUserId === next.senderMachineOwnerUserId &&
-    previous.senderInstanceStale === next.senderInstanceStale &&
-    previous.senderGoal?.objective === next.senderGoal?.objective &&
-    previous.senderGoal?.status === next.senderGoal?.status &&
-    chips(previous) === chips(next);
+/**
+ * The header tags a message carries, by the key its tag is drawn with. Model
+ * and effort share one tag in the header, so a change to either is the model's.
+ */
+function headerTags(item: TimelineItem): Map<string, string> {
+  const tags = new Map<string, string>([
+    ["branch", item.senderGitBranch ?? ""],
+    ["owner", item.senderOwnerLabel ?? ""],
+    ["machine", [item.senderMachineLabel, item.senderMachineId, item.senderMachineOwnerUserId].join("|")],
+    ["stale", item.senderInstanceStale ? "1" : ""],
+    ["goal", `${item.senderGoal?.objective ?? ""}|${item.senderGoal?.status ?? ""}`],
+  ]);
+  for (const chip of item.senderStatusChips ?? []) {
+    const id = chip.id.toLowerCase();
+    const key = id === "effort" ? "model" : id;
+    tags.set(key, `${tags.get(key) ?? ""}|${id}=${chip.value ?? ""}`);
+  }
+  return tags;
 }
 
-/** Whether a message can drop its avatar and header under the row above. */
-export function continuesPrevious(previous: TimelineItem | undefined, item: TimelineItem): boolean {
-  if (!previous || previous.folded || previous.isEvent || item.isEvent) return false;
+/** Keys of the tags that differ between two messages, sorted. */
+function changedTags(previous: TimelineItem, next: TimelineItem): string[] {
+  const before = headerTags(previous);
+  const after = headerTags(next);
+  const keys = new Set([...before.keys(), ...after.keys()]);
+  return [...keys].filter((key) => (before.get(key) ?? "") !== (after.get(key) ?? "")).sort();
+}
+
+/** Same sender moments later on the same day: everything continuation asks but the tags. */
+function sameTurn(previous: TimelineItem, item: TimelineItem): boolean {
+  if (previous.isEvent || item.isEvent) return false;
   // A provenance badge or a link origin is part of what the reader must see.
   if (item.provenance || item.linkOrigin || item.reservedSystemAgent || previous.reservedSystemAgent) {
     return false;
@@ -57,8 +71,28 @@ export function continuesPrevious(previous: TimelineItem | undefined, item: Time
   if (!Number.isFinite(gap) || gap < 0 || gap > CONTINUATION_WINDOW_MS) return false;
   // The timeline has no day dividers: a header's timestamp is what says a new
   // day began, so a turn that crosses local midnight starts a new header.
-  if (new Date(item.sentAt).toDateString() !== new Date(previous.sentAt).toDateString()) return false;
-  return sameTags(previous, item);
+  return new Date(item.sentAt).toDateString() === new Date(previous.sentAt).toDateString();
+}
+
+/** Whether a message can drop its avatar and header under the row above. */
+export function continuesPrevious(previous: TimelineItem | undefined, item: TimelineItem): boolean {
+  if (!previous || previous.folded) return false;
+  return sameTurn(previous, item) && changedTags(previous, item).length === 0;
+}
+
+/**
+ * The tags that brought a header back within one sender's turn: the previous
+ * message of the same Instance, past any fold of its own activity, is moments
+ * old, but a tag changed. The header names what changed so it is not read as
+ * a repeat (user 2026-10-09: 签变了能否有个更好的 UX 提示).
+ */
+export function retaggedKeys(rows: readonly TimelineItem[], item: TimelineItem): string[] | undefined {
+  let index = rows.length - 1;
+  while (index >= 0 && rows[index]!.folded && actorKey(rows[index]!) === actorKey(item)) index -= 1;
+  const previous = rows[index];
+  if (!previous || previous.folded || !sameTurn(previous, item)) return undefined;
+  const changed = changedTags(previous, item);
+  return changed.length > 0 ? changed : undefined;
 }
 
 function foldRow(items: TimelineItem[]): TimelineItem {
@@ -111,7 +145,12 @@ export function buildConversationRows(
     }
     flush();
     const previous = rows[rows.length - 1];
-    rows.push(continuesPrevious(previous, item) ? { ...item, continuation: true } : item);
+    if (continuesPrevious(previous, item)) {
+      rows.push({ ...item, continuation: true });
+      continue;
+    }
+    const retagged = retaggedKeys(rows, item);
+    rows.push(retagged ? { ...item, retagged } : item);
   }
   flush();
   return rows;

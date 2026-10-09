@@ -24,11 +24,13 @@ export function identityStatusChips({ name, owner, machine, machineBusy, machine
 
 /* Who, where, and in what. These answer which of two same-named Agents is
    speaking, so they stay whole and the tags after them give way first. */
-export function AgentIdentityLabels({ name, owner, machine, machineBusy, machineTarget, workspace, wrap }: {
+export function AgentIdentityLabels({ name, owner, machine, machineBusy, machineTarget, workspace, wrap, changed }: {
   name?: string; owner?: string; machine?: string; machineBusy?: StatusChip["busy"];
   machineTarget?: StatusChip["machine"]; workspace?: StatusChip;
   /** Set where the cluster owns its own lines; a one-line header keeps them together. */
   wrap?: boolean;
+  /** Keys of the tags that changed since the same sender's message just above. */
+  changed?: readonly string[];
 }) {
   const chips = identityStatusChips({ name, owner, machine, machineBusy, machineTarget, workspace });
   if (!chips.length) return null;
@@ -36,6 +38,7 @@ export function AgentIdentityLabels({ name, owner, machine, machineBusy, machine
     "app-agent-identity-labels inline-flex items-center gap-1",
     wrap ? "flex-wrap" : "shrink-0 flex-nowrap"
   )}>
-    {chips.map((chip) => <StatusChipBadge key={chip.id} chip={chip} untruncated={!wrap} />)}
+    {chips.map((chip) => <StatusChipBadge key={chip.id} chip={chip} untruncated={!wrap}
+      changed={changed?.includes(chip.id)} />)}
   </span>;
 }

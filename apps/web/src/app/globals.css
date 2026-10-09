@@ -2099,6 +2099,17 @@
   background: color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 
+/* A header back within one sender's turn because a tag changed: the tags that
+   stayed fade, so the one that changed is what reads (user 2026-10-09: 签变了
+   能否有个更好的 UX 提示). */
+.xmatrix-app .app-message-meta[data-retagged] :is(.app-paper-tag, .app-goal-status-badge-shell):not([data-tag-changed]) {
+  opacity: 0.4;
+}
+
+.xmatrix-app .app-message-meta[data-retagged] .app-paper-tag[data-tag-changed] {
+  color: var(--foreground);
+}
+
 .xmatrix-app .message-author-avatar .identity-avatar-face.identity-avatar-face {
   background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
   -webkit-backdrop-filter: none !important;

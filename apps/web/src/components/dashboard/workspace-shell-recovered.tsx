@@ -1994,9 +1994,11 @@ export function avatarInitials(value: string): string {
 export function GoalStatusBadge({
   goal,
   presentation = "historical",
+  changed,
 }: {
   goal?: AgentGoalStatus;
   presentation?: "historical" | "live";
+  changed?: boolean;
 }) {
   const tip = useAnchoredTip<HTMLSpanElement>();
   const label = goalStatusBadgeLabel(goal, presentation);
@@ -2007,6 +2009,7 @@ export function GoalStatusBadge({
   return (
     <span
       className="app-goal-status-badge-shell relative inline-flex shrink-0 align-middle"
+      data-tag-changed={changed || undefined}
       tabIndex={0}
       aria-label={title}
       {...tip.anchorProps}
@@ -2106,6 +2109,7 @@ export function StatusChipBadge({
   expanded,
   onToggleEditor,
   untruncated,
+  changed,
 }: {
   chip: StatusChip;
   /** Value chosen in the tag but not yet sent; shown in place of the live one. */
@@ -2115,6 +2119,8 @@ export function StatusChipBadge({
   onToggleEditor?: () => void;
   /** Set where the tag must stay whole; a tag that only adds detail truncates. */
   untruncated?: boolean;
+  /** Changed since the same sender's message just above (conversation-activity-rows.ts). */
+  changed?: boolean;
 }) {
   const chipId = chip.id.toLowerCase();
   const isMode = chipId === "mode";
@@ -2154,6 +2160,7 @@ export function StatusChipBadge({
       icon={Icon}
       title={chip.busy ? undefined : title}
       chipId={chip.id}
+      {...(changed ? { data: { "data-tag-changed": true } } : {})}
       nowrap={untruncated}
       className={cn("app-status-chip-badge", staged && "text-foreground")}
       fill={fillPercent === undefined ? null : (

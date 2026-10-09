@@ -1245,7 +1245,7 @@ function NamedAgentIdentityLabels({ message, spaceId, token }: {
   const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", Boolean(spaceId && token));
   const registrations = catalog.data?.registrations ?? [];
   const machine = messageMachineIdentity(registrations, message);
-  return <AgentIdentityLabels owner={message.senderOwnerLabel} wrap
+  return <AgentIdentityLabels owner={message.senderOwnerLabel} wrap changed={message.retagged}
     machine={registrationMachineName(registrations, machine?.machineId, machine?.ownerUserId) || "Unnamed machine"}
     machineBusy={registrationMachineBusy(registrations, machine?.machineId, machine?.ownerUserId)}
     machineTarget={machine} />;
@@ -1964,7 +1964,8 @@ export const MessageRow = memo(function MessageRow({
               something about the sender, so none is hidden or cut at the edge
               (user 2026-09-27, a phone showed half a Goal pill). */}
           {!message.continuation && (
-          <div className="app-message-meta flex min-h-6 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <div className="app-message-meta flex min-h-6 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1"
+            data-retagged={message.retagged?.join(" ")}>
           <span className="app-message-author-name shrink-0 whitespace-nowrap text-[15px] font-black">{message.author}</span>
           <MessageTimestamp value={message.sentAt} className="shrink-0 text-xs text-muted-foreground" />
           {message.sendStatus === "pending" && (
@@ -2011,20 +2012,22 @@ export const MessageRow = memo(function MessageRow({
           {message.senderInstanceStale && (
             <span
               className={tagClass("app-sender-instance-stale-badge")}
+              data-tag-changed={message.retagged?.includes("stale") || undefined}
               title="This message came from an agent instance that is no longer live in this channel."
             >
               instance offline
             </span>
           )}
           {message.senderKind === "agent" && (
-            <GoalStatusBadge goal={message.senderGoal} />
+            <GoalStatusBadge goal={message.senderGoal} changed={message.retagged?.includes("goal")} />
           )}
           {message.senderKind === "agent" && message.senderGitBranch && (
-            <BranchBadge branch={message.senderGitBranch} />
+            <BranchBadge branch={message.senderGitBranch} changed={message.retagged?.includes("branch")} />
           )}
           {message.senderKind === "agent" &&
             headerStatusChips(message.senderStatusChips)?.map((chip) => (
-              <StatusChipBadge key={chip.id} chip={chip} />
+              <StatusChipBadge key={chip.id} chip={chip}
+                changed={message.retagged?.includes(chip.id.toLowerCase())} />
             ))}
           </span>
           </div>
