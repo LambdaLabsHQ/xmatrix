@@ -129,8 +129,8 @@ export default function AccountDeletionPage() {
       {state === "completed" && <Link href="/login" className="block underline">Return to sign in</Link>}
     </section> : !ready || authLoading ? <p>Loading account…</p> : !user ? <p><Link href="/login?next=%2Faccount%2Fdelete" className="underline">Sign in to delete your account</Link></p> : <>
       <p>This permanently removes your profile, sign-in sessions, linked login credentials and private account settings, and retires your connected Machines. It does not delete files on your computers.</p>
-      <p>Close owned Spaces and resolve their subscriptions first. Leave other Spaces; their shared work and audit records remain under their owners&apos; control. Scheduled Space deletions continue, and cannot be restored from a deleted account.</p>
-      <p>App Store subscriptions are managed in your Apple Account; deleting an account does not cancel a subscription. No subscription is transferred to a different Space.</p>
+      <p>Close owned Spaces first. Leave other Spaces; their shared work and audit records remain under their owners&apos; control. Scheduled Space deletions continue, and cannot be restored from a deleted account.</p>
+      <p>You can delete your account immediately even if a subscription has not expired. Deletion does not cancel App Store or Stripe subscriptions. Cancel renewal with the billing provider before deletion if you want to stop future charges. App Store subscriptions are managed in your Apple Account. No subscription is transferred to a different Space.</p>
       {blockers === null ? <p>Checking requirements…</p> : blockers.length ? <section className="space-y-3" aria-label="Deletion requirements">
         <h2 className="text-xl font-semibold">Before you continue</h2>
         {blockers.map((blocker,index)=><div key={`${blocker.kind}:${index}`} className="rounded-xl border p-4">
@@ -144,7 +144,7 @@ export default function AccountDeletionPage() {
       </section> : <form className="space-y-4" onSubmit={event=>{event.preventDefault();void submit();}}>
         <label className="block">Account email<input className="mt-1 block w-full rounded-lg border p-3" type="email" autoComplete="off" value={email} onChange={e=>setEmail(e.target.value)} /></label>
         <label className="block">Type DELETE<input className="mt-1 block w-full rounded-lg border p-3" autoComplete="off" value={confirmation} onChange={e=>setConfirmation(e.target.value)} /></label>
-        <label className="flex items-start gap-3"><input type="checkbox" checked={acknowledge} onChange={e=>setAcknowledge(e.target.checked)} /><span>I understand this is permanent. I will lose access on every device and cannot restore scheduled Spaces or move a subscription by creating another account.</span></label>
+        <label className="flex items-start gap-3"><input type="checkbox" checked={acknowledge} onChange={e=>setAcknowledge(e.target.checked)} /><span>I understand this is permanent and does not cancel subscription renewal. I will lose access on every device and cannot restore scheduled Spaces or move a subscription by creating another account.</span></label>
         <button className={actionClass({variant:"danger",size:"md"})} disabled={busy || !acknowledge || confirmation!=="DELETE" || email.trim().toLowerCase()!==user.email.toLowerCase()} type="submit">{busy ? "Submitting…" : "Permanently delete account"}</button>
       </form>}
       {reauthenticate && <button className={actionClass({variant:"secondary",size:"md"})} onClick={()=>void logout({redirectTo:"/account/delete"})}>Sign out to verify identity</button>}

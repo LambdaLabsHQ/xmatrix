@@ -22,7 +22,7 @@ move with an individual Space. New shard admission must preserve retired identit
 before accepting historical identity writes.
 
 The current boundary refuses deletion while the person owns an unscheduled Space, belongs
-to another Space, has a nonterminal billed subscription, or owns active execution/pending
+to another Space, or owns active execution/pending
 Machine actions. Leaving another person's Space is an explicit self-only membership action;
 its owner cannot leave. Scheduled Space deletion continues independently. Restoration cannot
 resurrect deleted members or automations, and cannot restore a deleted owner's Space.
@@ -48,7 +48,7 @@ Cancellation and blocker recovery clear only uncommitted fences for the exact re
 Do not manually change a committed job to preparing or remove committed fences.
 
 Focused PostgreSQL integration tests cover fresh-session checks, wrong-owner requests,
-subscription and execution blockers, cross-shard checks, cancellation, bounded cleanup,
+unexpired-subscription deletion, execution blockers, cross-shard checks, cancellation, bounded cleanup,
 interruption/replay, Space restoration, and refusal of old signed tokens. Never validate
 by deleting a real person's production account. A completed local test is not evidence
 of production deployment or App Store acceptance.
@@ -58,7 +58,8 @@ of production deployment or App Store acceptance.
 This boundary is not yet sufficient to mark App Store account deletion accepted.
 Apple's [account deletion guidance](https://developer.apple.com/support/offering-account-deletion-in-your-app/)
 requires an immediate deletion option even when offering deletion at subscription expiry,
-and covers associated user-generated content. The current nonterminal-subscription blocker
-and retained shared-content behavior need a coordinated product/data-lifecycle change before
+and covers associated user-generated content. Unexpired subscriptions no longer block immediate account deletion; the confirmation explains
+that provider renewal must be cancelled separately and billing evidence is not rebound.
+The retained shared-content behavior still needs a coordinated product/data-lifecycle change before
 claiming compliance. Keep the review checklist open; do not represent support email as the
 solution or silently destroy other members' data to satisfy it.
