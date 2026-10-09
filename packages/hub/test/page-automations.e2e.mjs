@@ -93,16 +93,16 @@ test("a page's Automation is anchored by its reference and managed by whoever ca
     const runPaused = await call(memberToken, `${automations}/${created.id}/run`, "POST",
       { expectedVersion: paused.version });
     assert.equal(runPaused.status, 409, "a paused Automation is resumed, not run");
-    const resumed = (await ok(await call(ownerToken, `${automations}/${created.id}/resume`, "POST",
+    const running = (await ok(await call(ownerToken, `${automations}/${created.id}/resume`, "POST",
       { expectedVersion: paused.version }))).automation;
-    assert.equal(resumed.enabled, true);
+    assert.equal(running.enabled, true);
 
     // Running it now makes its next occurrence due at once, as its author, and keeps its cadence.
     const before = Date.now();
     const resumedByOwner = (await ok(await call(memberToken, `${automations}/${created.id}/run`, "POST",
-      { expectedVersion: resumed.version }))).automation;
+      { expectedVersion: running.version }))).automation;
     assert.equal(resumedByOwner.id, created.id, "running it keeps its author");
-    assert.equal(resumedByOwner.intervalMinutes, resumed.intervalMinutes);
+    assert.equal(resumedByOwner.intervalMinutes, running.intervalMinutes);
     assert.ok(Date.parse(resumedByOwner.nextRunAt) <= Date.now() &&
       Date.parse(resumedByOwner.nextRunAt) >= before - 1_000, "due now");
 
