@@ -88,6 +88,13 @@ async function openSchedule(page: Page, name: string) {
   await expect(page.locator(".app-tool-detail").getByRole("heading", { level: 2, name })).toBeVisible();
 }
 
+/** Confirms Delete on the open schedule and waits for its row to leave the list. */
+async function deleteExistingSchedule(page: Page) {
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete" }).click();
+  await expect(scheduleRow(page, "Existing schedule")).toHaveCount(0);
+}
+
 async function openAutomationEditor(page: Page, automation: typeof E2E_AUTOMATION) {
   await openWorkspaceWithStubs(page, {
     ...E2E_AUTOMATION_READY_FIXTURES,
@@ -155,10 +162,7 @@ test("Automation exits edit mode when the edited task is deleted", async ({ page
   await expect(page.getByLabel("Name")).toHaveValue("Existing schedule");
   await expect(page.getByLabel("What it does each time")).toHaveValue(E2E_AUTOMATION.expression.text);
 
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Delete" }).click();
-
-  await expect(scheduleRow(page, "Existing schedule")).toHaveCount(0);
+  await deleteExistingSchedule(page);
   await expect(page.getByLabel("Name")).toHaveCount(0);
   await expect(page.getByText("Nothing in this Space runs on a schedule")).toBeVisible();
 });
@@ -175,10 +179,7 @@ test("deleting an Automation that moved on since the list loaded deletes its cur
       { json: { ok: true, automationId: "task-local" } },
     ] } });
 
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Delete" }).click();
-
-  await expect(scheduleRow(page, "Existing schedule")).toHaveCount(0);
+  await deleteExistingSchedule(page);
   await expect(page.getByText(/changed in the meantime/u)).toHaveCount(0);
   expect((await fixtureRequestBodies(page, "automation-delete")).map((body) => body.expectedVersion)).toEqual([1, 2]);
 });
