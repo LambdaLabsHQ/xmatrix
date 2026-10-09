@@ -9,6 +9,7 @@ import {
   digestCanonicalCloneCborV1Bytes,
   encodeCanonicalCloneCborV1,
   type CanonicalCloneFieldPresenceEntry, utf8ByteLength } from "@xmatrix/protocol";
+import { CanonicalCloneFieldPresence } from "@xmatrix/protocol";
 
 /**
  * The message aggregate owns exactly one payload bundle. Reactions, content
@@ -288,6 +289,23 @@ export async function prepareRelayV2MessageRecord(
   input: RelayV2MessageRecordInput,
 ): Promise<PreparedRelayV2MessageRecord> {
   return prepareRelayV2MessageRecordWithBudget(input, RELAY_V2_MESSAGE_INLINE_RECORD_MAX_BYTES);
+}
+
+/** Maintenance changes a sender without turning absent timestamps into null, or vice versa. */
+export function relayV2StoredOptionalTimestamps(bytes: Uint8Array, facts: {
+  editedAt: string | null; recalledAt: string | null; deletedAt: string | null;
+}): Pick<RelayV2MessageRecordInput, "editedAt" | "recalledAt" | "deletedAt"> {
+  const presence=decodeCanonicalCloneCborV1(bytes);
+  if(!(presence instanceof CanonicalCloneFieldPresence)) fail("record-integrity","Stored message presence is invalid");
+  const result: Pick<RelayV2MessageRecordInput,"editedAt"|"recalledAt"|"deletedAt">={};
+  for(const key of ["editedAt","recalledAt","deletedAt"] as const) {
+    const state=presence.entries.find(([id])=>id===FIELD[key])?.[1];
+    if(state===0) continue;
+    if(state===1 && facts[key]===null) result[key]=null;
+    else if(state===2 && facts[key]!==null) result[key]=facts[key];
+    else fail("record-integrity","Stored message timestamp presence does not match its fact");
+  }
+  return result;
 }
 
 function decodeRelayV2MessagePayloadBundleWithBudget(
