@@ -8102,6 +8102,27 @@ html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-li
   content: none !important;
 }
 
+/* A field on the paper is a line written on it, not a well sunk into it: no
+   fill, no box, one ink rule underneath that darkens while it has the caret.
+   Only inputs that draw their own box take it; one sitting inside another
+   control's shell (border-0, transparent) and fields on a wood plank keep
+   theirs, and the page title, search and composer draw their own field. */
+html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border)):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *) {
+  background: transparent !important;
+  border-width: 0 0 1.5px !important;
+  border-style: solid !important;
+  border-color: oklch(0.35 0.07 60 / 0.28) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding-inline: 2px !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border)):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *):focus {
+  border-color: var(--app-panel-ink, currentColor) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 /* Notices on the paper: plain white with the tone's rail, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-notice {
   background: oklch(0.995 0.002 85) !important;
