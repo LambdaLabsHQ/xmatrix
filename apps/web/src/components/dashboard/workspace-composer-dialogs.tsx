@@ -118,20 +118,16 @@ import {
   formatFileSize,
   formatMember,
   latestEventTimestampMs,
-  memberDeviceLine,
   memberPresence,
   pastedImageFiles,
   prepareImageAttachmentFile,
-  presenceAvatarUrl,
   agentInstancePresenceLabel,
   presenceStatusLabel,
   relativeTime,
   shortId,
-  spaceMemberForChannelIdentity,
   GoalStatusBadge,
   traceEventChannelInstanceLabel,
   uploadChannelAttachment,
-  visibleHumanChannelMembers,
 } from "./workspace-shell-recovered";
 
 import {
@@ -154,7 +150,7 @@ import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
 import { AgentInstanceTagChips } from "./agent-instance-tag-chips";
-import { ListSkeleton, LoadingImage } from "./content-skeleton";
+import { LoadingImage } from "./content-skeleton";
 import { BranchBadge, PAPER_TAG_CLASS, UsageMeterFill } from "./status-tag";
 
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
@@ -1447,7 +1443,6 @@ export function ChannelDetails({
   automations,
   automationExecutionEnabled,
   automationBusy,
-  loadingAutomations,
   onToggleAutomation,
   onUpdateAutomation,
   onDeleteAutomation,
@@ -1476,7 +1471,6 @@ export function ChannelDetails({
   automations: SerializedAutomation[];
   automationExecutionEnabled: boolean | null;
   automationBusy: string | null;
-  loadingAutomations: boolean;
   onToggleAutomation: (automation: SerializedAutomation) => void;
   onUpdateAutomation: (automationId: string, input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
   onDeleteAutomation: (automation: SerializedAutomation) => void;
@@ -1500,9 +1494,6 @@ export function ChannelDetails({
     setAboutSummaryError(null);
   }, [channelId]);
 
-  const members = useMemo(() => (
-    channel ? visibleHumanChannelMembers(channel, space) : []
-  ), [channel, space]);
   const agentItems = useMemo(
     () => channelOnlineAgentAvatarItems(channel),
     [channel]
@@ -1523,8 +1514,6 @@ export function ChannelDetails({
     enabled: Boolean(token && channelId && channelSpaceId),
   });
   const connectorConnections = connectorsQuery.data ?? [];
-  const connectorsLoading = connectorsQuery.isPending && connectorsQuery.isEnabled;
-  const connectorsError = userErrorMessage(connectorsQuery.error, "Couldn't load apps");
 
   const requestAboutSummary = useCallback(async () => {
     if (!token || !channel || aboutSummaryBusy) return;
@@ -1589,6 +1578,7 @@ export function ChannelDetails({
   const detailsBody = (
       <div className="app-material-scroll-viewport min-h-0 flex-1 overflow-y-auto">
         <div className="app-material-scroll-content min-h-full space-y-4 p-4">
+          {(channel.summary || aboutSummaryBusy || aboutSummaryError) && (
           <DetailBlock
             title="Summary"
             action={
@@ -1604,7 +1594,7 @@ export function ChannelDetails({
               </button>
             }
           >
-            <p className="text-sm text-foreground">{channel.summary || "No summary yet"}</p>
+            {channel.summary && <p className="text-sm text-foreground">{channel.summary}</p>}
             {channel.summary && channel.summarySource && (
               <p className="mt-1 text-xs text-muted-foreground" title={channel.summarySource.generatedAt}>
                 {summarySourceLine(channel.summarySource, channel.historyHeadSequence)}
@@ -1614,63 +1604,11 @@ export function ChannelDetails({
               <p role="alert" className="mt-1 text-xs text-destructive">{aboutSummaryError}</p>
             )}
           </DetailBlock>
+          )}
 
-          <DetailBlock title="Members">
-            <div className="space-y-2">
-              {members.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No members with channel access</p>
-              ) : (
-                members.map((member) => {
-                  const presence = memberPresence(channel, member);
-                  const status = presence.kind === "user" ? presence.status : "offline";
-                  const spaceMember = spaceMemberForChannelIdentity(space, member);
-                  const label = spaceMember?.name || spaceMember?.email || formatMember(channel, member);
-                  const kindLabel = member === currentUserMemberId ? "you" : "human";
-                  const deviceLine = memberDeviceLine(presence);
-
-                  return (
-                    <div key={member} className="app-detail-member-row border-t border-border/60 py-2 text-sm first:border-t-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <IdentityAvatar
-                            kind="human"
-                            label={label}
-                            status={status}
-                            imageUrl={presenceAvatarUrl(presence) || spaceMember?.avatarUrl}
-                            initials={avatarInitials(label)}
-                            size="sm"
-                          />
-                          <div className="min-w-0">
-                            <p className="truncate">{label}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {presenceStatusLabel({ ...presence, status })}{presence.lastSeenAt ? ` - ${relativeTime(presence.lastSeenAt)}` : ""}
-                            </p>
-                            {deviceLine && (
-                              <p className="truncate text-[11px] text-muted-foreground" title={deviceLine}>
-                                {deviceLine}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <span className={cn("app-detail-member-badge px-[7px] py-0.5 text-[11px]", PAPER_TAG_CLASS)}>
-                            {kindLabel}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </DetailBlock>
-
+          {agentItems.length > 0 && (
           <DetailBlock title="Agents">
             <div className="space-y-2">
-              {agentItems.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No active agent instances</p>
-              ) : (
-                <>
                   {agentItems.map((item) => {
                     const presence = memberPresence(channel, item.member);
                     if (presence.kind !== "agent") return null;
@@ -1757,15 +1695,12 @@ export function ChannelDetails({
                       </div>
                     );
                   })}
-                </>
-              )}
             </div>
           </DetailBlock>
+          )}
 
           <ChannelSubscriptionsBlock
             connections={connectorConnections}
-            loading={connectorsLoading}
-            error={connectorsError}
             userId={currentUserMemberId || "anonymous"}
             spaceId={channelSpaceId}
             channelId={channelId}
@@ -1776,14 +1711,10 @@ export function ChannelDetails({
           />
 
           {/* Automations are made on a page, in the section they keep true; this lists the ones running here. */}
+          {channelAutomations.length > 0 && (
           <DetailBlock title="Schedules">
             <div className="space-y-2">
-              {loadingAutomations && channelAutomations.length === 0 ? (
-                <ListSkeleton label="Loading schedules" rows={3} />
-              ) : channelAutomations.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No schedules in this channel yet.</p>
-              ) : (
-                channelAutomations.map((automation) => (
+              {channelAutomations.map((automation) => (
                   <div key={automation.id} className="border-t border-border/60 py-2 text-sm first:border-t-0">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -1947,8 +1878,7 @@ export function ChannelDetails({
                       )}
                     </div>
                   )
-                )
-              )}
+                )}
               {automationExecutionEnabled === false && (
                 <p className={noticeClass("alert", "text-[11px]")}>
                   Evaluation resume is unavailable. Existing suspended evaluations will not run.
@@ -1956,6 +1886,7 @@ export function ChannelDetails({
               )}
             </div>
           </DetailBlock>
+          )}
         </div>
       </div>
   );

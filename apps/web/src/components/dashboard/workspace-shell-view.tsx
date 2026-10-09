@@ -1041,7 +1041,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       automations={automations}
       automationExecutionEnabled={automationExecutionEnabled}
       automationBusy={automationBusy}
-      loadingAutomations={loadingAutomations}
       onToggleAutomation={toggleAutomation}
       onUpdateAutomation={updateAutomation}
       onDeleteAutomation={deleteAutomation}

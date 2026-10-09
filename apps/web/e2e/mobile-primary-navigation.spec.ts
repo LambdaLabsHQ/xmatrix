@@ -26,8 +26,8 @@ async function openMoreChildWorkspace(page: Page) {
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
 }
 
-async function openGeneralChannelList(page: Page) {
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+async function openGeneralChannelList(page: Page, channel: unknown = E2E_CHANNEL) {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [channel] });
   await page.goto("/app/personal-sspaceperso/channels");
 }
 
@@ -83,8 +83,8 @@ async function installAndroidBackBridge(page: Page) {
   });
 }
 
-async function openGeneralChannel(page: Page) {
-  await openGeneralChannelList(page);
+async function openGeneralChannel(page: Page, channel: unknown = E2E_CHANNEL) {
+  await openGeneralChannelList(page, channel);
   await generalChannelRow(page).tap();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/channels\/general--channel-general$/);
 }
@@ -234,7 +234,8 @@ test("channel details keeps web back navigation above the material sheet", async
 });
 
 test("channel details navigation matches the content cards on a phone", async ({ page }, testInfo) => {
-  await openGeneralChannel(page);
+  // Empty planks are not drawn, so the channel carries a Summary to measure.
+  await openGeneralChannel(page, { ...E2E_CHANNEL, summary: "Planning the paper composer." });
   const { details } = await openChannelDetailsFrom(page, "More");
   const header = details.locator(".app-mobile-channel-details-header");
   const plank = details.locator(".app-mobile-channel-details-sheet .app-detail-plank").first();

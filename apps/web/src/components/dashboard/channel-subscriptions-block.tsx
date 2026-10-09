@@ -16,7 +16,7 @@
  * A direct HTTP mutation would need a second copy of all of it.
  */
 
-import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
+import { ContentSkeleton } from "./content-skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, PlugZap, Plus, X } from "lucide-react";
@@ -487,8 +487,6 @@ function ConnectionProblem({
 
 export function ChannelSubscriptionsBlock({
   connections,
-  loading,
-  error,
   userId,
   spaceId,
   channelId,
@@ -498,8 +496,6 @@ export function ChannelSubscriptionsBlock({
   onManageApps,
 }: {
   connections: SerializedAppConnectorConnection[];
-  loading: boolean;
-  error: string | null;
   userId: string;
   spaceId?: string;
   channelId?: string;
@@ -543,14 +539,14 @@ export function ChannelSubscriptionsBlock({
       }
     : undefined;
 
+  /* The rail shows only what this channel has; a channel with no subscriptions
+     draws no plank. Subscribing starts from the command in the conversation. */
+  if (subscribed.length === 0 && !pending) return null;
+
   return (
     <DetailBlock title="Subscriptions">
       <div className="space-y-2">
-        {loading && connections.length === 0 ? (
-          <ListSkeleton label="Loading subscriptions" rows={3} />
-        ) : error && connections.length === 0 ? (
-          <p className="text-[11px] text-destructive">Subscriptions unavailable: {error}</p>
-        ) : subscribed.length === 0 ? null : (
+        {subscribed.length === 0 ? null : (
           <div>
             {broken.map((connection) => (
               <ConnectionProblem key={connection.id} connection={connection} onManageApps={onManageApps} />
