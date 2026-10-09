@@ -261,10 +261,12 @@ export function PrivacyPolicyContent() {
         <p>
           If you sign in with Google, we receive your name, email address, and profile image to create
           and secure your account. If a Space administrator connects a Google service as an app, xMatrix
-          requests only the access that app needs: Google Docs, Drive and Sheets access is limited to
-          files created with or explicitly opened in xMatrix; Search Console, AdSense, and Google Cloud
-          access lets authorized people and Agents in that Space read the sites, reports, projects,
-          costs, logs, metrics, and alerts they ask about, and make the changes they request.
+          requests only the access that app needs. Google Docs, Drive and Sheets access is limited to
+          files created with or explicitly opened in xMatrix. Read-only Gmail access lets authorized
+          people and Agents in that Space search and read the messages they ask for; it never sends,
+          changes, or deletes mail. Search Console, AdSense, and Google Cloud access lets them read the
+          sites, reports, projects, costs, logs, metrics, and alerts they ask about, and make the
+          changes they request.
         </p>
         <p>
           We use Google user data only to provide those user-facing features: we retrieve it when a

@@ -4,6 +4,7 @@ import { Hono } from "hono";
 
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { githubConnectionInstallationIds, listGitHubUserInstallations } from "../src/app-connectors.ts";
+import { grantFieldsForgottenOnDisconnect } from "../src/connectors/oauth.ts";
 
 const load = await compileCommonJsSourceModule(new URL("../src/index-routes-auth-space-management.ts", import.meta.url));
 const env = { GITHUB_APP_CLIENT_SECRET: "app-secret" };
@@ -14,6 +15,7 @@ function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "c
   statePayload = { spaceId: "space-1", userId: "admin" } } = {}) {
   const upserts = [];
   const authorizations = [];
+  const credentialPuts = [];
   const imports = {
     hono: { Hono },
     "./apps": {
@@ -38,6 +40,8 @@ function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "c
         grant === "grant" && input.spaceId === "space-1" && input.userId === "admin" ? granted : undefined,
     },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
+    "./connectors/credentials": { connectorCredentialRepository: () => ({ put: async (input) => { credentialPuts.push(input); } }) },
+    "./connectors/oauth": { grantFieldsForgottenOnDisconnect },
     "./index-shared": {
       verifyGitHubAppState: async (state) => state === "signed" ? statePayload : null,
       requireAuth: async () => ({ id: "admin" }), requireHumanAuth: (user) => user,
@@ -54,7 +58,7 @@ function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "c
   const link = (installationId, grant = "grant") => app.request("/api/spaces/space-1/app-connections/github/installations", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installationId, grant }) }, env);
   const list = (grant) => app.request(`/api/spaces/space-1/app-connections/github/installations${grant ? `?grant=${grant}` : ""}`, {}, env);
-  return { app, setup, patch, link, list, upserts, authorizations };
+  return { app, setup, patch, link, list, upserts, authorizations, credentialPuts };
 }
 
 const outcome = (response) => new URL(response.headers.get("location")).searchParams.get("github");
@@ -151,6 +155,23 @@ test("Disconnect forgets the linked installations and keeps the rest of the conf
   assert.equal(f.upserts.length, 1);
   assert.equal(f.upserts[0].body.status, "disconnected");
   assert.deepEqual(f.upserts[0].body.metadata, { repository: "org/repo" });
+});
+
+test("Disconnecting a Google connection deletes its stored tokens before the status change", async () => {
+  const f = fixture();
+  const response = await f.app.request("/api/spaces/space-1/app-connections/gcp", { method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ providerId: "gcp", status: "disconnected" }) }, env);
+  assert.equal(response.status, 200);
+  assert.equal(f.credentialPuts.length, 1);
+  assert.equal(f.credentialPuts[0].providerId, "gcp");
+  assert.deepEqual(f.credentialPuts[0].fields, { oauthToken: null, oauthRefreshToken: null, oauthExpiresAt: null });
+  assert.equal(f.upserts[0].body.status, "disconnected");
+  const github = fixture();
+  await github.app.request("/api/spaces/space-1/app-connections/github", { method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ providerId: "github", status: "disconnected" }) }, env);
+  assert.deepEqual(github.credentialPuts, []);
 });
 
 test("the accounts list shows linked accounts, and after authorizing the granted ones not linked yet", async () => {
