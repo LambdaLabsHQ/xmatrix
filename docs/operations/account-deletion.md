@@ -30,6 +30,9 @@ resurrect deleted members or automations, and cannot restore a deleted owner's S
 Commit removes the auth user, sessions and linked credentials in one transaction, records
 handle retirement, and permanently revokes already-issued Human, Agent and Machine tokens.
 It does not transfer billing, cancel a provider subscription, or delete computer files.
+Verified late Apple notifications for deleted identities are acknowledged without recreating
+entitlement; restoring or rebinding that purchase is refused. Checkout, billing subscription,
+and Apple account-token inserts also take the per-owner deletion admission fence.
 Private settings, memories, Machine metadata and commands are erased in batches of at most
 2,000 rows per physical shard/pass. Provider declarations are scrubbed; minimal referenced
 allocation records remain. Avatar cleanup is restricted to `avatars/<exact-user-id>/`, with
