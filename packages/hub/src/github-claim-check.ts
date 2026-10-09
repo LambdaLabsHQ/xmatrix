@@ -177,7 +177,7 @@ async function askForWriteback(env: Env, input: { pullRequestUrl: string;
     const sections = claims.map((claim) => `- ${claim.pageTitle ?? "a page"}${claim.blockId ? ` › #${claim.blockId}` : ""}` +
       ` — \`xmatrix page read ${claim.pageId}${claim.blockId ? ` --block ${claim.blockId}` : ""}\``);
     const body = [`${input.pullRequestUrl} is merged. It did the work claimed on:`, ...sections, "",
-      "Update what these sections say now with `xmatrix page edit`, or run `xmatrix page done -m \"<why>\"` " +
+      "Rewrite these sections to what is true now with `xmatrix page edit` (the pull request keeps the evidence), or run `xmatrix page done -m \"<why>\"` " +
       "if the merge changed nothing there."].join("\n");
     await dispatchProductMessageAppend(env, conversationId, {
       commandId: `product:page-writeback:${conversationId}:${input.pullRequestUrl}`.slice(0, 200),
