@@ -215,7 +215,7 @@ export function SchedulesView({
       onToggle={() => onToggleAutomation(selected)}
       onDelete={() => onDeleteAutomation(selected)}
       onOpenWhere={() => selected.pageId ? onOpenPage(selected.pageId) : onOpenConversation(selected.channelId)}
-      onOpenConversation={() => onOpenConversation(selected.channelId)}
+      onOpenConversation={() => onOpenConversation(selected.lastChannelId ?? selected.channelId)}
     />
   ) : automations.length === 0 && !loadingAutomations && !loadError ? (
     <ToolDetailEmpty icon={<Clock />} title="Nothing in this Space runs on a schedule">
@@ -487,7 +487,7 @@ function ScheduleDetail({
           {automation.detachedAt && automation.pageId && (
             <Button size="sm" variant="outline" onClick={onOpenWhere}><FileText /> Put it back on its page</Button>
           )}
-          <Button size="sm" variant="outline" onClick={onOpenConversation}><MessageSquare /> Conversation</Button>
+          <Button size="sm" variant="outline" onClick={onOpenConversation}><MessageSquare /> {automation.lastChannelId ? "Last run" : "Conversation"}</Button>
           {automation.capabilities.update && !editing && (
             <Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => onEditingChange(true)}>
               <Pencil /> Edit

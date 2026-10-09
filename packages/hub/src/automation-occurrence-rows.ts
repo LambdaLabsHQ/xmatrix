@@ -10,6 +10,8 @@ export interface AutomationExecutionRow extends AuthoritySqlRow {
   id: string;
   owner_user_id: string;
   channel_id: string;
+  /** The page whose section the Automation keeps true; every page Automation has one. */
+  page_id: string | null;
   next_run_at: string;
   enabled: number;
   version: number;

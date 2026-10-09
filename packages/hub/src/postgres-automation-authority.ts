@@ -124,12 +124,12 @@ export class PostgresScheduleOccurrenceLifecycle implements ScheduleOccurrenceLi
   }
 
   async finishMessage(occurrence: AutomationOccurrenceRow,
-    automation: AutomationExecutionRow, now: string): Promise<void> {
+    automation: AutomationExecutionRow, channelId: string, now: string): Promise<void> {
     if (!occurrence.message_id) throw new Error("Scheduled message id is unavailable");
     await this.occurrenceRepository(occurrence.id).finishMessage({
       requestId: crypto.randomUUID(), occurrenceId: occurrence.id,
       leaseOwner: String(occurrence.lease_owner), taskId: automation.id,
-      messageId: occurrence.message_id, now });
+      messageId: occurrence.message_id, channelId, now });
     this.occurrenceRepositories.delete(occurrence.id);
   }
 

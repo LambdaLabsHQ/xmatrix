@@ -5,7 +5,7 @@ import {
   dispatchScheduledMessageOccurrence,
 } from "../src/relay-authority-scheduled-message-delivery.ts";
 
-test("legacy v2 message delivery remains a single owner-authored append and post-commit", async () => {
+test("each occurrence is one owner-authored append in a conversation opened for it, not the Automation's own", async () => {
   let occurrenceStatus = "leased";
   const appended = [];
   const postCommits = [];
@@ -28,6 +28,10 @@ test("legacy v2 message delivery remains a single owner-authored append and post
     },
     async appendMessage(command) { appended.push(command); },
     schedulePostCommit(input) { postCommits.push(input); },
+    async openConversation({ occurrence, automation, body, userId }) {
+      lifecycle.push(["open", occurrence.id, automation.id, body, userId]);
+      return "occurrence-conversation";
+    },
   };
   await dispatchScheduledMessageOccurrence(
     port,
@@ -48,17 +52,21 @@ test("legacy v2 message delivery remains a single owner-authored append and post
         lifecycle.push(["authorize", channelId, userId]);
       },
       async markPrepared() { lifecycle.push(["prepared"]); },
-      async finishMessage() { lifecycle.push(["dispatched"]); },
+      async finishMessage(_occurrence, _automation, channelId) { lifecycle.push(["dispatched", channelId]); },
     },
   );
   assert.equal(appended.length, 1);
+  assert.equal(appended[0].channelId, "occurrence-conversation");
   assert.equal(appended[0].body, "legacy status");
   assert.deepEqual(appended[0].principal, { kind: "user", id: "legacy-owner" });
   assert.equal(appended[0].authorityRootUserId, "legacy-owner");
   assert.equal(postCommits.length, 1);
+  assert.equal(postCommits[0].channelId, "occurrence-conversation");
   assert.equal(postCommits[0].senderKind, "user");
   assert.equal(postCommits[0].senderId, "legacy-owner");
   assert.deepEqual(lifecycle, [
-    ["authorize", "channel-v2", "legacy-owner"], ["prepared"], ["dispatched"],
+    ["authorize", "channel-v2", "legacy-owner"],
+    ["open", "occurrence-v2", "task-v2", "legacy status", "legacy-owner"],
+    ["prepared"], ["dispatched", "occurrence-conversation"],
   ]);
 });
