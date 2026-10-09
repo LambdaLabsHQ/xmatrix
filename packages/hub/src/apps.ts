@@ -2,7 +2,19 @@ import { utf8ByteLength } from "@xmatrix/protocol";
 import { AppControlError, PostgresAppRepository, type AuthorityDatabase } from "@xmatrix/db";
 
 import { getAppConnectorProvider, type AppConnectorConnectionView } from "./app-connectors";
+import { forgetGitHubSubscriptions, type GitHubSubscriptionIndex } from "./github-subscription-index";
 import { postgresAuthorityDatabase, type PostgresAuthorityBindingEnv } from "./postgres-authority-http";
+
+type SubscriptionIndexEnv = PostgresAuthorityBindingEnv & {
+  GITHUB_SUBSCRIPTION_INDEX?: DurableObjectNamespace<GitHubSubscriptionIndex>;
+};
+
+/** A write that may have widened GitHub subscriptions answers once their indexes forgot them. */
+async function afterGitHubSubscriptionWrite<T extends object>(env: SubscriptionIndexEnv, result: T): Promise<T> {
+  const { githubInstallations, ...answer } = result as T & { githubInstallations?: string[] };
+  await forgetGitHubSubscriptions(env, githubInstallations);
+  return (githubInstallations ? answer : result) as T;
+}
 
 /** App connections, their source relations and executions live on the directory shard. */
 export function appRepository(env: PostgresAuthorityBindingEnv, database?: AuthorityDatabase): PostgresAppRepository {
@@ -11,7 +23,7 @@ export function appRepository(env: PostgresAuthorityBindingEnv, database?: Autho
 }
 
 /** Connects or reconfigures one of a Space's apps under its provider's own policy. */
-export function upsertAppConnection(env: PostgresAuthorityBindingEnv, input: {
+export async function upsertAppConnection(env: SubscriptionIndexEnv, input: {
   commandId: string; spaceId: string; actorUserId: string; providerId: string; body: Record<string, unknown>;
 }) {
   const provider = getAppConnectorProvider(input.providerId.trim().toLowerCase());
@@ -19,14 +31,14 @@ export function upsertAppConnection(env: PostgresAuthorityBindingEnv, input: {
   if (utf8ByteLength(JSON.stringify(input.body)) > 64 * 1024) {
     throw new AppControlError("invalid_app_request", 400, "body is too large");
   }
-  return appRepository(env).upsert({ commandId: input.commandId, spaceId: input.spaceId,
-    actorUserId: input.actorUserId,
+  return afterGitHubSubscriptionWrite(env, await appRepository(env).upsert({ commandId: input.commandId,
+    spaceId: input.spaceId, actorUserId: input.actorUserId,
     provider: { id: provider.id, name: provider.name, authMode: provider.auth.type,
       scopes: provider.auth.scopes, secretRefs: provider.auth.secretRefs,
       capabilities: (provider.auth.capabilities ?? []).map((capability) => ({
         id: capability.id, scopes: capability.scopes,
       })), metadataFields: (provider.connectionMetadata ?? []).map((field) => field.id) },
-    body: input.body, at: new Date().toISOString() });
+    body: input.body, at: new Date().toISOString() }));
 }
 
 type AppCommandKind = Parameters<PostgresAppRepository["command"]>[1];
@@ -36,8 +48,9 @@ type AppCommandKind = Parameters<PostgresAppRepository["command"]>[1];
  * removing a source relation, recording or finishing an execution — by the
  * principal it names.
  */
-export function appCommand(env: PostgresAuthorityBindingEnv, kind: AppCommandKind, input: Record<string, unknown>) {
-  return appRepository(env).command({ ...input, at: new Date().toISOString() }, kind);
+export async function appCommand(env: SubscriptionIndexEnv, kind: AppCommandKind, input: Record<string, unknown>) {
+  return afterGitHubSubscriptionWrite(env, await appRepository(env).command({ ...input, at: new Date().toISOString() },
+    kind));
 }
 
 /** One of a Space's app connections, as a user who may see it reads it. */

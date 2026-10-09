@@ -53,7 +53,7 @@ test("Slack approval keeps its token encrypted on the session until it is consum
 });
 
 test("GitHub webhook routes are derived from PostgreSQL connector relations", async () => {
-  const db = database((query) => query.name === "app_github_subscription_routes_v5"
+  const db = database((query) => query.name === "app_github_subscription_routes_v6"
     ? [{ relation_id: "imported-repository", space_id: "space-1", channel_id: "channel-1", connection_id: "connection-1",
         created_by: "user-1", created_at: "2026-10-01T00:00:00.000Z", source_kind: "repository",
         source_ref: "github:repo:lambdalabshq/xmatrix" },
@@ -73,7 +73,7 @@ test("GitHub webhook routes are derived from PostgreSQL connector relations", as
     sourceKind: "issue", createdAt: "2026-10-08T00:00:00.000Z", spaceId: "space-1", channelId: "channel-2",
     connectionId: "connection-1",
     authorityRootUserId: "user-2" }]);
-  const query = db.calls.find((call) => call.name === "app_github_subscription_routes_v5");
+  const query = db.calls.find((call) => call.name === "app_github_subscription_routes_v6");
   assert.deepEqual(query.values, ["42",
     ["github:repo:lambdalabshq/xmatrix", "github:issue:lambdalabshq/xmatrix#7"], 1001, "pulls"]);
   assert.match(query.text, /features_json \? \$4/u, "an event nobody subscribed to finds no route");

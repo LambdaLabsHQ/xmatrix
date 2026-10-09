@@ -20,6 +20,7 @@ export interface Env {
   /** Global fact-free publisher for durable PostgreSQL Agent Launches. */
   /** One Agent Launch coordinator per Channel, addressed by Channel id. */
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
+  GITHUB_SUBSCRIPTION_INDEX?: DurableObjectNamespace<import("./github-subscription-index").GitHubSubscriptionIndex>;
   /** Per-shard permits bounding concurrent background passes; holds no work. */
   RELAY_POSTGRES_BACKGROUND_ADMISSION?: DurableObjectNamespace;
   /** Concurrent Channel coordinator passes admitted per PostgreSQL shard (default 8). */
