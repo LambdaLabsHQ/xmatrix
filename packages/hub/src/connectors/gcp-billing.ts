@@ -1,7 +1,7 @@
 import type { ConnectorAction, ConnectorActionStatement } from "./provider";
 import { ProviderRequestError } from "./http";
 import { record, text } from "./event-format";
-import { GCP_PROJECT, PAGE_SIZE, columns, list, projectOnly, report, request } from "./gcp-common";
+import { GCP_PROJECT, PAGE_SIZE, columns, list, report, request } from "./gcp-common";
 
 const DATASET = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/u;
 const BILLING_TABLE = /^gcp_billing_export_(?:resource_)?v1_[A-Za-z0-9_]{1,100}$/u;
@@ -25,13 +25,15 @@ function jsonOptions(statement: ConnectorActionStatement, keys: string[]): Recor
   } catch { return "options must be a JSON object"; }
 }
 
-function pageOptions(statement: ConnectorActionStatement): Record<string, string> | string {
-  const options = jsonOptions(statement, ["pageToken"]);
+function pageOptions(statement: ConnectorActionStatement, quota = false): Record<string, string> | string {
+  const options = jsonOptions(statement, quota ? ["pageToken", "quotaProject"] : ["pageToken"]);
   if (typeof options === "string") return options;
   if (options.pageToken !== undefined && (typeof options.pageToken !== "string" || options.pageToken.length > 2_000 || [...options.pageToken].some(character => character.charCodeAt(0) <= 32))) {
     return "pageToken must be a bounded Google continuation token";
   }
-  return options.pageToken ? { pageToken: String(options.pageToken) } : {};
+  if (options.quotaProject !== undefined && (typeof options.quotaProject !== "string" || !GCP_PROJECT.test(options.quotaProject))) return "quotaProject must be a Google Cloud project ID or number";
+  return { ...(options.pageToken ? { pageToken: String(options.pageToken) } : {}),
+    ...(options.quotaProject ? { quotaProject: String(options.quotaProject) } : {}) };
 }
 
 function paged(statement: ConnectorActionStatement, dataset = false): Record<string, string> | string {
@@ -187,20 +189,26 @@ function costReport(result: Record<string, unknown>, input: Record<string, strin
 export const GCP_BILLING_ACTIONS: Record<string, ConnectorAction> = {
   list_billing_accounts: {
     effect: "read", requires: ["oauthToken"],
-    parse: statement => statement.target === "*" ? pageOptions(statement) : "use * with optional pageToken",
+    parse: statement => statement.target === "*" ? pageOptions(statement, true) : "use * with optional pageToken and quotaProject",
     async execute({ credentials }, input) {
       const url = new URL("https://cloudbilling.googleapis.com/v1/billingAccounts");
       url.search = new URLSearchParams({ pageSize: String(PAGE_SIZE), ...(input.pageToken ? { pageToken: input.pageToken } : {}) }).toString();
-      const result = await request(credentials, url);
+      const result = await request(credentials, url, undefined, input.quotaProject);
       return report("Billing accounts (name, display name, open; NOT actual costs)", [...list(result, "billingAccounts").map(value => {
         const row = record(value); return columns(row.name, row.displayName, row.open);
       }), ...continuation(result)], result);
     },
   },
   read_billing_info: {
-    effect: "read", requires: ["oauthToken"], parse: projectOnly,
+    effect: "read", requires: ["oauthToken"], parse: statement => {
+      if (!GCP_PROJECT.test(statement.target)) return "name a Google Cloud project ID or number";
+      const options = jsonOptions(statement, ["quotaProject"]);
+      if (typeof options === "string") return options;
+      if (options.quotaProject !== undefined && options.quotaProject !== statement.target) return "quotaProject must match the target project";
+      return { project: statement.target, ...(options.quotaProject ? { quotaProject: String(options.quotaProject) } : {}) };
+    },
     async execute({ credentials }, input) {
-      const result = await request(credentials, `https://cloudbilling.googleapis.com/v1/projects/${input.project}/billingInfo`);
+      const result = await request(credentials, `https://cloudbilling.googleapis.com/v1/projects/${input.project}/billingInfo`, undefined, input.quotaProject);
       return report(`${input.project} billing linkage (NOT actual costs)`, [columns("Project", result.projectId),
         columns("Billing account", result.billingAccountName), columns("Billing enabled", result.billingEnabled)], {});
     },

@@ -33,7 +33,7 @@ type WorkerFixtures = {
  *   for controlled low-process measurements.
  */
 export const test = base.extend<Record<string, never>, WorkerFixtures>({
-  page: async ({ page }, use, testInfo) => {
+  page: async ({ page }, providePage, testInfo) => {
     // A query that resolves to undefined means a fixture answered an endpoint
     // with the wrong shape; the real Hub never does. Fail here rather than
     // leave it to the Next dev overlay.
@@ -43,7 +43,7 @@ export const test = base.extend<Record<string, never>, WorkerFixtures>({
         undefinedQueries.push(message.text());
       }
     });
-    await use(page);
+    await providePage(page);
     await dumpComputedStyles(page, testInfo);
     expect(undefinedQueries, "queries resolved to undefined (fixture shape mismatch)").toEqual([]);
   },

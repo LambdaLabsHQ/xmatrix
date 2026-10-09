@@ -222,3 +222,43 @@ References: [project search](https://docs.cloud.google.com/resource-manager/refe
 [App Optimize reports](https://docs.cloud.google.com/app-optimize/create-read-report),
 [App Optimize data semantics](https://docs.cloud.google.com/app-optimize/optimization-data),
 [App Optimize pricing](https://docs.cloud.google.com/app-optimize/overview#pricing).
+
+## Cost attribution and quota projects
+
+A cost report's SKU resource identifies a billable item, not its model or
+input/output description. Resolve that exact ID through the connected provider:
+
+```text
+@gcp:read_sku:my-project/ABCD-1234-5678
+@gcp:query_api_usage:my-project {"from":"2026-09-01T00:00:00Z","to":"2026-10-01T00:00:00Z","apiService":"generativelanguage.googleapis.com","responseClass":"all"}
+@gcp:read_billing_info:my-project {"quotaProject":"my-project"}
+@gcp:list_billing_accounts:* {"quotaProject":"my-project"}
+```
+
+`read_sku` reads public SKU metadata through Cloud Billing v2beta, with no
+price or usage inference. `query_api_usage` requires a project ID and filters the monitored resource to
+that exact project, even when its metrics scope includes other projects. It uses the fixed Service Runtime
+request-count metric, daily ALIGN_SUM and cross-series REDUCE_SUM. API service
+is limited to Gemini (`generativelanguage.googleapis.com`), Vertex AI
+(`aiplatform.googleapis.com`) or Cloud Run (`run.googleapis.com`); responseClass
+is all, 2xx, 4xx or 5xx. UTC timestamps must describe a completed interval of
+at most 31 days within the past 90 days. Results expose at most 30 daily
+points and a bounded pageToken continuation; empty or partial results do not
+prove zero requests or complete totals. These are API calls, not token usage
+or per-user attribution. Returned UTC intervals differ from Pacific billing
+days; preserve that distinction when comparing spikes.
+
+These two new reads explicitly use the named project as the quota project
+via `x-goog-user-project`. The existing billing metadata reads retain their
+previous behavior unless quotaProject is explicitly provided. For project
+billing linkage it must match the target; account discovery accepts a named
+project. The same encrypted OAuth grant authenticates every call. Google
+requires `serviceusage.services.use` and an enabled API on the quota project;
+this supplies quota context, never resource authorization, an IAM grant or
+a credential fallback. It avoids coupling a user's project queries to API
+activation on the company's OAuth client project. Enable the corresponding
+Cloud Billing/Monitoring API on that quota project before retrying.
+
+References: [public SKU metadata](https://docs.cloud.google.com/billing/docs/reference/pricing-api/rest/v2beta/skus/get),
+[quota project selection](https://docs.cloud.google.com/docs/quotas/set-quota-project),
+and [Monitoring aggregation](https://docs.cloud.google.com/monitoring/api/ref_v3/rest/v3/projects.timeSeries/list).
