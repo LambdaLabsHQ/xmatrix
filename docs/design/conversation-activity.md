@@ -189,8 +189,8 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   it, within ten minutes and with the same identity tags, drops the avatar
   and header. Identity tags reappear only when they change, and a header that
   is back within one sender's turn (same Instance, ten minutes, past any fold
-  of its own activity) only because a tag changed fades the tags that stayed,
-  so the changed one is what reads.
+  of its own activity) only because a tag changed carries only the changed
+  tags, each as old → new.
 
 ### 4.2 Work dock
 

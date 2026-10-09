@@ -90,6 +90,7 @@ import { parsePresentedRoutingDecision, RoutingDecisionBoard } from "./routing-d
 
 import {
   GoalStatusBadge,
+  goalStatusBadgeLabel,
   MachineRunFailureNotice,
   StatusChipBadge,
   avatarInitials,
@@ -164,6 +165,7 @@ import {
   RefreshCw,
   Reply,
   ArrowRightLeft,
+  ArrowRight,
   SmilePlus,
   Trash2,
   X,
@@ -1245,10 +1247,55 @@ function NamedAgentIdentityLabels({ message, spaceId, token }: {
   const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", Boolean(spaceId && token));
   const registrations = catalog.data?.registrations ?? [];
   const machine = messageMachineIdentity(registrations, message);
-  return <AgentIdentityLabels owner={message.senderOwnerLabel} wrap changed={message.retagged}
+  return <AgentIdentityLabels owner={message.senderOwnerLabel} wrap
     machine={registrationMachineName(registrations, machine?.machineId, machine?.ownerUserId) || "Unnamed machine"}
     machineBusy={registrationMachineBusy(registrations, machine?.machineId, machine?.ownerUserId)}
     machineTarget={machine} />;
+}
+
+/* One tag that changed within a sender's turn: what it was, faint, then what
+   it is now. */
+function RetagPair({ from, to }: { from?: ReactNode; to?: ReactNode }) {
+  return (
+    <span className="app-message-retag inline-flex min-w-0 items-center gap-1">
+      {from ? <span className="app-message-retag-from inline-flex min-w-0 opacity-50">{from}</span> : null}
+      {from && to ? <ArrowRight aria-label="now" className="size-3 shrink-0 text-muted-foreground" /> : null}
+      {to}
+    </span>
+  );
+}
+
+/* A header back within one sender's turn because tags changed carries only
+   those tags, each as old → new; the rest are what the header above says
+   (user 2026-10-09: 搞个箭头那种比较好，其他的签没必要显示). */
+function RetaggedHeaderTags({ message, previous, keys }: {
+  message: TimelineItem; previous: TimelineItem; keys: readonly string[];
+}) {
+  const goal = (item: TimelineItem) =>
+    goalStatusBadgeLabel(item.senderGoal, "historical") ? <GoalStatusBadge goal={item.senderGoal} /> : null;
+  const branch = (item: TimelineItem) => item.senderGitBranch ? <BranchBadge branch={item.senderGitBranch} /> : null;
+  const stale = (item: TimelineItem) => item.senderInstanceStale ? (
+    <span className={tagClass("app-sender-instance-stale-badge")}
+      title="This message came from an agent instance that is no longer live in this channel.">
+      instance offline
+    </span>
+  ) : null;
+  const before = headerStatusChips(previous.senderStatusChips) ?? [];
+  const after = headerStatusChips(message.senderStatusChips) ?? [];
+  const chipIds = [...new Set([...after, ...before].map((chip) => chip.id.toLowerCase()))]
+    .filter((id) => keys.includes(id));
+  const chipOf = (chips: typeof after, id: string) => {
+    const chip = chips.find((candidate) => candidate.id.toLowerCase() === id);
+    return chip ? <StatusChipBadge chip={chip} /> : null;
+  };
+  return (
+    <>
+      {keys.includes("stale") && <RetagPair from={stale(previous)} to={stale(message)} />}
+      {keys.includes("goal") && <RetagPair from={goal(previous)} to={goal(message)} />}
+      {keys.includes("branch") && <RetagPair from={branch(previous)} to={branch(message)} />}
+      {chipIds.map((id) => <RetagPair key={id} from={chipOf(before, id)} to={chipOf(after, id)} />)}
+    </>
+  );
 }
 
 function NamedMachineRunFailureNotice({ body, metadata, spaceId, token }: {
@@ -1964,8 +2011,7 @@ export const MessageRow = memo(function MessageRow({
               something about the sender, so none is hidden or cut at the edge
               (user 2026-09-27, a phone showed half a Goal pill). */}
           {!message.continuation && (
-          <div className="app-message-meta flex min-h-6 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1"
-            data-retagged={message.retagged?.join(" ")}>
+          <div className="app-message-meta flex min-h-6 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="app-message-author-name shrink-0 whitespace-nowrap text-[15px] font-black">{message.author}</span>
           <MessageTimestamp value={message.sentAt} className="shrink-0 text-xs text-muted-foreground" />
           {message.sendStatus === "pending" && (
@@ -1990,7 +2036,8 @@ export const MessageRow = memo(function MessageRow({
             </span>
           )}
           <span className="contents">
-          {message.senderKind === "agent" && !message.reservedSystemAgent && (
+          {message.senderKind === "agent" && !message.reservedSystemAgent &&
+            (!message.retagged || message.retagged.keys.some((key) => key === "owner" || key === "machine")) && (
             <NamedAgentIdentityLabels message={message} spaceId={channel?.spaceId} token={token} />
           )}
           {message.linkOrigin && (
@@ -2009,26 +2056,28 @@ export const MessageRow = memo(function MessageRow({
               {provenanceLabel(message.provenance, message.body)}
             </span>
           )}
+          {message.retagged ? (
+            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
+          ) : (<>
           {message.senderInstanceStale && (
             <span
               className={tagClass("app-sender-instance-stale-badge")}
-              data-tag-changed={message.retagged?.includes("stale") || undefined}
               title="This message came from an agent instance that is no longer live in this channel."
             >
               instance offline
             </span>
           )}
           {message.senderKind === "agent" && (
-            <GoalStatusBadge goal={message.senderGoal} changed={message.retagged?.includes("goal")} />
+            <GoalStatusBadge goal={message.senderGoal} />
           )}
           {message.senderKind === "agent" && message.senderGitBranch && (
-            <BranchBadge branch={message.senderGitBranch} changed={message.retagged?.includes("branch")} />
+            <BranchBadge branch={message.senderGitBranch} />
           )}
           {message.senderKind === "agent" &&
             headerStatusChips(message.senderStatusChips)?.map((chip) => (
-              <StatusChipBadge key={chip.id} chip={chip}
-                changed={message.retagged?.includes(chip.id.toLowerCase())} />
+              <StatusChipBadge key={chip.id} chip={chip} />
             ))}
+          </>)}
           </span>
           </div>
           )}

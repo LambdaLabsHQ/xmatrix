@@ -253,8 +253,11 @@ export type TimelineItem = {
   folded?: TimelineItem[];
   /** Same sender as the row above, moments later, with the same tags: no header. */
   continuation?: boolean;
-  /** Same sender moments later, but these header tags changed: the header shows which. */
-  retagged?: string[];
+  /**
+   * Same sender moments later, but these header tags changed since `previous`:
+   * the header shows only those, old → new (conversation-activity-rows.ts).
+   */
+  retagged?: { keys: string[]; previous: TimelineItem };
   /** Client-only outbound status while the POST is in flight or failed. */
   sendStatus?: "pending" | "unconfirmed" | "failed";
   sendError?: string;
@@ -410,7 +413,8 @@ export function timelineMessagesEqual(previous: TimelineItem, next: TimelineItem
     previous.eventType === next.eventType &&
     previous.supersededBy === next.supersededBy &&
     previous.continuation === next.continuation &&
-    previous.retagged?.join() === next.retagged?.join() &&
+    previous.retagged?.keys.join() === next.retagged?.keys.join() &&
+    previous.retagged?.previous.id === next.retagged?.previous.id &&
     previous.provenance === next.provenance &&
     foldedItemsEqual(previous.folded, next.folded)
   );

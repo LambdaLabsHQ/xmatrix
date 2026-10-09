@@ -84,15 +84,19 @@ export function continuesPrevious(previous: TimelineItem | undefined, item: Time
  * The tags that brought a header back within one sender's turn: the previous
  * message of the same Instance, past any fold of its own activity, is moments
  * old, but a tag changed. The header names what changed so it is not read as
- * a repeat (user 2026-10-09: 签变了能否有个更好的 UX 提示).
+ * a repeat: only the changed tags, each as its old value → new value (user
+ * 2026-10-09: 签变了能否有个更好的 UX 提示 / 搞个箭头那种，其他的签没必要显示).
  */
-export function retaggedKeys(rows: readonly TimelineItem[], item: TimelineItem): string[] | undefined {
+export function retaggedFrom(
+  rows: readonly TimelineItem[],
+  item: TimelineItem,
+): { keys: string[]; previous: TimelineItem } | undefined {
   let index = rows.length - 1;
   while (index >= 0 && rows[index]!.folded && actorKey(rows[index]!) === actorKey(item)) index -= 1;
   const previous = rows[index];
   if (!previous || previous.folded || !sameTurn(previous, item)) return undefined;
-  const changed = changedTags(previous, item);
-  return changed.length > 0 ? changed : undefined;
+  const keys = changedTags(previous, item);
+  return keys.length > 0 ? { keys, previous } : undefined;
 }
 
 function foldRow(items: TimelineItem[]): TimelineItem {
@@ -149,7 +153,7 @@ export function buildConversationRows(
       rows.push({ ...item, continuation: true });
       continue;
     }
-    const retagged = retaggedKeys(rows, item);
+    const retagged = retaggedFrom(rows, item);
     rows.push(retagged ? { ...item, retagged } : item);
   }
   flush();

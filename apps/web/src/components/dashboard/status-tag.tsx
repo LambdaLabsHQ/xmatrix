@@ -114,13 +114,13 @@ export function Tag({
   );
 }
 
-export function BranchBadge({ branch, live, changed }: { branch: string; live?: boolean; changed?: boolean }) {
+export function BranchBadge({ branch, live }: { branch: string; live?: boolean }) {
   return (
     <Tag
       icon={GitPullRequest}
       title={`Branch: ${branch}`}
       className="app-message-branch-badge max-w-[10rem]"
-      data={{ ...(live ? { "data-live-agent-branch": true } : {}), ...(changed ? { "data-tag-changed": true } : {}) }}
+      {...(live ? { data: { "data-live-agent-branch": true } } : {})}
     >
       {branch}
     </Tag>

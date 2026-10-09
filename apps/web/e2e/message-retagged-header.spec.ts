@@ -7,8 +7,8 @@ import {
 } from "./workspace-fixtures";
 
 /* A message from the same Instance moments later keeps its header when a tag
-   changed, and that header says which: the tags that stayed fade, the one
-   that changed keeps its ink (user 2026-10-09: 签变了能否有个更好的 UX 提示). */
+   changed, and that header carries only the changed tag, old → new (user
+   2026-10-09: 签变了能否有个更好的 UX 提示 / 搞个箭头那种，其他的签没必要显示). */
 
 test.use({ ...E2E_DESKTOP_CONTEXT, ...(process.env.RETAG_SHOT ? { deviceScaleFactor: 2 } : {}) });
 
@@ -21,7 +21,7 @@ function from(gitBranch: string) {
   };
 }
 
-test("a header back within one turn fades the tags that did not change", async ({ page }) => {
+test("a header back within one turn shows only the changed tag, old → new", async ({ page }) => {
   const at = (minute: number) => new Date(Date.parse(E2E_NOW) + minute * 60_000).toISOString();
   const messages = [
     { body: "合并是我在 F 那版里为了缩短一行自作主张加的，不对。", sentAt: at(0), from: from("paper-label-tags") },
@@ -35,10 +35,13 @@ test("a header back within one turn fades the tags that did not change", async (
   const first = page.locator(".app-message-row").filter({ hasText: "自作主张" });
   const second = page.locator(".app-message-row").filter({ hasText: "拆回单独" });
   const third = page.locator(".app-message-row").filter({ hasText: "已合并" });
-  await expect(first.locator(".app-message-meta")).not.toHaveAttribute("data-retagged", /.*/);
-  await expect(second.locator(".app-message-meta")).toHaveAttribute("data-retagged", "branch");
-  await expect(second.locator(".app-message-branch-badge")).toHaveCSS("opacity", "1");
-  await expect(second.locator("[data-status-chip='model']")).toHaveCSS("opacity", "0.4");
+  await expect(first.locator(".app-message-branch-badge")).toHaveText("paper-label-tags");
+  await expect(first.locator("[data-status-chip='model']")).toHaveCount(1);
+  const retag = second.locator(".app-message-retag");
+  await expect(retag).toHaveCount(1);
+  await expect(retag.locator(".app-message-retag-from .app-message-branch-badge")).toHaveText("paper-label-tags");
+  await expect(retag.locator("> .app-message-branch-badge")).toHaveText("split-effort-tag");
+  await expect(second.locator("[data-status-chip]")).toHaveCount(0);
   await expect(third.locator(".app-message-continuation-gutter")).toHaveCount(1);
   if (process.env.RETAG_SHOT) {
     const top = (await first.boundingBox())!;

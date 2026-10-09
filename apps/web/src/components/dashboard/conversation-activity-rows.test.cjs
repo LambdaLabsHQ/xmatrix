@@ -100,7 +100,7 @@ test("a message right after its sender's own drops the header, until tags or tim
   const branch = (branchName, minute) => said(claude1, "x", minute, { senderGitBranch: branchName });
   const [, changed] = buildConversationRows([branch("main", 0), branch("feat/x", 1)]);
   assert.equal(changed.continuation, undefined, "changed tags reappear");
-  assert.deepEqual(changed.retagged, ["branch"], "the header names the tag that changed");
+  assert.deepEqual(changed.retagged.keys, ["branch"], "the header names the tag that changed");
   const [, other] = buildConversationRows([said(claude1, "x", 0), said(claude2, "y", 1)]);
   assert.equal(other.continuation, undefined, "another Instance of the same Agent");
   const beforeMidnight = { ...said(yiming, "late", 0), sentAt: new Date(2026, 8, 27, 23, 59).toISOString() };
@@ -140,7 +140,8 @@ test("a header back within a turn names the changed tags, across the sender's ow
   ]);
   assert.equal(rows.length, 3);
   assert.equal(rows[2].continuation, undefined);
-  assert.deepEqual(rows[2].retagged, ["branch", "model"], "effort shares the model's tag");
+  assert.equal(rows[2].retagged.previous, rows[0], "compared with the message above the fold");
+  assert.deepEqual(rows[2].retagged.keys, ["branch", "model"], "effort shares the model's tag");
   const [, sameTags] = buildConversationRows([said(claude1, "a", 0), pullRequest(claude1, 1, 1), said(claude1, "b", 2)]);
   assert.equal(sameTags.retagged, undefined);
   const [, , afterOther] = buildConversationRows([
