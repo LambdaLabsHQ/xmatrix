@@ -562,7 +562,7 @@ async function mutationReplay(
 // event while the caller holds the authorized canonical message row lock. Keep
 // its payload, identity and delivery/lease state intact; unexpected rows still
 // fail the unique constraint instead of dropping an event.
-async function normalizeMessageCreateEvent(
+export async function normalizeMessageCreateEvent(
   transaction: DatabaseTransaction,
   input: { spaceId: string; channelId: string; messageId: string },
 ): Promise<void> {
