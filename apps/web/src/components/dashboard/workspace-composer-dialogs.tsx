@@ -2259,7 +2259,6 @@ export function ToolSurface({
   onScheduleFocusConsumed,
   onOpenPage,
   onOpenConversation,
-  onOpenAgentTrace,
   runtimeCheck,
   localSetupReady,
   localMachineName,
@@ -2340,7 +2339,6 @@ export function ToolSurface({
   onScheduleFocusConsumed: () => void;
   onOpenPage: (pageId: string) => void;
   onOpenConversation: (channelId: string) => void;
-  onOpenAgentTrace: (target: AgentTraceTarget) => void;
   runtimeCheck: DesktopRuntimeCheckResult | null;
   localSetupReady: boolean;
   localMachineName: string | null | undefined;
@@ -2469,18 +2467,17 @@ export function ToolSurface({
       <StatusView
         spaceId={currentSpace?.id ?? null}
         token={token}
+        currentUserId={user.id}
         machines={currentSpaceMachines}
         channels={currentSpaceChannels}
         events={currentSpaceEvents}
         automations={currentSpaceAutomations}
+        executionEnabled={automationExecutionEnabled}
+        onOpenAgent={(registrationId) => onChangeView("agents", registrationId)}
         onOpenAgents={() => onChangeView("agents")}
         onOpenMachine={(machineId) => onChangeView("machines", machineId)}
         onOpenMachines={() => onChangeView("machines")}
         onOpenSchedule={(automationId) => onChangeView("automation", automationId)}
-        onOpenSchedules={() => onChangeView("automation")}
-        onOpenConversation={onOpenConversation}
-        onOpenTrace={(member, instance, channelId) =>
-          onOpenAgentTrace(agentTraceTargetFromInstance(member, instance, channelId))}
       />
     );
   }

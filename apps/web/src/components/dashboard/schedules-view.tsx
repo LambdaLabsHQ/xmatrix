@@ -14,33 +14,27 @@ import {
 } from "@xmatrix/protocol";
 import { AlertTriangle, ChevronRight, Clock, FileText, Loader2, MessageSquare, Pause, Pencil, Play,
   Trash2 } from "lucide-react";
-import { pageDocumentQuery, usePageTree } from "@/components/pages/pages-view";
+import { pageDocumentQuery } from "@/components/pages/pages-view";
 import { formatAutomationCadence, formatAutomationNext, formatAutomationTrigger } from "@/components/pages/page-automation-format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { noticeClass } from "@/components/ui/status-tone";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
-import { channelTitle } from "./channel-links";
 import { ListSkeleton } from "./content-skeleton";
+import { ScheduleListGroups, nextRunPhrase, useScheduleWhere } from "./schedule-list-groups";
 import {
-  groupSchedules, scheduleAttention, scheduleRunning, scheduleState, scheduleSummary, sectionFallbackTitle,
+  scheduleAttention, scheduleRunning, scheduleState, scheduleSummary, sectionFallbackTitle,
   type ScheduleState,
 } from "./schedules-model";
 import { spaceMemberCanCreate } from "./space-member-permissions";
 import { formatRelativeAge } from "./time-display";
 import {
-  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSplit,
+  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolSplit,
   ToolStateDot, useToolItem,
 } from "./tool-split";
 import { AutomationExpressionGuidance, automationExpressionFromText } from "./workspace-admin-views";
 import { evaluationBindingLabel, formatDateTime } from "./workspace-shell-recovered";
-
-const GROUP_TITLES: Record<ScheduleState, string> = {
-  attention: "Needs attention",
-  running: "Running",
-  paused: "Paused",
-};
 
 /**
  * The Space's Schedules: every Automation it runs, listed page by page, and
@@ -106,9 +100,7 @@ export function SchedulesView({
   const summary = useMemo(() => scheduleSummary(automations, executionEnabled), [automations, executionEnabled]);
   const selected = automations.find((automation) => automation.id === selectedId);
 
-  const pageTree = usePageTree(spaceId, token);
-  const pageTitles = useMemo(() => new Map((pageTree.data ?? []).map((page) => [page.pageId, page.title])),
-    [pageTree.data]);
+  const whereTitle = useScheduleWhere(spaceId, token, channels);
   // Section titles come from the pages the listed Automations are on: one read per such page.
   const pageIds = useMemo(() => [...new Set(automations.flatMap((automation) => automation.pageId ? [automation.pageId] : []))],
     [automations]);
@@ -129,15 +121,6 @@ export function SchedulesView({
   }, [documents, pageIds]);
   const sectionTitle = (automation: SerializedAutomation) => automation.blockId === undefined ? null
     : sectionTitles.get(`${automation.pageId}#${automation.blockId}`) ?? sectionFallbackTitle(automation.blockId);
-  const conversationTitle = (channelId: string) => {
-    const channel = channels.find((item) => item.id === channelId);
-    return channel ? channelTitle(channel) : undefined;
-  };
-  const whereTitle = (automation: SerializedAutomation) => automation.pageId
-    ? pageTitles.get(automation.pageId) ?? "Untitled page"
-    : `#${conversationTitle(automation.channelId) ?? automation.channelId}`;
-
-  const groups = useMemo(() => groupSchedules(automations, executionEnabled), [automations, executionEnabled]);
 
   const selectedSpace = spaces.find((space) => space.id === spaceId);
   const memberMayCreate = spaceMemberCanCreate(selectedSpace, currentUserId, "automationCreation");
@@ -163,8 +146,6 @@ export function SchedulesView({
   }, [editingId, automations, selectedId]);
 
   const stateOf = (automation: SerializedAutomation) => scheduleState(automation, executionEnabled);
-  const whenOf = (automation: SerializedAutomation) => automation.detachedAt ? "detached"
-    : scheduleRunning(automation) ? nextRunPhrase(automation.nextRunAt, now) : "paused";
 
   // The group says what each one is doing, so a row needs no mark: what it is, where it lives, how often and when.
   const list = (
@@ -174,19 +155,10 @@ export function SchedulesView({
         <ListSkeleton label="Loading schedules" rows={4} className="px-4 md:px-5" />
       ) : automations.length === 0 ? (
         loadError ? null : <p className="px-4 text-sm text-muted-foreground md:px-5">No schedules yet.</p>
-      ) : groups.map((group) => (
-        <ToolListGroup key={group.state} title={GROUP_TITLES[group.state]} count={group.automations.length}>
-          {group.automations.map((automation) => (
-            <ToolListRow key={automation.id} testId="schedule-row" state={group.state}
-              selected={automation.id === selectedId}
-              onSelect={() => select(automation.id)}
-              title={automation.name}
-              end={group.state === "paused" ? undefined : whenOf(automation)}
-              subtitle={group.state === "attention" ? scheduleAttention(automation, executionEnabled)
-                : `${whereTitle(automation)} · ${formatAutomationCadence(automation.intervalMinutes)}`} />
-          ))}
-        </ToolListGroup>
-      ))}
+      ) : (
+        <ScheduleListGroups automations={automations} executionEnabled={executionEnabled} where={whereTitle} now={now}
+          selectedId={selectedId ?? null} onSelect={(id) => select(id)} />
+      )}
     </ToolList>
   );
 
@@ -237,11 +209,6 @@ export function SchedulesView({
   );
 
   return <ToolSplit label="Schedules" open={Boolean(selected)} list={list} detail={detail} />;
-}
-
-function nextRunPhrase(nextRunAt: string, now: number): string {
-  void now; // formatAutomationNext reads the clock; `now` only re-renders it.
-  return formatAutomationNext(nextRunAt).replace(/^next (?:run )?/u, "") || "unscheduled";
 }
 
 function ExecutionUnavailable() {
