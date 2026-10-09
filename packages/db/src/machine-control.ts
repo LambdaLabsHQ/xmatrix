@@ -46,6 +46,15 @@ const UNANSWERED_AFTER_MS = 60_000;
 /** Only recent work counts, so one command that can never be claimed does not
  * mark a working machine as not responding for its whole lifetime. */
 const UNANSWERED_WINDOW_MS = 30 * 60 * 1_000;
+/**
+ * A command handed to its daemon this many times, each time left to lapse
+ * without a word, fails instead of going out again: the daemon takes it and
+ * never reports, so another lease would be the same. Whoever issued it reads
+ * the failure (2026-10-09: spawns a Workstation daemon never answered were
+ * leased ~6,600 times each over three days, their Launches silently queued).
+ */
+const MAX_UNANSWERED_DELIVERIES = 10;
+const UNANSWERED_FAILURE = `The machine was given this ${MAX_UNANSWERED_DELIVERIES} times and never answered, so it was not run`;
 const MACHINE_ACTIVATION_RUN_LIMIT = 1_000;
 const SNAPSHOT_ROUTE_WINDOW_MS = 15 * 60 * 1_000;
 const ACTIVATION_TERMINAL_PHASES = new Set(["stable_granted", "aborted"]);
@@ -1173,6 +1182,12 @@ export class PostgresMachineControlRepository {
       "invalid_machine_command", 400, "Machine claim includes an unknown command type");
     const leaseMs = Math.min(integer(input.leaseMs ?? 30_000, "leaseMs", 1), 60_000);
     const leaseOwner = `machine-daemon:${String(current.owner_user_id)}:${String(current.machine_id)}:epoch:${connectionEpoch}`;
+    await tx.query({ name: "machine_control_unanswered_fail_v1", text: `UPDATE data.machine_daemon_commands SET
+        status='failed',result_json=jsonb_build_object('ok',false,'error',$3::text),lease_owner=NULL,lease_until=NULL,
+        completed_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp()
+      WHERE owner_user_id=$1 AND machine_id=$2 AND attempts>=$4
+        AND (status='pending' OR (status='leased' AND lease_until<=clock_timestamp()))`,
+    values: [current.owner_user_id, current.machine_id, UNANSWERED_FAILURE, MAX_UNANSWERED_DELIVERIES], maxRows: 0 });
     const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v8", text: `SELECT
       command.command_id,command.command_type,
       CASE WHEN command.command_type='spawn' AND launch.launch_id IS NOT NULL
