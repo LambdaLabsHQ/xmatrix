@@ -1,4 +1,5 @@
 import { PostgresAppRepository } from "@xmatrix/db";
+import { githubDeliveryMayRoute, type GitHubSubscriptionIndex } from "./github-subscription-index";
 import { createPostgresAuthorityFleet, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 
 export interface GitHubSubscriptionRoute {
@@ -20,7 +21,7 @@ type DirectoryEnv = Pick<
   "RELAY_POSTGRES_SHARD_2" | "RELAY_POSTGRES_SHARD_2_ID" |
   "RELAY_POSTGRES_SHARD_3" | "RELAY_POSTGRES_SHARD_3_ID" |
   "RELAY_POSTGRES_SHARD_4" | "RELAY_POSTGRES_SHARD_4_ID"
->;
+> & { GITHUB_SUBSCRIPTION_INDEX?: DurableObjectNamespace<GitHubSubscriptionIndex> };
 
 /**
  * The Channels subscribed to one GitHub delivery's sources. App connections
@@ -34,6 +35,8 @@ export async function resolveGitHubSubscriptionRoutes(
   sourceRefs: string[],
   feature: string,
 ): Promise<GitHubSubscriptionRoute[]> {
+  // A delivery none of whose sources anyone subscribed to has no route.
+  if (!await githubDeliveryMayRoute(env, installationId, sourceRefs, feature)) return [];
   const directory = createPostgresAuthorityFleet(env, {
     applicationName: "xmatrix-hub-github-subscription-directory",
     statementTimeoutMs: 5_000,

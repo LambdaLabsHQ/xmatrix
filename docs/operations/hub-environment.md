@@ -97,6 +97,7 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED` | var | Admits the last client generation that sends no compatibility identity. |
 | `DEVICE_AUTH` | binding | Device-code login broker for the CLI and apps. |
 | `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` | var | Mints repository tokens for daemons that name no Run (pre-binding CLI); refused unless "true". |
+| `GITHUB_SUBSCRIPTION_INDEX` | binding | Per-installation index of subscribed GitHub sources; a delivery nobody subscribed to reads no routes. |
 | `MACHINE_NAME_REQUIRED` | var | Require a recorded owner-chosen Machine name before enrollment, connect or recovery; production pins true. |
 | `RATE_LIMIT_ENFORCED` | var | Refuses over-limit requests with 429 and Retry-After only when "true"; otherwise they are only logged. |
 | `RELAY_AGENT_APP_POLICY_LOCATOR` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
