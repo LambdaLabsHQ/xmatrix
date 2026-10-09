@@ -320,7 +320,8 @@ function postgresJwtPlugin(env: Env, postgres: boolean): ReturnType<typeof jwt> 
       // Keep this aligned with the CLI refresh cadence. The migration adapter
       // must preserve the D1 authority's token lifetime exactly.
       expirationTime: "1 hour",
-      definePayload: ({ user }) => ({
+      definePayload: ({ user, session }) => ({
+        auth_session_id: session.id,
         email: user.email,
         name: user.name,
         user_metadata: {

@@ -14,6 +14,7 @@ import {
 import { ControlError } from "@xmatrix/db";
 
 import type { Env } from "./types";
+import { accountIdentityRevoked } from "./account-identity-status";
 import { authAuthority } from "./auth-authority";
 import { getBetterAuthPublicKey } from "./auth-jwks-cache";
 import { hubAuthBaseUrl } from "./deployment-origins";
@@ -106,6 +107,14 @@ export function hasBetterAuthConfig(env: Env): boolean {
 }
 
 export async function verifyAuthToken(token: string, env: Env): Promise<AuthUser> {
+  const mockUser = mockAuthUserForToken(token, env);
+  if (mockUser) return mockUser;
+  const user = await verifySignedAuthToken(token, env);
+  if (await accountIdentityRevoked(env, user.agentRun?.ownerUserId ?? user.id)) throw new InvalidAuthTokenError();
+  return user;
+}
+
+async function verifySignedAuthToken(token: string, env: Env): Promise<AuthUser> {
   const mockUser = mockAuthUserForToken(token, env);
   if (mockUser) return mockUser;
 

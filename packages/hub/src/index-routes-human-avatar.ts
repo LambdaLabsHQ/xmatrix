@@ -11,7 +11,8 @@ import {
 } from "@xmatrix/protocol";
 import type { Context } from "hono";
 import type { Env } from "./types";
-import { requireAuth } from "./index-shared";
+import { accountIdentityRevoked } from "./account-identity-status";
+import { requireAuth, readBoundedRequestBody } from "./index-shared";
 import { requireHumanAuth, requestErrorStatus } from "./index-shared";
 import {
   humanProfileFromStored,
@@ -65,6 +66,7 @@ export function registerIndexRoutesHumanAvatar(app: Hono<{ Bindings: Env }>): vo
     if (!isHumanAvatarObjectPath(objectPath)) {
       return c.json({ code: "avatar_not_found", message: "Avatar not found" }, 404);
     }
+    if (await accountIdentityRevoked(c.env,c.req.param("userId"))) return c.json({code:"avatar_not_found",message:"Avatar not found"},404);
     const bucket = c.env.ATTACHMENT_BUCKET;
     if (!bucket) {
       return c.json({ code: "avatar_storage_unavailable", message: "Avatar storage is unavailable" }, 503);
@@ -105,7 +107,9 @@ export function registerIndexRoutesHumanAvatar(app: Hono<{ Bindings: Env }>): vo
       if (Number.isFinite(declared) && declared > HUMAN_AVATAR_MAX_BYTES) {
         return c.json({ code: "avatar_too_large", message: "Image is too large" }, 413);
       }
-      const bytes = new Uint8Array(await c.req.arrayBuffer());
+      const boundedBytes = await readBoundedRequestBody(c.req.raw,HUMAN_AVATAR_MAX_BYTES);
+      if (!boundedBytes) return c.json({code:"avatar_too_large",message:"Image is too large"},413);
+      const bytes = new Uint8Array(boundedBytes);
       if (bytes.byteLength === 0) {
         return c.json({ code: "avatar_empty", message: "Image is empty" }, 400);
       }
@@ -118,15 +122,21 @@ export function registerIndexRoutesHumanAvatar(app: Hono<{ Bindings: Env }>): vo
 
       const contentHash = await sha256Hex(bytes);
       const key = humanAvatarObjectKey(authUser.id, contentHash, mimeType);
-      await bucket.put(key, bytes as unknown as ArrayBuffer, {
-        httpMetadata: { contentType: mimeType, cacheControl: IMMUTABLE_CACHE_CONTROL },
-      });
-
-      /* Absolute, because this URL is read by the web app, the desktop shell and
-         iOS alike. A path relative to one of them is not a profile field. */
-      const objectPath = `${authUser.id}/${contentHash}.${key.split(".").pop()}`;
-      const avatarUrl = `${new URL(c.req.url).origin}${HUB_ROUTES.human_avatar(objectPath)}`;
-      return await commitAvatarPointer(c, authUser.id, avatarUrl);
+      if (await accountIdentityRevoked(c.env,authUser.id)) return c.json({code:"profile_not_found",message:"Profile not found"},404);
+      const upload = (async () => {
+        try {
+          await bucket.put(key, bytes as unknown as ArrayBuffer, { httpMetadata: { contentType: mimeType, cacheControl: IMMUTABLE_CACHE_CONTROL } });
+          if (await accountIdentityRevoked(c.env,authUser.id)) return c.json({code:"profile_not_found",message:"Profile not found"},404);
+          const objectPath = `${authUser.id}/${contentHash}.${key.split(".").pop()}`;
+          return await commitAvatarPointer(c,authUser.id,`${new URL(c.req.url).origin}${HUB_ROUTES.human_avatar(objectPath)}`);
+        } finally {
+          // Compensate an upload already in flight when account deletion commits.
+          // The deletion maintenance pass also sweeps this exact owner's prefix.
+          if (await accountIdentityRevoked(c.env,authUser.id)) await bucket.delete(key);
+        }
+      })();
+      c.executionCtx.waitUntil(upload.then(()=>undefined,()=>undefined));
+      return await upload;
     } catch (error) {
       return c.json({ code: "avatar_update_failed", message: (error as Error).message }, requestErrorStatus(error));
     }

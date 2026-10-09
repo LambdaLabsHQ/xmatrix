@@ -504,6 +504,7 @@ export function SettingsView({
             </button>
           </div>
           <HumanProfileSummary profile={profile} />
+          <a href="/account/delete" className="mt-4 inline-block text-sm text-destructive underline">Delete account</a>
           <PrivateSignInEmail
             email={user.email}
             className="mt-4 flex items-start gap-3 border-t border-border/60 pt-4"
