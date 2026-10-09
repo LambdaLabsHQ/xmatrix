@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { WEB_PROXY_ROUTES, type SetupIntentStatus } from "@xmatrix/protocol";
 import { XMatrixApiError, xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 const POLL_MS = 2_000;
 
@@ -58,7 +59,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       setIntentId(created.intentId);
       setShownAt(Date.now());
     }).catch((reason: unknown) => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : "Could not prepare a setup command");
+      if (!cancelled) setError(userErrorMessage(reason, "Couldn't prepare a setup command"));
     });
     return () => { cancelled = true; };
   }, [spaceId, token, intentId]);
@@ -94,7 +95,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       await work();
       await status.refetch();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "That did not work. Try again.");
+      setError(userErrorMessage(reason, "Couldn't answer the connection request"));
     } finally {
       setBusy(false);
     }
