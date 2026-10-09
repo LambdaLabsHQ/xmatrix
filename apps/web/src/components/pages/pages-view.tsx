@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
@@ -8,7 +8,7 @@ import {
   isLiveAgentStatus, pageAuthorColor, type SerializedAutomation, type SerializedChannel,
 } from "@xmatrix/protocol";
 import {
-  ChevronDown, ChevronRight, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2,
+  FileText, History, Lock, MessageSquare, Plus, Share2, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -36,6 +36,7 @@ import { discussionDraft, discussionTitle } from "@/components/dashboard/selecti
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
+import { PageTreeRow } from "./page-tree-row";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
 // The native shell also imports this module for its list screens. The editor
@@ -142,30 +143,6 @@ export function pageRowMeta(page: Pick<PageSummary, "updatedAt">, agents: readon
   if (agents.length > 0) return `${names(agents)} reading`;
   const age = formatRelativeAge(page.updatedAt, now);
   return age ? `Edited ${age}` : "";
-}
-
-/**
- * One tree row's frame: the padding, selected material and expand control.
- * The caller supplies the row's own label control as children. The row is a list row, two lines
- * as tall as a conversation or an agent, on a phone as beside a page.
- */
-function PageTreeRow({ depth, selected, open, onToggle, expandHidden, children }: {
-  depth: number; selected: boolean; open: boolean; onToggle: () => void;
-  expandHidden?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div className={`app-page-row app-list-row group flex min-h-8 items-center gap-1${selected
-      ? " app-page-row-selected font-semibold" : ""}`}
-      style={{ "--page-depth": depth } as CSSProperties}>
-      <button type="button" aria-label={open ? "Collapse" : "Expand"}
-        className={`flex size-5 shrink-0 items-center justify-center text-muted-foreground ${expandHidden ? "invisible" : ""}`}
-        onClick={onToggle}>
-        {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-      </button>
-      {children}
-    </div>
-  );
 }
 
 function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect, onPrefetch, onCreateChild }: {
