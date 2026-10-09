@@ -334,8 +334,8 @@ party responsible for writing it back.
 
 A section **owes an update** when something that changes what it says
 happened after its last change and nobody has written it back. The debt is
-derived, never stored as a queue: from the event's own record and the page's
-revisions.
+never stored as a queue: it is read from the event's own record, which notes
+when it was written back.
 
 | Event | Section | Derived from |
 |---|---|---|
@@ -346,11 +346,14 @@ revisions.
 
 An owed update is settled by the next edit to its section, or by the Run
 saying nothing there changed (`xmatrix page done`, which records it on that
-conversation's ended claims). A release ends a lease, not work: a section its
-holder's conversation edited while holding the claim was written back before
-the release and owes nothing, and only a release that leaves a debt runs the
-section's `owed` Automations. A section taken off the page owes nothing.
-Anything older than a week stops counting.
+conversation's ended claims). The edit records the write-back on the claims of
+the sections it changes, so a debt never returns once the section's last change
+is old. A release ends a lease, not work: a section its holder's conversation
+edited while holding the claim was written back before the release and owes
+nothing; an edit from another conversation does not settle a claim still held.
+Only a release that leaves a debt runs the section's `owed` Automations. A
+section taken off the page owes nothing. Anything older than a week stops
+counting.
 
 ### 5.3 Who writes it back
 

@@ -325,9 +325,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       await announceClaims(c);
       // A released claim whose section was not written back owes an update; its `owed` Automations run.
       const blockId = result.blockId ?? "";
-      const { owed } = await repository(c.env).blockUpdates({ requestId: crypto.randomUUID(),
-        spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"), principal: await principal(c) });
-      if (owed.has(blockId)) {
+      if (result.owesUpdate) {
         await fireOwedAutomationTriggers(c.env, { spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")!,
           blockIds: [blockId], event: { id: `owed:claim:${c.req.param("claimId")}`.slice(0, 200),
             kind: "owed", summary: `A claim on #${blockId || "the page"} was released, so it owes an update` } })

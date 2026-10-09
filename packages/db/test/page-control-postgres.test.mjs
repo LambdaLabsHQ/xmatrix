@@ -457,7 +457,7 @@ integration("claims: one holder per block, renewed by its holder, open for compe
     assert.deepEqual(await pages.releaseClaim({ requestId: r(), ...base, principal: viewer, claimId: first.claimId }),
       { released: false }, "only its holder, its owner or an admin releases a claim");
     assert.deepEqual(await pages.releaseClaim({ requestId: r(), ...base, principal: member, claimId: first.claimId }),
-      { released: true, blockId: "search" }, "the owner of the Agent releases its claim");
+      { released: true, blockId: "search", owesUpdate: true }, "the owner of the Agent releases its claim");
     await client.query("UPDATE data.page_claims SET expires_at=now() - interval '1 second' WHERE claim_id=$1",
       [rival.claimId]);
     assert.deepEqual((await list()).claims.map((c) => c.blockId), [""], "an expired claim is no longer in force");
@@ -490,7 +490,25 @@ integration("a released claim owes an update unless its conversation wrote the s
     await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: silent.claimId });
     assert.deepEqual(await owed(), ["billing"], "released without a write-back: the section owes an update");
 
+    const elsewhere = await claim("billing");
     await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: 2,
+      body: "# Goals\n\n## Search\n\nShipped.\n\n## Billing\n\nPriced.\n" });
+    assert.equal((await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: elsewhere.claimId }))
+      .owesUpdate, true, "another conversation's edit does not write back a claim it does not hold");
+    await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: 3,
+      body: "# Goals\n\n## Search\n\nShipped.\n\n## Billing\n\nPriced monthly.\n" });
+    assert.deepEqual(await owed(), [], "an edit after the release writes the section back");
+
+    // The write-back is recorded on the claim, so it holds after the section's
+    // last change is older than the revisions blockUpdates reads.
+    let head = 4;
+    for (let index = 0; index < 35; index++) {
+      await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: head++,
+        body: `# Goals\n\n## Search\n\nShipped ${index}.\n\n## Billing\n\nPriced monthly.\n` });
+    }
+    assert.deepEqual(await owed(), [], "a section written back long ago still owes nothing");
+
+    await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: head,
       body: "# Goals\n\n## Search\n\nShipped.\n" });
     assert.deepEqual(await owed(), [], "a section taken off the page owes nothing");
   } finally {
