@@ -1,8 +1,11 @@
 import type { AccountMessageProfileRow, PreparedPostgresMessageRecord } from "@xmatrix/db";
-import { erasedAccountMessageSender } from "@xmatrix/db";
-import { base64UrlDecodeBytes, base64UrlEncodeBytes } from "./relay-v2-primitives";
-import { decodeRelayV2MessagePayloadBundle, prepareRelayV2MessageRecord, relayV2StoredOptionalTimestamps } from "./relay-v2-message-record";
-import { compactMessageBodyPreview } from "./message-body-preview";
+import { erasedAccountMessageSender } from "@xmatrix/protocol";
+// @ts-ignore -- Native Node tests and Wrangler use this same TypeScript source.
+import { base64UrlDecodeBytes, base64UrlEncodeBytes } from "./relay-v2-primitives.ts";
+// @ts-ignore -- Native Node tests and Wrangler use this same TypeScript source.
+import { decodeRelayV2MessagePayloadBundle, prepareRelayV2MessageRecord, relayV2StoredOptionalTimestamps } from "./relay-v2-message-record.ts";
+// @ts-ignore -- Native Node tests and Wrangler use this same TypeScript source.
+import { compactMessageBodyPreview } from "./message-body-preview.ts";
 
 const iso=(value: Date|string)=>new Date(value).toISOString();
 

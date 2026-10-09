@@ -1,3 +1,4 @@
+import { erasedAccountMessageSender } from "@xmatrix/protocol";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { QueryResultRow } from "pg";
 import type { PreparedPostgresMessageRecord } from "./message-control.js";
@@ -20,19 +21,6 @@ export type PrepareErasedMessageProfile = (row: AccountMessageProfileRow, userId
 
 const BATCH = 8;
 
-/** Shared by canonical payload and legacy previews; no caller controls the account scope. */
-export function erasedAccountMessageSender(snapshot: Record<string,unknown>|null,kind:string,authorId:string,userId:string):Record<string,unknown> {
-  if(kind==='user') {
-    if(authorId!==userId) throw new Error("Message profile owner does not match deleted identity");
-    return {identityId:`user:${userId}`,kind:"user",userId,label:"Deleted account",email:""};
-  }
-  if(kind!=='agent'||(snapshot && snapshot.userId!==userId)) throw new Error("Message profile owner does not match deleted identity");
-  if(!snapshot) return {identityId:authorId,kind:"agent",userId,label:"Unknown agent",email:""};
-  const fields=new Set(["identityId","kind","agentId","label","name","agentName","runtime","userId","registration",
-    "instanceId","channelInstanceId","instanceLabel","originChannelId","originMessageId","avatarUrl","profileVersion",
-    "goal","gitBranch","model","effort","statusChips"]);
-  return Object.fromEntries(Object.entries(snapshot).filter(([key])=>fields.has(key)));
-}
 
 async function assertCommitted(tx: DatabaseTransaction, userId: string): Promise<void> {
   await tx.query({name:"account_message_erasure_lock_v1",text:"SELECT pg_advisory_xact_lock(hashtextextended('account-deletion:'||$1,0))",values:[userId],maxRows:1});
