@@ -141,6 +141,8 @@ import { GoogleDocFileSelection } from "./google-doc-file-selection";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { cn } from "@/lib/utils";
+
+import { tagClass } from "./status-tag";
 import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
@@ -1886,10 +1888,7 @@ export function ConnectorExecutionList({
               </p>
             </div>
             <span
-              className={cn(
-                "app-connector-status app-status-chip app-paper-tag shrink-0 px-1.5 py-0.5 text-[11px] font-semibold capitalize",
-                appExecutionStatusClassName(execution.status)
-              )}
+              className={tagClass("app-connector-status app-status-chip capitalize", appExecutionStatusClassName(execution.status))}
             >
               {execution.status}
             </span>

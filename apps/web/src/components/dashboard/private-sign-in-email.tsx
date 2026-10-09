@@ -1,5 +1,6 @@
 import { Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { tagClass } from "./status-tag";
 
 export function PrivateSignInEmail({ email, className, labelClassName, emailClassName }: {
   email: string;
@@ -13,7 +14,7 @@ export function PrivateSignInEmail({ email, className, labelClassName, emailClas
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-bold text-foreground">Sign-in email</p>
-          <span className={cn(labelClassName, "app-paper-tag px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground")}>
+          <span className={cn(labelClassName, tagClass())}>
             Private
           </span>
         </div>

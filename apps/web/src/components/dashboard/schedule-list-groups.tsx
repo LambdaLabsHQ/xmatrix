@@ -33,7 +33,7 @@ export function useScheduleWhere(spaceId: string | null, token: string, channels
   };
 }
 
-/** Schedules as the Schedules list shows them: grouped by what each one is doing, so a row needs no mark. */
+/** Schedules as Status lists them: grouped by what each one is doing, so a row needs no mark. */
 export function ScheduleListGroups({ automations, executionEnabled, where, now, selectedId, onSelect,
   titles = SCHEDULE_GROUP_TITLES }: {
   automations: SerializedAutomation[];

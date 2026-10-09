@@ -2097,14 +2097,8 @@
   @apply app-liquid-material-recipe;
 }
 
-/* Paper labels and the message author's disc share one flat ink tint, with no
-   edge, lens, rim or shadow (user 2026-10-09: 纸签，边框都不要有). The disc's
-   status dot drops its glow. */
-.xmatrix-app .app-paper-tag {
-  border-radius: 0.375rem;
-  background: color-mix(in oklch, var(--foreground) 5%, transparent);
-}
-
+/* The message author's disc is paper like the labels beside it: the same flat
+   ink tint, with no edge, lens or shadow. Its status dot drops its glow. */
 .xmatrix-app .message-author-avatar .identity-avatar-face.identity-avatar-face {
   background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
   -webkit-backdrop-filter: none !important;
@@ -3555,17 +3549,19 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[d
   color: oklch(0.63 0.16 155);
 }
 
-.xmatrix-app .app-agent-work-action[data-action="reborn"]:is(:hover, :focus-visible, [data-armed]) {
+.xmatrix-app .app-agent-work-action[data-action="reborn"]:is(:hover, :focus-visible) {
   background: color-mix(in oklch, oklch(0.68 0.14 240) 14%, transparent) !important;
   color: oklch(0.58 0.15 245);
 }
 
-.xmatrix-app .app-agent-work-action:is([data-action="handoff"], [data-action="handoff-successor"], [data-action="back"]):is(:hover, :focus-visible, [data-armed]) {
+.xmatrix-app .app-agent-work-action:is([data-action="handoff"], [data-action="handoff-successor"], [data-action="back"]):is(:hover, :focus-visible) {
   background: color-mix(in oklch, var(--foreground) 8%, transparent) !important;
   color: var(--foreground);
 }
 
-.xmatrix-app .app-agent-work-action[data-action="stop"]:is(:hover, :focus-visible, [data-armed]) {
+/* Every armed control (Reborn, a Handoff successor, Stop) reads as Stop's:
+   one more press acts, so it must not look like a hovered option. */
+.xmatrix-app .app-agent-work-action:is([data-action="stop"]:is(:hover, :focus-visible), [data-armed]) {
   background: color-mix(in oklch, var(--destructive) 12%, transparent) !important;
   color: var(--destructive);
 }
@@ -3981,15 +3977,6 @@ html[data-app-theme="wood"] .xmatrix-app .message-code-block code {
 }
 
 /* date separators: little wood plaques */
-
-/* Role badges used to be "faint wood chips" with an inset top highlight and an
-   inset dark bottom edge. Removed: that lit edge is the glass cue, and the
-   design owner ruled wood must not carry it — the only approved chip material
-   is the highlighted channel row's liquid glass (app-material-liquid-pill,
-   applied via COUNT_CHIP_MATERIAL_CLASS). Ink still follows the plank. */
-html[data-app-theme="wood"] .xmatrix-app .app-sender-kind-badge {
-  color: oklch(0.36 0.05 58) !important;
-}
 
 /* right-rail ask composer: rounded rect (user) */
 .xmatrix-app .app-details form:has(> input[data-slot="input"]) {
@@ -5105,8 +5092,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app :is(
    glass. Channel rows are also excluded: hover must not move labels onto a
    different compositing/backdrop-filter path. Re-adding them here is the
    regression that made every tool page read as flat translucent cards on the
-   muted background. A chip on the paper is a paper label, not glass (see the
-   paper controls).
+   muted background. A chip on the paper is a paper label, not glass (see
+   "Labels take the material they sit on").
    ============================================================ */
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(
   .app-liquid-glass-fill,
@@ -5241,9 +5228,37 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
   background-color: oklch(0.577 0.245 27.325) !important;
 }
 
-/* On a paper label the meter's tone is softened so the label's ink stays legible over it. */
-.xmatrix-app .app-paper-tag > .app-usage-meter-fill {
+/* Labels take the material they sit on. Every label chip — tags, status chips,
+   counts, usage meters — wears COUNT_CHIP_MATERIAL_CLASS. On wood (the rail, a
+   WoodPanel, the space-setup plank) that stays the liquid-glass pill; everywhere
+   else it is a paper label: a flat ink tint cut as a rounded rectangle, with no
+   edge, lens, rim or shadow (user 2026-10-09: 只有木板上的走 liquid glass).
+   Counts stay round discs; connector actions are buttons, not labels. The
+   repeated class outranks the final glass override above. A usage meter's tone
+   is softened on paper so the label's ink stays legible over it. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action) {
+  background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action):not(.app-count-pill, .app-overflow-count) {
+  border-radius: 0.375rem !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action)::before,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action)::after {
+  content: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action) > .app-usage-meter-fill {
   opacity: 0.38;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action) .text-white {
+  color: inherit !important;
 }
 
 /* Mobile app shell reset.
@@ -6835,16 +6850,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-send-ready {
   outline: none;
 }
 
-.xmatrix-app .app-sender-kind-badge {
-  border-radius: 9999px !important;
-  min-height: 1.5rem;
-  line-height: 1;
-}
-
-.xmatrix-app .app-goal-status-badge {
-  min-height: 1.5rem;
-  line-height: 1;
-}
 
 /* Hint tooltips are the one surface drawn inverted — dark on a light theme,
    light on a dark one. A paper tooltip on paper content (user 2026-09-26:
@@ -8110,7 +8115,8 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
    no well, no capsule. It is a fine warm ink ring with a 2px lift (Notion's
    rgba(42,28,0,.07) ring), deepening with a faint halo while a field has the
    caret. Danger is that button in red ink, solid red only under the pointer
-   (GitHub); the one primary action is solid ink; chips are paper labels. A
+   (GitHub); the one primary action is solid ink; chips are paper labels (see
+   "Labels take the material they sit on"). A
    field drawn as a shell around its input (an icon beside the text) wears the
    material on the shell. Fields inside another control's shell (border-0),
    controls on a wood plank, the admin tables' tools, and the page title,
@@ -8167,20 +8173,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   background: color-mix(in oklch, var(--app-panel-ink, var(--foreground)) 86%, var(--app-panel-paper, white)) !important;
 }
 
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-shared-chip.app-liquid-glass-surface.app-liquid-glass-surface:not(.app-material-wood-panel *, .app-admin-view *) {
-  --app-liquid-surface-bg: transparent;
-  --app-glass-edge: none;
-  --app-liquid-backdrop-filter: none;
-  background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  border: 0 !important;
-  border-radius: 0.375rem !important;
-  box-shadow: none !important;
-}
-
-:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-shared-chip.app-liquid-glass-surface.app-liquid-glass-surface:not(.app-material-wood-panel *, .app-admin-view *))::before,
-:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-shared-chip.app-liquid-glass-surface.app-liquid-glass-surface:not(.app-material-wood-panel *, .app-admin-view *))::after {
+:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *))::before,
+:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *))::after {
   content: none !important;
 }
 

@@ -174,6 +174,8 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
+
+import { tagClass } from "./status-tag";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -526,7 +528,7 @@ export function SettingsView({
                   ? "Isolated from Production, with its own accounts, sessions and data. May require Cloudflare Access."
                   : "Your real accounts, sessions and data."}
                 control={clientEnvironment === environment ? (
-                  <span className="app-paper-tag px-2 py-1 text-xs font-semibold text-muted-foreground">In use</span>
+                  <span className={tagClass()}>In use</span>
                 ) : (
                   <button
                     type="button"
@@ -674,7 +676,7 @@ export function SettingsView({
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <p className="min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{entry.secretRef}</p>
-                      <span className={cn("app-paper-tag px-1.5 py-0.5 text-[11px] font-semibold capitalize", secretAccessChipClass(entry.access))}>
+                      <span className={tagClass("capitalize", secretAccessChipClass(entry.access))}>
                         {entry.access}
                       </span>
                     </div>
@@ -751,7 +753,7 @@ export function SettingsView({
     { key: "desktop", label: "Desktop app", icon: Monitor, summary: desktopAvailable ? "Connected" : "Browser", content: (
         <div className="app-settings-section min-w-0 space-y-10">
           <ToolDetailSection title="This app" action={
-            <span className="app-paper-tag px-2 py-1 text-xs font-semibold text-muted-foreground">
+            <span className={tagClass()}>
               {desktopAvailable ? "Connected" : "Browser"}
             </span>
           }>
