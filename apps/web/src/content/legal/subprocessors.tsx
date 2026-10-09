@@ -37,6 +37,25 @@ const subprocessors: Provider[] = [
       "United States and other locations described by Anthropic for its enterprise or API services.",
   },
   {
+    name: "Vercel, Inc. (AI Gateway)",
+    purpose:
+      "Gateway routing for Jev structured evaluations used by enabled message supersession, conversation-to-Page linking, and other decision features.",
+    data:
+      "Selected message context, Page titles and paths, attachment descriptions, evaluation questions, decision answers, and request or usage metadata required by the feature.",
+    region:
+      "The gateway and model providers' service regions. xMatrix does not currently promise a customer-selected or fixed data-residency region for these evaluations.",
+    added: "October 2026",
+  },
+  {
+    name: "TypeSafe AI, Inc.",
+    purpose:
+      "Jev model processing of structured state and questions sent through Vercel AI Gateway for enabled decision features.",
+    data:
+      "The selected evaluation state and questions, such as message context, Page titles and paths, or attachment descriptions, plus decision answers and request metadata.",
+    region: "United States, as described in TypeSafe AI's privacy policy.",
+    added: "October 2026",
+  },
+  {
     name: "Functional Software, Inc. (Sentry)",
     purpose: "Error and crash reporting for the xMatrix website, apps, and Hub.",
     data:
