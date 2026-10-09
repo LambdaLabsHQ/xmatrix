@@ -12,6 +12,14 @@ The Hub verifies Apple's signed notification and refetches current status from t
 
 StoreKit reports minimal transaction identifiers to the trusted main-frame web bridge. The server never trusts client claims of payment. Transactions finish only after successful server reconciliation; explicit Restore calls `AppStore.sync`, while reopening or foregrounding billing recovers pending verified transactions without prompting for authentication.
 
+Explicit StoreKit user cancellation, cancelled authentication, and task cancellation
+retain `AbortError` through the native bridge, so cancelling Restore is not
+reported as a client defect. Real StoreKit and network failures retain the existing
+error path. Classification uses framework types/codes, never localized message
+text; older native builds still report their legacy untyped failures until updated.
+See [StoreKit errors](https://developer.apple.com/documentation/storekit/storekiterror)
+and [Apple's error handling guidance](https://developer.apple.com/documentation/storekit/handling-errors).
+
 ## Production configuration
 
 Store `APPLE_SUBSCRIPTIONS_CONFIG` as a GitHub **production environment Secret**. The gated Hub release validates it and transfers it to the Worker through the existing secret deployment path. It is private JSON containing:

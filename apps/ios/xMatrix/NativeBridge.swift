@@ -21,7 +21,13 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         const callbacks = pending.get(id);
         if (!callbacks) return;
         pending.delete(id);
-        ok ? callbacks.resolve(value) : callbacks.reject(new Error(String(value || "Native bridge error")));
+        if (ok) {
+          callbacks.resolve(value);
+        } else {
+          const error = new Error(String(value?.message || value || "Native bridge error"));
+          if (value && typeof value === "object" && value.name === "AbortError") error.name = "AbortError";
+          callbacks.reject(error);
+        }
       };
 
       const invoke = (method, payload) => new Promise((resolve, reject) => {
@@ -105,9 +111,17 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
                 let result = try await handle(method: method, payload: payload)
                 resolve(id: id, ok: true, value: result)
             } catch {
-                resolve(id: id, ok: false, value: error.localizedDescription)
+                resolve(id: id, ok: false, value: Self.failurePayload(error))
             }
         }
+    }
+
+    static func failurePayload(_ error: Error) -> Any {
+        if AppleSubscriptions.isCancellation(error) {
+            return ["name": "AbortError", "message": "The operation was cancelled."]
+        }
+        // Keep the existing string contract for every actual failure.
+        return error.localizedDescription
     }
 
     @MainActor

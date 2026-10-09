@@ -1,5 +1,6 @@
 import XCTest
 import WebKit
+import StoreKit
 @testable import xMatrix
 
 @MainActor
@@ -116,6 +117,35 @@ final class WebContainerTests: XCTestCase {
                             ("agents", .more), ("roles", .more), ("machines", .more), ("security", .more)] {
             coordinator.update(MobileTabState(visible: true, activeView: view))
             XCTAssertEqual(coordinator.activeTab, tab, view)
+        }
+    }
+
+    func testBridgePreservesExplicitStoreKitCancellation() {
+        let errors: [Error] = [
+            StoreKitError.userCancelled,
+            StoreKitError.systemError(StoreKitError.userCancelled),
+            SKError(.paymentCancelled),
+            SKError(.overlayCancelled),
+            URLError(.userCancelledAuthentication),
+            CancellationError()
+        ]
+        for error in errors {
+            let payload = NativeBridge.failurePayload(error) as? [String: String]
+            XCTAssertEqual(payload?["name"], "AbortError")
+            XCTAssertEqual(payload?["message"], "The operation was cancelled.")
+        }
+    }
+
+    func testBridgeDoesNotTreatNetworkFailuresOrMessageTextAsCancellation() {
+        let errors: [Error] = [
+            StoreKitError.networkError(URLError(.networkConnectionLost)),
+            StoreKitError.unknown,
+            SKError(.paymentInvalid),
+            URLError(.timedOut),
+            NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Request Canceled"])
+        ]
+        for error in errors {
+            XCTAssertEqual(NativeBridge.failurePayload(error) as? String, error.localizedDescription)
         }
     }
 
