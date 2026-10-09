@@ -125,6 +125,8 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
 ]);
 
 export const GLOBAL_DATA_TABLES = Object.freeze([
+  // Identity admission fences stay on every physical shard, independent of Spaces.
+  "account_deletion_fences",
   // Application-wide signed retirement survives removal of all Space bindings.
   // App connections themselves remain movement blockers on the primary shard.
   "app_sentry_installation_lifecycle",

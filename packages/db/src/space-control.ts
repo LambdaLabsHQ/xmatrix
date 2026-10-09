@@ -1263,7 +1263,12 @@ export class PostgresSpaceControlRepository {
       const commitSequence = await requiredControlHead(transaction, {
         name: "space_restore_head_v1", spaceId, at,
       });
+      const deletedAccounts = await this.database.transaction({requestId,operation:"space.restore-account-status"}, tx => tx.query<{user_id:string}>({
+        name:"space_restore_deleted_accounts_v1",text:"SELECT user_id FROM control.account_deletion_requests WHERE user_id=ANY($1::text[]) AND state IN ('committed','completed')",
+        values:[(deletion.members_json ?? []).map(member=>member.userId)],maxRows:10_000}));
+      if(deletedAccounts.some(row=>row.user_id===actorUserId)) throw new SpaceControlError("forbidden",403,"Deleted accounts cannot restore Spaces");
       const members = await restoreSpaceDeletion(transaction, {
+        deletedUserIds: deletedAccounts.map(row=>row.user_id),
         deletion, at, commitSequence,
         placement: { shardId: placement.shardId, placementEpoch: placement.placementEpoch },
       });
@@ -1869,7 +1874,9 @@ export class PostgresSpaceControlRepository {
 
       if (input.kind === "space_member_put" || input.kind === "space_member_remove") {
         const userId = bounded(input.userId, "userId");
-        await requireSpaceAdmin(transaction, "space_membership_admin_v1", spaceId, actorUserId);
+        if (input.kind !== "space_member_remove" || actorUserId !== userId) {
+          await requireSpaceAdmin(transaction, "space_membership_admin_v1", spaceId, actorUserId);
+        }
         const members = await transaction.query<QueryResultRow & {
           role: string; version: string | number;
         }>({

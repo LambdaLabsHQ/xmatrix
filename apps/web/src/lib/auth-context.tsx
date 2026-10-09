@@ -39,7 +39,7 @@ interface AuthContextValue extends AuthState {
   verifyOtp: (email: string, token: string) => Promise<void>;
   signInWithGoogle: (redirectTo?: string) => Promise<void>;
   setSessionFromAuthResponse: (payload: AuthResponse) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: (options?: { redirectTo?: "/login" | "/account/delete" }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -272,17 +272,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signInWithBetterAuthGoogle(buildBetterAuthCallbackUrl(redirectTo));
   };
 
-  const logout = async () => {
+  const logout = async (options?: { redirectTo?: "/login" | "/account/delete" }) => {
     if (mockAuthState) {
       setState(mockAuthState || { session: null, user: null, loading: false });
-      router.push("/login");
+      router.push(options?.redirectTo === "/account/delete" ? "/account/delete" : "/login");
       return;
     }
 
     setState((prev) => ({ ...prev, loading: true }));
     await Promise.allSettled([clearNativeSession(), signOutBetterAuth()]);
     setState({ session: null, user: null, loading: false });
-    router.push("/login");
+    router.push(options?.redirectTo === "/account/delete" ? "/account/delete" : "/login");
   };
 
   return (

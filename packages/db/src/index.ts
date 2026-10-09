@@ -309,3 +309,6 @@ export { DingTalkEffectCoordinator,type DingTalkCoordinationNativeProof } from "
 export type { DingTalkPreparedPathCapability } from "./dingtalk-prepared-port.js";
 
 export { PostgresAppleBillingRepository, type AppleAccountBinding } from "./apple-billing-control.js";
+
+export { PostgresAccountDeletionRepository, AccountDeletionError } from "./account-deletion.js";
+export type { AccountDeletionBlocker, AccountDeletionState } from "./account-deletion.js";

@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 
+import { accountIdentityRevoked } from "../../account-identity-status";
 import type { Env } from "../../types";
 
 const MACHINE_DAEMON_TOKEN_ISSUER = "xmatrix-hub-machine-control";
@@ -54,7 +55,7 @@ export async function signMachineDaemonCredential(
     .sign(machineDaemonTokenSecret(env));
 }
 
-export async function verifyMachineDaemonCredential(
+async function verifySignedMachineDaemonCredential(
   token: string,
   env: Env
 ): Promise<MachineDaemonPrincipal> {
@@ -85,4 +86,10 @@ export async function verifyMachineDaemonCredential(
   } catch {
     throw new Error("Invalid or expired Machine Daemon credential");
   }
+}
+
+export async function verifyMachineDaemonCredential(token: string, env: Env): Promise<MachineDaemonPrincipal> {
+  const principal = await verifySignedMachineDaemonCredential(token, env);
+  if (await accountIdentityRevoked(env, principal.ownerUserId)) throw new Error("Invalid or expired Machine Daemon credential");
+  return principal;
 }

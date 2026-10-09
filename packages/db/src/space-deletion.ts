@@ -202,12 +202,13 @@ export async function restoreSpaceDeletion(
   transaction: DatabaseTransaction,
   input: {
     deletion: SpaceDeletionRow; at: string; commitSequence: number;
+    deletedUserIds?: readonly string[];
     placement: { shardId: string; placementEpoch: number };
   },
 ): Promise<SpaceDeletionMember[]> {
   const { deletion, at } = input;
   const spaceId = deletion.space_id;
-  const members = deletion.members_json ?? [];
+  const members = (deletion.members_json ?? []).filter(member => !input.deletedUserIds?.includes(member.userId));
   for (const member of members) {
     await insertSpaceMember(transaction, {
       name: "space_restore_member_v1", spaceId, userId: member.userId,
@@ -245,8 +246,8 @@ export async function restoreSpaceDeletion(
     await transaction.query({
       name: "space_restore_automation_v1",
       text: `UPDATE data.automations SET enabled=true, version=version+1, updated_at=$3
-        WHERE automation_id=$1 AND version=$2 AND NOT enabled`,
-      values: [automation.automationId, automation.version, at], maxRows: 0,
+        WHERE automation_id=$1 AND version=$2 AND NOT enabled AND NOT (owner_user_id=ANY($4::text[]))`,
+      values: [automation.automationId, automation.version, at, input.deletedUserIds ?? []], maxRows: 0,
     });
   }
   await transaction.query({
