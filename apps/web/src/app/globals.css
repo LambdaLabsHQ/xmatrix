@@ -1090,10 +1090,16 @@
     border-radius: 1.5rem;
   }
 
-  .xmatrix-app :is(.rounded-lg.border, .rounded-md.border, section.border, .app-tool-surface, .app-details):not(
-    .message-image-attachment
-  ):not(.composer-image-attachment):not(.message-video-attachment):not(.app-segmented-track) {
+  .xmatrix-app :is(.app-tool-surface, .app-details) {
     border-radius: 1.5rem;
+  }
+
+  /* A bordered box is a panel on the page, not an island: it takes the
+     controls' 8px, never the islands' 24px (user 2026-10-09: 单边框 panel 圆角太大). */
+  .xmatrix-app :is(.rounded-lg.border, .rounded-md.border, section.border):not(
+    .message-image-attachment
+  ):not(.composer-image-attachment):not(.message-video-attachment):not(.app-segmented-track):not(.app-tool-surface):not(.app-details) {
+    border-radius: 8px;
   }
 
   .xmatrix-app :is(.app-panel-header, .app-topbar, .app-composer) {
