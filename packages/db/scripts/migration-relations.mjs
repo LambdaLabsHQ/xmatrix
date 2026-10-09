@@ -11,9 +11,8 @@ export async function checkedInMigrationRelations() {
   const tables = new Set();
   const views = new Set();
   for (const name of names) {
-    const sql = (await readFile(new URL(name, directory), "utf8")).replace(/--[^\n]*/gu, "");
-    const statement = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+((?:control|data)\.[a-z0-9_]+)|ALTER\s+TABLE\s+((?:control|data)\.[a-z0-9_]+)\s+RENAME\s+TO\s+([a-z0-9_]+)\s*;|CREATE\s+VIEW\s+((?:control|data)\.[a-z0-9_]+)|DROP\s+VIEW(?:\s+IF\s+EXISTS)?\s+((?:control|data)\.[a-z0-9_]+)|DROP\s+TABLE(?:\s+IF\s+EXISTS)?\s+((?:control|data)\.[a-z0-9_]+)/giu;
-    for (const [, created, renamed, renamedTo, view, droppedView, droppedTable] of sql.matchAll(statement)) {
+    const sql = await readFile(new URL(name, directory), "utf8");
+    for (const { created, renamed, renamedTo, view, droppedView, droppedTable } of relationStatements(sql)) {
       if (created) tables.add(created);
       if (droppedTable) tables.delete(droppedTable);
       if (renamed) {
@@ -25,4 +24,13 @@ export async function checkedInMigrationRelations() {
     }
   }
   return { tables, views };
+}
+
+/** The relation-level DDL statements of one migration's SQL, in order. */
+export function* relationStatements(sql) {
+  const statement = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+((?:control|data)\.[a-z0-9_]+)|ALTER\s+TABLE\s+((?:control|data)\.[a-z0-9_]+)\s+RENAME\s+TO\s+([a-z0-9_]+)\s*;|CREATE\s+VIEW\s+((?:control|data)\.[a-z0-9_]+)|DROP\s+VIEW(?:\s+IF\s+EXISTS)?\s+((?:control|data)\.[a-z0-9_]+)|DROP\s+TABLE(?:\s+IF\s+EXISTS)?\s+((?:control|data)\.[a-z0-9_]+)/giu;
+  for (const [, created, renamed, renamedTo, view, droppedView, droppedTable] of
+    sql.replace(/--[^\n]*/gu, "").matchAll(statement)) {
+    yield { created, renamed, renamedTo, view, droppedView, droppedTable };
+  }
 }

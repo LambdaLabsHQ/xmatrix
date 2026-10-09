@@ -39,6 +39,7 @@ jobs:
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
     outputs:
       revision: ${{ steps.authorize.outputs.revision }}
+      hub_ref: ${{ steps.authorize.outputs.hub_ref }}
     steps:
       - name: Require an administrator, the exact confirmation and a green reviewed revision
         id: authorize
@@ -77,7 +78,19 @@ jobs:
             if (releases.some((run) => run.status !== "completed")) {
               return core.setFailed("production-release.yml has an active run");
             }
+            // The Hub serving now is the one the last successful hub deploy shipped.
+            let hubRef;
+            for (const run of releases.filter((run) => run.conclusion === "success").slice(0, 30)) {
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+                { owner, repo, run_id: run.id, per_page: 100 });
+              if (jobs.some((job) => job.name === "hub / deploy" && job.conclusion === "success")) {
+                hubRef = run.head_branch;
+                break;
+              }
+            }
+            if (!/^xmatrix-v[0-9A-Za-z.-]+$/.test(hubRef ?? "")) return core.setFailed("no recent successful hub deploy names its release tag");
             core.setOutput("revision", REVISION);
+            core.setOutput("hub_ref", hubRef);
 
   apply:
     needs: authorize
@@ -105,6 +118,16 @@ jobs:
           test "$(git rev-parse HEAD)" = "$REVISION"
           test -z "$(git status --porcelain)"
           test -f "packages/db/migrations/${MIGRATION_ID}.sql"
+
+      - name: Refuse while the serving Hub still uses a table this removes
+        shell: bash
+        env:
+          HUB_REF: ${{ needs.authorize.outputs.hub_ref }}
+          MIGRATION_ID: ${{ inputs.migration_id }}
+        run: |
+          set -euo pipefail
+          timeout 120s git fetch --no-tags origin "+refs/tags/${HUB_REF}:refs/tags/${HUB_REF}"
+          node packages/db/scripts/contract-readers.mjs "$MIGRATION_ID" "$HUB_REF"
 
       - name: Plan, require exactly the reviewed contract migration, and apply per shard
         shell: bash
