@@ -4,10 +4,6 @@ This is the canonical entrypoint for repository policy. The repository has exact
 
 `docs/guardrails/project-profile.md` describes the current repository, and `docs/guardrails/review-sources.md` records refresh evidence. They provide context but do not add rules or override the ten canonical guardrails.
 
-## Tests
-
-Before writing, changing, or removing a test, apply the value bar in `docs/test-audit.md`.
-
 ## Finishing work
 
 Carry a change on this repository all the way: open its pull request, merge it once required CI passes, request the production release through the Production Release Intent workflow, and verify the result live. Do not stop to ask whether to merge, release, or fix a related problem you found; guardrail P0#4 makes the automated gates the review and release authority here.
