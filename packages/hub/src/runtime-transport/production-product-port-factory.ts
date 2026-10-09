@@ -232,7 +232,8 @@ export function createProductionRelayRuntimeProductPortFactory(
         return;
       }
       const live = liveAgentFanout.sessions().filter(candidate => candidate.run.instanceId !== session.run.instanceId);
-      const payload = await readChannel(session.run.channelId, session.principal.ownerUserId, "agent-presence");
+      const payload = await readChannel(session.run.channelId, session.principal.ownerUserId, "agent-presence",
+        session.principal.spaceId);
       const accountQuota = payload ? channelInstanceQuota(payload.channel, session.run.instanceId) : undefined;
       const overlayLiveChannel = (channel: SerializedChannel, channelId: string) => {
         for (const liveSession of live) {

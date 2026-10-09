@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PostgresSpaceControlRepository } from "@xmatrix/db";
+import { PostgresSpaceControlRepository, SpaceControlError } from "@xmatrix/db";
 
 import { configureChannel, createChannel } from "../src/spaces.ts";
+import { humanFanoutChannelReader } from "../src/runtime-transport/human-presence-fanout.ts";
 import { publishHumanChannelCatalogChangedToSessions, publishHumanWorkspaceResourceChangedToSessions } from "../src/connections/human/registry.ts";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "../src/postgres-authority-http.ts";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "../src/postgres-message-database-policy.ts";
@@ -159,6 +160,23 @@ test("a rename, topic or summary rechecks nothing; a mode change rechecks only t
   assert.deepEqual(woken, []);
   await configureChannel(postgresEnv, { ...base, mode: "closed" }, dependencies);
   assert.deepEqual(woken, [["channel-1"]]);
+});
+
+test("a presence read named its Channel's Space skips the directory, and reads by route once the Channel moved", async (t) => {
+  const routed = [];
+  t.mock.method(PostgresSpaceControlRepository.prototype, "resolveChannelSpaceId", async () => {
+    routed.push("route");
+    return "now";
+  });
+  t.mock.method(PostgresSpaceControlRepository.prototype, "getChannel", async (input) => {
+    if (input.spaceId !== "now") throw new SpaceControlError("channel_not_found", 404, "Channel not found");
+    return { channel: { id: "channel-1", spaceId: "now", name: "Here", memberPresence: {} } };
+  });
+  const read = humanFanoutChannelReader(postgresEnv);
+  assert.equal((await read("channel-1", "owner", "agent-presence", "now")).channel.spaceId, "now");
+  assert.deepEqual(routed, []);
+  assert.equal((await read("channel-1", "owner", "agent-presence", "before")).channel.spaceId, "now");
+  assert.deepEqual(routed, ["route"]);
 });
 
 test("Space reads wait out the same Hyperdrive checkout as message reads", () => {
