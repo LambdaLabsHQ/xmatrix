@@ -108,6 +108,19 @@ test("malformed or oversized diagnostic metadata is omitted and does not fail an
   assert.match(stringRelease.result.summary, /Release: xmatrix-v1.0.149/);
 });
 
+test("capture boundary and runtime evidence cannot expose browser action text or arbitrary contexts", async () => {
+  const { result } = await run([{ body: issue }, { body: { ...event,
+    tags: [{ key: "operation", value: "browser: private-action-text" }],
+    contexts: { browser: { name: "Chrome", version: "130.0", userAgent: "private-user-agent" },
+      runtime: { name: "cloudflare", version: "private-version\nsecret" },
+      secret: { name: "private-context" }, user: { email: "private-user" } },
+  } }], undefined, "123");
+  assert.match(result.summary, /Capture boundary: browser defect endpoint/);
+  assert.match(result.summary, /browser: Chrome 130\.0/);
+  assert.match(result.summary, /runtime: cloudflare/);
+  assert.doesNotMatch(result.summary, /private-/);
+});
+
 test("manual tokens retain configured self-hosted origin without following redirects", async () => {
   const { calls } = await run([{ body: issue }, { body: event }], { authToken: "manual-test", organization: "test",
     baseUrl: "https://errors.example.com" }, "123");
