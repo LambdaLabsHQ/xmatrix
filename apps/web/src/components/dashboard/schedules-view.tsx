@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
 import {
   AUTOMATION_MAX_INTERVAL_MINUTES,
@@ -15,6 +15,8 @@ import {
 import { AlertTriangle, ChevronRight, Clock, FileText, Loader2, MessageSquare, Pause, Pencil, Play,
   Trash2 } from "lucide-react";
 import { pageDocumentQuery, usePageTree } from "@/components/pages/pages-view";
+import { PageTreeRow } from "@/components/pages/page-tree-row";
+import { pageChildren } from "@/lib/pages/page-client";
 import { formatAutomationCadence, formatAutomationNext, formatAutomationTrigger } from "@/components/pages/page-automation-format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,26 +26,20 @@ import { useAuth } from "@/lib/auth-context";
 import { channelTitle } from "./channel-links";
 import { ListSkeleton } from "./content-skeleton";
 import {
-  groupSchedules, scheduleAttention, scheduleRunning, scheduleState, scheduleSummary, sectionFallbackTitle,
-  type ScheduleState,
+  scheduleAttention, scheduleRunning, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
+  SCHEDULE_STATES, type ScheduleCounts, type SchedulePageNode, type ScheduleState,
 } from "./schedules-model";
 import { spaceMemberCanCreate } from "./space-member-permissions";
 import { formatRelativeAge } from "./time-display";
 import {
-  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSplit,
-  ToolStateDot, useToolItem,
+  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolSplit,
+  useToolItem,
 } from "./tool-split";
 import { AutomationExpressionGuidance, automationExpressionFromText } from "./workspace-admin-views";
 import { evaluationBindingLabel, formatDateTime } from "./workspace-shell-recovered";
 
-const GROUP_TITLES: Record<ScheduleState, string> = {
-  attention: "Needs attention",
-  running: "Running",
-  paused: "Paused",
-};
-
 /**
- * The Space's Schedules: every Automation it runs, listed page by page, and
+ * The Space's Schedules: every Automation it runs, on the page tree, and
  * the one chosen from the list with what can be done about it — pause,
  * resume, change, delete, answer a pause request. Nothing is made here. An
  * Automation is made on a page, in the section it keeps true
@@ -137,7 +133,11 @@ export function SchedulesView({
     ? pageTitles.get(automation.pageId) ?? "Untitled page"
     : `#${conversationTitle(automation.channelId) ?? automation.channelId}`;
 
-  const groups = useMemo(() => groupSchedules(automations, executionEnabled), [automations, executionEnabled]);
+  const childrenOf = useMemo(() => pageChildren(pageTree.data ?? []), [pageTree.data]);
+  const sectionIds = useMemo(() => new Map(documents.map((document, index) =>
+    [pageIds[index]!, pageBlocks(document.data?.body ?? "").map((block) => block.id)])), [documents, pageIds]);
+  const tree = useMemo(() => scheduleTree(automations, childrenOf, (pageId) => sectionIds.get(pageId) ?? [],
+    executionEnabled), [automations, childrenOf, sectionIds, executionEnabled]);
 
   const selectedSpace = spaces.find((space) => space.id === spaceId);
   const memberMayCreate = spaceMemberCanCreate(selectedSpace, currentUserId, "automationCreation");
@@ -166,7 +166,16 @@ export function SchedulesView({
   const whenOf = (automation: SerializedAutomation) => automation.detachedAt ? "detached"
     : scheduleRunning(automation) ? nextRunPhrase(automation.nextRunAt, now) : "paused";
 
-  // The group says what each one is doing, so a row needs no mark: what it is, where it lives, how often and when.
+  // The tree is the page tree; each row's icon says what its Automation is doing.
+  const row = (automation: SerializedAutomation, depth: number) => {
+    const state = stateOf(automation);
+    return (
+      <ScheduleRow key={automation.id} automation={automation} depth={depth} state={state}
+        selected={automation.id === selectedId} onSelect={() => select(automation.id)}
+        end={state === "paused" ? undefined : whenOf(automation)}
+        subtitle={scheduleAttention(automation, executionEnabled) ?? formatAutomationCadence(automation.intervalMinutes)} />
+    );
+  };
   const list = (
     <ToolList title="Schedules">
       {loadError && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{loadError}</p>}
@@ -174,19 +183,19 @@ export function SchedulesView({
         <ListSkeleton label="Loading schedules" rows={4} className="px-4 md:px-5" />
       ) : automations.length === 0 ? (
         loadError ? null : <p className="px-4 text-sm text-muted-foreground md:px-5">No schedules yet.</p>
-      ) : groups.map((group) => (
-        <ToolListGroup key={group.state} title={GROUP_TITLES[group.state]} count={group.automations.length}>
-          {group.automations.map((automation) => (
-            <ToolListRow key={automation.id} testId="schedule-row" state={group.state}
-              selected={automation.id === selectedId}
-              onSelect={() => select(automation.id)}
-              title={automation.name}
-              end={group.state === "paused" ? undefined : whenOf(automation)}
-              subtitle={group.state === "attention" ? scheduleAttention(automation, executionEnabled)
-                : `${whereTitle(automation)} · ${formatAutomationCadence(automation.intervalMinutes)}`} />
-          ))}
-        </ToolListGroup>
-      ))}
+      ) : (
+        <ul>
+          {tree.map((node) => node.kind === "page"
+            ? <SchedulePage key={node.pageId} node={node} depth={0} row={row} />
+            : (
+              <ScheduleBranch key={node.channelId} depth={0} icon={<MessageSquare className="size-4 shrink-0 text-muted-foreground" />}
+                title={`#${conversationTitle(node.channelId) ?? node.channelId}`}
+                meta={countsMeta(node.counts)}>
+                {node.automations.map((automation) => row(automation, 1))}
+              </ScheduleBranch>
+            ))}
+        </ul>
+      )}
     </ToolList>
   );
 
@@ -237,6 +246,89 @@ export function SchedulesView({
   );
 
   return <ToolSplit label="Schedules" open={Boolean(selected)} list={list} detail={detail} />;
+}
+
+/** A page and, under it, its Automations then the pages below it that hold some. */
+function SchedulePage({ node, depth, row }: {
+  node: SchedulePageNode;
+  depth: number;
+  row: (automation: SerializedAutomation, depth: number) => ReactNode;
+}) {
+  return (
+    <ScheduleBranch depth={depth} icon={<FileText className="size-4 shrink-0 text-muted-foreground" />}
+      title={node.title ?? "Untitled page"}
+      meta={countsMeta(node.counts)}>
+      {node.automations.map((automation) => row(automation, depth + 1))}
+      {node.children.map((child) => <SchedulePage key={child.pageId} node={child} depth={depth + 1} row={row} />)}
+    </ScheduleBranch>
+  );
+}
+
+/** A tree row that holds Automations; choosing it folds or unfolds them, as the Pages tree's chevron does. */
+function ScheduleBranch({ depth, icon, title, meta, children }: {
+  depth: number;
+  icon: ReactNode;
+  title: string;
+  meta: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  const toggle = () => setOpen((value) => !value);
+  return (
+    <li>
+      <PageTreeRow depth={depth} selected={false} open={open} onToggle={toggle}>
+        <button type="button" className="flex min-w-0 flex-1 flex-col text-left" onClick={toggle} aria-expanded={open}>
+          <span className="app-page-row-title-line flex min-w-0 items-center gap-2">
+            {icon}
+            <span className="app-page-row-title app-list-row-title truncate">{title}</span>
+          </span>
+          <span className="app-list-row-meta truncate">{meta}</span>
+        </button>
+      </PageTreeRow>
+      {open && <ul>{children}</ul>}
+    </li>
+  );
+}
+
+const STATE_ICON: Record<ScheduleState, ReactNode> = {
+  attention: <AlertTriangle className="app-ink-attention size-4 shrink-0" />,
+  running: <Clock className="size-4 shrink-0" />,
+  paused: <Pause className="size-4 shrink-0 text-muted-foreground" />,
+};
+
+function ScheduleRow({ automation, depth, state, selected, onSelect, end, subtitle }: {
+  automation: SerializedAutomation;
+  depth: number;
+  state: ScheduleState;
+  selected: boolean;
+  onSelect: () => void;
+  end?: string;
+  subtitle: string;
+}) {
+  return (
+    <li>
+      <PageTreeRow depth={depth} selected={selected} open={false} onToggle={() => undefined} expandHidden>
+        <button type="button" data-testid="schedule-row" data-state={state} aria-current={selected ? "true" : undefined}
+          className="flex min-w-0 flex-1 flex-col text-left" onClick={onSelect}>
+          <span className="app-page-row-title-line flex min-w-0 items-center gap-2">
+            {STATE_ICON[state]}
+            <span className="app-page-row-title app-list-row-title min-w-0 flex-1 truncate">{automation.name}</span>
+            {end && <span className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums">{end}</span>}
+          </span>
+          <span className="app-list-row-meta truncate">{subtitle}</span>
+        </button>
+      </PageTreeRow>
+    </li>
+  );
+}
+
+/** "2 running · 1 paused", with what needs a person first. */
+function countsMeta(counts: ScheduleCounts): string {
+  return SCHEDULE_STATES.flatMap((state) => {
+    const count = counts[state];
+    if (count === 0) return [];
+    return [`${count} ${state === "attention" ? `${count === 1 ? "needs" : "need"} attention` : state}`];
+  }).join(" · ");
 }
 
 function nextRunPhrase(nextRunAt: string, now: number): string {
@@ -388,7 +480,7 @@ function ScheduleDetail({
       title={automation.name}
       status={
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <ToolStateDot state={state} />
+          {STATE_ICON[state]}
           <span className="text-foreground">{automation.detachedAt ? "Detached" : running ? "Running" : "Paused"}</span>
           <span>· {formatAutomationCadence(automation.intervalMinutes)}</span>
           {running && <span title={formatDateTime(automation.nextRunAt)}>· {formatAutomationNext(automation.nextRunAt)}</span>}

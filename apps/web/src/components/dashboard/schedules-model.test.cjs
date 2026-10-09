@@ -3,7 +3,7 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  groupSchedules, scheduleAttention, scheduleState, scheduleSummary, sectionFallbackTitle,
+  scheduleAttention, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
 } = require("./schedules-model.ts");
 
 function automation(overrides) {
@@ -13,27 +13,52 @@ function automation(overrides) {
   };
 }
 
-test("Automations are grouped by what they are doing: attention, running, paused; empty states are left out", () => {
-  const groups = groupSchedules([
-    automation({ id: "off", name: "Off", enabled: false }),
-    automation({ id: "broken", name: "Broken", lastError: "Channel is archived" }),
-    automation({ id: "on", name: "On" }),
-  ], true);
-  assert.deepEqual(groups.map((group) => [group.state, group.automations.map((item) => item.id)]),
-    [["attention", ["broken"]], ["running", ["on"]], ["paused", ["off"]]]);
-  assert.deepEqual(groupSchedules([automation({ id: "on" })], true).map((group) => group.state), ["running"]);
+function tree(list, pages, sections = {}) {
+  const childrenOf = new Map();
+  for (const page of pages) {
+    const parent = page.parentPageId ?? null;
+    childrenOf.set(parent, [...childrenOf.get(parent) ?? [], page]);
+  }
+  return scheduleTree(list, childrenOf, (pageId) => sections[pageId] ?? [], true);
+}
+
+function shape(nodes) {
+  return nodes.map((node) => node.kind === "page"
+    ? [node.pageId, node.automations.map((item) => item.id), shape(node.children)]
+    : [`#${node.channelId}`, node.automations.map((item) => item.id), []]);
+}
+
+test("Automations sit on the page tree: only pages that hold one and the pages above them, in tree order", () => {
+  const pages = [
+    { pageId: "root", title: "Root" },
+    { pageId: "empty", title: "Empty", parentPageId: "root" },
+    { pageId: "goals", title: "Goals", parentPageId: "root" },
+    { pageId: "deep", title: "Deep", parentPageId: "goals" },
+    { pageId: "other", title: "Other" },
+  ];
+  const nodes = tree([
+    automation({ id: "d", pageId: "deep" }),
+    automation({ id: "g", pageId: "goals", enabled: false }),
+    automation({ id: "lost", pageId: "unreadable" }),
+    automation({ id: "chat", channelId: "c-old" }),
+  ], pages);
+  assert.deepEqual(shape(nodes), [
+    ["root", [], [["goals", ["g"], [["deep", ["d"], []]]]]],
+    ["unreadable", ["lost"], []],
+    ["#c-old", ["chat"], []],
+  ]);
+  assert.deepEqual(nodes[0].counts, { attention: 0, running: 1, paused: 1 });
+  assert.equal(nodes[1].title, null);
 });
 
-test("running Automations come soonest first, paused ones by name, and detached ones need attention", () => {
-  const groups = groupSchedules([
-    automation({ id: "p2", name: "Zeta", enabled: false }),
-    automation({ id: "late", name: "Late", nextRunAt: "2026-09-28T15:00:00.000Z" }),
-    automation({ id: "p1", name: "Alpha", enabled: false }),
-    automation({ id: "soon", name: "Soon", nextRunAt: "2026-09-28T13:00:00.000Z" }),
-    automation({ id: "gone", name: "Gone", detachedAt: "2026-09-27T00:00:00.000Z" }),
-  ], true);
-  assert.deepEqual(groups.map((group) => [group.state, group.automations.map((item) => item.id)]),
-    [["attention", ["gone"]], ["running", ["soon", "late"]], ["paused", ["p1", "p2"]]]);
+test("a page's Automations follow its sections from the top, then by name", () => {
+  const nodes = tree([
+    automation({ id: "z", name: "Zeta", pageId: "p" }),
+    automation({ id: "late", name: "Alpha", pageId: "p", blockId: "second" }),
+    automation({ id: "early", name: "Beta", pageId: "p", blockId: "first" }),
+    automation({ id: "a", name: "Alpha", pageId: "p" }),
+  ], [{ pageId: "p", title: "P" }], { p: ["first", "second"] });
+  assert.deepEqual(nodes[0].automations.map((item) => item.id), ["early", "late", "a", "z"]);
 });
 
 test("attention names what a person has to look at, most urgent first", () => {

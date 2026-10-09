@@ -3,8 +3,8 @@ import type { SerializedAutomation } from "@xmatrix/protocol";
 /**
  * The Space's Schedules are an index of its Automations, not where they are
  * made (docs/design/pages-live-document.md §6). Every one keeps a page
- * section true, and its page is named on its row; the index itself reads by
- * what each one is doing: what needs a person, what runs next, what rests.
+ * section true, so the index is the page tree, and each row says what its
+ * Automation is doing: what needs a person, what runs next, what rests.
  */
 export type ScheduleState = "attention" | "running" | "paused";
 
@@ -60,29 +60,89 @@ export function scheduleSummary(automations: readonly SerializedAutomation[],
     next };
 }
 
-/**
- * What needs a person first, then what runs, soonest first, then what is
- * paused, by name. A state with nothing in it is left out.
- */
-export function groupSchedules(automations: readonly SerializedAutomation[],
-  executionEnabled: boolean | null): ScheduleGroup[] {
-  const order: ScheduleState[] = ["attention", "running", "paused"];
-  const groups = order.map((state): ScheduleGroup => ({ state, automations: [] }));
-  for (const automation of automations) {
-    groups[order.indexOf(scheduleState(automation, executionEnabled))]!.automations.push(automation);
-  }
-  for (const group of groups) group.automations.sort(compareSchedules);
-  return groups.filter((group) => group.automations.length > 0);
+/** A page in the Schedules tree: its own Automations, then the pages under it that hold some. */
+export interface SchedulePageNode {
+  kind: "page";
+  pageId: string;
+  /** Null when the reader cannot see the page in the tree. */
+  title: string | null;
+  automations: SerializedAutomation[];
+  children: SchedulePageNode[];
+  /** What runs in this page and every page under it. */
+  counts: ScheduleCounts;
 }
 
-function compareSchedules(left: SerializedAutomation, right: SerializedAutomation): number {
-  const running = Number(scheduleRunning(right)) - Number(scheduleRunning(left));
-  if (running) return running;
-  if (scheduleRunning(left)) {
-    const soonest = nextRunTime(left) - nextRunTime(right);
-    if (soonest) return soonest;
+export type ScheduleCounts = Record<ScheduleState, number>;
+
+/** Automations made in a conversation rather than on a page, under that conversation. */
+export interface ScheduleConversationNode {
+  kind: "conversation";
+  channelId: string;
+  automations: SerializedAutomation[];
+  counts: ScheduleCounts;
+}
+
+/** What the tree needs of a page. */
+export interface TreePage {
+  pageId: string;
+  title: string;
+}
+
+export type ScheduleTreeNode = SchedulePageNode | ScheduleConversationNode;
+
+/**
+ * The Space's Automations on its page tree: only the pages that hold one, and
+ * the pages above them, in the tree's order (`childrenOf`: each parent's
+ * pages in sibling order, the top level under null). A page's Automations
+ * follow its sections from the top (`sectionOrder`: a read page's section
+ * ids). A page the reader cannot place sits at the top level. Automations
+ * kept in a conversation follow the pages, one node per conversation.
+ */
+export function scheduleTree(automations: readonly SerializedAutomation[],
+  childrenOf: ReadonlyMap<string | null, readonly TreePage[]>, sectionOrder: (pageId: string) => readonly string[],
+  executionEnabled: boolean | null): ScheduleTreeNode[] {
+  const byPage = new Map<string, SerializedAutomation[]>();
+  const byConversation = new Map<string, SerializedAutomation[]>();
+  for (const automation of automations) {
+    const [map, key] = automation.pageId ? [byPage, automation.pageId] : [byConversation, automation.channelId];
+    map.set(key, [...map.get(key) ?? [], automation]);
   }
-  return left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) || left.id.localeCompare(right.id);
+  const build = (page: TreePage | { pageId: string; title: null }): SchedulePageNode | null => {
+    const children = (childrenOf.get(page.pageId) ?? []).flatMap((child) => build(child) ?? []);
+    const own = bySection(byPage.get(page.pageId) ?? [], sectionOrder(page.pageId));
+    if (own.length === 0 && children.length === 0) return null;
+    const counts = countStates(own, executionEnabled);
+    for (const child of children) {
+      for (const state of SCHEDULE_STATES) counts[state] += child.counts[state];
+    }
+    return { kind: "page", pageId: page.pageId, title: page.title, automations: own, children, counts };
+  };
+  const known = new Set([...childrenOf.values()].flat().map((page) => page.pageId));
+  const roots = (childrenOf.get(null) ?? []).flatMap((page) => build(page) ?? []);
+  const unplaced = [...byPage.keys()].filter((pageId) => !known.has(pageId))
+    .flatMap((pageId) => build({ pageId, title: null }) ?? []);
+  const conversations = [...byConversation].map(([channelId, list]): ScheduleConversationNode =>
+    ({ kind: "conversation", channelId, automations: bySection(list, []), counts: countStates(list, executionEnabled) }));
+  return [...roots, ...unplaced, ...conversations];
+}
+
+/** Attention first: the order a person reads them in. */
+export const SCHEDULE_STATES: readonly ScheduleState[] = ["attention", "running", "paused"];
+
+function countStates(automations: readonly SerializedAutomation[], executionEnabled: boolean | null): ScheduleCounts {
+  const counts: ScheduleCounts = { attention: 0, running: 0, paused: 0 };
+  for (const automation of automations) counts[scheduleState(automation, executionEnabled)] += 1;
+  return counts;
+}
+
+/** In the order of the sections they keep, top first; then by name. */
+function bySection(automations: readonly SerializedAutomation[], sections: readonly string[]): SerializedAutomation[] {
+  const at = (automation: SerializedAutomation) => {
+    const index = automation.blockId === undefined ? -1 : sections.indexOf(automation.blockId);
+    return index < 0 ? sections.length : index;
+  };
+  return [...automations].sort((left, right) => at(left) - at(right) ||
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) || left.id.localeCompare(right.id));
 }
 
 function nextRunTime(automation: SerializedAutomation): number {
