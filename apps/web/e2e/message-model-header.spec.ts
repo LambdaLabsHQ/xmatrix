@@ -193,7 +193,7 @@ test("details rail shows live instance header labels instead of message snapshot
   const usageMeter = liveStatus.locator("[data-usage-meter-chip]", { hasText: "5h" });
   const usageFill = usageMeter.locator(".app-usage-meter-fill");
   await expect(usageMeter).toContainText("35%");
-  // The meter's track is the same chip material as the tags beside it.
+  // The meter is ink on the paper, the same as the tags beside it.
   const chipMaterial = (chip: Element) => {
     const style = getComputedStyle(chip);
     return { background: style.backgroundColor, edge: style.boxShadow };
@@ -223,13 +223,16 @@ test("details rail shows live instance header labels instead of message snapshot
     const chipRect = chip.getBoundingClientRect();
     const fillRect = fill.getBoundingClientRect();
     return {
-      chipHeight: chipRect.height,
+      chipBottom: chipRect.bottom,
       chipWidth: chipRect.width,
+      fillBottom: fillRect.bottom,
       fillHeight: fillRect.height,
       fillWidth: fillRect.width,
     };
   });
-  expect(usageGeometry.fillHeight).toBeGreaterThanOrEqual(usageGeometry.chipHeight - 1);
+  // The share used is a line under the words, not a wash behind them.
+  expect(usageGeometry.fillHeight).toBeLessThanOrEqual(3);
+  expect(Math.abs(usageGeometry.chipBottom - usageGeometry.fillBottom)).toBeLessThanOrEqual(1);
   expect(usageGeometry.fillWidth / usageGeometry.chipWidth).toBeCloseTo(0.35, 1);
   const screenshotPath = testInfo.outputPath("details-usage-meter-35-percent.png");
   await usageMeter.screenshot({ path: screenshotPath });

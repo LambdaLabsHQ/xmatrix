@@ -68,7 +68,6 @@ import {
   IMAGE_ATTACHMENT_TYPES,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
-  COUNT_CHIP_MATERIAL_CLASS,
 } from "./workspace-shell-constants";
 
 import {
@@ -156,7 +155,7 @@ export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
 import { AgentInstanceTagChips } from "./agent-instance-tag-chips";
 import { ListSkeleton, LoadingImage } from "./content-skeleton";
-import { BranchBadge } from "./status-tag";
+import { BranchBadge, INK_TAG_CLASS, UsageMeterLine } from "./status-tag";
 
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
@@ -1654,7 +1653,7 @@ export function ChannelDetails({
                           </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
-                          <span className={cn("app-detail-member-badge px-1.5 py-0.5 text-[11px] text-muted-foreground", COUNT_CHIP_MATERIAL_CLASS)}>
+                          <span className={cn("app-detail-member-badge py-0.5 text-[11px]", INK_TAG_CLASS)}>
                             {kindLabel}
                           </span>
                         </div>
@@ -1819,7 +1818,7 @@ export function ChannelDetails({
                             </span>
                             {!automation.capabilities.update && !automation.capabilities.pause && !automation.capabilities.resume &&
                               !automation.capabilities.delete && (
-                              <span className={cn("shrink-0 px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground", COUNT_CHIP_MATERIAL_CLASS)}>
+                              <span className={cn("shrink-0 py-0.5 text-[10px] font-bold", INK_TAG_CLASS)}>
                                 read only
                               </span>
                             )}
@@ -2102,9 +2101,9 @@ export function TagRow({
             key={tag.key}
             title={tag.title}
             className={cn(
-              "inline-flex items-center font-medium tabular-nums text-muted-foreground",
-              COUNT_CHIP_MATERIAL_CLASS,
-              compact ? "h-5 px-1.5 text-[10px] leading-none" : "h-6 px-2 text-[11px] leading-none"
+              "inline-flex items-center font-medium tabular-nums",
+              INK_TAG_CLASS,
+              compact ? "h-5 text-[10px] leading-none" : "h-6 text-[11px] leading-none"
             )}
           >
             {tag.label}
@@ -2157,12 +2156,6 @@ export function MeterTag({
         : displayPercent >= 70
           ? "yellow"
           : "green");
-  const textClass =
-    displayPercent === undefined
-      ? ""
-      : displayPercent >= 70
-        ? "text-white"
-        : "text-foreground/90";
   // Compact chips (Agents sidebar / status column): label + percent only.
   // Reset time stays in the tooltip so the pill does not feel cramped.
   // The verdict's note names the reset itself, so the plain reset steps aside.
@@ -2181,9 +2174,7 @@ export function MeterTag({
     tip.style.left = `${Math.max(8, Math.min(tipAnchor.left, maxLeft))}px`;
   }, [tipAnchor]);
 
-  // `inline-flex` in both sizes, like every `Tag`: the final glass override in
-  // globals.css skips `.inline-flex`, so a `flex` meter took a different fill
-  // from the chips beside it.
+  // Ink on the paper like every `Tag`; the meter is the line under its words.
   return (
     <span
       data-usage-meter-chip
@@ -2192,25 +2183,19 @@ export function MeterTag({
       onPointerLeave={() => setTipAnchor(null)}
       className={cn(
         "relative inline-flex shrink-0 items-center overflow-hidden font-medium",
-        COUNT_CHIP_MATERIAL_CLASS,
+        INK_TAG_CLASS,
         compact
-          ? "h-5 w-full px-2 text-[10px] leading-none"
-          : "h-6 gap-1.5 px-2 text-[11px] leading-none"
+          ? "h-5 w-full text-[10px] leading-none"
+          : "h-6 gap-1.5 text-[11px] leading-none"
       )}
     >
-      {displayPercent !== undefined ? (
-        <span
-          aria-hidden
-          className="app-usage-meter-fill pointer-events-none absolute inset-y-0 left-0"
-          data-tone={fillTone}
-          style={{ width: `${displayPercent}%` }}
-        />
+      {displayPercent !== undefined && fillTone ? (
+        <UsageMeterLine percent={displayPercent} tone={fillTone} track />
       ) : null}
       <span
         className={cn(
           "relative z-[1] w-full",
-          compact ? "flex items-center justify-between gap-2" : "inline-flex items-center gap-1.5",
-          textClass
+          compact ? "flex items-center justify-between gap-2" : "inline-flex items-center gap-1.5"
         )}
       >
         <span className="shrink-0">{label}</span>
