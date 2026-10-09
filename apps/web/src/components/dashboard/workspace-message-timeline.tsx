@@ -1350,6 +1350,8 @@ export const MessageRow = memo(function MessageRow({
   });
   const attachmentMediaMountedRef = useRef(true);
   const [rebornControlVisible, setRebornControlVisible] = useState(false);
+  // Reborn asks in place like the Instance controls: arm, then send.
+  const [rebornSenderArmed, setRebornSenderArmed] = useState(false);
   const [rebornToolbarPosition, setRebornToolbarPosition] = useState<CSSProperties>({ left: 0, top: 0 });
   const actionsRef = useRef<HTMLDivElement | null>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1755,6 +1757,7 @@ export const MessageRow = memo(function MessageRow({
   function hideRebornControl() {
     rebornHoveringRef.current = false;
     clearRebornHoverTimer();
+    setRebornSenderArmed(false);
     if (!reborningSender) {
       setRebornControlVisible(false);
     }
@@ -1921,22 +1924,28 @@ export const MessageRow = memo(function MessageRow({
             >
               <button
                 type="button"
-                aria-label={`Reborn ${message.author}`}
+                aria-label={rebornSenderArmed ? `Confirm reborn ${message.author}` : `Reborn ${message.author}`}
                 disabled={reborningSender || !isJoined}
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
+                  if (!rebornSenderArmed) {
+                    setRebornSenderArmed(true);
+                    return;
+                  }
+                  setRebornSenderArmed(false);
                   onRebornSender(message);
                 }}
                 className="app-agent-work-action"
                 data-action="reborn"
+                data-armed={rebornSenderArmed || undefined}
               >
                 {reborningSender ? (
                   <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
                 ) : (
                   <RefreshCw className="size-3.5" aria-hidden="true" />
                 )}
-                <span>Reborn</span>
+                <span>{rebornSenderArmed ? "Confirm" : "Reborn"}</span>
               </button>
             </div>
           </div>
@@ -2453,6 +2462,7 @@ export const MessageRow = memo(function MessageRow({
                     key: "reborn",
                     icon: RefreshCw,
                     label: reborningSender ? "Reborning…" : "Reborn",
+                    confirm: true,
                     onSelect: () => {
                       setActionsOpen(false);
                       onRebornSender(message);
@@ -2462,7 +2472,10 @@ export const MessageRow = memo(function MessageRow({
               ...(canEditMessage && !editing
                 ? [
                     { key: "edit", icon: Pencil, label: "Edit", onSelect: requestEdit },
-                    { key: "recall", icon: Trash2, label: "Recall", destructive: true, onSelect: requestRecall },
+                    { key: "recall", icon: Trash2, label: "Recall", destructive: true, confirm: true, onSelect: () => {
+                      setActionsOpen(false);
+                      onRecall(message);
+                    } },
                   ]
                 : []),
             ]}
@@ -3131,8 +3144,10 @@ export function AgentWorkAvatar({
   const [actionToolbarPosition, setActionToolbarPosition] = useState<CSSProperties>({ left: 0, top: 0 });
   const [handoffPickerOpen, setHandoffPickerOpen] = useState(false);
   const handoffPickerToggledRef = useRef(false);
-  // Stop asks in place: the first press arms the button, the second sends.
-  const [stopArmed, setStopArmed] = useState(false);
+  // Reborn, Handoff and Stop ask in place: the first press arms the button,
+  // the second sends. A handoff arms the successor row that was pressed.
+  const [armedAction, setArmedAction] = useState<string | null>(null);
+  const stopArmed = armedAction === "stop";
   const stopArmedByGestureRef = useRef(false);
   const displayStatus = agentWorkDisplayStatus(item);
   const waiting = displayStatus === "waiting" ? item.instance.runtimeState?.waiting : undefined;
@@ -3183,16 +3198,16 @@ export function AgentWorkAvatar({
     // The gesture opens the controls with Stop armed; pressing it there stops.
     stopArmedByGestureRef.current = true;
     setHandoffPickerOpen(false);
-    setStopArmed(true);
+    setArmedAction("stop");
   }
 
-  function pressStop() {
-    if (!stopArmed) {
-      setStopArmed(true);
+  function pressArmed(action: string, send: () => void) {
+    if (armedAction !== action) {
+      setArmedAction(action);
       return;
     }
-    setStopArmed(false);
-    onStop(item.agentId, item.instance, item.agentLabel);
+    setArmedAction(null);
+    send();
   }
 
   function startLongPress() {
@@ -3405,12 +3420,12 @@ export function AgentWorkAvatar({
       onPointerLeave={(event) => {
         if (event.pointerType !== "mouse") return;
         setHandoffPickerOpen(false);
-        setStopArmed(false);
+        setArmedAction(null);
       }}
       onBlur={(event) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
         setHandoffPickerOpen(false);
-        setStopArmed(false);
+        setArmedAction(null);
       }}
     >
       {island ? (
@@ -3477,6 +3492,7 @@ export function AgentWorkAvatar({
                   event.preventDefault();
                   event.stopPropagation();
                   handoffPickerToggledRef.current = true;
+                  setArmedAction(null);
                   setHandoffPickerOpen(false);
                 }}
                 className="app-agent-work-action"
@@ -3489,29 +3505,34 @@ export function AgentWorkAvatar({
             {/* One row per successor, so five or fifty stay one column;
                 the list scrolls inside the toolbar past a few rows. */}
             <div className="app-agent-work-picker-list" role="group" aria-label={`Hand off ${item.instance.label} to`}>
-              {handoffSuccessors.map((successor) => (
-                <button
-                  key={successor}
-                  type="button"
-                  aria-label={successor === "auto"
-                    ? `Hand off ${item.instance.label} to the best available agent`
-                    : `Hand off ${item.instance.label} to a new @${successor}`}
-                  disabled={rebornDisabled}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setHandoffPickerOpen(false);
-                    onHandoff?.(item.agentId, item.instance, item.agentLabel, successor);
-                  }}
-                  className="app-agent-work-action"
-                  data-action="handoff-successor"
-                >
-                  <span>{successor === "auto" ? "Auto" : `@${successor}`}</span>
-                  {successor === "auto" ? (
-                    <span className="app-agent-work-picker-hint">most headroom</span>
-                  ) : null}
-                </button>
-              ))}
+              {handoffSuccessors.map((successor) => {
+                const armed = armedAction === `handoff:${successor}`;
+                const target = successor === "auto" ? "the best available agent" : `a new @${successor}`;
+                return (
+                  <button
+                    key={successor}
+                    type="button"
+                    aria-label={`${armed ? "Confirm hand off" : "Hand off"} ${item.instance.label} to ${target}`}
+                    disabled={rebornDisabled}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      pressArmed(`handoff:${successor}`, () => {
+                        setHandoffPickerOpen(false);
+                        onHandoff?.(item.agentId, item.instance, item.agentLabel, successor);
+                      });
+                    }}
+                    className="app-agent-work-action"
+                    data-action="handoff-successor"
+                    data-armed={armed || undefined}
+                  >
+                    <span>{armed ? "Confirm" : successor === "auto" ? "Auto" : `@${successor}`}</span>
+                    {successor === "auto" && !armed ? (
+                      <span className="app-agent-work-picker-hint">most headroom</span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
           </>
         ) : <div className="app-agent-work-action-row">
@@ -3519,22 +3540,23 @@ export function AgentWorkAvatar({
         {canReborn ? (
           <button
             type="button"
-            aria-label={`Reborn ${item.instance.label}`}
+            aria-label={armedAction === "reborn" ? `Confirm reborn ${item.instance.label}` : `Reborn ${item.instance.label}`}
             disabled={rebornDisabled}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onReborn(item.agentId, item.instance, item.agentLabel);
+              pressArmed("reborn", () => onReborn(item.agentId, item.instance, item.agentLabel));
             }}
             className="app-agent-work-action"
             data-action="reborn"
+            data-armed={armedAction === "reborn" || undefined}
           >
             {reborning ? (
               <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <RefreshCw className="size-3.5" aria-hidden="true" />
             )}
-            <span>Reborn</span>
+            <span>{armedAction === "reborn" ? "Confirm" : "Reborn"}</span>
           </button>
         ) : null}
         {canHandoff ? (
@@ -3546,7 +3568,7 @@ export function AgentWorkAvatar({
               event.preventDefault();
               event.stopPropagation();
               handoffPickerToggledRef.current = true;
-              setStopArmed(false);
+              setArmedAction(null);
               setHandoffPickerOpen(true);
             }}
             className="app-agent-work-action"
@@ -3567,7 +3589,7 @@ export function AgentWorkAvatar({
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            pressStop();
+            pressArmed("stop", () => onStop(item.agentId, item.instance, item.agentLabel));
           }}
           className="app-agent-work-action"
           data-action="stop"

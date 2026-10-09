@@ -193,6 +193,25 @@ test("Stop asks in place and posts the card's address on the second press", asyn
     .toEqual([expect.stringMatching(/^@codex:1:stop$/iu)]);
 });
 
+test("Reborn asks in place and posts the reborn mention on the second press", async ({ page }) => {
+  await openActiveAgentWorkspace(page);
+  const { toolbar } = await hoverCodexControlsWithSend(page, "reborn-send");
+  await toolbar.getByRole("button", { name: "Reborn codex:1" }).click();
+
+  const confirm = toolbar.getByRole("button", { name: "Confirm reborn codex:1" });
+  await expect(confirm).toHaveText("Confirm");
+  expect(await fixtureRequestBodies(page, "reborn-send")).toEqual([]);
+
+  // Arming Stop disarms Reborn: one armed control at a time.
+  await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
+  await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toHaveText("Reborn");
+
+  await toolbar.getByRole("button", { name: "Reborn codex:1" }).click();
+  await confirm.click();
+  await expect.poll(async () => (await fixtureRequestBodies(page, "reborn-send")).map((body) => body.body))
+    .toEqual([expect.stringMatching(/^@codex:1:reborn$/iu)]);
+});
+
 /** Records Channel sends under `key` and opens codex:1's controls. */
 async function hoverCodexControlsWithSend(page: Page, key: string) {
   await fixtureJson(page, key, new RegExp(`/api/xmatrix/channels/${ACTIVE_AGENT_CHANNEL.id}/messages$`, "u"),
@@ -230,6 +249,11 @@ test("Handoff picks a successor and posts the handoff mention", async ({ page })
 
   await toolbar.getByRole("button", { name: "Hand off codex:1" }).click();
   await toolbar.getByRole("button", { name: "Hand off codex:1 to a new @claude" }).click();
+  // The successor asks in place like Stop before anything is sent.
+  const confirm = toolbar.getByRole("button", { name: "Confirm hand off codex:1 to a new @claude" });
+  await expect(confirm).toHaveText("Confirm");
+  expect(await fixtureRequestBodies(page, "handoff-send")).toEqual([]);
+  await confirm.click();
   await expect.poll(async () => (await fixtureRequestBodies(page, "handoff-send")).map((body) => body.body))
     .toEqual(["@Codex:1:handoff:@claude"]);
 });
