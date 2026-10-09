@@ -215,6 +215,26 @@ export async function signInWithBetterAuthGoogle(callbackURL: string): Promise<v
   }
 }
 
+export async function verifyBetterAuthPassword(email: string, password: string): Promise<void> {
+  const response = await authClient.signIn.email({ email, password }).catch(() => {
+    throw new TransientAuthSessionError();
+  });
+  if (response.error) throwAuthClientError(response.error, "Couldn't sign in");
+}
+
+export async function requestAccountPassword(email: string): Promise<void> {
+  const response = await authClient.requestPasswordReset({
+    email, redirectTo: `${window.location.origin}/reset-password`,
+  }).catch(() => { throw new TransientAuthSessionError(); });
+  if (response.error) throwAuthClientError(response.error, "Couldn't send password email");
+}
+
+export async function resetAccountPassword(token: string, newPassword: string): Promise<void> {
+  const response = await authClient.resetPassword({ token, newPassword })
+    .catch(() => { throw new TransientAuthSessionError(); });
+  if (response.error) throwAuthClientError(response.error, "Couldn't set password");
+}
+
 /** The GitHub account this person linked, by GitHub's user id; null when none. */
 export async function linkedGitHubAccount(): Promise<{ accountId: string } | null> {
   const response = await authClient.listAccounts();
