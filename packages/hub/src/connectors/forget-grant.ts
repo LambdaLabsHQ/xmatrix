@@ -13,11 +13,12 @@ export async function forgetConnectionGrant(env: Env, input: { spaceId: string; 
   const fields = grantFieldsForgottenOnDisconnect(input.providerId);
   if (!fields) return;
   const repository = connectorCredentialRepository(env);
+  const stored = await repository.resolveForAdmin({ requestId: crypto.randomUUID(), ...input });
+  if (!stored) return;
   if (getAppConnectorProvider(input.providerId)?.oauth?.flow === "composio") {
-    const stored = await repository.resolve({ requestId: crypto.randomUUID(), spaceId: input.spaceId, providerId: input.providerId });
-    const accountId = stored?.values.composioAccountId;
+    const accountId = stored.values.composioAccountId;
     if (accountId) await deleteComposioAccount(oauthClient(env, input.providerId)?.clientSecret ?? "", accountId);
   }
   await repository.put({ requestId: crypto.randomUUID(), ...input, fields,
-    policy: { allowed: Object.keys(fields) }, at: new Date().toISOString() });
+    expectedGrant: stored, policy: { allowed: Object.keys(fields) }, at: new Date().toISOString() });
 }

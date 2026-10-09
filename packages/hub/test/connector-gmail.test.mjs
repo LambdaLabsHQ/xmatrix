@@ -126,7 +126,8 @@ test("forgetting a Gmail grant deletes the Composio account before clearing the 
   const load = await compileCommonJsSourceModule(new URL("../src/connectors/forget-grant.ts", import.meta.url));
   const effects = [];
   const repository = {
-    resolve: async () => ({ values: { composioAccountId: "ca_mailbox1" } }),
+    resolveForAdmin: async () => ({ version: 1, connectionVersion: 2, connectionGeneration: "generation",
+      values: { composioAccountId: "ca_mailbox1" } }),
     put: async (input) => { effects.push(["put", input.providerId, input.fields]); },
   };
   const dependencies = {
