@@ -26,10 +26,11 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   google: { scope: "https://www.googleapis.com/auth/drive.file", name: "per-file" },
   googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
   googleadsense: { scope: "https://www.googleapis.com/auth/adsense.readonly", name: "AdSense" },
+  gcp: { scope: "https://www.googleapis.com/auth/cloud-platform", name: "Google Cloud" },
 };
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", gcp: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
@@ -274,6 +275,10 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     }
   }
   const afterNotionUnauthorized = providerId === "notion" && options.unauthorized === true;
+  if (providerId === "gcp" && values.oauthToken &&
+      (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
+    throw new ProviderRequestError(401, "Google Cloud OAuth requires a complete expiring grant; reconnect");
+  }
   if (providerId === "bitbucket" && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
     throw new ProviderRequestError(401, "Bitbucket OAuth requires a complete expiring grant; reconnect");
@@ -282,6 +287,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
       (!Number.isFinite(expiresAt) || expiresAt - now > REFRESH_MARGIN_MS))) return undefined;
   const client = oauthClient(env, providerId);
   if (!client) {
+    if (providerId === "gcp") throw new ProviderRequestError(503, "Google Cloud OAuth application is unavailable for refresh; reconnect");
     if (providerId === "bitbucket") throw new ProviderRequestError(503, "Bitbucket OAuth consumer is unavailable for refresh");
     if (providerId === "sentry") throw new ProviderRequestError(503, "Sentry user OAuth is unavailable for refresh; reconnect");
     return undefined;

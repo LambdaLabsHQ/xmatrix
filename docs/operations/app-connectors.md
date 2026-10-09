@@ -4,6 +4,10 @@ App connectors route app context into xMatrix channels through typed provider ma
 
 ## Current Providers
 
+- Google Cloud provides operations context and Monitoring incident routing.
+  Connection, IAM, commands and notification setup are documented in
+  [GCP connector](../connectors/gcp.md).
+
 - GitHub is available for repository-wide issue subscriptions and `subscribe`, `issue_to_channel`, and `issue_to_thread` issue/PR imports.
 - Webhook is available for any system that can POST JSON. A Space admin connects it in Apps and generates an ingress URL. A channel then runs `@webhook:subscribe:<source>`, and the sender posts to `<ingress URL>?source=<source>`.
 

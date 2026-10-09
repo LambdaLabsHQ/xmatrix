@@ -4,6 +4,10 @@ Status: proposed (2026-10-02). Owner: claude (Space channel "你怎么看 connec
 
 ## 1. Goal
 
+The Google Cloud operations provider is documented in
+[GCP connector](../connectors/gcp.md), including its separate OAuth grant,
+bounded reads, Monitoring authentication and native acceptance.
+
 Turn the GitHub-only App connector into a provider-neutral platform. Then use
 that platform to connect every provider we can reach without per-provider
 special cases in the Hub.

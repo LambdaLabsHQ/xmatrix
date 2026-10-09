@@ -17,6 +17,8 @@ import { SLACK_ACTIONS, verifySlack } from "./actions/slack";
 import { VERCEL_ACTIONS } from "./actions/vercel";
 import { CLOUDFLARE_ACTIONS, CLOUDFLARE_SUBSCRIPTIONS, verifyCloudflare } from "./cloudflare-api";
 import { receiveCloudflareDelivery } from "./cloudflare-events";
+import { GCP_ACTIONS, verifyGcp } from "./gcp-api";
+import { receiveGcpDelivery } from "./gcp-events";
 import { connectorCommands } from "./connector-commands";
 import { verifyFeishu } from "./feishu-api";
 import { receiveFeishuDelivery } from "./feishu-events";
@@ -53,6 +55,7 @@ const PROVIDERS: Record<string, {
   vercel: { receive: receiveVercelDelivery, actions: VERCEL_ACTIONS, verify: verifyVercel },
   cloudflare: { receive: receiveCloudflareDelivery, actions: CLOUDFLARE_ACTIONS, verify: verifyCloudflare,
     subscriptions: CLOUDFLARE_SUBSCRIPTIONS },
+  gcp: { receive: receiveGcpDelivery, actions: GCP_ACTIONS, verify: verifyGcp },
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },
   notion: { actions: NOTION_ACTIONS, verify: verifyNotion },
