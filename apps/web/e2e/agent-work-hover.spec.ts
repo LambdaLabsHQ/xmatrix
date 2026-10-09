@@ -194,6 +194,8 @@ test("Stop asks in place and posts the card's address on the second press", asyn
 });
 
 test("Reborn asks in place and posts the reborn mention on the second press", async ({ page }) => {
+  // Colours are read at once, so skip the 120ms tint transition.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await openActiveAgentWorkspace(page);
   const { toolbar } = await hoverCodexControlsWithSend(page, "reborn-send");
   await toolbar.getByRole("button", { name: "Reborn codex:1" }).click();
@@ -201,10 +203,17 @@ test("Reborn asks in place and posts the reborn mention on the second press", as
   const confirm = toolbar.getByRole("button", { name: "Confirm reborn codex:1" });
   await expect(confirm).toHaveText("Confirm");
   expect(await fixtureRequestBodies(page, "reborn-send")).toEqual([]);
+  // An armed Reborn wears Stop's armed colour, not its own hover tint.
+  const paint = (button: Locator) => button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return [style.color, style.backgroundColor];
+  });
+  const armedRebornPaint = await paint(confirm);
 
   // Arming Stop disarms Reborn: one armed control at a time.
   await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toHaveText("Reborn");
+  expect(await paint(toolbar.getByRole("button", { name: "Confirm stop codex:1" }))).toEqual(armedRebornPaint);
 
   await toolbar.getByRole("button", { name: "Reborn codex:1" }).click();
   await confirm.click();
