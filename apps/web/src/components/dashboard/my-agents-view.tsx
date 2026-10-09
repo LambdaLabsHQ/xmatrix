@@ -36,20 +36,16 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { AGENT_USAGE_REFRESH_MS, agentUsageGlance, agentUsageReadings } from "./agent-quota-usage";
+import { AgentListGroups, agentListGroups } from "./agent-list-groups";
+import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
 import { HarnessSignInSection } from "./harness-sign-in";
 import { IdentityAvatar } from "./identity-avatar";
-import { MachineGlyph } from "./machine-glyph";
-import { MachineLoadGlanceBars, MeterReadingList } from "./machine-load-panel";
-import { machineOs } from "./machine-os";
+import { MeterReadingList } from "./machine-load-panel";
 import {
   MY_AGENT_ACTION_LABEL,
   registrationActions,
-  registrationActivity,
-  registrationListed,
-  registrationRowTitle,
   registrationStatus,
   registrationSwitch,
   type MyAgentAction,
@@ -58,7 +54,7 @@ import { ConnectMachine } from "./space-agent-setup-card";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
-  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSplit,
+  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolSplit,
   ToolStateDot, useToolItem,
 } from "./tool-split";
 import { ErrorNotice } from "@/components/ui/error-notice";
@@ -136,18 +132,7 @@ export function MyAgentsView({
   };
   // Ticks with the catalog refresh, so ages and reset countdowns keep moving.
   const now = useNow(AGENT_USAGE_REFRESH_MS);
-  // Within a runtime, what is working comes first and what cannot work comes last.
-  const groups = (catalog.data?.capabilities ?? []).map((group) => ({
-    harness: group.harness,
-    rows: group.locations.filter(registrationListed).map((registration) => ({
-      registration,
-      harness: group.harness,
-      usage: agentUsageGlance(registration.live?.quota, now),
-      id: registrationTupleId(registration.key),
-      activity: registrationActivity(registration, { conversationTitle, now }),
-      ...registrationRowTitle(registration),
-    })).sort((left, right) => left.activity.rank - right.activity.rank || left.title.localeCompare(right.title)),
-  })).filter((group) => group.rows.length > 0);
+  const groups = agentListGroups(catalog.data, { conversationTitle, now });
   const rows = groups.flatMap((group) => group.rows);
   const chosen = rows.find((row) => row.id === item);
   // A desktop shows the list's first row beside it until another is chosen.
@@ -165,26 +150,10 @@ export function MyAgentsView({
         <ListSkeleton label="Loading agents" rows={4} className="px-4 md:px-5" />
       ) : rows.length === 0 ? (
         <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
-      ) : groups.map((group) => (
-        <ToolListGroup key={group.harness} title={group.harness} count={group.rows.length} identity
-          icon={<IdentityAvatar kind="agent" label={group.harness}
-            imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(group.harness))}
-            initials={group.harness.slice(0, 2)} size="sm" className="shrink-0" />}>
-          {group.rows.map((row) => (
-            <ToolListRow key={row.id} testId="agent-row" state={row.activity.state}
-              selected={row.id === item}
-              shownBeside={!item && shown?.id === row.id}
-              onSelect={() => { select(row.id); setEditingId(null); }}
-              leading={<span className="app-tool-state-icon" data-state={row.activity.state} aria-hidden="true">
-                <MachineGlyph os={machineOs(row.registration.live?.machine.platform)} className="size-4" /></span>}
-              trailing={<MachineLoadGlanceBars glance={row.usage}
-                testId="agent-usage-glance" label={row.usage.map((reading) => reading.detail).join(", ")} />}
-              title={row.title}
-              end={row.registration.key.ownerUserId === currentUserId ? undefined : row.registration.ownerName}
-              subtitle={row.machineInLine ? `${row.registration.machineName} · ${row.activity.line}` : row.activity.line} />
-          ))}
-        </ToolListGroup>
-      ))}
+      ) : (
+        <AgentListGroups groups={groups} selectedId={item} shownId={shown?.id} currentUserId={currentUserId}
+          onSelect={(id) => { select(id); setEditingId(null); }} />
+      )}
       {ready && (newCandidates.length > 0 || fleet.daemons.isError) && <ToolListGroup title="Installed on your machines" count={newCandidates.length}>
         <div className="px-4 md:px-5"><InstalledHarnessSwitchList fleet={fleet} onlyNew /></div>
       </ToolListGroup>}

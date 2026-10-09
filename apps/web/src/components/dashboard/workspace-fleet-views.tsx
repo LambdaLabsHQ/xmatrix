@@ -49,10 +49,12 @@ import {
 } from "./workspace-shell-recovered";
 
 import { daemonPresenceLabel } from "./machine-daemon-presence";
-import { MachineLoadGlance, MachineLoadPanel } from "./machine-load-panel";
+import { MachineLoadPanel } from "./machine-load-panel";
 import { MachineHarnessPanel } from "./machine-harness-panel";
 import { MachineWorktreesPanel } from "./machine-worktrees-panel";
-import { MachineGlyph } from "./machine-glyph";
+import {
+  MachineListRow, machinePlatform, machineStateLine, machineUnresponsive, machinesWithHostsFirst,
+} from "./machine-list-row";
 import { machineOs } from "./machine-os";
 import {
   ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListRow, ToolSplit,
@@ -740,14 +742,6 @@ export function LocalMacView({
   );
 }
 
-/** A WSL Machine is listed right after its Windows host. */
-function machinesWithHostsFirst(machines: MachineSummary[]): MachineSummary[] {
-  const hosts = new Set(machines.map((machine) => machine.machineId).filter(Boolean));
-  const hosted = (machine: MachineSummary) => Boolean(machine.parentMachineId && hosts.has(machine.parentMachineId));
-  return machines.filter((machine) => !hosted(machine)).flatMap((machine) => [machine,
-    ...machines.filter((child) => hosted(child) && child.parentMachineId === machine.machineId)]);
-}
-
 /**
  * The Space's Machines, read like every rail destination: the list names
  * each host (its WSL guests under it) and the paper shows the one chosen.
@@ -810,11 +804,6 @@ export function MachinesView({
   const nameOf = (machine: MachineSummary) => (machine.machineId && renamed[machine.machineId]) || machine.name;
   const hostOf = (machine: MachineSummary) => machines.find((host) =>
     host.machineId && host.machineId === machine.parentMachineId);
-  // The daemon reports its OS in metadata; a Machine without one shows the generic mark.
-  const platformOf = (machine: MachineSummary) => {
-    const platform = machine.daemon?.metadata?.platform;
-    return typeof platform === "string" ? platform : undefined;
-  };
   const saveName = async () => {
     if (skipSave.current) {
       skipSave.current = false;
@@ -896,14 +885,6 @@ export function MachinesView({
   const thisOs = thisMachine ? machineOs(thisMachine.platform) : "unknown";
   const thisLabel = thisOs === "macos" ? "This Mac" : thisOs === "windows" ? "This PC" : "This Machine";
   const thisTag = <span className="font-semibold text-foreground" data-testid="this-machine-tag">{thisLabel}</span>;
-  // What a Machine is doing now: Agents running on it while online, when it was last seen once offline.
-  // "Online" follows connection events only; work it left unanswered says it is not actually responding.
-  const unresponsive = (machine: MachineSummary) => machine.status === "online" && Boolean(machine.daemon?.unansweredSince);
-  const stateOf = (machine: MachineSummary) => machine.status === "online"
-    ? unresponsive(machine) ? "Not responding"
-      : machine.activeRuns === undefined ? null
-      : machine.activeRuns === 0 ? "Idle" : `${machine.activeRuns} ${machine.activeRuns === 1 ? "agent" : "agents"} running`
-    : machine.lastSeenAt ? `Offline · seen ${relativeTime(machine.lastSeenAt)}` : "Offline";
 
   const list = (
     <ToolList title="Machines">
@@ -922,22 +903,17 @@ export function MachinesView({
           const name = machine ? nameOf(machine) : thisMachine!.name;
           const host = machine ? hostOf(machine) : undefined;
           const online = machine ? machine.status === "online" : thisMachine!.online;
-          const stalled = Boolean(machine && unresponsive(machine));
           const facts = [host ? `WSL on ${nameOf(host)}` : null,
-            machine ? stateOf(machine) : thisMachine!.summary,
+            machine ? machineStateLine(machine) : thisMachine!.summary,
             machine && !autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
           return (
-            <ToolListRow key={machine?.id ?? THIS_MACHINE_ITEM} testId="machine-row"
+            <MachineListRow key={machine?.id ?? THIS_MACHINE_ITEM} machine={machine} name={name}
+              platform={local ? thisMachine!.platform : machinePlatform(machine!)} online={online} hosted={Boolean(host)}
               selected={local ? showingThis : machine!.id === chosen?.id}
               shownBeside={local ? showThisBeside && !item
                 : !chosen && !showingThis && !showThisBeside && machine!.id === shown?.id}
               onSelect={() => select(local ? THIS_MACHINE_ITEM : machine!.id)}
-              leading={<span className={cn("app-tool-state-icon", host && "pl-4")}
-                data-state={stalled ? "attention" : online ? "running" : "offline"}
-                aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
-                <MachineGlyph os={machineOs(local ? thisMachine!.platform : platformOf(machine!))} /></span>}
-              trailing={machine && <MachineLoadGlance machine={machine} now={now} />}
-              title={name}
+              now={now}
               subtitle={local ? <>{thisTag}{facts ? <> · {facts}</> : null}</> : facts} />
           );
         })}
@@ -956,7 +932,7 @@ export function MachinesView({
     const unnamed = name === "Unnamed machine";
     const renaming = Boolean(machine && editing && machine.machineId && editing.machineId === machine.machineId);
     const online = machine ? machine.status === "online" : thisMachine!.online;
-    const stalled = Boolean(machine && unresponsive(machine));
+    const stalled = Boolean(machine && machineUnresponsive(machine));
     const titleControl = "flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
     detail = (
       <ToolDetail
