@@ -112,7 +112,7 @@ Step 4b: Manage a page's Automations (docs/design/pages-live-document.md §6).
 - `edit`, `pause`, `resume` and `delete` take the Automation id and `--version <n>`. Editing an Automation someone else authored replaces it with one authored by your owner and points the page's reference at it; it never runs someone else's text under another name.
 - Deleting its reference from the page pauses it (`detached`); `xmatrix page automation attach <page-id> <id> --block <slug>` puts the reference back, which resumes it or moves it to another section.
 - `--every` controls the cadence. A finished occurrence leaves its Agent available for follow-up messages; any Agent can stop (`@<agent>:<N>:stop`) or restart (`@<agent>:<N>:reborn`) an Instance, its own included.
-- Each occurrence's conversation is new, so start its Agent with a harness mention such as `@auto`; an exact `@<agent>:<channel-instance-number>` finds no live instance there. Without an Agent mention an occurrence only posts its text in its conversation; it does not choose or start an Agent.
+- Each occurrence's conversation is new, so start its Agent with a harness mention such as `@auto`; an exact `@<agent>:<channel-instance-number>` finds no live instance there; other live Agents receive context only. Without an Agent mention an occurrence only posts its text in its conversation; it does not choose or start an Agent.
 
 - Secret values are never printed in chat; Space admins decide how Agents get each secret.
 - Space admins manage a Space's secrets from Settings -> Secrets or `xmatrix secret list|set|delete --space <space-id>`.

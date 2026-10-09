@@ -2362,7 +2362,8 @@ pub enum PageAutomationCommand {
     /// Use `@auto repo:<owner/repo>` to address an Agent each time.
     /// `--every` controls cadence. Use `pwd:"<registered-path>"` instead of
     /// `repo:` for a registered directory. Each occurrence's conversation is new,
-    /// so an exact `@agent:N` finds no live instance there.
+    /// so an exact `@agent:N` finds no live instance there;
+    /// other live Agents receive context.
     /// Without an Agent mention, it only posts its text.
     Create {
         /// Page ID
