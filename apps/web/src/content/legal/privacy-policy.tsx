@@ -375,7 +375,7 @@ export function PrivacyPolicyContent() {
           You can start account deletion in Settings → Account or at the{' '}
           <Link href="/account/delete">account deletion page</Link>. A recent sign-in, your account
           email, and explicit confirmation are required. Close owned Spaces, leave other Spaces,
-          resolve subscriptions, and stop active agent work before proceeding. Account deletion does
+          and stop active agent work before proceeding. You can delete your account before a subscription expires; cancel provider renewal separately to stop future charges. Account deletion does
           not cancel Apple or Stripe subscriptions or move them to another Space.
         </p>
         <p>

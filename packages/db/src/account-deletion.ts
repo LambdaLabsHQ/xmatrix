@@ -47,10 +47,6 @@ export async function accountDeletionBlockers(tx: DatabaseTransaction, userId: s
       SELECT 'membership',s.space_id,s.name FROM data.space_members m
         JOIN data.spaces s ON s.space_id=m.space_id WHERE m.user_id=$1 AND m.role<>'owner'
       UNION ALL
-      SELECT 'subscription',b.space_id,s.name FROM data.space_billing_subscriptions b
-        LEFT JOIN data.spaces s ON s.space_id=b.space_id
-        WHERE b.billing_owner_user_id=$1 AND b.status NOT IN ('canceled','incomplete_expired')
-      UNION ALL
       SELECT 'active_execution',NULL,NULL FROM data.runs r
         WHERE r.owner_user_id=$1 AND r.status IN ('starting','running')
       UNION ALL
