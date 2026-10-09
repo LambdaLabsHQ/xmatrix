@@ -34,16 +34,18 @@ export function agentListGroups(catalog: { capabilities: AgentCapabilitySummary[
 }
 
 /** Agents as the Agents list shows them: each runtime as a heading, one row per location under it. */
-export function AgentListGroups({ groups, selectedId, shownId, currentUserId, onSelect }: {
+export function AgentListGroups({ groups, selectedId, shownId, currentUserId, limit, onSelect }: {
   groups: AgentListGroup[];
   selectedId: string | null;
   /** The row shown on the paper beside the list without being chosen. */
   shownId?: string;
   currentUserId: string;
+  /** Rows each runtime shows before the rest are asked for (see ToolListGroup). */
+  limit?: number;
   onSelect: (id: string) => void;
 }) {
   return groups.map((group) => (
-    <ToolListGroup key={group.harness} title={group.harness} count={group.rows.length} identity
+    <ToolListGroup key={group.harness} title={group.harness} count={group.rows.length} identity limit={limit}
       icon={<IdentityAvatar kind="agent" label={group.harness}
         imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(group.harness))}
         initials={group.harness.slice(0, 2)} size="sm" className="shrink-0" />}>

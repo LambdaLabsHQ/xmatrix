@@ -2419,6 +2419,7 @@ export function ToolSurface({
         onOpenMachine={(machineId) => onChangeView("machines", machineId)}
         onOpenMachines={() => onChangeView("machines")}
         onOpenSchedule={(automationId) => onChangeView("automation", automationId)}
+        onOpenSchedules={() => onChangeView("automation")}
       />
     );
   }

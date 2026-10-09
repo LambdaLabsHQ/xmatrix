@@ -1,9 +1,11 @@
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, fixtureJson, openWorkspaceWithStubs } from "./workspace-fixtures";
 
-/* Status is the Space at work: how many agents are working and what each
-   runtime does, then the Agents, Machines and Schedules lists one after
-   another, a line per row, each row opening in its own destination. */
+/* Status is the Space at work. The paper is the overview: how many agents are
+   working, what each runtime does, every machine with who works on it, and
+   what runs next. The list is the Agents, Machines and Schedules lists one
+   after another, each folded to its first rows, each row opening in its own
+   destination. */
 
 const recent = () => new Date().toISOString();
 const machines = [
@@ -86,11 +88,17 @@ test.describe("on a phone", () => {
     await expect(runtimes).toHaveCount(4);
     await expect(runtimes.first()).toHaveAccessibleName(/^codex: 6 working/u);
 
-    // Machines as the Machines list orders them, each saying what it does.
-    const rows = page.getByTestId("machine-row").filter({ visible: true });
+    // Machines: busiest first, offline last; a row names at most three runtimes and counts the rest.
+    const rows = page.getByTestId("status-machine-row").filter({ visible: true });
     await expect(rows).toHaveCount(4);
     await expect(rows.nth(0)).toContainText("busy-box");
+    await expect(rows.nth(0)).toContainText("7 working");
+    await expect(rows.nth(1)).toContainText("+1");
+    await expect(rows.nth(2)).toContainText("Idle");
     await expect(rows.nth(3)).toContainText("Offline");
+
+    // What runs next, soonest first.
+    await expect(page.getByTestId("status-schedule-row").filter({ visible: true }).first()).toContainText("Nightly sync");
 
     await rows.nth(0).tap();
     await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?item=/u);
@@ -102,40 +110,38 @@ test("the desktop rail opens Status, where each machine row shows its load", asy
   await page.setViewportSize({ width: 1400, height: 900 });
   await openStatus(page);
   await expect(page.locator(".app-rail").getByRole("button", { name: "Status", exact: true })).toBeVisible();
-  const busy = page.getByTestId("machine-row").filter({ visible: true, hasText: "busy-box" });
+  const busy = page.getByTestId("status-machine-row").filter({ visible: true, hasText: "busy-box" });
   await expect(busy.getByTestId("machine-load-glance")).toBeVisible();
   await page.getByRole("button", { name: "All agents" }).click();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/agents$/u);
 });
 
-test("on a desktop Status lists agents, machines and schedules a line each, opening each in its destination", async ({ page }) => {
+test("on a desktop Status lists agents, machines and schedules folded to one screen", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await openStatus(page);
   // Its own list takes the conversation list's place.
   await expect(page.locator(".app-sidebar")).toBeHidden();
   const list = page.getByRole("navigation", { name: "Status list" });
   await expect(list.getByRole("heading", { name: "Status", level: 1 })).toBeVisible();
-  const agents = list.getByTestId("agent-row");
-  await expect(agents).toHaveCount(registrations.length);
-  await expect(list.getByTestId("machine-row")).toHaveCount(machines.length);
-  const schedules = list.getByTestId("schedule-row");
-  await expect(schedules.first()).toContainText("Nightly sync");
 
-  // A line per row, so the whole Space fits on one screen.
-  for (const row of [agents.first(), list.getByTestId("machine-row").first(), schedules.first()]) {
-    expect((await row.boundingBox())!.height).toBeLessThan(40);
-  }
-  const lastRow = (await schedules.last().boundingBox())!;
-  expect(lastRow.y + lastRow.height).toBeLessThanOrEqual(900);
+  // Each runtime is folded to its heading; opening it lists its machines.
+  await expect(list.getByTestId("agent-row")).toHaveCount(0);
+  await list.getByRole("button", { name: /^codex/u }).click();
+  await expect(list.getByTestId("agent-row")).toHaveCount(3);
 
-  // Nothing is chosen here: the overview stays beside the list.
+  // Machines show their first rows and the rest on request.
+  const machinesGroup = list.getByRole("region", { name: "Machines" });
+  await expect(machinesGroup.getByTestId("machine-row")).toHaveCount(3);
+  await machinesGroup.getByTestId("tool-list-more").click();
+  await expect(machinesGroup.getByTestId("machine-row")).toHaveCount(machines.length);
+
+  await expect(list.getByTestId("schedule-row").first()).toContainText("Nightly sync");
+
+  // Nothing chosen here: the overview stays beside the list.
   await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveText("11");
+  await expect(page.getByTestId("status-machine-row").filter({ visible: true })).toHaveCount(machines.length);
 
-  await schedules.first().click();
+  await list.getByTestId("schedule-row").first().click();
   await expect(page).toHaveURL(/\?item=soon$/u);
   await expect(page.locator(".app-tool-detail:visible").getByRole("heading", { level: 2, name: "Nightly sync" })).toBeVisible();
-
-  await page.goBack();
-  await list.getByTestId("agent-row").first().click();
-  await expect(page).toHaveURL(/\/agents\?item=/u);
 });
