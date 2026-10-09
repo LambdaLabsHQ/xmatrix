@@ -5,6 +5,8 @@ import { GMAIL_ACTIONS as ACTIONS, verifyGmail } from "../src/connectors/actions
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
+import { grantFieldsForgottenOnDisconnect } from "../src/connectors/oauth.ts";
+import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { verifyGitHubAppState } from "../src/index-shared.ts";
 
@@ -118,4 +120,29 @@ test("Disconnect deletes the Composio account, treating one already gone as dele
   await fetched([{ status: 500, body: {} }], () => assert.rejects(deleteComposioAccount("composio-project-key", "ca_mailbox1")));
   const skipped = await fetched([], () => deleteComposioAccount("composio-project-key", "../x"));
   assert.deepEqual(skipped.calls, []);
+});
+
+test("forgetting a Gmail grant deletes the Composio account before clearing the stored id", async () => {
+  const load = await compileCommonJsSourceModule(new URL("../src/connectors/forget-grant.ts", import.meta.url));
+  const effects = [];
+  const repository = {
+    resolve: async () => ({ values: { composioAccountId: "ca_mailbox1" } }),
+    put: async (input) => { effects.push(["put", input.providerId, input.fields]); },
+  };
+  const dependencies = {
+    "../app-connectors": { getAppConnectorProvider },
+    "./composio": { deleteComposioAccount: async (key, id) => { effects.push(["delete", key, id]); } },
+    "./credentials": { connectorCredentialRepository: () => repository },
+    "./oauth": { grantFieldsForgottenOnDisconnect, oauthClient },
+  };
+  const { forgetConnectionGrant } = load(name => { assert.ok(dependencies[name], name); return dependencies[name]; }, { crypto, Date, Object });
+  const input = { spaceId: "space-1", actorUserId: "admin" };
+  await forgetConnectionGrant(composio, { ...input, providerId: "gmail" });
+  await forgetConnectionGrant(composio, { ...input, providerId: "gcp" });
+  await forgetConnectionGrant(composio, { ...input, providerId: "notion" });
+  assert.deepEqual(effects, [
+    ["delete", "composio-project-key", "ca_mailbox1"],
+    ["put", "gmail", { composioAccountId: null }],
+    ["put", "gcp", { oauthToken: null, oauthRefreshToken: null, oauthExpiresAt: null }],
+  ]);
 });

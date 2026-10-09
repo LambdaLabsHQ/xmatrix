@@ -18,7 +18,7 @@ import { fireGitHubAutomationTriggers } from "./automation-triggers";
 import { checkPullRequestClaims } from "./github-claim-check";
 import { MAX_INVITE_EMAILS_PER_REQUEST, InviteEmailRequest, AdminInviteEmailRequest, normalizeInviteEmails, signGitHubAppState, verifyGitHubAppState, sendSpaceInviteEmails, requireAuth, requireHumanAuth, requireAdmin, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
-import { forgetConnectionGrant } from "./connectors/connection-credentials";
+import { forgetConnectionGrant } from "./connectors/forget-grant";
 import { grantFieldsForgottenOnDisconnect } from "./connectors/oauth";
 
 /* The emails and role an invite-email request asks for, or why it is refused. */

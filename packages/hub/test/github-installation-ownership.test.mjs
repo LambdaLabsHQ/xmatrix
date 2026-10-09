@@ -40,7 +40,7 @@ function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "c
         grant === "grant" && input.spaceId === "space-1" && input.userId === "admin" ? granted : undefined,
     },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
-    "./connectors/connection-credentials": { forgetConnectionGrant: async (_env, input) => { credentialPuts.push(input); } },
+    "./connectors/forget-grant": { forgetConnectionGrant: async (_env, input) => { credentialPuts.push(input); } },
     "./connectors/oauth": { grantFieldsForgottenOnDisconnect },
     "./index-shared": {
       verifyGitHubAppState: async (state) => state === "signed" ? statePayload : null,
