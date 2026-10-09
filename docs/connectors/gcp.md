@@ -169,7 +169,7 @@ is not a missing OAuth scope. Check or enable a supported API through Connector:
 IAM, and returns an operation receipt; use `read_api_status` until `ENABLED`.
 Use the numeric project number (returned by `list_projects` or the Google
 error consumer). Only App Optimize, Billing, BigQuery, Asset, Resource Manager, Run, Logging and
-Monitoring APIs are supported. It does not alter IAM bindings or create billable resources.
+Monitoring and API Keys APIs are supported. It does not alter IAM bindings or create billable resources.
 IAM denial requires the resource owner to grant the actual missing permission;
 a wider OAuth consent cannot override it.
 
@@ -238,11 +238,14 @@ input/output description. Resolve that exact ID through the connected provider:
 `read_sku` reads public SKU metadata through Cloud Billing v2beta, with no
 price or usage inference. `query_api_usage` requires a project ID and filters the monitored resource to
 that exact project, even when its metrics scope includes other projects. It uses the fixed Service Runtime
-request-count metric, daily ALIGN_SUM and cross-series REDUCE_SUM. API service
+request-count metric, ALIGN_SUM and cross-series REDUCE_SUM, daily by default. API service
 is limited to Gemini (`generativelanguage.googleapis.com`), Vertex AI
 (`aiplatform.googleapis.com`) or Cloud Run (`run.googleapis.com`); responseClass
-is all, 2xx, 4xx or 5xx. UTC timestamps must describe a completed interval of
-at most 31 days within the past 90 days. Results expose at most 30 daily
+is all, 2xx, 4xx or 5xx. Optional `groupBy` is `day` (default), `credential`
+or `credential_method`. Credential grouping sums over the selected interval,
+retaining only fixed credential/method labels; arbitrary grouping or filters
+are refused. UTC timestamps must describe a completed interval of
+at most 31 days within the past 90 days. Results expose at most 30
 points and a bounded pageToken continuation; empty or partial results do not
 prove zero requests or complete totals. These are API calls, not token usage
 or per-user attribution. Returned UTC intervals differ from Pacific billing
@@ -262,3 +265,46 @@ Cloud Billing/Monitoring API on that quota project before retrying.
 References: [public SKU metadata](https://docs.cloud.google.com/billing/docs/reference/pricing-api/rest/v2beta/skus/get),
 [quota project selection](https://docs.cloud.google.com/docs/quotas/set-quota-project),
 and [Monitoring aggregation](https://docs.cloud.google.com/monitoring/api/ref_v3/rest/v3/projects.timeSeries/list).
+
+## Caller attribution
+
+```text
+@gcp:query_api_usage:my-project {"from":"2026-09-01T00:00:00Z","to":"2026-10-01T00:00:00Z","groupBy":"credential_method"}
+@gcp:list_api_keys:123456789 {"showDeleted":true}
+@gcp:query_audit_activity:my-project {"from":"2026-09-01T00:00:00Z","to":"2026-10-01T00:00:00Z","service":"apikeys.googleapis.com"}
+```
+
+Credential-grouped Service Runtime counts identify recorded API key IDs or
+OAuth client IDs and, optionally, API methods. They do not identify people,
+programs, model names, tokens or per-key costs. Preserve returned UTC intervals
+and follow all bounded pageToken continuations before comparing their sum to
+an all-credential report. The same project filter prevents a shared metrics
+scope from including another project. Empty data is not proof of no use.
+
+`list_api_keys` requires the numeric project number and `apikeys.keys.list`.
+It calls only API Keys v2 ListKeys, never GetKeyString or LookupKey. The report
+includes exact-project key resource/UUID, mutable display name, creation/deletion
+timestamps, optional bound service account, API service restrictions and client
+restriction types. Secret key values, annotations, detailed client addresses
+and arbitrary metadata are omitted. `showDeleted` is false by default; Google's
+API retains deleted keys for only 30 days. Key metadata cannot establish a
+creation actor or who used a shared key. Enable `apikeys.googleapis.com` through
+the separate typed `enable_api` action if needed; no IAM, key or restriction
+mutation is exposed. These reads use the same OAuth identity and named quota project.
+
+`query_audit_activity` uses a fixed project, explicit completed UTC interval
+(up to 31 days within 400 days), newest-first bounded paging, the AuditLog payload
+type and exactly one allowed service: Gemini API or API Keys. It emits only
+principal email/subject, time, method, status and a syntactically valid key
+resource, omitting request/response bodies, key values, source IP and user agent.
+It accepts no caller-authored Logging filter. API-key CreateKey/UpdateKey actors
+are administrators, not necessarily inference callers. Data Access logs must
+have been enabled, retained and readable (`logging.privateLogEntries.list`);
+no returned entries do not prove no traffic. These reads do not enable audit
+logging, create sinks, grant IAM or reconstruct absent history.
+
+References: [consumed API credential labels](https://docs.cloud.google.com/monitoring/api/resources#tag_consumed_api),
+[Google's key-usage correlation example](https://codelabs.developers.google.com/api-key-management#4),
+[secret-free ListKeys](https://docs.cloud.google.com/api-keys/docs/reference/rest/v2/projects.locations.keys/list),
+[key metadata](https://docs.cloud.google.com/api-keys/docs/reference/rest/v2/projects.locations.keys),
+and [API Keys audit methods](https://docs.cloud.google.com/api-keys/docs/audit-logging).

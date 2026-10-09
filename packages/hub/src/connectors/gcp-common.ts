@@ -15,7 +15,7 @@ function googleError(payload: Record<string, unknown>): string | undefined {
   if (typeof metadata.service === "string" && /^[a-z0-9.-]+\.googleapis\.com$/u.test(metadata.service)) parts.push(`API=${metadata.service}`);
   if (typeof metadata.consumer === "string" && /^projects\/[0-9]{1,20}$/u.test(metadata.consumer)) parts.push(`consumer=${metadata.consumer}`);
   const permission = typeof error.message === "string" ? error.message.match(/(?:[a-z][a-zA-Z]+\.){2,4}[a-z][a-zA-Z]+/u)?.[0] : undefined;
-  if (permission && /^(appoptimize|cloudasset|bigquery|billing|serviceusage|resourcemanager|run|logging|monitoring)\./u.test(permission)) parts.push(`permission=${permission}`);
+  if (permission && /^(appoptimize|cloudasset|bigquery|billing|serviceusage|resourcemanager|run|logging|monitoring|apikeys)\./u.test(permission)) parts.push(`permission=${permission}`);
   if (!parts.length && typeof error.status === "string" && /^[A-Z_]{1,80}$/u.test(error.status)) parts.push(error.status);
   return parts.length ? parts.join("; ") : undefined;
 }
@@ -57,4 +57,13 @@ export function project(statement: ConnectorActionStatement) {
 
 export function projectOnly(statement: ConnectorActionStatement) {
   return statement.text.trim() ? "this action takes only a project ID or number" : project(statement);
+}
+
+export function optionsJson(statement: ConnectorActionStatement, keys: readonly string[], emptyAllowed = false): Record<string, unknown> | string {
+  if (statement.text.length > 3_000) return "options must be at most 3000 characters";
+  try {
+    const value: unknown = emptyAllowed && !statement.text.trim() ? {} : JSON.parse(statement.text);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return "options must be a JSON object";
+    return Object.keys(value).some(key => !keys.includes(key)) ? `options are ${keys.join(", ")}` : value as Record<string, unknown>;
+  } catch { return "options must be a JSON object"; }
 }
