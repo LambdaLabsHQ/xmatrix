@@ -61,7 +61,7 @@ test("Apple API credentials stay in the header, destinations are fixed, and fail
   let calls = 0;
   await assert.rejects(retrieveAppleSubscription(config, "100", "Production", async (url, init) => {
     calls++; assert.equal(url, "https://api.storekit.apple.com/inApps/v1/subscriptions/100");
-    assert.equal(init.redirect, "error"); assert.ok(init.signal);
+    assert.equal(init.redirect, "manual"); assert.ok(init.signal);
     const payload = JSON.parse(Buffer.from(init.headers.authorization.split(".")[1], "base64url").toString());
     assert.equal(payload.bid, "sh.xmatrix.app");
     return new Response("private sentinel", { status: 401 });
@@ -75,4 +75,15 @@ test("a verified Apple purchase never grants access to a retired identity", () =
   const verified = subscriptionFact(config, "Production", 1, transaction, renewal);
   assert.throws(() => appleBillingFact(verified, { spaceId: "space", ownerUserId: "owner", accountDeleted: true }),
     { code: "apple_purchase_account_deleted" });
+});
+
+ test("Apple redirects are rejected without following or exposing the destination", async () => {
+  let calls = 0;
+  await assert.rejects(retrieveAppleSubscription(config, "100", "Sandbox", async (url, init) => {
+    calls++;
+    assert.equal(url, "https://api.storekit-sandbox.apple.com/inApps/v1/subscriptions/100");
+    assert.equal(init.redirect, "manual");
+    return new Response("private sentinel", { status: 302, headers: { location: "https://untrusted.example/private" } });
+  }), (error) => error.code === "apple_request_failed" && !error.message.includes("private") && !error.retryable);
+  assert.equal(calls, 1);
 });

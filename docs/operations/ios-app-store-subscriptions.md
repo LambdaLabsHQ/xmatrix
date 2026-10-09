@@ -44,3 +44,5 @@ An Apple outage fails closed for new grants. Existing access lasts through the v
 ## Local runtime verification
 
 The repository's Wrangler 4.79.0 simulator cannot extract the Apple Root G3 EC public key (`id-ecPublicKey`). A successful bundle or Node unit test does not exercise this boundary. The same certificate verifies its self-signature in the current official Wrangler 4.149.0 runtime with the unchanged compatibility date. Use a current official runtime for certificate-chain integration checks; do not work around the old simulator by skipping signature or chain validation. Root self-signature verification alone is not proof of a completed StoreKit purchase.
+
+Apple server API requests use manual redirects, which Cloudflare Workers supports. Non-success responses, including redirects, fail verification without forwarding credentials or granting entitlement.
