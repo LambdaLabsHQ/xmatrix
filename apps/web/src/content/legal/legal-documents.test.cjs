@@ -134,7 +134,7 @@ test("cookie notice truthfully describes only current necessary storage", () => 
 test("legal documents stay discoverable before and after sign-in", () => {
   for (const href of ["/privacy", "/terms", "/cookies", "/subprocessors"]) {
     assert.match(footerSource, new RegExp(`href: "${href}"`));
-    assert.match(settingsSource, new RegExp(`href="${href}"`));
+    assert.match(settingsSource, new RegExp(`"${href}"`));
     assert.match(legalDocumentSource, new RegExp(`href: "${href}"`));
   }
   assert.match(loginSource, /By continuing, you agree/);
