@@ -1,6 +1,6 @@
-import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 // First, so that error reporting is open before anything else loads.
 import "./error-reporting";
+import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
 import { watchHarnessReleases } from "./harness-release-watch";
