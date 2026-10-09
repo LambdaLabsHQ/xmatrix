@@ -257,7 +257,52 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="cookies" title="10. Cookies, local storage, and device permissions">
+      <LegalSection id="google-user-data" title="10. Google user data">
+        <p>
+          If you sign in with Google, we receive your name, email address, and profile image to create
+          and secure your account. If a Space administrator connects a Google service as an app, xMatrix
+          requests only the access that app needs: Google Docs, Drive and Sheets access is limited to
+          files created with or explicitly opened in xMatrix; Search Console, AdSense, and Google Cloud
+          access lets authorized people and Agents in that Space read the sites, reports, projects,
+          costs, logs, metrics, and alerts they ask about, and make the changes they request.
+        </p>
+        <p>
+          We use Google user data only to provide those user-facing features: we retrieve it when a
+          person or Agent in the Space invokes an action, and deliver the result to the Channel, Page,
+          Automation, or Agent that asked. Results become Customer Data in that Space and are shown to
+          its authorized members and Agents. A Customer-selected Agent may pass them to the model
+          provider that Customer chose.
+        </p>
+        <p>
+          xMatrix&apos;s use and transfer of information received from Google APIs adheres to the{" "}
+          <a
+            className="font-medium text-foreground underline underline-offset-4"
+            href="https://developers.google.com/terms/api-services-user-data-policy"
+          >
+            Google API Services User Data Policy
+          </a>
+          , including the Limited Use requirements. We do not sell Google user data, use or transfer it
+          for advertising, use it to determine credit-worthiness or for lending, or use it to develop,
+          improve, or train generalized AI or machine-learning models. Our staff do not read it except
+          with your affirmative agreement for specific content, when necessary for security or to
+          comply with law, or when the data is aggregated and anonymized for internal operations.
+        </p>
+        <p>
+          Google access and refresh tokens are stored encrypted and are used only by the Hub for the
+          connected Space. Disconnecting a Google app in xMatrix deletes its stored tokens; you can
+          also revoke xMatrix at any time in your{" "}
+          <a
+            className="font-medium text-foreground underline underline-offset-4"
+            href="https://myaccount.google.com/permissions"
+          >
+            Google Account permissions
+          </a>
+          . Google data already delivered into a Space is retained and deleted as described in Sections
+          12 and 17, and you may ask us to delete it at the contact below.
+        </p>
+      </LegalSection>
+
+      <LegalSection id="cookies" title="11. Cookies, local storage, and device permissions">
         <p>
           xMatrix currently uses only security, authentication, preference, and functionality storage.
           It does not use advertising cookies, cross-site behavioral tracking, marketing attribution,
@@ -276,7 +321,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="retention" title="11. Retention and deletion">
+      <LegalSection id="retention" title="12. Retention and deletion">
         <p>
           We retain Customer Data according to the Customer&apos;s instructions, our agreement, actual
           product controls, and applicable law. We retain account, authentication, security, billing,
@@ -298,7 +343,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="security" title="12. Security">
+      <LegalSection id="security" title="13. Security">
         <p>
           We use risk-appropriate administrative, technical, and organizational measures, including
           authentication, Space/Channel/Run access controls, scoped short-lived Agent credentials,
@@ -322,7 +367,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="sensitive-data" title="13. Regulated and highly sensitive data">
+      <LegalSection id="sensitive-data" title="14. Regulated and highly sensitive data">
         <p>
           Unless we separately agree in writing and expressly provide the relevant compliance capability,
           do not use the Services to process protected health information subject to HIPAA, full payment
@@ -333,7 +378,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="international" title="14. International processing and transfers">
+      <LegalSection id="international" title="15. International processing and transfers">
         <p>
           MadeByRobot is based in the United States. We and our providers may process information in the
           United States and other countries, including countries with data-protection rules different
@@ -348,7 +393,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="rights" title="15. Your privacy rights and choices">
+      <LegalSection id="rights" title="16. Your privacy rights and choices">
         <p>
           Depending on where you live, you may have rights to access, correct, delete, or obtain a copy
           of personal information; restrict or object to processing; withdraw consent; opt out of certain
@@ -370,7 +415,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="account-deletion" title="16. Account and Space deletion">
+      <LegalSection id="account-deletion" title="17. Account and Space deletion">
         <p>
           You can start account deletion in Settings → Account or at the{' '}
           <Link href="/account/delete">account deletion page</Link>. A recent sign-in, your account
@@ -393,7 +438,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="children" title="17. Children">
+      <LegalSection id="children" title="18. Children">
         <p>
           The Services are not intended for anyone under 18, and we do not knowingly collect personal
           information from children. Contact us if you believe a child has provided personal information,
@@ -401,7 +446,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="changes" title="18. Changes to this Policy">
+      <LegalSection id="changes" title="19. Changes to this Policy">
         <p>
           We may update this Policy as the Services, law, or our practices change. We will publish a new
           version and effective date and preserve accessible version history. We will provide additional
@@ -410,7 +455,7 @@ export function PrivacyPolicyContent() {
         </p>
       </LegalSection>
 
-      <LegalSection id="contact" title="19. Contact and language">
+      <LegalSection id="contact" title="20. Contact and language">
         <p>
           Questions, complaints, and privacy requests may be sent to {LEGAL_ENTITY} at{" "}
           <LegalContactLink subject="xMatrix privacy" />. We do not publish a postal address in this
