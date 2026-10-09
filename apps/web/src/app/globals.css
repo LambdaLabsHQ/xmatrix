@@ -3549,12 +3549,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[d
   color: oklch(0.63 0.16 155);
 }
 
-.xmatrix-app .app-agent-work-action[data-action="reborn"]:is(:hover, :focus-visible) {
+.xmatrix-app .app-agent-work-action[data-action="reborn"]:is(:hover, :focus-visible, [data-armed]) {
   background: color-mix(in oklch, oklch(0.68 0.14 240) 14%, transparent) !important;
   color: oklch(0.58 0.15 245);
 }
 
-.xmatrix-app .app-agent-work-action:is([data-action="handoff"], [data-action="handoff-successor"], [data-action="back"]):is(:hover, :focus-visible) {
+.xmatrix-app .app-agent-work-action:is([data-action="handoff"], [data-action="handoff-successor"], [data-action="back"]):is(:hover, :focus-visible, [data-armed]) {
   background: color-mix(in oklch, var(--foreground) 8%, transparent) !important;
   color: var(--foreground);
 }
@@ -6386,6 +6386,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
     color: var(--destructive);
   }
 
+  html[data-app-theme] .xmatrix-app .app-mobile-inline-actions-row > .app-mobile-inline-action[data-armed] {
+    background: color-mix(in oklch, var(--destructive) 12%, transparent);
+    color: var(--destructive);
+  }
+
   @keyframes xmatrix-mobile-inline-actions-in {
     from { opacity: 0; transform: translate3d(0, -0.25rem, 0); }
     to { opacity: 1; transform: translate3d(0, 0, 0); }
@@ -6904,15 +6909,15 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   }
 }
 
-.xmatrix-app .app-detail-plank :where(.app-detail-note, .app-detail-member-row, .app-detail-member-badge) {
+.xmatrix-app .app-detail-plank :where(.app-detail-note) {
   background: transparent !important;
   background-color: transparent !important;
   @apply app-flat-control-recipe;
   transform: none !important;
 }
 
-.xmatrix-app .app-detail-plank :where(.app-detail-note, .app-detail-member-row, .app-detail-member-badge)::before,
-.xmatrix-app .app-detail-plank :where(.app-detail-note, .app-detail-member-row, .app-detail-member-badge)::after {
+.xmatrix-app .app-detail-plank :where(.app-detail-note)::before,
+.xmatrix-app .app-detail-plank :where(.app-detail-note)::after {
   content: none !important;
   display: none !important;
 }
@@ -7712,6 +7717,19 @@ html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-list
 
 /* Inline marks in a conversation preview. The row's meta weight is 450 on the
    span; the mark has to set its own, or the bold the body shows never appears. */
+/* Status lists every destination's rows at once, one line each, so the
+   Space fits on one screen: the line under the name sits beside it. */
+html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row.app-list-row.app-list-row-dense {
+  min-height: 34px;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+
+html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row.app-list-row-dense span.app-list-row-title {
+  font-size: 15px !important;
+  line-height: 20px;
+}
+
 html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-channel-row-preview strong {
   font-weight: 650 !important;
 }
@@ -8095,6 +8113,27 @@ html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-li
 html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) [data-slot="button"]::before,
 html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) [data-slot="button"]::after {
   content: none !important;
+}
+
+/* A field on the paper is a line written on it, not a well sunk into it: no
+   fill, no box, one ink rule underneath that darkens while it has the caret.
+   Only inputs that draw their own box take it; one sitting inside another
+   control's shell (border-0, transparent) and fields on a wood plank keep
+   theirs, and the page title, search and composer draw their own field. */
+html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border)):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *) {
+  background: transparent !important;
+  border-width: 0 0 1.5px !important;
+  border-style: solid !important;
+  border-color: oklch(0.35 0.07 60 / 0.28) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding-inline: 2px !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border)):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *):focus {
+  border-color: var(--app-panel-ink, currentColor) !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 /* Notices on the paper: plain white with the tone's rail, not glass. */

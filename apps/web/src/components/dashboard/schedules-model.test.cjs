@@ -3,7 +3,7 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  scheduleAttention, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
+  groupSchedules, scheduleAttention, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
 } = require("./schedules-model.ts");
 
 function automation(overrides) {
@@ -59,6 +59,29 @@ test("a page's Automations follow its sections from the top, then by name", () =
     automation({ id: "a", name: "Alpha", pageId: "p" }),
   ], [{ pageId: "p", title: "P" }], { p: ["first", "second"] });
   assert.deepEqual(nodes[0].automations.map((item) => item.id), ["early", "late", "a", "z"]);
+});
+
+test("Automations are grouped by what they are doing: attention, running, paused; empty states are left out", () => {
+  const groups = groupSchedules([
+    automation({ id: "off", name: "Off", enabled: false }),
+    automation({ id: "broken", name: "Broken", lastError: "Channel is archived" }),
+    automation({ id: "on", name: "On" }),
+  ], true);
+  assert.deepEqual(groups.map((group) => [group.state, group.automations.map((item) => item.id)]),
+    [["attention", ["broken"]], ["running", ["on"]], ["paused", ["off"]]]);
+  assert.deepEqual(groupSchedules([automation({ id: "on" })], true).map((group) => group.state), ["running"]);
+});
+
+test("running Automations come soonest first, paused ones by name, and detached ones need attention", () => {
+  const groups = groupSchedules([
+    automation({ id: "p2", name: "Zeta", enabled: false }),
+    automation({ id: "late", name: "Late", nextRunAt: "2026-09-28T15:00:00.000Z" }),
+    automation({ id: "p1", name: "Alpha", enabled: false }),
+    automation({ id: "soon", name: "Soon", nextRunAt: "2026-09-28T13:00:00.000Z" }),
+    automation({ id: "gone", name: "Gone", detachedAt: "2026-09-27T00:00:00.000Z" }),
+  ], true);
+  assert.deepEqual(groups.map((group) => [group.state, group.automations.map((item) => item.id)]),
+    [["attention", ["gone"]], ["running", ["soon", "late"]], ["paused", ["p1", "p2"]]]);
 });
 
 test("attention names what a person has to look at, most urgent first", () => {

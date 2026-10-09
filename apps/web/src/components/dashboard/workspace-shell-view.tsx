@@ -1041,7 +1041,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       automations={automations}
       automationExecutionEnabled={automationExecutionEnabled}
       automationBusy={automationBusy}
-      loadingAutomations={loadingAutomations}
       onToggleAutomation={toggleAutomation}
       onUpdateAutomation={updateAutomation}
       onDeleteAutomation={deleteAutomation}
@@ -1134,7 +1133,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onScheduleFocusConsumed={clearScheduleFocus}
       onOpenPage={openPage}
       onOpenConversation={(channelId) => navigateToChannel(channelId)}
-      onOpenAgentTrace={openAgentTrace}
       runtimeCheck={runtimeCheck}
       localSetupReady={localSetupReady}
       localMachineName={localMachineName}

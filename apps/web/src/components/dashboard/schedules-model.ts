@@ -3,10 +3,19 @@ import type { SerializedAutomation } from "@xmatrix/protocol";
 /**
  * The Space's Schedules are an index of its Automations, not where they are
  * made (docs/design/pages-live-document.md §6). Every one keeps a page
- * section true, so the index is the page tree, and each row says what its
- * Automation is doing: what needs a person, what runs next, what rests.
+ * section true, so the Schedules list is the page tree, each row saying what
+ * its Automation is doing; Status groups the same rows by what they are
+ * doing: what needs a person, what runs next, what rests.
  */
 export type ScheduleState = "attention" | "running" | "paused";
+
+/** Attention first: the order a person reads them in. */
+export const SCHEDULE_STATES: readonly ScheduleState[] = ["attention", "running", "paused"];
+
+export interface ScheduleGroup {
+  state: ScheduleState;
+  automations: SerializedAutomation[];
+}
 
 export interface ScheduleSummary {
   total: number;
@@ -53,6 +62,30 @@ export function scheduleSummary(automations: readonly SerializedAutomation[],
   }
   return { total: automations.length, running, paused: automations.length - running, attention, pages: pages.size,
     next };
+}
+
+/**
+ * What needs a person first, then what runs, soonest first, then what is
+ * paused, by name. A state with nothing in it is left out.
+ */
+export function groupSchedules(automations: readonly SerializedAutomation[],
+  executionEnabled: boolean | null): ScheduleGroup[] {
+  const groups = SCHEDULE_STATES.map((state): ScheduleGroup => ({ state, automations: [] }));
+  for (const automation of automations) {
+    groups[SCHEDULE_STATES.indexOf(scheduleState(automation, executionEnabled))]!.automations.push(automation);
+  }
+  for (const group of groups) group.automations.sort(compareSchedules);
+  return groups.filter((group) => group.automations.length > 0);
+}
+
+function compareSchedules(left: SerializedAutomation, right: SerializedAutomation): number {
+  const running = Number(scheduleRunning(right)) - Number(scheduleRunning(left));
+  if (running) return running;
+  if (scheduleRunning(left)) {
+    const soonest = nextRunTime(left) - nextRunTime(right);
+    if (soonest) return soonest;
+  }
+  return left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) || left.id.localeCompare(right.id);
 }
 
 /** A page in the Schedules tree: its own Automations, then the pages under it that hold some. */
@@ -120,9 +153,6 @@ export function scheduleTree(automations: readonly SerializedAutomation[],
     ({ kind: "conversation", channelId, automations: bySection(list, []), counts: countStates(list, executionEnabled) }));
   return [...roots, ...unplaced, ...conversations];
 }
-
-/** Attention first: the order a person reads them in. */
-export const SCHEDULE_STATES: readonly ScheduleState[] = ["attention", "running", "paused"];
 
 function countStates(automations: readonly SerializedAutomation[], executionEnabled: boolean | null): ScheduleCounts {
   const counts: ScheduleCounts = { attention: 0, running: 0, paused: 0 };

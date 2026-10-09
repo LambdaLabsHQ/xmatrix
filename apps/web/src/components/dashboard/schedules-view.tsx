@@ -23,8 +23,8 @@ import { Input } from "@/components/ui/input";
 import { noticeClass } from "@/components/ui/status-tone";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
-import { channelTitle } from "./channel-links";
 import { ListSkeleton } from "./content-skeleton";
+import { nextRunPhrase, useScheduleWhere } from "./schedule-list-groups";
 import {
   scheduleAttention, scheduleRunning, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
   SCHEDULE_STATES, type ScheduleCounts, type SchedulePageNode, type ScheduleState,
@@ -103,8 +103,7 @@ export function SchedulesView({
   const selected = automations.find((automation) => automation.id === selectedId);
 
   const pageTree = usePageTree(spaceId, token);
-  const pageTitles = useMemo(() => new Map((pageTree.data ?? []).map((page) => [page.pageId, page.title])),
-    [pageTree.data]);
+  const whereTitle = useScheduleWhere(spaceId, token, channels);
   // Section titles come from the pages the listed Automations are on: one read per such page.
   const pageIds = useMemo(() => [...new Set(automations.flatMap((automation) => automation.pageId ? [automation.pageId] : []))],
     [automations]);
@@ -125,13 +124,6 @@ export function SchedulesView({
   }, [documents, pageIds]);
   const sectionTitle = (automation: SerializedAutomation) => automation.blockId === undefined ? null
     : sectionTitles.get(`${automation.pageId}#${automation.blockId}`) ?? sectionFallbackTitle(automation.blockId);
-  const conversationTitle = (channelId: string) => {
-    const channel = channels.find((item) => item.id === channelId);
-    return channel ? channelTitle(channel) : undefined;
-  };
-  const whereTitle = (automation: SerializedAutomation) => automation.pageId
-    ? pageTitles.get(automation.pageId) ?? "Untitled page"
-    : `#${conversationTitle(automation.channelId) ?? automation.channelId}`;
 
   const childrenOf = useMemo(() => pageChildren(pageTree.data ?? []), [pageTree.data]);
   const sectionIds = useMemo(() => new Map(documents.map((document, index) =>
@@ -189,7 +181,7 @@ export function SchedulesView({
             ? <SchedulePage key={node.pageId} node={node} depth={0} row={row} />
             : (
               <ScheduleBranch key={node.channelId} depth={0} icon={<MessageSquare className="size-4 shrink-0 text-muted-foreground" />}
-                title={`#${conversationTitle(node.channelId) ?? node.channelId}`}
+                title={whereTitle(node.automations[0]!)}
                 meta={countsMeta(node.counts)}>
                 {node.automations.map((automation) => row(automation, 1))}
               </ScheduleBranch>
@@ -329,11 +321,6 @@ function countsMeta(counts: ScheduleCounts): string {
     if (count === 0) return [];
     return [`${count} ${state === "attention" ? `${count === 1 ? "needs" : "need"} attention` : state}`];
   }).join(" · ");
-}
-
-function nextRunPhrase(nextRunAt: string, now: number): string {
-  void now; // formatAutomationNext reads the clock; `now` only re-renders it.
-  return formatAutomationNext(nextRunAt).replace(/^next (?:run )?/u, "") || "unscheduled";
 }
 
 function ExecutionUnavailable() {
