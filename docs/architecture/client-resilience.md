@@ -131,7 +131,10 @@ An answer is for a person and a machine; a report is for whoever debugs it.
 - **Browser.** A failure `describeError` can only call "something went wrong"
   is a client defect: `reportClientDefect` sends the action, the error's name,
   its message with quoted text redacted, and its stack to `/api/client-defects`
-  (same origin, 8 KB), which reports it like a Worker failure. Ten distinct
+  (same origin, 8 KB), which reports it like a Worker failure. The action is one
+  of protocol's closed `ClientDefectAction` set, the only text the report keeps
+  about what the person did; a headline naming something specific, such as an
+  app, passes the set's action and shows its own sentence. Ten distinct
   defects per page at most; cancellations and transient failures are never
   sent.
 
