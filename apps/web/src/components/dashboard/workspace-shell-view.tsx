@@ -33,7 +33,6 @@ import { humanProfileFromSpaceMember } from "@/components/dashboard/human-profil
 import {
   AgentConfigPage,
   AgentInstanceDetailWindow,
-  AgentInstanceStopDialog,
   AgentWorkDetailsDock,
   ChannelDetails,
   ChannelHeader,
@@ -154,8 +153,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     stoppingAgentInstanceId,
     reborningAgentInstanceId,
     handingOffAgentInstanceId,
-    agentInstanceStopRequest,
-    setAgentInstanceStopRequest,
     renamingChannelId,
     updatingChannelVisibilityId,
     error,
@@ -318,7 +315,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     renameChannel,
     saveAgentConfig,
     deleteAgent,
-    confirmStopAgentInstance,
     sendChannelMessage,
     desktopFrameClass,
     cachedCatalogChannels,
@@ -1511,14 +1507,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           setDesktopUpdateConfirmOpen(false);
           void installDesktopUpdate();
         }}
-      />
-      <AgentInstanceStopDialog
-        request={agentInstanceStopRequest}
-        busy={Boolean(stoppingAgentInstanceId)}
-        onCancel={() => {
-          if (!stoppingAgentInstanceId) setAgentInstanceStopRequest(null);
-        }}
-        onConfirm={() => void confirmStopAgentInstance()}
       />
     </div>
     </MachineLinkProvider>

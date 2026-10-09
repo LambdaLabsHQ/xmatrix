@@ -103,8 +103,6 @@ import {
   TimelineItem,
   agentInstanceStopBody,
   agentPresetOrCustom,
-  agentTraceTargetFromAgentInstance,
-  agentTraceTargetFromInstance,
   appLinkMessageIdFromHash,
   appRouteInfo,
   appViewPath,
@@ -202,7 +200,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setLoadingHistory,
     setOlderLoading,
     setReborningAgentInstanceId,
-    setAgentInstanceStopRequest,
     setRenamingChannelId,
     setUpdatingChannelVisibilityId,
     setOutgoingMessages,
@@ -2107,13 +2104,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setHistoryError(message);
       return;
     }
-    setAgentInstanceStopRequest({
-      instance,
-      body,
-      target: liveAgent
-        ? agentTraceTargetFromAgentInstance(liveAgent, instance)
-        : agentTraceTargetFromInstance(agentId, instance),
-    });
+    void sendLifecycleMention(body, instance.id, s.setStoppingAgentInstanceId);
   }
 
   /** Posts one lifecycle mention while `setBusy` marks that Instance busy. */
@@ -2356,14 +2347,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     } finally {
       setDeletingAgentId(null);
     }
-  }
-
-  async function confirmStopAgentInstance() {
-    if (!s.token || !s.agentInstanceStopRequest || s.stoppingAgentInstanceId) return;
-
-    const { body, instance } = s.agentInstanceStopRequest;
-    setAgentInstanceStopRequest(null);
-    await sendLifecycleMention(body, instance.id, s.setStoppingAgentInstanceId);
   }
 
   function insertMentionIntoComposer(mention: string) {
@@ -2821,7 +2804,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     renameChannel,
     saveAgentConfig,
     deleteAgent,
-    confirmStopAgentInstance,
     sendChannelMessage,
   };
 }

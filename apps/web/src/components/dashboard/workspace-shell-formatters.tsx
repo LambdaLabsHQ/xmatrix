@@ -980,14 +980,6 @@ export function agentPresetOrCustom(id: string | undefined | null): AgentPreset 
     AGENT_PRESETS[0];
 }
 
-export function agentAvatarUrl(agent: {
-  avatarUrl?: string;
-  metadata?: Record<string, unknown>;
-  type?: string;
-}): string | undefined {
-  return agent.avatarUrl || agentAvatarUrlFromMetadata(agent.metadata, agent.type);
-}
-
 /** Its harness preset's avatar. */
 export function localManagedAgentAvatarUrl(agent: LocalManagedAgent): string | undefined {
   return agentAvatarUrlFromMetadata({ presetId: agent.harness }, agent.harness);

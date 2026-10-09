@@ -3540,7 +3540,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[d
   color: var(--foreground);
 }
 
-.xmatrix-app .app-agent-work-action[data-action="stop"]:is(:hover, :focus-visible) {
+.xmatrix-app .app-agent-work-action[data-action="stop"]:is(:hover, :focus-visible, [data-armed]) {
   background: color-mix(in oklch, var(--destructive) 12%, transparent) !important;
   color: var(--destructive);
 }

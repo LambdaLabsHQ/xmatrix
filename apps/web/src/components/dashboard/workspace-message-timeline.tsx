@@ -3119,6 +3119,9 @@ export function AgentWorkAvatar({
   const [actionToolbarPosition, setActionToolbarPosition] = useState<CSSProperties>({ left: 0, top: 0 });
   const [handoffPickerOpen, setHandoffPickerOpen] = useState(false);
   const handoffPickerToggledRef = useRef(false);
+  // Stop asks in place: the first press arms the button, the second sends.
+  const [stopArmed, setStopArmed] = useState(false);
+  const stopArmedByGestureRef = useRef(false);
   const displayStatus = agentWorkDisplayStatus(item);
   const waiting = displayStatus === "waiting" ? item.instance.runtimeState?.waiting : undefined;
   const issue = item.instance.runtimeState?.issue;
@@ -3165,6 +3168,18 @@ export function AgentWorkAvatar({
     if (stopDisabled || item.canStop === false) return;
     longPressTriggeredRef.current = true;
     suppressNextClickRef.current = true;
+    // The gesture opens the controls with Stop armed; pressing it there stops.
+    stopArmedByGestureRef.current = true;
+    setHandoffPickerOpen(false);
+    setStopArmed(true);
+  }
+
+  function pressStop() {
+    if (!stopArmed) {
+      setStopArmed(true);
+      return;
+    }
+    setStopArmed(false);
     onStop(item.agentId, item.instance, item.agentLabel);
   }
 
@@ -3267,6 +3282,14 @@ export function AgentWorkAvatar({
       ? '[data-action="handoff-successor"]' : '[data-action="handoff"]')?.focus();
   }, [handoffPickerOpen, positionActionToolbar]);
 
+  useLayoutEffect(() => {
+    if (!stopArmed || !stopArmedByGestureRef.current) return;
+    stopArmedByGestureRef.current = false;
+    // Focus within the item shows the controls (a touch never focuses the disc).
+    avatarButtonRef.current?.focus();
+    actionToolbarRef.current?.querySelector<HTMLButtonElement>('[data-action="stop"]')?.focus();
+  }, [stopArmed]);
+
   const avatarButton = (
     <button
       ref={avatarButtonRef}
@@ -3368,10 +3391,14 @@ export function AgentWorkAvatar({
         setHoverPart(target.closest(".app-agent-work-intent") ? "intent" : "instance");
       }}
       onPointerLeave={(event) => {
-        if (event.pointerType === "mouse") setHandoffPickerOpen(false);
+        if (event.pointerType !== "mouse") return;
+        setHandoffPickerOpen(false);
+        setStopArmed(false);
       }}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHandoffPickerOpen(false);
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setHandoffPickerOpen(false);
+        setStopArmed(false);
       }}
     >
       {island ? (
@@ -3507,6 +3534,7 @@ export function AgentWorkAvatar({
               event.preventDefault();
               event.stopPropagation();
               handoffPickerToggledRef.current = true;
+              setStopArmed(false);
               setHandoffPickerOpen(true);
             }}
             className="app-agent-work-action"
@@ -3522,22 +3550,23 @@ export function AgentWorkAvatar({
         ) : null}
         <button
           type="button"
-          aria-label={`Stop ${item.instance.label}`}
+          aria-label={stopArmed ? `Confirm stop ${item.instance.label}` : `Stop ${item.instance.label}`}
           disabled={stopDisabled}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            onStop(item.agentId, item.instance, item.agentLabel);
+            pressStop();
           }}
           className="app-agent-work-action"
           data-action="stop"
+          data-armed={stopArmed || undefined}
         >
           {stopping ? (
             <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
           ) : (
             <Trash2 className="size-3.5" aria-hidden="true" />
           )}
-          <span>Stop</span>
+          <span>{stopArmed ? "Confirm" : "Stop"}</span>
         </button>
         </div>}
       </div>
