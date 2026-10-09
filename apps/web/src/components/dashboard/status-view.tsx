@@ -13,6 +13,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { ErrorNotice } from "@/components/ui/error-notice";
+import { formatAutomationNext } from "@/components/pages/page-automation-format";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { AgentListGroups, agentListGroups } from "./agent-list-groups";
@@ -20,13 +21,26 @@ import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
 import { ListSkeleton } from "./content-skeleton";
 import { IdentityAvatar } from "./identity-avatar";
+import { MachineGlyph } from "./machine-glyph";
+import { MachineLoadGlance } from "./machine-load-panel";
 import { MachineListRow, machinePlatform, machineStateLine, machinesWithHostsFirst } from "./machine-list-row";
+import { machineOs } from "./machine-os";
 import { registrationActivity, registrationListed } from "./my-agents-registrations";
 import { ScheduleListGroups, useScheduleWhere } from "./schedule-list-groups";
 import { scheduleRunning, type ScheduleState } from "./schedules-model";
-import { ToolDetailSection, ToolList, ToolListDense, ToolListGroup, ToolPaperScroll, ToolSplit } from "./tool-split";
+import { formatRelativeAge } from "./time-display";
+import { ToolDetailSection, ToolList, ToolListGroup, ToolPaperScroll, ToolSplit } from "./tool-split";
 import { channelWorkInHand } from "./workspace-shell-chrome";
 import type { MachineSummary } from "./workspace-shell-helpers";
+
+/** Machine rows show at most this many runtimes; the rest are counted. */
+const MACHINE_RUNTIMES_SHOWN = 3;
+const UPCOMING_SHOWN = 5;
+/** Rows the list shows before "Show more", so the whole list fits on one screen. */
+const MACHINES_SHOWN = 3;
+const SCHEDULES_SHOWN = 3;
+
+type RuntimeCount = { harness: string; working: number };
 
 /** Status lists every group of schedules among other things, so each says it is schedules. */
 const SCHEDULE_TITLES: Record<ScheduleState, string> = {
@@ -37,9 +51,10 @@ const SCHEDULE_TITLES: Record<ScheduleState, string> = {
 
 /**
  * Status: the Space at work. Its list is the Agents, Machines and Schedules
- * lists one after another, a line per row, so the whole Space fits on one
- * screen; a row opens in its own destination. The paper beside it counts who
- * is working; on a phone that count leads the list.
+ * lists one after another, each showing its first few rows with the rest a
+ * click away, so the whole Space fits on one screen; a row opens in its own
+ * destination. The paper beside it is the overview at a glance; on a phone
+ * the overview leads the list.
  */
 export function StatusView({
   spaceId,
@@ -55,6 +70,7 @@ export function StatusView({
   onOpenMachine,
   onOpenMachines,
   onOpenSchedule,
+  onOpenSchedules,
 }: {
   spaceId: string | null;
   token: string | undefined;
@@ -69,6 +85,7 @@ export function StatusView({
   onOpenMachine: (machineId: string) => void;
   onOpenMachines: () => void;
   onOpenSchedule: (automationId: string) => void;
+  onOpenSchedules: () => void;
 }) {
   const ready = Boolean(spaceId && token);
   const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", ready, { live: true });
@@ -76,11 +93,6 @@ export function StatusView({
   // Load samples and "seen" ages expire; re-read them between refreshes.
   const now = useNow(15_000);
 
-  const conversationTitle = (channelId: string) => {
-    const channel = channels.find((candidate) => candidate.id === channelId);
-    return channel ? channelTitle(channel) : undefined;
-  };
-  const groups = agentListGroups(catalog.data, { conversationTitle, now });
   const registrations: Array<AgentRegistrationSummary & { harness: string }> = (catalog.data?.capabilities ?? [])
     .flatMap((group) => group.locations.filter(registrationListed).map((registration) => ({ ...registration, harness: group.harness })));
   // Working is what the conversation list shows as in progress: a live
@@ -105,16 +117,37 @@ export function StatusView({
   }).filter((runtime) => runtime.total > 0)
     .sort((left, right) => right.working - left.working || left.harness.localeCompare(right.harness));
 
-  const online = machines.filter((machine) => machine.status === "online");
-  // Active Runs count idle processes too; read them only until the catalog says who works.
+  // A machine's runtimes are the registrations on it that are working now.
+  const runtimesOn = (machine: MachineSummary): RuntimeCount[] => registrations
+    .filter((registration) => machine.machineId ? registration.key.machineId === machine.machineId
+      : registration.machineName === machine.name)
+    .reduce<RuntimeCount[]>((counts, registration) => {
+      const working = workingOf(registration);
+      if (!working) return counts;
+      const existing = counts.find((count) => count.harness === registration.harness);
+      if (existing) existing.working += working;
+      else counts.push({ harness: registration.harness, working });
+      return counts;
+    }, [])
+    .sort((left, right) => right.working - left.working);
+
+  const machineRows = machines.map((machine) => {
+    const counts = runtimesOn(machine);
+    // Active Runs count idle processes too; read them only until the catalog says who works.
+    const working = catalog.data ? counts.reduce((sum, count) => sum + count.working, 0) : machine.activeRuns || 0;
+    return { machine, counts, working, online: machine.status === "online" };
+  }).sort((left, right) => Number(right.online) - Number(left.online) || right.working - left.working
+    || left.machine.name.localeCompare(right.machine.name));
+  const online = machineRows.filter((row) => row.online).length;
+  const busy = machineRows.filter((row) => row.online && row.working > 0).length;
+
   const workingCount = catalog.data
     ? registrations.reduce((sum, registration) => sum + workingOf(registration), 0)
-    : online.reduce((sum, machine) => sum + (machine.activeRuns || 0), 0);
-  const busy = catalog.data
-    ? new Set(registrations.filter((registration) => workingOf(registration) > 0)
-      .map((registration) => registration.key.machineId)).size
-    : online.filter((machine) => (machine.activeRuns || 0) > 0).length;
-  const scheduled = automations.filter(scheduleRunning).length;
+    : machineRows.reduce((sum, row) => sum + row.working, 0);
+
+  const active = automations.filter(scheduleRunning);
+  const upcoming = [...active].sort((left, right) => Date.parse(left.nextRunAt) - Date.parse(right.nextRunAt))
+    .slice(0, UPCOMING_SHOWN);
 
   const overview = (
     <>
@@ -124,58 +157,115 @@ export function StatusView({
           <span className="text-lg font-semibold">{workingCount === 1 ? "agent working" : "agents working"}</span>
         </div>
         <p className="mt-2 text-sm text-muted-foreground" data-testid="status-summary">
-          {busy}/{online.length} machines busy · {scheduled} {scheduled === 1 ? "schedule" : "schedules"}
+          {busy}/{online} machines busy · {active.length} {active.length === 1 ? "schedule" : "schedules"}
         </p>
       </header>
 
-      <ToolDetailSection title="Agents" action={<SeeAll label="All agents" onClick={onOpenAgents} />}>
-        {catalog.isError ? (
-          <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()} />
-        ) : !catalog.data && ready ? (
-          <ListSkeleton label="Loading agents" rows={1} />
-        ) : runtimes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No agents yet.</p>
-        ) : (
-          <ul className="flex flex-wrap gap-x-6 gap-y-3 pt-1">
-            {runtimes.map((runtime) => (
-              <li key={runtime.harness}>
-                <button type="button" onClick={onOpenAgents} data-testid="status-runtime"
-                  title={runtimeLine(runtime)} aria-label={`${runtime.harness}: ${runtime.working} working, ${runtimeLine(runtime)}`}
-                  className={cn("flex items-center gap-2", runtime.working === 0 && "opacity-50")}>
-                  <IdentityAvatar kind="agent" label={runtime.harness}
-                    imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(runtime.harness))}
-                    initials={runtime.harness.slice(0, 2)} size="sm" showKindBadge={false} className="shrink-0" />
-                  <span className="text-xl font-black tabular-nums">{runtime.working}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </ToolDetailSection>
+      <div className="space-y-8">
+        <ToolDetailSection title="Agents" action={<SeeAll label="All agents" onClick={onOpenAgents} />}>
+          {catalog.isError ? (
+            <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()} />
+          ) : !catalog.data && ready ? (
+            <ListSkeleton label="Loading agents" rows={1} />
+          ) : runtimes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No agents yet.</p>
+          ) : (
+            <ul className="flex flex-wrap gap-x-6 gap-y-3 pt-1">
+              {runtimes.map((runtime) => (
+                <li key={runtime.harness}>
+                  <button type="button" onClick={onOpenAgents} data-testid="status-runtime"
+                    title={runtimeLine(runtime)} aria-label={`${runtime.harness}: ${runtime.working} working, ${runtimeLine(runtime)}`}
+                    className={cn("flex items-center gap-2", runtime.working === 0 && "opacity-50")}>
+                    <IdentityAvatar kind="agent" label={runtime.harness}
+                      imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(runtime.harness))}
+                      initials={runtime.harness.slice(0, 2)} size="sm" showKindBadge={false} className="shrink-0" />
+                    <span className="text-xl font-black tabular-nums">{runtime.working}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ToolDetailSection>
+
+        <ToolDetailSection title={`Machines · ${online}/${machineRows.length} online`}
+          action={<SeeAll label="All machines" onClick={onOpenMachines} />}>
+          {machineRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No machines registered.</p>
+          ) : (
+            <ul className="app-tool-lines">
+              {machineRows.map(({ machine, counts, working: machineWorking, online: up }) => {
+                const seen = formatRelativeAge(machine.lastSeenAt, now);
+                return (
+                  <li key={machine.id}>
+                    <button type="button" onClick={() => onOpenMachine(machine.id)} data-testid="status-machine-row"
+                      className={cn("flex w-full min-w-0 items-center gap-3 py-2.5 text-left", !up && "opacity-50")}>
+                      <span className="app-tool-state-icon" data-state={up ? "running" : "offline"} aria-hidden="true">
+                        <MachineGlyph os={machineOs(machinePlatform(machine))} className="size-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold">{machine.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {!up ? (seen ? `Offline · seen ${seen}` : "Offline")
+                            : machineWorking > 0 ? `${machineWorking} working` : "Idle"}
+                        </span>
+                      </span>
+                      {up && counts.length > 0 && <RuntimeStack counts={counts} />}
+                      <span className="hidden sm:block"><MachineLoadGlance machine={machine} now={now} /></span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </ToolDetailSection>
+        <ToolDetailSection title="Schedules" action={<SeeAll label="All schedules" onClick={onOpenSchedules} />}>
+          {upcoming.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nothing runs on a schedule.</p>
+          ) : (
+            <ul className="app-tool-lines">
+              {upcoming.map((automation) => (
+                <li key={automation.id}>
+                  <button type="button" onClick={() => onOpenSchedule(automation.id)} data-testid="status-schedule-row"
+                    className="flex w-full min-w-0 items-baseline gap-3 py-2 text-left">
+                    <span className="w-20 shrink-0 text-sm tabular-nums text-muted-foreground">
+                      {formatAutomationNext(automation.nextRunAt).replace(/^next (?:run )?/u, "") || "unscheduled"}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-semibold">{automation.name}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ToolDetailSection>
+
+      </div>
     </>
   );
 
+  const conversationTitle = (channelId: string) => {
+    const channel = channels.find((candidate) => candidate.id === channelId);
+    return channel ? channelTitle(channel) : undefined;
+  };
   const list = (
     <ToolList title="Status">
       <div className="px-[var(--mobile-content-inset,1rem)] pt-3 pb-6 md:hidden">{overview}</div>
-      <ToolListDense>
-        <AgentListGroups groups={groups} selectedId={null} currentUserId={currentUserId} onSelect={onOpenAgent} />
-        {machines.length > 0 && (
-          <ToolListGroup title="Machines" count={machines.length} onTitle={onOpenMachines} titleHint="All machines">
-            {machinesWithHostsFirst(machines).map((machine) => {
-              const host = machines.find((candidate) => candidate.machineId && candidate.machineId === machine.parentMachineId);
-              return (
-                <MachineListRow key={machine.id} machine={machine} name={machine.name}
-                  platform={machinePlatform(machine)} online={machine.status === "online"} hosted={Boolean(host)}
-                  subtitle={[host ? `WSL on ${host.name}` : null, machineStateLine(machine)].filter(Boolean).join(" · ")}
-                  now={now} selected={false} onSelect={() => onOpenMachine(machine.id)} />
-              );
-            })}
-          </ToolListGroup>
-        )}
-        <ScheduleListGroups automations={automations} executionEnabled={executionEnabled} where={where} now={now}
-          selectedId={null} onSelect={onOpenSchedule} titles={SCHEDULE_TITLES} />
-      </ToolListDense>
+      <AgentListGroups groups={agentListGroups(catalog.data, { conversationTitle, now })} selectedId={null}
+        currentUserId={currentUserId} limit={0} onSelect={onOpenAgent} />
+      {machines.length > 0 && (
+        <ToolListGroup title="Machines" count={machines.length} limit={MACHINES_SHOWN}>
+          {machinesWithHostsFirst(machines).map((machine) => {
+            const host = machines.find((candidate) => candidate.machineId && candidate.machineId === machine.parentMachineId);
+            return (
+              <MachineListRow key={machine.id} machine={machine} name={machine.name}
+                platform={machinePlatform(machine)} online={machine.status === "online"} hosted={Boolean(host)}
+                subtitle={[host ? `WSL on ${host.name}` : null, machineStateLine(machine)].filter(Boolean).join(" · ")}
+                now={now} selected={false} onSelect={() => onOpenMachine(machine.id)} />
+            );
+          })}
+        </ToolListGroup>
+      )}
+      <ScheduleListGroups automations={automations} executionEnabled={executionEnabled} where={where} now={now}
+        selectedId={null} onSelect={onOpenSchedule} titles={SCHEDULE_TITLES} limit={SCHEDULES_SHOWN} />
     </ToolList>
   );
 
@@ -201,4 +291,24 @@ function runtimeLine(runtime: RuntimeTotals): string {
     runtime.blocked > 0 ? `${runtime.blocked} out of quota` : null,
     runtime.offline > 0 ? `${runtime.offline} offline` : null,
   ].filter(Boolean).join(" · ") || `${runtime.total} ${runtime.total === 1 ? "machine" : "machines"}`;
+}
+
+/** The runtimes working on a machine: each one's face and how many of it, the rest counted. */
+function RuntimeStack({ counts }: { counts: RuntimeCount[] }) {
+  const shown = counts.slice(0, MACHINE_RUNTIMES_SHOWN);
+  const rest = counts.length - shown.length;
+  return (
+    <span className="flex shrink-0 items-center gap-2.5"
+      aria-label={counts.map((count) => `${count.harness} ${count.working}`).join(", ")} role="img">
+      {shown.map((count) => (
+        <span key={count.harness} className="flex items-center gap-1" aria-hidden="true">
+          <IdentityAvatar kind="agent" label={count.harness}
+            imageUrl={agentPresetAvatarUrl(normalizeAgentPresetRuntime(count.harness))}
+            initials={count.harness.slice(0, 2)} size="xs" showKindBadge={false} />
+          <span className="text-sm font-semibold tabular-nums">{count.working}</span>
+        </span>
+      ))}
+      {rest > 0 && <span className="text-xs font-semibold text-muted-foreground" aria-hidden="true">+{rest}</span>}
+    </span>
+  );
 }

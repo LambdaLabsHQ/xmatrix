@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useSyncExternalStore, type ReactNode } from "react";
-import { ChevronLeft, type LucideIcon } from "lucide-react";
+import { Children, createContext, useCallback, useContext, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ChevronDown, ChevronLeft, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ListColumnResizeHandle } from "./list-column-resize";
 import { ListCreate, type CreateAction } from "./list-create";
@@ -100,15 +100,7 @@ export function ToolList({ title, action, create, createLead, toolbar, children 
  * name does (its padding, 2rem icon and gap), so they read as its children. */
 const IdentityIndent = createContext(false);
 
-/** Rows that sit one line tall: the line under the name moves beside it. Status lists
- * every destination's rows at once this way, so the Space fits on one screen. */
-const Dense = createContext(false);
-
-export function ToolListDense({ children }: { children: ReactNode }) {
-  return <Dense.Provider value>{children}</Dense.Provider>;
-}
-
-export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity, children }: {
+export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity, limit, children }: {
   title: string;
   icon?: ReactNode;
   count?: number;
@@ -117,13 +109,22 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
   /** The heading is the thing the rows belong to, so its icon and name use the
    * row's scale. A section label (the default) stays small and quiet. */
   identity?: boolean;
+  /** Show only this many rows until the reader asks for the rest; at 0 the
+   * heading itself opens and closes the group. */
+  limit?: number;
   children: ReactNode;
 }) {
-  const dense = useContext(Dense);
+  const [expanded, setExpanded] = useState(false);
+  const rows = Children.toArray(children);
+  const folds = limit !== undefined && rows.length > limit;
+  const hidden = folds && !expanded ? rows.length - (limit ?? 0) : 0;
+  const headingToggles = folds && limit === 0;
   const label = (
     <>
       {icon}
       <span className={cn("min-w-0 truncate", identity && "app-list-row-title")}>{title}</span>
+      {headingToggles && <ChevronDown aria-hidden="true"
+        className={cn("size-4 shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")} />}
       {count !== undefined && (
         <span className={cn("ml-auto pl-2 tabular-nums",
           identity ? "text-sm font-medium text-muted-foreground" : "font-medium")}>
@@ -135,13 +136,17 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
   const titleClass = cn(
     "app-tool-list-group-title flex min-w-0 items-center pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] text-left",
     identity
-      ? cn("app-list-row gap-2.5 text-base font-semibold text-foreground", dense ? "app-list-row-dense py-1" : "py-2")
+      ? "app-list-row gap-2.5 py-2 text-base font-semibold text-foreground"
       : "gap-1.5 py-1.5 text-xs font-bold text-muted-foreground",
-    onTitle && "w-full hover:text-foreground",
+    (onTitle || headingToggles) && "w-full hover:text-foreground",
   );
   return (
     <section className="app-tool-list-group mt-2 first:mt-0" aria-label={title}>
-      {onTitle ? (
+      {headingToggles ? (
+        <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded} className={titleClass}>
+          {label}
+        </button>
+      ) : onTitle ? (
         <button type="button" onClick={onTitle} title={titleHint} className={titleClass}>
           {label}
         </button>
@@ -149,7 +154,19 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
         <div className={titleClass}>{label}</div>
       )}
       <IdentityIndent.Provider value={Boolean(identity)}>
-        <ul>{children}</ul>
+        <ul>
+          {hidden ? rows.slice(0, limit) : rows}
+          {folds && !headingToggles && (
+            <li>
+              <button type="button" onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}
+                data-testid="tool-list-more"
+                className="flex w-full items-center gap-1 py-1.5 pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] text-left text-xs font-semibold text-muted-foreground hover:text-foreground">
+                {expanded ? "Show less" : `Show ${hidden} more`}
+                <ChevronDown aria-hidden="true" className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+              </button>
+            </li>
+          )}
+        </ul>
       </IdentityIndent.Provider>
     </section>
   );
@@ -173,33 +190,21 @@ export function ToolListRow({ selected, shownBeside, onSelect, leading, title, e
   state?: string;
 }) {
   const indented = useContext(IdentityIndent);
-  const dense = useContext(Dense);
   return (
     <li className={phoneOnly ? "md:hidden" : undefined}>
       <button type="button" onClick={onSelect} aria-current={selected ? "true" : undefined} data-testid={testId}
         data-state={state}
-        className={cn("app-tool-list-row app-list-row relative flex w-full min-w-0 items-center gap-2.5 pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] text-left",
-          dense ? "app-list-row-dense py-1" : "py-2.5",
+        className={cn("app-tool-list-row app-list-row relative flex w-full min-w-0 items-center gap-2.5 pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] py-2.5 text-left",
           indented && "pl-[calc(var(--app-list-row-start)+2.625rem)]",
           selected && "app-tool-list-row-selected", shownBeside && "app-tool-list-row-beside")}>
-        {leading && <span className={cn("flex shrink-0 items-center", subtitle && !dense && "mt-[3px] self-start")}>{leading}</span>}
-        {dense ? (
-          <span className="flex min-w-0 flex-1 items-baseline gap-2">
-            <span className={cn("app-list-row-title min-w-0 truncate font-semibold", subtitle ? "max-w-[60%] shrink-0" : "flex-1")}>
-              {title}
-            </span>
-            {subtitle && <span className="app-list-row-meta min-w-0 flex-1 truncate text-xs text-muted-foreground">{subtitle}</span>}
+        {leading && <span className={cn("flex shrink-0 items-center", subtitle && "mt-[3px] self-start")}>{leading}</span>}
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="app-list-row-title min-w-0 flex-1 truncate font-semibold">{title}</span>
             {end && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{end}</span>}
           </span>
-        ) : (
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-baseline gap-2">
-              <span className="app-list-row-title min-w-0 flex-1 truncate font-semibold">{title}</span>
-              {end && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{end}</span>}
-            </span>
-            {subtitle && <span className="app-list-row-meta block truncate text-xs text-muted-foreground">{subtitle}</span>}
-          </span>
-        )}
+          {subtitle && <span className="app-list-row-meta block truncate text-xs text-muted-foreground">{subtitle}</span>}
+        </span>
         {trailing}
       </button>
     </li>

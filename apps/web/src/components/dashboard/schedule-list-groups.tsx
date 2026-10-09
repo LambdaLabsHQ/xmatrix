@@ -35,7 +35,7 @@ export function useScheduleWhere(spaceId: string | null, token: string, channels
 
 /** Schedules as Status lists them: grouped by what each one is doing, so a row needs no mark. */
 export function ScheduleListGroups({ automations, executionEnabled, where, now, selectedId, onSelect,
-  titles = SCHEDULE_GROUP_TITLES }: {
+  titles = SCHEDULE_GROUP_TITLES, limit }: {
   automations: SerializedAutomation[];
   executionEnabled: boolean | null;
   where: (automation: SerializedAutomation) => string;
@@ -43,12 +43,15 @@ export function ScheduleListGroups({ automations, executionEnabled, where, now, 
   selectedId: string | null;
   onSelect: (automationId: string) => void;
   titles?: Record<ScheduleState, string>;
+  /** Rows each group shows before the rest are asked for. */
+  limit?: number;
 }) {
   const groups = useMemo(() => groupSchedules(automations, executionEnabled), [automations, executionEnabled]);
   const whenOf = (automation: SerializedAutomation) => automation.detachedAt ? "detached"
     : scheduleRunning(automation) ? nextRunPhrase(automation.nextRunAt, now) : "paused";
   return groups.map((group) => (
-    <ToolListGroup key={group.state} title={titles[group.state]} count={group.automations.length}>
+    <ToolListGroup key={group.state} title={titles[group.state]} count={group.automations.length}
+      limit={limit}>
       {group.automations.map((automation) => (
         <ToolListRow key={automation.id} testId="schedule-row" state={group.state}
           selected={automation.id === selectedId}

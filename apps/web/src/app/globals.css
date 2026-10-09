@@ -7732,19 +7732,6 @@ html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-list
 
 /* Inline marks in a conversation preview. The row's meta weight is 450 on the
    span; the mark has to set its own, or the bold the body shows never appears. */
-/* Status lists every destination's rows at once, one line each, so the
-   Space fits on one screen: the line under the name sits beside it. */
-html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row.app-list-row.app-list-row-dense {
-  min-height: 34px;
-  padding-top: 4px !important;
-  padding-bottom: 4px !important;
-}
-
-html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row.app-list-row-dense span.app-list-row-title {
-  font-size: 15px !important;
-  line-height: 20px;
-}
-
 html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-channel-row-preview strong {
   font-weight: 650 !important;
 }
