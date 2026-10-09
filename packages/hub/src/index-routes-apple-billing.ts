@@ -37,6 +37,12 @@ async function reconcile(c: BillingContext, config: AppleSubscriptionConfig, ori
   if (!binding || (actor && (binding.ownerUserId !== actor.userId || binding.spaceId !== actor.spaceId))) {
     throw new AppleBillingError("apple_purchase_owner_mismatch", "This purchase is not bound to this account and Space");
   }
+  if (binding.accountDeleted) {
+    if (actor) throw new AppleBillingError("apple_purchase_account_deleted", "This purchase belongs to a deleted account and cannot be restored or rebound");
+    // The signed provider fact was verified above. Preserve immutable ownership,
+    // acknowledge delivery, and never recreate entitlement for a retired identity.
+    return { ignoredDeletedAccount: true };
+  }
   if (subscription.environment === "Sandbox" && !config.sandboxSpaceIds.includes(binding.spaceId)) {
     throw new AppleBillingError("apple_sandbox_not_enabled", "Sandbox purchases are not enabled for this Space");
   }
