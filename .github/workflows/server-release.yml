@@ -239,6 +239,9 @@ jobs:
           CONNECTOR_CLOUDFLARE_CLIENT_SECRET: ${{ secrets.CONNECTOR_CLOUDFLARE_CLIENT_SECRET }}
           CONNECTOR_GOOGLE_CLIENT_ID: ${{ secrets.CONNECTOR_GOOGLE_CLIENT_ID }}
           CONNECTOR_GOOGLE_CLIENT_SECRET: ${{ secrets.CONNECTOR_GOOGLE_CLIENT_SECRET }}
+          # Gmail signs in through Composio: its client id is the Composio auth config id.
+          CONNECTOR_COMPOSIO_API_KEY: ${{ secrets.CONNECTOR_COMPOSIO_API_KEY }}
+          CONNECTOR_GMAIL_CLIENT_ID: ${{ secrets.CONNECTOR_GMAIL_CLIENT_ID }}
           CONNECTOR_GOOGLE_PICKER_API_KEY: ${{ secrets.CONNECTOR_GOOGLE_PICKER_API_KEY }}
           CONNECTOR_GOOGLE_PICKER_APP_ID: ${{ secrets.CONNECTOR_GOOGLE_PICKER_APP_ID }}
           CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON: ${{ secrets.CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON }}
@@ -325,6 +328,11 @@ jobs:
             if (keys.some((key) => process.env[key])) {
               for (const key of keys) payload[key] = validConnectorSecret(key);
             }
+          }
+          const composio = ["CONNECTOR_COMPOSIO_API_KEY", "CONNECTOR_GMAIL_CLIENT_ID"];
+          if (composio.some(key => process.env[key])) {
+            for (const key of composio) payload[key] = validConnectorSecret(key);
+            if (!/^ac_[A-Za-z0-9_-]{4,64}$/.test(payload.CONNECTOR_GMAIL_CLIENT_ID)) throw new Error("Invalid Composio Gmail auth config id");
           }
           const discord = ["CONNECTOR_DISCORD_CLIENT_ID", "CONNECTOR_DISCORD_CLIENT_SECRET", "CONNECTOR_DISCORD_BOT_TOKEN"];
           if (discord.some(key => process.env[key])) {

@@ -3,7 +3,7 @@ import type { Env } from "../types";
 import { connectorCredentialRepository } from "./credentials";
 import { verifyNotion } from "./actions/notion";
 import { ProviderRequestError } from "./http";
-import { refreshOAuthFields } from "./oauth";
+import { oauthClient, refreshOAuthFields } from "./oauth";
 import { isSentryInstallationGrant, verifySentryInstallation } from "./sentry-installation";
 
 /**
@@ -24,7 +24,7 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
   const credentials: Record<string, string> = { ...resolved?.values };
   const verify = grantVerifier(providerId, credentials);
   let refreshed = await refreshOAuthFields(env, providerId, credentials).catch(error => {
-    if (verify || ["google", "googlesearchconsole", "googleadsense", "gcp", "gmail", "bitbucket", "pagerduty", "sentry", "discord"].includes(providerId)) throw error;
+    if (verify || ["google", "googlesearchconsole", "googleadsense", "gcp", "bitbucket", "pagerduty", "sentry", "discord"].includes(providerId)) throw error;
     return undefined;
   });
   const persist = async (fields: Record<string, string | null>) => {
@@ -50,6 +50,10 @@ export async function connectionCredentials(env: Env, spaceId: string, providerI
       await persist(refreshed);
       await verify(credentials);
     }
+  }
+  /* A Composio connection stores only its account id; the project key stays a Hub secret, read per call. */
+  if (getAppConnectorProvider(providerId)?.oauth?.flow === "composio") {
+    credentials.composioApiKey = oauthClient(env, providerId)?.clientSecret ?? "";
   }
   return credentials;
 }
