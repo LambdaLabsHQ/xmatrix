@@ -1134,7 +1134,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onScheduleFocusConsumed={clearScheduleFocus}
       onOpenPage={openPage}
       onOpenConversation={(channelId) => navigateToChannel(channelId)}
-      onOpenAgentTrace={openAgentTrace}
       runtimeCheck={runtimeCheck}
       localSetupReady={localSetupReady}
       localMachineName={localMachineName}

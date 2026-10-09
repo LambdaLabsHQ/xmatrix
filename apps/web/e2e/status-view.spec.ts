@@ -1,9 +1,9 @@
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, fixtureJson, openWorkspaceWithStubs } from "./workspace-fixtures";
 
-/* Status is the Space at work: how many agents are working, what each runtime
-   does, every machine with who works on it, and what runs next. Rows only grow
-   downward, so the page holds any number of machines and runtimes. */
+/* Status is the Space at work: how many agents are working and what each
+   runtime does, then the Agents, Machines and Schedules lists one after
+   another, a line per row, each row opening in its own destination. */
 
 const recent = () => new Date().toISOString();
 const machines = [
@@ -86,17 +86,11 @@ test.describe("on a phone", () => {
     await expect(runtimes).toHaveCount(4);
     await expect(runtimes.first()).toHaveAccessibleName(/^codex: 6 working/u);
 
-    // Machines: busiest first, offline last; a row names at most three runtimes and counts the rest.
-    const rows = page.getByTestId("status-machine-row").filter({ visible: true });
+    // Machines as the Machines list orders them, each saying what it does.
+    const rows = page.getByTestId("machine-row").filter({ visible: true });
     await expect(rows).toHaveCount(4);
     await expect(rows.nth(0)).toContainText("busy-box");
-    await expect(rows.nth(0)).toContainText("7 working");
-    await expect(rows.nth(1)).toContainText("+1");
-    await expect(rows.nth(2)).toContainText("Idle");
     await expect(rows.nth(3)).toContainText("Offline");
-
-    // What runs next, soonest first.
-    await expect(page.getByTestId("status-schedule-row").filter({ visible: true }).first()).toContainText("Nightly sync");
 
     await rows.nth(0).tap();
     await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?item=/u);
@@ -108,35 +102,40 @@ test("the desktop rail opens Status, where each machine row shows its load", asy
   await page.setViewportSize({ width: 1400, height: 900 });
   await openStatus(page);
   await expect(page.locator(".app-rail").getByRole("button", { name: "Status", exact: true })).toBeVisible();
-  const busy = page.getByTestId("status-machine-row").filter({ visible: true, hasText: "busy-box" });
+  const busy = page.getByTestId("machine-row").filter({ visible: true, hasText: "busy-box" });
   await expect(busy.getByTestId("machine-load-glance")).toBeVisible();
   await page.getByRole("button", { name: "All agents" }).click();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/agents$/u);
 });
 
-test("on a desktop Status lists the work in its own column, with the overview beside it", async ({ page }) => {
+test("on a desktop Status lists agents, machines and schedules a line each, opening each in its destination", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await openStatus(page);
   // Its own list takes the conversation list's place.
   await expect(page.locator(".app-sidebar")).toBeHidden();
   const list = page.getByRole("navigation", { name: "Status list" });
   await expect(list.getByRole("heading", { name: "Status", level: 1 })).toBeVisible();
-  const work = list.getByTestId("status-work-row");
-  await expect(work).toHaveCount(11);
-  await expect(list.getByRole("region", { name: "Working" })).toContainText("11");
-  await expect(list.getByTestId("status-next-row").first()).toContainText("Nightly sync");
+  const agents = list.getByTestId("agent-row");
+  await expect(agents).toHaveCount(registrations.length);
+  await expect(list.getByTestId("machine-row")).toHaveCount(machines.length);
+  const schedules = list.getByTestId("schedule-row");
+  await expect(schedules.first()).toContainText("Nightly sync");
 
-  // Nothing chosen: the overview at a glance.
+  // A line per row, so the whole Space fits on one screen.
+  for (const row of [agents.first(), list.getByTestId("machine-row").first(), schedules.first()]) {
+    expect((await row.boundingBox())!.height).toBeLessThan(40);
+  }
+  const lastRow = (await schedules.last().boundingBox())!;
+  expect(lastRow.y + lastRow.height).toBeLessThanOrEqual(900);
+
+  // Nothing is chosen here: the overview stays beside the list.
   await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveText("11");
 
-  // A working Instance opens beside the list, with its trace and its conversation one step away.
-  await work.first().click();
-  await expect(page).toHaveURL(/\/status\?item=work%3A/u);
-  const detail = page.locator(".app-tool-detail:visible");
-  await expect(detail.getByRole("button", { name: "Trace" })).toBeVisible();
-  await expect(detail.getByRole("button", { name: "Conversation" })).toBeVisible();
-  await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveCount(0);
+  await schedules.first().click();
+  await expect(page).toHaveURL(/\?item=soon$/u);
+  await expect(page.locator(".app-tool-detail:visible").getByRole("heading", { level: 2, name: "Nightly sync" })).toBeVisible();
 
-  await list.getByTestId("status-next-row").first().click();
-  await expect(detail.getByRole("heading", { level: 2, name: "Nightly sync" })).toBeVisible();
+  await page.goBack();
+  await list.getByTestId("agent-row").first().click();
+  await expect(page).toHaveURL(/\/agents\?item=/u);
 });
