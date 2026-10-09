@@ -2501,6 +2501,7 @@ export function ToolSurface({
         token={token}
         currentUserId={user.id}
         error={agentsError}
+        addsOnThisMachine={Boolean(desktopContext?.machineId)}
         channels={currentSpaceChannels}
         onOpenConversation={onOpenConversation}
         onOpenMachines={() => onChangeView("machines")}

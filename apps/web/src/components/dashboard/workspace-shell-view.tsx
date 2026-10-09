@@ -754,6 +754,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <div className="app-tool-paper app-tool-detail min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
             state={spaceAgentSetup}
+            spaceId={currentSpaceId ?? null}
+            token={token ?? undefined}
+            userId={user?.id}
             hostLabel={desktopContext?.hostname || desktopContext?.hostName || desktopContext?.hostId || "this machine"}
             busy={bringingLocal ? "enabling" : localActionBusy}
             error={installedFleet.error ?? localActionError}
