@@ -229,3 +229,46 @@ integration("an unanswered action shows on the Machine, settles as expired, and 
     assert.equal((await read(queuedId)).status, "succeeded");
   } finally { await fixture.close(); }
 });
+
+integration("a command handed out ten times and never answered fails instead of going out again", async () => {
+  const fixture = await isolatedPostgres("unanswered_command", { shard: true });
+  const { client, session } = fixture;
+  try {
+    const controls = new PostgresMachineControlRepository(session);
+    const machine = { ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "silent-machine",
+      hostId: "silent-host", daemonId: "silent-daemon" };
+    const principal = { kind: "machine", id: "machine-daemon:owner:silent-machine:silent-host",
+      ownerUserId: "owner", machineId: "silent-machine", hostId: "silent-host" };
+    const connected = await controls.command({ ...machine, commandId: randomUUID(), action: "connect",
+      principal, capabilities: ["machine_harness_action_v1"], payload: {}, metadata: {} });
+    const claim = () => controls.command({ ...machine, commandId: randomUUID(), action: "claim",
+      principal, connectionEpoch: connected.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
+    const issue = requestId => controls.command({ ...machine, commandId: randomUUID(), action: "issue",
+      principal: { kind: "user", id: "owner" }, controlId: requestId, commandType: "harness_action",
+      payload: { type: "machine_harness_action", requestId, presetId: "claude", action: "update" } });
+    const lapse = (requestId, attempts) => client.query(`UPDATE data.machine_daemon_commands SET status='leased',
+      attempts=$2,lease_owner='silent-daemon',lease_until=now()-interval '1 second' WHERE command_id=$1`,
+    [requestId, attempts]);
+
+    const retried = `harness:${randomUUID()}`;
+    await issue(retried);
+    await lapse(retried, 9);
+    assert.deepEqual((await claim()).commands.map(command => command.payload.requestId), [retried],
+      "a lapsed lease is handed out again while deliveries remain");
+
+    const silent = `harness:${randomUUID()}`;
+    await issue(silent);
+    await lapse(retried, 10);
+    await lapse(silent, 10);
+    assert.deepEqual((await claim()).commands, []);
+    for (const requestId of [retried, silent]) {
+      assert.equal((await readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "owner",
+        controlId: requestId })).status, "failed");
+    }
+    const [stored] = (await client.query("SELECT status,result_json FROM data.machine_daemon_commands WHERE command_id=$1",
+      [silent])).rows;
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.result_json.ok, false);
+    assert.match(stored.result_json.error, /never answered/u);
+  } finally { await fixture.close(); }
+});
