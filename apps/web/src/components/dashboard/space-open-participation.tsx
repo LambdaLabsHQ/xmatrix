@@ -3,10 +3,13 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { pageApi } from "@/lib/pages/page-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
+
+import { ToolSettingRow } from "./tool-split";
 
 /**
  * Whether anyone with a linked GitHub account may join the Space as a
@@ -36,20 +39,19 @@ export function SpaceOpenParticipation({ spaceId, token }: { spaceId: string; to
     }
   };
   return (
-    <div className="mt-3">
-      <label className="flex items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-        <input type="checkbox" className="mt-0.5 size-4 accent-primary"
+    <ToolSettingRow
+      title="GitHub participants"
+      description={<>
+        Anyone with a linked GitHub account can join as a participant. They read the project and start
+        conversations; what they start arrives as intake.
+        {error ? <span className="mt-1 block font-medium text-destructive">{error}</span> : null}
+      </>}
+      control={<>
+        {busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+        <Switch label="Anyone with a linked GitHub account can join as a participant"
           checked={governance.data?.openParticipation ?? false} disabled={!governance.data || busy}
-          onChange={(event) => void toggle(event.target.checked)} />
-        <span className="min-w-0 flex-1">
-          <span className="block font-bold">Anyone with a linked GitHub account can join as a participant</span>
-          <span className="mt-0.5 block text-xs text-muted-foreground">
-            Participants read the project and start conversations; what they start arrives as intake.
-          </span>
-        </span>
-        {busy ? <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" /> : null}
-      </label>
-      {error ? <p className="mt-2 text-xs font-medium text-destructive">{error}</p> : null}
-    </div>
+          onChange={(open) => void toggle(open)} />
+      </>}
+    />
   );
 }

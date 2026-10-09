@@ -14,7 +14,7 @@ export function PrivateSignInEmail({ email, className, labelClassName, emailClas
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-bold text-foreground">Sign-in email</p>
-          <span className={cn(labelClassName, tagClass("uppercase tracking-wide"))}>
+          <span className={cn(labelClassName, tagClass())}>
             Private
           </span>
         </div>

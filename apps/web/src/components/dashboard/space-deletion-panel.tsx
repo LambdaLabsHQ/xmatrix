@@ -10,6 +10,8 @@ import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
+import { ToolDetailSection, ToolSettingRow } from "./tool-split";
+
 export interface SpaceDeletionSummary {
   spaceId: string;
   spaceName: string;
@@ -65,57 +67,56 @@ export function SpaceDangerZone({
     setError(null);
   }
 
-  // A section of the paper like its neighbours; red appears once, on the action.
-  // The confirmation is asked for only once the owner sets out to delete.
+  // The last section of the paper, a settings row like its neighbours; red appears only on the
+  // action. The confirmation is asked for once the owner sets out to delete.
   return (
-    <div className="mt-4 border-t border-border/60 pt-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-black">Delete this Space</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Everyone loses access at once and running agents stop. You can restore it here for 7 days;
-            after that its channels, messages and files are deleted for good.
-          </p>
-        </div>
-        {!open ? (
+    <ToolDetailSection title="Delete this Space">
+      <ToolSettingRow
+        title={`Delete ${space.name}`}
+        description="Everyone loses access at once and running agents stop. You can restore it here for 7 days; after that its channels, messages and files are deleted for good."
+        control={!open ? (
           <button type="button" onClick={() => setOpen(true)} className={actionClass({ variant: "danger" })}>
             Delete Space…
           </button>
         ) : null}
-      </div>
-      {open ? (
-        <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-2">
-          <label className="block min-w-48 flex-1 text-xs font-bold text-muted-foreground">
-            Type <span className="font-black text-foreground">{space.name}</span> to confirm
-            <input
-              value={confirmation}
-              onChange={(event) => setConfirmation(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void submit();
-                if (event.key === "Escape") close();
-              }}
-              disabled={busy}
-              autoFocus
-              aria-label={`Type ${space.name} to confirm deleting it`}
-              className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm font-normal text-foreground"
-            />
-          </label>
-          <button type="button" onClick={close} disabled={busy} className={actionClass({ variant: "quiet" })}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={!confirmed || busy}
-            className={actionClass({ variant: "danger" })}
-          >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-            Delete Space
-          </button>
-        </div>
-      ) : null}
-      {error ? <p className="mt-2 text-xs font-medium text-destructive">{error}</p> : null}
-    </div>
+        below={open || error ? (
+          <>
+            {open ? (
+              <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+                <label className="block min-w-48 flex-1 text-[13px] font-semibold text-muted-foreground">
+                  Type <span className="font-bold text-foreground">{space.name}</span> to confirm
+                  <input
+                    value={confirmation}
+                    onChange={(event) => setConfirmation(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void submit();
+                      if (event.key === "Escape") close();
+                    }}
+                    disabled={busy}
+                    autoFocus
+                    aria-label={`Type ${space.name} to confirm deleting it`}
+                    className="mt-1.5 h-9 w-full rounded-md border border-border px-3 text-sm font-normal text-foreground"
+                  />
+                </label>
+                <button type="button" onClick={close} disabled={busy} className={actionClass({ variant: "quiet" })}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submit()}
+                  disabled={!confirmed || busy}
+                  className={actionClass({ variant: "danger" })}
+                >
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  Delete Space
+                </button>
+              </div>
+            ) : null}
+            {error ? <p className="mt-2 text-xs font-medium text-destructive">{error}</p> : null}
+          </>
+        ) : null}
+      />
+    </ToolDetailSection>
   );
 }
 
