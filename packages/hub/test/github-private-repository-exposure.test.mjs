@@ -76,9 +76,6 @@ function webhookHarness(exposure) {
     dependencies: {
       exposure,
       resolveRoutes: async () => [route],
-      listConnections: async () => [{ id: "connection-1", providerId: "github", status: "configured",
-        channelState: { channelId: "channel-1", bound: true, subscriptions: [
-          { kind: "repository", source: "github:repo:acme/app", features: ["commits"] }] } }],
       append: async (_env, channelId, message) => {
         appended.push({ channelId, body: message.body });
         return { ok: true };

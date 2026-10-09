@@ -1,6 +1,6 @@
 import { plainRecord } from "@xmatrix/protocol";
 import { githubCommitCheckVerdict } from "./app-connectors";
-import { resolveGitHubSubscriptionRoutes, type GitHubSubscriptionRoute } from "./github-subscription-route-directory";
+import { resolveGitHubSubscriptionRoutes } from "./github-subscription-route-directory";
 import {
   githubIssueSourceRef,
   githubIssueSubscriptionCurrent,
@@ -12,7 +12,7 @@ import {
 import { wakeRestingInstances } from "./registration-launch-dispatch";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import type { Env } from "./types";
-import { appCommand, listAppConnections } from "./apps";
+import { appCommand } from "./apps";
 import {
   channelExposureReader,
   githubContentAllowedInChannel,
@@ -23,35 +23,14 @@ import {
   githubRepositoryIsPublic,
   githubWebhookRepositoryIdentity,
   githubWebhookMessageBody,
-  type GitHubRepositoryFeature,
 } from "./github-subscription-domain";
 
 function record(value: unknown): Record<string, unknown> {
   return plainRecord(value) ?? {};
 }
 
-function subscriptionAllows(
-  connection: Record<string, unknown>,
-  route: GitHubSubscriptionRoute,
-  feature: GitHubRepositoryFeature,
-): boolean {
-  if (connection.id === undefined || connection.status !== "configured") return false;
-  const channelState = record(connection.channelState);
-  if (channelState.channelId !== route.channelId || channelState.bound !== true) {
-    return false;
-  }
-  const subscriptions = Array.isArray(channelState.subscriptions) ? channelState.subscriptions : [];
-  return subscriptions.some((value) => {
-    const subscription = record(value);
-    return subscription.kind === route.sourceKind &&
-      String(subscription.source).toLowerCase() === route.sourceRef &&
-      Array.isArray(subscription.features) && subscription.features.includes(feature);
-  });
-}
-
 export interface ProductGitHubWebhookDependencies {
   resolveRoutes: typeof resolveGitHubSubscriptionRoutes;
-  listConnections: typeof listAppConnections;
   append: typeof dispatchProductMessageAppend;
   exposure: ChannelExposureReader;
   checkVerdict: typeof githubCommitCheckVerdict;
@@ -74,7 +53,6 @@ export async function dispatchProductGitHubWebhook(input: {
   payload: Record<string, unknown>;
 }, dependencies: Partial<ProductGitHubWebhookDependencies> = {}): Promise<{ ok: true; delivered: number }> {
   const resolveRoutes = dependencies.resolveRoutes ?? resolveGitHubSubscriptionRoutes;
-  const listConnections = dependencies.listConnections ?? listAppConnections;
   const append = dependencies.append ?? dispatchProductMessageAppend;
   const exposure = dependencies.exposure ?? channelExposureReader(input.env);
   const checkVerdict = dependencies.checkVerdict ?? githubCommitCheckVerdict;
@@ -129,13 +107,6 @@ export async function dispatchProductGitHubWebhook(input: {
         : undefined;
       try {
         if (!body) return 0;
-        const listed = await listConnections(input.env, { spaceId: route.spaceId, channelId: route.channelId,
-          actorUserId: route.authorityRootUserId }).catch(() => null);
-        if (!listed) return 0;
-        const connection = listed.map(record).find((candidate) => candidate.id === route.connectionId);
-        if (!connection || !subscriptionAllows(connection, route, feature)) return 0;
-        const appAuthorId = typeof connection.providerId === "string" ? connection.providerId : "";
-        if (!appAuthorId) return 0;
         if (!await githubContentAllowedInChannel(exposure, { repositoryPublic, channelId: route.channelId,
           userId: route.authorityRootUserId })) return 0;
         /* A verdict is one message per settling, whichever suite's delivery reports it. */
@@ -149,7 +120,7 @@ export async function dispatchProductGitHubWebhook(input: {
           channelId: route.channelId,
           body,
           principal,
-          appAuthorId,
+          appAuthorId: "github",
         });
         if (!response.ok) return 0;
         await wake(input.env, { commandId: `resting-wake:${messageId}`.slice(0, 200), channelId: route.channelId,
