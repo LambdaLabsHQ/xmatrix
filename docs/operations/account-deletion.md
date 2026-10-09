@@ -56,6 +56,19 @@ of 500. Scheduled Space restore snapshots remove only the deleted member, at mos
 snapshots per pass; other members and shared work remain unchanged. Admission fences
 reject stale join/profile inserts, including UPSERTs, after deletion.
 
+Historical Human message sender profiles are replaced with `Deleted account` and the opaque
+identity; Agent sender snapshots retain Agent/runtime presentation but lose the owner's
+personal profile fields. The existing Hub codec prepares the canonical bytes and digests.
+SQL erases the sender in previews, removes profile copies from append receipts/outbox rows,
+and publishes an audited message revision. Bodies, timestamps (including absent versus null),
+residuals, attachments, other authors and invocation input versions are preserved. Each pass
+handles at most eight messages and 500 replay copies per shard, in addition to the private-row
+batch above. Every message write checks the directory placement and committed account fence.
+An unavailable placement or corrupt payload leaves cleanup retryable, never completed early.
+An INSERT fence refuses late retired-author publications. Normal edits keep their existing
+canonical version conflict checks. Already-completed pre-upgrade deletions are selected for
+this additional cleanup without reopening identity access or changing their recorded state.
+
 ## Recovery and verification
 
 Cron resumes at most two pending jobs per invocation. A failed shard or avatar operation

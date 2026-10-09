@@ -550,3 +550,5 @@ export { parseAppleSubscriptionConfig, type AppleSubscriptionConfig } from "./ap
 
 export type { AccountDeletionState, AccountDeletionBlocker, AccountDeletionReceipt } from "./account-deletion.js";
 export { ACCOUNT_REVOKED_STATES, isAccountRevoked } from "./account-deletion.js";
+
+export { erasedAccountMessageSender } from "./account-message-sender.js";
