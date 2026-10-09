@@ -1230,17 +1230,6 @@ export function MessageTimestamp({ value, clock = false, className }: { value: s
 
 
 
-/* A header reads model and effort as one label, `gpt-5.5 · high`: they say one
-   thing about the run. The rail keeps them apart, where each can be changed. */
-function headerStatusChips<Chip extends { id: string; value?: string }>(chips: Chip[] | undefined): Chip[] | undefined {
-  const model = chips?.find((chip) => chip.id.toLowerCase() === "model" && chip.value);
-  const effort = chips?.find((chip) => chip.id.toLowerCase() === "effort" && chip.value);
-  if (!chips || !model || !effort) return chips;
-  return chips
-    .filter((chip) => chip !== effort)
-    .map((chip) => (chip === model ? { ...chip, value: `${model.value} · ${effort.value}` } : chip));
-}
-
 function NamedAgentIdentityLabels({ message, spaceId, token }: {
   message: TimelineItem; spaceId?: string; token: string | null;
 }) {
@@ -2074,7 +2063,7 @@ export const MessageRow = memo(function MessageRow({
             <BranchBadge branch={message.senderGitBranch} />
           )}
           {message.senderKind === "agent" &&
-            headerStatusChips(message.senderStatusChips)?.map((chip) => (
+            message.senderStatusChips?.map((chip) => (
               <StatusChipBadge key={chip.id} chip={chip} />
             ))}
           </>)}

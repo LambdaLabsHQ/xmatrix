@@ -12,7 +12,7 @@ import { AtSign } from "lucide-react";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { HumanLocalTime } from "@/components/dashboard/human-local-time";
 import { cn } from "@/lib/utils";
-import { COUNT_CHIP_MATERIAL_CLASS } from "./workspace-shell-constants";
+import { tagClass } from "./status-tag";
 
 export type CurrentHumanProfileSource = {
   id: string;
@@ -81,7 +81,7 @@ export function HumanProfileSummary({
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-black text-foreground">{profile.displayName}</p>
           {profile.handleIsTemporary ? (
-            <span className={cn("shrink-0 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground", COUNT_CHIP_MATERIAL_CLASS)}>
+            <span className={tagClass("uppercase tracking-wide")}>
               Temporary
             </span>
           ) : null}

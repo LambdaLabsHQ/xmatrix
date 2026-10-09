@@ -2016,7 +2016,7 @@ export function GoalStatusBadge({
           // Same shape as every other tag; the tone paints its own surface in
           // place of the shared chip material.
           TAG_SHAPE_CLASS,
-          "app-goal-status-badge max-w-[10rem] truncate rounded border",
+          "app-goal-status-badge max-w-[10rem] truncate border",
           tone
         )}
       >
