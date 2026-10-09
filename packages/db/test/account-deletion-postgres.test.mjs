@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createAuthorityDatabase, PostgresAccountDeletionRepository, PostgresSpaceControlRepository } from "../dist/index.js";
+import { isAccountRevoked } from "@xmatrix/protocol";
+import { createAuthorityDatabase, PostgresAccountDeletionRepository, PostgresAppleBillingRepository, PostgresBillingRepository,
+  PostgresSpaceControlRepository } from "../dist/index.js";
 import { integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
 
 async function fixture() {
@@ -223,5 +225,21 @@ integration("an expired prepare lease cannot commit after checking blockers",asy
     f.repo.preview=original;
     await f.repo.advance("delete-user",async()=>true);
     await expectState(f,"completed");
+  }finally{await f.close();}
+});
+
+/* Sign-in, daemons, Apple notifications and Space restore once each wrote
+   their own list of the states that revoke an identity. */
+integration("every reader of a deleted identity agrees on which deletion states revoke it",async()=>{
+  const f=await fixture();try{
+    const apple=new PostgresAppleBillingRepository(f.db,new PostgresBillingRepository(f.db,"shard-0"));
+    const token=randomUUID();
+    await f.run(`INSERT INTO control.apple_account_tokens(app_account_token,space_id,owner_user_id) VALUES($1,'apple-space','delete-user')`,[token]);
+    for(const state of ["preparing","blocked","committed","completed"]){
+      await f.run(`INSERT INTO control.account_deletion_requests(user_id,request_id,state,receipt_hash) VALUES('delete-user',$1,$2,$3)
+        ON CONFLICT (user_id) DO UPDATE SET state=EXCLUDED.state`,[f.proof.requestId,state,f.proof.receiptHash]);
+      assert.equal(await f.repo.revoked("delete-user"),isAccountRevoked(state),state);
+      assert.equal((await apple.resolve(randomUUID(),token)).accountDeleted,isAccountRevoked(state),state);
+    }
   }finally{await f.close();}
 });
