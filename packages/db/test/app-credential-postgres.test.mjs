@@ -145,8 +145,14 @@ integration("GitHub routes require their creator's current user append capabilit
     const creators = async () => (await routes()).map(route => route.authorityRootUserId).sort();
     assert.deepEqual(await creators(), ["member", "owner"],
       "legacy Agent identities, viewers and ungranted closed Channels cannot act as users");
+    // The subscription index is a superset: whoever may act on a source now, it is listed.
+    const subscribed = (installationId) => new PostgresAppRepository(database).githubSubscribedSources({
+      requestId: crypto.randomUUID(), installationId, limit: 100 });
+    assert.deepEqual(await subscribed("42"), [{ sourceKind: "issue", sourceRef, feature: "pulls" }]);
+    assert.deepEqual(await subscribed("43"), []);
     await sql("DELETE FROM data.space_members WHERE space_id=$1 AND user_id='member'", [space]);
     assert.deepEqual(await creators(), ["owner"], "membership revocation invalidates existing subscriptions");
+    assert.deepEqual(await subscribed("42"), [{ sourceKind: "issue", sourceRef, feature: "pulls" }]);
     assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_source_relations WHERE space_id=$1",
       [space])).rows[0].n, 5, "invalid subscriptions remain stored without being dispatched");
   });
@@ -908,6 +914,7 @@ integration("an imported PR subscription keeps its identity through update, rout
       principal: { kind: "user", id: "owner" }, at }, "put-relation");
     assert.equal(updated.relation.id, relationId);
     assert.equal(updated.relation.version, 2);
+    assert.deepEqual(updated.githubInstallations, ["42"], "a widened subscription names its installation's index");
     const routes = await apps.githubSubscriptionRoutes({ requestId: `route-${space}`, installationId: "42",
       sourceRefs: [sourceRef], feature: "pulls", limit: 100 });
     const route = routes.find(value => value.channelId === channelId);
