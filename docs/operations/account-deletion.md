@@ -27,6 +27,16 @@ Machine actions. Leaving another person's Space is an explicit self-only members
 its owner cannot leave. Scheduled Space deletion continues independently. Restoration cannot
 resurrect deleted members or automations, and cannot restore a deleted owner's Space.
 
+An owner can close a Space from the account-deletion requirements screen, even with
+an unexpired subscription. This is a separate Human action requiring a fresh login,
+the account email, exact current Space name, `CLOSE SPACE`, and acknowledgement that
+all members lose access and provider renewal continues. The directory verifies the
+session and issues a request-local, short-lived authorization; the owning shard still
+checks current ownership, the confirmed name and account admission fences. JSON flags
+cannot recreate that authorization. Ordinary Space deletion keeps its billing guard,
+and a pending checkout still blocks closure. Existing Space retention, restore and
+purge clocks apply; deleting the account later removes its restoration ability.
+
 Commit removes the auth user, sessions and linked credentials in one transaction, records
 handle retirement, and permanently revokes already-issued Human, Agent and Machine tokens.
 It does not transfer billing, cancel a provider subscription, or delete computer files.

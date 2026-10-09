@@ -26,14 +26,20 @@ test("account deletion requires all confirmations and retries an uncertain deliv
 
 test("an owned Space blocks deletion and an ordinary membership requires explicit leave confirmation", async ({ page }) => {
   let left = false;
+  let closed = false;
+  const closureRequests: Record<string,unknown>[] = [];
   await page.route("**/api/xmatrix/account-deletion", route => route.fulfill({ json: { blockers: [
-    { kind: "owned_space", spaceId: "owned", name: "My team" },
+    ...closed ? [] : [{ kind: "owned_space", spaceId: "owned", name: "My team" }],
     ...left ? [] : [{ kind: "membership", spaceId: "joined", name: "Another team" }],
   ] } }));
   await page.route("**/api/xmatrix/account-deletion/leave-space", route => {
     expect(route.request().postDataJSON()).toEqual({ spaceId: "joined" });
     left = true;
     return route.fulfill({ json: { left: true } });
+  });
+  await page.route("**/api/xmatrix/account-deletion/close-space", route => {
+    closureRequests.push(route.request().postDataJSON());closed=true;
+    return route.fulfill({json:{closed:true}});
   });
   await page.goto("/account/delete");
   await expect(page.getByRole("button", { name: "Permanently delete account" })).toHaveCount(0);
@@ -42,4 +48,16 @@ test("an owned Space blocks deletion and an ordinary membership requires explici
   await page.getByRole("button", { name: "Confirm leave" }).click();
   await expect(page.getByText("Another team", { exact: true })).toHaveCount(0);
   await expect(page.getByText("My team", { exact: true })).toBeVisible();
+  await page.getByRole("button",{name:"Close Space for account deletion"}).click();
+  const confirm=page.getByRole("button",{name:"Confirm Space closure"});
+  await expect(confirm).toBeDisabled();
+  await page.getByLabel("Account email for Space closure",{exact:true}).fill("e2e@xmatrix.test");
+  await page.getByLabel("Space name",{exact:true}).fill("My team");
+  await page.getByLabel("Type CLOSE SPACE",{exact:true}).fill("CLOSE SPACE");
+  await expect(confirm).toBeDisabled();
+  expect(closureRequests).toHaveLength(0);
+  await page.getByRole("checkbox").check();
+  await confirm.click();
+  await expect(page.getByRole("button",{name:"Permanently delete account"})).toBeVisible();
+  expect(closureRequests).toEqual([{spaceId:"owned",name:"My team",email:"e2e@xmatrix.test",confirmation:"CLOSE SPACE",acknowledge:true}]);
 });

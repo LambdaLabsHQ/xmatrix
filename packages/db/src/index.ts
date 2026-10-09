@@ -313,3 +313,4 @@ export { PostgresAppleBillingRepository, type AppleAccountBinding } from "./appl
 
 export { PostgresAccountDeletionRepository, AccountDeletionError, accountIdentityRevoked } from "./account-deletion.js";
 export type { AccountDeletionBlocker, AccountDeletionState } from "./account-deletion.js";
+export type { AccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";

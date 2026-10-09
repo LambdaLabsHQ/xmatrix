@@ -8,11 +8,12 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, XMatrixApiError } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { actionClass } from "@/components/ui/action-tone";
+import { CloseOwnedSpace } from "./close-owned-space";
 
 const RECEIPT_KEY = "xmatrix.account-deletion.receipt";
 const base = WEB_PROXY_ROUTES.account_deletion;
 const reasons: Record<AccountDeletionBlocker["kind"], string> = {
-  owned_space: "Close this Space before deleting your account. Its data is not deleted by this button.",
+  owned_space: "Close this Space before deleting your account.",
   membership: "Leave this Space before deleting your account. Other members' work stays with the Space.",
   subscription: "Resolve this subscription in Billing first. Deleting an account does not cancel App Store or Stripe billing.",
   active_execution: "Stop active agent work and finish pending Machine actions before deleting your account.",
@@ -136,6 +137,11 @@ export default function AccountDeletionPage() {
         {blockers.map((blocker,index)=><div key={`${blocker.kind}:${index}`} className="rounded-xl border p-4">
           {blocker.name && <strong>{blocker.name}</strong>}<p>{reasons[blocker.kind]}</p>
           {blocker.spaceId && <Link href={`/app/${encodeURIComponent(blocker.spaceId)}?view=team`} className="underline">Open Space</Link>}
+          {blocker.kind === "owned_space" && blocker.spaceId && blocker.name && <div className="mt-2">
+            <CloseOwnedSpace spaceId={blocker.spaceId} name={blocker.name} accountEmail={user.email} onClosed={loadPreview}
+              onError={error=>{if(error instanceof XMatrixApiError && error.code==="account_deletion_reauthenticate")setReauthenticate(true);
+                setMessage(userErrorMessage(error,"Couldn't delete the Space")??"");}} />
+          </div>}
           {blocker.kind === "membership" && blocker.spaceId && <div className="mt-2">
             {leave===blocker.spaceId ? <><p>Leaving removes your access to this Space.</p><button disabled={busy} className={actionClass({variant:"secondary",size:"sm"})} onClick={()=>void leaveSpace(blocker.spaceId!)}>Confirm leave</button></> : <button className={actionClass({variant:"secondary",size:"sm"})} onClick={()=>setLeave(blocker.spaceId!)}>Leave Space</button>}
           </div>}
