@@ -271,6 +271,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     checkLocalRuntime,
     completeDesktopSetup,
     toggleAutomation,
+    runAutomation,
     updateAutomation,
     deleteAutomation,
     openLocalAgentDiscovery,
@@ -1154,6 +1155,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onCompleteDesktopSetup={() => void completeDesktopSetup()}
       onUpdateAutomation={(automationId, input) => void updateAutomation(automationId, input)}
       onToggleAutomation={(automation) => void toggleAutomation(automation)}
+      onRunAutomation={(automation) => void runAutomation(automation)}
       onDeleteAutomation={(automation) => void deleteAutomation(automation)}
       joinRequestsBySpace={joinRequestsBySpace}
       onDecideJoinRequest={resolveSpaceJoinRequest}

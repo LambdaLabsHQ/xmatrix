@@ -27,6 +27,7 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
   googleadsense: { scope: "https://www.googleapis.com/auth/adsense.readonly", name: "AdSense" },
   gcp: { scope: "https://www.googleapis.com/auth/cloud-platform", name: "Google Cloud" },
+  gmail: { scope: "https://www.googleapis.com/auth/gmail.readonly", name: "read-only Gmail" },
 };
 
 /**
@@ -40,7 +41,7 @@ export function grantFieldsForgottenOnDisconnect(providerId: string): Record<str
 }
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", gcp: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", gcp: "google", gmail: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;

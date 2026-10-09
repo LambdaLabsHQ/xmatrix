@@ -85,6 +85,7 @@ export type AutomationRecord = Record<string, unknown> & {
     pause: boolean;
     requestPause: false;
     resume: boolean;
+    run: boolean;
     delete: boolean;
     reasonRequired: boolean;
   };

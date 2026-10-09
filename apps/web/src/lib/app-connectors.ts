@@ -76,6 +76,10 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Read daily AdSense earnings, page views and RPM by site, country or page.",
     "Let a scheduled Automation track each site's revenue next to its search traffic.",
   ],
+  gmail: [
+    "Find a sign-up or login verification email and open its link without leaving the agent.",
+    "Read receipts, alerts and replies from the connected mailbox as task context.",
+  ],
   bitbucket: [
     "Follow Bitbucket pull requests and builds alongside agents.",
   ],

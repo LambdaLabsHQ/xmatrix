@@ -1,5 +1,6 @@
 import { record } from "../command-support";
 import { providerJson, ProviderRequestError } from "../http";
+import { googleHeaders } from "./google-headers";
 import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText } from "./common";
 
@@ -21,13 +22,6 @@ const MAX_ROWS = 250;
 const MAX_DAYS = 1_095;
 const DAY_MS = 86_400_000;
 
-function bearer(credentials: Readonly<Record<string, string>>): Record<string, string> {
-  const token = credentials.oauthToken;
-  if (!token || token.length > 16_384 || /\s/u.test(token)) {
-    throw new ProviderRequestError(401, "Connect Google AdSense with OAuth first");
-  }
-  return { authorization: `Bearer ${token}` };
-}
 
 /** `pub-123…` or `accounts/pub-123…`, normalised to the API resource name. */
 export function adsenseAccount(target: string): string | undefined {
@@ -91,7 +85,7 @@ export const GOOGLE_ADSENSE_ACTIONS: Record<string, ConnectorAction> = {
       return statement.target === "*" && !statement.text.trim() ? {} : "use @googleadsense:list_accounts:*";
     },
     async execute({ credentials }) {
-      const result = await providerJson(`${API}/accounts`, { headers: bearer(credentials) });
+      const result = await providerJson(`${API}/accounts`, { headers: googleHeaders(credentials, "Google AdSense") });
       if (result.accounts !== undefined && !Array.isArray(result.accounts)) {
         throw new ProviderRequestError(502, "Google did not return an AdSense account list");
       }
@@ -111,7 +105,7 @@ export const GOOGLE_ADSENSE_ACTIONS: Record<string, ConnectorAction> = {
       return account && !statement.text.trim() ? { account } : "name an account: pub-1234567890123456";
     },
     async execute({ credentials }, input) {
-      const result = await providerJson(`${API}/${input.account}/sites?pageSize=${MAX_ROWS}`, { headers: bearer(credentials) });
+      const result = await providerJson(`${API}/${input.account}/sites?pageSize=${MAX_ROWS}`, { headers: googleHeaders(credentials, "Google AdSense") });
       if (result.sites !== undefined && !Array.isArray(result.sites)) {
         throw new ProviderRequestError(502, "Google did not return an AdSense site list");
       }
@@ -133,7 +127,7 @@ export const GOOGLE_ADSENSE_ACTIONS: Record<string, ConnectorAction> = {
       return typeof options === "string" ? options : { account, url: adsenseReportUrl(account, options).href };
     },
     async execute({ credentials }, input) {
-      const result = await providerJson(input.url!, { headers: bearer(credentials) });
+      const result = await providerJson(input.url!, { headers: googleHeaders(credentials, "Google AdSense") });
       if (!Array.isArray(result.headers) || (result.rows !== undefined && !Array.isArray(result.rows))) {
         throw new ProviderRequestError(502, "Google did not return an AdSense report");
       }
@@ -154,7 +148,7 @@ export const GOOGLE_ADSENSE_ACTIONS: Record<string, ConnectorAction> = {
 
 /** Confirm the grant with a real read; the account list is not stored. */
 export async function verifyGoogleAdsense(credentials: Readonly<Record<string, string>>): Promise<void> {
-  const result = await providerJson(`${API}/accounts`, { headers: bearer(credentials) });
+  const result = await providerJson(`${API}/accounts`, { headers: googleHeaders(credentials, "Google AdSense") });
   if (result.accounts !== undefined && !Array.isArray(result.accounts)) {
     throw new ProviderRequestError(502, "Google did not confirm AdSense access");
   }
