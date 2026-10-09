@@ -41,6 +41,10 @@ export interface ScheduledMessageDeliveryPort {
   ) => T | undefined;
   appendMessage(command: AppendMessageCommand): Promise<unknown>;
   schedulePostCommit(input: ScheduledMessagePostCommit): void;
+  /** Opens the occurrence's own conversation as its authority root; returns its id. */
+  openConversation(input: { occurrence: AutomationOccurrenceRow; automation: AutomationExecutionRow;
+    /** The Automation's stored name, and what it says to fall back on for a row without one. */
+    storedName: unknown; body: string; userId: string }): Promise<string>;
 }
 
 export interface ScheduledMessageDelivery {
@@ -53,7 +57,7 @@ export interface ScheduledMessageDelivery {
 }
 
 export async function dispatchScheduledMessageOccurrence(
-  port: Pick<ScheduledMessageDeliveryPort, "appendMessage" | "schedulePostCommit">,
+  port: Pick<ScheduledMessageDeliveryPort, "appendMessage" | "schedulePostCommit" | "openConversation">,
   occurrence: AutomationOccurrenceRow,
   automation: AutomationExecutionRow,
   payload: Record<string, unknown>,
@@ -92,6 +96,11 @@ export async function dispatchScheduledMessageOccurrence(
   // the effect actor is rechecked by appendMessage, and its Human authority
   // root is rechecked here. Neither side may keep the closure alive alone.
   await schedule.requireEvaluationAuthority(automation.channel_id, authorityRootUserId);
+  // Each occurrence runs in a fresh conversation, so one occurrence's chatter
+  // never becomes the next one's context; what carries over is on the page.
+  // Opened before the prepared boundary, idempotently, so a retry reopens it.
+  const channelId = await port.openConversation({ occurrence, automation, userId: authorityRootUserId,
+    storedName: payload.name, body });
   const appMentions = Array.isArray(expression?.appMentions) ? expression.appMentions
     : Array.isArray(message?.appMentions) ? message.appMentions : undefined;
   // Prepared is the durable delivery-acceptance boundary. Automation edits only
@@ -101,7 +110,7 @@ export async function dispatchScheduledMessageOccurrence(
   await port.appendMessage({
     commandId: `scheduled:message-append:${occurrence.id}`.slice(0, 200),
     messageId: occurrence.message_id,
-    channelId: automation.channel_id,
+    channelId,
     body,
     principal: { kind: senderKind, id: senderId },
     authorityRootUserId,
@@ -117,9 +126,9 @@ export async function dispatchScheduledMessageOccurrence(
     },
   });
   const deliveredAt = new Date().toISOString();
-  await schedule.finishMessage(occurrence, automation, deliveredAt);
+  await schedule.finishMessage(occurrence, automation, channelId, deliveredAt);
   port.schedulePostCommit({
-    channelId: automation.channel_id,
+    channelId,
     messageId: occurrence.message_id,
     body,
     actorUserId: automation.owner_user_id,

@@ -437,10 +437,14 @@ section it keeps true, and it is written there:
   and each top section it removed, `page edit` prints a line for each, and
   people on the page see a notice. A resumed Automation that never ran gets
   its first delay again, at most one interval.
-- **Each Automation works in a conversation of its own**, created with it and
-  linked to its section. Each occurrence is a fresh Run in that conversation
-  and writes back to the section (§5.2). The conversation is where it runs,
-  not what it belongs to.
+- **Each occurrence works in a fresh conversation.** The Automation has a
+  conversation of its own, created with it, whose authority times it; nothing
+  is posted there. Each occurrence opens a new conversation as the
+  Automation's author, linked to its section and named for the Automation and
+  the occurrence's time, posts its message there and writes back to the
+  section (§5.2). An occurrence never inherits an earlier one's chatter: what
+  carries over lives on the page. The chip and Schedules open the last
+  occurrence's conversation.
 - **Nothing runs unanchored.** An Automation is created only in a page
   section: from the page, `xmatrix page automation create` or a Management
   Agent acting through the page. The Space's Schedules only lists and

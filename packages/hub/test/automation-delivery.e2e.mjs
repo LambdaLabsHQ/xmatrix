@@ -40,9 +40,11 @@ test("due Automation commits one canonical message with App metadata and no dupl
       message: { body: visibleBody },
       intervalMinutes: 15,
     });
-    // A page's Automation runs in a conversation of its own.
-    const channel = { id: task.channelId };
-
+    // Each occurrence runs in a fresh conversation, not the Automation's own.
+    const persisted = await waitForTask(worker, task.id,
+      (candidate) => candidate.deliveryCount === 1 && Boolean(candidate.lastChannelId));
+    assert.notEqual(persisted.lastChannelId, task.channelId);
+    const channel = { id: persisted.lastChannelId };
     const delivered = await waitForChannelHistoryMessage(
       worker,
       MOCK_TOKEN,
@@ -53,14 +55,11 @@ test("due Automation commits one canonical message with App metadata and no dupl
     );
     assert.equal(delivered.metadata?.appMentions?.[0]?.appId, "github");
     assert.equal(delivered.metadata?.appMentions?.[0]?.actionId, "issue_to_channel");
-
-    const persisted = await waitForTask(
-      worker,
-      task.id,
-      (candidate) => candidate.deliveryCount === 1 && candidate.lastMessageId === delivered.messageId,
-    );
+    assert.equal(persisted.lastMessageId, delivered.messageId);
     assert.equal(persisted.lastRunAt !== undefined, true);
     assert.equal(Date.parse(persisted.nextRunAt) > Date.now(), true);
+    assert.equal((await channelHistory(worker, task.channelId))
+      .some((message) => message.body.includes(`scheduled-${unique}`)), false);
 
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     const matching = (await channelHistory(worker, channel.id))
@@ -93,10 +92,8 @@ test("scheduled tagged Auto uses the shared post-commit dispatcher without a lau
     const { key: registration, canonicalCwd } = await createRoutableAgent(worker, { token: MOCK_TOKEN,
       spaceId: space.id, name: `scheduled-message-agent-${unique}`, machineId, hostId });
 
-    let scheduledChannelId = "";
     const spawnPromise = daemon.inbox.waitFor(
-      (message) => message.type === "machine_spawn_agent" &&
-        message.channelId === scheduledChannelId && isSpawnOf(message, registration),
+      (message) => message.type === "machine_spawn_agent" && isSpawnOf(message, registration),
       "scheduled message one-shot spawn",
       20_000,
     );
@@ -110,8 +107,6 @@ test("scheduled tagged Auto uses the shared post-commit dispatcher without a lau
       },
       intervalMinutes: 15,
     });
-    // A page's Automation runs in a conversation of its own.
-    scheduledChannelId = task.channelId;
     const spawn = await spawnPromise;
     assert.ok(spawn.runId && spawn.launchId && spawn.instanceId && spawn.executionKey);
     assert.equal(spawn.identityId, spawn.instanceId, "a registered Agent acts as its Instance");
@@ -127,7 +122,10 @@ test("scheduled tagged Auto uses the shared post-commit dispatcher without a lau
     assert.notEqual(persisted.lastMessageId, spawn.runId);
     assert.equal(persisted.lastMessageId, spawn.sourceMessageId,
       "the launch must consume the exact canonical scheduled message");
-    sendSpawnResult(daemon, spawn, { channelId: task.channelId, ok: false, error: "test completed before provider launch" });
+    // The occurrence's Run works in the occurrence's own conversation.
+    assert.equal(spawn.channelId, persisted.lastChannelId);
+    assert.notEqual(spawn.channelId, task.channelId);
+    sendSpawnResult(daemon, spawn, { channelId: spawn.channelId, ok: false, error: "test completed before provider launch" });
   } finally {
     if (daemon) daemon.ws.close();
     await worker.stop();
