@@ -1204,6 +1204,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   const {
     toggleAutomation,
+    runAutomation,
     updateAutomation,
     deleteAutomation,
   } = useWorkspaceAutomationActions({
@@ -2758,6 +2759,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     checkLocalRuntime,
     completeDesktopSetup,
     toggleAutomation,
+    runAutomation,
     updateAutomation,
     deleteAutomation,
     openLocalAgentDiscovery,

@@ -248,18 +248,20 @@ function capabilities(row: QueryResultRow) {
     const canManage = row.can_manage === true;
     const enabled = row.enabled === true;
     return { update: canManage, pause: canManage && enabled, requestPause: false,
-      resume: canManage && !enabled && !row.detached_at, delete: canManage, reasonRequired: false };
+      resume: canManage && !enabled && !row.detached_at, run: canManage && enabled, delete: canManage,
+      reasonRequired: false };
   }
   if (row.agent_principal_id) {
     const owner = automationOwner(row);
     const own = owner.kind === "agent" && owner.id === row.agent_principal_id;
     return { update: own, pause: own && row.enabled === true, requestPause: false,
-      resume: own && row.enabled !== true, delete: own, reasonRequired: false };
+      resume: own && row.enabled !== true, run: false, delete: own, reasonRequired: false };
   }
   const canManage = row.can_manage === true;
   const enabled = row.enabled === true;
+  // Only a page's Automation runs now: the page route is the one that does it.
   return { update: canManage, pause: canManage && enabled, requestPause: false,
-    resume: canManage && !enabled, delete: canManage, reasonRequired: false };
+    resume: canManage && !enabled, run: false, delete: canManage, reasonRequired: false };
 }
 
 /**

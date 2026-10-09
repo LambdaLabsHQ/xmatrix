@@ -1017,6 +1017,8 @@ export interface AutomationCapabilities {
   /** Always false; pause-request approval is retired. Sent for CLIs that still require it. */
   requestPause: false;
   resume: boolean;
+  /** Make its next occurrence due now; a running Automation whose page the caller can edit. */
+  run: boolean;
   delete: boolean;
   reasonRequired: boolean;
 }

@@ -13,7 +13,7 @@ xmatrix page automation list <page-id>
 xmatrix page automation create <page-id> --block <heading-slug> --name "Code audit" --every 12h \
   -m "@auto repo:<owner/repo> audit duplication and update this section"
 xmatrix page automation edit <page-id> <automation-id> --version <n> --every 1d
-xmatrix page automation pause|resume|delete <page-id> <automation-id> --version <n>
+xmatrix page automation pause|resume|run|delete <page-id> <automation-id> --version <n>
 xmatrix page automation attach <page-id> <automation-id> --block <heading-slug>
 xmatrix page automation create <page-id> --block architecture --name "Merge review" --every 12h \
   --on merged:<owner/repo>@main --on ci-failed:<owner/repo>:CI -m "@auto repo:<owner/repo> review what changed"
@@ -26,4 +26,5 @@ xmatrix page automation create <page-id> --block architecture --name "Merge revi
 - Anyone who can edit the page manages its Automations, from any conversation. On a page that takes Agent edits as suggestions, ask a person.
 - An Automation runs as its author. Editing someone else's replaces it with one authored by your owner and points the page's reference at it.
 - Deleting its reference from the page pauses it (`detached`); `attach` puts the reference back, which resumes it or moves it to another section.
-- Use the version from `list` for edit, pause, resume and delete. After a version conflict, re-read and reassess rather than retrying.
+- `run` makes a running Automation's next occurrence due now; its cadence stays.
+- Use the version from `list` for edit, pause, resume, run and delete. After a version conflict, re-read and reassess rather than retrying.
