@@ -206,6 +206,16 @@ link the message contains, fenced as untrusted content. The Hub never
 requests a link found in mail; an Agent that needs to confirm a sign-up opens
 the link itself. There is no send, label or delete action and no inbound
 event. Composio is a subprocessor for connected mailboxes.
+
+Disconnect reads the grant through the credential authority's live Space
+owner/admin check before any provider deletion. Member-visible connection
+metadata is not authorization for that effect. Composio retirement happens
+before clearing the stored grant, so a provider failure remains retryable;
+the clear compares the credential version, connection version and generation
+read before the provider request,
+preserving a grant installed by a concurrent reconnect. Google disconnects
+use the same authorized read and version comparison. The Hub-only credential
+read remains for independently authorized executions and verified ingress.
 See [Gmail API](https://developers.google.com/workspace/gmail/api/reference/rest).
 
 Google Sheets uses the same per-file Google connection and `drive.file` grant.
