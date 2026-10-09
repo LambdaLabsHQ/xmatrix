@@ -78,13 +78,13 @@ export const spaceBilling: SpaceBillingPolicy = {
     });
   },
 
-  async spaceDeletion(transaction, { spaceId, now }) {
+  async spaceDeletion(transaction, { spaceId, now, intent }) {
     const subscriptions = await transaction.query<{ status: string }>({
       name: "official_space_delete_subscription_v1",
       text: "SELECT status FROM data.space_billing_subscriptions WHERE space_id=$1 FOR UPDATE",
       values: [spaceId], maxRows: 1,
     });
-    if (subscriptions[0] && !["canceled", "incomplete_expired"].includes(subscriptions[0].status)) {
+    if (intent !== "account-deletion" && subscriptions[0] && !["canceled", "incomplete_expired"].includes(subscriptions[0].status)) {
       return {
         code: "conflict", status: 409,
         message: "Cancel the Space subscription and wait for provider confirmation before deletion",

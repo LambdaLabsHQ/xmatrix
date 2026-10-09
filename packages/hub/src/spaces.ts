@@ -2,6 +2,7 @@ import {
   PostgresChannelCatalogRepository,
   PostgresSpaceControlRepository,
   type AuthorityDatabase,
+  type AccountSpaceClosureAuthorization,
   type ChannelCatalogChangeAudience,
   type PostgresChannelMutation,
   type PostgresMembershipMutation,
@@ -114,7 +115,7 @@ export function updateSpace(env: SpacesEnv, input: DomainCommand & {
 }
 
 /** Deletes a Space; it stays restorable for its retention window. */
-export function deleteSpace(env: SpacesEnv, input: DomainCommand & { spaceId: string }) {
+export function deleteSpace(env: SpacesEnv, input: DomainCommand & { spaceId: string; accountClosure?: AccountSpaceClosureAuthorization }) {
   const { repository, requestId } = spaces(env, {}, input.commandId);
   return repository.mutateSpace({ requestId, kind: "space_delete", ...input });
 }

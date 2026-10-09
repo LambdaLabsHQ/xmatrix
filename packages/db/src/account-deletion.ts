@@ -2,6 +2,7 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { erasePrivateAccountRows } from "./account-deletion-cleanup.js";
 import { DetailedControlError } from "./control-error.js";
+import { issueAccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";
 
 export class AccountDeletionError extends DetailedControlError {
   override name = "AccountDeletionError";
@@ -87,6 +88,19 @@ export class PostgresAccountDeletionRepository {
       { requestId: crypto.randomUUID(), operation: "account-deletion.preview" },
       (tx) => accountDeletionBlockers(tx, userId))));
     return { blockers: results.flat() };
+  }
+
+  async authorizeSpaceClosure(input: { userId: string; sessionId: string; email: string; spaceId: string; name: string }) {
+    if (!input.spaceId || input.spaceId.length > 300 || !input.name || input.name.length > 200)
+      throw new AccountDeletionError("account_space_confirmation",400,"Confirm the Space name");
+    await this.directory.transaction({requestId:crypto.randomUUID(),operation:"account-deletion.close-space-identity"},async tx=>{
+      await lockAccountDeletion(tx,input.userId);
+      await assertDeletionSession(tx,input.userId,input.sessionId,input.email);
+      const pending=await tx.query({name:"account_space_closure_pending_v1",text:`SELECT user_id FROM control.account_deletion_requests
+        WHERE user_id=$1 AND (state<>'blocked' OR NOT fences_cleared) LIMIT 1`,values:[input.userId],maxRows:1});
+      if(pending.length)throw new AccountDeletionError("account_deletion_in_progress",409,"Resolve the current deletion request first");
+    });
+    return issueAccountSpaceClosureAuthorization(input.userId,input.spaceId,input.name);
   }
 
   async begin(input: { userId: string; sessionId: string; email: string; requestId: string; receiptHash: string }) {

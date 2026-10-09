@@ -6,6 +6,7 @@ import {integration,isolatedPostgres} from "../../db/test/postgres-database.fixt
 import {verifyAuthToken,signAgentRunToken} from "../src/auth.ts";
 import {signMachineDaemonCredential,verifyMachineDaemonCredential} from "../src/connections/machine-daemon/auth.ts";
 import {registerAccountDeletionRoutes} from "../src/index-routes-account-deletion.ts";
+import {createAuthorityDatabase,PostgresSpaceControlRepository} from "@xmatrix/db";
 
 integration("deletion requires a Human's fresh session and revokes already-issued Human, Agent and Machine tokens",async()=>{
  const f=await isolatedPostgres("account_auth",{shard:true});
@@ -16,8 +17,12 @@ integration("deletion requires a Human's fresh session and revokes already-issue
   const keys=await generateKeyPair("ES256"),publicKey=JSON.stringify(await exportJWK(keys.publicKey));
   await f.run("INSERT INTO control.auth_jwks(id,public_key,private_key,created_at) VALUES('test-key',$1,'unused',now())",[publicKey]);
   const objects=new Set(["avatars/auth-user/one.png","avatars/other-user/two.png"]);
+  const spaceRepo=new PostgresSpaceControlRepository(createAuthorityDatabase({connectionString:f.url.toString(),shardId:"shard-0"}),"shard-0");
+  await spaceRepo.createSpace({requestId:randomUUID(),commandId:randomUUID(),spaceId:"auth-owned",ownerUserId:user.id,name:"Owned work"});
+  let armed=0;
   const env={AUTH_AUTHORITY:"postgres",RELAY_POSTGRES:{connectionString:f.url.toString()},RELAY_POSTGRES_SHARD_ID:"shard-0",
     BETTER_AUTH_SECRET:"isolated-account-test-signing-secret",HUB_URL:"https://hub.example.test",APP_URL:"https://example.test",
+    RELAY_SPACE_DELETION_CLOCK:{idFromName:id=>id,get:()=>({arm:async(spaceId,dueAt)=>{assert.equal(spaceId,"auth-owned");assert.ok(Number.isFinite(dueAt));armed++;}})},
     ATTACHMENT_BUCKET:{list:async({prefix})=>({objects:[...objects].filter(k=>k.startsWith(prefix)).map(key=>({key})),truncated:false}),delete:async keys=>{for(const key of keys){assert.ok(key.startsWith("avatars/auth-user/"));objects.delete(key);}}}};
   const token=await new SignJWT({email:user.email,auth_session_id:"fresh-session"}).setProtectedHeader({alg:"ES256",kid:"test-key"}).setIssuer(env.HUB_URL).setAudience(env.HUB_URL).setSubject(user.id).setIssuedAt().setExpirationTime("1h").sign(keys.privateKey);
   const agent=await signAgentRunToken(env,user,{agentId:"test-agent",agentName:"test",runId:"test-run",executionKey:"test-execution",spaceId:"test-space",channelId:"test-channel",machineId:"test-machine",hostId:"test-host",permissions:[]});
@@ -32,6 +37,16 @@ integration("deletion requires a Human's fresh session and revokes already-issue
   assert.equal((await send("/api/account-deletion",proof,agent)).status,401);
   assert.equal((await send("/api/account-deletion",{...proof,acknowledge:false})).status,400);
   assert.equal((await send("/api/account-deletion",{...proof,email:"other@example.test"})).status,400);
+  const close={spaceId:"auth-owned",name:"Owned work",email:user.email,confirmation:"CLOSE SPACE",acknowledge:true};
+  assert.equal((await send("/api/account-deletion/close-space",close,agent)).status,401);
+  assert.equal((await send("/api/account-deletion/close-space",{...close,acknowledge:false})).status,400);
+  assert.equal((await send("/api/account-deletion/close-space",{...close,name:"Wrong name"})).status,409);
+  assert.equal((await send("/api/account-deletion/close-space",{...close,email:"other@example.test"})).status,400);
+  const closed=await send("/api/account-deletion/close-space",close);
+  assert.equal(closed.status,200,await closed.text());
+  assert.equal(armed,1);
+  assert.equal((await send("/api/account-deletion/close-space",close)).status,200);
+  assert.equal(armed,2,"a recorded closure retry re-arms its original purge clock");
   assert.equal((await send("/api/account-deletion",proof)).status,202);
   await Promise.all(work);
   assert.equal((await send("/api/account-deletion/status",proof,"")).status,200);

@@ -6,6 +6,7 @@ import { lockTransfer, requireTransferAdmin, transferSnapshot, transferView, val
 import type { QueryResultRow } from "pg";
 import { channelVisibilityScope, ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, portableNameKey, TERMINAL_RUN_STATUS_SQL, sha256Hex , utf8ByteLength } from "@xmatrix/protocol";
 import { spaceBilling, type BillingRejection, type SpaceBillingPolicy } from "@xmatrix/billing";
+import { assertAccountSpaceActionAdmitted, assertAccountSpaceClosureAuthorization, type AccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";
 import { commandDigest as digest } from "./command-digest.js";
 import { readSpaceCommandReplay, storeSpaceCommandReplay } from "./command-replay.js";
 
@@ -159,7 +160,7 @@ export type PostgresSpaceMutation = PostgresSpaceMutationBase & (
       name?: string;
       metadata?: Record<string, unknown>;
     }
-  | { kind: "space_delete" }
+  | { kind: "space_delete"; accountClosure?: AccountSpaceClosureAuthorization }
 );
 
 export interface UpdatePostgresSpaceMemberCreationPolicy {
@@ -1103,10 +1104,13 @@ export class PostgresSpaceControlRepository {
 
   async mutateSpace(input: PostgresSpaceMutation): Promise<Record<string, unknown>> {
     const { requestId, commandId, actorUserId, spaceId } = actorCommand(input);
+    const closure = input.kind === "space_delete" ? input.accountClosure : undefined;
+    if (closure) assertAccountSpaceClosureAuthorization(closure,actorUserId,spaceId);
     const at = iso(input.at);
     requireExpectedVersion(input.expectedVersion, 1);
     const requestDigest = await digest(input);
     return this.inSpace(requestId, `space.${input.kind}`, spaceId, async (transaction) => {
+      if (closure) await assertAccountSpaceActionAdmitted(transaction,actorUserId);
       const replay = await idempotentReplay(
         transaction, spaceId, commandId, input.kind, requestDigest,
       );
@@ -1121,6 +1125,10 @@ export class PostgresSpaceControlRepository {
         values: [spaceId], maxRows: 1,
       });
       const current = requireSpaceRow(spaces);
+      if (closure) {
+        assertAccountSpaceClosureAuthorization(closure,actorUserId,spaceId,current.name);
+        if(current.owner_user_id!==actorUserId)throw new SpaceControlError("forbidden",403,"Space owner required");
+      }
       if (input.kind === "space_delete") {
         // Its owner asking again gets the scheduled deletion back, so a client
         // retry can re-arm the purge clock without a second mutation.
@@ -1170,7 +1178,8 @@ export class PostgresSpaceControlRepository {
         });
         if (!updated[0]) throw new SpaceControlError("conflict", 409, "Space changed");
       } else {
-        rejectBilling(await this.billing.spaceDeletion(transaction, { spaceId, now: at }));
+        rejectBilling(await this.billing.spaceDeletion(transaction, { spaceId, now: at,
+          ...(closure ? { intent: "account-deletion" as const } : {}) }));
         const advanced = await transaction.query({
           name: "space_delete_advance_v1",
           text: `UPDATE data.spaces SET version=$2, updated_at=$3
@@ -1235,6 +1244,7 @@ export class PostgresSpaceControlRepository {
       operation: "space.space_restore",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
     }, async (transaction) => {
+      await assertAccountSpaceActionAdmitted(transaction,actorUserId);
       const replay = await idempotentReplay(
         transaction, spaceId, commandId, "space_restore", requestDigest,
       );
@@ -1267,7 +1277,7 @@ export class PostgresSpaceControlRepository {
       const deletedAccounts = await this.database.transaction({requestId,operation:"space.restore-account-status"}, tx => tx.query<{user_id:string}>({
         name:"space_restore_deleted_accounts_v2",text:`SELECT member.user_id FROM unnest($1::text[]) AS member(user_id)
           WHERE ${accountRevokedSql("member.user_id")}`,
-        values:[(deletion.members_json ?? []).map(member=>member.userId)],maxRows:10_000}));
+        values:[[...new Set([deletion.owner_user_id,...(deletion.members_json ?? []).map(member=>member.userId)])]],maxRows:10_000}));
       if(deletedAccounts.some(row=>row.user_id===actorUserId)) throw new SpaceControlError("forbidden",403,"Deleted accounts cannot restore Spaces");
       const members = await restoreSpaceDeletion(transaction, {
         deletedUserIds: deletedAccounts.map(row=>row.user_id),

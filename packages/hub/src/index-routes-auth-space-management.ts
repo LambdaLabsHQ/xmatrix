@@ -2,9 +2,7 @@ import { Hono, type Context } from "hono";
 import { type AppConnectorCompletionDynamicSource, type UpsertAppConnectorConnectionRequest } from "@xmatrix/protocol";
 import { deliveryProven, GITHUB_SIGNATURE } from "./connectors/delivery-proof";
 import type { Env } from "./types";
-import { ServiceUnavailable } from "./error-contract";
-import { daemonStopTargets, issueDaemonStopsForArchivedChannelTree } from "./product-agent-intervention-authority-adapter";
-import { armSpaceDeletionClock } from "./space-deletion-clock";
+import { deploymentPinnedSpace, finishScheduledSpaceDeletion } from "./space-deletion-effects";
 import { checkAppConnection } from "./app-connection-check";
 import { appCommand, findAppConnection, listAppConnections, listAppExecutions, upsertAppConnection } from "./apps";
 import { schedulerRepository } from "./automations";
@@ -61,12 +59,6 @@ async function emailCreatedInvite(
     historyMode: body.historyMode,
   });
   return c.json({ invite: { ...invite, url: inviteUrl }, sent: result.sent, failed: result.failed });
-}
-
-/** Spaces the deployment configuration names cannot be deleted from the product. */
-function deploymentPinnedSpace(env: Env, spaceId: string): boolean {
-  return [env.PLATFORM_ADMIN_SPACE_ID, env.TEST_ENVIRONMENT_ACCESS_SPACE_ID]
-    .some((pinned) => typeof pinned === "string" && pinned.trim() === spaceId);
 }
 
 /** The Channel and request id a Channel About refresh names; undefined when either is missing or too long. */
@@ -138,28 +130,8 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       commandId: productCommandId(c.req.raw, "domain"),
       actorUserId: authUser.id, at: new Date().toISOString(), spaceId,
     });
-    const deletion = result.deletion as { purgeAfter?: unknown } | undefined;
-    if (typeof deletion?.purgeAfter !== "string") {
-      return c.json({ error: "Space deletion result is invalid" }, 503);
-    }
-    const stopTargets = daemonStopTargets(result.stopTargets);
-    if (stopTargets.length > 0) {
-      // PostgreSQL already stopped these Runs; the daemon kills are best-effort.
-      c.executionCtx.waitUntil(issueDaemonStopsForArchivedChannelTree({
-        env: c.env, actorUserId: authUser.id, rootChannelId: `space-delete:${spaceId}`,
-        reason: "The Space was deleted", targets: stopTargets,
-      }));
-    }
-    // Repeating the request returns the scheduled deletion and arms the clock again.
-    try {
-      await armSpaceDeletionClock(c.env, spaceId, deletion.purgeAfter);
-    } catch (error) {
-      console.error("Space deletion clock was not armed", {
-        spaceId, error: error instanceof Error ? error.message : String(error),
-      });
-      throw new ServiceUnavailable("space_deletion_clock_unavailable",
-        "Space deletion was recorded but its purge is not scheduled yet; retry");
-    }
+    const deletion = await finishScheduledSpaceDeletion({env:c.env,spaceId,actorUserId:authUser.id,result,
+      waitUntil:work=>c.executionCtx.waitUntil(work)});
     return c.json({ ok: true, deletion });
   }));
   app.post("/api/spaces/:spaceId/restore", (c) => jsonErrors(c, async () => {

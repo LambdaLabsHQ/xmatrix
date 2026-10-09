@@ -7,7 +7,8 @@ import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
 import { readBearerToken } from "./auth";
 import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorResponse } from "./index-shared";
-import { changeMembership } from "./spaces";
+import { changeMembership, deleteSpace } from "./spaces";
+import { deploymentPinnedSpace, finishScheduledSpaceDeletion } from "./space-deletion-effects";
 import type { Env } from "./types";
 
 function repository(env: Env) {
@@ -87,6 +88,25 @@ export function registerAccountDeletionRoutes(app:Hono<{Bindings:Env}>) {
       if(typeof body.spaceId!=="string" || !body.spaceId || body.spaceId.length>300)throw new AccountDeletionError("invalid_deletion_request",400,"Choose a Space");
       await changeMembership(c.env,{commandId:crypto.randomUUID(),actorUserId:user.id,at:new Date().toISOString(),kind:"space_member_remove",spaceId:body.spaceId,userId:user.id});
       return c.json({left:true});
+    }catch(error){return requestErrorResponse(c,error);}
+  });
+  app.post(HUB_ROUTES.account_deletion_close,async c=>{
+    try {
+      const user=requireHumanAuth(await requireAuth(c.req.raw,c.env));const body=await input(c.req.raw);
+      if(body.confirmation!=="CLOSE SPACE" || body.acknowledge!==true || typeof body.email!=="string" || body.email.length>320 ||
+          typeof body.spaceId!=="string" || typeof body.name!=="string")throw new AccountDeletionError(
+        "account_space_confirmation",400,"Confirm your email, the Space name and CLOSE SPACE, and acknowledge the consequences");
+      if(deploymentPinnedSpace(c.env,body.spaceId))throw new AccountDeletionError("space_pinned",403,"This Space is pinned by the deployment and cannot be closed");
+      const sessionId=decodeJwt(readBearerToken(c.req.header("authorization"))??"").auth_session_id;
+      if(typeof sessionId!=="string" || sessionId.length>300)throw new AccountDeletionError(
+        "account_deletion_reauthenticate",409,"Sign out and sign in again before closing this Space");
+      const accountClosure=await repository(c.env).authorizeSpaceClosure({userId:user.id,sessionId,
+        email:body.email,spaceId:body.spaceId,name:body.name});
+      const result=await deleteSpace(c.env,{commandId:crypto.randomUUID(),actorUserId:user.id,
+        at:new Date().toISOString(),spaceId:body.spaceId,accountClosure});
+      const deletion=await finishScheduledSpaceDeletion({env:c.env,spaceId:body.spaceId,actorUserId:user.id,result,
+        waitUntil:work=>c.executionCtx.waitUntil(work)});
+      return c.json({closed:true,deletion},200,{"cache-control":"private, no-store"});
     }catch(error){return requestErrorResponse(c,error);}
   });
 }
