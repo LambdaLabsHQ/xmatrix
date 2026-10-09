@@ -10,10 +10,10 @@
  *
  * `TAG_SHAPE_CLASS` is geometry and type only. Tags that carry a status tone of
  * their own — the goal badge — paint their own surface over the same shape.
- * Every other tag is ink on the paper, from `tagClass`: an icon and a word with
- * no surface of its own, the way a detail page's context line reads. A row of
- * glass capsules beside a glass avatar was six raised objects per header
- * (user 2026-10-09: 头像和标签都改成纸面风格，不然看着太乱了).
+ * Every other tag is a paper label, from `tagClass`: a flat ink tint with no
+ * edge, lens or shadow, holding an icon and a word in medium muted ink. Glass
+ * capsules beside a glass avatar were six raised objects per header, and bare
+ * ink words ran together (user 2026-10-09: 纸签，边框都不要有).
  */
 
 import { GitPullRequest } from "lucide-react";
@@ -22,28 +22,25 @@ import type { ComponentType, ReactNode, SVGProps } from "react";
 import { cn } from "@/lib/utils";
 
 export const TAG_SHAPE_CLASS =
-  "inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold";
+  "inline-flex shrink-0 items-center gap-1 px-[7px] py-0.5 text-[12px] font-medium";
 
-/** Ink on the paper: no surface, so no padding to hold one. */
-export const INK_TAG_CLASS = "app-ink-tag px-0 text-muted-foreground";
+/** A paper label: the shared tint, cut square-ish so a row of them reads as labels, not pills. */
+export const PAPER_TAG_CLASS = "app-paper-tag overflow-hidden rounded-md text-muted-foreground";
 
 export function tagClass(...extra: Array<string | false | undefined>): string {
-  return cn(TAG_SHAPE_CLASS, INK_TAG_CLASS, ...extra);
+  return cn(TAG_SHAPE_CLASS, PAPER_TAG_CLASS, ...extra);
 }
 
-/* A usage meter on an ink tag is a line under its words: the share used in the
-   meter's tone, over a faint track when the meter is the tag's whole point. */
-export function UsageMeterLine({ percent, tone, track }: { percent: number; tone: string; track?: boolean }) {
+/* A usage meter on a paper label fills the label from the left, in the meter's
+   tone softened onto the paper (user 2026-10-09: 背景色的进度条，不要下面的横条). */
+export function UsageMeterFill({ percent, tone }: { percent: number; tone: string }) {
   return (
-    <>
-      {track ? <span aria-hidden className="app-usage-meter-track pointer-events-none absolute bottom-0 inset-x-0 h-0.5 rounded-full" /> : null}
-      <span
-        aria-hidden
-        className="app-usage-meter-fill pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-full"
-        data-tone={tone}
-        style={{ width: `${percent}%` }}
-      />
-    </>
+    <span
+      aria-hidden
+      className="app-usage-meter-fill pointer-events-none absolute inset-y-0 left-0"
+      data-tone={tone}
+      style={{ width: `${percent}%` }}
+    />
   );
 }
 
@@ -87,7 +84,7 @@ export function Tag({
   const body = (
     <>
       {fill}
-      <Icon className="relative z-[1] size-3 shrink-0" />
+      <Icon className="relative z-[1] size-3 shrink-0 opacity-80" />
       <span className={cn("relative z-[1]", nowrap ? "whitespace-nowrap" : "truncate")}>{children}</span>
     </>
   );
