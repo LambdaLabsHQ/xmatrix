@@ -78,7 +78,7 @@ export function SpaceDangerZone({
           </p>
         </div>
         {!open ? (
-          <button type="button" onClick={() => setOpen(true)} className={actionClass({}, "text-destructive")}>
+          <button type="button" onClick={() => setOpen(true)} className={actionClass({ variant: "danger" })}>
             Delete Space…
           </button>
         ) : null}
