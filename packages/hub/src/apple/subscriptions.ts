@@ -92,7 +92,7 @@ export async function retrieveAppleSubscription(config: AppleSubscriptionConfig,
     const token = await new SignJWT({ bid: APPLE_BUNDLE_ID }).setProtectedHeader({ alg: "ES256", kid: config.keyId, typ: "JWT" })
       .setIssuer(config.issuerId).setAudience("appstoreconnect-v1").setIssuedAt().setExpirationTime("5m").sign(key);
     response = await fetchImpl(`${host}/inApps/v1/subscriptions/${transactionId}`, {
-      headers: { authorization: `Bearer ${token}` }, redirect: "error", signal: AbortSignal.timeout(10_000),
+      headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(10_000),
     });
   } catch { throw new AppleBillingError("apple_request_failed", "Apple subscription verification is temporarily unavailable", true); }
   if (!response.ok) { await response.body?.cancel(); throw new AppleBillingError("apple_request_failed", "Apple subscription could not be verified", response.status >= 500 || response.status === 429); }
