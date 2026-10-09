@@ -8088,19 +8088,37 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 }
 
 /* Controls on the paper follow what GitHub and Notion share (measured
-   2026-10-09): one material for every secondary control, no glass, no well,
-   no capsule. A button is a fine warm ink ring on the paper (Notion's
-   rgba(42,28,0,.07) ring with its 2px lift); danger is that button in red
-   ink, solid red only while the pointer is on it (GitHub); the one primary
-   action is solid ink. Status and role chips are paper labels. Controls on a
-   wood plank, and the admin tables' inline tools, keep their own. */
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *) {
+   2026-10-09): one material for every field and secondary button, no glass,
+   no well, no capsule. It is a fine warm ink ring with a 2px lift (Notion's
+   rgba(42,28,0,.07) ring), deepening with a faint halo while a field has the
+   caret. Danger is that button in red ink, solid red only under the pointer
+   (GitHub); the one primary action is solid ink; chips are paper labels. A
+   field drawn as a shell around its input (an icon beside the text) wears the
+   material on the shell. Fields inside another control's shell (border-0),
+   controls on a wood plank, the admin tables' tools, and the page title,
+   search and composer keep their own. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *),
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) label.border:has(> input:not([type="file"]):not([type="checkbox"]):not([type="radio"])):not(.app-material-wood-panel *, .app-admin-view *),
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *) {
   background: transparent !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   border: 0 !important;
   border-radius: 8px !important;
   box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.16), 0 2px 4px oklch(0 0 0 / 0.04) !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) label.border:has(> input:not([type="file"]):not([type="checkbox"]):not([type="radio"])):not(.app-material-wood-panel *, .app-admin-view *):focus-within,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *):focus {
+  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.45), 0 0 0 4px oklch(0.35 0.07 60 / 0.08) !important;
+  outline: none !important;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) label.border:has(> input:not([type="file"]):not([type="checkbox"]):not([type="radio"])):not(.app-material-wood-panel *, .app-admin-view *) > input:not([type="file"]):not([type="checkbox"]):not([type="radio"]) {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *):hover:not(:disabled) {
@@ -8143,8 +8161,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   box-shadow: none !important;
 }
 
-:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-shared-chip.app-liquid-glass-surface.app-liquid-glass-surface:not(.app-material-wood-panel *, .app-admin-view *))::before,
-:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-shared-chip.app-liquid-glass-surface.app-liquid-glass-surface:not(.app-material-wood-panel *, .app-admin-view *))::after {
+:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-shared-chip.app-liquid-glass-surface.app-liquid-glass-surface:not(.app-material-wood-panel *, .app-admin-view *))::before,
+:is(html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(.app-action-secondary, .app-action-danger, [data-slot="button"]:not([data-variant="ghost"]):not([data-variant="default"]), button:is(.rounded, .rounded-md, .rounded-lg).border:not(.app-glass-select-trigger)):not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-action-primary:not(.app-material-wood-panel *, .app-admin-view *), html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .app-shared-chip.app-liquid-glass-surface.app-liquid-glass-surface:not(.app-material-wood-panel *, .app-admin-view *))::after {
   content: none !important;
 }
 
@@ -8159,50 +8177,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
 
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) .bg-muted\/50:not(.app-material-wood-panel *, .app-admin-view *) {
   background: transparent !important;
-}
-
-/* A field drawn as a shell around its input (an icon beside the text) takes
-   the same material on the shell; the input inside is bare. */
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) label.border:has(> input:not([type="file"]):not([type="checkbox"]):not([type="radio"])):not(.app-material-wood-panel *, .app-admin-view *) {
-  background: transparent !important;
-  border: 0 !important;
-  border-radius: 8px !important;
-  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.16), 0 2px 4px oklch(0 0 0 / 0.04) !important;
-}
-
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) label.border:has(> input:not([type="file"]):not([type="checkbox"]):not([type="radio"])):not(.app-material-wood-panel *, .app-admin-view *):focus-within {
-  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.45), 0 0 0 4px oklch(0.35 0.07 60 / 0.08) !important;
-}
-
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) label.border:has(> input:not([type="file"]):not([type="checkbox"]):not([type="radio"])):not(.app-material-wood-panel *, .app-admin-view *) > input:not([type="file"]):not([type="checkbox"]):not([type="radio"]) {
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-/* A field on the paper is the buttons' material, not a well sunk into it: the
-   same warm ink ring and 2px lift, deepening with a faint halo while it has
-   the caret. Only fields that draw their own box take it; one sitting inside
-   another control's shell (border-0), fields on a wood plank, the admin
-   tables' tools, and the page title, search and composer keep their own. */
-html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *) {
-  background: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  border: 0 !important;
-  border-radius: 8px !important;
-  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.16), 0 2px 4px oklch(0 0 0 / 0.04) !important;
-}
-
-html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *):focus {
-  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.45), 0 0 0 4px oklch(0.35 0.07 60 / 0.08) !important;
-  outline: none !important;
-}
-
-html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *)::before,
-html[data-app-theme] .xmatrix-app.xmatrix-app :is(.app-tool-detail, .app-tool-list) :is(input:is([data-slot="input"], .border):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea:is([data-slot="textarea"], .border), .app-glass-select-trigger):not(.border-0, .page-title, .app-search-panel-input, .composer-textarea, .app-material-wood-panel *, .app-admin-view *)::after {
-  content: none !important;
 }
 
 /* Notices on the paper: plain white with the tone's rail, not glass. */
