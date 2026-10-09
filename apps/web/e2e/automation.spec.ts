@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { E2E_CHANNEL, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
-import { fixtureJson } from "./in-page-api-fixtures";
+import { fixtureJson, fixtureRequestBodies, fixtureRule } from "./in-page-api-fixtures";
 
 test.use({ viewport: { width: 1280, height: 900 } });
 
@@ -161,6 +161,26 @@ test("Automation exits edit mode when the edited task is deleted", async ({ page
   await expect(scheduleRow(page, "Existing schedule")).toHaveCount(0);
   await expect(page.getByLabel("Name")).toHaveCount(0);
   await expect(page.getByText("Nothing in this Space runs on a schedule")).toBeVisible();
+});
+
+test("deleting an Automation that moved on since the list loaded deletes its current version", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { ...E2E_AUTOMATION_READY_FIXTURES, automations: [E2E_AUTOMATION] });
+  await openSchedule(page, "Existing schedule");
+  const automationUrl = /\/api\/xmatrix\/automations\/task-local$/u;
+  await fixtureJson(page, "automation-read", automationUrl,
+    { automation: { ...E2E_AUTOMATION, version: 2 } }, { method: "GET" });
+  await fixtureRule(page, { id: "automation-delete", pattern: automationUrl, method: "DELETE", responder: {
+    kind: "sequence", responses: [
+      { status: 409, json: { error: "expectedVersion must match the current Automation version", code: "conflict" } },
+      { json: { ok: true, automationId: "task-local" } },
+    ] } });
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete" }).click();
+
+  await expect(scheduleRow(page, "Existing schedule")).toHaveCount(0);
+  await expect(page.getByText(/changed in the meantime/u)).toHaveCount(0);
+  expect((await fixtureRequestBodies(page, "automation-delete")).map((body) => body.expectedVersion)).toEqual([1, 2]);
 });
 
 test("Schedules lists Automations by page and makes none; an empty Space is sent to Pages", async ({ page }) => {
