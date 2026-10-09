@@ -2,6 +2,7 @@ import { providerJson, ProviderRequestError } from "./http";
 import { oneLine, record, text } from "./event-format";
 import type { ConnectorActionStatement } from "./provider";
 import { quoteRetrievedText } from "./actions/common";
+import { googleHeaders } from "./actions/google-headers";
 
 // Return typed Google failure context, never the raw error body or credentials.
 function googleError(payload: Record<string, unknown>): string | undefined {
@@ -23,16 +24,9 @@ export const GCP_PROJECT = /^(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{5,19})$/
 export const PAGE_SIZE = 30;
 type Credentials = Readonly<Record<string, string>>;
 
-function headers(credentials: Credentials): Record<string, string> {
-  const token = credentials.oauthToken;
-  if (!token || token.length > 16_384 || /\s/u.test(token)) {
-    throw new ProviderRequestError(401, "Connect Google Cloud with OAuth first");
-  }
-  return { authorization: `Bearer ${token}` };
-}
 
 export async function request(credentials: Credentials, url: URL | string, json?: unknown) {
-  return providerJson(url, { describeError: googleError, headers: headers(credentials), ...(json === undefined ? {} : { method: "POST", json }) });
+  return providerJson(url, { describeError: googleError, headers: googleHeaders(credentials, "Google Cloud"), ...(json === undefined ? {} : { method: "POST", json }) });
 }
 
 export function list(result: Record<string, unknown>, key: string): unknown[] {

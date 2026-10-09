@@ -156,6 +156,21 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/adsense.readonly"], secretRefs: [] },
   },
   {
+    ...actionConnector({
+      id: "gmail", name: "Gmail", kind: "docs",
+      description: "Search and read the connected Google account's mail, with every link a message contains, so an Agent can find a verification email and open its link. Read-only.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent", include_granted_scopes: "false" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS],
+      actions: [
+        readAction("search", "Search mail", "The 10 newest messages matching a Gmail search (from:, subject:, newer_than:1h, is:unread …), with id, sender, subject and snippet.", "* [gmail search]"),
+        readAction("read", "Read message", "Headers, text body and every link of one message; open a link yourself when the task needs it.", "<message id>"),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/gmail.readonly"], secretRefs: [] },
+  },
+  {
     ...eventConnector({
       id: "gcp", name: "Google Cloud", kind: "observability",
       description: "Analyze project costs and billing exports, and investigate Google Cloud resources, Cloud Run status, logs, metrics and alert policies; route Monitoring incidents to channels and Automations.",

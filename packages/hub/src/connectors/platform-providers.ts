@@ -10,6 +10,7 @@ import { NOTION_ACTIONS, verifyNotion } from "./actions/notion";
 import { GOOGLE_ACTIONS, verifyGoogle } from "./actions/google";
 import { GOOGLE_SEARCH_CONSOLE_ACTIONS, verifyGoogleSearchConsole } from "./actions/google-search-console";
 import { GOOGLE_ADSENSE_ACTIONS, verifyGoogleAdsense } from "./actions/google-adsense";
+import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
 import { OPENCONNECTOR_ACTIONS, verifyOpenConnector } from "./actions/openconnector";
 import { PAGERDUTY_ACTIONS, verifyPagerDuty } from "./actions/pagerduty";
 import { SENTRY_ACTIONS, verifySentry } from "./actions/sentry";
@@ -62,6 +63,7 @@ const PROVIDERS: Record<string, {
   google: { actions: GOOGLE_ACTIONS, verify: verifyGoogle },
   googlesearchconsole: { actions: GOOGLE_SEARCH_CONSOLE_ACTIONS, verify: verifyGoogleSearchConsole },
   googleadsense: { actions: GOOGLE_ADSENSE_ACTIONS, verify: verifyGoogleAdsense },
+  gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail },
   bitbucket: { receive: receiveBitbucketDelivery, actions: BITBUCKET_ACTIONS, verify: verifyBitbucket },
   circleci: { receive: receiveCircleCiDelivery },
   buildkite: { receive: receiveBuildkiteDelivery },
