@@ -8,11 +8,6 @@ import type { SerializedAutomation } from "@xmatrix/protocol";
  */
 export type ScheduleState = "attention" | "running" | "paused";
 
-export interface ScheduleGroup {
-  state: ScheduleState;
-  automations: SerializedAutomation[];
-}
-
 export interface ScheduleSummary {
   total: number;
   running: number;
