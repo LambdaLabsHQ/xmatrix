@@ -1,4 +1,5 @@
-import { readOwnerRegistrationQuotaState, registrationQuotaKey, type RegistrationQuotaReading } from "@xmatrix/db";
+import { readOwnerRegistrationQuotaState, readRegistrationQuotaState, registrationQuotaKey,
+  type RegistrationQuotaReading } from "@xmatrix/db";
 import { withRegistrationQuota } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
@@ -52,6 +53,9 @@ import {
   type ChannelAgentPresenceRecipient,
 } from "./channel-agent-presence-delivery";
 import { publishRuntimeChannelAgentPresence } from "./runtime-route-directory-delivery";
+import {
+  PRESENCE_AUDIENCE_TTL_MS, PresenceAudiences, type PresenceAudience, type PresenceStorage,
+} from "./presence-audiences";
 import { RELAY_RUNTIME_SELECTED_CELL } from "./runtime-cell-locator";
 
 const RUNTIME_SIGNAL_TYPES = new Set<string>([
@@ -74,6 +78,8 @@ export function createProductionRelayRuntimeProductPortFactory(
     readChannel?: HumanFanoutChannelReader;
     /** Every registration of one owner with its quota reading; PostgreSQL by default. */
     readOwnerQuota?: (ownerUserId: string) => Promise<readonly RegistrationQuotaReading[]>;
+    /** One registration's quota reading; PostgreSQL by default. */
+    readQuota?: (registration: AgentRegistrationKey) => Promise<LlmUsage | undefined>;
     /** The Agent Instance socket's Run and Instance facts; PostgreSQL by default. */
     runtime?: AgentInstanceRuntime;
     /** How Agent sockets read Channel history; PostgreSQL by default. */
@@ -83,6 +89,8 @@ export function createProductionRelayRuntimeProductPortFactory(
     scheduleBackground?: (task: Promise<unknown>) => void;
     /** This Runtime cell; live fanout must not RPC back into the same object. */
     runtimeSelf?: { cellName: () => string; fetch(request: Request): Promise<Response> };
+    /** This Runtime cell's own storage, which outlives its hibernation. */
+    storage?: PresenceStorage;
   } = {},
 ): RelayRuntimeProductPortFactory {
   const analytics = options.analytics ?? analyticsSinkFromEnv(env);
@@ -114,6 +122,37 @@ export function createProductionRelayRuntimeProductPortFactory(
     publishedQuotaReadings.set(key, digest);
     deliver(userId, { type: "registration_quota", registration, usage });
   };
+  const readQuota = options.readQuota ?? (async (registration: AgentRegistrationKey) =>
+    (await readRegistrationQuotaState(runtimeDirectory(env), [registration], crypto.randomUUID()))
+      .get(registrationQuotaKey(registration)));
+  /* A status report from a working Agent is the frequent case. It reuses what
+     the Instance's last Channel read said about who may see it and its quota,
+     and reads nothing: joining and leaving read the Channel again, a catalog
+     change in its Space forgets the audience, and the quota is read again
+     when the Instance reports a newer provider reading or a minute passes. */
+  const audiences = new PresenceAudiences(options.storage);
+  /** The registration's reading for a status report, and whether this report read it. */
+  const audienceQuota = async (instanceId: string, audience: PresenceAudience,
+    session: Readonly<AgentInstanceRuntimeSession>): Promise<{ quota: LlmUsage | undefined; read: boolean }> => {
+    if (!audience.registration) return { quota: undefined, read: false };
+    const held = await audiences.quota(audience.registration);
+    const reported = reportedQuotaAt(session);
+    if (held && reported <= audience.quotaCheckedThrough && Date.now() - held.readAt < PRESENCE_QUOTA_TTL_MS) {
+      return { quota: held.quota, read: false };
+    }
+    let quota: LlmUsage | undefined;
+    try {
+      quota = await readQuota(audience.registration);
+    } catch {
+      // The reading held stays shown; the next report tries again.
+      return { quota: held?.quota, read: false };
+    }
+    await audiences.rememberQuota(audience.registration, quota);
+    if (reported > audience.quotaCheckedThrough) {
+      await audiences.remember(instanceId, { ...audience, quotaCheckedThrough: reported });
+    }
+    return { quota, read: true };
+  };
 
   return {
     human: () => PostgresHumanPort.fromEnv({ env }),
@@ -142,7 +181,19 @@ export function createProductionRelayRuntimeProductPortFactory(
         });
         return [];
       });
-      for (const { registration, usage } of readings) publishQuota(ownerUserId, registration, usage, deliver);
+      for (const { registration, usage } of readings) {
+        await audiences.rememberQuota(registration, usage);
+        publishQuota(ownerUserId, registration, usage, deliver);
+      }
+    },
+    onChannelCatalogChanged: (spaceId) => {
+      // Who may see a Channel of this Space may have changed: read it again.
+      const forgotten = audiences.forgetSpace(spaceId).catch((error: unknown) => {
+        console.warn("Presence audiences of a changed Space could not be forgotten", {
+          errorCode: error instanceof Error ? error.name : "unknown",
+        });
+      });
+      options.scheduleBackground?.(forgotten);
     },
     onAgentPresenceChange: async ({
       reason, session, status: reportedStatus, liveHumanSessions, deliver, deliverAgentPresence, machineReachable,
@@ -159,8 +210,30 @@ export function createProductionRelayRuntimeProductPortFactory(
       const { status, offlineReason } = reason === "disconnect"
         ? { status: reportedStatus, offlineReason: undefined }
         : shown(session, reportedStatus);
+      const ownerUserId = session.principal.ownerUserId;
+      const known = reason === "update" ? await audiences.audience(session.run.instanceId) : undefined;
+      if (reason === "disconnect") await audiences.forget(session.run.instanceId);
+      if (known && known.channelId === session.run.channelId && Date.now() - known.readAt < PRESENCE_AUDIENCE_TTL_MS) {
+        // A status report: the card alone carries it, and every viewer's
+        // client patches its Channel from the card.
+        const { quota: accountQuota, read } = await audienceQuota(session.run.instanceId, known, session);
+        // A held reading went out when it was read; only a new read is news.
+        if (read && known.registration) publishQuota(ownerUserId, known.registration, accountQuota, deliver);
+        const card = humanEnhancedPresenceFrame(session, status, offlineReason, accountQuota);
+        const recipients: ChannelAgentPresenceRecipient[] = [];
+        for (const userId of [ownerUserId, ...known.viewers]) {
+          deliverAgentPresence(userId, session.run.channelId, card, undefined);
+          recipients.push({ userId, digest: true, card: true, channel: false, immediate: [] });
+        }
+        scheduleAgentPresenceAcrossCells({
+          env, scheduleBackground: options.scheduleBackground, runtimeSelf: options.runtimeSelf,
+          channelId: session.run.channelId, reason, card: card.agent, recipients,
+        });
+        return;
+      }
       const live = liveAgentFanout.sessions().filter(candidate => candidate.run.instanceId !== session.run.instanceId);
-      const payload = await readChannel(session.run.channelId, session.principal.ownerUserId, "agent-presence");
+      const payload = await readChannel(session.run.channelId, session.principal.ownerUserId, "agent-presence",
+        session.principal.spaceId);
       const accountQuota = payload ? channelInstanceQuota(payload.channel, session.run.instanceId) : undefined;
       const overlayLiveChannel = (channel: SerializedChannel, channelId: string) => {
         for (const liveSession of live) {
@@ -173,9 +246,11 @@ export function createProductionRelayRuntimeProductPortFactory(
       const registration = payload && Object.values(payload.channel.memberPresence ?? {}).flatMap(presence =>
         presence.kind === "agent" && presence.instances?.some(instance => instance.id === session.run.instanceId)
           ? [presence.registration] : [])[0];
-      const ownerUserId = session.principal.ownerUserId;
       // This read is the registration's current reading; the owner's other Agents under it take it too.
-      if (registration) publishQuota(ownerUserId, registration, accountQuota, deliver);
+      if (registration) {
+        await audiences.rememberQuota(registration, accountQuota);
+        publishQuota(ownerUserId, registration, accountQuota, deliver);
+      }
       const remoteRecipients: ChannelAgentPresenceRecipient[] = [];
       const remember = (recipient: ChannelAgentPresenceRecipient) => {
         remoteRecipients.push(recipient);
@@ -247,6 +322,13 @@ export function createProductionRelayRuntimeProductPortFactory(
         payload.channel,
         payload.openChannelHumanMemberIdsBySpace,
       );
+      if (reason !== "disconnect") {
+        await audiences.remember(session.run.instanceId, {
+          channelId: session.run.channelId, spaceId: payload.channel.spaceId, readAt: Date.now(),
+          viewers: visibleHumanUserIds(humanMemberIds).filter(userId => userId !== ownerUserId),
+          ...(registration ? { registration } : {}), quotaCheckedThrough: reportedQuotaAt(session),
+        });
+      }
       const channel = channelForSharedPresenceFanout(
         overlayHumanPresenceOnChannel(
           payload.channel,
@@ -276,6 +358,14 @@ export function createProductionRelayRuntimeProductPortFactory(
       fanOut(channel);
     },
   };
+}
+
+const PRESENCE_QUOTA_TTL_MS = 60_000;
+
+/** When the Instance's own provider reading was taken, if it reported one. */
+function reportedQuotaAt(session: Readonly<AgentInstanceRuntimeSession>): number {
+  const at = Date.parse(session.presentation?.usage?.quotaObservedAt ?? "");
+  return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
 }
 
 /**

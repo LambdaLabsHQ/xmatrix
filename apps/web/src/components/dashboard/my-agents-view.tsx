@@ -4,6 +4,8 @@ import { useState, type ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
+  Download,
+  HardDrive,
   Loader2,
   Plus,
   RotateCcw,
@@ -52,6 +54,7 @@ import {
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
+import { ConnectMachine } from "./space-agent-setup-card";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
@@ -91,6 +94,7 @@ export function MyAgentsView({
   currentUserId,
   channels,
   error,
+  addsOnThisMachine,
   onOpenMachines,
   onOpenConversation,
 }: {
@@ -100,6 +104,8 @@ export function MyAgentsView({
   /** The Space's conversations the reader has, to name where an agent runs. */
   channels: readonly SerializedChannel[];
   error: string | null;
+  /** The desktop app reports this machine's harnesses itself; a browser cannot. */
+  addsOnThisMachine: boolean;
   onOpenMachines: () => void;
   onOpenConversation: (channelId: string) => void;
 }) {
@@ -319,6 +325,21 @@ export function MyAgentsView({
           )}
         </ToolDetailSection>
       </ToolDetail>
+    );
+  } else if (catalog.data && rows.length === 0 && newCandidates.length === 0 && !addsOnThisMachine) {
+    /* A browser cannot find anything on a machine, so with nothing installed
+       anywhere yet this shows where agents come from. */
+    detail = (
+      <ToolDetailEmpty icon={<HardDrive />} title="Bring your agents into xMatrix">
+        <p>
+          Your agents run on your own computer, and xMatrix connects them with the people they work
+          with. Open the desktop app on that computer and it finds the agents already installed there.
+        </p>
+        <a href="/download" className={actionClass({ variant: "primary", size: "sm" })}>
+          <Download className="size-4" /> Download xMatrix
+        </a>
+        <ConnectMachine spaceId={spaceId} token={token} userId={currentUserId} centered />
+      </ToolDetailEmpty>
     );
   } else if (catalog.data && rows.length === 0) {
     detail = (

@@ -27,7 +27,7 @@ for (const [name, viewport] of [
         await page.goto("/app", { waitUntil: "domcontentloaded" });
         await expect.poll(async () => (await fixtureRequests(page, "pending-channels")).length).toBeGreaterThan(0);
         await expect.poll(async () => (await fixtureRequests(page, "pending-agents")).length).toBeGreaterThan(0);
-        const setup = page.getByText("Connect the machine your agents run on", { exact: true });
+        const setup = page.getByText("Bring your agents into xMatrix", { exact: true });
         const setupCards = page.locator(".app-space-setup-card");
         await expect(setupCards).toHaveCount(0);
         await expect(page.getByText("Tap + to start one.", { exact: true })).toHaveCount(0);
