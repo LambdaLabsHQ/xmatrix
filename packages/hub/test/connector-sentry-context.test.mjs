@@ -76,6 +76,38 @@ test("numeric read uses two GETs and OAuth ignores stale manual token and URL me
   } finally { stub.restore(); }
 });
 
+test("a stackless event retains bounded provenance without copying private payload metadata", async () => {
+  const diagnosticEvent = { ...event, dateCreated: "2026-10-09T09:59:39.498000Z",
+    release: { version: "xmatrix-v1.0.149", author: "private-release-author" },
+    sdk: { name: "sentry.javascript.browser", version: "11.4.0", integrations: ["private-integration"] },
+    tags: [{ key: "component", value: "web" }, { key: "environment", value: "production" },
+      { key: "user.email", value: "private-user-tag" }, { key: "request", value: "private-request-tag" }],
+    entries: [{ type: "exception", data: { values: [{ type: "Error", value: "Request Canceled",
+      mechanism: { type: "auto.browser.global_handlers.onunhandledrejection", handled: false, synthetic: true,
+        data: { secret: "private-mechanism-data" }, meta: { secret: "private-mechanism-meta" } } }] } }] };
+  const { result, calls } = await run([{ body: issue }, { body: diagnosticEvent }], undefined, "123");
+  for (const expected of ["Event time: 2026-10-09T09:59:39.498000Z", "Release: xmatrix-v1.0.149",
+    "Component: web", "Environment: production", "SDK: sentry.javascript.browser 11.4.0",
+    "Mechanism: auto.browser.global_handlers.onunhandledrejection · handled=false · synthetic=true"]) {
+    assert.ok(result.summary.includes(expected), expected);
+  }
+  assert.doesNotMatch(result.summary, /private-|Frame:/);
+  assert.equal(calls.length, 2);
+});
+
+test("malformed or oversized diagnostic metadata is omitted and does not fail an issue read", async () => {
+  const { result } = await run([{ body: issue }, { body: { ...event, dateCreated: "private-time",
+    release: "x".repeat(161), sdk: { name: "private-sdk\nsecret", version: "private-version" },
+    tags: [{ key: "component", value: "private-component" }, { key: "environment", value: "private-environment\nsecret" }],
+    entries: [{ type: "exception", data: { values: [{ type: "Error", value: "Request Canceled",
+      mechanism: { type: "x".repeat(161), handled: "private-handled", synthetic: "private-synthetic" } }] } }],
+  } }], undefined, "123");
+  assert.match(result.summary, /Request Canceled/);
+  assert.doesNotMatch(result.summary, /private-|Event time:|Release:|SDK:|Component:|Environment:|Mechanism:/);
+  const stringRelease = await run([{ body: issue }, { body: { ...event, release: "xmatrix-v1.0.149" } }], undefined, "123");
+  assert.match(stringRelease.result.summary, /Release: xmatrix-v1.0.149/);
+});
+
 test("manual tokens retain configured self-hosted origin without following redirects", async () => {
   const { calls } = await run([{ body: issue }, { body: event }], { authToken: "manual-test", organization: "test",
     baseUrl: "https://errors.example.com" }, "123");
