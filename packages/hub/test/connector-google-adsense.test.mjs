@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { GOOGLE_ADSENSE_ACTIONS as ACTIONS, adsenseAccount, adsenseReportOptions, verifyGoogleAdsense }
   from "../src/connectors/actions/google-adsense.ts";
-import { assertGoogleReadOnlyGrant } from "./support/google-read-grant.mjs";
+import { exchangeOAuthGrant, oauthClient, oauthProviderIds } from "../src/connectors/oauth.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
+import { getAppConnectorProvider } from "../src/app-connectors.ts";
 
+const company = { CONNECTOR_GOOGLE_CLIENT_ID: "fixture-client.apps.googleusercontent.com", CONNECTOR_GOOGLE_CLIENT_SECRET: "fixture-secret" };
 const readonly = "https://www.googleapis.com/auth/adsense.readonly";
 const token = { oauthToken: "adsense-access" };
 const noon = Date.UTC(2026, 9, 8, 12);
@@ -15,9 +17,20 @@ const statement = body => {
   return ACTIONS[command.actionId].parse(command.statement);
 };
 
-test("AdSense reuses the company Google client and accepts only the read-only AdSense scope", () =>
-  assertGoogleReadOnlyGrant("googleadsense", readonly, ["https://www.googleapis.com/auth/adsense", `${readonly} https://www.googleapis.com/auth/webmasters`],
-    /AdSense OAuth grant/u, ACTIONS));
+test("AdSense reuses the company Google client and accepts only the read-only AdSense scope", async () => {
+  assert.equal(oauthClient(company, "googleadsense").clientId, company.CONNECTOR_GOOGLE_CLIENT_ID);
+  assert.ok(oauthProviderIds(company).includes("googleadsense"));
+  const client = oauthClient(company, "googleadsense");
+  const accepted = { access_token: "a", refresh_token: "r", token_type: "Bearer", expires_in: 3600, scope: readonly };
+  assert.equal((await fetched([{ body: accepted }], () => exchangeOAuthGrant(client, "code", "https://hub.test/cb"))).result.fields.oauthToken, "a");
+  for (const scope of ["https://www.googleapis.com/auth/adsense", `${readonly} https://www.googleapis.com/auth/webmasters`]) {
+    await fetched([{ body: { ...accepted, scope } }], () => assert.rejects(exchangeOAuthGrant(client, "code", "https://hub.test/cb"), /AdSense OAuth grant/u));
+  }
+  const manifest = getAppConnectorProvider("googleadsense");
+  assert.deepEqual(manifest.oauth.scopes, [readonly]);
+  const effects = new Map(manifest.actions.map(action => [action.id, action.effect]));
+  for (const [id, action] of Object.entries(ACTIONS)) assert.deepEqual([action.effect, effects.get(id)], ["read", "read"], id);
+});
 
 test("accounts, report options and statements are validated before any request", () => {
   assert.equal(adsenseAccount("pub-1234567890"), "accounts/pub-1234567890");
