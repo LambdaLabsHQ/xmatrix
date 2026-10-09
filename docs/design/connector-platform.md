@@ -244,7 +244,8 @@ See [PagerDuty's official REST schema](https://github.com/PagerDuty/api-schema/b
 Sentry `read_issue:WEB-1A` (or a numeric group id) reads one issue and its latest
 event from the configured organization. Short ids require one lookup; numeric
 ids use two GETs. The excerpt includes title/status/culprit/platform, event UTC
-time, release version, component/environment and SDK name/version, plus at most
+time, release version, component/environment, SDK and browser/runtime name/version,
+and whether the browser defect endpoint captured it (without its action text), plus at most
 three exceptions, each with the last 20 stack frames (module, function, filename
 and line/column only). Exception `type` and `value` are included when they are
 strings (including Sentry's annotated truncated-string form); a missing type or
