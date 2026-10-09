@@ -1477,17 +1477,6 @@ export function nativePlatformLabel(platform: DesktopContext["platform"]): strin
   return platform || undefined;
 }
 
-export function memberDeviceLine(presence: ChannelMemberPresence): string | undefined {
-  const instances = presence.instances || [];
-  if (!instances.length) return undefined;
-  const labels = instances
-    .map((instance) => instance.hostName || instance.label || instance.machineId || instance.hostId)
-    .filter((label): label is string => Boolean(label));
-  if (!labels.length) return undefined;
-  const uniqueLabels = Array.from(new Set(labels));
-  return uniqueLabels.length === 1 ? uniqueLabels[0] : uniqueLabels.join(", ");
-}
-
 export function formatMember(
   channel: SerializedChannel,
   member: string,
@@ -1887,14 +1876,6 @@ export function visibleHumanChannelMembers(
       .sort((left, right) => left.localeCompare(right));
   }
   return humanChannelMembersByPresence(channel);
-}
-
-export function spaceMemberForChannelIdentity(
-  space: SerializedSpace | null,
-  memberId: string
-) {
-  if (!space || !memberId.startsWith("user:")) return undefined;
-  return space.members.find((member) => member.userId === memberId.slice("user:".length));
 }
 
 export function channelFocusedHumanMembers(channel: SerializedChannel): string[] {
