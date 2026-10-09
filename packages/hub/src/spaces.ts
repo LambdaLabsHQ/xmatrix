@@ -15,6 +15,7 @@ import {
   type PostgresAuthorityFleetEnv,
 } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS, postgresAuthorityShardId } from "./postgres-authority-http";
+import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { wakeRegistrationChannels } from "./registration-authority-wake";
 import { projectRegistrationQuota } from "./registration-quota-presentation";
 import { relayChannelCatalogPublishCommittedChanges } from "./relay-channel-catalog-notification-delivery";
@@ -37,6 +38,8 @@ export interface SpacesDependencies {
   publishCatalogChanges?: (changes: readonly ChannelCatalogChangeAudience[]) => Promise<void>;
   /** Tells the Channels whose running executions an authority change may withdraw. */
   wakeAffectedChannels?: (database: AuthorityDatabase, spaceId: string) => Promise<unknown>;
+  /** Tells these Channels to recheck their running executions. */
+  recheckChannels?: (channelIds: readonly string[]) => Promise<unknown>;
 }
 
 type Principal = SpaceControlPrincipal;
@@ -185,21 +188,28 @@ export async function createChannel(env: SpacesEnv, input: {
 }
 
 /**
- * Changes a Channel's name, mode, topic, summary or Space. Mode and placement
- * decide what running executions may do, so its Space's Channels recheck
- * them; the answer is the Channel as its actor now reads it.
+ * Changes a Channel's name, mode, topic, summary or Space. Its mode and its
+ * Space decide what the executions running in it (and in the threads a move
+ * takes along) may do, so a change to either has those Channels recheck them;
+ * a name, topic or summary decides nothing and wakes none (2026-10-09: every
+ * summary an About session wrote rechecked each Channel of its Space). The
+ * answer is the Channel as its actor now reads it.
  */
 export async function configureChannel(env: SpacesEnv,
   input: Omit<PostgresChannelMutation, "requestId" | "kind">, dependencies: SpacesDependencies = {},
 ): Promise<Record<string, unknown> & { channel: unknown }> {
-  const { repository, requestId, database } = spaces(env, dependencies, input.commandId);
+  const { repository, requestId } = spaces(env, dependencies, input.commandId);
   const mutation: PostgresChannelMutation = { ...input, requestId, kind: "channel_configure" };
   const sourceSpaceId = await repository.resolveChannelSpaceId({ requestId, channelId: input.channelId });
   const result = await repository.mutateChannel(mutation, undefined, sourceSpaceId);
   const targetSpaceId = input.spaceId?.trim() || sourceSpaceId;
   await publishCatalogChanges(env, dependencies, repository, requestId,
     sourceSpaceId === targetSpaceId ? [sourceSpaceId] : [sourceSpaceId, targetSpaceId]);
-  await wakeAffectedChannels(env, dependencies, database, sourceSpaceId);
+  if (input.mode !== undefined || targetSpaceId !== sourceSpaceId) {
+    const channelIds = [input.channelId, ...(input.moveTree ?? []).map((item) => item.channelId)];
+    await (dependencies.recheckChannels ?? ((ids) => Promise.all(ids.map((channelId) =>
+      wakeAgentLaunchCoordinator(env, channelId, ["registrationStop"])))))(channelIds);
+  }
   // A move changes the Channel's route; read it where it is now.
   const configured = await repository.getChannel({
     requestId, spaceId: await repository.resolveChannelSpaceId({ requestId, channelId: input.channelId }),
