@@ -372,17 +372,24 @@ export function PrivacyPolicyContent() {
 
       <LegalSection id="account-deletion" title="16. Account and Space deletion">
         <p>
-          You may request account deletion at <LegalContactLink subject="xMatrix account deletion" />.
-          We may need to verify identity, ask you to confirm the irreversible request, and distinguish
-          your account from Customer Data controlled by an organization. Space ownership, legal holds,
-          fraud and security records, processor deletion cycles, and data already held by a
-          Customer-selected provider may affect scope and timing. We will communicate expected timing
-          and completion.
+          You can start account deletion in Settings → Account or at the{' '}
+          <Link href="/account/delete">account deletion page</Link>. A recent sign-in, your account
+          email, and explicit confirmation are required. Close owned Spaces, leave other Spaces,
+          resolve subscriptions, and stop active agent work before proceeding. Account deletion does
+          not cancel Apple or Stripe subscriptions or move them to another Space.
         </p>
         <p>
-          A verified in-product deletion control and a public account-deletion flow are required before
-          formal mobile-store launch. Until those controls are implemented and tested, this email process
-          is an auxiliary manual route and is not represented as satisfying every app-store requirement.
+          Once committed, deletion revokes sign-in access and removes your profile, login credentials,
+          avatars, and private account settings. Interrupted cleanup resumes automatically. It does
+          not delete files on your computers. Shared work and audit or billing records remain under
+          the relevant Space and retention policies. Minimal identity retirement records prevent old
+          credentials from regaining access. Scheduled Space deletions continue and cannot be restored
+          by the deleted account.
+        </p>
+        <p>
+          For assistance, contact <LegalContactLink subject="xMatrix account deletion" />. Legal
+          obligations, security records, processor deletion cycles, and data already held by a
+          Customer-selected provider may affect retention and timing.
         </p>
       </LegalSection>
 

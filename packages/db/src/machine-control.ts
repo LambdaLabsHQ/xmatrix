@@ -338,6 +338,9 @@ export class PostgresMachineControlRepository {
       if (input.requireMachineName === true && ["enroll", "connect", "recover_connect"].includes(action)) {
         await requireMachineName(tx, { ownerUserId, machineId });
       }
+      const deleted = await tx.query({ name: "machine_control_account_deleted_v1",
+        text: "SELECT 1 FROM data.account_deletion_fences WHERE user_id=$1 AND committed", values: [ownerUserId], maxRows: 1 });
+      if (deleted.length) throw new MachineControlError("machine_retired", 410, "The owner's account was deleted");
       if (RETIRED_REFUSED_ACTIONS.has(action)) {
         const retired = await tx.query<QueryResultRow>({ name: "machine_control_retired_v1", text: `SELECT 1
           FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2 AND retired_at IS NOT NULL`,

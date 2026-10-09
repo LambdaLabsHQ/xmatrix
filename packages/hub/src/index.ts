@@ -1,3 +1,4 @@
+import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 // First, so that error reporting is open before anything else loads.
 import "./error-reporting";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
@@ -114,6 +115,7 @@ registerWorktreeActionRoutes(app);
 registerSetupIntentRoutes(app);
 registerIndexRoutesHumanProfile(app);
 registerIndexRoutesHumanAvatar(app);
+registerAccountDeletionRoutes(app);
 
 export default {
   fetch: async (request: Request, env: Env, executionCtx: ExecutionContext) => {
@@ -126,6 +128,7 @@ export default {
   scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => {
     const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
+    run("Account deletion maintenance", () => maintainAccountDeletions(env));
     run("Sentry event recovery", () => drainSentryEvents(env));
     run("Harness release watch", () => watchHarnessReleases(env));
     run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
