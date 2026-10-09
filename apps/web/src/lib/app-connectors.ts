@@ -47,6 +47,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Wake agents when Cloudflare alerts fire, with Workers logs, deployments, and rollback at hand.",
   ],
   gcp: [
+    "Analyze exported billing costs, credits and net spend by project, month, service or SKU.",
     "Investigate Google Cloud alerts using project resources, Cloud Run status, logs and metrics.",
     "Keep GCP credentials in the Space while IAM and channel policies control access.",
   ],

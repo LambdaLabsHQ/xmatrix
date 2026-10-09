@@ -1,6 +1,6 @@
 import { createSignedJsonReceiver, deliveryProven } from "./delivery-proof";
 import { connectorEvent, excerpt, oneLine, record, text } from "./event-format";
-import { GCP_PROJECT } from "./gcp-api";
+import { GCP_PROJECT } from "./gcp-common";
 
 /* Monitoring webhook schema 1.2. Token authentication is Google's documented
  * HTTPS query-token method. The ingress key still selects only this Space's
