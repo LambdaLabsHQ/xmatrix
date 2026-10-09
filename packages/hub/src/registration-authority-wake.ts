@@ -1,6 +1,6 @@
 import type { AuthorityDatabase } from "@xmatrix/db";
 import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
-import { createPostgresAuthorityDatabase, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
+import { createPostgresAuthorityFleet, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import { ACTIVE_RUN_STATUS_SQL } from "@xmatrix/protocol";
 import type { ScheduledStep } from "./postgres-agent-launch-schedule";
 
@@ -31,28 +31,55 @@ export async function wakeRegistrationChannels(env: { RELAY_POSTGRES_AGENT_LAUNC
       : `SELECT DISTINCT channel_id FROM data.machine_run_routes
       WHERE owner_user_id=$1 AND machine_id=$2 AND terminal_at IS NULL LIMIT ${AFFECTED_CHANNEL_LIMIT}`,
     values: bySpace ? [scope.spaceId] : [scope.ownerUserId, scope.machineId], maxRows: AFFECTED_CHANNEL_LIMIT }));
-  const woken = await Promise.allSettled(rows.map(row =>
-    wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId: String(row.channel_id), work })));
-  // The same retryable handover failure as any other coordinator wake: the change is committed
-  // and its idempotent retry tells the Channels again.
+  return wakeChannels(env, new Map(rows.map(row => [String(row.channel_id), { work }])));
+}
+
+/**
+ * A Machine's daemon is back. What waited on it moves now rather than at its
+ * next timed look, which backs off while the Machine is away: Launches queued
+ * for it and registration stops pending on it. Only their Channels are told,
+ * each about that work. A Channel whose Runs merely live on the Machine has
+ * nothing to move (2026-10-09: every reconnect woke each such Channel into a
+ * full registration re-check, about eight transactions apiece). Each shard is
+ * asked once.
+ */
+export async function wakeMachineChannels(env: PostgresAuthorityFleetEnv & {
+  RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace }, scope: { ownerUserId: string; machineId: string },
+  shards: readonly { shardId: string; database: AuthorityDatabase }[] = createPostgresAuthorityFleet(env, {
+    applicationName: "xmatrix-hub-machine-reconnect", statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000,
+    lockTimeoutMs: 2_000 }).physicalShards): Promise<number> {
+  const waiting = new Map<string, ChannelWork>();
+  for (const { shardId, database } of shards) {
+    const rows = await database.transaction({ requestId: `machine-reconnect-wake:${crypto.randomUUID()}`,
+      operation: "registration.machine.waiting-channels" }, tx => tx.query<{ channel_id: string; work: string }>({
+      name: "machine_waiting_channels_v1",
+      text: `(SELECT DISTINCT channel_id, 'launch' AS work FROM data.agent_launches
+          WHERE owner_user_id=$1 AND machine_id=$2 AND state IN ('prepared','queued') LIMIT ${AFFECTED_CHANNEL_LIMIT})
+        UNION ALL (SELECT DISTINCT channel_id, 'registrationStop' AS work FROM data.registration_stop_intents
+          WHERE owner_user_id=$1 AND machine_id=$2 AND state='pending' LIMIT ${AFFECTED_CHANNEL_LIMIT})`,
+      values: [scope.ownerUserId, scope.machineId], maxRows: 2 * AFFECTED_CHANNEL_LIMIT }));
+    for (const row of rows) {
+      // The shard is known here, so the Channel need not look it up.
+      const channelId = String(row.channel_id);
+      waiting.set(channelId, { shardId, work: [...(waiting.get(channelId)?.work ?? []),
+        row.work === "launch" ? "launch" : "registrationStop"] });
+    }
+  }
+  return wakeChannels(env, waiting);
+}
+
+interface ChannelWork { work: readonly ScheduledStep[]; shardId?: string }
+
+/** Each Channel is told the work named for it. A Channel that cannot be told
+ *  fails the caller with the coordinator's retryable handover error: the
+ *  change is committed and its idempotent retry tells the Channels again. */
+async function wakeChannels(env: { RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace },
+  work: ReadonlyMap<string, ChannelWork>): Promise<number> {
+  const woken = await Promise.allSettled([...work].map(([channelId, channel]) =>
+    wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId, ...channel })));
   const refused = woken.find(result => result.status === "fulfilled" && !result.value.ok);
   if (refused || woken.some(result => result.status === "rejected")) {
     throw new AgentLaunchHandoverUnavailable(refused?.status === "fulfilled" ? refused.value.status : undefined);
   }
-  return rows.length;
-}
-
-/**
- * A Machine's daemon is back: tell every Channel with a Run on it, so work
- * that waited on the Machine (a queued Launch, a parked stop) moves now
- * rather than at its next timed look, which backs off while the Machine is
- * away.
- */
-export async function wakeMachineChannels(env: PostgresAuthorityFleetEnv & {
-  RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace }, scope: { ownerUserId: string; machineId: string }): Promise<number> {
-  const session = createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-hub-machine-reconnect",
-    statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000 }).openSession();
-  // Its parked stops can settle, and Launches queued while it was away publish now.
-  try { return await wakeRegistrationChannels(env, session, scope, ["registrationStop", "launch"]); }
-  finally { await session.close(); }
+  return work.size;
 }
