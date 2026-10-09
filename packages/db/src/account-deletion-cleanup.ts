@@ -14,7 +14,6 @@ const PRIVATE_ROWS = [
   ["control.registration_quota_observations", "owner_user_id"],
   ["control.agent_registration_enrollments", "owner_user_id"],
   ["data.assistant_memory_snapshots", "owner_user_id"],
-  ["data.shared_memory_entries", "owner_user_id"],
   ["data.shared_memory_workspace_entries", "owner_user_id"],
   ["data.roles", "owner_user_id"],
   ["data.workspaces", "owner_user_id"],

@@ -276,16 +276,13 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.machine_run_routes", "data.machine_run_snapshot_heads", "data.machine_run_terminal_reports",
     "data.trace_access_grants",
   ].map((table) => ({ table, predicate: `channel_id IN ${SPACE_CHANNELS}` })),
-  ...["data.extension_index_entries", "data.extension_index_heads", "data.extension_records",
-    "control.scoped_control_command_replays"]
+  ...["data.extension_records", "control.scoped_control_command_replays"]
     .map((table) => ({ table, predicate: "scope_kind='space' AND scope_id=$1" })),
   ...["data.projection_manifest_grants", "data.projection_scope_heads"].map((table) => ({
     table,
     predicate: `visibility_scope_id='space:'||$1
       OR visibility_scope_id IN (SELECT 'channel:'||channel_id FROM data.channels WHERE space_id=$1)`,
   })),
-  { table: "data.control_intents", predicate: `scope_id='space:'||$1
-      OR scope_id IN (SELECT 'channel:'||channel_id FROM data.channels WHERE space_id=$1)` },
   { table: "data.cross_space_read_grants", predicate: "space_id=$1 OR source_space_id=$1" },
   { table: "data.channel_transfer_proposals", predicate: "space_id=$1 OR target_space_id=$1" },
   ...[
@@ -299,7 +296,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.app_connector_executions", "data.app_source_relations", "data.blob_upload_intents",
     "data.channel_metadata_revisions", "data.channel_about_inputs",
     "data.channel_access", "data.channel_content_counters", "data.channel_message_sequences",
-    "data.content_closure_heads", "data.content_gc_candidates", "data.content_objects",
+    "data.content_gc_candidates", "data.content_objects",
     "data.content_refs", "data.cross_space_read_notices", "data.delivery_cursors", "data.first_message_launch_choices",
     "data.message_annotations",
     "data.message_attachment_refs", "data.message_attachments", "data.message_attention",
@@ -337,7 +334,6 @@ export const SPACE_PURGE_EXCLUDED_TABLES: Readonly<Record<string, string>> = Obj
   "data.space_control_heads": "removed by the finalizing transaction",
   "control.space_placement": "removed by the finalizing transaction",
   "data.space_deletions": "the audit record of the deletion itself",
-  "data.dangerous_action_requests": "owner-scoped approval requests that expire within minutes; resource_id only names the target",
 });
 
 function stepName(index: number): string {
