@@ -346,7 +346,10 @@ revisions.
 
 An owed update is settled by the next edit to its section, or by the Run
 saying nothing there changed (`xmatrix page done`, which records it on that
-conversation's ended claims). Anything older than a week stops counting.
+conversation's ended claims). A release ends a lease, not work: a section its
+holder's conversation edited while holding the claim was written back before
+the release and owes nothing, and only a release that leaves a debt runs the
+section's `owed` Automations. Anything older than a week stops counting.
 
 ### 5.3 Who writes it back
 

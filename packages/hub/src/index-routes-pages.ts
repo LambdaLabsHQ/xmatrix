@@ -323,11 +323,16 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       principal: await principal(c) });
     if (result.released) {
       await announceClaims(c);
-      // A released claim leaves its section owing an update; its `owed` Automations run.
-      await fireOwedAutomationTriggers(c.env, { spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")!,
-        blockIds: [result.blockId ?? ""], event: { id: `owed:claim:${c.req.param("claimId")}`.slice(0, 200),
-          kind: "owed", summary: `A claim on #${result.blockId || "the page"} was released, so it owes an update` } })
-        .catch((error: unknown) => console.error("owed Automation triggers failed", error));
+      // A released claim whose section was not written back owes an update; its `owed` Automations run.
+      const blockId = result.blockId ?? "";
+      const { owed } = await repository(c.env).blockUpdates({ requestId: crypto.randomUUID(),
+        spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"), principal: await principal(c) });
+      if (owed.has(blockId)) {
+        await fireOwedAutomationTriggers(c.env, { spaceId: c.req.param("spaceId")!, pageId: c.req.param("pageId")!,
+          blockIds: [blockId], event: { id: `owed:claim:${c.req.param("claimId")}`.slice(0, 200),
+            kind: "owed", summary: `A claim on #${blockId || "the page"} was released, so it owes an update` } })
+          .catch((error: unknown) => console.error("owed Automation triggers failed", error));
+      }
     }
     return { released: result.released };
   }));
