@@ -489,6 +489,10 @@ integration("a released claim owes an update unless its conversation wrote the s
     const silent = await claim("billing");
     await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: silent.claimId });
     assert.deepEqual(await owed(), ["billing"], "released without a write-back: the section owes an update");
+
+    await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: 2,
+      body: "# Goals\n\n## Search\n\nShipped.\n" });
+    assert.deepEqual(await owed(), [], "a section taken off the page owes nothing");
   } finally {
     await cleanup(client, ids);
     await client.end();

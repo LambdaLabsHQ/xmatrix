@@ -349,7 +349,8 @@ saying nothing there changed (`xmatrix page done`, which records it on that
 conversation's ended claims). A release ends a lease, not work: a section its
 holder's conversation edited while holding the claim was written back before
 the release and owes nothing, and only a release that leaves a debt runs the
-section's `owed` Automations. Anything older than a week stops counting.
+section's `owed` Automations. A section taken off the page owes nothing.
+Anything older than a week stops counting.
 
 ### 5.3 Who writes it back
 
