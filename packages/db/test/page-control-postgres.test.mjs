@@ -508,8 +508,12 @@ integration("a released claim owes an update unless its conversation wrote the s
     }
     assert.deepEqual(await owed(), [], "a section written back long ago still owes nothing");
 
+    // Removed while another conversation held it, so the removal settles nothing.
+    const dropped = await claim("billing");
     await pages.edit({ requestId: r(), ...base, principal: owner, baseRevision: head,
       body: "# Goals\n\n## Search\n\nShipped.\n" });
+    assert.equal((await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: dropped.claimId }))
+      .owesUpdate, true, "the claim was never written back");
     assert.deepEqual(await owed(), [], "a section taken off the page owes nothing");
   } finally {
     await cleanup(client, ids);
