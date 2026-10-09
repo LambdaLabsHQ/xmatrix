@@ -40,7 +40,7 @@ function fixture({ granted = ["111"], stored = ["111"], listed = [], status = "c
         grant === "grant" && input.spaceId === "space-1" && input.userId === "admin" ? granted : undefined,
     },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
-    "./connectors/credentials": { connectorCredentialRepository: () => ({ put: async (input) => { credentialPuts.push(input); } }) },
+    "./connectors/connection-credentials": { forgetConnectionGrant: async (_env, input) => { credentialPuts.push(input); } },
     "./connectors/oauth": { grantFieldsForgottenOnDisconnect },
     "./index-shared": {
       verifyGitHubAppState: async (state) => state === "signed" ? statePayload : null,
@@ -157,15 +157,13 @@ test("Disconnect forgets the linked installations and keeps the rest of the conf
   assert.deepEqual(f.upserts[0].body.metadata, { repository: "org/repo" });
 });
 
-test("Disconnecting a Google connection deletes its stored tokens before the status change", async () => {
+test("Disconnecting a Google or Composio connection forgets its grant before the status change", async () => {
   const f = fixture();
   const response = await f.app.request("/api/spaces/space-1/app-connections/gcp", { method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ providerId: "gcp", status: "disconnected" }) }, env);
   assert.equal(response.status, 200);
-  assert.equal(f.credentialPuts.length, 1);
-  assert.equal(f.credentialPuts[0].providerId, "gcp");
-  assert.deepEqual(f.credentialPuts[0].fields, { oauthToken: null, oauthRefreshToken: null, oauthExpiresAt: null });
+  assert.deepEqual(f.credentialPuts, [{ spaceId: "space-1", providerId: "gcp", actorUserId: "admin" }]);
   assert.equal(f.upserts[0].body.status, "disconnected");
   const github = fixture();
   await github.app.request("/api/spaces/space-1/app-connections/github", { method: "PATCH",

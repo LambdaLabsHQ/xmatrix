@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { GMAIL_ACTIONS as ACTIONS, verifyGmail } from "../src/connectors/actions/gmail.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
+import { deleteComposioAccount } from "../src/connectors/composio.ts";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { verifyGitHubAppState } from "../src/index-shared.ts";
 
@@ -106,4 +107,15 @@ test("Gmail fails closed without its Composio account, on Gmail refusals and on 
   await fetched([gmail({})], () => assert.rejects(ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }), /Gmail message/u));
   await fetched([gmail({})], () => assert.rejects(verifyGmail(token), /confirm Gmail/u));
   await fetched([gmail({ emailAddress: "me@example.com" })], () => verifyGmail(token));
+});
+
+test("Disconnect deletes the Composio account, treating one already gone as deleted", async () => {
+  const deleted = await fetched([{ body: { success: true } }], () => deleteComposioAccount("composio-project-key", "ca_mailbox1"));
+  assert.equal(deleted.calls[0].url, "https://backend.composio.dev/api/v3.1/connected_accounts/ca_mailbox1");
+  assert.equal(deleted.calls[0].method, "DELETE");
+  assert.equal(deleted.calls[0].headers.get("x-api-key"), "composio-project-key");
+  await fetched([{ status: 404, body: { error: { message: "not found" } } }], () => deleteComposioAccount("composio-project-key", "ca_mailbox1"));
+  await fetched([{ status: 500, body: {} }], () => assert.rejects(deleteComposioAccount("composio-project-key", "ca_mailbox1")));
+  const skipped = await fetched([], () => deleteComposioAccount("composio-project-key", "../x"));
+  assert.deepEqual(skipped.calls, []);
 });
