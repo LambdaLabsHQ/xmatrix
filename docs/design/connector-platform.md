@@ -190,8 +190,8 @@ Gmail signs in through Composio rather than the company Google client:
 `gmail.readonly` is a restricted Google scope, and Composio's Google app is
 already verified for it. The `gmail` manifest uses `oauth.flow: "composio"`;
 `CONNECTOR_GMAIL_CLIENT_ID` is the Composio auth config (Composio-managed
-Gmail auth limited to `gmail.readonly`) and `CONNECTOR_GMAIL_CLIENT_SECRET`
-the Composio project API key. Connect creates a Composio Connect Link for the
+Gmail auth limited to `gmail.readonly`) and the shared
+`CONNECTOR_COMPOSIO_API_KEY` is the Composio project API key. Connect creates a Composio Connect Link for the
 user id `xmatrix:<space>:<state nonce>` with the Hub callback carrying the
 signed state; completion ignores redirect parameters and stores the single
 ACTIVE account that per-attempt user id holds under that auth config, as the

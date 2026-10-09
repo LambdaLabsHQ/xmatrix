@@ -78,7 +78,8 @@ export function oauthClient(env: Env, providerId: string): OAuthClient | undefin
   if (providerId === "discord" && !discordCompanyApp(env)) return undefined;
   const prefix = `CONNECTOR_${(SHARED_OAUTH_CLIENTS[manifest.id] ?? manifest.id).toUpperCase()}`;
   const clientId = envValue(env, `${prefix}_CLIENT_ID`);
-  const clientSecret = envValue(env, `${prefix}_CLIENT_SECRET`);
+  /* Composio providers share the company Composio project key; their client id is the provider's auth config. */
+  const clientSecret = envValue(env, manifest.oauth.flow === "composio" ? "CONNECTOR_COMPOSIO_API_KEY" : `${prefix}_CLIENT_SECRET`);
   if (!clientId || !clientSecret) return undefined;
   return { manifest: manifest as OAuthClient["manifest"], clientId, clientSecret };
 }

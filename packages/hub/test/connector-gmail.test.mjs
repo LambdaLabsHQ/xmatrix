@@ -7,7 +7,7 @@ import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/conne
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { verifyGitHubAppState } from "../src/index-shared.ts";
 
-const composio = { CONNECTOR_GMAIL_CLIENT_ID: "ac_gmailreadonly", CONNECTOR_GMAIL_CLIENT_SECRET: "composio-project-key" };
+const composio = { CONNECTOR_GMAIL_CLIENT_ID: "ac_gmailreadonly", CONNECTOR_COMPOSIO_API_KEY: "composio-project-key" };
 const token = { composioAccountId: "ca_mailbox1", composioApiKey: "composio-project-key" };
 const base64url = value => Buffer.from(value).toString("base64url");
 /* Composio's proxy wraps the Gmail answer. */

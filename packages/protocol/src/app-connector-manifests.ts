@@ -70,7 +70,7 @@ export interface AppConnectorProviderManifest {
     extraAuthorizeParams?: Record<string, string>;
     /**
      * Vercel external Integration installs use their registered slug and completion redirect;
-     * Composio signs the account in with its own verified app (client id = Composio auth config, secret = Composio API key).
+     * Composio signs the account in with its own verified app (client id = Composio auth config; the secret is the shared CONNECTOR_COMPOSIO_API_KEY).
      */
     flow?: "vercel-integration" | "composio";
   };

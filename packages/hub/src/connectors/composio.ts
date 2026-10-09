@@ -3,9 +3,9 @@ import { providerJson, ProviderRequestError } from "./http";
 
 /*
  * Composio-hosted sign-in and API calls for providers whose OAuth app is
- * Composio's (docs/design/connector-platform.md). The provider's company
- * client pair holds the Composio auth config id (`CLIENT_ID`) and the
- * Composio project API key (`CLIENT_SECRET`). Each connect attempt gets its
+ * Composio's (docs/design/connector-platform.md). The provider's
+ * `CONNECTOR_<ID>_CLIENT_ID` is its Composio auth config id; every such
+ * provider shares the Composio project key `CONNECTOR_COMPOSIO_API_KEY`. Each connect attempt gets its
  * own Composio user id derived from the signed state, so the account the Hub
  * stores is the one this admin's attempt created, never one named by a
  * redirect parameter. Every proxied call names that account; Composio's
