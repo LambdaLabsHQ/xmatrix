@@ -548,7 +548,17 @@ export function Composer({
     const composerElement = composer;
     const surfaceElement = surface;
 
+    // The completion panel grows the composer box upward over the timeline.
+    // It is a popup, not resting composer chrome: publishing its height would
+    // pad the timeline and push the messages up under it. Keep the height the
+    // composer had before the panel opened, and re-measure once the box has
+    // shrunk back (the morph class leaves after the closing animation).
+    function completionExpanded() {
+      return composerElement.querySelector(".app-composer-box-mentions-open, .app-composer-box-morphing") !== null;
+    }
+
     function updateComposerMetrics() {
+      if (completionExpanded() && surfaceElement.style.getPropertyValue("--app-composer-height")) return;
       surfaceElement.style.setProperty("--app-composer-height", `${composerElement.offsetHeight}px`);
       // Overlays anchored to this variable only move, so nothing resizes and no
       // observer of theirs is delivered. Announce the write; see
@@ -563,11 +573,15 @@ export function Composer({
     const observer = new ResizeObserver(updateComposerMetrics);
     observer.observe(composerElement);
     observer.observe(surfaceElement);
+    const completionObserver = new MutationObserver(updateComposerMetrics);
+    const box = composerElement.querySelector(".app-composer-box");
+    if (box) completionObserver.observe(box, { attributes: true, attributeFilter: ["class"] });
     window.addEventListener("resize", updateComposerMetrics);
     window.visualViewport?.addEventListener("resize", updateComposerMetrics);
     window.visualViewport?.addEventListener("scroll", updateComposerMetrics);
     return () => {
       observer.disconnect();
+      completionObserver.disconnect();
       window.removeEventListener("resize", updateComposerMetrics);
       window.visualViewport?.removeEventListener("resize", updateComposerMetrics);
       window.visualViewport?.removeEventListener("scroll", updateComposerMetrics);
