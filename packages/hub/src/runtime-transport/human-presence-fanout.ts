@@ -1,3 +1,4 @@
+import { SpaceControlError } from "@xmatrix/db";
 import type { HumanServerMessage } from "@xmatrix/protocol/connections/human";
 import type { SerializedChannel } from "@xmatrix/protocol";
 import { getChannel, type SpacesEnv } from "../spaces";
@@ -146,29 +147,36 @@ export type HumanFanoutPurpose = "human-presence" | "agent-presence" | "member-r
 
 /**
  * A Channel as one Human reads it, with the hint naming an open Channel's
- * Human members; undefined when that Human cannot read it.
+ * Human members; undefined when that Human cannot read it. A caller that
+ * knows the Channel's Space names it, and the read skips the directory.
  */
-export type HumanFanoutChannelReader = (channelId: string, userId: string, purpose: HumanFanoutPurpose) => Promise<{
+export type HumanFanoutChannelReader = (channelId: string, userId: string, purpose: HumanFanoutPurpose,
+  spaceId?: string) => Promise<{
   channel: SerializedChannel;
   openChannelHumanMemberIdsBySpace: OpenChannelHumanMemberIdsBySpace;
 } | undefined>;
 
 /** Fanout is best effort: a Channel that cannot be read is skipped, never fatal. */
 export function humanFanoutChannelReader(env: SpacesEnv): HumanFanoutChannelReader {
-  return async (channelId, userId, purpose) => {
+  const read = async (channelId: string, userId: string, purpose: HumanFanoutPurpose, spaceId?: string) => {
+    const result = await getChannel(env, { channelId, principal: { kind: "user", id: userId },
+      purpose: `fanout.${purpose}`, ...(spaceId ? { spaceId } : {}) }) as {
+      channel?: SerializedChannel;
+      openChannelHumanMemberIdsBySpace?: OpenChannelHumanMemberIdsBySpace;
+    };
+    if (!result.channel || typeof result.channel.id !== "string") return undefined;
+    return {
+      channel: result.channel,
+      openChannelHumanMemberIdsBySpace: result.openChannelHumanMemberIdsBySpace || {},
+    };
+  };
+  return async (channelId, userId, purpose, spaceId) => {
     try {
-      const read = await getChannel(env, { channelId, principal: { kind: "user", id: userId },
-        purpose: `fanout.${purpose}` }) as {
-        channel?: SerializedChannel;
-        openChannelHumanMemberIdsBySpace?: OpenChannelHumanMemberIdsBySpace;
-      };
-      if (!read.channel || typeof read.channel.id !== "string") return undefined;
-      return {
-        channel: read.channel,
-        openChannelHumanMemberIdsBySpace: read.openChannelHumanMemberIdsBySpace || {},
-      };
-    } catch {
-      return undefined;
+      return await read(channelId, userId, purpose, spaceId);
+    } catch (error) {
+      // A Channel that left the Space it was named in is read where it is now.
+      if (!spaceId || !(error instanceof SpaceControlError) || error.code !== "channel_not_found") return undefined;
+      return read(channelId, userId, purpose).catch(() => undefined);
     }
   };
 }
