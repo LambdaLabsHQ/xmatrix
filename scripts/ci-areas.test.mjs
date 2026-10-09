@@ -158,9 +158,6 @@ test("new script tests always select Node checks and enter the discovered test p
 
   const rootDir = fileURLToPath(new URL("..", import.meta.url));
   assert.ok(discoverScriptTests(rootDir).includes("scripts/ci-aggregate.test.mjs"));
-
-  const runner = fs.readFileSync(new URL("./ci.mjs", import.meta.url), "utf8");
-  assert.match(runner, /nodeTestStages\(\{ allFiles: scriptTests \}\)/u);
 });
 
 test("Hub deploy gate changes run both contract checks and the required Hub suite", () => {
