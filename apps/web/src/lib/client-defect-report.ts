@@ -1,4 +1,5 @@
 import { defaultStackParser } from "@sentry/browser";
+import type { ClientDefectAction } from "@xmatrix/protocol";
 
 import { xmatrixRawResponse } from "./query/api-client";
 
@@ -19,7 +20,7 @@ export function redactDefectMessage(message: string): string {
  * "something went wrong" — with what the person was doing, so it is found
  * without a screenshot. Never content: quoted text is redacted, no URL, no body.
  */
-export function reportClientDefect(action: string, error: unknown): void {
+export function reportClientDefect(action: ClientDefectAction, error: unknown): void {
   if (typeof window === "undefined" || reported.size >= PAGE_BUDGET) return;
   const name = error instanceof Error ? error.name : typeof error;
   const message = redactDefectMessage(error instanceof Error ? error.message : "");

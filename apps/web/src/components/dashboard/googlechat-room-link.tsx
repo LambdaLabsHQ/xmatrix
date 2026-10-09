@@ -47,7 +47,7 @@ export function GoogleChatRoomLink({ spaceId, token, beforeLink, afterRefresh, p
     const current = () => generation === pending.current.generation;
     setBusy(true); setError(null);
     try { await work(current, AbortSignal.any([request.signal, AbortSignal.timeout(20_000)])); }
-    catch (caught) { if (current()) setError(userErrorMessage(caught, `Couldn't link the ${label} room`)); }
+    catch (caught) { if (current()) setError(userErrorMessage(caught, "Couldn't link the room", `Couldn't link the ${label} room`)); }
     finally { if (current()) setBusy(false); }
   }
 

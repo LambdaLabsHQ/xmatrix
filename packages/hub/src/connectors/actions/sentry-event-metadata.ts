@@ -1,4 +1,4 @@
-import { sentryBrowserAction } from "./sentry-browser-actions";
+import { clientDefectAction } from "@xmatrix/protocol";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
@@ -22,7 +22,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       // The browser defect endpoint sets this prefix. Only fixed application copy is readable.
       if (tag.key === "operation" && typeof tag.value === "string" && tag.value.startsWith("browser: ")) {
         lines.push("Capture boundary: browser defect endpoint");
-        const action = sentryBrowserAction(tag.value);
+        const action = clientDefectAction(tag.value.slice("browser: ".length));
         if (action) lines.push("Browser action: " + action);
       }
     }

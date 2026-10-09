@@ -1324,7 +1324,7 @@ export function AppsView({
 
       await connectWithCredentials(connector);
     } catch (error) {
-      setConnectionsError(userErrorMessage(error, `Couldn't connect ${connector.name}`));
+      setConnectionsError(userErrorMessage(error, "Couldn't connect the app", `Couldn't connect ${connector.name}`));
     } finally {
       setUpdatingProviderId(null);
     }
@@ -1373,7 +1373,7 @@ export function AppsView({
       await patchConnectorConnection(connector.id, { providerId: connector.id, status: "disconnected" });
       if (configuringProviderId === connector.id) closeConnectorConfiguration();
     } catch (error) {
-      setConnectionsError(userErrorMessage(error, `Couldn't disconnect ${connector.name}`));
+      setConnectionsError(userErrorMessage(error, "Couldn't disconnect the app", `Couldn't disconnect ${connector.name}`));
     } finally {
       setUpdatingProviderId(null);
       setDisconnectingProviderId(null);
@@ -1399,7 +1399,7 @@ export function AppsView({
         setConnectionsError(payload.connection.error || payload.message || "App connection check failed");
       }
     } catch (error) {
-      setConnectionsError(userErrorMessage(error, `Couldn't check ${connector.name}`));
+      setConnectionsError(userErrorMessage(error, "Couldn't check the app", `Couldn't check ${connector.name}`));
     } finally {
       setCheckingProviderId(null);
     }
@@ -1453,7 +1453,7 @@ export function AppsView({
       });
       closeConnectorConfiguration();
     } catch (error) {
-      setConnectionsError(userErrorMessage(error, `Couldn't save the ${connector.name} settings`));
+      setConnectionsError(userErrorMessage(error, "Couldn't save the app settings", `Couldn't save the ${connector.name} settings`));
     } finally {
       setSavingProviderId(null);
     }

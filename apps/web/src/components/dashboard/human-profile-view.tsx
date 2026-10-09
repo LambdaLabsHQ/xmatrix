@@ -1,7 +1,7 @@
 "use client";
 
 import { actionClass } from "@/components/ui/action-tone";
-import { WEB_PROXY_ROUTES, type HumanProfile, type HumanProfileEdit, type SpaceMember } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type ClientDefectAction, type HumanProfile, type HumanProfileEdit, type SpaceMember } from "@xmatrix/protocol";
 import { AtSign, Pencil } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
@@ -99,7 +99,7 @@ export function ProfileView({
      handling does not. */
   async function writeProfile(
     request: { route: string; method: "POST" | "PATCH" | "DELETE"; contentType?: string; body?: BodyInit },
-    failureMessage: string,
+    failureMessage: ClientDefectAction,
   ) {
     setLocalError(null);
     try {

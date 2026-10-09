@@ -1,5 +1,12 @@
-/** Fixed copy from browser failure boundaries; dynamic names and unknown text stay private. */
-const ACTIONS = new Set([
+/**
+ * What a person was doing when the browser failed: the headline `describeError`
+ * shows and the one fact a browser defect report carries about it. The set is
+ * closed because the report crosses a trust boundary: the web Worker writes it
+ * to error reporting from an unauthenticated request, and the Hub reads it back
+ * to Agents. Only these exact sentences pass; any other text stays private.
+ * The web types its actions with this set, so a new one is added here.
+ */
+const CLIENT_DEFECT_ACTIONS = [
   "Couldn't accept the invite",
   "Couldn't add local directory",
   "Couldn't add the agent to this Space",
@@ -15,10 +22,12 @@ const ACTIONS = new Set([
   "Couldn't change who edits this page",
   "Couldn't check deletion requirements",
   "Couldn't check deletion status",
+  "Couldn't check the app",
   "Couldn't check whether this app is up to date",
   "Couldn't complete the purchase",
   "Couldn't confirm the recovery",
   "Couldn't confirm the transfer",
+  "Couldn't connect the app",
   "Couldn't create the Space",
   "Couldn't create the invite code",
   "Couldn't create the page",
@@ -29,12 +38,14 @@ const ACTIONS = new Set([
   "Couldn't delete this page",
   "Couldn't delete your account",
   "Couldn't disable the agent",
+  "Couldn't disconnect the app",
   "Couldn't discover local agents",
   "Couldn't hand the session to your terminal",
   "Couldn't import workspace",
   "Couldn't install xMatrix update",
   "Couldn't join this Space",
   "Couldn't leave the Space",
+  "Couldn't link the room",
   "Couldn't load App Store products",
   "Couldn't load Automations",
   "Couldn't load GitHub accounts",
@@ -83,6 +94,7 @@ const ACTIONS = new Set([
   "Couldn't restore the purchase",
   "Couldn't save secret",
   "Couldn't save setup status",
+  "Couldn't save the app settings",
   "Couldn't save the credentials",
   "Couldn't save the harness switch",
   "Couldn't save the secret",
@@ -93,12 +105,8 @@ const ACTIONS = new Set([
   "Couldn't send the request to the Agent",
   "Couldn't send your answer",
   "Couldn't sign you in",
-  "Couldn't start",
-  "Couldn't start agent",
   "Couldn't start drafting pages",
   "Couldn't start the Agent",
-  "Couldn't start the agent",
-  "Couldn't start the agent.",
   "Couldn't start the conversation",
   "Couldn't switch environments",
   "Couldn't update member permissions",
@@ -110,10 +118,14 @@ const ACTIONS = new Set([
   "Couldn't update your profile",
   "Couldn't upload the file",
   "Couldn't use that folder",
-]);
+  "That didn't work",
+] as const;
 
-/** Accept only an exact source-defined action, never arbitrary provider tag text. */
-export function sentryBrowserAction(value: string): string | undefined {
-  const action = value.slice("browser: ".length);
-  return ACTIONS.has(action) ? action : undefined;
+export type ClientDefectAction = typeof CLIENT_DEFECT_ACTIONS[number];
+
+const ACTIONS: ReadonlySet<string> = new Set(CLIENT_DEFECT_ACTIONS);
+
+/** The action `value` names exactly, or undefined. */
+export function clientDefectAction(value: unknown): ClientDefectAction | undefined {
+  return typeof value === "string" && ACTIONS.has(value) ? value as ClientDefectAction : undefined;
 }
