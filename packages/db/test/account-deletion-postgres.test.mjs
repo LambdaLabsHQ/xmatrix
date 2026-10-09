@@ -132,18 +132,17 @@ integration("an unbound data shard fails closed before any account mutation",asy
  }finally{await f.close();}
 });
 
-integration("a nonterminal subscription blocks deletion even without a membership; only provider-terminal state releases it",async()=>{
+integration("unexpired subscriptions do not prevent immediate deletion or transfer their billing evidence",async()=>{
  const f=await fixture();try{
   await f.run(`INSERT INTO data.space_billing_subscriptions(space_id,billing_owner_user_id,provider_customer_id,provider_subscription_id,provider_price_id,plan,status,seat_quantity,provider_event_created_at,version,created_at,updated_at)
     VALUES('billing-space','delete-user','customer','subscription','price','pro','active',1,now(),1,now(),now())`);
-  assert.ok((await f.repo.preview("delete-user")).blockers.some(b=>b.kind==="subscription"));
+  assert.deepEqual((await f.repo.preview("delete-user")).blockers,[]);
   await f.repo.begin(f.proof);await f.repo.advance("delete-user",async()=>true);
-  await expectState(f,"blocked");
-  assert.equal((await f.run("SELECT status FROM data.space_billing_subscriptions WHERE space_id='billing-space'"))[0].status,"active");
-  await f.run("UPDATE data.space_billing_subscriptions SET status='canceled' WHERE space_id='billing-space'");
-  const retry={...f.proof,requestId:randomUUID()};await f.repo.begin(retry);await f.repo.advance("delete-user",async()=>true);
-  assert.deepEqual(await f.repo.status(retry.requestId,retry.receiptHash),{state:"completed"});
-  assert.equal((await f.run("SELECT count(*)::int n FROM data.space_billing_subscriptions"))[0].n,1);
+  await expectState(f,"completed");
+  assert.equal(await f.repo.revoked("delete-user"),true);
+  const rows=await f.run("SELECT status,billing_owner_user_id FROM data.space_billing_subscriptions WHERE space_id='billing-space'");
+  assert.deepEqual(rows,[{status:"active",billing_owner_user_id:"delete-user"}]);
+  assert.equal((await f.run("SELECT count(*)::int n FROM control.auth_sessions WHERE user_id='delete-user'"))[0].n,0);
  }finally{await f.close();}
 });
 
