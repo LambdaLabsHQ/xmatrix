@@ -348,6 +348,7 @@ function automationFromRow(row: QueryResultRow): Record<string, unknown> {
     ...(Array.isArray(row.trigger_events) && row.trigger_events.length ? { triggerEvents: row.trigger_events } : {}),
     canManage, capabilities: taskCapabilities, expression, message,
     ...(lastMessageId ? { lastMessageId } : {}),
+    ...(lastMessageId && row.last_channel_id ? { lastChannelId: String(row.last_channel_id) } : {}),
     version: Number(row.version), deliveryCount: runCount, payload,
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
 }
@@ -1279,7 +1280,7 @@ export class PostgresAutomationRepository {
   }
 
   async finishMessage(input: { requestId: string; occurrenceId: string; leaseOwner: string;
-    taskId: string; messageId: string; now: string }): Promise<void> {
+    taskId: string; messageId: string; channelId: string; now: string }): Promise<void> {
     const now = timestamp(input.now, "now");
     await this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "automation.message.dispatched" }, async (tx) => {
@@ -1292,10 +1293,10 @@ export class PostgresAutomationRepository {
         text(input.messageId, "messageId", 300)], maxRows: 1 });
       if (!rows[0]) throw new AutomationControlError(
         "scheduled_occurrence_lease_lost", 409, "Scheduled message occurrence lost its dispatch lease");
-      await tx.query({ name: "scheduled_message_task_finish_v2", text: `UPDATE data.automations
-        SET run_count=run_count+1,last_run_at=$1,last_run_id=$2,last_error=NULL,
+      await tx.query({ name: "scheduled_message_task_finish_v3", text: `UPDATE data.automations
+        SET run_count=run_count+1,last_run_at=$1,last_run_id=$2,last_channel_id=$4,last_error=NULL,
           version=version+1,updated_at=$1 WHERE automation_id=$3`, values: [now, input.messageId,
-        text(input.taskId, "taskId", 300)], maxRows: 0 });
+        text(input.taskId, "taskId", 300), text(input.channelId, "channelId", 300)], maxRows: 0 });
     });
   }
 

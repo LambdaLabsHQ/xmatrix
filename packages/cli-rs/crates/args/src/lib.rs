@@ -2357,13 +2357,13 @@ pub enum PageAutomationCommand {
         #[arg(long)]
         space: Option<String>,
     },
-    /// Create an Automation in a section; it runs as your owner, in a conversation of its own.
+    /// Create an Automation in a section; it runs as your owner, each occurrence in a fresh conversation.
     ///
     /// Use `@auto repo:<owner/repo>` to address an Agent each time.
     /// `--every` controls cadence. Use `pwd:"<registered-path>"` instead of
-    /// `repo:` for a registered directory. Exact `@agent:N` addresses only that
-    /// instance while it is live in the Automation's conversation;
-    /// other live Agents receive context. Without an Agent mention, it only posts its text.
+    /// `repo:` for a registered directory. Each occurrence's conversation is new,
+    /// so an exact `@agent:N` finds no live instance there.
+    /// Without an Agent mention, it only posts its text.
     Create {
         /// Page ID
         page: String,

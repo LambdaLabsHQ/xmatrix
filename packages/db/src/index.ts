@@ -189,6 +189,7 @@ export {
   AutomationControlError,
   CHANNEL_AUTOMATION_WAKE_SQL,
 } from "./automation-control.js";
+export { automationName } from "./automation-commit.js";
 export {
   PostgresSchedulerControlRepository,
   SchedulerControlError,

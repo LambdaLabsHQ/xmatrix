@@ -11,7 +11,7 @@ import { formatAutomationCadence, formatAutomationNext } from "./page-automation
  * `xmatrix:automation/<id>` is drawn as a chip that says, from the
  * Automation itself, how often it runs and whether it is running, so the
  * page never restates a schedule in prose. Clicking the chip's state opens
- * the conversation it runs in.
+ * the conversation its last occurrence ran in, or its own before it has run.
  */
 export const automationsKey = new PluginKey<{
   automations: Map<string, SerializedAutomation>; decorations: DecorationSet;
@@ -47,9 +47,9 @@ function chipDecorations(doc: DocNode, automations: Map<string, SerializedAutoma
           ? formatAutomationNext(automation.nextRunAt) : "paused"}`
         : "not found";
       if (automation) {
-        status.title = "Open the conversation it runs in";
+        status.title = automation.lastChannelId ? "Open its last run" : "Open its conversation";
         status.addEventListener("mousedown", (event) => event.preventDefault());
-        status.addEventListener("click", () => openConversation(automation.channelId));
+        status.addEventListener("click", () => openConversation(automation.lastChannelId ?? automation.channelId));
       } else {
         status.disabled = true;
         status.title = "No Automation of this page has this id";
