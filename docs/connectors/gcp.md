@@ -38,6 +38,10 @@ Worker mutation is needed.
 Commands also appear through `xmatrix-connectors` MCP and per-action Channel
 policies. Use an explicit project ID or number and Cloud Run region:
 
+Region numbers can have two digits, such as `europe-west10` and `europe-west12`.
+Zones, wildcards and paths are not region names. See
+[Cloud Run locations](https://docs.cloud.google.com/run/docs/locations).
+
 ```text
 @gcp:list_projects:*
 @gcp:list_resources:my-project
