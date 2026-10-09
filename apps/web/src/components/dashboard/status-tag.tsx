@@ -10,29 +10,29 @@
  *
  * `TAG_SHAPE_CLASS` is geometry and type only. Tags that carry a status tone of
  * their own — the goal badge — paint their own surface over the same shape.
- * Every other tag is a paper label, from `tagClass`: a flat ink tint with no
- * edge, lens or shadow, holding an icon and a word in medium muted ink. Glass
- * capsules beside a glass avatar were six raised objects per header, and bare
- * ink words ran together (user 2026-10-09: 纸签，边框都不要有).
+ * Every other tag wears the shared chip from `tagClass`, rendered through
+ * `LiquidGlassPill`. The chip takes the material it sits on (globals.css,
+ * "Labels take the material they sit on"): a borderless paper label on paper,
+ * liquid glass only on wood (user 2026-10-09: 只有木板上的走 liquid glass).
  */
 
 import { GitPullRequest } from "lucide-react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
+import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
 
-export const TAG_SHAPE_CLASS =
-  "inline-flex shrink-0 items-center gap-1 px-[7px] py-0.5 text-[12px] font-medium";
+import { COUNT_CHIP_MATERIAL_CLASS } from "./workspace-shell-constants";
 
-/** A paper label: the shared tint, cut square-ish so a row of them reads as labels, not pills. */
-export const PAPER_TAG_CLASS = "app-paper-tag overflow-hidden rounded-md text-muted-foreground";
+export const TAG_SHAPE_CLASS =
+  "inline-flex shrink-0 items-center gap-1 rounded-md px-[7px] py-0.5 text-[12px] font-medium";
 
 export function tagClass(...extra: Array<string | false | undefined>): string {
-  return cn(TAG_SHAPE_CLASS, PAPER_TAG_CLASS, ...extra);
+  return cn(TAG_SHAPE_CLASS, COUNT_CHIP_MATERIAL_CLASS, "text-muted-foreground", ...extra);
 }
 
-/* A usage meter on a paper label fills the label from the left, in the meter's
-   tone softened onto the paper (user 2026-10-09: 背景色的进度条，不要下面的横条). */
+/* A usage meter fills its tag from the left in the meter's tone; on paper the
+   tone is softened (user 2026-10-09: 背景色的进度条，不要下面的横条). */
 export function UsageMeterFill({ percent, tone }: { percent: number; tone: string }) {
   return (
     <span
@@ -92,13 +92,14 @@ export function Tag({
      would offer a control on facts like context usage that nothing can set. */
   if (!onClick) {
     return (
-      <span className={shell} title={title} aria-label={title} data-status-chip={chipId} {...data}>
+      <LiquidGlassPill as="span" className={shell} title={title} aria-label={title} data-status-chip={chipId} {...data}>
         {body}
-      </span>
+      </LiquidGlassPill>
     );
   }
   return (
-    <button
+    <LiquidGlassPill
+      as="button"
       type="button"
       className={cn(shell, "hover:text-foreground")}
       title={title}
@@ -110,7 +111,7 @@ export function Tag({
       {...data}
     >
       {body}
-    </button>
+    </LiquidGlassPill>
   );
 }
 

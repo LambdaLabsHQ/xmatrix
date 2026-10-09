@@ -20,7 +20,6 @@ import {
 import { type AppView } from "./workspace-shell-navigation";
 
 import {
-  COUNT_CHIP_MATERIAL_CLASS,
   WORKING_SPACE_KV_KEY,
 } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
@@ -176,6 +175,8 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
+
+import { tagClass } from "./status-tag";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -685,11 +686,7 @@ export function SettingsView({
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <p className="min-w-0 font-mono text-sm font-black [overflow-wrap:anywhere]">{entry.secretRef}</p>
                       <span
-                        className={cn(
-                          "px-2 py-0.5 text-xs font-bold capitalize",
-                          COUNT_CHIP_MATERIAL_CLASS,
-                          secretAccessChipClass(entry.access)
-                        )}
+                        className={tagClass("capitalize", secretAccessChipClass(entry.access))}
                       >
                         {entry.access}
                       </span>
@@ -1164,7 +1161,7 @@ export function TeamView({
                     <div className="min-w-0">
                       <p className="truncate font-black">{space.name}</p>
                     </div>
-                    <span className={cn("shrink-0 px-2 py-1 text-xs font-bold text-primary", COUNT_CHIP_MATERIAL_CLASS)}>
+                    <span className={tagClass("text-primary")}>
                       {spaceRoleFor(space, user.id)}
                     </span>
                   </div>

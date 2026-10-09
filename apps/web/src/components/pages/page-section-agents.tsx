@@ -38,7 +38,7 @@ function SectionAgents({ agents, openConversation }: { agents: readonly SectionA
         );
       })}
       {hidden > 0 && (
-        <span className={cn("inline-flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-bold",
+        <span className={cn("app-overflow-count inline-flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-bold",
           COUNT_CHIP_MATERIAL_CLASS)} title={sorted.slice(SHOWN).map((agent) => agent.name).join(", ")}>
           +{hidden}
         </span>
