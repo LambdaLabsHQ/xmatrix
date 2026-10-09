@@ -249,7 +249,7 @@ export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, 
         {status && <div className="mt-1 text-sm text-muted-foreground">{status}</div>}
         {actions && <div className="mt-4 flex flex-wrap items-center gap-2">{actions}</div>}
       </header>
-      <div className="space-y-7">{children}</div>
+      <div className="space-y-10">{children}</div>
     </ToolPaperScroll>
   );
 }
@@ -288,20 +288,45 @@ export function ToolDetailSection({ title, action, concealAction, children }: {
   concealAction?: boolean;
   children: ReactNode;
 }) {
-  const heading = "text-xs font-black uppercase tracking-wide text-muted-foreground";
+  const heading = "text-[15px] font-bold text-foreground";
   return (
     <section aria-label={title} className="group/section">
       {action ? (
-        <div className="app-tool-detail-section-title mb-2 flex min-w-0 items-center justify-between gap-2 pb-1">
+        <div className="app-tool-detail-section-title mb-1 flex min-w-0 items-center justify-between gap-2 pb-1.5">
           <h3 className={cn("min-w-0 truncate", heading)}>{title}</h3>
           <div className={cn("-my-1 flex shrink-0 items-center gap-1", concealAction
             && "opacity-100 md:opacity-0 md:group-hover/section:opacity-100 md:focus-within:opacity-100")}>{action}</div>
         </div>
       ) : (
-        <h3 className={cn("app-tool-detail-section-title mb-2 pb-1.5", heading)}>{title}</h3>
+        <h3 className={cn("app-tool-detail-section-title mb-1 pb-2", heading)}>{title}</h3>
       )}
       {children}
     </section>
+  );
+}
+
+/**
+ * One setting on the paper, as GitHub and Notion lay them out: what it is and
+ * why on the left, its control on the right, a hairline under it. A wide
+ * control (a text box) goes under the words instead.
+ */
+export function ToolSettingRow({ title, description, control, below }: {
+  title: ReactNode;
+  description?: ReactNode;
+  control?: ReactNode;
+  below?: ReactNode;
+}) {
+  return (
+    <div className="app-tool-hairline border-b py-3.5">
+      <div className="flex items-center gap-6">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold">{title}</div>
+          {description && <div className="mt-0.5 max-w-[56ch] text-[13px] leading-[1.45] text-muted-foreground">{description}</div>}
+        </div>
+        {control && <div className="flex shrink-0 items-center gap-2">{control}</div>}
+      </div>
+      {below && <div className="mt-3">{below}</div>}
+    </div>
   );
 }
 

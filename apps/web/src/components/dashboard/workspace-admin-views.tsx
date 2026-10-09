@@ -19,10 +19,7 @@ import {
 
 import { type AppView } from "./workspace-shell-navigation";
 
-import {
-  COUNT_CHIP_MATERIAL_CLASS,
-  WORKING_SPACE_KV_KEY,
-} from "./workspace-shell-constants";
+import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
 
 import {
@@ -123,7 +120,7 @@ import {
   Monitor,
   X,
 } from "lucide-react";
-import { SectionedToolView, type ToolSection } from "./tool-split";
+import { SectionedToolView, ToolDetailSection, ToolSettingRow, type ToolSection } from "./tool-split";
 import { spacePlansAbsent } from "./space-plan-mark";
 import {
   SPACE_BILLING_SECTION,
@@ -135,6 +132,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 import { GlassSelect } from "@/components/ui/glass-select";
+import { Switch } from "@/components/ui/switch";
 
 import { Input } from "@/components/ui/input";
 
@@ -490,110 +488,102 @@ export function SettingsView({
   // Settings reads like the other rail destinations: its sections in the list, one on the paper.
   const sections: ToolSection[] = [
     { key: "account", label: "Account", icon: UserRound, summary: user.email, content: (
-        <div className="app-settings-section min-w-0">
-          <div className="mb-4 flex flex-col items-start gap-3 min-[390px]:flex-row min-[390px]:items-center min-[390px]:justify-between">
-            {/* Editing lives on the Profile view. Two editors would be two
-                sources of truth for the same fields. */}
-            <button
-              type="button"
-              onClick={() => onChangeView("profile")}
-              className={actionClass({ variant: "secondary", size: "sm" }, "w-full min-[390px]:w-auto")}
-            >
+        <div className="app-settings-section min-w-0 space-y-10">
+          {/* Editing lives on the Profile view. Two editors would be two sources of truth for the
+              same fields. */}
+          <ToolDetailSection title="Profile" action={
+            <button type="button" onClick={() => onChangeView("profile")} className={actionClass({ variant: "secondary", size: "sm" })}>
               <Pencil className="size-3.5" aria-hidden="true" />
               Edit profile
             </button>
-          </div>
-          <HumanProfileSummary profile={profile} />
-          <a href="/account/delete" className="mt-4 inline-block text-sm text-destructive underline">Delete account</a>
-          <PrivateSignInEmail
-            email={user.email}
-            className="mt-4 flex items-start gap-3 border-t border-border/60 pt-4"
-            emailClassName="mt-1 truncate text-sm text-muted-foreground"
-          />
+          }>
+            <HumanProfileSummary profile={profile} className="py-3" />
+            <PrivateSignInEmail
+              email={user.email}
+              className="app-tool-hairline flex items-start gap-3 border-t py-3.5"
+              emailClassName="mt-1 truncate text-sm text-muted-foreground"
+            />
+          </ToolDetailSection>
+          <ToolDetailSection title="Delete account">
+            <ToolSettingRow
+              title="Delete your account"
+              description="Permanently removes your profile, sessions and private settings. Close the Spaces you own first."
+              control={<a href="/account/delete" className={actionClass({ variant: "danger" })}>Delete account…</a>}
+            />
+          </ToolDetailSection>
         </div>
       ) },
     ...(testEnvironmentAllowed || clientEnvironment === "test" ? [{
       key: "environment", label: "Environment", icon: Globe,
       summary: XMATRIX_CLIENT_ENVIRONMENTS[clientEnvironment].label, content: (
         <div className="app-settings-section min-w-0">
-            <p className="mt-1 text-sm text-muted-foreground">
-              Production and Test have separate accounts, sessions, and data.
-            </p>
-            <div className="mt-4 grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
-              {(Object.keys(XMATRIX_CLIENT_ENVIRONMENTS) as XMatrixClientEnvironment[]).map((environment) => (
-                <button
-                  key={environment}
-                  type="button"
-                  aria-pressed={clientEnvironment === environment}
-                  disabled={environmentSwitching || (environment === "test" && !testEnvironmentAllowed)}
-                  onClick={() => void switchEnvironment(environment)}
-                  className={cn(
-                    "rounded-lg border px-3 py-2 text-sm font-bold transition-colors disabled:opacity-50",
-                    clientEnvironment === environment
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border hover:bg-muted",
-                  )}
-                >
-                  {environmentSwitching && clientEnvironment !== environment ? "Switching…" : XMATRIX_CLIENT_ENVIRONMENTS[environment].label}
-                </button>
-              ))}
-            </div>
-            {clientEnvironment === "test" ? (
-              <p className={noticeClass("attention", "mt-3 text-xs")}>
-                Test is isolated and may require Cloudflare Access.
-              </p>
-            ) : null}
+          <ToolDetailSection title="Environment">
+            {(Object.keys(XMATRIX_CLIENT_ENVIRONMENTS) as XMatrixClientEnvironment[]).map((environment) => (
+              <ToolSettingRow
+                key={environment}
+                title={XMATRIX_CLIENT_ENVIRONMENTS[environment].label}
+                description={environment === "test"
+                  ? "Isolated from Production, with its own accounts, sessions and data. May require Cloudflare Access."
+                  : "Your real accounts, sessions and data."}
+                control={clientEnvironment === environment ? (
+                  <span className="app-paper-tag px-2 py-1 text-xs font-semibold text-muted-foreground">In use</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={environmentSwitching || (environment === "test" && !testEnvironmentAllowed)}
+                    onClick={() => void switchEnvironment(environment)}
+                    className={actionClass({ variant: "secondary" })}
+                  >
+                    {environmentSwitching ? "Switching…" : `Switch to ${XMATRIX_CLIENT_ENVIRONMENTS[environment].label}`}
+                  </button>
+                )}
+              />
+            ))}
             {environmentSwitchError ? (
               <p className="mt-3 text-sm text-destructive">{environmentSwitchError}</p>
             ) : null}
-          </div>
+          </ToolDetailSection>
+        </div>
       ),
     }] : []),
     { key: "secrets", label: "Secrets", icon: Key,
       summary: secretCatalogLoaded ? `${secretCatalogEntries.length} in ${space?.name ?? "this Space"}` : "Stored values are never shown", content: (
         <div className="app-settings-section min-w-0">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Secrets belong to {space?.name ?? "the Space"}. An Agent reads one when it needs it: an <b>auto</b> secret
-                right away, an <b>ask</b> secret after a Space admin approves that Agent on a card in its Channel.
-                Stored values are never shown.
-              </p>
-            </div>
-            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0 sm:flex-wrap sm:items-center">
-              {canManageSecrets && <button
-                type="button"
-                onClick={() => openSecretEditor("create")}
-                disabled={!token || secretSaving}
-                className={actionClass({ variant: "primary", size: "lg" }, "min-w-0 sm:h-9 sm:px-3")}
-              >
-                <Plus className="size-4" />
-                New secret
-              </button>}
-              <button
-                type="button"
-                onClick={() => void loadSecretCatalog()}
-                disabled={!token || secretCatalogLoading}
-                className={actionClass({ variant: "secondary", size: "lg" }, "min-w-0 sm:h-9 sm:px-3")}
-              >
-                <RefreshCw className={cn("size-4", secretCatalogLoading && "animate-spin")} />
-                Refresh
-              </button>
-            </div>
+          <p className="max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+            Secrets belong to {space?.name ?? "the Space"}. An Agent reads one when it needs it: an <b>auto</b> secret
+            right away, an <b>ask</b> secret after a Space admin approves that Agent on a card in its Channel.
+            Stored values are never shown.
+          </p>
+          <div className="mb-8 mt-4 flex flex-wrap items-center gap-2">
+            {canManageSecrets && <button
+              type="button"
+              onClick={() => openSecretEditor("create")}
+              disabled={!token || secretSaving}
+              className={actionClass({ variant: "primary" })}
+            >
+              <Plus className="size-4" />
+              New secret
+            </button>}
+            <button
+              type="button"
+              onClick={() => void loadSecretCatalog()}
+              disabled={!token || secretCatalogLoading}
+              className={actionClass({ variant: "quiet" })}
+            >
+              <RefreshCw className={cn("size-4", secretCatalogLoading && "animate-spin")} />
+              Refresh
+            </button>
           </div>
 
           {secretCatalogError && (
-            <div className="mb-4 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {secretCatalogError}
-            </div>
+            <p className="mb-4 text-sm font-medium text-destructive">{secretCatalogError}</p>
           )}
 
           {secretEditor && (
-            <form onSubmit={submitSecretCatalog} className="mb-4 border-y border-border py-4">
+            <form onSubmit={submitSecretCatalog} className="mb-10">
+              <h3 className="app-tool-detail-section-title mb-4 pb-2 text-[15px] font-bold">{secretEditor.mode === "create" ? "New secret" : `Edit ${secretEditor.draft.secretRef}`}</h3>
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="grid gap-1 text-sm font-bold">
+                <label className="grid gap-1.5 text-[13px] font-semibold">
                   <span>Alias</span>
                   <Input
                     value={secretEditor.draft.secretRef}
@@ -603,7 +593,7 @@ export function SettingsView({
                     className="h-9 font-mono"
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-bold">
+                <label className="grid gap-1.5 text-[13px] font-semibold">
                   <span>Value</span>
                   <Input
                     type="password"
@@ -615,7 +605,7 @@ export function SettingsView({
                     className="h-9"
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-bold">
+                <label className="grid gap-1.5 text-[13px] font-semibold">
                   <span>Env</span>
                   <Input
                     value={secretEditor.draft.envName}
@@ -625,7 +615,7 @@ export function SettingsView({
                     className="h-9 font-mono"
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-bold">
+                <label className="grid gap-1.5 text-[13px] font-semibold">
                   <span>Agents get it</span>
                   <GlassSelect
                     value={secretEditor.draft.access}
@@ -635,10 +625,10 @@ export function SettingsView({
                       { value: "ask", label: "After an admin approves" },
                     ]}
                     disabled={secretSaving}
-                    className="rounded border-input font-bold transition focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
+                    className="h-9 px-3 text-sm font-medium disabled:cursor-not-allowed"
                   />
                 </label>
-                <label className="grid gap-1 text-sm font-bold sm:col-span-2">
+                <label className="grid gap-1.5 text-[13px] font-semibold sm:col-span-2">
                   <span>Description</span>
                   <Textarea
                     value={secretEditor.draft.description}
@@ -652,19 +642,19 @@ export function SettingsView({
               {secretEditor.error && (
                 <p className="mt-3 text-sm font-medium text-destructive">{secretEditor.error}</p>
               )}
-              <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setSecretEditor(null)}
                   disabled={secretSaving}
-                  className={actionClass({ variant: "secondary", size: "lg" }, "min-w-0 sm:h-9")}
+                  className={actionClass({ variant: "quiet" })}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={secretSaving}
-                  className={actionClass({ variant: "primary", size: "lg" }, "min-w-0 sm:h-9")}
+                  className={actionClass({ variant: "primary" })}
                 >
                   {secretSaving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
                   Save secret
@@ -673,24 +663,18 @@ export function SettingsView({
             </form>
           )}
 
-          <div className="divide-y divide-border">
+          <ToolDetailSection title="Saved secrets">
             {secretCatalogLoading && secretCatalogEntries.length === 0 ? (
               <ListSkeleton label="Loading secrets" rows={3} className="py-4" />
             ) : secretCatalogEntries.length === 0 ? (
               <p className="py-4 text-sm text-muted-foreground">No saved secrets yet.</p>
             ) : (
               secretCatalogEntries.map((entry) => (
-                <div key={entry.secretRef} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div key={entry.secretRef} className="app-tool-hairline flex flex-col gap-3 border-b py-3.5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <p className="min-w-0 font-mono text-sm font-black [overflow-wrap:anywhere]">{entry.secretRef}</p>
-                      <span
-                        className={cn(
-                          "px-2 py-0.5 text-xs font-bold capitalize",
-                          COUNT_CHIP_MATERIAL_CLASS,
-                          secretAccessChipClass(entry.access)
-                        )}
-                      >
+                      <p className="min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{entry.secretRef}</p>
+                      <span className={cn("app-paper-tag px-1.5 py-0.5 text-[11px] font-semibold capitalize", secretAccessChipClass(entry.access))}>
                         {entry.access}
                       </span>
                     </div>
@@ -702,7 +686,7 @@ export function SettingsView({
                       <p className="mt-1 text-sm text-muted-foreground">{entry.description}</p>
                     )}
                   </div>
-                  {canManageSecrets && <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:shrink-0 sm:flex-wrap sm:items-center">
+                  {canManageSecrets && <div className="flex shrink-0 items-center gap-1">
                     {confirmingSecretRef === entry.secretRef ? (
                       <>
                         <button
@@ -722,7 +706,7 @@ export function SettingsView({
                           type="button"
                           onClick={() => setConfirmingSecretRef(null)}
                           disabled={deletingSecretRef === entry.secretRef}
-                          className={actionClass({ variant: "secondary", size: "sm" })}
+                          className={actionClass({ variant: "quiet", size: "sm" })}
                         >
                           Cancel
                         </button>
@@ -733,7 +717,7 @@ export function SettingsView({
                           type="button"
                           onClick={() => openSecretEditor("edit", entry)}
                           disabled={secretSaving}
-                          className={actionClass({ variant: "secondary", size: "sm" })}
+                          className={actionClass({ variant: "quiet", size: "sm" })}
                         >
                           <Pencil className="size-3.5" />
                           Edit
@@ -756,7 +740,7 @@ export function SettingsView({
                 </div>
               ))
             )}
-          </div>
+          </ToolDetailSection>
         </div>
       ) },
     // A deployment that meters nothing serves no Space billing, so it has no Billing section.
@@ -765,130 +749,92 @@ export function SettingsView({
       content: <SpaceBillingSection userId={user.id} space={space} />,
     }]),
     { key: "desktop", label: "Desktop app", icon: Monitor, summary: desktopAvailable ? "Connected" : "Browser", content: (
-        <div className="app-settings-section min-w-0">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <span
-              className={cn(
-                "rounded bg-muted px-2 py-1 text-xs font-bold",
-                desktopAvailable ? "text-foreground" : "text-muted-foreground"
-              )}
-            >
+        <div className="app-settings-section min-w-0 space-y-10">
+          <ToolDetailSection title="This app" action={
+            <span className="app-paper-tag px-2 py-1 text-xs font-semibold text-muted-foreground">
               {desktopAvailable ? "Connected" : "Browser"}
             </span>
-          </div>
-          <div className="space-y-2 text-sm">
-            <DetailRow label="App version" value={desktopContext?.version || "-"} />
-            <DetailRow
-              label="Platform"
-              value={desktopContext ? desktopContext.platform : "-"}
-            />
-            <DetailRow
-              label="Daemon"
-              value={desktopDaemonLabel(desktopDaemonStatus, desktopAvailable)}
-            />
-            <DetailRow
-              label="Updates"
-              value={desktopUpdateLabel(
-                desktopUpdateStatus,
-                desktopAvailable,
-                desktopUpdateBridgeAvailable
-              )}
-            />
-          </div>
-          {desktopUpdateStatus?.percent !== undefined && desktopUpdateStatus.state === "downloading" && (
-            <div className="mt-4 h-1.5 overflow-hidden rounded bg-muted">
-              <div
-                className="h-full rounded bg-primary"
-                style={{ width: `${Math.max(0, Math.min(100, desktopUpdateStatus.percent))}%` }}
-              />
+          }>
+            <div className="py-2 text-sm">
+              <DetailRow label="App version" value={desktopContext?.version || "-"} />
+              <DetailRow label="Platform" value={desktopContext ? desktopContext.platform : "-"} />
+              <DetailRow label="Updates" value={desktopUpdateLabel(desktopUpdateStatus, desktopAvailable, desktopUpdateBridgeAvailable)} />
             </div>
-          )}
-          {desktopAvailable && desktopUpdateStatus?.enabled && (
-            <DesktopUpdateAction
-              status={desktopUpdateStatus}
-              checking={checkingDesktopUpdates}
-              onCheck={onCheckDesktopUpdates}
-              onInstall={onInstallDesktopUpdate}
-            />
-          )}
-          <p className="mt-4 text-sm text-muted-foreground">
-            {desktopDaemonStatus?.message || "Opening the desktop app starts the local daemon automatically."}
-          </p>
-          <div className="mt-4 grid grid-cols-1 gap-2 min-[360px]:grid-cols-3">
-            <button
-              onClick={onStartDesktopDaemon}
-              disabled={!desktopAvailable || daemonRunning || daemonBusy}
-              className={actionClass({ variant: "secondary", size: "lg" }, "min-w-0 sm:h-9 sm:px-3")}
-            >
-              <Radio className="size-4" />
-              Start
-            </button>
-            <button
-              onClick={onStopDesktopDaemon}
-              disabled={!desktopAvailable || !daemonRunning}
-              className={actionClass({ variant: "secondary", size: "lg" }, "min-w-0 sm:h-9 sm:px-3")}
-            >
-              <X className="size-4" />
-              Stop
-            </button>
-            <button
-              onClick={onRestartDesktopDaemon}
-              disabled={!desktopAvailable || daemonBusy}
-              className={actionClass({ variant: "secondary", size: "lg" }, "min-w-0 sm:h-9 sm:px-3")}
-            >
-              <RefreshCw className={cn("size-4", daemonBusy && "animate-spin")} />
-              Restart
-            </button>
-          </div>
-          <p className="mt-4 text-sm text-muted-foreground">
-            {desktopUpdateDescription(
-              desktopUpdateStatus,
-              desktopAvailable,
-              desktopUpdateBridgeAvailable
+            {desktopUpdateStatus?.percent !== undefined && desktopUpdateStatus.state === "downloading" && (
+              <div className="mt-2 h-1.5 overflow-hidden rounded bg-muted">
+                <div
+                  className="h-full rounded bg-primary"
+                  style={{ width: `${Math.max(0, Math.min(100, desktopUpdateStatus.percent))}%` }}
+                />
+              </div>
             )}
-          </p>
+            <ToolSettingRow
+              title="Updates"
+              description={desktopUpdateDescription(desktopUpdateStatus, desktopAvailable, desktopUpdateBridgeAvailable)}
+              control={desktopAvailable && desktopUpdateStatus?.enabled ? (
+                <DesktopUpdateAction
+                  status={desktopUpdateStatus}
+                  checking={checkingDesktopUpdates}
+                  onCheck={onCheckDesktopUpdates}
+                  onInstall={onInstallDesktopUpdate}
+                />
+              ) : null}
+            />
+          </ToolDetailSection>
+          <ToolDetailSection title="Local daemon">
+            <ToolSettingRow
+              title={desktopDaemonLabel(desktopDaemonStatus, desktopAvailable)}
+              description={desktopDaemonStatus?.message || "Opening the desktop app starts the local daemon automatically."}
+              control={<>
+                <button
+                  onClick={onStartDesktopDaemon}
+                  disabled={!desktopAvailable || daemonRunning || daemonBusy}
+                  className={actionClass({ variant: "secondary" })}
+                >
+                  <Radio className="size-4" />
+                  Start
+                </button>
+                <button
+                  onClick={onStopDesktopDaemon}
+                  disabled={!desktopAvailable || !daemonRunning}
+                  className={actionClass({ variant: "secondary" })}
+                >
+                  <X className="size-4" />
+                  Stop
+                </button>
+                <button
+                  onClick={onRestartDesktopDaemon}
+                  disabled={!desktopAvailable || daemonBusy}
+                  className={actionClass({ variant: "secondary" })}
+                >
+                  <RefreshCw className={cn("size-4", daemonBusy && "animate-spin")} />
+                  Restart
+                </button>
+              </>}
+            />
+          </ToolDetailSection>
         </div>
       ) },
     { key: "legal", label: "Legal and privacy", icon: Shield, summary: "Terms, privacy, cookies", content: (
         <div className="app-settings-section min-w-0">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Review the terms that apply to xMatrix and how MadeByRobot handles information.
-              </p>
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <a
-              href="/privacy"
-              className="flex h-9 w-full items-center justify-between rounded border border-border bg-card px-3 text-sm font-bold hover:bg-muted"
-            >
-              Privacy Policy
-              <ChevronRight className="size-4 text-muted-foreground" />
-            </a>
-            <a
-              href="/terms"
-              className="flex h-9 w-full items-center justify-between rounded border border-border bg-card px-3 text-sm font-bold hover:bg-muted"
-            >
-              Terms of Service
-              <ChevronRight className="size-4 text-muted-foreground" />
-            </a>
-            <a
-              href="/cookies"
-              className="flex h-9 w-full items-center justify-between rounded border border-border bg-card px-3 text-sm font-bold hover:bg-muted"
-            >
-              Cookies and Local Storage
-              <ChevronRight className="size-4 text-muted-foreground" />
-            </a>
-            <a
-              href="/subprocessors"
-              className="flex h-9 w-full items-center justify-between rounded border border-border bg-card px-3 text-sm font-bold hover:bg-muted"
-            >
-              Subprocessors
-              <ChevronRight className="size-4 text-muted-foreground" />
-            </a>
-          </div>
-          <p className="mt-3 text-xs leading-5 text-muted-foreground">
+          <p className="mb-4 max-w-[60ch] text-sm text-muted-foreground">
+            Review the terms that apply to xMatrix and how MadeByRobot handles information.
+          </p>
+          <ToolDetailSection title="Documents">
+            {([
+              ["/privacy", "Privacy Policy"],
+              ["/terms", "Terms of Service"],
+              ["/cookies", "Cookies and Local Storage"],
+              ["/subprocessors", "Subprocessors"],
+            ] as const).map(([href, label]) => (
+              <a key={href} href={href}
+                className="app-tool-hairline flex items-center justify-between border-b py-3 text-sm font-semibold hover:text-foreground/80">
+                {label}
+                <ChevronRight className="size-4 text-muted-foreground" />
+              </a>
+            ))}
+          </ToolDetailSection>
+          <p className="mt-4 text-xs leading-5 text-muted-foreground">
             Privacy, access, correction, and deletion requests can be sent to{" "}
             <a className="font-medium text-foreground underline underline-offset-4" href="mailto:contact@madebyrobot.net?subject=xMatrix%20privacy%20request">
               contact@madebyrobot.net
@@ -899,14 +845,18 @@ export function SettingsView({
       ) },
     { key: "session", label: "Session", icon: LogOut, summary: "Sign out of this browser", content: (
         <div className="app-settings-section min-w-0">
-          <p className="mb-4 text-sm text-muted-foreground">Sign out of this browser session. CLI sessions remain separate.</p>
-          <button
-            onClick={onLogout}
-            className={actionClass({ variant: "danger", size: "md" }, "w-full")}
-          >
-            <LogOut className="size-4" />
-            Sign out
-          </button>
+          <ToolDetailSection title="Session">
+            <ToolSettingRow
+              title="Sign out"
+              description="Sign out of this browser session. CLI sessions remain separate."
+              control={
+                <button onClick={onLogout} className={actionClass({ variant: "danger" })}>
+                  <LogOut className="size-4" />
+                  Sign out
+                </button>
+              }
+            />
+          </ToolDetailSection>
         </div>
       ) },
   ];
@@ -1136,114 +1086,134 @@ export function TeamView({
     }
   }
 
-  // Team lists every workspace you belong to; the one you are in is tagged and managed beside the list.
+  // Team lists every workspace you belong to; the one you are in is managed beside the list, as
+  // sections of settings rows on the paper.
   const currentContent = (
-          <div className="app-team-view space-y-5">
+    <div className="app-team-view space-y-10">
       {currentSpace && ["owner", "admin"].includes(spaceRoleFor(currentSpace, user.id) || "") ? (
         <ChannelTransferQueue token={token} userId={user.id} spaceId={currentSpace.id} />
       ) : null}
 
-      {error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
+      {error && <p className="text-sm font-medium text-destructive">{error}</p>}
 
-      <div className="grid gap-4">
-        <div className="space-y-4">
-          <div className="space-y-4">
+      {teamSpaces.map((space) => {
+        const canManage = canInviteToSpace(space, user.id);
+        const memberPermissions = effectiveSpaceMemberPermissions(space);
+        const permissionBusy = permissionBusyBySpace[space.id] === true;
+        return (
+          <div key={space.id} className="space-y-10">
+            {canManage ? (
+              <ToolDetailSection title="General">
+                <ToolSettingRow
+                  title="Language"
+                  description="xMatrix speaks this language in this workspace."
+                  control={
+                    <GlassSelect
+                      value={spacePreferredLanguage(space) || ""}
+                      aria-label={`Preferred language for ${space.name}`}
+                      options={[
+                        { value: "", label: "Auto" },
+                        { value: "zh", label: "中文" },
+                        { value: "en", label: "English" },
+                      ]}
+                      onChange={(value) =>
+                        void onUpdateSpacePreferredLanguage(space.id, value as "zh" | "en" | "").catch(() => undefined)
+                      }
+                      className="h-9 w-36 px-3 text-sm font-medium"
+                    />
+                  }
+                />
+                {token ? <SpaceOpenParticipation spaceId={space.id} token={token} /> : null}
+              </ToolDetailSection>
+            ) : null}
 
-            <div className="divide-y divide-border/60 border-y border-border/60">
-              {teamSpaces.map((space) => {
-                const canManage = canInviteToSpace(space, user.id);
-                const memberPermissions = effectiveSpaceMemberPermissions(space);
-                const permissionBusy = permissionBusyBySpace[space.id] === true;
+            <ToolDetailSection title="Members can create">
+              {([
+                ["agentCreation", "Agents", "Allow members to add agents", "add agents"],
+                ["automationCreation", "Automations", "Allow members to create automations", "create automations"],
+              ] as const).map(([capability, title, label, verb]) => {
+                const open = memberPermissions[capability] === "members";
                 return (
-                <section key={space.id} className="py-5 first:pt-4 last:pb-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate font-black">{space.name}</p>
-                    </div>
-                    <span className={cn("shrink-0 px-2 py-1 text-xs font-bold text-primary", COUNT_CHIP_MATERIAL_CLASS)}>
-                      {spaceRoleFor(space, user.id)}
-                    </span>
-                  </div>
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    {space.members.length} {space.members.length === 1 ? "member" : "members"}
-                  </div>
-                  {canManage ? (
-                    <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:flex">
-                      <span className="font-bold">Language / 语言</span>
-                      <GlassSelect
-                        value={spacePreferredLanguage(space) || ""}
-                        aria-label={`Preferred language for ${space.name}`}
-                        options={[
-                          { value: "", label: "Auto" },
-                          { value: "zh", label: "中文" },
-                          { value: "en", label: "English" },
-                        ]}
-                        onChange={(value) =>
-                          void onUpdateSpacePreferredLanguage(
-                            space.id,
-                            value as "zh" | "en" | ""
-                          ).catch(() => undefined)
-                        }
-                        className="h-7 rounded bg-card px-2 text-xs font-bold"
+                  <ToolSettingRow
+                    key={capability}
+                    title={title}
+                    description={`${open ? `Any member may ${verb}` : `Only owners and admins ${verb}`}. Existing ones keep working.`}
+                    control={<>
+                      {permissionBusy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+                      <Switch
+                        label={label}
+                        checked={open}
+                        disabled={!canManage || permissionBusy}
+                        onChange={(next) => void updateMemberPermission(space, capability, next)}
                       />
-                      <span className="col-span-2 sm:col-span-1">xMatrix speaks this language in this workspace.</span>
-                    </div>
-                  ) : null}
-                  {canManage && token ? <SpaceOpenParticipation spaceId={space.id} token={token} /> : null}
-                  <div className="mt-4 border-t border-border/60 pt-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-black">Member creation permissions</p>
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          These controls affect new resources only. Existing Agents and Automations keep working.
-                        </p>
-                      </div>
-                      {permissionBusy ? <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" /> : null}
-                    </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      {([
-                        ["agentCreation", "Allow members to add agents"],
-                        ["automationCreation", "Allow members to create automations"],
-                      ] as const).map(([capability, label]) => (
-                        <label key={capability} className="flex items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={memberPermissions[capability] === "members"}
-                            disabled={!canManage || permissionBusy}
-                            onChange={(event) => void updateMemberPermission(space, capability, event.target.checked)}
-                            className="mt-0.5 size-4 accent-primary"
-                          />
-                          <span>
-                            <span className="block font-bold">{label}</span>
-                            <span className="mt-0.5 block text-xs text-muted-foreground">
-                              {memberPermissions[capability] === "members"
-                                ? "All Space members may create."
-                                : "Only owners and admins may create."}
-                            </span>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                    {!canManage ? (
-                      <p className="mt-2 text-xs text-muted-foreground">Only owners and admins can change these permissions.</p>
-                    ) : null}
-                    {permissionErrorBySpace[space.id] ? (
-                      <p className="mt-2 text-xs font-medium text-destructive">{permissionErrorBySpace[space.id]}</p>
-                    ) : null}
-                  </div>
-                  {/* A list on the paper, as GitHub and Notion draw members: a quiet
-                      header and hairlines between rows, no frame around them. */}
-                  <div className="mt-4">
-                    <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] gap-3 border-b border-border/60 pb-2 text-xs font-medium text-muted-foreground md:grid">
-                      <span>Name</span>
-                      <span>Email</span>
-                      <span>Role</span>
-                      <span className="sr-only">Remove</span>
-                    </div>
+                    </>}
+                  />
+                );
+              })}
+              {!canManage ? (
+                <p className="mt-2 text-xs text-muted-foreground">Only owners and admins can change these.</p>
+              ) : null}
+              {permissionErrorBySpace[space.id] ? (
+                <p className="mt-2 text-xs font-medium text-destructive">{permissionErrorBySpace[space.id]}</p>
+              ) : null}
+            </ToolDetailSection>
+
+            <ToolDetailSection title="Members">
+              {canManage && (
+                <form
+                  className="mb-3 mt-2 flex flex-col gap-2 sm:flex-row"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitInvite(space);
+                  }}
+                >
+                  <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-border px-3 text-sm">
+                    <Mail className="size-4 shrink-0 text-muted-foreground" />
+                    <input
+                      value={inviteEmailsBySpace[space.id] || ""}
+                      onChange={(event) =>
+                        setInviteEmailsBySpace((current) => ({ ...current, [space.id]: event.target.value }))
+                      }
+                      placeholder="Invite by email"
+                      aria-label={`Invite emails to ${space.name}`}
+                      className="min-w-0 flex-1 bg-transparent outline-none"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={invitingSpaceId === space.id}
+                    className={actionClass({ variant: "primary", size: "md" }, "shrink-0")}
+                  >
+                    {invitingSpaceId === space.id ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                    Invite
+                  </button>
+                </form>
+              )}
+              {canManage && (
+                <div className="mb-2 space-y-2">
+                      {inviteStatusBySpace[space.id] && (
+                    <p
+                      className={cn(
+                        "text-xs font-medium",
+                        inviteStatusBySpace[space.id].type === "success"
+                          ? "text-foreground"
+                          : "text-destructive"
+                      )}
+                    >
+                      {inviteStatusBySpace[space.id].message}
+                    </p>
+                  )}
+                </div>
+              )}
+              {/* A list on the paper, as GitHub and Notion draw members: a quiet
+                  header and hairlines between rows, no frame around them. */}
+              <div>
+                <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] gap-3 app-tool-hairline border-b py-2 text-xs font-medium text-muted-foreground md:grid">
+                  <span>Name</span>
+                  <span>Email</span>
+                  <span>Role</span>
+                  <span className="sr-only">Remove</span>
+                </div>
                     {space.members.map((member) => {
                       const memberLabel = member.name || member.email || shortId(member.userId);
                       const canEditMember = canManage && member.role !== "owner" && member.userId !== user.id;
@@ -1252,7 +1222,7 @@ export function TeamView({
                       return (
                       <div
                         key={member.userId}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 py-2.5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] md:gap-3"
+                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 app-tool-hairline border-b py-2.5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] md:gap-3"
                       >
                         <div className="col-span-2 min-w-0 md:col-span-1">
                           <p className="truncate text-sm font-bold text-foreground">{memberLabel}</p>
@@ -1276,7 +1246,7 @@ export function TeamView({
                               void updateMemberRole(space, member.userId, value as SpaceInviteRole)
                             }
                             aria-label={`Role for ${memberLabel}`}
-                            className="h-8 rounded bg-card px-2 text-xs font-bold disabled:cursor-not-allowed"
+                            className="h-8 w-full px-2.5 text-[13px] font-medium disabled:cursor-not-allowed"
                           />
                         )}
                         <div className="flex justify-end">
@@ -1299,7 +1269,7 @@ export function TeamView({
                       </div>
                       );
                     })}
-                  </div>
+              </div>
                   {memberStatusBySpace[space.id] && (
                     <p
                       className={cn(
@@ -1312,64 +1282,17 @@ export function TeamView({
                       {memberStatusBySpace[space.id].message}
                     </p>
                   )}
-                  {canManage && (
-                    <div className="mt-4 space-y-2">
-                      <form
-                        className="flex flex-col gap-2 sm:flex-row"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void submitInvite(space);
-                        }}
-                      >
-                        <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
-                          <Mail className="size-4 shrink-0 text-muted-foreground" />
-                          <input
-                            value={inviteEmailsBySpace[space.id] || ""}
-                            onChange={(event) =>
-                              setInviteEmailsBySpace((current) => ({
-                                ...current,
-                                [space.id]: event.target.value,
-                              }))
-                            }
-                            placeholder="Invite by email"
-                            aria-label={`Invite emails to ${space.name}`}
-                            className="min-w-0 flex-1 bg-transparent outline-none"
-                          />
-                        </label>
-                        <button
-                          type="submit"
-                          disabled={invitingSpaceId === space.id}
-                          className={actionClass({ variant: "primary", size: "md" }, "shrink-0")}
-                        >
-                          {invitingSpaceId === space.id ? (
-                            <Loader2 className="size-4 animate-spin" />
-                          ) : (
-                            <Send className="size-4" />
-                          )}
-                          Invite
-                        </button>
-                      </form>
-                      {inviteStatusBySpace[space.id] && (
-                        <p
-                          className={cn(
-                            "text-xs font-medium",
-                            inviteStatusBySpace[space.id].type === "success"
-                              ? "text-foreground"
-                              : "text-destructive"
-                          )}
-                        >
-                          {inviteStatusBySpace[space.id].message}
-                        </p>
-                      )}
+              {canManage && (joinRequestsBySpace[space.id] || []).length > 0 ? (
+                <div className="mt-3">
                       {(joinRequestsBySpace[space.id] || []).length > 0 && (
-                        <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
-                          <p className="text-xs font-bold text-muted-foreground">
+                        <div className="flex flex-col">
+                          <p className="py-2 text-[13px] font-semibold">
                             Waiting for you ({(joinRequestsBySpace[space.id] || []).length})
                           </p>
                           {(joinRequestsBySpace[space.id] || []).map((request) => (
                             <div
                               key={request.id}
-                              className="flex flex-wrap items-center gap-2 rounded-md border border-border px-2.5 py-2 text-xs"
+                              className="flex flex-wrap items-center gap-2 app-tool-hairline border-b py-2 text-sm"
                             >
                               <span className="min-w-0 flex-1 truncate font-medium">
                                 {request.name || request.email || request.userId}
@@ -1394,51 +1317,47 @@ export function TeamView({
                           ))}
                         </div>
                       )}
-                      <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
-                        <p className="text-xs font-bold text-muted-foreground">
-                          Or share a link
-                        </p>
-                        <div className="flex flex-wrap items-center gap-3 text-xs">
-                          <label className="flex items-center gap-1.5">
-                            <input
-                              type="checkbox"
-                              checked={codeApprovalBySpace[space.id] === true}
-                              onChange={(event) =>
-                                setCodeApprovalBySpace((current) => ({
-                                  ...current,
-                                  [space.id]: event.target.checked,
-                                }))
-                              }
-                            />
-                            Require my approval
-                          </label>
-                          <label className="flex items-center gap-1.5">
-                            <input
-                              type="checkbox"
-                              checked={codeUnlimitedBySpace[space.id] === true}
-                              onChange={(event) =>
-                                setCodeUnlimitedBySpace((current) => ({
-                                  ...current,
-                                  [space.id]: event.target.checked,
-                                }))
-                              }
-                            />
-                            Unlimited uses
-                          </label>
-                          <button
-                            type="button"
-                            disabled={creatingCodeSpaceId === space.id}
-                            onClick={() => void submitInviteCode(space)}
-                            className={actionClass({ variant: "secondary", size: "md" })}
-                          >
-                            {creatingCodeSpaceId === space.id ? (
-                              <Loader2 className="size-3.5 animate-spin" />
-                            ) : (
-                              <LinkIcon className="size-3.5" />
-                            )}
-                            Create link
-                          </button>
-                        </div>
+                </div>
+              ) : null}
+              {canManage && (
+                <ToolSettingRow
+                  title="Invite link"
+                  description="Anyone who opens the link joins this workspace as a member."
+                  control={
+                    <button
+                      type="button"
+                      disabled={creatingCodeSpaceId === space.id}
+                      onClick={() => void submitInviteCode(space)}
+                      className={actionClass({ variant: "secondary", size: "md" })}
+                    >
+                      {creatingCodeSpaceId === space.id ? <Loader2 className="size-3.5 animate-spin" /> : <LinkIcon className="size-3.5" />}
+                      Create link
+                    </button>
+                  }
+                  below={
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-4 text-[13px] text-muted-foreground">
+                        <label className="flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={codeApprovalBySpace[space.id] === true}
+                            onChange={(event) =>
+                              setCodeApprovalBySpace((current) => ({ ...current, [space.id]: event.target.checked }))
+                            }
+                          />
+                          Require my approval
+                        </label>
+                        <label className="flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={codeUnlimitedBySpace[space.id] === true}
+                            onChange={(event) =>
+                              setCodeUnlimitedBySpace((current) => ({ ...current, [space.id]: event.target.checked }))
+                            }
+                          />
+                          Unlimited uses
+                        </label>
+                      </div>
                         {codeUnlimitedBySpace[space.id] && (
                           <p className={noticeClass("attention", "text-[11px]")}>
                             An unlimited link never stops working — anyone it reaches can join.
@@ -1457,27 +1376,23 @@ export function TeamView({
                         {codeErrorBySpace[space.id] && (
                           <p className="text-xs font-medium text-destructive">{codeErrorBySpace[space.id]}</p>
                         )}
-                      </div>
                     </div>
-                  )}
-                  {spaceRoleFor(space, user.id) === "owner" ? (
-                    <SpaceDangerZone space={space} userId={user.id} onDeleteSpace={onDeleteSpace} />
-                  ) : null}
-                </section>
-                );
-              })}
-
-              {teamSpaces.length === 0 && (
-                <div className="rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
-                  Open a Space to manage its members and invitations.
-                </div>
+                  }
+                />
               )}
-            </div>
-          </div>
+            </ToolDetailSection>
 
-        </div>
-      </div>
+            {spaceRoleFor(space, user.id) === "owner" ? (
+              <SpaceDangerZone space={space} userId={user.id} onDeleteSpace={onDeleteSpace} />
+            ) : null}
           </div>
+        );
+      })}
+
+      {teamSpaces.length === 0 && (
+        <p className="text-sm text-muted-foreground">Open a Space to manage its members and invitations.</p>
+      )}
+    </div>
   );
   return (
     <SectionedToolView title="Team" defaultKey={currentSpace?.id} sections={[

@@ -8197,6 +8197,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   background: transparent !important;
 }
 
+/* The paper's hairlines: under a section's settings rows and list rows. The
+   board hides one-sided borders everywhere; these are the ones the paper keeps. */
+.xmatrix-app.xmatrix-app .app-tool-detail .app-tool-hairline {
+  border-color: color-mix(in oklab, var(--foreground) 9%, transparent) !important;
+}
+
 /* Notices on the paper: plain white with the tone's rail, not glass. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-notice {
   background: oklch(0.995 0.002 85) !important;
