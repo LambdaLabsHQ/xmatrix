@@ -56,7 +56,7 @@ export const GCP_ANALYSIS_ACTIONS: Record<string, ConnectorAction> = {
       if (input.responseClass !== "all") filter.push(`metric.labels.response_code_class = ${JSON.stringify(input.responseClass)}`);
       const url = new URL(`https://monitoring.googleapis.com/v3/projects/${input.project}/timeSeries`);
       url.search = new URLSearchParams({ filter: filter.join(" AND "), view: "FULL", pageSize: String(PAGE_SIZE),
-        "interval.startTime": input.from!, "interval.endTime": input.to!, "aggregation.alignmentPeriod": input.groupBy === "day" ? "86400s" : `${(Date.parse(input.to!) - Date.parse(input.from!)) / 1000}s`,
+        "interval.startTime": input.from!, "interval.endTime": input.to!, "aggregation.alignmentPeriod": "86400s",
         "aggregation.perSeriesAligner": "ALIGN_SUM", "aggregation.crossSeriesReducer": "REDUCE_SUM",
         ...(input.pageToken ? { pageToken: input.pageToken } : {}) }).toString();
       if (input.groupBy !== "day") url.searchParams.append("aggregation.groupByFields", "resource.labels.credential_id");
@@ -82,7 +82,7 @@ export const GCP_ANALYSIS_ACTIONS: Record<string, ConnectorAction> = {
       if (result.nextPageToken) rows.push(columns("Next pageToken", result.nextPageToken));
       if (count > PAGE_SIZE || result.nextPageToken) rows.push("This page is incomplete; do not sum it as the complete interval.");
       rows.push(input.groupBy === "day" ? "Counts sum API calls across methods and credentials; not billable tokens or application users. Daily alignment uses the returned UTC intervals, which differ from Pacific billing days." :
-        "Credential IDs identify API keys or OAuth clients, not people, programs or models. These are request counts, not per-credential billed costs. Preserve returned intervals and continuation before comparing totals.");
+        "Credential IDs identify API keys or OAuth clients, not people, programs or models. These are daily request counts, not per-credential billed costs. Sum every page on the same returned UTC daily grid before comparing totals.");
       return report(`Aggregated API request usage${count > PAGE_SIZE ? " (truncated; first 30 points only)" : ""}`, rows, result);
     },
   },

@@ -238,18 +238,20 @@ input/output description. Resolve that exact ID through the connected provider:
 `read_sku` reads public SKU metadata through Cloud Billing v2beta, with no
 price or usage inference. `query_api_usage` requires a project ID and filters the monitored resource to
 that exact project, even when its metrics scope includes other projects. It uses the fixed Service Runtime
-request-count metric, ALIGN_SUM and cross-series REDUCE_SUM, daily by default. API service
+request-count metric, ALIGN_SUM and cross-series REDUCE_SUM, on the same daily alignment grid for every grouping. API service
 is limited to Gemini (`generativelanguage.googleapis.com`), Vertex AI
 (`aiplatform.googleapis.com`) or Cloud Run (`run.googleapis.com`); responseClass
 is all, 2xx, 4xx or 5xx. Optional `groupBy` is `day` (default), `credential`
-or `credential_method`. Credential grouping sums over the selected interval,
+or `credential_method`. Credential grouping preserves daily points throughout the selected interval,
 retaining only fixed credential/method labels; arbitrary grouping or filters
 are refused. UTC timestamps must describe a completed interval of
 at most 31 days within the past 90 days. Results expose at most 30
 points and a bounded pageToken continuation; empty or partial results do not
 prove zero requests or complete totals. These are API calls, not token usage
 or per-user attribution. Returned UTC intervals differ from Pacific billing
-days; preserve that distinction when comparing spikes.
+days; preserve that distinction when comparing spikes. Consume every continuation
+and sum matching daily intervals; changing the alignment period can change
+provider totals and cannot be treated as a comparable credential breakdown.
 
 These two new reads explicitly use the named project as the quota project
 via `x-goog-user-project`. The existing billing metadata reads retain their

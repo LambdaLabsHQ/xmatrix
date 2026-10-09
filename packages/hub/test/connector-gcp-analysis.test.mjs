@@ -58,7 +58,7 @@ test("historical API usage fixes the metric, service filter and aggregation with
   await fetched([{ body: { timeSeries: [{ points: [{ value: { int64Value: "bad" } }] }] } }], () => assert.rejects(actions.query_api_usage.execute(context, parse("query_api_usage", project, window)), /malformed usage counts/u));
 });
 
-test("credential aggregation retains opaque client IDs and methods without accepting caller-defined filters or collapsing them into a daily total", async () => {
+test("credential aggregation preserves the daily comparison grid and opaque client IDs without accepting caller-defined filters", async () => {
   for (const groupBy of ["principal", 'credential" OR true', ["credential"]]) assert.equal(typeof parse("query_api_usage", project, { ...window, groupBy }), "string");
   const credential = "apikey:12345678-1234-4234-8234-123456789abc";
   for (const groupBy of ["credential", "credential_method"]) {
@@ -66,7 +66,7 @@ test("credential aggregation retains opaque client IDs and methods without accep
     const run = await fetched([{ body }], () => actions.query_api_usage.execute(context, parse("query_api_usage", project, { ...window, groupBy })));
     const query = new URL(run.calls[0].url).searchParams;
     assert.deepEqual(query.getAll("aggregation.groupByFields"), groupBy === "credential" ? ["resource.labels.credential_id"] : ["resource.labels.credential_id", "resource.labels.method"]);
-    assert.equal(query.get("aggregation.alignmentPeriod"), "2505600s");
+    assert.equal(query.get("aggregation.alignmentPeriod"), "86400s");
     assert.match(query.get("filter"), /resource.labels.project_id = "billing-project"/u);
     assert.match(run.result.summary, /apikey:12345678-1234-4234-8234-123456789abc/u);
     assert.match(run.result.summary, groupBy === "credential_method" ? /GenerateContent/u : /all methods/u);
