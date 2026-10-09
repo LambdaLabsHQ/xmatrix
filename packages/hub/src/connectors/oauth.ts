@@ -30,6 +30,16 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   gmail: { scope: "https://www.googleapis.com/auth/gmail.readonly", name: "read-only Gmail" },
 };
 
+/**
+ * Disconnecting a Google connection deletes its stored tokens (Google API Services User Data
+ * Policy), so connecting again asks Google for a new grant. Other providers keep theirs.
+ */
+export function grantFieldsForgottenOnDisconnect(providerId: string): Record<string, null> | undefined {
+  if (!GOOGLE_GRANTS[providerId]) return undefined;
+  const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
+  return Object.fromEntries((manifest?.credentials ?? []).filter((field) => field.managed).map((field) => [field.id, null]));
+}
+
 /* Providers that sign in with another provider's company OAuth client. */
 const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", gcp: "google", gmail: "google" };
 

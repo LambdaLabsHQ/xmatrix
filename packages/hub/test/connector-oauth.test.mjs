@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "../../protocol/src/app-connector-manifests.ts";
-import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, oauthProviderIds, oauthTokenFields, refreshOAuthFields,
+import { exchangeOAuthGrant, grantFieldsForgottenOnDisconnect, oauthAuthorizeUrl, oauthClient, oauthProviderIds, oauthTokenFields, refreshOAuthFields,
   verifyOAuthState } from "../src/connectors/oauth.ts";
 import { connectorProvider } from "../src/connectors/registry.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
@@ -192,4 +192,13 @@ test("Notion refresh rotates the access and refresh token together using Basic-a
   const missingPair = stubFetch([{ body: { access_token: "new-access" } }]);
   try { await assert.rejects(refreshOAuthFields(env, "notion", values, now), /rotated refresh token/); }
   finally { missingPair.restore(); }
+});
+
+test("disconnecting a Google connection forgets its tokens but keeps generated ingress secrets", () => {
+  const tokens = { oauthToken: null, oauthRefreshToken: null, oauthExpiresAt: null };
+  for (const id of ["google", "googlesearchconsole", "googleadsense", "gcp"]) {
+    assert.deepEqual(grantFieldsForgottenOnDisconnect(id), tokens, id);
+  }
+  assert.equal(grantFieldsForgottenOnDisconnect("notion"), undefined);
+  assert.equal(grantFieldsForgottenOnDisconnect("github"), undefined);
 });
