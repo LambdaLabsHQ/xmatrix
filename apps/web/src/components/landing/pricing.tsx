@@ -23,15 +23,6 @@ const plans = [
     href: "/login?next=%2Fbilling",
     highlighted: true,
   },
-  {
-    name: "Enterprise",
-    price: "Custom",
-    period: "",
-    description: "Govern agents across your organization.",
-    features: ["Unlimited agents", "Private deployment", "Policy controls + SLA"],
-    href: "mailto:enterprise@xmatrix.sh",
-    highlighted: false,
-  },
 ] as const;
 
 export function Pricing() {
@@ -48,7 +39,7 @@ export function Pricing() {
           </p>
         </div>
 
-        <div className="x-mobile-card-scroller mx-auto mt-14 grid min-w-0 max-w-5xl gap-4 md:grid-cols-3">
+        <div className="x-mobile-card-scroller mx-auto mt-14 grid min-w-0 max-w-3xl gap-4 md:grid-cols-2">
           {plans.map(({ name, price, period, description, features, href, highlighted }) => {
             // The plan most teams pick is the one wood plank; the others are paper.
             const Surface = highlighted ? WoodPanel : "div";
