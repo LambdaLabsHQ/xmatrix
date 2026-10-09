@@ -1,3 +1,5 @@
+import type { ClientDefectAction } from "@xmatrix/protocol";
+
 import { reportClientDefect } from "./client-defect-report";
 import { XMatrixApiError, isTransientFailure } from "./query/api-client";
 
@@ -91,11 +93,14 @@ function readable(error: XMatrixApiError): boolean {
 
 /**
  * `action` names what failed as a sentence, such as "Couldn't load transfer
- * proposals". Returns null for a request its own caller cancelled.
+ * proposals", from the closed set a defect report may carry. `specific` shows
+ * a more specific sentence for the same action, such as the app's own name.
+ * Returns null for a request its own caller cancelled.
  */
-export function describeError(error: unknown, action: string): UserFacingError | null {
+export function describeError(error: unknown, action: ClientDefectAction,
+  specific: string = action): UserFacingError | null {
   if (error === null || error === undefined || isAbort(error)) return null;
-  const headline = sentence(action);
+  const headline = sentence(specific);
   if (error instanceof XMatrixApiError) {
     const { reason, retryable } = apiReason(error);
     const reference = error.code !== "request_failed" ? error.code : error.status ? `HTTP ${error.status}` : undefined;
@@ -117,6 +122,6 @@ export function describeError(error: unknown, action: string): UserFacingError |
 }
 
 /** `describeError` as the one string a component keeps in state; null when nothing should show. */
-export function userErrorMessage(error: unknown, action: string): string | null {
-  return describeError(error, action)?.message ?? null;
+export function userErrorMessage(error: unknown, action: ClientDefectAction, specific?: string): string | null {
+  return describeError(error, action, specific)?.message ?? null;
 }

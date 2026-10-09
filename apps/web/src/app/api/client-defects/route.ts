@@ -1,16 +1,18 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { clientDefectAction } from "@xmatrix/protocol";
 
 import { webErrorReporting } from "@/lib/server-error-reporting";
 
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 8_192;
-const LIMITS = { action: 120, name: 80, message: 300, stack: 2_000 } as const;
+const LIMITS = { name: 80, message: 300, stack: 2_000 } as const;
 
 /**
  * A browser defect, reported like a Worker failure: under the action the person
  * was taking, with a bounded name, message and stack. Same-origin only; the
- * body carries no content by construction (src/lib/client-defect-report.ts).
+ * body carries no content by construction (src/lib/client-defect-report.ts),
+ * and an action outside the closed set is not written at all.
  */
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
@@ -32,7 +34,7 @@ export async function POST(request: Request) {
   const defect = new Error(field("message") || "(no message)");
   defect.name = field("name") || "ClientDefect";
   defect.stack = `${defect.name}: ${defect.message}\n${field("stack")}`;
-  const reference = reporting.reportError(defect, { operation: `browser: ${field("action") || "unknown action"}` });
+  const reference = reporting.reportError(defect, { operation: `browser: ${clientDefectAction(body.action) ?? "unknown action"}` });
   getCloudflareContext().ctx.waitUntil(reporting.sendErrorReports());
   return Response.json({ reference: reference ?? null }, { status: 202 });
 }

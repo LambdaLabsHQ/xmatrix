@@ -2,6 +2,8 @@
 
 import { actionClass } from "@/components/ui/action-tone";
 import { statusInkClass } from "@/components/ui/status-tone";
+import type { ClientDefectAction } from "@xmatrix/protocol";
+
 import { describeError } from "@/lib/user-facing-error";
 
 /**
@@ -13,7 +15,7 @@ import { describeError } from "@/lib/user-facing-error";
 export function ErrorNotice({ error, action, onRetry, className }: {
   error: unknown;
   /** What failed, as a sentence: "Couldn't load transfer proposals". */
-  action: string;
+  action: ClientDefectAction;
   onRetry?: () => void;
   className?: string;
 }) {

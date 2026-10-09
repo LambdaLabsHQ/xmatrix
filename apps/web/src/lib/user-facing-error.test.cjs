@@ -135,3 +135,24 @@ test("browser defect forwarding preserves the first Safari and Firefox frame for
     assert.equal(frames.at(-1).colno, 20);
   }
 });
+
+test("a specific headline is shown, and only its action from the closed set is reported", async (t) => {
+  const previousWindow = global.window;
+  global.window = {};
+  t.after(() => {
+    if (previousWindow === undefined) delete global.window;
+    else global.window = previousWindow;
+  });
+  t.mock.method(console, "error", () => {});
+  const sent = [];
+  t.mock.method(global, "fetch", async (_url, init) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(null, { status: 202 });
+  });
+  assert.equal(userErrorMessage(new TypeError("Cannot read properties of undefined"), "Couldn't connect the app",
+    "Couldn't connect private-account"),
+  "Couldn't connect private-account. Something went wrong. Try again, and report it if it keeps happening.");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].action, "Couldn't connect the app");
+});
