@@ -66,7 +66,7 @@ export function PresenceStack({ people, onFollow }: { people: PresentPerson[]; o
         </button>
       ))}
       {people.length > shown.length && (
-        <span className={cn("inline-flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-bold",
+        <span className={cn("app-overflow-count inline-flex h-5 min-w-5 items-center justify-center px-1 text-[10px] font-bold",
           COUNT_CHIP_MATERIAL_CLASS)}>
           +{people.length - shown.length}
         </span>

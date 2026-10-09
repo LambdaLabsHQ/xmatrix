@@ -1428,7 +1428,7 @@ export function ChannelPresenceAvatars({
       {hiddenCount > 0 && (
         <span
           className={cn(
-            "app-channel-presence-overflow flex size-8 items-center justify-center text-[10px] font-bold",
+            "app-channel-presence-overflow app-overflow-count flex size-8 items-center justify-center text-[10px] font-bold",
             COUNT_CHIP_MATERIAL_CLASS
           )}
         >

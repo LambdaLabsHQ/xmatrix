@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
+import { tagClass } from "@/components/dashboard/status-tag";
 
 /* One status vocabulary for the whole app.
 
@@ -36,14 +36,9 @@ const NOTICE_TONE_CLASS: Record<StatusTone, string> = {
   alert: "app-notice-alert",
 };
 
-/** A chip-scale status label: the shared chip glass plus one of the four inks. */
+/** A chip-scale status label: the shared tag (shape and material) plus one of the four inks. */
 export function statusChipClass(tone: StatusTone = "settled", className?: string): string {
-  return cn(
-    "app-status-chip px-2 py-0.5 text-xs font-bold",
-    COUNT_CHIP_MATERIAL_CLASS,
-    CHIP_TONE_CLASS[tone],
-    className
-  );
+  return tagClass("app-status-chip", CHIP_TONE_CLASS[tone], className);
 }
 
 /** Ink on a bare run of text, for a warning that was never a box. */

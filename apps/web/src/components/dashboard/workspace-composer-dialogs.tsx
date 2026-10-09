@@ -68,6 +68,7 @@ import {
   IMAGE_ATTACHMENT_TYPES,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
+  COUNT_CHIP_MATERIAL_CLASS,
 } from "./workspace-shell-constants";
 
 import {
@@ -151,7 +152,7 @@ export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
 import { AgentInstanceTagChips } from "./agent-instance-tag-chips";
 import { LoadingImage } from "./content-skeleton";
-import { BranchBadge, PAPER_TAG_CLASS, UsageMeterFill } from "./status-tag";
+import { BranchBadge, tagClass, UsageMeterFill } from "./status-tag";
 
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
@@ -1749,7 +1750,7 @@ export function ChannelDetails({
                             </span>
                             {!automation.capabilities.update && !automation.capabilities.pause && !automation.capabilities.resume &&
                               !automation.capabilities.delete && (
-                              <span className={cn("shrink-0 px-[7px] py-0.5 text-[10px] font-bold", PAPER_TAG_CLASS)}>
+                              <span className={tagClass()}>
                                 read only
                               </span>
                             )}
@@ -2032,8 +2033,8 @@ export function TagRow({
             key={tag.key}
             title={tag.title}
             className={cn(
-              "inline-flex items-center font-medium tabular-nums",
-              PAPER_TAG_CLASS,
+              "inline-flex items-center font-medium tabular-nums text-muted-foreground",
+              COUNT_CHIP_MATERIAL_CLASS,
               compact ? "h-5 px-1.5 text-[10px] leading-none" : "h-6 px-2 text-[11px] leading-none"
             )}
           >
@@ -2087,6 +2088,12 @@ export function MeterTag({
         : displayPercent >= 70
           ? "yellow"
           : "green");
+  const textClass =
+    displayPercent === undefined
+      ? ""
+      : displayPercent >= 70
+        ? "text-white"
+        : "text-foreground/90";
   // Compact chips (Agents sidebar / status column): label + percent only.
   // Reset time stays in the tooltip so the pill does not feel cramped.
   // The verdict's note names the reset itself, so the plain reset steps aside.
@@ -2105,7 +2112,9 @@ export function MeterTag({
     tip.style.left = `${Math.max(8, Math.min(tipAnchor.left, maxLeft))}px`;
   }, [tipAnchor]);
 
-  // A paper label like every `Tag`; the meter fills it from the left.
+  // `inline-flex` in both sizes, like every `Tag`: the final glass override in
+  // globals.css skips `.inline-flex`, so a `flex` meter took a different fill
+  // from the chips beside it.
   return (
     <span
       data-usage-meter-chip
@@ -2114,7 +2123,7 @@ export function MeterTag({
       onPointerLeave={() => setTipAnchor(null)}
       className={cn(
         "relative inline-flex shrink-0 items-center overflow-hidden font-medium",
-        PAPER_TAG_CLASS,
+        COUNT_CHIP_MATERIAL_CLASS,
         compact
           ? "h-5 w-full px-2 text-[10px] leading-none"
           : "h-6 gap-1.5 px-2 text-[11px] leading-none"
@@ -2126,7 +2135,8 @@ export function MeterTag({
       <span
         className={cn(
           "relative z-[1] w-full",
-          compact ? "flex items-center justify-between gap-2" : "inline-flex items-center gap-1.5"
+          compact ? "flex items-center justify-between gap-2" : "inline-flex items-center gap-1.5",
+          textClass
         )}
       >
         <span className="shrink-0">{label}</span>
