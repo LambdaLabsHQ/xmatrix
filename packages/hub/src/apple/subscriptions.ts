@@ -87,10 +87,13 @@ export async function retrieveAppleSubscription(config: AppleSubscriptionConfig,
   if (typeof transactionId !== "string" || !/^[0-9]{1,100}$/.test(transactionId)) throw new AppleBillingError("invalid_apple_transaction", "Invalid Apple transaction");
   const host = realm === "Production" ? "https://api.storekit.apple.com" : "https://api.storekit-sandbox.apple.com";
   let response: Response;
+  let token: string;
   try {
     const key = await importPKCS8(config.privateKey, "ES256");
-    const token = await new SignJWT({ bid: APPLE_BUNDLE_ID }).setProtectedHeader({ alg: "ES256", kid: config.keyId, typ: "JWT" })
+    token = await new SignJWT({ bid: APPLE_BUNDLE_ID }).setProtectedHeader({ alg: "ES256", kid: config.keyId, typ: "JWT" })
       .setIssuer(config.issuerId).setAudience("appstoreconnect-v1").setIssuedAt().setExpirationTime("5m").sign(key);
+  } catch { throw new AppleBillingError("apple_signing_failed", "Apple subscription signing is temporarily unavailable", true); }
+  try {
     response = await fetchImpl(`${host}/inApps/v1/subscriptions/${transactionId}`, {
       headers: { authorization: `Bearer ${token}` }, redirect: "manual", signal: AbortSignal.timeout(10_000),
     });
