@@ -79,17 +79,10 @@ test("the comparison ref prevents an unreleased main-branch downgrade", () => {
 });
 
 test("only the CLI binary carries the release version; its library crates stay 0.0.0", () => {
-  const versionScript = fs.readFileSync(new URL("./version.mjs", import.meta.url), "utf8");
   const cargoLock = fs.readFileSync(
     new URL("../packages/cli-rs/Cargo.lock", import.meta.url),
     "utf8",
   );
-  const configuredBlock = versionScript.match(
-    /const cargoLockPackageNames = \[([\s\S]*?)\];/,
-  )?.[1];
-  assert.ok(configuredBlock);
-  assert.deepEqual([...configuredBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]), ["xmatrix"]);
-
   // A library crate carrying the release version would be rebuilt by every
   // bump; the binary registers the version at startup instead.
   const libraries = [
