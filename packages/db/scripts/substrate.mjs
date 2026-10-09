@@ -28,11 +28,8 @@ export const AUTH_OBSERVATION_TABLES = Object.freeze([
   "auth_accounts",
   "auth_jwks",
   "auth_sessions",
-  "auth_shadow_backfill_progress",
-  "auth_shadow_runs",
   "auth_users",
   "auth_verifications",
-  "authority_migration_receipts",
   "retired_human_handles",
 ]);
 
@@ -200,11 +197,7 @@ export async function readOperationalSnapshot(client, options) {
     (SELECT count(*) FROM control.auth_sessions) AS auth_sessions,
     (SELECT count(*) FROM control.auth_users) AS auth_users,
     (SELECT count(*) FROM control.auth_verifications) AS auth_verifications,
-    (SELECT count(*) FROM control.authority_migration_receipts) AS authority_migration_receipts,
     (SELECT count(*) FROM control.retired_human_handles) AS retired_human_handles`);
-  const shadow = await client.query(`SELECT
-    (SELECT count(*) FROM control.auth_shadow_backfill_progress) AS auth_shadow_backfill_progress,
-    (SELECT count(*) FROM control.auth_shadow_runs) AS auth_shadow_runs`);
   const facts = await client.query(`SELECT
     (SELECT count(*) FROM control.space_placement) AS space_placement,
     (SELECT count(*) FROM data.agent_launches) AS agent_launches,
@@ -229,7 +222,7 @@ export async function readOperationalSnapshot(client, options) {
     shards: shards.rows,
     localShardId: localIdentity.rows.length === 1 ? localIdentity.rows[0].shard_id : null,
     factCounts: facts.rows[0],
-    authCounts: { ...counts.rows[0], ...shadow.rows[0] },
+    authCounts: counts.rows[0],
   };
   assertOperationalSnapshot(snapshot, options, await checkedInMigrationRelations());
   return snapshot;

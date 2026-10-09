@@ -276,19 +276,13 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.machine_run_routes", "data.machine_run_snapshot_heads", "data.machine_run_terminal_reports",
     "data.trace_access_grants",
   ].map((table) => ({ table, predicate: `channel_id IN ${SPACE_CHANNELS}` })),
-  ...["data.extension_records", "control.scoped_control_command_replays"]
-    .map((table) => ({ table, predicate: "scope_kind='space' AND scope_id=$1" })),
-  ...["data.projection_manifest_grants", "data.projection_scope_heads"].map((table) => ({
-    table,
-    predicate: `visibility_scope_id='space:'||$1
-      OR visibility_scope_id IN (SELECT 'channel:'||channel_id FROM data.channels WHERE space_id=$1)`,
-  })),
+  { table: "control.scoped_control_command_replays", predicate: "scope_kind='space' AND scope_id=$1" },
   { table: "data.cross_space_read_grants", predicate: "space_id=$1 OR source_space_id=$1" },
   { table: "data.channel_transfer_proposals", predicate: "space_id=$1 OR target_space_id=$1" },
   ...[
     "data.agent_launches", "data.agent_message_executions", "data.agent_reborn_intents",
     "data.agent_registration_commands",
-    "data.app_connector_action_policies", "data.app_connector_channel_bindings", "data.app_connector_connections",
+    "data.app_connector_action_policies", "data.app_connector_connections",
     "data.app_connector_credentials", "data.app_connector_oauth_installations",
     "data.app_wecom_install_attempts", "data.app_wecom_installations",
     "data.app_teams_link_attempts", "data.app_teams_room_bindings",
@@ -304,8 +298,7 @@ export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] 
     "data.message_sequence_reservations", "data.messages", "data.page_access", "data.page_block_competitions",
     "data.page_claims", "data.page_links", "data.page_migrations", "data.page_reads",
     "data.page_revisions", "data.pages", "data.registration_access_changes",
-    "data.registration_launch_intents", "data.registration_stop_intents", "data.retired_agent_dm_purges",
-    "data.retired_direct_conversation_purges",
+    "data.registration_launch_intents", "data.registration_stop_intents",
     "data.run_agent_registrations", "data.space_action_claims",
     "data.space_agent_registration_access", "data.space_agent_registrations",
     "data.space_billing_checkout_intents",

@@ -90,12 +90,6 @@ test("operational schema permits business facts and rejects invalid counts or ro
   );
 });
 
-test("operational schema permits Auth shadow facts", () => {
-  assert.doesNotThrow(() => assertOperationalSnapshot(snapshot({
-    authCounts: { ...snapshot().authCounts, auth_users: "12", auth_shadow_runs: "1" },
-  }), options, expected));
-});
-
 test("capacity policy has ordered conservative levels", () => {
   const policy = CAPACITY_POLICY.postgresLogical;
   assert.equal(capacityLevel(policy.warningBytes - 1), "healthy");
