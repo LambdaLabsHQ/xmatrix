@@ -1,6 +1,6 @@
 {
   "name": "@xmatrix/desktop",
-  "version": "1.0.0",
+  "version": "1.0.151",
   "description": "xMatrix desktop client for agent workspace chat.",
   "author": "xMatrix",
   "private": true,
