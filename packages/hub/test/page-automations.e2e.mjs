@@ -175,8 +175,11 @@ test("an Agent Run manages a page's Automations as its owner, from any conversat
 
     const listed = (await ok(await worker.fetch(automations, { headers: asRun }))).automations;
     assert.deepEqual(listed.map((item) => [item.id, item.capabilities.update]), [[created.id, true]]);
-    const paused = (await ok(await worker.fetch(`${automations}/${created.id}/pause`, { method: "POST",
+    const ran = (await ok(await worker.fetch(`${automations}/${created.id}/run`, { method: "POST",
       headers: asRun, body: JSON.stringify({ expectedVersion: created.version }) }))).automation;
+    assert.equal(ran.id, created.id, "an Agent runs it now as the author it works for");
+    const paused = (await ok(await worker.fetch(`${automations}/${created.id}/pause`, { method: "POST",
+      headers: asRun, body: JSON.stringify({ expectedVersion: ran.version }) }))).automation;
     assert.equal(paused.enabled, false);
     assert.equal(paused.id, created.id, "the Agent acts as the author it works for");
 

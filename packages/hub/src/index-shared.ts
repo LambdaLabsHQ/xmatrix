@@ -560,7 +560,7 @@ export function agentRunHttpRouteAllowed(
   if (["GET", "POST"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/claims$/u.test(path)) return true;
   if (request.method === "DELETE" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/claims\/[^/]+$/u.test(path)) return true;
   // A page's Automations are the page's: a Run that may edit the page manages them as its owner.
-  if (/^\/api\/spaces\/[^/]+\/pages\/[^/]+\/automations(?:\/[^/]+(?:\/(?:pause|resume|reference))?)?$/u.test(path)) return true;
+  if (/^\/api\/spaces\/[^/]+\/pages\/[^/]+\/automations(?:\/[^/]+(?:\/(?:pause|resume|run|reference))?)?$/u.test(path)) return true;
   if (["GET", "POST"].includes(request.method) && /^\/api\/spaces\/[^/]+\/page-links$/u.test(path)) return true;
   if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/page-links\/[^/]+\/resolution$/u.test(path)) return true;
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/(?:page-space|pages)$/u.test(path)) return true;
