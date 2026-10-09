@@ -24,7 +24,7 @@ const subprocessors: Provider[] = [
     name: "PlanetScale, Inc.",
     purpose: "Managed PostgreSQL database hosting for production account, collaboration, and service records.",
     data: "Account and authentication records, Customer Data stored in the database, billing metadata, and service records required by the enabled features.",
-    region: "United States. xMatrix does not currently promise a customer-selected or fixed data-residency region.",
+    region: "The configured production database region. xMatrix does not currently promise a customer-selected or fixed data-residency region.",
     added: "October 2026",
   },
   {
