@@ -9,25 +9,42 @@
  * the icon gap, or the truncation for a second time.
  *
  * `TAG_SHAPE_CLASS` is geometry and type only. Tags that carry a status tone of
- * their own — the goal badge — paint their own surface over the same shape;
- * every other tag takes the shared chip material from `tagClass`, rendered
- * through `LiquidGlassPill`, the composer buttons' own primitive, so it blurs
- * and bends the backdrop exactly as they do.
+ * their own — the goal badge — paint their own surface over the same shape.
+ * Every other tag is ink on the paper, from `tagClass`: an icon and a word with
+ * no surface of its own, the way a detail page's context line reads. A row of
+ * glass capsules beside a glass avatar was six raised objects per header
+ * (user 2026-10-09: 头像和标签都改成纸面风格，不然看着太乱了).
  */
 
 import { GitPullRequest } from "lucide-react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
-import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
-
-import { COUNT_CHIP_MATERIAL_CLASS } from "./workspace-shell-constants";
 
 export const TAG_SHAPE_CLASS =
   "inline-flex shrink-0 items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold";
 
+/** Ink on the paper: no surface, so no padding to hold one. */
+export const INK_TAG_CLASS = "app-ink-tag px-0 text-muted-foreground";
+
 export function tagClass(...extra: Array<string | false | undefined>): string {
-  return cn(TAG_SHAPE_CLASS, COUNT_CHIP_MATERIAL_CLASS, "text-muted-foreground", ...extra);
+  return cn(TAG_SHAPE_CLASS, INK_TAG_CLASS, ...extra);
+}
+
+/* A usage meter on an ink tag is a line under its words: the share used in the
+   meter's tone, over a faint track when the meter is the tag's whole point. */
+export function UsageMeterLine({ percent, tone, track }: { percent: number; tone: string; track?: boolean }) {
+  return (
+    <>
+      {track ? <span aria-hidden className="app-usage-meter-track pointer-events-none absolute bottom-0 inset-x-0 h-0.5 rounded-full" /> : null}
+      <span
+        aria-hidden
+        className="app-usage-meter-fill pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-full"
+        data-tone={tone}
+        style={{ width: `${percent}%` }}
+      />
+    </>
+  );
 }
 
 export function Tag({
@@ -50,7 +67,7 @@ export function Tag({
   title?: string;
   className?: string;
   nowrap?: boolean;
-  /** Painted under the label, e.g. the usage meter behind a quota tag. */
+  /** Drawn under the label, e.g. the usage meter of a quota tag. */
   fill?: ReactNode;
   /** Identifies the tag to tests and to the tag editor. */
   chipId?: string;
@@ -78,14 +95,13 @@ export function Tag({
      would offer a control on facts like context usage that nothing can set. */
   if (!onClick) {
     return (
-      <LiquidGlassPill as="span" className={shell} title={title} aria-label={title} data-status-chip={chipId} {...data}>
+      <span className={shell} title={title} aria-label={title} data-status-chip={chipId} {...data}>
         {body}
-      </LiquidGlassPill>
+      </span>
     );
   }
   return (
-    <LiquidGlassPill
-      as="button"
+    <button
       type="button"
       className={cn(shell, "hover:text-foreground")}
       title={title}
@@ -97,7 +113,7 @@ export function Tag({
       {...data}
     >
       {body}
-    </LiquidGlassPill>
+    </button>
   );
 }
 
