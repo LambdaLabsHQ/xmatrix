@@ -42,7 +42,7 @@ import {
 } from "./agent-trace-stream";
 import { visibleAgentTraceReplicasForHistoryReads, type AgentTraceReplica } from "./agent-trace-replica";
 import { agentTraceHistoryStatusCopy, type AgentTraceHistoryReadState } from "./agent-trace-on-demand";
-import { CenteredDialogShell, DialogButton, DialogInset } from "./centered-dialog-shell";
+import { CenteredDialogShell, DialogButton } from "./centered-dialog-shell";
 import { RichMessageContent } from "./workspace-shell-rich-message";
 import { AGENT_BUSY_TRACE_STALE_MS } from "./workspace-shell-constants";
 import { tagsFromUsage, traceBlockText, traceFieldValue, traceToolPreviewText } from "./workspace-shell-formatters";
@@ -50,7 +50,6 @@ import { avatarInitials, formatTime, isOlderThan, relativeTime, shortId, traceUs
 import {
   TagRow,
   agentTraceGroupsForTarget,
-  type AgentInstanceStopRequest,
   type AgentTraceHistoryPanelState,
   type AgentTraceTarget,
 } from "./workspace-composer-dialogs";
@@ -935,62 +934,3 @@ export function AgentInstanceWindowShell({
   );
 }
 
-export function AgentInstanceStopDialog({
-  request,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  request: AgentInstanceStopRequest | null;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  if (!request) return null;
-
-  return (
-    <AgentInstanceWindowShell
-      target={request.target}
-      busy={busy}
-      labelledBy="agent-instance-stop-title"
-      onClose={onCancel}
-    >
-      <div className="p-4">
-        <div className="app-agent-instance-content p-4 text-sm leading-6 text-foreground [overflow-wrap:anywhere]">
-          <div className="flex items-start gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-destructive/40 text-destructive">
-              <X className="size-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-black">
-                Stop agent?
-              </h2>
-              <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                {request.instance.label}
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-5 space-y-3 text-sm">
-            <p>
-              This sends a visible stop command to the channel. xMatrix will terminate the live
-              agent process and remove the instance from the channel when the host confirms it.
-            </p>
-            <DialogInset label="Instance ID">
-              <p className="mt-1 truncate font-mono text-sm">{request.instance.id}</p>
-            </DialogInset>
-          </div>
-
-          <div className="mt-5 flex justify-end gap-2">
-            <DialogButton disabled={busy} onClick={onCancel}>
-          Cancel
-        </DialogButton>
-            <DialogButton tone="destructive" busy={busy} icon={X} disabled={busy} onClick={onConfirm}>
-              Stop
-            </DialogButton>
-          </div>
-        </div>
-      </div>
-    </AgentInstanceWindowShell>
-  );
-}
