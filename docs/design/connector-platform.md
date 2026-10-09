@@ -186,6 +186,22 @@ Google project and add the `webmasters` scope to its consent screen; it is a
 sensitive scope, so external use beyond Testing users needs Google verification.
 See [Search Console API](https://developers.google.com/webmaster-tools/v1/api_reference_index).
 
+Gmail is a separate `gmail` connection on the same company Google OAuth
+client, requesting only `https://www.googleapis.com/auth/gmail.readonly`; the
+Hub requires exactly that scope on exchange and refresh. Check reads the
+mailbox profile without storing it. Reads: `search:* [Gmail search]` returns
+the ten newest matching messages (id, received time, sender, subject,
+snippet) and `read:<message id>` returns the headers, the text body (plain
+text, else HTML reduced to text, truncated at 8,000 characters) and every
+distinct http(s) link the message contains, fenced as untrusted content. The
+Hub never requests a link found in mail; an Agent that needs to confirm a
+sign-up opens the link itself. There is no send, label or delete action and no
+inbound event. Enable the Gmail API on the company Google project and add the
+`gmail.readonly` scope to its consent screen; it is a restricted scope, so
+external use beyond the app's own users needs Google verification and a
+security assessment.
+See [Gmail API](https://developers.google.com/workspace/gmail/api/reference/rest).
+
 Google Sheets uses the same per-file Google connection and `drive.file` grant.
 `read_sheet:<spreadsheet id> <A1 range>` returns an explicit rectangle (up to
 50 rows by 20 columns) as untrusted JSON, with formula text and formatted dates;
