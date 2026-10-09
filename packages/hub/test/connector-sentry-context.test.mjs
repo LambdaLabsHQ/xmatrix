@@ -121,6 +121,22 @@ test("capture boundary and runtime evidence cannot expose browser action text or
   assert.doesNotMatch(result.summary, /private-/);
 });
 
+test("browser actions expose only exact fixed application copy", async () => {
+  for (const [action, expected] of [
+    ["Couldn't sign you in", "Browser action: Couldn't sign you in"],
+    ["Couldn't attach the file", "Browser action: Couldn't attach the file"],
+    ["Couldn't connect private-account", undefined],
+    ["Couldn't sign you in\nprivate-account", undefined],
+  ]) {
+    const { result } = await run([{ body: issue }, { body: { ...event,
+      tags: [{ key: "operation", value: "browser: " + action }],
+    } }], undefined, "123");
+    assert.match(result.summary, /Capture boundary: browser defect endpoint/);
+    if (expected) assert.ok(result.summary.includes(expected));
+    else assert.doesNotMatch(result.summary, /Browser action:|private-account/);
+  }
+});
+
 test("manual tokens retain configured self-hosted origin without following redirects", async () => {
   const { calls } = await run([{ body: issue }, { body: event }], { authToken: "manual-test", organization: "test",
     baseUrl: "https://errors.example.com" }, "123");

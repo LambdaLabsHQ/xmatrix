@@ -1,3 +1,5 @@
+import { defaultStackParser } from "@sentry/browser";
+
 import { xmatrixRawResponse } from "./query/api-client";
 
 /** The web Worker route that forwards a browser defect to error reporting. */
@@ -24,11 +26,26 @@ export function reportClientDefect(action: string, error: unknown): void {
   const key = `${action}\n${name}\n${message}`;
   if (reported.has(key)) return;
   reported.add(key);
-  const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(1, 16).join("\n") : "";
+  const stack = error instanceof Error ? browserDefectStack(error) : "";
   void xmatrixRawResponse(CLIENT_DEFECT_ROUTE, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action, name, message, stack: stack.slice(0, 2_000) }),
     keepalive: true,
   }).catch(() => undefined);
+}
+
+/** Normalize browser frames for the Worker reporter's Node stack parser. */
+function browserDefectStack(error: Error): string {
+  const stack = error.stack ?? "";
+  const frames = defaultStackParser(stack);
+  if (frames.length) {
+    return frames.slice(-15).reverse().map(frame =>
+      `    at ${frame.function ?? "<anonymous>"} (${frame.filename ?? "<unknown>"}:${frame.lineno ?? 0}:${frame.colno ?? 0})`,
+    ).join("\n");
+  }
+  // Some browsers omit the message header; do not delete their first frame.
+  const header = error.message ? `${error.name}: ${error.message}` : error.name;
+  const body = stack === header ? "" : stack.startsWith(header + "\n") ? stack.slice(header.length + 1) : stack;
+  return body.split("\n").slice(0, 15).join("\n");
 }

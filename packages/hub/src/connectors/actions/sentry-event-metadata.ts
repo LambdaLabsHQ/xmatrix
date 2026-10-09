@@ -1,3 +1,5 @@
+import { sentryBrowserAction } from "./sentry-browser-actions";
+
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
   return typeof value === "string" && /^[A-Za-z0-9_.@+-]{1,160}$/u.test(value) ? value : undefined;
@@ -17,9 +19,11 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       if (!tag || typeof tag !== "object") continue;
       if (tag.key === "component" && ["hub", "web"].includes(tag.value)) lines.push(`Component: ${tag.value}`);
       if (tag.key === "environment" && token(tag.value)) lines.push(`Environment: ${tag.value}`);
-      // The browser defect endpoint sets this prefix. Do not copy its action text.
+      // The browser defect endpoint sets this prefix. Only fixed application copy is readable.
       if (tag.key === "operation" && typeof tag.value === "string" && tag.value.startsWith("browser: ")) {
         lines.push("Capture boundary: browser defect endpoint");
+        const action = sentryBrowserAction(tag.value);
+        if (action) lines.push("Browser action: " + action);
       }
     }
   }

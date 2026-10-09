@@ -96,3 +96,42 @@ test("a browser defect report keeps the message shape but not what it quoted", (
   assert.equal(redactDefectMessage(`Unexpected token 'h', "hello secret" is not valid JSON`),
     "Unexpected token '…', \"…\" is not valid JSON");
 });
+
+test("browser defect forwarding preserves the first Safari and Firefox frame for the Worker parser", async (t) => {
+  const { reportClientDefect } = require("./client-defect-report.ts");
+  const previousWindow = global.window;
+  global.window = {};
+  t.after(() => {
+    if (previousWindow === undefined) delete global.window;
+    else global.window = previousWindow;
+  });
+  const sent = [];
+  t.mock.method(global, "fetch", async (_url, init) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(null, { status: 202 });
+  });
+  for (const [engine, stack] of [
+    ["Safari", "load@https://xmatrix.sh/app.js:10:20"],
+    ["Firefox", "load@https://xmatrix.sh/app.js:10:20\n@https://xmatrix.sh/index.js:1:2"],
+    ["Chrome", "Error: Request Canceled\n    at load (https://xmatrix.sh/app.js:10:20)"],
+  ]) {
+    const error = new Error("Request Canceled");
+    error.stack = stack;
+    reportClientDefect("Couldn't load " + engine, error);
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.length, 3);
+  const reportingRequire = require("node:module").createRequire(require.resolve("@xmatrix/protocol/error-reporting"));
+  const { createStackParser } = reportingRequire("@sentry/core");
+  const { nodeStackLineParser } = reportingRequire("@sentry/core/server");
+  const parseWorkerStack = createStackParser(nodeStackLineParser());
+  for (const body of sent) {
+    assert.equal(body.message, "Request Canceled");
+    assert.match(body.stack, /^    at load \(https:\/\/xmatrix\.sh\/app\.js:10:20\)/);
+    assert.doesNotMatch(body.stack, /Error: Request Canceled/);
+    const frames = parseWorkerStack(body.name + ": " + body.message + "\n" + body.stack);
+    assert.equal(frames.at(-1).filename, "https://xmatrix.sh/app.js");
+    assert.equal(frames.at(-1).lineno, 10);
+    assert.equal(frames.at(-1).colno, 20);
+  }
+});
