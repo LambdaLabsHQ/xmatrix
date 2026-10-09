@@ -116,6 +116,17 @@ integration("event routes are the configured connection's Channels subscribed to
     assert.deepEqual(await apps.connectorEventRoutes({ requestId: "routes-1", connectionId: `${space}:webhook`,
       sourceRef: "Webhook:Deploys", limit: 10 }), [{ spaceId: space, channelId: `${space}:a`,
       authorityRootUserId: "owner", features: ["delivery"] }]);
+    const creators = async (sourceRef) => (await apps.connectorEventRoutes({ requestId: crypto.randomUUID(),
+      connectionId: `${space}:webhook`, sourceRef, limit: 10 })).map(route => route.authorityRootUserId);
+    assert.deepEqual(await creators("webhook:other"), ["member"]);
+    // Deliveries are appended as the subscriber: one who may no longer post is skipped, not a failed append.
+    await sql("UPDATE data.space_members SET role='viewer' WHERE space_id=$1 AND user_id='member'", [space]);
+    assert.deepEqual(await creators("webhook:other"), []);
+    await sql(`INSERT INTO data.space_deletions(space_id,space_name,owner_user_id,requested_at,purge_after,state,
+      members_json,automations_json,version,updated_at) VALUES($1,'test','owner',$2,$2::timestamptz+interval '1 day',
+      'scheduled','[]','[]',1,$2)`, [space, at]);
+    try { assert.deepEqual(await creators("webhook:deploys"), [], "a Space being deleted delivers nothing"); }
+    finally { await sql("DELETE FROM data.space_deletions WHERE space_id=$1", [space]); }
     await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
     assert.deepEqual(await apps.connectorEventRoutes({ requestId: "routes-2", connectionId: `${space}:webhook`,
       sourceRef: "webhook:deploys", limit: 10 }), []);
@@ -152,6 +163,11 @@ integration("GitHub routes require their creator's current user append capabilit
     assert.deepEqual(await subscribed("43"), []);
     await sql("DELETE FROM data.space_members WHERE space_id=$1 AND user_id='member'", [space]);
     assert.deepEqual(await creators(), ["owner"], "membership revocation invalidates existing subscriptions");
+    await sql(`INSERT INTO data.space_deletions(space_id,space_name,owner_user_id,requested_at,purge_after,state,
+      members_json,automations_json,version,updated_at) VALUES($1,'test','owner',$2,$2::timestamptz+interval '1 day',
+      'scheduled','[]','[]',1,$2)`, [space, at]);
+    try { assert.deepEqual(await creators(), [], "a Space being deleted delivers nothing"); }
+    finally { await sql("DELETE FROM data.space_deletions WHERE space_id=$1", [space]); }
     assert.deepEqual(await subscribed("42"), [{ sourceKind: "issue", sourceRef, feature: "pulls" }]);
     assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_source_relations WHERE space_id=$1",
       [space])).rows[0].n, 5, "invalid subscriptions remain stored without being dispatched");
