@@ -55,7 +55,7 @@ function messages() {
   }));
 }
 
-async function openChannelWithAgents(page: Page, agentCount: number) {
+async function openChannelWithAgents(page: Page, agentCount: number, additionalChannels: unknown[] = []) {
   await openGeneralChannelWithHistory(
     page,
     {
@@ -65,7 +65,8 @@ async function openChannelWithAgents(page: Page, agentCount: number) {
       updatedAt: E2E_NOW,
       memberPresence: agentPresence(agentCount),
     },
-    messages()
+    messages(),
+    additionalChannels
   );
   await expect(page.locator(".app-message-row").last()).toBeVisible();
   await expect(page.locator(".app-agent-work-scroller")).toBeVisible();
@@ -182,4 +183,37 @@ test("a composer that grows pushes the dock up and the timeline tail with it", a
     [button.left + button.width / 2, button.top + button.height / 2]
   );
   expect(overDock).toBe(false);
+});
+
+/* A completion panel (@, /, [[, #) grows the composer box upward, over the
+   timeline. It is a popup: if its height reached --app-composer-height, the
+   timeline would pad its tail by it and shove every message up while you pick.
+   They share one box, so a # channel reference stands in for all of them. */
+test("a completion panel covers the timeline instead of pushing it up", async ({ page }) => {
+  await openChannelWithAgents(page, 3, [
+    { ...E2E_CHANNEL, id: "5f0c2d4e-8a1b-4c3d-9e2f-1a2b3c4d5e6f", name: "release-train" },
+  ]);
+  const beforeGeometry = await tailGeometry(page);
+  const composer = page.locator(".app-composer");
+  const before = await composer.boundingBox();
+
+  await page.locator(".composer-textarea").fill("ship in #rel");
+  await expect(page.getByTestId("composer-reference-suggestions")
+    .getByRole("option", { name: /release-train/u })).toBeVisible();
+  await expect
+    .poll(async () => (await composer.boundingBox())?.height ?? 0)
+    .toBeGreaterThan((before?.height ?? 0) + 40);
+  await expect(page.locator(".app-composer-box-morphing")).toHaveCount(0);
+
+  const open = await tailGeometry(page);
+  expect(open.lastRowBottom).toBeCloseTo(beforeGeometry.lastRowBottom, 0);
+  expect(open.dockTop).toBeCloseTo(beforeGeometry.dockTop!, 0);
+
+  // Closing the panel re-measures the resting composer, which never changed.
+  await page.locator(".composer-textarea").fill("");
+  await expect(page.locator(".app-mention-suggestions")).toHaveCount(0);
+  await expect(page.locator(".app-composer-box-morphing")).toHaveCount(0);
+  await expect
+    .poll(async () => (await tailGeometry(page)).lastRowBottom)
+    .toBeCloseTo(beforeGeometry.lastRowBottom, 0);
 });
