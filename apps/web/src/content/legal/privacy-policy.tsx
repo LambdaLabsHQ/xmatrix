@@ -264,7 +264,8 @@ export function PrivacyPolicyContent() {
           requests only the access that app needs. Google Docs, Drive and Sheets access is limited to
           files created with or explicitly opened in xMatrix. Read-only Gmail access lets authorized
           people and Agents in that Space search and read the messages they ask for; it never sends,
-          changes, or deletes mail. Search Console, AdSense, and Google Cloud access lets them read the
+          changes, or deletes mail. Gmail signs in through our subprocessor Composio, whose verified
+          Google application holds the Gmail grant and relays each request. Search Console, AdSense, and Google Cloud access lets them read the
           sites, reports, projects, costs, logs, metrics, and alerts they ask about, and make the
           changes they request.
         </p>
@@ -290,8 +291,9 @@ export function PrivacyPolicyContent() {
           comply with law, or when the data is aggregated and anonymized for internal operations.
         </p>
         <p>
-          Google access and refresh tokens are stored encrypted and are used only by the Hub for the
-          connected Space. Disconnecting a Google app in xMatrix deletes its stored tokens; you can
+          Google access and refresh tokens are stored encrypted, by xMatrix or, for Gmail, by Composio,
+          and are used only for the connected Space. Disconnecting a Google app in xMatrix deletes its
+          stored tokens, including the Gmail account held at Composio; you can
           also revoke xMatrix at any time in your{" "}
           <a
             className="font-medium text-foreground underline underline-offset-4"

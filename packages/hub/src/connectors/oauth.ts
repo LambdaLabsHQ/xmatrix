@@ -31,12 +31,12 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
 };
 
 /**
- * Disconnecting a Google connection deletes its stored tokens (Google API Services User Data
- * Policy), so connecting again asks Google for a new grant. Other providers keep theirs.
+ * Disconnecting a Google connection, or a Composio one such as Gmail, deletes its stored grant
+ * (Google API Services User Data Policy), so connecting again signs in anew. Other providers keep theirs.
  */
 export function grantFieldsForgottenOnDisconnect(providerId: string): Record<string, null> | undefined {
-  if (!GOOGLE_GRANTS[providerId]) return undefined;
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
+  if (!GOOGLE_GRANTS[providerId] && manifest?.oauth?.flow !== "composio") return undefined;
   return Object.fromEntries((manifest?.credentials ?? []).filter((field) => field.managed).map((field) => [field.id, null]));
 }
 
