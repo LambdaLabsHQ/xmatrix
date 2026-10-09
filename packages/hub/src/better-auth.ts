@@ -20,6 +20,7 @@ import {
   type AuthRouteFailureStatus,
 } from "./better-auth-error-policy";
 import { EmailDeliveryConfigurationError, escapeHtml, sendEmail } from "./email-delivery";
+import { passwordResetEmail, VERIFIED_PASSWORD_OPTIONS } from "./auth-password-policy";
 import { runBetterAuthHandlerWithObservedHookFailure } from "./better-auth-request-lifecycle";
 import { mintHandleForNewAccount } from "./human-handle-mint";
 import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
@@ -71,6 +72,7 @@ type AuthDatabase = NonNullable<BetterAuthOptions["database"]>;
 export interface AuthBehaviorHooks {
   mintHandleForNewAccount(userId: string): Promise<void>;
   sendLoginCode(email: string, otp: string): Promise<void>;
+  sendPasswordReset(email: string, url: string): Promise<void>;
 }
 
 export class BetterAuthRequestError extends Error {
@@ -174,6 +176,7 @@ function productAuthBehavior(env: Env): AuthBehaviorHooks {
   return {
     mintHandleForNewAccount: (userId) => mintHandleForNewAccount(env, userId),
     sendLoginCode: (email, otp) => sendLoginCodeEmail(env, email, otp),
+    sendPasswordReset: (email, url) => sendEmail(env, email, passwordResetEmail(url)),
   };
 }
 
@@ -215,6 +218,20 @@ function createAuthWithDatabase(
     database,
     trustedOrigins: Array.from(new Set([appOrigin(env), hubAuthBaseUrl(env)])),
     socialProviders,
+    emailAndPassword: {
+      ...VERIFIED_PASSWORD_OPTIONS,
+      async sendResetPassword({ user, url }) {
+        try { await behavior.sendPasswordReset(user.email, url); }
+        catch (error) { observeEmailOtpFailure?.(error); throw error; }
+      },
+    },
+    rateLimit: {
+      enabled: true,
+      customRules: {
+        "/sign-in/email": { window: 60, max: 5 },
+        "/request-password-reset": { window: 60, max: 3 },
+      },
+    },
     account: {
       ...(postgres ? AUTH_POSTGRES_MODELS.account : {}),
       accountLinking: {
