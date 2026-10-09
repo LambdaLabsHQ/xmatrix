@@ -1,6 +1,7 @@
 import { providerJson, providerUrl, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { taskContextExcerpt } from "./task-context";
+import { sentryEventMetadata, sentryExceptionMechanism } from "./sentry-event-metadata";
 import { isSentryInstallationGrant, sentryOrganization, validateSentryInstallationCredentials,
   verifySentryInstallation } from "../sentry-installation";
 
@@ -57,6 +58,8 @@ function exceptionContext(entries: unknown): { lines: string[]; partial: boolean
       exceptions++;
       const headline = [type, message].filter(Boolean).join(": ");
       lines.push(`Exception ${exceptions}${headline ? `: ${headline}` : ""}`);
+      const mechanism = sentryExceptionMechanism(value);
+      if (mechanism) lines.push(mechanism);
       partial ||= frames.length > 20;
       for (const frame of frames.slice(-20)) {
         if (!frame || typeof frame !== "object") continue;
@@ -97,7 +100,7 @@ const READ_ISSUE: ConnectorAction = {
     const context = [`Issue ${issue.shortId || id}: ${issue.title}`, `Status: ${issue.status}`,
       typeof issue.culprit === "string" ? `Culprit: ${issue.culprit}` : "",
       typeof event.platform === "string" ? `Platform: ${event.platform}` : "",
-      `Latest event: ${event.eventID}`, ...stack.lines].filter(Boolean).join("\n\n");
+      `Latest event: ${event.eventID}`, ...sentryEventMetadata(event), ...stack.lines].filter(Boolean).join("\n\n");
     return { summary: taskContextExcerpt("Sentry", context, false, stack.partial) +
       "\nRequest data, local variables, breadcrumbs and user profiles omitted." };
   },

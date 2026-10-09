@@ -243,11 +243,15 @@ See [PagerDuty's official REST schema](https://github.com/PagerDuty/api-schema/b
 
 Sentry `read_issue:WEB-1A` (or a numeric group id) reads one issue and its latest
 event from the configured organization. Short ids require one lookup; numeric
-ids use two GETs. The excerpt includes title/status/culprit/platform and at most
+ids use two GETs. The excerpt includes title/status/culprit/platform, event UTC
+time, release version, component/environment and SDK name/version, plus at most
 three exceptions, each with the last 20 stack frames (module, function, filename
 and line/column only). Exception `type` and `value` are included when they are
 strings (including Sentry's annotated truncated-string form); a missing type or
-value does not fail the read, and frames still copy. Incomplete exception values
+value does not fail the read, and frames still copy. Each exception also includes
+its mechanism type and handled/synthetic flags when present. Only these bounded
+diagnostic fields are copied; arbitrary tags, contexts and mechanism data remain
+private. Incomplete exception values
 or frames are omitted. It is fenced as untrusted and capped at 12,000 characters;
 omissions are explicit. Request bodies/headers, local variables, source context,
 breadcrumbs, account profiles, attachments and linked URLs are not fetched or
