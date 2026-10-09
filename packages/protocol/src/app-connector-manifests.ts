@@ -68,8 +68,11 @@ export interface AppConnectorProviderManifest {
     pkce?: "S256";
     tokenField: string;
     extraAuthorizeParams?: Record<string, string>;
-    /** Vercel external Integration installs use their registered slug and completion redirect. */
-    flow?: "vercel-integration";
+    /**
+     * Vercel external Integration installs use their registered slug and completion redirect;
+     * Composio signs the account in with its own verified app (client id = Composio auth config, secret = Composio API key).
+     */
+    flow?: "vercel-integration" | "composio";
   };
   credentials?: Array<{
     id: string;

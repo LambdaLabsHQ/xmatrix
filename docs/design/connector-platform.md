@@ -186,20 +186,26 @@ Google project and add the `webmasters` scope to its consent screen; it is a
 sensitive scope, so external use beyond Testing users needs Google verification.
 See [Search Console API](https://developers.google.com/webmaster-tools/v1/api_reference_index).
 
-Gmail is a separate `gmail` connection on the same company Google OAuth
-client, requesting only `https://www.googleapis.com/auth/gmail.readonly`; the
-Hub requires exactly that scope on exchange and refresh. Check reads the
-mailbox profile without storing it. Reads: `search:* [Gmail search]` returns
-the ten newest matching messages (id, received time, sender, subject,
-snippet) and `read:<message id>` returns the headers, the text body (plain
-text, else HTML reduced to text, truncated at 8,000 characters) and every
-distinct http(s) link the message contains, fenced as untrusted content. The
-Hub never requests a link found in mail; an Agent that needs to confirm a
-sign-up opens the link itself. There is no send, label or delete action and no
-inbound event. Enable the Gmail API on the company Google project and add the
-`gmail.readonly` scope to its consent screen; it is a restricted scope, so
-external use beyond the app's own users needs Google verification and a
-security assessment.
+Gmail signs in through Composio rather than the company Google client:
+`gmail.readonly` is a restricted Google scope, and Composio's Google app is
+already verified for it. The `gmail` manifest uses `oauth.flow: "composio"`;
+`CONNECTOR_GMAIL_CLIENT_ID` is the Composio auth config (Composio-managed
+Gmail auth limited to `gmail.readonly`) and `CONNECTOR_GMAIL_CLIENT_SECRET`
+the Composio project API key. Connect creates a Composio Connect Link for the
+user id `xmatrix:<space>:<state nonce>` with the Hub callback carrying the
+signed state; completion ignores redirect parameters and stores the single
+ACTIVE account that per-attempt user id holds under that auth config, as the
+only credential (`composioAccountId`). The API key never enters the
+credential store; the Hub adds it when it resolves the connection. Every
+Gmail call goes through Composio's proxy and names the stored account, never
+the project default. Reads: `search:* [Gmail search]` returns the ten newest
+matching messages (id, received time, sender, subject, snippet) and
+`read:<message id>` returns the headers, the text body (plain text, else HTML
+reduced to text, truncated at 8,000 characters) and every distinct http(s)
+link the message contains, fenced as untrusted content. The Hub never
+requests a link found in mail; an Agent that needs to confirm a sign-up opens
+the link itself. There is no send, label or delete action and no inbound
+event. Composio is a subprocessor for connected mailboxes.
 See [Gmail API](https://developers.google.com/workspace/gmail/api/reference/rest).
 
 Google Sheets uses the same per-file Google connection and `drive.file` grant.

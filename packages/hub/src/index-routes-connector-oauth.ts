@@ -43,7 +43,8 @@ type VerifiedOAuthState = NonNullable<Awaited<ReturnType<typeof verifyOAuthState
 async function completeOAuthConnect(env: Env, request: Request, verified: VerifiedOAuthState, state: string,
   input: { code?: string; configurationId?: string; teamId?: string; next?: string }): Promise<string> {
   const providerId = verified.client.manifest.id;
-  if (!input.code) return appsRedirect(env, verified.spaceId, providerId, "failed");
+  /* Composio returns no code: the account is found from the signed state alone. */
+  if (!input.code && verified.client.manifest.oauth.flow !== "composio") return appsRedirect(env, verified.spaceId, providerId, "failed");
   try {
     if (providerId === "discord") {
       const current = await connectorCredentialRepository(env).installationSnapshot({ requestId: crypto.randomUUID(),
@@ -52,7 +53,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
       if (!original || current.connectionVersion !== original.connectionVersion || current.credentialVersion !== original.credentialVersion ||
           current.connectionGeneration !== original.connectionGeneration) throw new Error("Discord connection changed before installation");
     }
-    const grant = await exchangeOAuthGrant(verified.client, input.code, oauthRedirectUri(connectorHubOrigin(env, request)), state);
+    const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state);
     const integration = verified.client.manifest.oauth.flow === "vercel-integration";
     const completion = integration ? vercelCompletionUrl({ configurationId: input.configurationId,
       teamId: input.teamId, next: input.next }, grant.fields) : undefined;

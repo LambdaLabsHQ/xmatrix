@@ -239,6 +239,9 @@ jobs:
           CONNECTOR_CLOUDFLARE_CLIENT_SECRET: ${{ secrets.CONNECTOR_CLOUDFLARE_CLIENT_SECRET }}
           CONNECTOR_GOOGLE_CLIENT_ID: ${{ secrets.CONNECTOR_GOOGLE_CLIENT_ID }}
           CONNECTOR_GOOGLE_CLIENT_SECRET: ${{ secrets.CONNECTOR_GOOGLE_CLIENT_SECRET }}
+          # Gmail signs in through Composio: CLIENT_ID is the Composio auth config id, CLIENT_SECRET the Composio API key.
+          CONNECTOR_GMAIL_CLIENT_ID: ${{ secrets.CONNECTOR_GMAIL_CLIENT_ID }}
+          CONNECTOR_GMAIL_CLIENT_SECRET: ${{ secrets.CONNECTOR_GMAIL_CLIENT_SECRET }}
           CONNECTOR_GOOGLE_PICKER_API_KEY: ${{ secrets.CONNECTOR_GOOGLE_PICKER_API_KEY }}
           CONNECTOR_GOOGLE_PICKER_APP_ID: ${{ secrets.CONNECTOR_GOOGLE_PICKER_APP_ID }}
           CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON: ${{ secrets.CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON }}
@@ -311,7 +314,7 @@ jobs:
           }
           // Each optional registered application rotates as a complete pair.
           // Unregistered providers preserve their existing Worker settings.
-          const providers = ["NOTION", "SLACK", "LINEAR", "SENTRY", "GITLAB", "JIRA", "NETLIFY", "VERCEL", "GOOGLE", "BITBUCKET", "PAGERDUTY", "CLOUDFLARE"];
+          const providers = ["NOTION", "SLACK", "LINEAR", "SENTRY", "GITLAB", "JIRA", "NETLIFY", "VERCEL", "GOOGLE", "BITBUCKET", "PAGERDUTY", "CLOUDFLARE", "GMAIL"];
           const validConnectorSecret = (key) => {
             const value = process.env[key];
             if (!value?.trim()) throw new Error(`Missing production connector secret ${key}`);
