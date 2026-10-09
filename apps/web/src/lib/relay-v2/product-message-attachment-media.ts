@@ -1,3 +1,4 @@
+import { xmatrixRawResponse } from "../query/api-client";
 import type { RelayV2MessageAttachmentDescriptor } from "@xmatrix/protocol/relay-v2/message-attachment";
 
 /** One attachment's bytes, read through the Hub or from this browser's media cache. */
@@ -33,16 +34,11 @@ export class ProductMessageAttachmentMediaClient {
   private readonly cache: ProductMessageAttachmentCache | null;
 
   constructor(
-    // Native `fetch` requires its global receiver. Capturing the unbound
-    // function and calling it as `this.fetchImpl(...)` throws
-    // "Illegal invocation" in Chromium and permanently fail-closes the UI.
-    fetchImpl: typeof fetch = (...args) => globalThis.fetch(...args),
+    // The transport classifies a dropped connection like every other read.
+    fetchImpl: typeof fetch = xmatrixRawResponse,
     cache: ProductMessageAttachmentCache | null | undefined = undefined,
   ) {
-    this.fetchImpl =
-      fetchImpl === globalThis.fetch
-        ? (...args) => globalThis.fetch(...args)
-        : fetchImpl;
+    this.fetchImpl = fetchImpl;
     this.cache = cache === undefined ? browserProductMediaCache() : cache;
   }
 

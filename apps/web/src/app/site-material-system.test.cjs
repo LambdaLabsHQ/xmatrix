@@ -36,13 +36,26 @@ test("hero image can extend under the fixed public navbar", () => {
   assert.match(heroSource, /md:absolute md:inset-0/);
 });
 
-test("public actions use shared liquid glass and the Hero has one CTA", () => {
+test("Get started renders the product live instead of a screenshot", () => {
+  const quickStartSource = source("../components/landing/quick-start.tsx");
+  assert.match(quickStartSource, /<AppWindow \/>/);
+  assert.match(source("../components/landing/app-window-preview.tsx"), /MessageTimeline[\s\S]*ChannelSidebar|ChannelSidebar[\s\S]*MessageTimeline/);
+  assert.doesNotMatch(quickStartSource, /next\/image|\.png|\.webp/);
+  assert.match(source("page.tsx"), /<Hero \/>\s*<QuickStart \/>/);
+});
+
+test("public site labels carry no decorative eyebrow bar", () => {
+  assert.doesNotMatch(siteCss, /\.x-eyebrow::before/);
+});
+
+test("public actions use shared materials and the Hero has one wood CTA", () => {
   assert.match(layoutSource, /LiquidGlassFilter/);
   assert.match(navbarSource, /WoodPanel/);
   assert.match(navbarSource, /LiquidGlassPill/);
   assert.doesNotMatch(navbarSource, /x-glass-button/);
   assert.doesNotMatch(navbarSource, /bg-\[#68462f\]|bg-\[#513522\]/);
-  assert.match(heroSource, /LiquidGlassPill[\s\S]*as=\{Link\}[\s\S]*href="\/login"/);
+  assert.match(heroSource, /WoodPanel[\s\S]*as=\{Link\}[\s\S]*href="\/login"/);
+  assert.match(siteCss, /\.site-page \.app-material-wood-panel\.site-wood-pill \{\s*border-radius: 999px;/);
   assert.doesNotMatch(heroSource, /landing-liquid-button/);
   assert.match(heroSource, /Start Free/);
   assert.doesNotMatch(heroSource, /Set up with your agent|See How It Works|Shared space|clear handoffs/);
@@ -84,8 +97,7 @@ test("navbar keeps the 3D logo off a centered sticky wood bar", () => {
   assert.match(navbarSource, /site-navbar-brand/);
   assert.match(navbarSource, /--navbar-wood-reveal/);
   assert.match(navbarSource, /className="site-navbar fixed top-0/);
-  assert.match(siteCss, /--site-navbar-brand-slot:/);
-  assert.match(siteCss, /\.site-navbar-bar \{[\s\S]*margin-inline:\s*auto/);
+  assert.match(siteCss, /\.site-navbar-layout \{[\s\S]*?justify-content:\s*center/);
   assert.match(siteCss, /\.site-navbar \.site-navbar-inner \{[\s\S]*opacity:\s*var\(--navbar-wood-reveal\)/);
   assert.match(siteCss, /\.site-navbar \{[\s\S]*background:\s*transparent/);
   assert.doesNotMatch(siteCss, /\.site-navbar::before/);
@@ -110,4 +122,16 @@ test("public connector list shows only connected services with checked-in icons"
   assert.doesNotMatch(connectorsSource, /LiquidGlassCard/);
   assert.match(source("page.tsx"), /<HowItWorks \/>\s*<Connectors \/>/);
   assert.match(source("docs/page.tsx"), /<ConnectorList /);
+});
+
+test("homepage display headings use the self-hosted Manrope face", () => {
+  const globalsCss = source("globals.css");
+  assert.match(globalsCss, /font-family: "Manrope Variable";[\s\S]*?url\("\/fonts\/manrope-latin-wght-normal\.woff2"\)/);
+  assert.ok(fs.existsSync(path.join(appRoot, "../../public/fonts/manrope-latin-wght-normal.woff2")));
+  assert.ok(fs.existsSync(path.join(appRoot, "../../public/fonts/manrope-latin-ext-wght-normal.woff2")));
+  assert.match(tokensCss, /--font-site-display-family: "Manrope Variable", var\(--font-sans-family\);/);
+  assert.match(siteCss, /\.site-display \{\s*font-family: var\(--font-site-display-family\);/);
+  assert.match(heroSource, /<h1 className="site-display /);
+  assert.doesNotMatch(heroSource, /tracking-\[-0\.055em\]/);
+  assert.match(heroSource, /preload\("\/fonts\/manrope-latin-wght-normal\.woff2", \{ as: "font"/);
 });

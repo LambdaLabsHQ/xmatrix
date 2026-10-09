@@ -7,6 +7,8 @@
  */
 import { WEB_PROXY_ROUTES, type SerializedSpace } from "@xmatrix/protocol";
 import { canInviteToSpace } from "@/components/dashboard/workspace-shell-recovered";
+import { xmatrixRawResponse, unexpectedResponse, requireField } from "@/lib/query/api-client";
+import { UserFacingProblem } from "../../lib/user-facing-error";
 
 export type SpaceInviteCodeOptions = {
   /** `"unlimited"` is a standing secret; callers must choose it deliberately. */
@@ -27,12 +29,12 @@ export async function createSpaceInviteCodeRequest(input: {
   options: SpaceInviteCodeOptions;
 }): Promise<{ token: string }> {
   const { token, userId, spaces, spaceId, options } = input;
-  if (!token || !userId) throw new Error("Sign in before creating an invite code");
+  if (!token || !userId) throw new UserFacingProblem("Sign in before creating an invite code");
   const space = spaces.find((item) => item.id === spaceId);
   if (!space || !canInviteToSpace(space, userId)) {
-    throw new Error("Only workspace owners and admins can create invite codes");
+    throw new UserFacingProblem("Only workspace owners and admins can create invite codes");
   }
-  const response = await fetch(WEB_PROXY_ROUTES.space_invites(spaceId), {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.space_invites(spaceId), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -43,12 +45,7 @@ export async function createSpaceInviteCodeRequest(input: {
     }),
     cache: "no-store",
   });
-  const payload = (await response.json().catch(() => ({}))) as {
-    invite?: { token?: string };
-    error?: string;
-  };
-  if (!response.ok || !payload.invite?.token) {
-    throw new Error(payload.error || "Failed to create invite code");
-  }
-  return { token: payload.invite.token };
+  const invite = await requireField<{ token?: string }>(response, "invite", "The invite code");
+  if (!invite.token) throw unexpectedResponse("The invite code");
+  return { token: invite.token };
 }

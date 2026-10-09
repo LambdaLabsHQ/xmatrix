@@ -3,15 +3,15 @@ import test from "node:test";
 import { RegistrationAccessError } from "../dist/agent-registration-errors.js";
 import { PostgresRegistrationRebornRepository, autoHandoffSuccessorOrder } from "../dist/registration-reborn.js";
 
-test("successors never share the exhausted pool or read empty, and the fullest goes first", () => {
+test("successors never share the exhausted pool or read empty, and the highest quota pace goes first", () => {
   assert.deepEqual(autoHandoffSuccessorOrder([
-    { harness: "kimi", sharesSourcePool: false, remainingPercent: 20 },
+    { harness: "kimi", sharesSourcePool: false, quotaPace: 0.2 },
     { harness: "grok", sharesSourcePool: false },
-    { harness: "codex", sharesSourcePool: false, remainingPercent: 80 },
-    { harness: "claude-work", sharesSourcePool: true, remainingPercent: 100 },
-    { harness: "zai", sharesSourcePool: false, remainingPercent: 0 },
-    { harness: "aider", sharesSourcePool: false, remainingPercent: 80 },
-  ]), ["grok", "aider", "codex", "kimi"]);
+    { harness: "codex", sharesSourcePool: false, quotaPace: 2.5 },
+    { harness: "claude-work", sharesSourcePool: true, quotaPace: 3 },
+    { harness: "zai", sharesSourcePool: false, quotaPace: 0 },
+    { harness: "aider", sharesSourcePool: false, quotaPace: 2.5 },
+  ]), ["aider", "codex", "grok", "kimi"]);
 });
 
 /** The repository with its database steps replaced by recorded stand-ins. */

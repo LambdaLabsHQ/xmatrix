@@ -1,9 +1,11 @@
 /**
- * Jev's retained decision records, read back as what it was asked and what it
+ * xMatrix routing's retained decision records, read back as what it was asked and what it
  * answered. The Hub stores one record when a reading starts (its whole input)
  * and one when it ends (the answers, or why it failed); both carry the same
  * decision id, so a reading is the pair.
  */
+
+import type { LaunchPlacementCandidate } from "@xmatrix/protocol";
 
 type Json = Record<string, unknown>;
 
@@ -16,7 +18,8 @@ export type JevOption = {
   selected: boolean;
 };
 
-export type JevQuestion = { key: string; label: string; instructions?: string; options: JevOption[] };
+/** `model`: the routing model that answered this step, when the record names it. */
+export type JevQuestion = { key: string; label: string; instructions?: string; model?: string; options: JevOption[] };
 
 export type JevContextMessage = { sentAt?: string; body: string };
 
@@ -77,10 +80,35 @@ function describeOption(handle: string, criteria: unknown): Pick<JevOption, "tit
   return { title: handle, detail: raw };
 }
 
-function questionsOf(input: Json | undefined, answers: Json | undefined): JevQuestion[] {
+/** A fit score: the harness it rates (the JSON its instructions end with)
+ *  and its ordered levels, the one nearest the score being the answer. */
+function scoreQuestion(key: string, question: Json, levels: unknown[], answer: Json | undefined, model: string | undefined): JevQuestion {
+  const instructions = text(question.instructions);
+  let rated: Json | undefined;
+  try { rated = object(JSON.parse(instructions?.slice(instructions.indexOf("{")) ?? "")); } catch { rated = undefined; }
+  const harness = text(rated?.harness);
+  const probabilities = object(answer?.probabilities) ?? {};
+  // The level drawn as the answer is the one Jev weighed most, so its share is the one shown beside it.
+  const weighed = Object.entries(probabilities).filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+    .sort((left, right) => (right[1] as number) - (left[1] as number))[0];
+  const score = weighed ? Number(weighed[0]) : typeof answer?.score === "number" && Number.isFinite(answer.score)
+    ? Math.round(answer.score) : undefined;
+  const options = levels.map((level, index) => {
+    const [title, ...detail] = (text(level) ?? `Level ${index}`).split(": ");
+    const probability = probabilities[String(index)];
+    return { handle: String(index), title: title!, ...(detail.length ? { detail: detail.join(": ") } : {}), selected: score === index,
+      ...(typeof probability === "number" && Number.isFinite(probability) ? { probability } : {}) };
+  });
+  return { key, label: harness ? `Fit · ${harness}` : "Fit", ...(instructions ? { instructions } : {}), ...(model ? { model } : {}), options };
+}
+
+function questionsOf(input: Json | undefined, answers: Json | undefined, model: string | undefined): JevQuestion[] {
   const questions = object(input?.questions) ?? {};
   return Object.entries(questions).flatMap(([key, value]) => {
     const question = object(value);
+    if (question?.type === "score" && Array.isArray(question.criteria)) {
+      return [scoreQuestion(key, question, question.criteria, object(answers?.[key]), model)];
+    }
     const criteria = object(question?.criteria);
     if (!question || !criteria) return [];
     const answer = object(answers?.[key]);
@@ -93,7 +121,7 @@ function questionsOf(input: Json | undefined, answers: Json | undefined): JevQue
     // The answer first, then the rest by how strongly Jev weighed them.
     options.sort((left, right) => Number(right.selected) - Number(left.selected) ||
       (right.probability ?? -1) - (left.probability ?? -1));
-    return [{ key, label: questionLabel(key), instructions: text(question.instructions), options }];
+    return [{ key, label: questionLabel(key), instructions: text(question.instructions), ...(model ? { model } : {}), options }];
   });
 }
 
@@ -127,7 +155,7 @@ export function jevReadings(records: Array<{ refId: string; payload: unknown }>)
       channel: text(channel?.name),
       context: messages,
       contextTruncated: context?.historyTruncated === true,
-      questions: questionsOf(input, object(finished?.answers)),
+      questions: questionsOf(input, object(finished?.answers), text(finished?.model)),
     } satisfies JevReading;
   }).sort((left, right) => (Date.parse(left.at ?? "") || 0) - (Date.parse(right.at ?? "") || 0));
 }
@@ -147,3 +175,23 @@ export function jevDecisions(readings: JevReading[]): JevReading[] {
   }
   return decisions;
 }
+
+/** How routing's joint choice of Agent and machine reads: a fit level, the room left, and why the first one won. */
+const FIT_LEVELS = ["Unsuitable", "Capable", "Strong fit", "Asked for"];
+export const fitLevel = (fit: number) => FIT_LEVELS[Math.max(0, Math.min(3, Math.round(fit * 3)))]!;
+export const roomText = (headroom: number | undefined) => headroom === undefined ? "room unknown"
+  : headroom <= 0 ? "overloaded" : `${Math.round(headroom * 100)}% room`;
+
+/** One sentence on why the first-ranked environment won. */
+export function placementReason(ranking: readonly LaunchPlacementCandidate[], compared: boolean): string {
+  const [chosen] = ranking;
+  if (!chosen) return "";
+  const fitter = ranking.filter(item => item.fit > chosen.fit + 0.05).sort((left, right) => right.fit - left.fit)[0];
+  if (!compared) return `Most room for ${chosen.harness}: ${roomText(chosen.headroom)}`;
+  if (fitter) return `${fitter.harness} fits better, but ${fitter.machineName || "its machine"} is ${
+    fitter.headroom !== undefined && fitter.headroom > 0 ? `at ${roomText(fitter.headroom)}` : roomText(fitter.headroom)}`;
+  const even = ranking.every(item => Math.abs(item.fit - chosen.fit) <= 0.05);
+  return even ? `All equally suited; most room here (${roomText(chosen.headroom)})`
+    : `Best suited, with ${roomText(chosen.headroom)}`;
+}
+

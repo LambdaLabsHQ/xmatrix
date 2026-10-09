@@ -18,11 +18,10 @@ export function defaultInstallPlatform(userAgent: string): InstallPlatform {
   return /windows/iu.test(userAgent) ? "windows" : "unix";
 }
 
-/** Harnesses on the connected machine this Space can take in now. */
-export function harnessesToBringIn(status: SetupIntentStatus | undefined): Array<{ id: string; name: string }> {
-  const registered = new Set(status?.registeredHarnesses ?? []);
+/** Harnesses the connected machine reported as installed. */
+export function installedHarnesses(status: SetupIntentStatus | undefined): Array<{ id: string; name: string }> {
   return (status?.machine?.harnesses ?? [])
-    .filter((harness) => harness.installed && !registered.has(harness.id))
+    .filter((harness) => harness.installed)
     .flatMap((harness) => {
       const preset = AGENT_PRESETS.find((candidate) => candidate.id === harness.id);
       return preset ? [{ id: preset.id, name: preset.displayName }] : [];
@@ -35,8 +34,7 @@ export type ConnectStep =
   | { kind: "connecting"; hostname: string }
   | { kind: "looking"; machineName: string }
   | { kind: "found"; machineName: string; harnesses: Array<{ id: string; name: string }> }
-  | { kind: "none-installed"; machineName: string }
-  | { kind: "done"; machineName: string };
+  | { kind: "none-installed"; machineName: string };
 
 /** A wait says more the longer it lasts, but never before it could have finished. */
 const CHECK_TERMINAL_AFTER_MS = 45_000;
@@ -57,10 +55,8 @@ export function connectStep(status: SetupIntentStatus, waitingForMs: number): Co
   if (status.phase !== "connected" || !status.machine) return { kind: "connecting", hostname };
   const machineName = status.machine.name;
   if (!status.machine.harnesses) return { kind: "looking", machineName };
-  const harnesses = harnessesToBringIn(status);
-  if (harnesses.length > 0) return { kind: "found", machineName, harnesses };
-  if (status.registeredHarnesses.length > 0) return { kind: "done", machineName };
-  return { kind: "none-installed", machineName };
+  const harnesses = installedHarnesses(status);
+  return harnesses.length > 0 ? { kind: "found", machineName, harnesses } : { kind: "none-installed", machineName };
 }
 
 /** "Claude Code", "Claude Code and Codex", "Claude Code, Codex and Gemini". */

@@ -1,4 +1,5 @@
 import { plainDeliveryRecord as plainObject } from "./runtime-transport/delivery-record";
+import { HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG } from "@xmatrix/protocol";
 import { parseChannelTombstoneDelivery } from "./runtime-transport/channel-tombstone-delivery";
 import { DurableObject } from "cloudflare:workers";
 import { relayRuntimeRouteDirectory } from "./relay-authority-locator";
@@ -265,13 +266,13 @@ function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): b
 function relayRuntimeProductFactoryFromEnv(
   env: Env,
   scheduleBackground: (task: Promise<unknown>) => void,
-  runtimeSelf?: { cellName: () => string; fetch(request: Request): Promise<Response> },
+  runtimeSelf: { cellName: () => string; fetch(request: Request): Promise<Response> },
+  storage: DurableObjectStorage,
 ): RelayRuntimeProductPortFactory | undefined {
   // Every product port answers from PostgreSQL.
   if (!env.RELAY_POSTGRES) return undefined;
   try {
-    return createProductionRelayRuntimeProductPortFactory(env, { scheduleBackground,
-      ...(runtimeSelf ? { runtimeSelf } : {}) });
+    return createProductionRelayRuntimeProductPortFactory(env, { scheduleBackground, runtimeSelf, storage });
   } catch {
     return undefined;
   }
@@ -291,6 +292,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    // The web heartbeat is answered without waking this object (and without
+    // ending its hibernation), so the web can find a dead socket in seconds.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG));
     const productFactory = relayRuntimeProductFactoryFromEnv(
       env,
       (task) => ctx.waitUntil(task),
@@ -298,6 +302,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
         cellName: () => this.ownerCell ?? RELAY_RUNTIME_SELECTED_CELL,
         fetch: request => this.fetch(request),
       },
+      ctx.storage,
     );
     this.productAdapter = productFactory
       ? createRelayRuntimeProductAdapter(ctx, productFactory, {

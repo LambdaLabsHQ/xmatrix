@@ -4,6 +4,7 @@ import WebKit
 
 final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCenterDelegate {
     weak var webView: WKWebView?
+    private let subscriptions = AppleSubscriptions()
     var onMobileTabStateChanged: ((MobileTabState) -> Void)?
     var onOpenURL: ((URL) -> Void)?
     private static let notificationURLKey = "xmatrix.url"
@@ -48,6 +49,11 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         client: "ios",
         platform: "ios",
         getContext: () => invoke("getContext"),
+        appleProducts: (productIds) => invoke("appleProducts", { productIds }),
+        applePurchase: (payload) => invoke("applePurchase", payload),
+        applePurchases: (payload) => invoke("applePurchases", payload),
+        appleFinish: (transactionId) => invoke("appleFinish", { transactionId }),
+        appleManage: () => invoke("appleManage"),
         setBadge: (count) => invoke("setBadge", { count }),
         setTitle: (title) => invoke("setTitle", { title }),
         getNotificationSettings: () => invoke("getNotificationSettings"),
@@ -78,7 +84,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
     """
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard AppConfiguration.isTrustedAppPage(message.webView?.url ?? webView?.url) else {
+        guard message.frameInfo.isMainFrame,
+              AppConfiguration.isTrustedAppPage(message.frameInfo.request.url),
+              AppConfiguration.isTrustedAppPage(message.webView?.url ?? webView?.url) else {
             return
         }
 
@@ -113,6 +121,22 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
                 "isPackaged": true,
                 "startUrl": AppConfiguration.startURL.absoluteString
             ]
+
+        case "appleProducts":
+            return try await subscriptions.products(payload?["productIds"] as? [String] ?? [])
+        case "applePurchase":
+            return try await subscriptions.purchase(productId: payload?["productId"] as? String ?? "",
+                appAccountToken: payload?["appAccountToken"] as? String ?? "",
+                productIds: payload?["productIds"] as? [String] ?? [])
+        case "applePurchases":
+            return try await subscriptions.purchases(productIds: payload?["productIds"] as? [String] ?? [],
+                restore: payload?["restore"] as? Bool ?? false)
+        case "appleFinish":
+            try await subscriptions.finish(transactionId: payload?["transactionId"] as? String ?? "")
+            return NSNull()
+        case "appleManage":
+            try await subscriptions.manage()
+            return NSNull()
 
         case "setBadge":
             let count = max(0, intValue(payload?["count"]))
@@ -174,7 +198,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
     func updateMobileTabState(from payload: [String: Any]?) {
         let visible = boolValue(payload?["visible"])
         let activeView = payload?["activeView"] as? String ?? "pages"
-        let state = MobileTabState(visible: visible, activeView: activeView)
+        let statusLive = boolValue(payload?["statusLive"])
+        let state = MobileTabState(visible: visible, activeView: activeView, statusLive: statusLive)
         onMobileTabStateChanged?(state)
     }
 

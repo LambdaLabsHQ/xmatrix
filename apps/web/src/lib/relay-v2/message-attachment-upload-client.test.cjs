@@ -48,6 +48,24 @@ class FakeXMLHttpRequest {
   }
 }
 
+/** The real transport, run against this file's fetch stub. */
+const transport = (() => {
+  // Its own imports (auth-events) are TypeScript too.
+  require("../../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
+  const transportJs = ts.transpileModule(fs.readFileSync(`${__dirname}/../query/api-client.ts`, "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const transportModule = { exports: {} };
+  vm.runInNewContext(transportJs, {
+    module: transportModule,
+    exports: transportModule.exports,
+    Error, DOMException, JSON, Math, Number, Date, Set, Object, Headers, Request,
+    fetch: (...args) => fetchImpl(...args),
+    require: (specifier) => require(specifier.startsWith(".") ? `../query/${specifier}` : specifier),
+  });
+  return transportModule.exports;
+})();
+
 const moduleValue = { exports: {} };
 vm.runInNewContext(js, {
   module: moduleValue,
@@ -94,6 +112,7 @@ vm.runInNewContext(js, {
         RELAY_V2_BLOB_UPLOAD_PREFIX: "/api/relay-v2/private-r2/uploads",
       };
     }
+    if (specifier === "../query/api-client") return transport;
     return require(specifier);
   },
 });
@@ -330,4 +349,32 @@ test("a pre-send cancellation disarms the stall watchdog", async () => {
   // that no longer has an owner.
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(requests[0].aborted, false, "no watchdog may survive the cancellation");
+});
+
+test("a brief storage outage while committing is replayed under the same request id", async () => {
+  const bodies = [];
+  fetchImpl = async (_url, init) => {
+    bodies.push(init.body);
+    return bodies.length === 1
+      ? Response.json({ error: "Attachments are briefly unavailable; try again", code: "authority_unavailable", retryable: true },
+        { status: 503, headers: { "retry-after": "0.01" } })
+      : Response.json({ ok: true });
+  };
+  await commitMessageAttachmentRefs({
+    token: "human-token", messageId: "message-1", visibilityScopeId: "channel:closed-1", attachments: [attachment],
+  });
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0], bodies[1], "a replay must carry the same requestId");
+});
+
+test("a refused commit is not replayed", async () => {
+  let calls = 0;
+  fetchImpl = async () => {
+    calls += 1;
+    return Response.json({ error: "not allowed", code: "not_authorized", retryable: false }, { status: 403 });
+  };
+  await assert.rejects(commitMessageAttachmentRefs({
+    token: "human-token", messageId: "message-1", visibilityScopeId: "channel:closed-1", attachments: [attachment],
+  }), { status: 403, code: "not_authorized" });
+  assert.equal(calls, 1);
 });

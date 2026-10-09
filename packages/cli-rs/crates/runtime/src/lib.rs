@@ -3,6 +3,8 @@
 // Domain-oriented include sections (same module scope via include!).
 // Self-contained helpers use mod; remaining include! peels still share crate-root scope.
 include!("runtime_process_utf8.rs");
+mod runtime_utf8_shell;
+pub use runtime_utf8_shell::maybe_run_utf8_shell;
 include!("runtime_harness_cli.rs");
 include!("runtime_agent_cli_admission.rs");
 mod automation;
@@ -62,10 +64,10 @@ use runtime_channel_activity::{
 };
 use runtime_channel_history_bootstrap::with_channel_history_bootstrap;
 mod runtime_channel_history_cache;
-mod runtime_daemon_message_send;
-mod runtime_daemon_quota_probe;
 #[cfg(unix)]
 mod runtime_daemon_fd_limit;
+mod runtime_daemon_message_send;
+mod runtime_daemon_quota_probe;
 #[cfg(unix)]
 mod runtime_daemon_socket;
 mod runtime_execution_outbox;
@@ -100,6 +102,7 @@ mod runtime_claude_stream_session;
 mod runtime_claude_turn;
 mod runtime_codex_turn_errors;
 mod runtime_connector_mcp;
+mod runtime_harness_questions;
 mod runtime_headless_runs;
 mod runtime_presence_updates;
 mod runtime_trusted_role_prompt;

@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::connection_error::durable_object_runtime_reset;
+use crate::backoff::Backoff;
+use crate::connection_error::frame_hub_restarting;
 use crate::error::{CliError, Result};
 use crate::http::{self, CLIENT_COMPATIBILITY_PROTOCOL_VERSION, ClientComponent};
 use crate::protocol::{
@@ -417,6 +418,13 @@ pub enum MachineDaemonCommand {
         /// ignored rather than rejected.
         #[serde(default)]
         role_initial_prompt: Option<String>,
+        /// The registration's working mode, `autonomous` or `cautious`.
+        /// Absent means autonomous, which is also what an older Hub gets.
+        #[serde(default)]
+        working_mode: Option<String>,
+        /// The Space's rules page, which the Agent reads on demand.
+        #[serde(default)]
+        space_rules_page_id: Option<String>,
         #[serde(default)]
         resume: Option<bool>,
         #[serde(default)]
@@ -546,6 +554,27 @@ pub enum MachineDaemonCommand {
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+    /// The owner lists or reclaims the git worktrees on this Machine. Paths
+    /// name trees from a listing; the daemon reclaims only trees it finds
+    /// registered with git itself, behind its own gates.
+    MachineWorktreeAction {
+        request_id: String,
+        action: WorktreeAction,
+        /// Only on `reclaim`.
+        #[serde(default)]
+        paths: Option<Vec<String>>,
+        #[serde(default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeAction {
+    List,
+    Reclaim,
+    AutoReclaimOn,
+    AutoReclaimOff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -727,6 +756,13 @@ pub enum MachineDaemonReport {
     MachineHarnessActionResult {
         request_id: String,
         result: HarnessActionResult,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
+    /// The protocol's `WorktreeActionResult`, built by the repo-pool inventory.
+    MachineWorktreeActionResult {
+        request_id: String,
+        result: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -951,7 +987,8 @@ impl MachineDaemonCommand {
             | Self::MachineRecoverReply { relay_lease, .. }
             | Self::MachineWorktreeCleanup { relay_lease, .. }
             | Self::MachineQuotaProbe { relay_lease, .. }
-            | Self::MachineHarnessAction { relay_lease, .. } => relay_lease.as_ref(),
+            | Self::MachineHarnessAction { relay_lease, .. }
+            | Self::MachineWorktreeAction { relay_lease, .. } => relay_lease.as_ref(),
         }
     }
 }
@@ -1700,15 +1737,20 @@ async fn handle_machine_daemon_connection_failure(
     events: &mpsc::UnboundedSender<MachineDaemonConnectionEvent>,
     reason: String,
     fatal: bool,
-    backoff: &mut Duration,
+    backoff: &mut Backoff,
 ) -> bool {
+    // Before the first registration completes, a transient failure is waited
+    // out here instead of failing it; `register`'s ready timeout bounds that.
+    if !fatal && ready.is_some() {
+        crate::websocket::retry_initial_transient(&reason, backoff).await;
+        return false;
+    }
     crate::websocket::handle_connection_failure(
         ready,
         events,
         reason,
         fatal,
         backoff,
-        RECONNECT_MAX,
         machine_daemon_reconnect_events(),
     )
     .await
@@ -1728,7 +1770,7 @@ async fn run_machine_daemon_connection(
 ) {
     let mut ready_tx = Some(ready_tx);
     let mut connected_once = false;
-    let mut backoff = RECONNECT_BASE;
+    let mut backoff = Backoff::new(RECONNECT_BASE, RECONNECT_MAX);
 
     loop {
         let current_enrollment_token = match machine_daemon_enrollment_token(&enrollment_token) {
@@ -1758,6 +1800,10 @@ async fn run_machine_daemon_connection(
                 let upgrade_required = matches!(&error, CliError::UpgradeRequired(_));
                 let retired = machine_retired(&error);
                 let reason = format!("Machine Daemon credential enrollment failed: {error}");
+                if enrollment_retry_waits_out(&error, ready_tx.is_some()) {
+                    crate::websocket::retry_initial_transient(&reason, &mut backoff).await;
+                    continue;
+                }
                 if crate::websocket::fail_initial_ready(&mut ready_tx, &reason) {
                     return;
                 }
@@ -1777,7 +1823,7 @@ async fn run_machine_daemon_connection(
                     return;
                 }
                 let _ = event_tx.send(MachineDaemonConnectionEvent::Disconnected { reason });
-                crate::websocket::wait_before_reconnect(&mut backoff, RECONNECT_MAX).await;
+                backoff.wait().await;
                 continue;
             }
         };
@@ -1803,7 +1849,7 @@ async fn run_machine_daemon_connection(
                 component: ClientComponent::Daemon,
                 timeout: CONNECT_TIMEOUT,
                 timeout_reason: "Machine Daemon connection timed out",
-                reconnect_max: RECONNECT_MAX,
+                retry_initial_transient: true,
             },
             &mut ready_tx,
             &event_tx,
@@ -1871,8 +1917,12 @@ async fn run_machine_daemon_connection(
         {
             Ok(text) => text,
             Err(reason) => {
-                if crate::websocket::fail_handshake_or_wait(&mut ready_tx, &reason, backoff).await {
-                    return;
+                // The socket closed or went quiet before the Hub answered: an
+                // outage, retried even before the first registration.
+                if ready_tx.is_some() {
+                    crate::websocket::retry_initial_transient(&reason, &mut backoff).await;
+                } else {
+                    backoff.wait().await;
                 }
                 continue;
             }
@@ -1880,14 +1930,21 @@ async fn run_machine_daemon_connection(
 
         let (daemon, epoch, receipt) = match parse_machine_daemon_connected(&first_text) {
             Ok(handshake) => handshake,
-            Err(reason) => {
-                if durable_object_runtime_reset(&reason) {
-                    let _ = event_tx.send(MachineDaemonConnectionEvent::Disconnected {
-                        reason: format!("Machine Daemon Hub runtime reset: {reason}"),
-                    });
-                    crate::websocket::wait_before_reconnect(&mut backoff, RECONNECT_MAX).await;
-                    continue;
+            Err(refusal) if refusal.retryable => {
+                let reason = format!(
+                    "Machine Daemon Hub briefly unavailable: {}",
+                    refusal.message
+                );
+                if ready_tx.is_some() {
+                    crate::websocket::retry_initial_transient(&reason, &mut backoff).await;
+                } else {
+                    let _ = event_tx.send(MachineDaemonConnectionEvent::Disconnected { reason });
+                    backoff.wait().await;
                 }
+                continue;
+            }
+            Err(refusal) => {
+                let reason = refusal.message;
                 if crate::websocket::fail_initial_ready(&mut ready_tx, &reason) {
                     return;
                 }
@@ -1895,7 +1952,7 @@ async fn run_machine_daemon_connection(
                     message: reason,
                     correlation: None,
                 });
-                tokio::time::sleep(backoff).await;
+                backoff.wait().await;
                 continue;
             }
         };
@@ -1908,7 +1965,9 @@ async fn run_machine_daemon_connection(
         if let Some(receipt) = receipt {
             let _ = event_tx.send(MachineDaemonConnectionEvent::ActivationReceipt(receipt));
         }
-        backoff = RECONNECT_BASE;
+        // The backoff starts over only once this session proves healthy; a Hub
+        // that admits the handshake and drops the socket keeps it growing.
+        let connected_at = Instant::now();
         if let Some(sender) = ready_tx.take() {
             let _ = sender.send(Ok(daemon.clone()));
         } else if connected_once {
@@ -2205,10 +2264,10 @@ async fn run_machine_daemon_connection(
                                 if let Some(event) = parse_machine_daemon_server_event(text.as_ref())
                             {
                                 if let MachineDaemonConnectionEvent::Error { message, .. } = &event
-                                    && durable_object_runtime_reset(message)
+                                    && frame_hub_restarting(text.as_ref())
                                 {
                                     break format!(
-                                        "Machine Daemon Hub runtime reset: {message}"
+                                        "Machine Daemon Hub restarting: {message}"
                                     );
                                 }
                                 let shutdown = matches!(event, MachineDaemonConnectionEvent::ShutdownRequested { .. });
@@ -2263,7 +2322,32 @@ async fn run_machine_daemon_connection(
         let _ = event_tx.send(MachineDaemonConnectionEvent::Disconnected {
             reason: disconnect_reason,
         });
-        crate::websocket::wait_before_reconnect(&mut backoff, RECONNECT_MAX).await;
+        backoff.reset_if_healthy(connected_at.elapsed());
+        backoff.wait().await;
+    }
+}
+
+/// Whether a failed credential enrollment is waited out and retried rather
+/// than failing the first registration: only an outage, never the Hub's
+/// refusal. Once registered, every non-terminal failure reconnects anyway.
+fn enrollment_retry_waits_out(error: &CliError, initial: bool) -> bool {
+    initial && error.is_transient()
+}
+
+/// A first frame that was not `machine_daemon_connected`.
+#[derive(Debug)]
+struct HandshakeRefusal {
+    message: String,
+    /// The Hub's error frame said a later attempt may succeed.
+    retryable: bool,
+}
+
+impl From<String> for HandshakeRefusal {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            retryable: false,
+        }
     }
 }
 
@@ -2309,7 +2393,9 @@ fn machine_daemon_hub_url(connection_url: &str) -> Result<String> {
 const MACHINE_RETIRED_MARKER: &str = "This Machine was removed from its owner's xMatrix account.";
 
 fn machine_retired(error: &CliError) -> bool {
-    matches!(error, CliError::Http(message) if message.contains(MACHINE_RETIRED_MARKER))
+    error
+        .http_message()
+        .is_some_and(|message| message.contains(MACHINE_RETIRED_MARKER))
 }
 
 async fn mint_machine_daemon_credential(
@@ -2399,8 +2485,13 @@ fn parse_machine_daemon_connected(
         u64,
         Option<MachineDaemonActivationReceipt>,
     ),
-    String,
+    HandshakeRefusal,
 > {
+    #[derive(Deserialize)]
+    struct FailureVerdict {
+        #[serde(default)]
+        retryable: bool,
+    }
     #[derive(Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
     enum Handshake {
@@ -2413,6 +2504,8 @@ fn parse_machine_daemon_connected(
         },
         Error {
             message: String,
+            #[serde(default)]
+            failure: Option<FailureVerdict>,
         },
         ShutdownRequested {
             reason: Option<String>,
@@ -2426,13 +2519,17 @@ fn parse_machine_daemon_connected(
             activation,
         }) if connection_epoch > 0 => Ok((daemon, connection_epoch, activation)),
         Ok(Handshake::MachineDaemonConnected { .. }) => {
-            Err("Invalid Machine Daemon connection epoch".to_string())
+            Err("Invalid Machine Daemon connection epoch".to_string().into())
         }
-        Ok(Handshake::Error { message }) => Err(message),
+        Ok(Handshake::Error { message, failure }) => Err(HandshakeRefusal {
+            message,
+            retryable: failure.is_some_and(|failure| failure.retryable),
+        }),
         Ok(Handshake::ShutdownRequested { reason }) => Err(reason
             .map(|value| format!("Machine Daemon shutdown requested: {value}"))
-            .unwrap_or_else(|| "Machine Daemon shutdown requested".to_string())),
-        Err(error) => Err(format!("Invalid Machine Daemon handshake: {error}")),
+            .unwrap_or_else(|| "Machine Daemon shutdown requested".to_string())
+            .into()),
+        Err(error) => Err(format!("Invalid Machine Daemon handshake: {error}").into()),
     }
 }
 
@@ -2687,6 +2784,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
         | "machine_request_resolve"
         | "machine_quota_probe"
         | "machine_harness_action"
+        | "machine_worktree_action"
         | "machine_recover_reply"
         | "machine_worktree_cleanup" => Some(
             match serde_json::from_value::<MachineDaemonCommand>(value) {
@@ -3103,14 +3201,62 @@ mod tests {
 
     #[test]
     fn machine_runtime_reset_error_requires_a_fresh_reverse_delivery_socket() {
-        assert!(durable_object_runtime_reset(
-            "Durable Object reset because its code was updated."
+        assert!(frame_hub_restarting(
+            r#"{"type":"error","message":"Request failed","failure":{"code":"service_restarting","diagnosticId":"diag_1","retryable":true,"stage":"runtime.session"}}"#
         ));
-        assert!(durable_object_runtime_reset(
-            " durable object reset because its code was updated. "
+        assert!(!frame_hub_restarting(
+            r#"{"type":"error","message":"Machine Daemon report payload type mismatch","failure":{"code":"runtime.session_failed","diagnosticId":"diag_1","retryable":false,"stage":"runtime.session"}}"#
         ));
-        assert!(!durable_object_runtime_reset(
-            "Machine Daemon report payload type mismatch"
+    }
+
+    #[test]
+    fn a_transient_handshake_failure_is_retried_and_a_refusal_is_not() {
+        let restarting = parse_machine_daemon_connected(
+            r#"{"type":"error","message":"Registration failed","failure":{"code":"service_restarting","retryable":true}}"#,
+        )
+        .expect_err("not connected");
+        assert!(restarting.retryable);
+        assert_eq!(restarting.message, "Registration failed");
+        for refused in [
+            r#"{"type":"error","message":"Machine Daemon credential does not match its enrolled identity","failure":{"code":"machine_credential_mismatch","retryable":false}}"#,
+            r#"{"type":"error","message":"Durable Object reset because its code was updated."}"#,
+            r#"{"type":"shutdown_requested","reason":"retired"}"#,
+            "not json",
+        ] {
+            assert!(
+                !parse_machine_daemon_connected(refused)
+                    .expect_err("not connected")
+                    .retryable,
+                "{refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_an_outage_during_first_enrollment_is_waited_out() {
+        let outage = crate::error::CliError::HttpStatus(Box::new(crate::error::HttpStatusError {
+            status: 503,
+            code: Some("service_restarting".into()),
+            retryable: true,
+            message: "xMatrix is restarting; try again".into(),
+        }));
+        assert!(super::enrollment_retry_waits_out(&outage, true));
+        // Once registered, the reconnect loop handles it with its own events.
+        assert!(!super::enrollment_retry_waits_out(&outage, false));
+        let refused = crate::error::CliError::HttpStatus(Box::new(crate::error::HttpStatusError {
+            status: 403,
+            code: None,
+            retryable: false,
+            message: "forbidden".into(),
+        }));
+        assert!(!super::enrollment_retry_waits_out(&refused, true));
+        assert!(!super::enrollment_retry_waits_out(
+            &crate::error::CliError::UpgradeRequired("update".into()),
+            true
+        ));
+        assert!(super::enrollment_retry_waits_out(
+            &crate::error::CliError::RelayTransient("offline".into()),
+            true
         ));
     }
 
@@ -3513,6 +3659,8 @@ mod tests {
               "runtime":"codex",
               "agentName":"codex",
               "roleInitialPrompt":"Follow the registration instructions.",
+              "workingMode":"cautious",
+              "spaceRulesPageId":"page-rules",
               "roleReminder":"Stay within the reviewer role.",
               "roleSkills":[{
                 "id":"skill:review",
@@ -3534,12 +3682,16 @@ mod tests {
         let MachineDaemonCommand::MachineSpawnAgent {
             ref request_id,
             ref role_initial_prompt,
+            ref working_mode,
+            ref space_rules_page_id,
             ..
         } = command
         else {
             panic!("expected Machine Daemon spawn command");
         };
         assert_eq!(request_id, "spawn-3");
+        assert_eq!(working_mode.as_deref(), Some("cautious"));
+        assert_eq!(space_rules_page_id.as_deref(), Some("page-rules"));
         assert_eq!(
             role_initial_prompt.as_deref(),
             Some("Follow the registration instructions.")
@@ -3957,17 +4109,6 @@ mod tests {
             other,
             Some(MachineDaemonConnectionEvent::Error { message, correlation: Some(correlation) })
                 if message == "nope" && correlation == "requestId=report-7, diagnosticId=diag_2"
-        ));
-
-        // The runtime-reset check compares the bare message, so correlation
-        // must never be folded into it.
-        let reset = parse_machine_daemon_server_event(
-            r#"{"type":"error","message":"Durable Object reset because its code was updated."}"#,
-        );
-        assert!(matches!(
-            reset,
-            Some(MachineDaemonConnectionEvent::Error { message, correlation: None })
-                if crate::connection_error::durable_object_runtime_reset(&message)
         ));
     }
 }

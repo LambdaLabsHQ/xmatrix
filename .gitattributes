@@ -2,3 +2,4 @@
 *.sh text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+packages/cli-rs/crates/core/prompts/*.md text eol=lf

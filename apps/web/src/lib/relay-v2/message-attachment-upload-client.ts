@@ -6,6 +6,7 @@ import {
   RELAY_V2_BLOB_UPLOAD_PREFIX,
 } from "@xmatrix/protocol/relay-v2/message-attachment";
 import { lowercaseHex } from "@xmatrix/protocol";
+import { XMatrixApiError, shouldRetryXMatrixQuery, xmatrixRawResponse, xmatrixRetryDelayMs } from "../query/api-client";
 const HASH_CHUNK_BYTES = 4 * 1024 * 1024;
 const UPLOAD_INTENT_TTL_MS = 60 * 60 * 1_000;
 
@@ -53,12 +54,24 @@ function randomId(): string {
   return crypto.randomUUID();
 }
 
-function errorFromPayload(payload: unknown, fallback: string): Error {
-  const message = payload && typeof payload === "object" &&
-    typeof (payload as { error?: unknown }).error === "string"
-    ? (payload as { error: string }).error
-    : fallback;
-  return new Error(message);
+/** A refused hop, classified like every other xMatrix failure (docs/architecture/client-resilience.md). */
+function errorFromPayload(payload: unknown, fallback: string, status: number): XMatrixApiError {
+  const body = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  return new XMatrixApiError({
+    message: typeof body.error === "string" ? body.error : fallback,
+    status,
+    code: typeof body.code === "string" ? body.code : undefined,
+    retryable: typeof body.retryable === "boolean" ? body.retryable : status === 502 || status === 503 || status === 504,
+  });
+}
+
+/** The transfer got no answer, or stopped advancing: the network, and transient. */
+function transferLost(message: string, code: string): XMatrixApiError {
+  return new XMatrixApiError({ message, status: 0, code, retryable: true });
+}
+
+function uploadCancelled(): DOMException {
+  return new DOMException("Upload cancelled", "AbortError");
 }
 
 /**
@@ -76,7 +89,7 @@ function deadlineSignal(deadlineMs: number): { signal: AbortSignal; done: () => 
 
 function deadlineError(error: unknown, what: string): Error {
   if (error instanceof DOMException && error.name === "TimeoutError") {
-    return new Error(`${what} timed out`);
+    return new DOMException(`${what} timed out`, "TimeoutError");
   }
   return error instanceof Error ? error : new Error(`${what} failed`);
 }
@@ -97,8 +110,30 @@ async function jsonResponse(
     if (signal?.aborted) throw signal.reason ?? error;
     payload = {};
   }
-  if (!response.ok) throw errorFromPayload(payload, fallback);
+  if (!response.ok) throw errorFromPayload(payload, fallback, response.status);
   return payload;
+}
+
+/**
+ * Replays a control hop through a transient failure — a Hub restart, a brief
+ * database outage — under the shared retry policy. Safe because every attempt
+ * carries the same `requestId`, which the Hub treats as one command; bounded
+ * by the hop's own deadline as well as the policy.
+ */
+async function replayTransient<T>(attempt: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  for (let failures = 0; ; failures += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (signal.aborted || !shouldRetryXMatrixQuery(failures, error)) throw error;
+      await new Promise<void>((resolve, reject) => {
+        const wake = () => { clearTimeout(timer); reject(signal.reason); };
+        const timer = setTimeout(() => { signal.removeEventListener("abort", wake); resolve(); },
+          xmatrixRetryDelayMs(failures, error));
+        signal.addEventListener("abort", wake, { once: true });
+      });
+    }
+  }
 }
 
 export async function sha256Blob(
@@ -146,28 +181,28 @@ export async function prepareMessageAttachmentUpload(input: {
     // The deadline has to stay armed across reading the body, not just until
     // headers arrive: a response whose JSON never finishes streaming is the
     // same permanent hang as one that never answers at all.
-    const intentResponse = await fetch(webProxyPath(RELAY_V2_BLOB_UPLOAD_INTENT_PATH), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${input.token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        requestId: randomId(),
-        intentId,
-        visibilityScopeId: input.visibilityScopeId,
-        contentHash,
-        encodedSize: input.file.size,
-        expiresAt: new Date(Date.now() + UPLOAD_INTENT_TTL_MS).toISOString(),
-      }),
-      cache: "no-store",
-      signal: intentDeadline.signal,
+    const intentBody = JSON.stringify({
+      requestId: randomId(),
+      intentId,
+      visibilityScopeId: input.visibilityScopeId,
+      contentHash,
+      encodedSize: input.file.size,
+      expiresAt: new Date(Date.now() + UPLOAD_INTENT_TTL_MS).toISOString(),
     });
-    const admitted = await jsonResponse(
-      intentResponse,
+    const admitted = await replayTransient(async () => jsonResponse(
+      await xmatrixRawResponse(webProxyPath(RELAY_V2_BLOB_UPLOAD_INTENT_PATH), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${input.token}`,
+          "content-type": "application/json",
+        },
+        body: intentBody,
+        cache: "no-store",
+        signal: intentDeadline.signal,
+      }),
       "Failed to create attachment upload",
       intentDeadline.signal,
-    );
+    ), intentDeadline.signal);
     const upload = admitted.upload;
     uploadPath = upload && typeof upload === "object" &&
       typeof (upload as { finalPath?: unknown }).finalPath === "string"
@@ -233,24 +268,24 @@ export async function prepareMessageAttachmentUpload(input: {
         return;
       }
       if (request.status < 200 || request.status >= 300) {
-        reject(errorFromPayload(payload, "Failed to upload attachment"));
+        reject(errorFromPayload(payload, "Failed to upload attachment", request.status));
         return;
       }
       resolve();
     };
     request.onerror = () => {
       clearStall();
-      reject(new Error("Failed to upload attachment"));
+      reject(transferLost("Failed to upload attachment", "network_error"));
     };
     request.onabort = () => {
       clearStall();
-      reject(new Error(stalled ? "Attachment upload stalled" : "Upload cancelled"));
+      reject(stalled ? transferLost("Attachment upload stalled", "upload_stalled") : uploadCancelled());
     };
     // Registered only now: before `open` and the abort handler there is nothing
     // an abort could act on, and the send below would have gone out anyway.
     if (input.onRequest?.(request) === false) {
       clearStall();
-      reject(new Error("Upload cancelled"));
+      reject(uploadCancelled());
       return;
     }
     // Armed before `send` as well: a connection that never emits a single
@@ -294,24 +329,28 @@ export async function commitMessageAttachmentRefs(input: {
     const deadline = deadlineSignal(input.controlDeadlineMs ?? UPLOAD_CONTROL_DEADLINE_MS);
     try {
       // Armed across the body read too — see the intent hop above.
-      const response = await fetch(webProxyPath(RELAY_V2_BLOB_REF_PATH), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${input.token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          requestId: randomId(),
-          intentId: attachment.intentId,
-          refId: attachment.attachmentId,
-          ownerKind: "message_attachment",
-          ownerId: input.messageId,
-          visibilityScopeId: input.visibilityScopeId,
-        }),
-        cache: "no-store",
-        signal: deadline.signal,
+      const body = JSON.stringify({
+        requestId: randomId(),
+        intentId: attachment.intentId,
+        refId: attachment.attachmentId,
+        ownerKind: "message_attachment",
+        ownerId: input.messageId,
+        visibilityScopeId: input.visibilityScopeId,
       });
-      await jsonResponse(response, "Failed to commit attachment", deadline.signal);
+      await replayTransient(async () => jsonResponse(
+        await xmatrixRawResponse(webProxyPath(RELAY_V2_BLOB_REF_PATH), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${input.token}`,
+            "content-type": "application/json",
+          },
+          body,
+          cache: "no-store",
+          signal: deadline.signal,
+        }),
+        "Failed to commit attachment",
+        deadline.signal,
+      ), deadline.signal);
     } catch (error) {
       throw deadlineError(error, "Committing the attachment");
     } finally {

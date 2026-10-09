@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { projectRegistrationQuota, withRegistrationQuota } from "../src/registration-quota-presentation.ts";
+import { withRegistrationQuota } from "@xmatrix/protocol";
+import { projectRegistrationQuota } from "../src/registration-quota-presentation.ts";
 import { overlayChannelsWithLiveAgentPresence } from "../src/runtime-transport/agent-presence-snapshot.ts";
 import { createProductionRelayRuntimeProductPortFactory } from "../src/runtime-transport/production-product-port-factory.ts";
 import { AgentInstanceRuntimeTransport } from "../src/runtime-transport/agent-instance-port.ts";
@@ -38,12 +39,34 @@ test("different Channel identities read one tuple quota; stale samples cannot re
 });
 
 class Socket { readyState = 1; send() {} close() {} }
-function fixture() {
+
+/** A Durable Object's storage, which outlives the cell's hibernation. */
+function cellStorage() {
+  const values = new Map();
+  return {
+    values,
+    get: async key => structuredClone(values.get(key)),
+    put: async (key, value) => { values.set(key, structuredClone(value)); },
+    delete: async keys => { for (const key of [keys].flat()) values.delete(key); },
+    list: async ({ prefix }) => new Map([...values].filter(([key]) => key.startsWith(prefix))),
+  };
+}
+
+function fixture({ storage } = {}) {
   const channels = { a: channel("a"), b: channel("b", { ...key, machineId: "another-machine" }), sleeping: channel("sleeping") };
   for (const c of Object.values(channels)) c.memberPresence[c.id].usage = quota(12);
+  const readings = { owner: [{ registration: key, usage: quota(12) },
+    { registration: { ...key, machineId: "another-machine" }, usage: quota(12) }] };
+  const channelReads = [], quotaReads = [];
+  const pool = { usage: quota(12) };
   const factory = createProductionRelayRuntimeProductPortFactory({}, {
-    readChannel: async (channelId) => ({ channel: channels[channelId],
-      openChannelHumanMemberIdsBySpace: { space: ["user:owner", "user:viewer"] } }),
+    readChannel: async (channelId) => {
+      channelReads.push(channelId);
+      return { channel: channels[channelId], openChannelHumanMemberIdsBySpace: { space: ["user:owner", "user:viewer"] } };
+    },
+    readOwnerQuota: async ownerUserId => readings[ownerUserId] ?? [],
+    readQuota: async registration => { quotaReads.push(registration); return pool.usage; },
+    ...(storage ? { storage } : {}),
     analytics: { writeDataPoint() {} }, readHistory: async () => { throw Error("unexpected history"); } });
   const transport = new AgentInstanceRuntimeTransport(factory.agentInstance());
   const sessions = ["a", "b"].map(id => ({ principal: { ownerUserId: "owner", agentId: id,
@@ -54,7 +77,7 @@ function fixture() {
     presentation: { usage: quota(99) }, clientVersion: "0.16.705", clientProtocolVersion: 2 }));
   for (const session of sessions) assert.equal(transport.rehydrate(new Socket(), { version: 1, domain: "agent_instance",
     expiresAt: new Date(Date.now() + 60_000).toISOString(), session }), true);
-  return { factory, sessions, channels };
+  return { factory, sessions, channels, readings, channelReads, quotaReads, pool };
 }
 
 /** Records both immediate frames and a presence digest's card and Channel as one list. */
@@ -68,24 +91,55 @@ function recordDelivered(frames) {
   };
 }
 
-test("an Instance update publishes authoritative quota to sibling Channel identities", async () => {
-  const { factory, sessions } = fixture(), frames = [];
+const quotaFrames = frames => frames.filter(({ frame }) => frame.type === "registration_quota");
+
+/** The fixture, with one presence change of its first Instance recorded per call. */
+function reporting(options) {
+  const context = fixture(options), frames = [];
+  const report = (reason = "update") => context.factory.onAgentPresenceChange({ reason, session: context.sessions[0],
+    liveHumanSessions: [], ...recordDelivered(frames) });
+  return { ...context, frames, report };
+}
+
+test("an Instance update sends its registration's reading to the owner once, reading no other Channel", async () => {
+  const { factory, sessions, channelReads } = fixture(), frames = [];
   await factory.onAgentPresenceChange({ reason: "update", session: sessions[0], liveHumanSessions: [],
     ...recordDelivered(frames) });
-  const sibling = frames.find(({ userId, frame }) => userId === "viewer" && frame.channel?.id === "b");
-  assert.equal(sibling.frame.channel.memberPresence.b.usage.quotaUsages[0].percent, 12);
+  assert.deepEqual(channelReads, ["a"]);
+  assert.deepEqual(quotaFrames(frames).map(({ userId, frame }) => [userId, frame.registration]), [["owner", key]]);
+  assert.equal(quotaFrames(frames)[0].frame.usage.quotaUsages[0].percent, 12);
+  assert.equal(quotaFrames(frames)[0].frame.usage.totalTokens, undefined, "no Instance counters in a pool reading");
   assert.equal(frames.find(({ frame }) => frame.type === "enhanced_presence").frame.agent.usage.quotaUsages[0].percent, 12);
+  frames.length = 0;
+  await factory.onAgentPresenceChange({ reason: "update", session: sessions[0], liveHumanSessions: [],
+    ...recordDelivered(frames) });
+  assert.deepEqual(quotaFrames(frames), [], "an unchanged reading is not sent again");
 });
 
-test("daemon probe completion updates a focused Channel with a sleeping Instance", async () => {
-  const { factory } = fixture(), frames = [];
-  await factory.onRegistrationQuotaChange({ ownerUserId: "owner", machineId: "machine",
-    liveHumanSessions: [{ userId: "viewer", lastSeenAt: now, focusedChannelId: "sleeping" }],
-    deliver: (userId, frame) => frames.push({ userId, frame }) });
-  assert.equal(frames.find(({ frame }) => frame.channel?.id === "sleeping").frame.channel.memberPresence.sleeping.usage.quotaUsages[0].percent, 12);
+test("a daemon probe sends the owner each changed registration reading from one read", async () => {
+  const { factory, readings, channelReads } = fixture(), frames = [];
+  const deliver = (userId, frame) => frames.push({ userId, frame });
+  await factory.onRegistrationQuotaChange({ ownerUserId: "owner", deliver });
+  assert.deepEqual(quotaFrames(frames).map(({ userId, frame }) => [userId, frame.registration.machineId]),
+    [["owner", "machine"], ["owner", "another-machine"]]);
+  assert.deepEqual(channelReads, []);
   frames.length = 0;
-  await factory.onRegistrationQuotaChange({ ownerUserId: "other-owner", machineId: "machine",
-    liveHumanSessions: [], deliver: (userId, frame) => frames.push({ userId, frame }) });
+  readings.owner[1] = { ...readings.owner[1], usage: quota(40) };
+  await factory.onRegistrationQuotaChange({ ownerUserId: "owner", deliver });
+  assert.deepEqual(quotaFrames(frames).map(({ frame }) => [frame.registration.machineId, frame.usage.quotaUsages[0].percent]),
+    [["another-machine", 40]]);
+  frames.length = 0;
+  await factory.onRegistrationQuotaChange({ ownerUserId: "other-owner", deliver });
+  assert.deepEqual(frames, []);
+});
+
+test("a failed probe read sends nothing and does not throw", async () => {
+  const frames = [];
+  const factory = createProductionRelayRuntimeProductPortFactory({}, {
+    readChannel: async () => undefined,
+    readOwnerQuota: async () => { throw new Error("PostgreSQL unavailable"); },
+    analytics: { writeDataPoint() {} }, readHistory: async () => { throw Error("unexpected history"); } });
+  await factory.onRegistrationQuotaChange({ ownerUserId: "owner", deliver: (userId, frame) => frames.push({ userId, frame }) });
   assert.deepEqual(frames, []);
 });
 
@@ -118,21 +172,78 @@ test("usage-limit holds reach catalog and member presentation without a fabricat
   assert.equal(live.memberPresence.held.usage.quotaUsages[0].label, undefined);
 });
 
-test("local accounting changes do not fan out an unchanged pool observation", async () => {
-  const { factory, sessions, channels } = fixture(), frames = [];
-  const publish = () => factory.onAgentPresenceChange({ reason: "update", session: sessions[0], liveHumanSessions: [],
-    ...recordDelivered(frames) });
+test("local accounting changes do not send an unchanged pool observation", async () => {
+  const { sessions, quotaReads, pool, frames, report: publish } = reporting();
   await publish();
   frames.length = 0;
-  channels.a.memberPresence.a.usage = { ...quota(12), totalTokens: 2, contextUsedTokens: 1 };
   sessions[0].presentation.usage = { ...quota(99), totalTokens: 2, contextUsedTokens: 1 };
   await publish();
-  assert.equal(frames.some(({ frame }) => frame.channel?.id === "b"), false);
+  assert.deepEqual(quotaFrames(frames), []);
+  assert.deepEqual(quotaReads, [], "a reading the Instance already reported is not read again");
   assert.equal(frames.find(({ frame }) => frame.type === "enhanced_presence").frame.agent.usage.totalTokens, 2);
   frames.length = 0;
-  channels.a.memberPresence.a.usage.quotaObservedAt = new Date(Date.parse(now) + 1).toISOString();
+  // The Instance reports a newer provider reading: its pool is read once, and the new version reaches the owner.
+  const later = new Date(Date.parse(now) + 1).toISOString();
+  pool.usage = { ...quota(30), quotaObservedAt: later };
+  sessions[0].presentation.usage = { ...quota(30), quotaObservedAt: later };
   await publish();
-  assert.equal(frames.some(({ frame }) => frame.channel?.id === "b"), true, "a new quota version still refreshes sibling Channels");
+  await publish();
+  assert.deepEqual(quotaReads, [key]);
+  assert.equal(quotaFrames(frames).length, 1, "a new quota version still reaches the owner's other Agents");
+  assert.equal(frames.filter(({ frame }) => frame.type === "enhanced_presence")
+    .every(({ frame }) => frame.agent.usage.quotaUsages[0].percent === 30), true);
+});
+
+test("a status report after the Channel was read reads nothing and sends only the card", async () => {
+  const { channelReads, frames, report } = reporting();
+  await report("connect");
+  assert.deepEqual(channelReads, ["a"]);
+  frames.length = 0;
+  await report("update");
+  assert.deepEqual(channelReads, ["a"], "a status report reads no Channel");
+  assert.deepEqual(frames.map(({ userId, frame }) => [userId, frame.type]),
+    [["owner", "enhanced_presence"], ["viewer", "enhanced_presence"]]);
+});
+
+test("a status report after the cell hibernated still reads nothing", async () => {
+  const storage = cellStorage();
+  await reporting({ storage }).report("connect");
+  // A woken cell starts with empty memory; what it kept is in its storage.
+  const { channelReads, quotaReads, frames, report } = reporting({ storage });
+  await report("update");
+  assert.deepEqual(channelReads, []);
+  assert.deepEqual(quotaReads, []);
+  assert.deepEqual(frames.map(({ userId, frame }) => [userId, frame.type]),
+    [["owner", "enhanced_presence"], ["viewer", "enhanced_presence"]]);
+  assert.equal(frames[0].frame.agent.usage.quotaUsages[0].percent, 12, "the kept quota reading is shown");
+});
+
+test("a catalog change forgets the Space's kept audiences; leaving forgets the Instance's", async () => {
+  const storage = cellStorage();
+  const { factory, report } = reporting({ storage });
+  await report("connect");
+  assert.equal([...storage.values.keys()].filter(key => key.startsWith("presence-audience:")).length, 1);
+  factory.onChannelCatalogChanged("space");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal([...storage.values.keys()].filter(key => key.startsWith("presence-audience:")).length, 0);
+  await report("connect");
+  await report("disconnect");
+  assert.equal([...storage.values.keys()].filter(key => key.startsWith("presence-audience:")).length, 0);
+});
+
+test("a catalog change in the Space, or leaving, reads the Channel again", async () => {
+  const { factory, channelReads, frames, report } = reporting();
+  await report("connect");
+  factory.onChannelCatalogChanged("another-space");
+  await report("update");
+  assert.deepEqual(channelReads, ["a"], "another Space's catalog says nothing about this Channel");
+  factory.onChannelCatalogChanged("space");
+  await report("update");
+  assert.deepEqual(channelReads, ["a", "a"]);
+  assert.ok(frames.some(({ userId, frame }) => userId === "viewer" && frame.type === "channel_updated"));
+  await report("disconnect");
+  await report("update");
+  assert.deepEqual(channelReads, ["a", "a", "a", "a"], "after leaving, a report reads the Channel again");
 });
 
 test("a status report goes through presence delivery, with no presence_updated event", async () => {

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowUp, BookOpen, MessagesSquare, Paperclip, Search } from "lucide-react";
+import { ArrowUp, BookOpen, MessagesSquare, Paperclip } from "lucide-react";
+import { SearchGlyph } from "@/components/ui/search-glyph";
 
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { BranchBadge } from "@/components/dashboard/status-tag";
@@ -181,7 +182,7 @@ export default function GlassLab() {
               style={woodStyle}
             >
               <IdentityAvatar kind="human" label="E2" initials="E2" size="md" shape="circle" />
-              <RailButton icon={Search} label="Search" />
+              <RailButton icon={SearchGlyph} label="Search" />
               <RailButton icon={BookOpen} label="Pages" />
               <RailButton active icon={MessagesSquare} label="Conversations" />
             </aside>

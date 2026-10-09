@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { hmacHex, sha256Hex } from "@xmatrix/protocol";
 import { validateSentryEventIdentity } from "@xmatrix/db";
-import { hmacMatches } from "../src/connectors/hmac.ts";
+import { deliveryProven } from "../src/connectors/delivery-proof.ts";
 import { connectorEvent, parseJsonObject, record } from "../src/connectors/event-format.ts";
 import { sentryInstallationClient, validateSentryInstallationCredentials } from "../src/connectors/sentry-installation.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
@@ -24,7 +24,7 @@ function receiver() {
   const accepted = [], wakes = [];
   let committed = false, failure;
   const imports = { "@xmatrix/protocol": { sha256Hex }, "../index-shared": { readBoundedRequestBody: async request => request.arrayBuffer() },
-    "./sentry-installation": { sentryInstallationClient }, "./hmac": { hmacMatches }, "./event-format": { parseJsonObject },
+    "./sentry-installation": { sentryInstallationClient }, "./delivery-proof": { deliveryProven }, "./event-format": { parseJsonObject },
     "./sentry-event-identity": { sentryEventIdentity }, "./sentry-event-drain": { drainSentryEvents: async () => {
       assert.equal(committed, true, "wake follows receipt commit"); wakes.push(true);
     } }, "./credentials": { connectorSentryEventRepository: () => ({ accept: async input => {
@@ -74,10 +74,10 @@ function drainer() {
   const fields = { oauthToken: "private-access", oauthRefreshToken: "private-refresh", oauthExpiresAt: String(Date.now()+28800000),
     oauthScopes: "event:read event:write org:read project:read", oauthClientId: job.appClientId, oauthAppUuid: job.appUuid,
     oauthAppSlug: "xmatrix", oauthInstallationId: installationId, oauthOrganization: "company", oauthOrganizationId: "9" };
-  const calls = { appended: [], automation: [], finish: [], provider: [], routes: [] };
+  const calls = { appended: [], automation: [], finish: [], provider: [], routes: [], refreshes: 0 };
   const state = { current: true, version: 2, resolvedVersion: 2, failAppend: false, failAutomation: false, revokeAtProvider: false,
     rotateAfterAppend: false, wrongProject: false };
-  const receipts = { claim: async () => [job], current: async () => state.current ? { credentialVersion: state.version } : null,
+  const receipts = { claim: async () => state.jobs ?? [job], current: async () => state.current ? { credentialVersion: state.version } : null,
     finish: async input => calls.finish.push(input) };
   const apps = { connectorEventRoutes: async input => { calls.routes.push(input); return input.sourceRef.endsWith("*") ? [] :
     [{ channelId: "channel", authorityRootUserId: "owner", features: ["issue.created", "alert"] }]; } };
@@ -85,7 +85,7 @@ function drainer() {
     "../automation-triggers": {}, "../product-message-append": {}, "./credentials": {}, "@xmatrix/protocol": {},
     "./oauth": {}, "./event-format": {} })[name]);
   const dependencies = { receipts: () => receipts, credentials: () => ({ resolve: async () => ({ connectionId: job.connectionId,
-    status: "configured", version: state.resolvedVersion, values: fields }) }), refresh: async () => fields,
+    status: "configured", version: state.resolvedVersion, values: fields }) }), refresh: async () => { calls.refreshes++; return fields; },
     verify: async () => {}, request: async url => { calls.provider.push(url); if (state.revokeAtProvider) state.current = false;
       return { id: state.wrongProject ? "8" : "7", slug: "test-project", organization: { id: "9", slug: "company" } }; },
     apps: () => apps, append: async (_env, channelId, command) => { calls.appended.push({ channelId, command });
@@ -108,6 +108,13 @@ test("Sentry drain proves current organization/project and routes only its curre
   assert.equal(run.calls.routes[0].oauthBinding.credentialVersion, 2);
   assert.match(run.calls.appended[0].command.body, /Issue 42 created/);
   assert.doesNotMatch(JSON.stringify(run.calls.appended), /private-|PRIVATE_/);
+});
+test("parallel jobs of one Space share a single refresh, which replaces the installation's only token", async () => {
+  const run = drainer();
+  run.state.jobs = ["a", "b", "c"].map(digit => ({ ...run.job, deliveryDigest: digit.repeat(64) }));
+  await run.run();
+  assert.equal(run.calls.refreshes, 1);
+  assert.deepEqual(run.calls.finish.map(finish => finish.outcome), ["done", "done", "done"]);
 });
 test("Sentry rejected project or concurrent uninstall causes no effects; changed token retries", async () => {
   for (const flag of ["wrongProject", "revokeAtProvider", "disconnected", "rotated"]) {

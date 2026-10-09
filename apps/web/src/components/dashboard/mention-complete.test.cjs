@@ -33,26 +33,6 @@ function openChannel(overrides = {}) {
   };
 }
 
-/** A team Space whose xMatrix management assistant is configured. */
-function managedSpace(managementAgent = {}) {
-  return {
-    id: "space-1",
-    name: "Team",
-    ownerId: "user-1",
-    members: [],
-    managementAgent: {
-      enabled: true,
-      identityName: "xMatrix",
-      agentId: "agent:management",
-      agentName: "management-profile",
-      defaultChannelVisibility: "management-visible",
-      ...managementAgent,
-    },
-    createdAt: "2026-05-07T00:00:00Z",
-    updatedAt: "2026-05-07T00:00:00Z",
-  };
-}
-
 /** A Channel where Agent `name` has one live instance, `name:1`, carrying `instance`. */
 function agentPresenceChannel(name, status, instances) {
   return openChannel({ memberPresence: { [`agent:${name}`]: { kind: "agent", status, label: name, instances } } });
@@ -234,7 +214,6 @@ test("channelMentionCandidates does not rank Agent identities by aggregate prese
       id: "space-1",
       members: [{ userId: "1", name: "Yiming Hu" }],
     })
-      .filter((candidate) => candidate.id !== "xmatrix-management-assistant")
       .map((candidate) => `${candidate.name}:${candidate.action || "mention"}`),
     [
       "Yiming Hu:mention",
@@ -242,108 +221,6 @@ test("channelMentionCandidates does not rank Agent identities by aggregate prese
       "codex-online:mention",
     ]
   );
-});
-
-test("channelMentionCandidates exposes xMatrix when a space management assistant is configured", () => {
-  const channel = openChannel();
-  const space = managedSpace({ agentId: "agent:codex", agentName: "codex-workstation" });
-
-  const candidates = channelMentionCandidates(
-    members(channel, [
-      {
-        id: "agent:codex",
-        name: "codex-workstation",
-        kind: "agent",
-        status: "offline",
-        email: "agent@example.com",
-      },
-    ]),
-    null,
-    [],
-    space
-  );
-
-  assert.equal(candidates[0].name, "xMatrix");
-  assert.equal(candidates[0].mention, "xMatrix");
-  assert.equal(completeMention("@xm", 3, candidates[0]).value, "@xMatrix ");
-
-  const beforeSetup = channelMentionCandidates(members(channel, []), null, [], {
-    ...space,
-    managementAgent: undefined,
-  });
-  assert.equal(beforeSetup[0].mention, "xMatrix");
-  assert.equal(beforeSetup[0].status, "offline");
-  assert.match(beforeSetup[0].description, /setup required/);
-});
-
-test("channelMentionCandidates keeps xMatrix first ahead of local online agents", () => {
-  const channel = openChannel({
-    memberPresence: {
-      "agent:local": {
-        kind: "agent",
-        status: "online",
-        label: "local-codex",
-        instances: [
-          {
-            id: "instance-local",
-            label: "local-codex",
-            status: "online",
-            hostId: "host-local",
-          },
-        ],
-      },
-    },
-  });
-  const space = managedSpace();
-
-  const candidates = channelMentionCandidates(
-    members(channel, [
-      {
-        id: "agent:local",
-        name: "local-codex",
-        kind: "agent",
-        status: "online",
-        metadata: { hostId: "host-local" },
-      },
-      {
-        id: "agent:management",
-        name: "management-profile",
-        kind: "agent",
-        status: "offline",
-      },
-    ]),
-    { hostId: "host-local" },
-    [],
-    space
-  );
-
-  assert.equal(candidates[0].mention, "xMatrix");
-  assert.equal(candidates[1].mention, "local-codex");
-});
-
-test("channelMentionCandidates keeps xMatrix available in excluded channels", () => {
-  const channel = openChannel({
-    memberPresence: {},
-    metadata: { managementVisibility: "excluded" },
-  });
-  const space = managedSpace({ defaultChannelVisibility: "excluded" });
-
-  const candidates = channelMentionCandidates(
-    members(channel, [
-      {
-        id: "agent:management",
-        name: "management-profile",
-        kind: "agent",
-        status: "offline",
-      },
-    ]),
-    null,
-    [],
-    space
-  );
-
-  assert.equal(candidates[0].name, "xMatrix");
-  assert.equal(candidates[0].mention, "xMatrix");
 });
 
 test("segmented completion does not offer unparseable member names", () => {
@@ -378,7 +255,7 @@ test("channelMentionCandidates ranks members on this machine first and labels th
   const candidates = channelMentionCandidates(channel, { machineId: "local-machine" }, [], {
     id: "space-1",
     members: [{ userId: "1", name: "Yiming Hu", email: "yiming@example.com" }],
-  }).filter((candidate) => candidate.id !== "xmatrix-management-assistant");
+  });
 
   // Agent identities are status-neutral; the member on this machine leads.
   assert.deepEqual(
@@ -1935,8 +1812,8 @@ test("composer targets and operations come from interaction descriptors the regi
     { id: "create_issue", label: "Create issue" }, { id: "Not An Operation", label: "Broken" }] }];
   const space = { id: "space-1", members: [] };
   const { registry, candidates } = channelInteractionTargets(channel, null, apps, space);
-  assert.deepEqual(candidates.map((candidate) => candidate.id), ["xmatrix-management-assistant", "app:github"]);
-  assert.equal(registry.resolve("xMatrix", "launch").status, "resolved");
+  assert.deepEqual(candidates.map((candidate) => candidate.id), ["app:github"]);
+  assert.equal(registry.resolve("xMatrix", "launch").status, "unknown");
   assert.equal(registry.resolve("github", "create_issue").operation.presentationRef, "connector.v1");
   // An action the descriptor cannot declare is not offered as an operation.
   const actions = resolveMentionCompletion("@github:", "@github:".length, channel, null, apps, space);

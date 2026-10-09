@@ -5,6 +5,7 @@ import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 type Binding = { chatSpace: string; sourceRef: string };
 type Challenge = { chatSpace: string; nonce: string; expiresAt: string; botUsername?: string };
@@ -46,7 +47,7 @@ export function GoogleChatRoomLink({ spaceId, token, beforeLink, afterRefresh, p
     const current = () => generation === pending.current.generation;
     setBusy(true); setError(null);
     try { await work(current, AbortSignal.any([request.signal, AbortSignal.timeout(20_000)])); }
-    catch (caught) { if (current()) setError((caught as Error).message); }
+    catch (caught) { if (current()) setError(userErrorMessage(caught, `Couldn't link the ${label} room`)); }
     finally { if (current()) setBusy(false); }
   }
 
@@ -62,7 +63,7 @@ export function GoogleChatRoomLink({ spaceId, token, beforeLink, afterRefresh, p
           (isTelegram && (typeof result.botUsername !== "string" || !/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(result.botUsername))) ||
           !Number.isFinite(Date.parse(result.expiresAt)) || Date.parse(result.expiresAt) <= Date.now() ||
           Date.parse(result.expiresAt) > Date.now() + 185_000) {
-        throw new Error(`${label} confirmation expired. Start again.`);
+        throw new UserFacingProblem(`${label} confirmation expired. Start again.`, true);
       }
       setChallenge(isTeams ? { ...result, chatSpace: "pending" } : result);
     });
@@ -74,7 +75,7 @@ export function GoogleChatRoomLink({ spaceId, token, beforeLink, afterRefresh, p
       if (!current()) return;
       const next = multiple ? result.bindings : result.binding ? [result.binding] : [];
       if (!Array.isArray(next) || next.length > (multiple ? 20 : 1) || next.some(binding => !binding || typeof binding.chatSpace !== "string" || typeof binding.sourceRef !== "string")) {
-        throw new Error(`${label} connection could not be confirmed.`);
+        throw new UserFacingProblem(`${label} connection could not be confirmed.`, true);
       }
       setBindings(next);
       if (isTeams ? !result.pending && next.length > 0 : next.some(binding => binding.chatSpace === challenge?.chatSpace)) setChallenge(null);

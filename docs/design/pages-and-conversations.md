@@ -79,7 +79,10 @@ The production x-matrix Space on 2026-09-26:
    has to close, file, archive or distill them. An idle conversation sinks.
 4. **Structure is deliberate.** Humans and Agents add, move and remove pages
    on purpose, within the owner's page access. A conversation never creates
-   structure as a side effect.
+   structure as a side effect. The Web page header offers Delete to editors,
+   with a confirmation explaining permanent history deletion and automation
+   shutdown. Child pages must be moved or deleted first; linked conversations
+   remain. The server rechecks access and children when deleting.
 5. **Every piece of knowledge has exactly one home.** Knowledge that changes
    with code lives in that code's repository. Knowledge about the organization
    around the code lives in pages (§3.5).
@@ -165,8 +168,10 @@ stored. It combines:
 The test: **if the text should change in the same pull request as the code,
 it belongs in the repository.**
 
-- **Link repository docs, don't copy or mount them.** A page that needs a
-  repository document links to it on GitHub. Repositories do not share one
+- **Link or embed repository files, never copy or mount them.** A page that
+  needs a repository document links to it on GitHub, or embeds that one file
+  so it reads in place (pages-live-document.md §6.5); the embed is read
+  through from GitHub when the page is opened. Repositories do not share one
   layout for their docs, so xMatrix assumes none, and the page store never
   holds a copy. (Mounting a repository's `docs/` directory into the page tree
   was built and removed: it assumed that layout and only re-showed what

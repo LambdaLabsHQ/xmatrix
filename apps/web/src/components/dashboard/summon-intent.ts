@@ -1,4 +1,4 @@
-import { parseAutoLaunchMentions, type AutoLaunchMention,
+import { parseAutoLaunchMentions, selectionLaunchConditions, type DraftSummonIntent,
   type SummonIntentCategory } from "@xmatrix/protocol";
 
 /** Jev's reading of a launch mention, as the refusal code recorded it. */
@@ -29,24 +29,40 @@ export function readingIntentUntil(sentAt: string | undefined, now: number): num
   return until > now && sent <= now + 5_000 ? until : undefined;
 }
 
-export type DraftSummon = { mention: AutoLaunchMention; forced: boolean };
-
-/** Launch mentions the Hub will act on, in the order written. Code spans,
- *  quotes and links are literal and never reach Jev. */
-export function draftSummons(draft: string): DraftSummon[] {
-  return parseAutoLaunchMentions(draft).filter(mention => !mention.error)
-    .map(mention => ({ mention, forced: mention.tags.launch === "force" }));
+/** The summons in an outgoing body Jev reads while the author types: launch
+ *  mentions and picked Agents, each through its last condition (the text the
+ *  Hub keys a launch by). `launch:force` already answers, and code spans,
+ *  quotes and links are literal, so none of those is read. */
+export function draftSummonRanges(body: string,
+  selections: ReadonlyArray<{ start: number; end: number; text: string }> = []): Array<{ start: number; end: number }> {
+  const ranges = new Map<number, { start: number; end: number }>();
+  for (const mention of parseAutoLaunchMentions(body)) {
+    if (!mention.error && mention.tags.launch !== "force") ranges.set(mention.start, { start: mention.start, end: mention.end });
+  }
+  for (const selection of selections) {
+    const options = selectionLaunchConditions(body, selection);
+    if (!options.error && options.tags.launch !== "force") ranges.set(selection.start, { start: selection.start, end: options.end });
+  }
+  return [...ranges.values()].sort((left, right) => left.start - right.start);
 }
 
-/** Add or remove `launch:force` on one summon; the rest of the draft is untouched. */
-export function toggleLaunchForce(draft: string, mention: AutoLaunchMention): { draft: string; caret: number } {
-  const condition = mention.conditions.find(item => item.field === "launch");
-  if (condition) {
-    // Remove the condition with the break that introduced it.
-    let from = condition.start;
-    while (from > mention.start && /[\t\p{Zs}]/u.test(draft[from - 1]!)) from--;
-    return { draft: draft.slice(0, from) + draft.slice(condition.end), caret: from };
-  }
-  const insert = " launch:force";
-  return { draft: draft.slice(0, mention.end) + insert + draft.slice(mention.end), caret: mention.end + insert.length };
+/** The author's override is written into just this exact summon, so the
+ * sent message carries the same instruction on every client and launch path. */
+export function forceDraftSummon(body: string, reading: DraftSummonIntent): { body: string; caret: number } | undefined {
+  if (reading.start < 0 || reading.end > body.length || body.slice(reading.start, reading.end) !== reading.mention) return undefined;
+  // A condition ends at whitespace: punctuation immediately after the
+  // address must not become part of the new `force` value.
+  const insert = " launch:force" + (body[reading.end] && !/\s/u.test(body[reading.end]!) ? " " : "");
+  return { body: body.slice(0, reading.end) + insert + body.slice(reading.end), caret: reading.end + insert.length };
+}
+
+/** Picked page/channel labels expand to id tokens when sent. Project preview
+ * ranges back to the visible draft in summon order, preserving repeated names. */
+export function draftSummonReadingsForDisplay(readings: ReadonlyArray<DraftSummonIntent>, body: string,
+  selections: ReadonlyArray<{ start: number; end: number; text: string }> = []): DraftSummonIntent[] {
+  const ranges = draftSummonRanges(body, selections);
+  return readings.flatMap((reading, index) => {
+    const range = ranges[index];
+    return range && body.slice(range.start, range.end) === reading.mention ? [{ ...reading, ...range }] : [];
+  });
 }

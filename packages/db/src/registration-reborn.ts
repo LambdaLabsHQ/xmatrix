@@ -1,14 +1,15 @@
 import { storedObject as object } from "./stored-values.js";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
-import { canonicalRegistrationHarness, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
-  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RegistrationResourceLimits,
+import { canonicalRegistrationHarness, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
+  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RegistrationResourceLimits,
   type SpaceAgentRegistrationKey, hasControlCharacter,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
 import { RegistrationAccessError, registrationRouteRefusal } from "./agent-registration-errors.js";
 import { registrationInstructionsSpawnFields } from "./registration-instructions-spawn.js";
+import { spaceRulesSpawnFields } from "./space-rules-spawn.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
@@ -83,14 +84,15 @@ const USAGE_LIMIT_SUCCESSOR_CANDIDATES = 32;
 const USAGE_LIMIT_SUCCESSOR_ATTEMPTS = 4;
 
 /** Successor harnesses in the order `handoff:@auto` tries them: never
- * one drawing on the exhausted pool or one whose own pool reads empty; most
- * headroom first, an unmeasured pool counting as full the way launch routing
- * assumes it, then by name so the choice is stable. */
+ * one drawing on the exhausted pool or one whose own pool reads empty; the
+ * highest quota pace first (`routingQuotaPace`: quota left close to its reset
+ * is the cheapest to spend), an unmeasured pool counting as on pace the way
+ * launch routing assumes it, then by name so the choice is stable. */
 export function autoHandoffSuccessorOrder(candidates: ReadonlyArray<{ harness: string; sharesSourcePool: boolean;
-  remainingPercent?: number }>): string[] {
+  quotaPace?: number }>): string[] {
   return candidates
-    .filter(candidate => !candidate.sharesSourcePool && (candidate.remainingPercent ?? 1) > 0)
-    .sort((a, b) => (b.remainingPercent ?? 100) - (a.remainingPercent ?? 100) || a.harness.localeCompare(b.harness))
+    .filter(candidate => !candidate.sharesSourcePool && (candidate.quotaPace ?? 1) > 0)
+    .sort((a, b) => (b.quotaPace ?? 1) - (a.quotaPace ?? 1) || a.harness.localeCompare(b.harness))
     .map(candidate => candidate.harness);
 }
 
@@ -364,13 +366,14 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         metadata: runMetadata, ...(workspace ? { workspace } : {}), registration,
         ...(invocationSource ? { invocationSource } : {}) };
       const instance = { instanceId, runId, channelId: input.channelId, status: "offline", channelInstanceId, spaceId };
+      const spaceRules = await spaceRulesSpawnFields(tx, spaceId);
       const spawn = { type: "machine_spawn_agent", requestId: `handoff:1-spawn:${suffix}`, spaceId, channelId: input.channelId,
         runId, instanceId, executionKey, identityId: instanceId, resumeSessionKey,
         handoffTransfer: true, handoffSourceInstanceId: input.sourceInstanceId,
         ...(source.resumeSessionKey ? { handoffSourceResumeSessionKey: source.resumeSessionKey } : {}),
         ...registrationLaunchSpawnFields(physical.environment.launch, key.harness),
         agentName: displayName, prompt: input.prompt, sourceMessageId: input.sourceMessageId, context: {},
-        ...registrationInstructionsSpawnFields(configuration),
+        ...registrationInstructionsSpawnFields(configuration), ...spaceRules,
         ...continuationSpawnWorkspace(source, key, hostId, physical, at) };
       const value = await prepareHandoff(tx, { run, instance, spawnPayload: spawn, channelId: input.channelId,
         sourceRunId: source.runId, sourceInstanceId: input.sourceInstanceId }, input.actorUserId, spaceId, at);
@@ -460,11 +463,11 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     if (!harnesses.length) return [];
     const facts = await this.directory.transaction({ requestId: `${input.commandId}:successor-quota`,
       operation: "registration.usage-limit.successor-quota" }, tx => tx.query({
-      name: "registration_usage_limit_successor_quota_v1", text: `SELECT e.harness,e.declaration_json,
+      name: "registration_usage_limit_successor_quota_v2", text: `SELECT e.harness,e.declaration_json,
         statement_timestamp() AS evaluated_at,${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id,
         (SELECT ${REGISTRATION_QUOTA_POOL_SQL} FROM control.agent_registration_environments e
           WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$4) AS source_pool_id,
-        q.remaining,q.observed_at,q.expires_at
+        q.source,q.remaining,q.observed_at,q.expires_at,q.windows_json,q.account_json
         FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
         WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=ANY($3::text[])`,
       values: [key.ownerUserId, key.machineId, harnesses, key.harness], maxRows: USAGE_LIMIT_SUCCESSOR_CANDIDATES }));
@@ -473,8 +476,10 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       try { environment = parseAgentRegistrationEnvironment(row.declaration_json); } catch { return []; }
       const evaluatedAt = new Date(row.evaluated_at as string).getTime();
       if (!environment.enabled || environment.availableUntil && Date.parse(environment.availableUntil) <= evaluatedAt) return [];
+      const reading = registrationQuotaReading(row);
       return [{ harness: String(row.harness), sharesSourcePool: row.quota_pool_id === row.source_pool_id,
-        remainingPercent: registrationQuotaReading(row)?.remainingPercent }];
+        ...(reading ? { quotaPace: routingQuotaPace({ remainingPercent: reading.remainingPercent,
+          windows: row.source === "daemon" ? [] : currentRoutingQuotaWindows(row.windows_json, evaluatedAt) }, evaluatedAt) } : {}) }];
     })).slice(0, USAGE_LIMIT_SUCCESSOR_ATTEMPTS);
   }
 

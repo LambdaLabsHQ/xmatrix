@@ -16,6 +16,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { queueHarnessAction, readHarnessAction } from "./machine-harness-api";
 import { ToolDetailSection } from "./tool-split";
 import { fetchMachineDaemons } from "./workspace-admin-views";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 type Step = "start" | "finish" | "cancel";
 type Operation = { controlId: string; step: Step; startedAt: number };
@@ -75,7 +76,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
   const queue = useMutation({
     mutationFn: async (input: { step: Step; code?: string }) => {
       const daemon = view.daemon;
-      if (!daemon?.machineId) throw new Error("This machine is offline.");
+      if (!daemon?.machineId) throw new UserFacingProblem("This machine is offline.", true);
       const result = await queueHarnessAction(token, daemon.machineId, daemon.hostId, registration.key.harness,
         `login_${input.step}`, undefined, input.code);
       return { ...input, controlId: result.controlId };
@@ -84,7 +85,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
       setOperation({ controlId, step, startedAt: Date.now() });
       if (step !== "finish") setNotice(null);
     },
-    onError: (error) => setNotice({ text: error instanceof Error ? error.message : "The sign-in could not be requested.", error: true }),
+    onError: (error) => setNotice({ text: userErrorMessage(error, "Couldn't request the sign-in") ?? "", error: true }),
   });
 
   const settled = SETTLED(status.data?.status) ? status.data : undefined;
@@ -146,7 +147,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
           <div className="space-y-2 rounded-lg border p-3">
             <p>
               Open this link{prompt.userCode ? " and enter the code" : ""}
-              {prompt.flow === "url_paste_code" ? ", then paste the code the page shows below." : "."}
+              {prompt.flow === "url_paste_code" ? ", then paste below the code the page shows, or the full address your browser ends on." : "."}
             </p>
             <a href={prompt.verificationUri} target="_blank" rel="noopener noreferrer"
               className="inline-flex max-w-full items-center gap-1 break-all font-semibold underline">

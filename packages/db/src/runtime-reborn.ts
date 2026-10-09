@@ -34,7 +34,7 @@ function rejectFenced(metadata: Record<string, unknown>): void {
 }
 async function source(tx: DatabaseTransaction, instanceId: string): Promise<QueryResultRow> {
   const row = (await tx.query<QueryResultRow>({ name: "reborn_source_lock_v2", text: `SELECT
-    instance.run_id,instance.channel_id,instance.channel_instance_id,instance.status AS instance_status,
+    instance.run_id,instance.channel_id,instance.channel_instance_id,instance.status AS instance_status,instance.rest_state,
     run.owner_user_id,run.status AS run_status,run.metadata_json,
     run.workspace_machine_id,run.workspace_canonical_cwd
     FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
@@ -100,6 +100,10 @@ async function recordIntent(tx: DatabaseTransaction, input: { kind: Continuation
   sourceRunId: string; sourceInstanceId: string; machineId: string; hostId: string; run: Record<string, unknown>;
   instance: Record<string, unknown>; spawn: Record<string, unknown>; at: string }): Promise<Record<string, unknown>> {
   const { before, previous, sourceInstanceId } = input;
+  if (input.kind === "wake" && (previous.instance_status !== "offline" ||
+      !["sleeping", "interrupted"].includes(String(previous.rest_state)))) {
+    throw new RuntimeControlError("instance_not_resting", 409, "Instance no longer accepts an automatic wake");
+  }
   const pending = await tx.query({ name: "continuation_source_pending_v1", text: `SELECT intent_id
     FROM data.agent_reborn_intents WHERE source_instance_id=$1 AND state IN ('waiting','prepared') LIMIT 1`,
     values: [sourceInstanceId], maxRows: 1 });
@@ -277,7 +281,64 @@ export async function advanceReborn(tx: DatabaseTransaction, input: Record<strin
   const run = object(row.run_input_json), instance = object(row.instance_input_json);
   // Re-check current grants/registration/workspace through the canonical creators.
   await create(run, instance);
+  // A NULL kind predates wakes and is a reborn or a handoff.
+  if (!handoff && row.kind !== "wake") {
+    await settleRebornBacklog(tx, { spaceId, channelId: String(row.channel_id),
+      instanceId: String(instance.instanceId), at });
+  }
   await tx.query({ name: "reborn_intent_prepared_v1", text: `UPDATE data.agent_reborn_intents
     SET state='prepared',updated_at=$2 WHERE intent_id=$1`, values: [intentId, at], maxRows: 0 });
   return { entityId: intentId, runId: row.successor_run_id, instanceId: String(instance.instanceId), state: "prepared" };
+}
+
+/**
+ * A reborn answers its own message, which the successor takes as its first
+ * prompt; nothing the Channel said while the predecessor was stopped is owed to
+ * it. Its durable cursor, though, is still parked where the predecessor last
+ * acknowledged, so the successor's join catch-up served that backlog — peers'
+ * handoffs, `/kill all`, work long since taken over — as fresh work, after a
+ * resumed session that never read it. Advance the Instance's cursor to the
+ * committed head here, with the same monotonic write an ack makes; messages
+ * committed after this transaction still reach the successor as catch-up.
+ * A wake is different: the message that woke it is the work.
+ */
+async function settleRebornBacklog(tx: DatabaseTransaction,
+  input: { spaceId: string; channelId: string; instanceId: string; at: string }): Promise<void> {
+  const { spaceId, channelId, at } = input;
+  const subjectId = `agent:${input.instanceId}`;
+  const heads = await tx.query<QueryResultRow & { sequence: string | number }>({
+    name: "reborn_backlog_head_v1",
+    text: `SELECT COALESCE(MAX(timeline_sequence), 0) AS sequence FROM data.messages
+      WHERE space_id = $1 AND channel_id = $2`,
+    values: [spaceId, channelId], maxRows: 1,
+  });
+  const head = Number(heads[0]?.sequence ?? 0);
+  if (head <= 0) return;
+  const cursors = await tx.query<QueryResultRow & { acknowledged_sequence: string | number }>({
+    name: "reborn_backlog_cursor_lock_v1",
+    text: `SELECT acknowledged_sequence FROM data.delivery_cursors
+      WHERE space_id = $1 AND subject_id = $2 AND channel_id = $3 FOR UPDATE`,
+    values: [spaceId, subjectId, channelId], maxRows: 1,
+  });
+  if (cursors[0] && Number(cursors[0].acknowledged_sequence) >= head) return;
+  await tx.query({
+    name: "reborn_backlog_cursor_write_v1",
+    text: `INSERT INTO data.delivery_cursors
+      (space_id, subject_id, channel_id, acknowledged_sequence, version, updated_at)
+      VALUES ($1,$2,$3,$4,1,$5)
+      ON CONFLICT (space_id, subject_id, channel_id) DO UPDATE SET
+        acknowledged_sequence = GREATEST(data.delivery_cursors.acknowledged_sequence,
+          EXCLUDED.acknowledged_sequence),
+        version = data.delivery_cursors.version + 1,
+        updated_at = EXCLUDED.updated_at`,
+    values: [spaceId, subjectId, channelId, head, at], maxRows: 0,
+  });
+  await tx.query({
+    name: "reborn_backlog_attention_revision_v1",
+    text: `INSERT INTO data.message_attention_revisions
+      (space_id, subject_id, channel_id, revision, updated_at) VALUES ($1,$2,$3,1,$4)
+      ON CONFLICT (space_id, subject_id, channel_id) DO UPDATE SET
+        revision = data.message_attention_revisions.revision + 1, updated_at = EXCLUDED.updated_at`,
+    values: [spaceId, subjectId, channelId, at], maxRows: 0,
+  });
 }

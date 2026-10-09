@@ -8,6 +8,8 @@ import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
 import { registerMachineRetirementRoutes } from "./index-routes-machine-retirement";
 import { registerHarnessActionRoutes } from "./index-routes-harness-actions";
+import { registerWorktreeActionRoutes } from "./index-routes-worktree-actions";
+import { maintainMachineResourceHistoryOnSchedule, registerMachineResourceRoutes } from "./index-routes-machine-resources";
 import { registerSetupIntentRoutes } from "./index-routes-setup-intents";
 import { registerChannelTransferRoutes } from "./index-routes-channel-transfer";
 import { registerPageRoutes } from "./index-routes-pages";
@@ -24,12 +26,15 @@ import { registerGooglePickerRoutes } from "./index-routes-google-picker";
 import { redirectInsecureRequest } from "./https-redirect";
 import { retryablePostgresFailure } from "./postgres-error-classification";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { requestErrorResponse } from "./index-shared";
 import type { Env } from "./types";
 export { RelaySummonDecisionClock } from "./summon-decision-clock-do";
 export { RelaySpaceDeletionClock } from "./space-deletion-clock-do";
 export { RelayPageSession } from "./page-session-do";
 export { RelayPostgresChannelCoordinator } from "./relay-postgres-channel-coordinator-do";
 export { RelayPostgresAgentLaunchChannel } from "./postgres-agent-launch-channel-do";
+export { GitHubSubscriptionIndex } from "./github-subscription-index";
 export { RelayPostgresBackgroundAdmission } from "./postgres-background-admission-do";
 export {
   RelayAgentAppPolicyAuthority,
@@ -64,6 +69,7 @@ import { registerIndexRoutesChannelAgent } from "./index-routes-channel-agent";
 import { registerIndexRoutesHumanProfile } from "./index-routes-human-profile";
 import { registerIndexRoutesHumanAvatar } from "./index-routes-human-avatar";
 import { registerIndexRoutesMachineDaemonAdmission } from "./index-routes-machine-daemon-admission";
+import { registerIndexRoutesAppleBilling } from "./index-routes-apple-billing";
 import { registerIndexRoutesBilling } from "./index-routes-billing";
 import { registerIndexRoutesJev } from "./index-routes-jev";
 import { registerClientCompatibilityGate } from "./client-compatibility-gate";
@@ -72,6 +78,10 @@ import { registerRequestRateLimit } from "./request-rate-limit";
 import { registerIndexRoutesPostgresReadiness } from "./postgres-readiness";
 
 const app = new Hono<{ Bindings: Env }>();
+// A failure no route answered still gets the one error contract: a transient
+// outage as a retryable 503, anything else as a reported JSON 500. Hono's
+// default is a plain-text 500 that no client can tell from a defect.
+app.onError((error, c) => error instanceof HTTPException ? error.getResponse() : requestErrorResponse(c, error));
 registerRequestRateLimit(app);
 registerRequestBodyLimit(app);
 registerClientCompatibilityGate(app);
@@ -80,6 +90,7 @@ registerIndexRoutesAdmin(app);
 registerIndexRoutesAuthSpace(app);
 registerIndexRoutesMachineDaemonAdmission(app);
 registerIndexRoutesBilling(app);
+registerIndexRoutesAppleBilling(app);
 registerIndexRoutesJev(app);
 registerIndexRoutesAutomation(app);
 registerIndexRoutesSpaceJoinRequests(app);
@@ -97,8 +108,10 @@ registerGooglePickerRoutes(app);
 registerSentryInstallationRoutes(app);
 registerChannelTransferRoutes(app);
 registerMachineNameRoutes(app);
+registerMachineResourceRoutes(app);
 registerMachineRetirementRoutes(app);
 registerHarnessActionRoutes(app);
+registerWorktreeActionRoutes(app);
 registerSetupIntentRoutes(app);
 registerIndexRoutesHumanProfile(app);
 registerIndexRoutesHumanAvatar(app);
@@ -111,11 +124,12 @@ export default {
       executionCtx.waitUntil(sendErrorReports());
     }
   },
-  scheduled: (_event: ScheduledController, env: Env, executionCtx: ExecutionContext) => {
+  scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => {
     const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
     run("Sentry event recovery", () => drainSentryEvents(env));
     run("Harness release watch", () => watchHarnessReleases(env));
+    run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
     for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
       run(`${provider} lifecycle maintenance`, () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }));
     }
@@ -126,5 +140,5 @@ export default {
 /** A failed cron task names its cause; a database outage is logged, a defect is also reported. */
 function scheduledTaskFailed(name: string, error: unknown): void {
   console.error(`${name} failed`, error);
-  if (!retryablePostgresFailure(error)) reportError(error);
+  if (!retryablePostgresFailure(error)) reportError(error, { operation: `scheduled: ${name}` });
 }

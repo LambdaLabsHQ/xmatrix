@@ -71,7 +71,7 @@ test("PostgreSQL Channel Presence keys each registered Run by its Instance", asy
   assert.match(query.text, /LIMIT 513/u);
 });
 
-test("a management delegate Instance wears the xMatrix persona on its Instance label only", async () => {
+test("an Instance is labelled by its registration, whatever its Run was routed as", async () => {
   const transaction = {
     async query(input) {
       if (input.name === "channel_agent_resting_presence_v4") return [];
@@ -83,7 +83,8 @@ test("a management delegate Instance wears the xMatrix persona on its Instance l
   const result = await loadChannelAgentPresence(transaction, "space-1", ["channel-1"]);
   const presence = result.get("channel-1")["instance-1"];
   assert.equal(presence.label, "Codex");
-  assert.deepEqual(presence.instances.map((instance) => instance.label), ["xMatrix:6"]);
+  // The retired management delegate no longer wears an xMatrix persona.
+  assert.deepEqual(presence.instances.map((instance) => instance.label), ["Codex:6"]);
 });
 
 test("PostgreSQL Channel Presence fails closed instead of truncating active Instances", async () => {

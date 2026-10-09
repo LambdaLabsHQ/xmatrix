@@ -97,6 +97,10 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/teams/link`,
     space_app_connection_googlechat_link: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/googlechat/link`,
+    space_app_connection_github_installations: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/github/installations`,
+    space_app_connection_github_installation: (spaceId: string, installationId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/github/installations/${encodeURIComponent(installationId)}`,
     space_app_connection_feishu_link: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/feishu/link`,
     space_app_connection_telegram_link: (spaceId: string) =>
@@ -114,7 +118,7 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-executions`,
     github_app_install: (
       spaceId: string,
-      options?: { mode?: "add" | "manage" | "install"; installationId?: string }
+      options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
     ) => {
       const params = new URLSearchParams({ spaceId });
       if (options?.mode) params.set("mode", options.mode);
@@ -147,6 +151,10 @@ export const HUB_ROUTES = {
   machine_harness_actions: "/api/machine-daemons/harness-actions",
   machine_harness_action: (controlId: string) =>
     `/api/machine-daemons/harness-actions/${encodeURIComponent(controlId)}`,
+  /** The owner lists and reclaims the git worktrees on one of their Machines. */
+  machine_worktree_actions: "/api/machine-daemons/worktree-actions",
+  machine_worktree_action: (controlId: string) =>
+    `/api/machine-daemons/worktree-actions/${encodeURIComponent(controlId)}`,
   machine_daemon_credentials: "/api/machine-daemon-credentials",
   machine_daemon_migration_fence: "/api/machine-daemon/migration-fence",
   machine_daemon_workspaces: "/api/machine-daemon/workspaces",
@@ -204,12 +212,13 @@ export const HUB_ROUTES = {
   space_billing_checkout: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/checkout`,
   space_billing_portal: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/portal`,
   space_billing_reconcile: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/reconcile`,
+  space_billing_apple: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/apple`,
+  space_billing_apple_prepare: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/apple/prepare`,
+  space_billing_apple_reconcile: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/billing/apple/reconcile`,
   stripe_billing_webhook: "/api/billing/stripe/webhook",
-  space_management_agent: (spaceId: string) =>
-    `/api/spaces/${encodeURIComponent(spaceId)}/management-agent`,
-  /** Starts a direct management-Agent pass that refreshes one Channel About. */
-  space_management_channel_about: (spaceId: string) =>
-    `/api/spaces/${encodeURIComponent(spaceId)}/management/channel-about`,
+  /** Starts an Agent session that refreshes one Channel About. */
+  space_channel_about: (spaceId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/channel-about`,
   space_locale_preference: (spaceId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/locale-preference`,
   space_channel_view_preference: (spaceId: string) =>
@@ -231,6 +240,8 @@ export const HUB_ROUTES = {
   channel_transfer_proposals: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/transfer-proposals`,
   machine_name: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/name`,
+  /** The owner reads one Machine's load history; `range` is one of 1h, 24h, 7d, 30d, 90d. */
+  machine_resource_history: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/resource-history`,
   machine_auto_assign: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}/auto-assign`,
   machine: (machineId: string) => `/api/machines/${encodeURIComponent(machineId)}`,
   space_channel_transfers: (spaceId: string) =>
@@ -276,6 +287,8 @@ export const HUB_ROUTES = {
     `/api/agent-launches/${encodeURIComponent(launchId)}/retry`,
   channel_message_launch_anyway: (channelId: string, messageId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-anyway`,
+  channel_summon_intent: (channelId: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/summon-intent`,
   channel_message_launch_choice: (channelId: string, messageId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-choice`,
   channel_message: (channelId: string, messageId: string) =>
@@ -368,6 +381,8 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/agent-launches/${encodeURIComponent(launchId)}/retry`,
   channel_message_launch_anyway: (channelId: string, messageId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-anyway`,
+  channel_summon_intent: (channelId: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/summon-intent`,
   channel_message_launch_choice: (channelId: string, messageId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-choice`,
   space_launch_targets: (spaceId: string) =>
@@ -399,12 +414,13 @@ export const WEB_PROXY_ROUTES = {
   space_billing_checkout: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/checkout`,
   space_billing_portal: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/portal`,
   space_billing_reconcile: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/reconcile`,
+  space_billing_apple: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/apple`,
+  space_billing_apple_prepare: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/apple/prepare`,
+  space_billing_apple_reconcile: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/billing/apple/reconcile`,
   space_member_permissions: (spaceId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/member-permissions`,
-  space_management_agent: (spaceId: string) =>
-    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/management-agent`,
-  space_management_channel_about: (spaceId: string) =>
-    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/management/channel-about`,
+  space_channel_about: (spaceId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/channel-about`,
   space_locale_preference: (spaceId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/locale-preference`,
   space_channel_view_preference: (spaceId: string) =>
@@ -426,6 +442,8 @@ export const WEB_PROXY_ROUTES = {
   channel_transfer_proposals: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/transfer-proposals`,
   machine_name: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}/name`,
+  machine_resource_history: (machineId: string) =>
+    `/api/xmatrix/machines/${encodeURIComponent(machineId)}/resource-history`,
   machine_auto_assign: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}/auto-assign`,
   machine: (machineId: string) => `/api/xmatrix/machines/${encodeURIComponent(machineId)}`,
   space_channel_transfers: (spaceId: string) =>
@@ -814,6 +832,14 @@ export interface SerializedMachineDaemon {
   autoAssign?: false;
   /** Agent Runs starting or running on this Machine. */
   activeRuns?: number;
+  /**
+   * Set while this online daemon has left work unanswered: since when a command
+   * sent to it has waited unclaimed, or a lease it held has lapsed, past a
+   * minute. `status` and `lastSeenAt` follow connection events only, so this is
+   * the evidence that an "online" route is not actually responding. Presence
+   * only; absent from Hubs that predate it.
+   */
+  unansweredSince?: string;
   /** Latest operating-system computer name; an observation, never identity. */
   hostname?: string;
   hostId?: string;

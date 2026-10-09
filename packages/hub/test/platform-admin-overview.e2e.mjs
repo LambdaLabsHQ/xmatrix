@@ -11,6 +11,7 @@ import {
   test,
 } from "./agent-mention-spawn.fixture.mjs";
 import { createAuthorityDatabase, PostgresSpaceControlRepository } from "../../db/dist/index.js";
+import { Client } from "pg";
 
 const ADMIN_EMAIL = "platform-admin-e2e@example.com";
 const OPERATOR_TOKEN = `operator-${"0123456789abcdef".repeat(4)}`;
@@ -31,6 +32,14 @@ async function adminFixture(userId, options) {
   return { worker, auth, jsonAuth: { ...auth, "content-type": "application/json" } };
 }
 
+async function createOpenChannel(worker, jsonAuth, spaceId, prefix) {
+  return (await json(await worker.fetch("/api/channels", {
+    method: "POST",
+    headers: jsonAuth,
+    body: JSON.stringify({ spaceId, name: `${prefix}-${randomUUID()}`, mode: "open" }),
+  }))).channel;
+}
+
 async function assertNotPlatformAdmin(worker, auth) {
   const me = await json(await worker.fetch("/api/auth/me", { headers: auth }));
   assert.equal(me.capabilities.platformAdmin, false);
@@ -42,13 +51,20 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
   try {
     const spaceName = `Admin Overview ${randomUUID()}`;
     const space = await createSpace(worker, spaceName);
-    const channel = (await json(await worker.fetch("/api/channels", {
-      method: "POST",
-      headers: jsonAuth,
-      body: JSON.stringify({ spaceId: space.id, name: `admin-${randomUUID()}`, mode: "open" }),
-    }))).channel;
+    const channel = await createOpenChannel(worker, jsonAuth, space.id, "admin");
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "first admin overview message");
     await postChannelMessage(worker, MOCK_TOKEN, channel.id, "second admin overview message");
+
+    const client = new Client({ connectionString: worker.postgresUrl });
+    await client.connect();
+    try {
+      await client.query(`INSERT INTO data.machine_daemons
+        (daemon_id, owner_user_id, owner_email, machine_id, hostname, status,
+         capabilities_json, metadata_json, connection_epoch, version, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, 'private-admin-machine-host', 'online',
+         '[]', '{"private":"must-not-appear"}', 1, 1, now(), now())`,
+      [`daemon:${userId}`, userId, ADMIN_EMAIL, `machine:${userId}`]);
+    } finally { await client.end(); }
 
     const me = await json(await worker.fetch("/api/auth/me", { headers: auth }));
     assert.equal(me.capabilities.platformAdmin, true);
@@ -65,6 +81,8 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     assert.ok(overview.totals.activeChannels >= 1);
     assert.ok(overview.totals.messages >= 2);
     assert.ok(overview.totals.humanMessages >= 2);
+    assert.equal(overview.totals.machines, 1);
+    assert.equal(overview.totals.onlineMachines, 1);
 
     const summary = overview.spaces.find((entry) => entry.id === space.id);
     assert.equal(summary?.name, spaceName);
@@ -78,6 +96,7 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     const user = overview.users.find((entry) => entry.userId === userId);
     assert.ok(user, "the Space member appears in the user table");
     assert.equal(user.messages, 2);
+    assert.equal(user.machines, 1);
     assert.ok(user.spaces >= 1);
 
     // Daily volume is a dense oldest-first series that sums to the window total.
@@ -93,9 +112,77 @@ test("platform admin reads a cross-Space overview of spaces, users, and message 
     const serialized = JSON.stringify(overview);
     assert.equal(serialized.includes("first admin overview message"), false);
     assert.equal(serialized.includes(channel.name), false);
+    assert.equal(serialized.includes("private-admin-machine-host"), false);
+    assert.equal(serialized.includes("must-not-appear"), false);
   } finally {
     await worker.stop();
   }
+});
+
+test("platform admin reads one user's metadata-only detail, and every read is audited", async () => {
+  const userId = `platform-admin-detail-${randomUUID()}`;
+  const { worker, auth, jsonAuth } = await adminFixture(userId);
+  try {
+    const spaceName = `Admin Detail ${randomUUID()}`;
+    const space = await createSpace(worker, spaceName);
+    const channel = await createOpenChannel(worker, jsonAuth, space.id, "detail");
+    await postChannelMessage(worker, MOCK_TOKEN, channel.id, "private detail message");
+
+    const { detail } = await json(await worker.fetch(
+      `/api/admin/users/${encodeURIComponent(userId)}`,
+      { headers: auth },
+    ));
+    assert.equal(detail.user.userId, userId);
+    const membership = detail.spaces.find((entry) => entry.spaceId === space.id);
+    assert.equal(membership?.name, spaceName);
+    assert.equal(membership?.role, "owner");
+    assert.equal(membership?.messages, 1);
+    assert.ok(detail.messages.total >= 1);
+    assert.equal(detail.activity.length, 30);
+    assert.equal(detail.activity.at(-1).messages >= 1, true);
+
+    // Metadata only: no message text, no Channel name.
+    const serialized = JSON.stringify(detail);
+    assert.equal(serialized.includes("private detail message"), false);
+    assert.equal(serialized.includes(channel.name), false);
+
+    assert.equal((await worker.fetch(
+      `/api/admin/users/${encodeURIComponent(`absent-${randomUUID()}`)}`,
+      { headers: auth },
+    )).status, 404);
+
+    const { events } = await json(await worker.fetch("/api/admin/audit?limit=20", { headers: auth }));
+    const userRead = events.find((event) => event.action === "user.read" && event.targetId === userId);
+    assert.ok(userRead, "the detail read is in the audit trail");
+    assert.equal(userRead.actorUserId, userId);
+    assert.equal(userRead.targetKind, "user");
+    assert.equal(events[0].action, "audit.read", "reading the trail is itself recorded first");
+  } finally {
+    await worker.stop();
+  }
+});
+
+test("admin reads fail closed when their audit record cannot be written", async () => {
+  const userId = `platform-admin-audit-failure-${randomUUID()}`;
+  const { worker, auth } = await adminFixture(userId);
+  try {
+    await createSpace(worker, "Audit failure fixture");
+    // Only this worker's disposable database is changed; the test template
+    // and other workers retain their audit table.
+    const client = new Client({ connectionString: worker.postgresUrl });
+    await client.connect();
+    try {
+      await client.query("ALTER TABLE control.admin_audit_events RENAME TO unavailable_admin_audit_events");
+    } finally { await client.end(); }
+    for (const route of ["/api/admin/overview", `/api/admin/users/${userId}`, "/api/admin/audit"]) {
+      const response = await worker.fetch(route, { headers: auth });
+      assert.equal(response.status, 500, `${route} must refuse an unaudited read`);
+      const body = await response.json();
+      assert.equal(body.overview, undefined);
+      assert.equal(body.detail, undefined);
+      assert.equal(body.events, undefined);
+    }
+  } finally { await worker.stop(); }
 });
 
 test("a signed-in user off the allowlist cannot read the platform overview", async () => {
@@ -115,6 +202,8 @@ test("a signed-in user off the allowlist cannot read the platform overview", asy
 
     const response = await worker.fetch("/api/admin/overview", { headers: auth });
     assert.equal(response.status, 403);
+    assert.equal((await worker.fetch(`/api/admin/users/${userId}`, { headers: auth })).status, 403);
+    assert.equal((await worker.fetch("/api/admin/audit", { headers: auth })).status, 403);
 
     const unauthenticated = await worker.fetch("/api/admin/overview");
     assert.equal(unauthenticated.status, 401);

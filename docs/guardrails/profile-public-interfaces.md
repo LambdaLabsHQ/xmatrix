@@ -2,6 +2,8 @@ Part of the descriptive project profile. Not policy. The index is `project-profi
 
 ## Public Interfaces And Domain Contracts
 
+- Web derives installed `(machine, harness)` candidates and offers owner-controlled Space switches from Machines, Agents, and first-run onboarding. Existing registration commands remain the authorization boundary; existing switch states are retained without a data rewrite. See [installed harnesses and Space switches](../design/harness-space-switches.md).
+
 - A handoff must change the stable Agent registration, whether on the same or another machine. A usage limit only holds the quota pool and posts an ordinary `handoff:@auto`. Same-machine directory handoff rejects the original harness; the repository-backed move to another machine excludes the predecessor's authoritative registration binding independently of quota refresh, so the same harness elsewhere is eligible. See `docs/same-machine-instance-handoff.md` §2.1–2.2.
 
 - Direct runtime addresses (for example `@codex` and `@claude`) accept the same
@@ -38,6 +40,7 @@ Part of the descriptive project profile. Not policy. The index is `project-profi
 - PostgreSQL message appends derive management sender presentation from the exact live Run and current Space management configuration, checking the configuration again in the commit transaction. Management mentions display the xMatrix name and avatar while preserving underlying Agent, Run, and Instance ids for attribution. Caller-supplied sender fields cannot grant this presentation; existing stored snapshots are not rewritten.
 - Agent trace/details should remain human-readable, but the Agent host is the canonical trace source. Hub may expose only a bounded session-lifetime cache or an exact authenticated on-demand host fetch; once the session/instance expires it clears the cache, and an unavailable host yields an explicit unavailable result rather than stale Hub history.
 - Assistant memory is exposed as a Hub-authenticated per-user typed projection. It stores compact entries, checkpoints, and source refs so assistant instances can resume from a snapshot instead of replaying raw assistant-channel history.
+- The public download page recommends a stable installer based on the browser operating system (Windows x64, macOS Apple Silicon, or Android). iOS, Linux, and unrecognized browsers get a web-app entry; all platform and preview links remain available. macOS CPU architecture is not inferred from browser metadata, so Apple Silicon requirements stay explicit.
 - Recent Android, Desktop, and CLI stable downloads are served from verified immutable prefixes in the dedicated `xmatrix-release-assets` R2 bucket through Web routes; the mutable channel pointer advances only after complete readback. Large release objects use bounded streaming R2 S3 multipart uploads when the bucket-scoped credential pair is configured, while every upload retains independent size and SHA-256 readback. Cross-runner handoffs remain run-and-attempt scoped; a failed-job finalizer rerun may select the newest complete manifest independently per platform from earlier attempts of the same run, but never crosses a run or accepts an incomplete prefix. GitHub Releases retain historical component archives through an independent post-CD mirror and remain the fallback when no recent R2 channel object exists. Android uses `android-v<version>`, Desktop uses `desktop-v<version>`, and CLI uses `cli-v<version>`. Every macOS CLI asset is Developer ID signed with the stable `net.madebyrobot.xmatrix.cli` / `VWN9V9V56Z` requirement before upload so the daemon retains access to its encrypted-replica Keychain item across self-updates.
 - GitHub connector customization is channel feature subscription, not a GitHub permission editor. The default path is the xMatrix GitHub App plus GitHub-native repository access and permission approval; customer-owned GitHub Apps may become an advanced deployment path while preserving installation and secret-reference boundaries.
 - GitHub Actions mutations use two typed connector atoms: failed-job rerun and workflow dispatch. Both require one explicitly configured Actions write Channel and a freshly minted repository-scoped installation token that reports Actions write permission; workflow dispatch additionally requires the exact workflow file name or numeric id in the connection allowlist. Persisted connector scopes do not substitute for live installation authority, and no arbitrary GitHub REST path is exposed.
@@ -58,3 +61,9 @@ Webhook Events lifecycle endpoint. It binds the current app/guild/installing
 Human grant and retires user deauthorization under PostgreSQL locks; it does not
 receive ordinary guild messages. See [connector lifecycle](../design/connector-platform.md#signed-discord-installation-lifecycle)
 and [native acceptance](../operations/app-connectors.md#discord-company-bot-registration-and-acceptance).
+
+Channel title and About changes retain full immutable revisions, with scoped
+history and append-only restoration through HTTP and CLI. About writes prove
+the live Channel-bound Run and its recorded authoritative inputs, and reject
+stale metadata revisions. Automatic titles may still refresh. Legacy overwritten
+content cannot be reconstructed. See [Channel metadata revisions](../design/channel-metadata-revisions.md).

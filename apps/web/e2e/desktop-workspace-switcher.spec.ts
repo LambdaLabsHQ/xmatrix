@@ -1,9 +1,16 @@
+import type { Locator } from "@playwright/test";
+
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
-test("expanded desktop workspace switcher uses only its outer glass surface", async ({ page }) => {
+/** A computed style read mid-transition is an in-between value: wait for the element's motion to end. */
+async function settled(locator: Locator): Promise<void> {
+  await expect.poll(() => locator.evaluate((element) => element.getAnimations().length)).toBe(0);
+}
+
+test("expanded desktop workspace switcher is one glass panel floating over the list", async ({ page }) => {
   const otherSpace = {
     ...E2E_SPACE,
     id: "space-team",
@@ -16,26 +23,41 @@ test("expanded desktop workspace switcher uses only its outer glass surface", as
 
   await openWorkspaceWithStubs(page, { spaces: [otherSpace, E2E_SPACE], channels: [teamChannel] });
 
+  /* At rest the header is the name and the chevron at the row's end, with
+     no glass of its own. */
   const trigger = page.locator(".app-space-switcher-trigger");
   await expect(trigger).not.toContainText("LL");
+  await expect(trigger).not.toContainText(/\b(Pro|Free)\b/u);
+  await expect(page.locator(".app-space-switcher-rename")).toHaveCount(0);
+  const rest = await trigger.evaluate((element) => {
+    const chevron = element.querySelector(".app-space-switcher-chevron")!.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return { chevronGap: box.right - chevron.right, backdrop: style.backdropFilter, shadow: style.boxShadow };
+  });
+  expect(rest.chevronGap).toBeLessThanOrEqual(16);
+  expect(rest.backdrop).toBe("none");
+  expect(rest.shadow).toBe("none");
+
+  // Opening floats the panel over the list; the list does not move.
+  const list = page.locator(".app-sidebar-pane-body");
+  const listTop = (await list.boundingBox())!.y;
   await trigger.click();
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
-
   const menu = page.locator(".app-space-switcher-menu");
   await expect(menu).toBeVisible();
-  const causticContents = await Promise.all(
-    [trigger, menu].map((locator) => locator.evaluate((element) => getComputedStyle(element, "::before").content))
-  );
-  expect(causticContents).toEqual(["none", "none"]);
+  expect((await list.boundingBox())!.y).toBe(listTop);
 
-  /* The expanded shell must carry the shared liquid glass recipe and nothing
-     more. Comparing it against a live probe of the generic glass class stays
-     true when that recipe is retuned, and it is wider than any "no bright
-     inset" check: a private recipe reintroduced on the shell — an extra rim, a
-     top edge highlight, caustic gradients, its own backdrop filter — makes one
-     of these four reads differ. */
+  /* The expanded shell carries the shared liquid glass recipe — the
+     composer's fill, lens and rim — and nothing more but a floating
+     surface's drop shadow. Comparing it against a live probe of the generic
+     glass class stays true when that recipe is retuned: a private recipe on
+     the shell (an extra rim, a top edge highlight, caustic gradients, its own
+     backdrop filter) makes one of these reads differ. */
   const shell = page.locator(".app-space-switcher-shell-open");
   await expect(shell).toBeVisible();
+  // The glass fades in while the panel grows.
+  await settled(shell);
   const material = await shell.evaluate((element) => {
     const read = (node: Element) => {
       const own = getComputedStyle(node);
@@ -56,48 +78,52 @@ test("expanded desktop workspace switcher uses only its outer glass surface", as
 
     return { shell: read(element), sharedRecipe };
   });
+  const { boxShadow: shellShadow, ...shellGlass } = material.shell;
+  const { boxShadow: sharedShadow, ...sharedGlass } = material.sharedRecipe;
+  expect(shellGlass).toEqual(sharedGlass);
+  // Same rim, and a heavier shadow than the composer's lift.
+  const rim = sharedShadow.split(/,(?![^(]*\))/u).filter((layer) => layer.includes("inset"));
+  for (const layer of rim) expect(shellShadow).toContain(layer.trim());
+  expect(shellShadow).toContain("0px 14px 36px -8px");
 
-  expect(material.shell).toEqual(material.sharedRecipe);
+  // Nothing inside the panel is a second pane of glass but the action discs,
+  // even under the pointer.
+  await trigger.hover();
+  for (const inner of [trigger, menu, page.getByRole("button", { name: "Manage", exact: true })]) {
+    expect(await inner.evaluate((element) => getComputedStyle(element).backdropFilter)).toBe("none");
+  }
 
-  const row = page.locator(".app-space-switcher-row", { hasText: "Personal" });
+  /* A Space is one row: its avatar in the Space's own ink, its name, its
+     member count; under the pointer the row takes a flat inset highlight. */
+  const row = page.locator(".app-space-switcher-option", { hasText: "Personal" });
   await row.hover();
+  await settled(row);
   const paint = await row.evaluate((element) => {
-    const shellNode = element.closest(".app-space-switcher-shell-open");
-    const option = element.querySelector(".app-space-switcher-option");
-    const openWindow = element.querySelector(".app-space-switcher-open-window");
-    if (!shellNode || !option) return null;
+    const shellNode = element.closest(".app-space-switcher-shell-open")!;
+    const avatar = element.querySelector(".app-space-avatar")!;
+    const style = getComputedStyle(element);
     const rowBox = element.getBoundingClientRect();
     const shellBox = shellNode.getBoundingClientRect();
-    const rowStyle = getComputedStyle(element);
-    const optionStyle = getComputedStyle(option);
-    const iconStyle = openWindow ? getComputedStyle(openWindow) : null;
     return {
-      rowRadius: rowStyle.borderRadius,
-      rowBackground: rowStyle.backgroundColor,
-      optionBackground: optionStyle.backgroundColor,
-      optionBackdrop: optionStyle.backdropFilter,
-      iconBackground: iconStyle?.backgroundColor ?? "",
-      iconBackdrop: iconStyle?.backdropFilter ?? "",
-      iconColor: iconStyle?.color ?? "",
-      optionColor: optionStyle.color,
-      rowLeft: rowBox.left,
-      rowRight: rowBox.right,
-      shellLeft: shellBox.left,
-      shellRight: shellBox.right,
+      background: style.backgroundColor,
+      backdrop: style.backdropFilter,
+      shadow: style.boxShadow,
+      avatarInk: getComputedStyle(avatar).color,
+      avatarFill: getComputedStyle(avatar).backgroundColor,
+      inside: rowBox.left >= shellBox.left && rowBox.right <= shellBox.right,
     };
   });
-  expect(paint).not.toBeNull();
-  expect(paint!.rowRadius === "0px" || paint!.rowRadius === "0px 0px 0px 0px").toBe(true);
-  expect(paint!.rowBackground).not.toBe("rgba(0, 0, 0, 0)");
-  expect(paint!.optionBackground).toBe("rgba(0, 0, 0, 0)");
-  expect(paint!.optionBackdrop).toBe("none");
-  if (paint!.iconBackground) {
-    expect(paint!.iconBackground).toBe("rgba(0, 0, 0, 0)");
-    expect(paint!.iconBackdrop).toBe("none");
-    expect(paint!.iconColor).toBe(paint!.optionColor);
-  }
-  expect(Math.abs(paint!.rowLeft - paint!.shellLeft)).toBeLessThanOrEqual(1);
-  expect(Math.abs(paint!.rowRight - paint!.shellRight)).toBeLessThanOrEqual(1);
+  expect(paint.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(paint.backdrop).toBe("none");
+  expect(paint.shadow).toBe("none");
+  expect(paint.avatarInk).not.toBe(paint.avatarFill);
+  expect(paint.inside).toBe(true);
+  await expect(row).toContainText("1 member");
+  await expect(page.locator(".app-space-switcher-option[aria-selected='true']")).toContainText("Lambda Labs");
+
+  // Renaming starts from the panel, not from a pencil on the header.
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Workspace name" })).toHaveValue("Lambda Labs");
 });
 
 test("Team lists every workspace and tags the one you are in", async ({ page }) => {
@@ -108,7 +134,7 @@ test("Team lists every workspace and tags the one you are in", async ({ page }) 
   });
 
   await page.locator(".app-space-switcher-trigger").click();
-  await page.getByRole("button", { name: "Manage workspaces" }).click();
+  await page.getByRole("button", { name: "Manage", exact: true }).click();
 
   await expect(page).toHaveURL(/\/team$/);
   const rows = page.locator('[data-testid="tool-section-row"]');

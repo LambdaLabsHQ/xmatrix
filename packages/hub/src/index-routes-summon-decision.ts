@@ -1,6 +1,7 @@
-import type { Context, Hono } from "hono";
-import { crossSpaceReadErrorResponse, crossSpaceRetryOwner } from "./cross-space-read";
-import { AgentChannelAccessError, ContentControlError, PostgresContentRepository } from "@xmatrix/db";
+import type { Hono } from "hono";
+import { crossSpaceRetryOwner } from "./cross-space-read";
+import { ControlError, PostgresContentRepository } from "@xmatrix/db";
+import { postgresControlErrorResponse } from "./postgres-authority-http";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { requireAuth, requestErrorStatus } from "./index-shared";
 import type { Env } from "./types";
@@ -30,7 +31,7 @@ export function registerSummonDecisionRoutes(app: Hono<{ Bindings: Env }>): void
         result = await read(user.agentRun ? { kind: "agent", id: user.agentRun.agentId } : { kind: "user", id: user.id });
       } catch (error) {
         // Outside its own Space an Agent reads only through its owner's grant, as its owner.
-        const denied = decisionFailure(c, error);
+        const denied = decisionFailure(error);
         if (!user.agentRun || !denied) throw error;
         const granted = await crossSpaceRetryOwner(c.env, user.agentRun, { channelId }, denied);
         if (granted instanceof Response) return granted;
@@ -52,14 +53,12 @@ export function registerSummonDecisionRoutes(app: Hono<{ Bindings: Env }>): void
       return new Response(bytes, { headers: { "content-type": "application/json", "cache-control": "private, no-store",
         "content-disposition": 'attachment; filename="summon-decision.json"', "x-content-type-options": "nosniff" } });
     } catch (error) {
-      return decisionFailure(c, error) ??
+      return decisionFailure(error) ??
         c.json({ error: "Decision evidence request failed" }, requestErrorStatus(error), { "cache-control": "private, no-store" });
     }
   });
 }
 
-function decisionFailure(c: Context<{ Bindings: Env }>, error: unknown): Response | null {
-  if (error instanceof ContentControlError || error instanceof AgentChannelAccessError) return c.json({ error: error.message, code: error.code },
-    error.status as 400 | 403 | 404 | 409 | 503, { "cache-control": "private, no-store" });
-  return crossSpaceReadErrorResponse(error);
+function decisionFailure(error: unknown): Response | null {
+  return error instanceof ControlError ? postgresControlErrorResponse(error) : null;
 }

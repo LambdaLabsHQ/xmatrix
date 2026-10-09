@@ -99,13 +99,9 @@ if [[ -z "${ASC_API_KEY_ID:-}" || -z "${ASC_API_ISSUER_ID:-}" || -z "${ASC_P8_PA
   exit 2
 fi
 
-ASC_KEY_DIR="$HOME/.appstoreconnect/private_keys"
-ASC_KEY_DEST="$ASC_KEY_DIR/AuthKey_$ASC_API_KEY_ID.p8"
-mkdir -p "$ASC_KEY_DIR"
-if [[ "$ASC_P8_PATH" != "$ASC_KEY_DEST" ]]; then
-  cp "$ASC_P8_PATH" "$ASC_KEY_DEST"
-fi
-chmod 600 "$ASC_KEY_DEST"
+# Keep the key in the job's protected temporary directory. Never persist it
+# into the runner user's long-lived credential directories.
+export API_PRIVATE_KEYS_DIR="$(dirname "$ASC_P8_PATH")"
 
 xcrun altool \
   --upload-app \

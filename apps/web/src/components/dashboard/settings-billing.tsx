@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { getDesktopBridge } from "@/lib/desktop/bridge";
+import { AppleSpaceBillingSection } from "./settings-apple-billing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ExternalLink, Loader2, RefreshCw } from "lucide-react";
@@ -27,6 +29,7 @@ export type SpaceBilling = SpacePlanBilling & {
   seats: { used: number; limit: number };
   freeUsage: { acceptedMessages: number; limit: number; remaining: number };
   subscription: {
+    billingProvider?: "stripe" | "apple";
     status: string;
     seatQuantity: number;
     currentPeriodEnd?: string | null;
@@ -56,8 +59,6 @@ function useCheckoutReturn() {
 }
 
 function spaceBillingKey(userId: string, spaceId: string) {
-  // The plan badge reads under this same key, so a checkout that writes the
-  // fresher summary here updates the badge beside the Space name with it.
   return xmatrixQueryKeys.domain({ userId }, "billing", [spaceId]);
 }
 
@@ -90,7 +91,7 @@ function SectionError({ error }: { error: string }) {
   return error ? <p role="alert" className={noticeClass("alert", "mt-3")}>{error}</p> : null;
 }
 
-export function SpaceBillingSection({ userId, space }: {
+function StripeSpaceBillingSection({ userId, space }: {
   userId: string;
   space: { id: string; name: string } | null;
 }) {
@@ -104,9 +105,9 @@ export function SpaceBillingSection({ userId, space }: {
   const reconciled = useRef<string | null>(null);
   const command = useMutation({
     mutationKey: [...spaceBillingKey(userId, spaceId ?? ""), "command"],
-    mutationFn: (input: { kind: "checkout" | "portal" | "reconcile"; body?: unknown }) =>
+    mutationFn: (input: { kind: "checkout" | "portal" | "reconcile" | "apple-reconcile"; body?: unknown }) =>
       xmatrixApiRequest<{ checkoutUrl?: string; portalUrl?: string; billing?: SpaceBilling }>({
-        url: `/api/xmatrix/spaces/${encodeURIComponent(spaceId!)}/billing/${input.kind}`,
+        url: `/api/xmatrix/spaces/${encodeURIComponent(spaceId!)}/billing/${input.kind === "apple-reconcile" ? "apple/reconcile" : input.kind}`,
         method: "POST",
         body: input.body,
       }),
@@ -121,7 +122,7 @@ export function SpaceBillingSection({ userId, space }: {
     if (billing) setSeats(Math.max(1, billing.seats.used));
   }, [billing]);
 
-  const run = useCallback(async (kind: "checkout" | "portal" | "reconcile", body?: unknown) => {
+  const run = useCallback(async (kind: "checkout" | "portal" | "reconcile" | "apple-reconcile", body?: unknown) => {
     try {
       const payload = await command.mutateAsync({ kind, body });
       const destination = payload.checkoutUrl ?? payload.portalUrl;
@@ -175,13 +176,13 @@ export function SpaceBillingSection({ userId, space }: {
             <p className="text-sm text-muted-foreground">Only the Space owner can change its plan.</p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("portal")}>
+              {subscription?.billingProvider === "apple" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://apps.apple.com/account/subscriptions">Manage in App Store</a> : <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("portal")}>
                 {busy === "portal" ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
                 Manage subscription
-              </button>
-              <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("reconcile")}>
+              </button>}
+              <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run(subscription?.billingProvider === "apple" ? "apple-reconcile" : "reconcile")}>
                 <RefreshCw className={cn("size-4", busy === "reconcile" && "animate-spin")} />
-                Refresh from Stripe
+                Refresh from {subscription?.billingProvider === "apple" ? "App Store" : "Stripe"}
               </button>
             </div>
           )}
@@ -226,7 +227,7 @@ export function SpaceBillingSection({ userId, space }: {
                 </button>
                 <p className="text-xs text-muted-foreground">
                   Renews until you cancel in the billing portal; cancelling takes effect at the end of the paid period.
-                  Tax is added at checkout. See <Link className="underline underline-offset-4" href="/terms#billing">Terms §12</Link>.
+                  Tax is added at checkout. See <Link className="underline underline-offset-4" href="/terms#billing">Terms §11</Link>.
                 </p>
               </div>
             ) : <p className="text-sm">Ask the Space owner to upgrade.</p>}
@@ -340,4 +341,12 @@ function PlanFeatures({ features }: { features: readonly string[] }) {
       ))}
     </ul>
   );
+}
+
+
+export function SpaceBillingSection(props: { userId: string; space: { id: string; name: string } | null }) {
+  const [nativeIOS, setNativeIOS] = useState<boolean | null>(null);
+  useEffect(() => { setNativeIOS(getDesktopBridge()?.platform === "ios"); }, []);
+  if (nativeIOS === null) return <p>Loading plan…</p>;
+  return nativeIOS ? <AppleSpaceBillingSection {...props} /> : <StripeSpaceBillingSection {...props} />;
 }

@@ -23,7 +23,6 @@ export function registerAgentRebornRoutes(app: Hono<{ Bindings: Env }>): void {
         instance: instance as Record<string, unknown>, port });
       return c.json(queued, 202, { "cache-control": "private, no-store" });
     } catch (error) {
-      if (error instanceof AgentRebornControlError) return c.json({ code: error.code, error: error.message }, error.status);
       return requestErrorResponse(c, error);
     }
   });

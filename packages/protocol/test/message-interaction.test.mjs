@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { matchInteractionGrammar, parseMessageInteraction, MessageInteractionRegistry,
   parseConnectorActionCommand, parseAgentControlCommands, parseAgentStopCommand, parseAgentStopInvocation,
   summarizeStopReceipts, agentInteractionTarget, connectorInteractionTarget,
-  humanInteractionTarget, interactionRegistry, managementInteractionTarget } from "../dist/index.js";
+  humanInteractionTarget, interactionRegistry } from "../dist/index.js";
 
 const vectors = JSON.parse(await readFile(new URL("./message-interaction-vectors.json", import.meta.url), "utf8"));
 for (const { rule, body, matches } of vectors) {
@@ -66,13 +66,12 @@ test("a person's display name may hold single spaces; an Agent's alias is one wo
 
 test("shared target projections pass the registry, and a refused one is left out", () => {
   const registry = interactionRegistry([
-    managementInteractionTarget(), humanInteractionTarget("u1", ["Dana", "dana-h"]),
+    humanInteractionTarget("u1", ["Dana", "dana-h"]),
     agentInteractionTarget("a1", "codex"), connectorInteractionTarget("github", ["create_issue", "Bad Id"]),
     humanInteractionTarget("u2", ["everyone"]), agentInteractionTarget("a2", "codex"),
   ]);
   assert.deepEqual(registry.descriptors().map(item => item.targetId),
-    ["management:xmatrix", "human:u1", "agent:a1", "connector:github", "agent:a2"]);
-  assert.equal(registry.resolve("xmatrix", "launch").status, "resolved");
+    ["human:u1", "agent:a1", "connector:github", "agent:a2"]);
   assert.equal(registry.resolve("dana-h", "mention").target.targetId, "human:u1");
   assert.equal(registry.resolve("github", "create_issue").operation.presentationRef, "connector.v1");
   assert.equal(registry.resolve("github", "bad id").status, "unsupported");

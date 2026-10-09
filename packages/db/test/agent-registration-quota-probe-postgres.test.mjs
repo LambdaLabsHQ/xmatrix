@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { Client } from "pg";
 import { readRegistrationQuotaProbeTargets, recordRegistrationQuotaProbeResult, recordRegistrationUsageLimit,
-  REGISTRATION_QUOTA_POOL_SQL } from "../dist/agent-registration-quota-probe.js";
+  registrationQuotaReading, REGISTRATION_QUOTA_POOL_SQL } from "../dist/agent-registration-quota-probe.js";
 
-import { observeRegistrationQuota, readRegistrationQuotaState, registrationQuotaKey } from "../dist/registration-quota-state.js";
+import { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaState,
+  registrationQuotaKey } from "../dist/registration-quota-state.js";
 
 integration("registration quota probe targets are the Space's authorized, singly-hosted registrations", async () => {
   assert.ok(url);
@@ -131,6 +132,12 @@ integration("registration quota probe targets are the Space's authorized, singly
     const shared = { ...key, machineId: "shared-machine" };
     const both = await readRegistrationQuotaState(database, [key, shared], "explicit-shared-pool");
     assert.deepEqual(both.get(registrationQuotaKey(key)), both.get(registrationQuotaKey(shared)));
+    // One read gives the owner every registration with what a read by key gives it, a shared pool on each machine.
+    const owned = await readOwnerRegistrationQuotaState(database, "owner", "owner-read");
+    const byKey = await readRegistrationQuotaState(database, owned.map(({ registration }) => registration), "by-key");
+    for (const { registration, usage } of owned) assert.deepEqual(usage, byKey.get(registrationQuotaKey(registration)));
+    assert.ok(owned.some(({ registration }) => registrationQuotaKey(registration) === registrationQuotaKey(shared)));
+    assert.ok(owned.every(({ registration }) => registration.ownerUserId === "owner"), "another owner's registrations stay out");
     await sql(`UPDATE control.registration_quota_observations SET expires_at=now()-interval '1 second',
       observed_at=now()-interval '2 seconds' WHERE quota_pool_id='shared-claude'`);
     const expired = (await readRegistrationQuotaState(database, [key], "expired")).get(registrationQuotaKey(key));
@@ -185,6 +192,36 @@ integration("registration quota probe targets are the Space's authorized, singly
     assert.equal(heldProjection.get(registrationQuotaKey(key)).quotaState, "exhausted");
     assert.deepEqual(heldProjection.get(registrationQuotaKey(key)), heldProjection.get(registrationQuotaKey(shared)));
     assert.equal(heldProjection.get(registrationQuotaKey(key)).quotaUsages[0].label, undefined, "a hold does not invent a provider window");
+    const windows = [{ label: "5h", usedPercent: 100, resetAt: new Date(hours(2)).toISOString() },
+      { label: "1w", usedPercent: 30, resetAt: new Date(hours(24)).toISOString() }];
+    await sql(`UPDATE control.registration_quota_observations SET windows_json=$1::jsonb,source='provider',
+      account_json='{"allowed":true}'::jsonb WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`,
+      [JSON.stringify(windows)]);
+    await limit({ harness: "claude" });
+    const retained = await sql(`SELECT remaining,windows_json,account_json FROM control.registration_quota_observations
+      WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
+    assert.deepEqual(retained.rows[0].windows_json, windows, "a turn limit retains current provider window names");
+    assert.equal(Number(retained.rows[0].remaining), 0, "window detail cannot override the hold");
+    const retainedProjection = await readRegistrationQuotaState(database, [key], "retained-projection");
+    assert.equal(retainedProjection.get(registrationQuotaKey(key)).quotaState, "exhausted",
+      "retained window detail cannot clear an authoritative usage-limit hold");
+    assert.equal(retained.rows[0].account_json, null, "a prior allowed verdict cannot contradict the refusal");
+    const availableWindows = windows.map(window => ({ ...window, usedPercent: 20 }));
+    await sql(`UPDATE control.registration_quota_observations SET windows_json=$1::jsonb
+      WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`, [JSON.stringify(availableWindows)]);
+    await limit({ harness: "claude" });
+    const routingHold = await sql(`SELECT source,remaining,observed_at::text,expires_at::text,windows_json
+      FROM control.registration_quota_observations WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
+    assert.equal(registrationQuotaReading(routingHold.rows[0]).remainingPercent, 0,
+      "retained nonempty windows cannot replace the daemon's authoritative hold");
+    assert.equal(registrationQuotaReading({ ...routingHold.rows[0], source: "provider" }).remainingPercent, 80,
+      "provider samples still recompute headroom from their own windows");
+    await sql(`UPDATE control.registration_quota_observations SET observed_at=now()-interval '2 seconds',
+      expires_at=now()-interval '1 second' WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
+    await limit({ harness: "claude" });
+    const expiredDetail = await sql(`SELECT windows_json FROM control.registration_quota_observations
+      WHERE owner_user_id='owner' AND quota_pool_id='shared-claude'`);
+    assert.equal(expiredDetail.rows[0].windows_json, null, "expired detail is not revived by a limit report");
     assert.ok(near((await limit({ harness: "grok" })).limitedUntil, hours(1)), "no reset time holds for an hour");
     assert.ok(near((await limit({ harness: "grok", resetsAt: new Date(hours(-1)).toISOString() })).limitedUntil, hours(1 / 12)),
       "a reset already past still holds for five minutes");

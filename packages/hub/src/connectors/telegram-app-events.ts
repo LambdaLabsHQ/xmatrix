@@ -1,5 +1,5 @@
 import { telegramChatId } from "@xmatrix/db";
-import { timingSafeEqual } from "@xmatrix/protocol";
+import { deliveryProven, TELEGRAM_SECRET_TOKEN } from "./delivery-proof";
 import { connectorEvent, excerpt, parseJsonObject, record, text } from "./event-format";
 import { ProviderRequestError } from "./http";
 import type { ConnectorEvent } from "./provider";
@@ -9,8 +9,8 @@ type Base = { chatSpace: string; eventTime: string; eventId: string };
 type Interaction = Base & ({ kind: "link"; nonce: string; username: string; userId: number } |
   { kind: "removed" } | { kind: "message"; event: ConnectorEvent });
 /** Telegram authenticates its HTTPS delivery with a configured secret header, not an HMAC. */
-export function verifyTelegramAppRequest(secret: string, headers: Headers): void {
-  if (!timingSafeEqual(headers.get("x-telegram-bot-api-secret-token") ?? "", secret)) {
+export async function verifyTelegramAppRequest(secret: string, headers: Headers): Promise<void> {
+  if (!await deliveryProven(TELEGRAM_SECRET_TOKEN, headers, "", secret)) {
     throw new ProviderRequestError(401, "Invalid Telegram webhook authentication");
   }
 }

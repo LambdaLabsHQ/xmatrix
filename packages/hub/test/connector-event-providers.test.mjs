@@ -16,6 +16,8 @@ import { receiveFeishuDelivery } from "../src/connectors/feishu-events.ts";
 import { connectorForCommand, connectorProvider } from "../src/connectors/registry.ts";
 import { parseConnectorSubscription } from "../src/connectors/subscription-parse.ts";
 import { handleConnectorDelivery } from "../src/connectors/event-ingress.ts";
+import { deliveryProven, GITHUB_SIGNATURE, STRIPE_SIGNATURE } from "../src/connectors/delivery-proof.ts";
+import { readdirSync, readFileSync } from "node:fs";
 
 function delivery(body, headers = {}, credentials = {}) {
   const rawBody = typeof body === "string" ? body : JSON.stringify(body);
@@ -334,4 +336,44 @@ test("second-wave providers verify their documented signatures and route by sour
   const tgOk = await receiveTelegramDelivery(delivery(tg, { "x-telegram-bot-api-secret-token": "ts" }, { webhookSecret: "ts" }));
   assertEventsMatchManifest("telegram", tgOk);
   assert.equal(tgOk.events[0].sourceRef, "telegram:-1001234");
+});
+
+test("one proof check reads each provider's signature or token as data", async () => {
+  const body = "{\"a\":1}";
+  const headers = (values) => new Headers(values);
+  const now = 1_800_000_000_000;
+  const sha256 = await hmacHex("SHA-256", "s", body);
+  assert.equal(await deliveryProven(GITHUB_SIGNATURE, headers({ "x-hub-signature-256": `sha256=${sha256}` }), body, "s"), true);
+  assert.equal(await deliveryProven(GITHUB_SIGNATURE, headers({ "x-hub-signature-256": sha256 }), body, "s"), false,
+    "a declared prefix is required");
+  assert.equal(await deliveryProven(GITHUB_SIGNATURE, headers({ "x-hub-signature-256": `sha256=${sha256}` }), body, undefined), false,
+    "no secret proves nothing");
+  const proof = { header: "x-sig", prefix: "v1=" };
+  assert.equal(await deliveryProven(proof, headers({ "x-sig": `v1=00, V1=${sha256.toUpperCase()}` }), body, "s"), true,
+    "any of several rotated signatures, in any case");
+  const t = String(now / 1_000);
+  const signed = await hmacHex("SHA-256", "s", `${t}.${body}`);
+  assert.equal(await deliveryProven(STRIPE_SIGNATURE, headers({ "stripe-signature": `t=${t},v1=${signed}` }), body, "s", now), true);
+  assert.equal(await deliveryProven(STRIPE_SIGNATURE, headers({ "stripe-signature": `t=${t},v1=${signed}` }), body, "s", now + 301_000),
+    false, "a stale timestamp is a replay");
+  assert.equal(await deliveryProven(STRIPE_SIGNATURE, headers({ "stripe-signature": `v1=${signed}` }), body, "s", now), false);
+  const token = { header: "authorization", token: true, bearer: true };
+  assert.equal(await deliveryProven(token, headers({ authorization: "Bearer tk" }), body, "tk"), true);
+  assert.equal(await deliveryProven(token, headers({ authorization: "tk" }), body, "tk"), false);
+});
+
+test("webhook receivers prove deliveries only through deliveryProven", () => {
+  const source = new URL("../src/", import.meta.url);
+  const files = readdirSync(source, { recursive: true }).filter((file) => String(file).endsWith(".ts"));
+  /* Files that sign outgoing requests or state, or verify a scheme that is not a header HMAC or token. */
+  const signers = new Set(["index-shared.ts", "connectors/delivery-proof.ts", "connectors/oauth-pkce.ts",
+    "connectors/actions/chat-webhooks.ts", "connectors/wave2-events.ts"]);
+  for (const file of files) {
+    const text = readFileSync(new URL(String(file), source), "utf8");
+    if (/\bhmac(?:Hex|Bytes)\(/u.test(text)) assert.ok(signers.has(String(file).replaceAll("\\", "/")), `${file} computes an HMAC itself`);
+    for (const [, name, form] of text.matchAll(/^export (?:async function|const) (receive\w+Delivery)\b(.*)$/gmu)) {
+      if (name === "receiveFeishuDelivery" || name === "receiveWebhookDelivery") continue;
+      assert.match(form, /createSignedJsonReceiver\(/u, `${name} verifies its delivery by hand`);
+    }
+  }
 });

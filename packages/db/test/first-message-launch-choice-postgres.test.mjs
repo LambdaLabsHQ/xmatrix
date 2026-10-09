@@ -253,3 +253,73 @@ integration("an author's pick must name a harness the Space can route now, and a
     await client.end();
   }
 });
+
+
+integration("an Agent's first message persists an immediate owner-bound decision authorizing exactly one summon", async () => {
+  const { space, channel, client, database, placement, choices } = await firstLaunchFixture();
+  const owner = `${space}:owner`, instance = `${channel}:1`, run = `${instance}#1`;
+  const body = "start an agent to inspect the release notes";
+  const bodyHash = await digestCanonicalCloneCborV1(body);
+  const where = { channelId: channel, messageId: "agent-first" };
+  try {
+    await client.query(`INSERT INTO control.space_placement
+      (space_id,shard_id,placement_epoch,state,target_shard_id,plan_class,created_at,updated_at)
+      VALUES ($1,'shard-0',1,'active',NULL,'test',now(),now())`, [space]);
+    await routableHarness(client, space, "codex");
+    await client.query(`INSERT INTO data.runs
+      (run_id,owner_user_id,channel_id,workspace_machine_id,workspace_canonical_cwd,status,version,metadata_json,created_at,updated_at)
+      VALUES ($1,$2,$3,$4,'/tmp/test','running',1,'{}',now(),now())`, [run, owner, channel, `${space}:machine`]);
+    await client.query(`INSERT INTO data.instances
+      (instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
+      VALUES ($1,$2,$3,1,'online',1,now(),now())`, [instance, run, channel]);
+    await client.query(`INSERT INTO data.run_agent_registrations
+      (run_id,space_id,owner_user_id,machine_id,harness,actor_user_id,allocation_id,authorization_digest,
+       grant_revision,grant_execution_revision,policy_revision,policy_execution_revision,requested_json)
+      VALUES ($1,$2,$3,$4,'codex',$3,$1,repeat('a',64),1,1,1,1,'{}')`, [run, space, owner, `${space}:machine`]);
+    await client.query(`INSERT INTO data.messages
+      (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,message_kind,content_hash,
+       payload_kind,payload_ref,sent_at,updated_at,created_at,search_rank_sequence,body_hash)
+      VALUES ($1,$2,'agent-first',1,1,'agent',$3,'message','hash','inline','ref',now(),now(),now(),'m',$4)`,
+    [space, channel, instance, bodyHash]);
+    await assert.rejects(choices.open({ requestId: "stranger", ...where, authorUserId: "stranger" }),
+      error => error.code === "launch_choice_forbidden");
+    await client.query("UPDATE data.messages SET author_id='unbound-instance' WHERE channel_id=$1", [channel]);
+    await assert.rejects(choices.open({ requestId: "unbound", ...where, authorUserId: owner }),
+      error => error.code === "launch_choice_forbidden");
+    await client.query("UPDATE data.messages SET author_id=$2,edited_at=now() WHERE channel_id=$1", [channel, instance]);
+    await assert.rejects(choices.open({ requestId: "edited", ...where, authorUserId: owner }),
+      error => error.code === "launch_choice_unavailable");
+    await client.query("UPDATE data.messages SET edited_at=NULL WHERE channel_id=$1", [channel]);
+    assert.equal((await client.query("SELECT 1 FROM data.first_message_launch_choices WHERE channel_id=$1", [channel])).rowCount, 0);
+    const opened = await choices.open({ requestId: "open", ...where, authorUserId: owner });
+    assert.ok(Date.parse(opened.deadlineAt) <= Date.now(), "no Human picker window for an Agent");
+    // The owner cannot claim an Agent publication through the Human picker.
+    await assert.rejects(choices.show({ requestId: "show", ...where, actorUserId: owner, body }),
+      error => error.code === "launch_choice_forbidden");
+    await assert.rejects(choices.claim({ requestId: "pick", ...where, by: "author", actorUserId: owner, body, harness: "codex" }),
+      error => error.code === "launch_choice_forbidden");
+    await choices.recommend({ requestId: "recommend", ...where, harness: "codex" });
+    const claim = { ...where, by: "jev", actorUserId: owner, harness: "codex" };
+    const results = await Promise.all([choices.claim({ requestId: "claim", ...claim }), choices.claim({ requestId: "retry", ...claim })]);
+    assert.deepEqual(results, [{ claimed: true }, { claimed: true }]);
+    assert.deepEqual(await choices.claim({ requestId: "stranger-replay", ...claim, actorUserId: "stranger" }), { claimed: false });
+    assert.deepEqual(await choices.claim({ requestId: "different", ...claim, harness: "claude" }), { claimed: false });
+    const { messageAuthoredForActor } = await import("../dist/message-invocation-selections.js");
+    const authorized = actorUserId => database.transaction({ requestId: "summon", operation: "test", placement }, tx =>
+      messageAuthoredForActor(tx, { spaceId: space, channelId: channel, messageId: "xmatrix-summon:agent-first",
+        authorKind: "system", authorId: "xmatrix", actorUserId }));
+    assert.equal(await authorized(owner), true, "the persisted decision authorizes the system summon");
+    assert.equal(await authorized("stranger"), false);
+    const [decision] = await database.transaction({ requestId: "read", operation: "test", placement }, tx =>
+      readFirstMessageLaunchChoices(tx, channel, [where.messageId]));
+    assert.equal(decision.open, false);
+    assert.equal(decision.choice.harness, "codex");
+    assert.equal(decision.choice.by, "jev");
+  } finally {
+    await client.query("DELETE FROM data.instances WHERE instance_id=$1", [instance]);
+    await client.query("DELETE FROM data.run_agent_registrations WHERE run_id=$1", [run]);
+    await client.query("DELETE FROM data.runs WHERE run_id=$1", [run]);
+    await removeSpace(client, space);
+    await client.end();
+  }
+});

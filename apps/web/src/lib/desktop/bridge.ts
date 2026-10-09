@@ -53,7 +53,21 @@ export type DesktopRuntimeCheckResult = {
   error?: string;
 };
 
+export type ApplePurchaseTransaction = {
+  transactionId: string;
+  originalTransactionId: string;
+  productId: string;
+  environment: "Production" | "Sandbox";
+};
+
 export type DesktopBridge = {
+  appleProducts?: (productIds: string[]) => Promise<{ id: string; displayName: string; displayPrice: string }[]>;
+  applePurchase?: (input: { productId: string; appAccountToken: string; productIds: string[] }) => Promise<{
+    status: "purchased" | "pending" | "cancelled"; transaction?: ApplePurchaseTransaction;
+  }>;
+  applePurchases?: (input: { productIds: string[]; restore: boolean }) => Promise<ApplePurchaseTransaction[]>;
+  appleFinish?: (transactionId: string) => Promise<void>;
+  appleManage?: () => Promise<void>;
   client?: NativeBridgeClient;
   platform: NativeBridgePlatform;
   getContext: () => Promise<DesktopContext>;
@@ -112,6 +126,8 @@ export type DesktopBridge = {
   /** iOS native shell controls the bottom tab dock instead of the web-rendered one. */
   setMobileTabState?: (state: {
     visible: boolean; activeView: string; spaceId?: string | null; userId?: string | null;
+    /** An Agent in the Space is working now: the Status pulse runs. */
+    statusLive?: boolean;
   }) => Promise<void>;
   /** A tab the user picked; `spaceId` when that tab must follow the Space the user is in. */
   onMobileTabChange?: (listener: (event: { view: string; spaceId?: string }) => void) => () => void;

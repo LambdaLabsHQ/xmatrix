@@ -1,5 +1,7 @@
 "use client";
 
+import { AUTH_TOKEN_REJECTED_EVENT } from "@/lib/auth-events";
+import { subscribeResume } from "@/lib/connectivity/connectivity";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { WEB_PROXY_ROUTES, type AuthResponse, type AuthUser } from "@xmatrix/protocol";
@@ -20,9 +22,9 @@ import {
 } from "./auth-session-policy";
 import { getDesktopBridge } from "./desktop/bridge";
 import { XMatrixQueryProvider } from "./query/query-provider";
+import { xmatrixRawResponse } from "@/lib/query/api-client";
 
-/** Dispatched when the Hub refuses the session token; the auth provider renews it. */
-export const AUTH_TOKEN_REJECTED_EVENT = "xmatrix:auth-token-rejected";
+export { AUTH_TOKEN_REJECTED_EVENT };
 
 export type { AuthUser };
 
@@ -187,11 +189,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         if (isTransientSessionLoadError(error)) {
           setState((prev) => (prev.session ? { ...prev, loading: false } : { ...prev, loading: true }));
-          if (!stateRef.current.session && transientRetries < 3) {
+          // Without a session the app waits on this read, so it keeps
+          // trying, backing off, rather than spin until the next focus.
+          if (!stateRef.current.session) {
             transientRetries += 1;
+            if (transientRetryTimer !== undefined) window.clearTimeout(transientRetryTimer);
             transientRetryTimer = window.setTimeout(() => {
               if (!cancelled) void refreshSessionState();
-            }, 1_500 * transientRetries);
+            }, Math.min(30_000, 1_500 * 2 ** (transientRetries - 1)));
           }
           return;
         }
@@ -205,14 +210,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void refreshSessionState();
     }
 
-    /* The Hub refused the current token: renew it now, visible or not. */
+    /* The Hub refused the current token: renew it now, visible or not. Many
+       requests can be refused at once; one renewal answers all of them. */
+    let lastRejectionRefresh = -Infinity;
     function refreshAfterRejection() {
+      const now = Date.now();
+      if (now - lastRejectionRefresh < 10_000) return;
+      lastRejectionRefresh = now;
       void refreshSessionState();
     }
 
     refreshWhenVisible();
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
+    const stopResume = subscribeResume((signal) => {
+      // The network is back: a pending backoff would only keep the spinner up.
+      if (signal.online) transientRetries = 0;
+      refreshWhenVisible();
+    });
     window.addEventListener(AUTH_TOKEN_REJECTED_EVENT, refreshAfterRejection);
     const interval = window.setInterval(refreshWhenVisible, 5 * 60 * 1000);
 
@@ -220,8 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       if (transientRetryTimer !== undefined) window.clearTimeout(transientRetryTimer);
       window.removeEventListener(AUTH_TOKEN_REJECTED_EVENT, refreshAfterRejection);
-      window.removeEventListener("focus", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      stopResume();
       window.clearInterval(interval);
     };
   }, [applySessionState, loadSessionStateOnce, mockAuthState]);
@@ -349,7 +361,7 @@ async function persistNativeSession(payload: AuthResponse): Promise<void> {
     return;
   }
 
-  const response = await fetch(WEB_PROXY_ROUTES.native_session, {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -365,7 +377,7 @@ async function clearNativeSession(): Promise<void> {
     return;
   }
 
-  await fetch(WEB_PROXY_ROUTES.native_session, {
+  await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     method: "DELETE",
   }).catch(() => null);
 }
@@ -375,7 +387,7 @@ async function loadNativeSessionState(): Promise<Omit<AuthState, "loading">> {
     return { session: null, user: null };
   }
 
-  const response = await fetch(WEB_PROXY_ROUTES.native_session, {
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.native_session, {
     cache: "no-store",
   }).catch((error) => {
     if (isTransientNetworkSessionError(error)) {

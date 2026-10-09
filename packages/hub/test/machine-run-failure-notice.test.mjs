@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { machineRunFailureNoticeCommand, machineStopResultNoticeCommand } from "../src/machine-run-failure-notice.ts";
+import { machineRunFailureNoticeCommand, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand } from "../src/machine-run-failure-notice.ts";
 
 const base = { runId: "run-1", channelId: "channel-1", agentName: "grok", ownerUserId: "owner",
   ownerEmail: "owner@example.test", machineId: "machine:a", hostId: "cursor" };
+
+test("continuity notices have immutable commands across remote changes and later reborns", async () => {
+  const baseline = { baseRef: "origin/main", baseOid: "a".repeat(40), noticeKey: "b".repeat(64), relationship: "diverged",
+    remote: { baseRef: "origin/trunk", baseOid: "c".repeat(40), confirmedAt: "2026-10-08T10:00:00Z" } };
+  const first = await repositoryBaselineNoticeCommand({ ...base, baseline });
+  const later = await repositoryBaselineNoticeCommand({ ...base, runId: "run-2", agentName: "codex", baseline: {
+    ...baseline, remote: { ...baseline.remote, baseOid: "d".repeat(40) } } });
+  assert.deepEqual(later, first, "stable command and message deduplicate without payload conflicts");
+  assert.equal(first.residual.appMetadata.xmatrixProvenance, "system_fact");
+  assert.match(first.body, /checkout and uncommitted work have been preserved/u);
+  await assert.rejects(repositoryBaselineNoticeCommand({ ...base, baseline: { ...baseline, relationship: "unknown" } }));
+});
 
 test("Machine notices name the Machine as its owner named it, never its hostname", async () => {
   const start = await machineRunFailureNoticeCommand({ ...base, machineName: "Grok Bot Machine",
@@ -23,11 +35,11 @@ test("a notice without the Machine name names no machine", async () => {
   for (const body of [start.body, stop.body]) assert.doesNotMatch(body, /cursor/u);
 });
 
-test("repository preparation failures show actionable copy without publishing private paths", async () => {
+test("repository preparation failures preserve the cause without publishing private paths", async () => {
   const input = { ...base, detail: "repo pool lease unavailable (base_ref_unresolved: could not resolve origin default branch after fetch) /private/SECRET_SENTINEL" };
   const notice = await machineRunFailureNoticeCommand(input);
-  assert.match(notice.body, /no usable default branch/u);
-  assert.match(notice.body, /initial commit/u);
+  assert.match(notice.body, /could not resolve origin default branch after fetch/u);
+  assert.doesNotMatch(notice.body, /initial commit/u);
   assert.equal(notice.residual.appMetadata.failureCode, "repository_base_unresolved");
   assert.doesNotMatch(JSON.stringify(notice), /SECRET_SENTINEL/u);
   assert.equal((await machineRunFailureNoticeCommand(input)).messageId, notice.messageId);
@@ -36,7 +48,8 @@ test("repository preparation failures show actionable copy without publishing pr
 test("a repository the Space's GitHub connection cannot reach fails with its own reason, not a generic error", async () => {
   const notice = await machineRunFailureNoticeCommand({ ...base, machineName: "srv",
     detail: "this Space's GitHub connector could not authorize owner/missing (repository_access_unavailable: the Space's GitHub connection cannot access owner/missing (github_api_422)) /private/SECRET_SENTINEL" });
-  assert.match(notice.body, /^Couldn't start @grok on srv\.\n\nThe Space's GitHub connection can't access owner\/missing\.\n\nCheck that the Space's GitHub app installation includes owner\/missing/u);
+  assert.match(notice.body, /github_api_422/u);
+  assert.match(notice.body, /could not authorize owner\/missing/u);
   assert.equal(notice.residual.appMetadata.failureCode, "repository_access_unavailable");
   assert.doesNotMatch(JSON.stringify(notice), /SECRET_SENTINEL|gh auth status/u);
 });
@@ -47,4 +60,12 @@ test("cleanup after failed startup still presents the startup failure", async ()
   assert.match(notice.body, /Cleanup confirmed no process remains/u);
   assert.doesNotMatch(notice.body, /^Stopped/u);
   assert.equal(notice.residual.appMetadata.startupFailed, true);
+});
+
+test("fetch stderr survives in both the Channel body and invocation metadata", async () => {
+  const detail = "repo pool lease unavailable (fetch_required_failed: required origin fetch failed (\n ! [rejected] main -> origin/main (non-fast-forward)))";
+  const notice = await machineRunFailureNoticeCommand({ ...base, detail });
+  assert.equal(notice.body, `Couldn't start @grok.\n\n${detail}`);
+  assert.equal(notice.residual.appMetadata.failureDetail, detail);
+  assert.equal(notice.residual.appMetadata.failureCode, "repository_fetch_failed");
 });

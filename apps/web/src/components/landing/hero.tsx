@@ -1,9 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { preload } from "react-dom";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 
 export function Hero() {
+  // The display face must be in before the first scroll: a late swap reflows
+  // the page mid smooth-scroll and leaves it a few pixels off the top.
+  preload("/fonts/manrope-latin-wght-normal.woff2", { as: "font", type: "font/woff2", crossOrigin: "anonymous" });
   return (
     <section className="site-hero landing-hero relative box-border min-h-svh w-full overflow-hidden px-6 pb-16 pt-20 md:flex md:items-center md:py-24">
       <div className="pointer-events-none relative mx-auto mb-8 aspect-square w-[calc(100%+3rem)] -translate-x-6 overflow-hidden md:absolute md:inset-0 md:mb-0 md:aspect-auto md:w-auto md:translate-x-0">
@@ -19,7 +23,7 @@ export function Hero() {
 
       <div className="relative z-10 mx-auto flex w-full max-w-6xl min-w-0 flex-col justify-center md:translate-y-10 lg:translate-y-14">
         <div className="max-w-full min-w-0 md:max-w-2xl">
-          <h1 className="max-w-full text-5xl font-semibold leading-[0.96] tracking-[-0.055em] text-[#171714] sm:text-6xl lg:text-7xl">
+          <h1 className="site-display max-w-full text-5xl font-semibold leading-[0.96] text-[#171714] sm:text-6xl lg:text-7xl">
             xMatrix
             <span className="mt-3 block text-3xl leading-[1.02] text-[#6d6c67] sm:text-4xl lg:text-5xl">
               Where people and AI agents work together.
@@ -32,14 +36,14 @@ export function Hero() {
           </p>
 
           <div className="mt-9 flex w-full max-w-full sm:w-auto">
-            <LiquidGlassPill
+            <WoodPanel
               as={Link}
               href="/login"
-              className="inline-flex h-12 w-full items-center justify-center px-7 text-sm font-semibold text-[#27251f] sm:w-auto"
+              className="site-wood-pill inline-flex h-12 w-full items-center justify-center px-7 text-sm sm:w-auto"
             >
               Start Free
               <ArrowRight className="ml-2 size-5" />
-            </LiquidGlassPill>
+            </WoodPanel>
           </div>
         </div>
       </div>

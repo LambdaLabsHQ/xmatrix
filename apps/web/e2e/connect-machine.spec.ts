@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import {
-  E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureRequestBodies, fixtureRule, installWorkspaceStubs,
+  E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureRequestBodies, fixtureRequests, fixtureRule, installWorkspaceStubs,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -39,18 +39,21 @@ test("a waiting terminal is approved with the code it shows", async ({ page }) =
   await expect.poll(() => fixtureRequestBodies(page, "intent-approve")).toEqual([{ userCode: "WDJB-MJHT" }]);
 });
 
-test("the agents found on the connected machine come in with one click", async ({ page }) => {
+test("a connected machine hands its agents to the installed-harness switches", async ({ page }) => {
   const connect = await openWithIntent(page, {
     ...base, phase: "connected", terminal,
     machine: { machineId: "machine-1", name: "daniel-laptop", online: true,
       harnesses: [{ id: "claude", installed: true }, { id: "codex", installed: true }, { id: "gemini", installed: false }] },
-  }, [{ id: "registration-create", pattern: `**/api/xmatrix/spaces/${E2E_SPACE.id}/agent-registrations/commands`,
-    responder: { kind: "static", json: { ok: true } } }]);
+  });
   await expect(connect).toContainText("daniel-laptop is connected. Found Claude Code and Codex.");
-  await connect.getByRole("button", { name: "Bring them in" }).click();
-  await expect.poll(async () => (await fixtureRequestBodies(page, "registration-create"))
-    .map((body) => (body.key as { harness: string; machineId: string }))).toEqual([
-    expect.objectContaining({ harness: "claude", machineId: "machine-1", spaceId: E2E_SPACE.id }),
-    expect.objectContaining({ harness: "codex", machineId: "machine-1", spaceId: E2E_SPACE.id }),
-  ]);
+  // The switches read the same machine report, so the page reads it again now.
+  await expect.poll(async () => (await fixtureRequests(page, "machine-daemons")).length).toBeGreaterThanOrEqual(2);
+});
+
+test("a stranger's terminal is turned away without approving it", async ({ page }) => {
+  const connect = await openWithIntent(page, { ...base, phase: "approval", terminal }, [{
+    id: "intent-decline", pattern: `**/api/xmatrix/setup-intents/${INTENT}/decline`,
+    responder: { kind: "static", json: { ok: true } } }]);
+  await connect.getByRole("button", { name: "Not mine" }).click();
+  await expect.poll(async () => (await fixtureRequests(page, "intent-decline")).length).toBe(1);
 });

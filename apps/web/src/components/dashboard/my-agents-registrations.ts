@@ -1,4 +1,4 @@
-import type { AgentRegistrationSummary } from "@xmatrix/protocol";
+import { currentRoutingQuotaWindows, type AgentRegistrationSummary } from "@xmatrix/protocol";
 import type { StatusTone } from "@/components/ui/status-tone";
 import { formatRelativeAge } from "./time-display";
 
@@ -60,7 +60,13 @@ export function registrationActivity(registration: AgentRegistrationSummary, opt
   }
   if (status) return { state: "attention", line: status.label, rank: 2 };
   const quota = live?.quota;
-  if (quota && quota.remainingPercent < 1) return { state: "attention", line: "Out of quota", rank: 2 };
+  if (quota && quota.remainingPercent < 1) {
+    const windows = currentRoutingQuotaWindows(quota.windows, options.now ?? Date.now());
+    const labels = [...new Set(windows.filter(window => window.usedPercent > 99)
+      .flatMap(window => window.label ? [window.label] : []))];
+    const line = labels.length ? `${labels.join(" + ")} limit reached` : "Out of quota · window unavailable";
+    return { state: "attention", line, rank: 2 };
+  }
   const quotaNote = quota && quota.remainingPercent <= QUOTA_NOTICE_PERCENT
     ? ` · ${Math.round(quota.remainingPercent)}% quota left` : "";
   const running = live?.running ?? [];
@@ -89,13 +95,6 @@ export function registrationRowTitle(registration: AgentRegistrationSummary): { 
 
 /** Why the registration catalog could not be read: the server's message plus
  * its error code, so a failure is diagnosable instead of an empty list. */
-export function registrationCatalogErrorText(error: unknown): string {
-  const message = error instanceof Error && error.message ? error.message : "The agent list could not be loaded.";
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === "string" && code && code !== "request_failed" && !message.includes(code)
-    ? `${message} (${code})` : message;
-}
-
 /** Space owners/admins configure an agent; an agent removed from the Space
  * before switches existed is added back by its owner. */
 export function registrationActions(registration: AgentRegistrationSummary): MyAgentAction[] {

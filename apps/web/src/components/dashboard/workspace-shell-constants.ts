@@ -2,6 +2,7 @@
 import type { ComponentType } from "react";
 import {
   Bell,
+  Bot,
   Cpu,
   Database,
   Hash,
@@ -12,7 +13,6 @@ import {
 } from "lucide-react";
 import type { ChannelMessage } from "@xmatrix/protocol";
 import { RELAY_V2_MESSAGE_ATTACHMENT_UPLOAD_MAX_BYTES } from "@xmatrix/protocol/relay-v2/message-attachment";
-import rootPackage from "../../../../../package.json";
 
 export const HISTORY_REFRESH_INTERVAL_MS = 30000;
 /** When to re-read a channel's presence after one of its Instances went offline. */
@@ -22,7 +22,14 @@ export const EMPTY_CHANNEL_HISTORY: ChannelMessage[] = [];
 
 export const AGENT_REFRESH_INTERVAL_MS = 60000;
 
-export const RELAY_PUSH_PING_INTERVAL_MS = 120000;
+/**
+ * The Hub answers this exact frame itself (a WebSocket auto-response), without
+ * waking the Durable Object that holds the socket, so a short interval costs
+ * nothing and a socket the OS dropped is replaced within seconds.
+ */
+export { HUMAN_HEARTBEAT_PING } from "@xmatrix/protocol";
+export const RELAY_PUSH_PING_INTERVAL_MS = 25_000;
+export const RELAY_PUSH_PONG_TIMEOUT_MS = 10_000;
 
 export const HUMAN_FOCUS_STABILITY_MS = 50;
 
@@ -69,8 +76,6 @@ export const TIMELINE_VIRTUAL_MIN_OVERSCAN_ITEMS = 2;
 export const MESSAGE_JUMP_SETTLE_FRAMES = 12;
 
 export const EVENT_LIMIT = 200;
-
-export const XMATRIX_RELEASE_VERSION = rootPackage.version;
 
 export const XMATRIX_SYSTEM_AVATAR_URL = "/brand/xmatrix-management-icon.png";
 
@@ -186,8 +191,8 @@ export const COUNT_CHIP_MATERIAL_CLASS =
   "app-shared-chip rounded-full app-material-liquid-pill app-liquid-glass-surface app-liquid-glass-fill";
 
 export const EVENT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  agent_connected: Cpu,
-  agent_disconnected: Cpu,
+  agent_connected: Bot,
+  agent_disconnected: Bot,
   channel_mention: Bell,
   channel_attention_updated: Bell,
   msg_routed: MessageSquare,

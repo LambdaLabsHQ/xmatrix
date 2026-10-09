@@ -1,4 +1,5 @@
-import { withRegistrationQuota, channelInstanceQuota } from "../registration-quota-presentation";
+import { withRegistrationQuota } from "@xmatrix/protocol";
+import { channelInstanceQuota } from "../registration-quota-presentation";
 import type {
   ChannelAgentMemberPresence,
   SerializedAgent,

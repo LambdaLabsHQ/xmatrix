@@ -1,0 +1,196 @@
+# Client resilience: transient failures
+
+xMatrix clients lose their connection often and briefly: a laptop sleeps, the
+network changes, the Hub Worker and its Durable Objects restart on every
+deploy. None of that is a real answer, and none of it should reach a person as
+an error. This document is the single contract for telling a transient failure
+from a real one and for what a client does about it.
+
+## The contract
+
+A failure is **transient** when one of these holds, and only then:
+
+| Failure | Why it is transient |
+| --- | --- |
+| The request got no answer (status `0`: the connection dropped, DNS failed, the attempt hit its own deadline) | Nothing was decided; the next attempt may reach the server. |
+| `408` or `429` | The server asked the client to slow down. |
+| `5xx` whose JSON body says `retryable: true` | The Hub labelled the failure transient (a PostgreSQL outage, a Durable Object reset by a deploy, a Space moving shards). |
+| `502`, `503` or `504` without the Hub's error body | A gateway answered; the Hub's logic never ran. |
+
+Everything else is a real answer and is shown as such: a `4xx`, and a `5xx`
+the Hub labelled `retryable: false` (a defect, reported by the Hub).
+
+A request the caller ended — its own abort or its own deadline — is the
+caller's outcome, not a transport failure, and passes through unchanged.
+
+### Hub side
+
+The Hub answers every transient failure as `503` with
+`{ error, code, retryable: true }` and a `Retry-After` header, and every other
+failure under its own status with `retryable: false`. `requestFailure`
+(`packages/hub/src/index-shared.ts`) is the one mapper, built from
+`packages/hub/src/error-contract.ts`; `requestErrorResponse`,
+`privateRouteResponse`, `postgresControlErrorResponse` and the private-storage
+and message-authority mappers all answer through it, and `app.onError` routes
+uncaught failures through it so no route answers a plain-text `500`.
+
+- Transient means a replay can succeed: a PostgreSQL outage the driver
+  classifies as retryable, a Durable Object reset, dropped or overloaded, a
+  `ControlError` that says `retryable: true` (a Space moving shards, private
+  object storage failing in passing), or a Better Auth JWKS that could not be
+  fetched.
+- A part of the Hub that is briefly unavailable (the Agent Launch coordinator
+  refusing a handover, a page session, the Space deletion clock, a catalog
+  deadline) is thrown as `ServiceUnavailable`, a retryable `503` `ControlError`
+  carrying its `Retry-After`. Routes do not hand-write that answer; a source
+  guard in `authority-failure-retryable.test.mjs` enforces it.
+- A domain rejection (`ControlError`) keeps its own status and code; those are
+  public API. Route mappers may keep their own public code (for example
+  `private_storage_unavailable`) but take status, retry policy and headers
+  from the contract.
+- `401` is only a definite verdict on the credential. A credential that could
+  not be checked is a retryable `503`, never a `401`, because a client signs
+  out on `401`.
+- No body carries a driver's or provider's raw message; the detail goes to the
+  error report.
+
+### Web client
+
+- **Transport.** Every client request goes through `src/lib/query/api-client.ts`
+  (`xmatrixApiRequest`, `xmatrixRawResponse`). It turns a dropped connection
+  into an `XMatrixApiError` with status `0` and reads a failed response into an
+  `XMatrixApiError` carrying `retryable` and `retryAfterMs` (`errorFromResponse`).
+  ESLint forbids the global `fetch` in client code; only the transport itself
+  and server code (route handlers, the Worker's Hub proxy) are exempt.
+- **Classification.** `isTransientFailure` in the same file is the only rule.
+  Query retries (`shouldRetryXMatrixQuery`) and the interactive retry helper
+  (`runWorkspaceFetchWithRetry`) both use it.
+- **Pacing.** A server `Retry-After` wins; otherwise jittered exponential
+  backoff (`xmatrixRetryDelayMs`). Interactive helpers that run inside a UI
+  deadline return a response that names a `Retry-After` instead of sleeping
+  through it.
+- **Mutations** are never replayed by Query. A mutation is retried only through
+  `runIdempotentMutationFetchWithRetry`, and only when every attempt carries the
+  same server-enforced idempotency key.
+- **Channel pins.** Saves for one person and Space run in click order. Each
+  click cancels the pending preference read before updating the displayed pins;
+  only the last queued save refreshes preferences and the Channel catalog. This
+  keeps an earlier pin or read from undoing a later unpin. PostgreSQL remains
+  the source of truth, with the existing version-conflict re-read.
+
+### Showing a failure
+
+A person reads a failure only through `describeError` / `userErrorMessage`
+(`src/lib/user-facing-error.ts`) or the `<ErrorNotice>` component built on it.
+Each call names the action that failed ("Couldn't load transfer proposals");
+the reason comes from the failure's class, never from raw exception text:
+
+| Failure | What the person reads |
+| --- | --- |
+| The caller cancelled its own request (`AbortError`, Query's cancellation) | Nothing. |
+| No answer (status `0`), its own deadline (`TimeoutError`), a `504` | Check the connection / it took too long; try again. |
+| Transient (`isTransientFailure`) | xMatrix is busy; try again in a moment. |
+| `401` | The session ended; sign in again. |
+| A generic Hub code (`forbidden`, `conflict`, `not_found`, …) | The status category in plain words. |
+| A specific Hub code with a sentence, or a body without a code | The Hub's own sentence. |
+| Any other `5xx`, a response missing what it promised (`unexpectedResponse`) | Something went wrong on our side; the code is the reference. |
+| A `UserFacingProblem` thrown by client code; a desktop main-process refusal | The sentence as written. |
+| Any other exception (`TypeError`, `SyntaxError`, an invariant) | A generic sentence; the detail goes to the console. |
+
+- A failed response is read with `errorFromResponse` (or `requireResponseOk`)
+  before its body, so status, code and retry policy survive. Reading JSON first
+  turns a gateway's HTML page into a `SyntaxError`.
+- `<ErrorNotice>` offers "Try again" when a retry can succeed and shows the Hub
+  code as a reference for a report.
+- A background poll whose only result is a transient failure shows nothing; the
+  poll retries on its own.
+- A screen that fails to render shows `app/error.tsx` (or `global-error.tsx`):
+  plain words, "Try again", and the render digest as the reference. A chunk
+  that no longer exists after a deploy asks for a reload instead.
+- ESLint forbids rendering `error.message`, `(error as Error).message` and
+  `new Error(payload.error || …)` in components and routes.
+- A deduplicated read follows only Query's signal; a caller that stops waiting
+  uses `untilCallerAborts`, so it never aborts the request others share.
+
+The Hub's messages for transient failures name no internal component
+(`postgres_unavailable` says "xMatrix is briefly unavailable; try again").
+
+### Finding a failure again
+
+An answer is for a person and a machine; a report is for whoever debugs it.
+
+- **Hub.** Every route failure is answered through `requestFailure`, and a `500`
+  is reported with what the route was doing: its method and template
+  (`GET /api/spaces/:spaceId/channels/:channelId`) and the opaque ids in its
+  path, never its body or query. The answer quotes the report's id as
+  `reference`; `<ErrorNotice>` shows it ("Report: …"), so one id finds the log.
+  A cron task is reported under its task name.
+- **Retry policy.** When Query's bounded retries give up on a transient failure
+  the error is marked `persistent`, and the person reads that xMatrix is still
+  unavailable after several tries rather than "try again in a moment".
+- **Browser.** A failure `describeError` can only call "something went wrong"
+  is a client defect: `reportClientDefect` sends the action, the error's name,
+  its message with quoted text redacted, and its stack to `/api/client-defects`
+  (same origin, 8 KB), which reports it like a Worker failure. Ten distinct
+  defects per page at most; cancellations and transient failures are never
+  sent.
+
+### Web proxy
+
+The web Worker's hop to the Hub (`src/lib/xmatrix-proxy.ts`) answers a dropped
+Hub connection as a retryable `503`. A hop timeout and a failed session refresh
+are not retryable: repeating them only adds load or delays the real error.
+
+## Coming back: one connectivity signal
+
+`apps/web/src/lib/connectivity/connectivity.ts` is the only place that listens
+to `focus`, `visibilitychange`, `online`, `pageshow` and the iOS app's
+`xmatrix:native-resume`. It emits one resume signal per return to the
+foreground, carrying whether the page was **suspended** (hidden for more than
+20 seconds, restored from the back-forward cache, or resumed by the native app)
+and whether the network just came back. Every subscriber sees the same answer.
+
+Subscribers: both live sockets (below), the foreground refresh of the
+conversation list and workspace, the session read in `auth-context.tsx`, and
+TanStack Query's `onlineManager`. New code that needs to react to the page
+coming back subscribes here; it does not add its own window listeners.
+
+## Live connections: one reconnecting socket
+
+`apps/web/src/lib/connectivity/reconnecting-socket.ts` keeps every WebSocket
+up: the Human socket (`use-workspace-shell-state.ts`) and the page editor's
+session (`lib/pages/page-client.ts`). It guarantees:
+
+- one dial at a time, so a delayed redial never opens a second socket;
+- jittered exponential backoff, reset only when the owner reports the session
+  works (`markHealthy`: `human_connected`, a page's first sync), never on a
+  bare `open`;
+- a dial still connecting after 15 seconds is abandoned;
+- a heartbeat: any inbound frame counts as an answer, a socket silent past the
+  pong timeout is replaced, and repeated probes never extend the deadline;
+- on resume: a suspended page replaces its socket, a page with no socket dials
+  at once, a live socket is probed.
+
+### Heartbeats cost nothing
+
+The Hub answers both heartbeats with a Durable Object WebSocket auto-response,
+so a ping neither wakes the object nor ends its hibernation:
+
+| Socket | Ping frame | Answer | Interval / timeout |
+| --- | --- | --- | --- |
+| Human | `HUMAN_HEARTBEAT_PING` (`@xmatrix/protocol`) | `HUMAN_HEARTBEAT_PONG` | 25 s / 10 s |
+| Page | `"ping"` text frame | `"pong"` | 25 s / 10 s |
+
+The frames are compared byte for byte, so both sides import the same constant.
+A page session pings only when its ticket names the heartbeat
+(`heartbeat: "ping"`), so an editor never times out a Hub that predates it.
+
+### Tokens
+
+A token renewal does not tear a connection down. The Human socket reads the
+current token when it dials, and the Hub decides when a new one is needed by
+closing with `4401`; the page session takes a renewed token for its next
+ticket and keeps its document, which may hold edits the Hub has not received.
+An HTTP `401` to a request that carried the bearer token raises the same
+renewal event as a socket `4401` (`lib/auth-events.ts`); the auth provider
+renews at most once every ten seconds however many requests were refused.

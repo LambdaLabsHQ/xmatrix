@@ -171,6 +171,23 @@ test("an Agent edit merges with human edits, streams in under its cursor and com
   assert.notEqual(h.session.doc.clientID, agentClient, "the session writes as itself again afterwards");
 });
 
+test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  const original = h.ports.commit;
+  const detached = [{ automationId: "a-1", name: "Dependency sweep" }];
+  h.ports.commit = async (principal, input) => ({ ...await original(principal, input),
+    detachedAutomations: detached, attachedAutomations: [] });
+  const result = await h.session.submitEdit(agent, { baseRevision: 1, body: "# Project\n\n## Status\n\nIn progress\n",
+    conversationIds: [] });
+  assert.deepEqual(result.removedSections, ["Notes"]);
+  assert.deepEqual(result.detachedAutomations, detached);
+  assert.deepEqual(result.attachedAutomations, []);
+  assert.deepEqual(h.notices.find((notice) => notice.type === "committed").detachedAutomations, detached,
+    "people on the page see it too");
+  assert.doesNotMatch(ann.text.toString(), /## Notes/u);
+});
+
 test("an Agent edit that overlaps a newer change is refused with the current text", async () => {
   const h = harness();
   const ann = await annConnected(h);
@@ -243,6 +260,28 @@ test("closing a connection removes its awareness", async () => {
   h.session.receive("c-ann", encoding.toUint8Array(encoder));
   assert.equal(bob.awareness.getStates().get(ann.doc.clientID)?.user?.name, "ann");
   h.session.disconnect("c-ann");
+  assert.equal(bob.awareness.getStates().has(ann.doc.clientID), false);
+});
+
+test("a session holds no timer, so its Durable Object can hibernate", () => {
+  const timers = () => process.getActiveResourcesInfo().filter((kind) => kind === "Timeout").length;
+  const before = timers();
+  const h = harness();
+  assert.equal(timers(), before, "a pending timer keeps the object in memory and billed");
+  assert.ok(h.session);
+});
+
+test("presence nobody renewed expires when the next connection arrives", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  ann.awareness.setLocalStateField("user", { name: "ann" });
+  const encoder = encoding.createEncoder();
+  encoding.writeVarUint(encoder, PAGE_MESSAGE_AWARENESS);
+  encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(ann.awareness, [ann.doc.clientID]));
+  h.session.receive("c-ann", encoding.toUint8Array(encoder));
+  h.session.awareness.meta.get(ann.doc.clientID).lastUpdated -= awarenessProtocol.outdatedTimeout;
+  const bob = h.connect("c-bob", human("bob"));
+  assert.equal(h.session.awareness.getStates().has(ann.doc.clientID), false);
   assert.equal(bob.awareness.getStates().has(ann.doc.clientID), false);
 });
 
@@ -547,3 +586,4 @@ test("pages written by hand and Agent edits in any markdown style merge as the s
   await h.session.submitEdit(agent, { baseRevision: 1, body: "# Project\n* zero\n* one\n* two\n", conversationIds: [] });
   assert.equal(h.session.markdown(), "# Project\n\n- zero\n- one\n- two and a half\n");
 });
+

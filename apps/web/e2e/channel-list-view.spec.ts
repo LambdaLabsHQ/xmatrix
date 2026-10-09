@@ -184,3 +184,83 @@ test("the list loads its next page into the same list", async ({ page }) => {
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect.poll(visibleChannelRowIds(page)).toEqual([E2E_CHANNEL.id, older.id]);
 });
+
+test("pinned conversations sit under their own Pinned heading", async ({ page }) => {
+  const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan" };
+  const other = { ...E2E_CHANNEL, id: "channel-other", name: "random" };
+  await openWorkspaceWithStubs(page, {
+    spaces: [E2E_SPACE],
+    channels: [pinned, other],
+    channelViewPreference: { pinnedChannelIds: [pinned.id] },
+  });
+  const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+  await expect(sidebar.locator(`[data-channel-row-id="${pinned.id}"]`)).toBeVisible();
+  const order = await sidebar.locator(".app-list-section-heading, [data-channel-row-id]").evaluateAll((nodes) =>
+    nodes.map((node) => (node as HTMLElement).dataset.channelRowId ?? node.textContent?.trim()));
+  expect(order).toEqual(["Pinned", pinned.id, "Recent", other.id]);
+});
+
+test("unpinning the last conversation removes Pinned and saves an empty list", async ({ page }) => {
+  const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan",
+    updatedAt: "2026-07-01T08:00:00.000Z" };
+  const other = { ...E2E_CHANNEL, id: "channel-other", name: "random",
+    updatedAt: "2026-07-01T12:00:00.000Z" };
+  await openWorkspaceWithStubs(page, {
+    spaces: [E2E_SPACE], channels: [pinned, other],
+    channelViewPreference: { pinnedChannelIds: [pinned.id] },
+  });
+  const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+  await sidebar.getByRole("button", { name: "Unpin #launch-plan", exact: true }).click();
+  await expect(sidebar.getByText("Pinned", { exact: true })).toHaveCount(0);
+  await expect.poll(visibleChannelRowIds(page)).toEqual([other.id, pinned.id]);
+  await expect(sidebar.getByRole("button", { name: "Pin #launch-plan", exact: true })).toHaveCount(1);
+  await expect.poll(() => page.evaluate(async (spaceId) => {
+    const response = await fetch(`/api/xmatrix/spaces/${spaceId}/channel-view-preference`);
+    return (await response.json()).pinnedChannelIds;
+  }, E2E_SPACE.id)).toEqual([]);
+});
+
+test("unpin while a pin is saving keeps the person's last choice", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+  await expect(sidebar.getByRole("button", { name: "Pin #general", exact: true })).toHaveCount(1);
+  await page.evaluate(() => {
+    const original = window.fetch;
+    let release: () => void;
+    let releaseUnpin: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const unpinGate = new Promise<void>((resolve) => { releaseUnpin = resolve; });
+    const control = { started: false, unpinStarted: false,
+      release: () => release(), releaseUnpin: () => releaseUnpin() };
+    Object.assign(window, { pinSaveControl: control });
+    window.fetch = async (url, init) => {
+      if (!control.started && init?.method === "PATCH" && String(url).endsWith("/channel-view-preference")) {
+        control.started = true;
+        await gate;
+      } else if (!control.unpinStarted && init?.method === "PATCH" && String(url).endsWith("/channel-view-preference")) {
+        control.unpinStarted = true;
+        await unpinGate;
+      }
+      return original(url, init);
+    };
+  });
+  await sidebar.getByRole("button", { name: "Pin #general", exact: true }).click({ force: true });
+  await expect.poll(() => page.evaluate(() =>
+    (window as typeof window & { pinSaveControl: { started: boolean } }).pinSaveControl.started)).toBe(true);
+  await sidebar.getByRole("button", { name: "Unpin #general", exact: true }).click();
+  await expect(sidebar.getByText("Pinned", { exact: true })).toHaveCount(0);
+  // The old request returns after the person has already undone it.
+  await page.evaluate(() =>
+    (window as typeof window & { pinSaveControl: { release: () => void } }).pinSaveControl.release());
+  await expect.poll(() => page.evaluate(() =>
+    (window as typeof window & { pinSaveControl: { unpinStarted: boolean } }).pinSaveControl.unpinStarted)).toBe(true);
+  await expect(sidebar.getByText("Pinned", { exact: true })).toHaveCount(0);
+  await page.evaluate(() =>
+    (window as typeof window & { pinSaveControl: { releaseUnpin: () => void } }).pinSaveControl.releaseUnpin());
+  await expect.poll(() => page.evaluate(async (spaceId) => {
+    const response = await fetch(`/api/xmatrix/spaces/${spaceId}/channel-view-preference`);
+    const preference = await response.json();
+    return { version: preference.version, pins: preference.pinnedChannelIds };
+  }, E2E_SPACE.id)).toEqual({ version: 3, pins: [] });
+  await expect(sidebar.getByText("Pinned", { exact: true })).toHaveCount(0);
+});

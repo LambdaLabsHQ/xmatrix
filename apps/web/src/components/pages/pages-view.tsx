@@ -8,7 +8,7 @@ import {
   isLiveAgentStatus, pageAuthorColor, type SerializedAutomation, type SerializedChannel,
 } from "@xmatrix/protocol";
 import {
-  ChevronDown, ChevronRight, FileText, History, Lock, MessageSquare, Plus, Share2,
+  ChevronDown, ChevronRight, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -16,15 +16,16 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
   PageLiveSession, pageApi, pageChildren,
-  type PageClaim, type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageSummary, type PageTreeAgent,
+  type PageClaim, type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageSummary, type PageTreeActivity, type PageTreeAgent,
 } from "@/lib/pages/page-client";
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
+import { CountPill } from "@/components/dashboard/count-pill";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
 import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
-  ConversationList, PageDialog, PageHistory, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageDialog, PageHistory, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin } from "./page-margin";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
@@ -32,11 +33,10 @@ import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/t
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
 import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
 import { discussionDraft, discussionTitle } from "@/components/dashboard/selection-discussion";
-import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
-import { avatarInitials } from "@/components/dashboard/completion-option-button";
-import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
+import { NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 // The native shell also imports this module for its list screens. The editor
 // (ProseMirror and the page document) belongs to an open document, not to the cold-start list dependency graph.
@@ -66,6 +66,8 @@ function documentOpensWithTitle(title: string, blocks: PageDocBlock[], markdown:
  * people and Agents, with who is on each section shown beside it.
  */
 
+const PAGE_SERVER_OUTDATED_NOTICE = "Live editing is being updated; the page will open for editing in a moment.";
+
 export function usePageTree(spaceId: string | null, token: string) {
   const { user } = useAuth();
   return useQuery({
@@ -75,52 +77,69 @@ export function usePageTree(spaceId: string | null, token: string) {
   });
 }
 
-/** The Agents reading or editing each page from a live Run, as Channel rows show theirs. */
+interface PageTreeActivities {
+  /** The Agents reading or editing each page from a live Run. */
+  agents: Map<string, PageTreeAgent[]>;
+  /** Each page's open discussions, as this reader sees them. */
+  discussions: Map<string, PageTreeActivity["discussions"]>;
+}
+
 function usePageAgents(spaceId: string | null, token: string) {
   const { user } = useAuth();
   return useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-tree-agents", [spaceId]),
     enabled: Boolean(spaceId && token && user?.id), staleTime: 5_000, refetchInterval: 15_000,
-    queryFn: ({ signal }) => pageApi.agents(spaceId!, token, signal)
-      .then((result) => new Map(result.pages.map((page) => [page.pageId, page.agents]))),
+    queryFn: ({ signal }) => pageApi.agents(spaceId!, token, signal).then((result): PageTreeActivities => ({
+      agents: new Map(result.pages.map((page) => [page.pageId, page.agents])),
+      discussions: new Map(result.pages.map((page) => [page.pageId, page.discussions])),
+    })),
   });
 }
 
-const TREE_AVATARS = 3;
-const NO_AGENTS = new Map<string, PageTreeAgent[]>();
+const NO_ACTIVITY: PageTreeActivities = { agents: new Map(), discussions: new Map() };
 
-// The Agents on a page stay icon-sized beside its title.
-function PageAgentAvatars({ agents }: { agents: readonly PageTreeAgent[] }) {
-  // Busy Agents first: they are the ones working on the page right now.
-  const sorted = [...agents].sort((a, b) => Number(b.status === "busy") - Number(a.status === "busy"));
-  const hidden = sorted.length - TREE_AVATARS;
+/**
+ * A page's open discussions beside its title, as Google Docs counts unresolved
+ * comments. While one has replies this reader has not read, the count wears the
+ * app's count chip, as a conversation's unread does; otherwise it stays faint.
+ */
+function PageDiscussionCount({ open, unread }: { open: number; unread: number }) {
+  const label = `${open} open discussion${open === 1 ? "" : "s"}${unread > 0 ? `, ${unread} with unread replies` : ""}`;
+  if (unread > 0) {
+    return (
+      <span className="app-page-row-discussions flex shrink-0 items-center px-0.5" data-testid="page-tree-discussions"
+        aria-label={label}>
+        <CountPill count={open} title={label} />
+      </span>
+    );
+  }
   return (
-    <div className="app-channel-agent-avatars flex shrink-0 items-center -space-x-1.5 px-0.5" data-testid="page-tree-agents">
-      {sorted.slice(0, TREE_AVATARS).map((agent) => (
-        <IdentityAvatar key={`${agent.instanceId}:${agent.conversationId}`} kind="agent"
-          label={`${agent.name} (${agent.activity})`} status={agent.status} imageUrl={agent.avatarUrl}
-          initials={agent.avatarUrl ? avatarInitials(agent.name) : undefined}
-          size="xs" showKindBadge={false} className="app-channel-agent-avatar rounded-full" />
-      ))}
-      {hidden > 0 && (
-        <span className={cn("app-channel-presence-overflow flex size-5 items-center justify-center text-[9px] font-bold",
-          COUNT_CHIP_MATERIAL_CLASS)}>
-          +{hidden}
-        </span>
-      )}
-    </div>
+    <span className="app-page-row-discussions app-page-row-discussions-read flex shrink-0 items-center gap-1 px-0.5 text-xs tabular-nums text-muted-foreground"
+      data-testid="page-tree-discussions" title={label} aria-label={label}>
+      <MessageSquare className="size-3.5" aria-hidden="true" />{open}
+    </span>
   );
 }
 
-/** A page row's second line: who is on the page now, else when it last changed. */
-export function pageRowMeta(page: Pick<PageSummary, "updatedAt">, agents: readonly PageTreeAgent[], now = Date.now()) {
+function names(agents: readonly PageTreeAgent[]): string {
+  const unique = [...new Set(agents.map((agent) => agent.name))];
+  return unique.length > 2 ? `${unique.slice(0, 2).join(", ")} +${unique.length - 2}` : unique.join(", ");
+}
+
+/**
+ * A page row's second line, what is happening on the page: an Agent editing
+ * it and where, else the newest reply in its open discussions, else who is
+ * reading it, else when it last changed.
+ */
+export function pageRowMeta(page: Pick<PageSummary, "updatedAt">, agents: readonly PageTreeAgent[],
+  latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()) {
   const editing = agents.filter((agent) => agent.activity === "editing");
-  const on = editing.length > 0 ? editing : agents;
-  if (on.length > 0) {
-    const names = [...new Set(on.map((agent) => agent.name))];
-    const who = names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
-    return `${who} ${editing.length > 0 ? "editing" : "reading"}`;
+  if (editing.length > 0) {
+    const sections = [...new Set(editing.map((agent) => agent.section).filter(Boolean))];
+    return `${names(editing)} editing${sections.length === 1 ? ` · ${sections[0]}` : ""}`;
   }
+  if (latest) return `${latest.from.label}: ${latest.bodyPreview}`;
+  if (agents.length > 0) return `${names(agents)} reading`;
   const age = formatRelativeAge(page.updatedAt, now);
   return age ? `Edited ${age}` : "";
 }
@@ -149,8 +168,8 @@ function PageTreeRow({ depth, selected, open, onToggle, expandHidden, children }
   );
 }
 
-function TreeNode({ page, childrenOf, agentsOf, depth, selectedPageId, onSelect, onPrefetch, onCreateChild }: {
-  page: PageSummary; childrenOf: Map<string | null, PageSummary[]>; agentsOf: Map<string, PageTreeAgent[]>; depth: number;
+function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect, onPrefetch, onCreateChild }: {
+  page: PageSummary; childrenOf: Map<string | null, PageSummary[]>; activity: PageTreeActivities; depth: number;
   selectedPageId: string | null; onSelect: (pageId: string) => void; onPrefetch: (pageId: string) => void;
   /** Makes a page under this one, from the row itself. */
   onCreateChild?: (pageId: string) => void;
@@ -158,7 +177,8 @@ function TreeNode({ page, childrenOf, agentsOf, depth, selectedPageId, onSelect,
   const children = childrenOf.get(page.pageId) ?? [];
   const [open, setOpen] = useState(true);
   const selected = page.pageId === selectedPageId;
-  const agents = agentsOf.get(page.pageId) ?? [];
+  const agents = activity.agents.get(page.pageId) ?? [];
+  const discussions = activity.discussions.get(page.pageId);
   return (
     <li>
       <PageTreeRow depth={depth} selected={selected} open={open}
@@ -171,9 +191,9 @@ function TreeNode({ page, childrenOf, agentsOf, depth, selectedPageId, onSelect,
             <span className="app-page-row-title app-list-row-title truncate">{page.title}</span>
             {page.accessMode === "restricted" && <Lock className="size-3 shrink-0 text-muted-foreground" />}
           </span>
-          <span className="app-list-row-meta truncate">{pageRowMeta(page, agents)}</span>
+          <span className="app-list-row-meta truncate">{pageRowMeta(page, agents, discussions?.latest)}</span>
         </button>
-        {agents.length > 0 && <PageAgentAvatars agents={agents} />}
+        {discussions && discussions.open > 0 && <PageDiscussionCount open={discussions.open} unread={discussions.unread} />}
         {/* Shown while the row is hovered; a touch screen has no hover, so there it stays. */}
         {onCreateChild && (
           <button type="button" aria-label="New sub-page" title="New sub-page"
@@ -186,7 +206,7 @@ function TreeNode({ page, childrenOf, agentsOf, depth, selectedPageId, onSelect,
       {open && children.length > 0 && (
         <ul>
           {children.map((child) => (
-            <TreeNode key={child.pageId} page={child} childrenOf={childrenOf} agentsOf={agentsOf} depth={depth + 1}
+            <TreeNode key={child.pageId} page={child} childrenOf={childrenOf} activity={activity} depth={depth + 1}
               selectedPageId={selectedPageId} onSelect={onSelect} onPrefetch={onPrefetch} onCreateChild={onCreateChild} />
           ))}
         </ul>
@@ -241,35 +261,6 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
 
 const PREFETCHED_PAGES = 40;
 
-export type PageCreation = ReturnType<typeof usePageCreation>;
-
-/**
- * Creating a page, shared by the tree's own + and, on a phone, the + in the
- * top bar: one state, so the tree shows the error whichever of them started it.
- */
-export function usePageCreation(spaceId: string | null, token: string, onCreated: (pageId: string) => void) {
-  const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const create = useCallback(async (parentPageId: string | null) => {
-    const title = window.prompt(parentPageId ? "Title of the new sub-page" : "Title of the new page");
-    if (!title?.trim() || !spaceId) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const { page } = await pageApi.create(spaceId, token, { title: title.trim(), parentPageId });
-      await queryClient.invalidateQueries({ queryKey: ["xmatrix"], predicate: (query) =>
-        query.queryKey.includes("page-tree") });
-      onCreated(page.pageId);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create the page");
-    } finally {
-      setCreating(false);
-    }
-  }, [onCreated, queryClient, spaceId, token]);
-  return { create, creating, error };
-}
-
 export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, creation,
   layout = "sidebar", create }: {
   spaceId: string | null; token: string; selectedPageId: string | null; onSelectPage: (pageId: string) => void;
@@ -285,8 +276,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
   layout?: "sidebar" | "phone";
 }) {
   const tree = usePageTree(spaceId, token);
-  const agents = usePageAgents(spaceId, token);
-  const agentsOf = agents.data ?? NO_AGENTS;
+  const activity = usePageAgents(spaceId, token).data ?? NO_ACTIVITY;
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -350,7 +340,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
         {/* The list always meets the plank with a section's name, never a bare row. */}
         {roots.length > 0 && <ListSectionHeading label="All pages" />}
         <ul>{roots.map((page) => (
-          <TreeNode key={page.pageId} page={page} childrenOf={childrenOf} agentsOf={agentsOf} depth={0}
+          <TreeNode key={page.pageId} page={page} childrenOf={childrenOf} activity={activity} depth={0}
             selectedPageId={selectedPageId} onSelect={onSelectPage} onPrefetch={prefetch}
             onCreateChild={creation.creating ? undefined : (pageId) => void creation.create(pageId)} />
         ))}</ul>
@@ -441,15 +431,18 @@ const MARGIN_ROOM_PX = 640 + 24 + 320;
 
 type PageDialogState =
   | "share"
+  | "delete"
   | { kind: "conversations"; blockId: string | null }
   | { kind: "attach"; blockId: string };
 
-export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conversation, activeConversationId = null,
-  renderConversation, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null }: {
+export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPageDeleted, conversation, activeConversationId = null,
+  renderConversation, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
+  freshPageId = null }: {
   spaceId: string | null;
   token: string;
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
+  onPageDeleted: () => void;
   /** What this client knows live about a conversation: the channel it holds, when it holds it. */
   conversation: (conversationId: string) => SerializedChannel | null;
   /** The conversation open beside the page: in the margin at what it is about, or docked when there is no room. */
@@ -472,6 +465,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
   layout?: "desktop" | "phone";
   /** A section a reference opened the page at; a new `seq` brings it into view again. */
   focusSection?: { pageId: string; blockId: string; seq: number } | null;
+  /** A page just made with +: it opens with its title selected, ready to type over. */
+  freshPageId?: string | null;
 }) {
   const { user } = useAuth();
   const tree = usePageTree(spaceId, token);
@@ -559,6 +554,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
     setSeenRevision(revision);
     void pageApi.markRead(spaceId, pageId, token, revision).catch(() => undefined);
   }, [opened, pageId, spaceId, token]);
+  // The GitHub files the page embeds are read through the Hub, as this reader (pages-live-document.md §6.5).
+  const readGitHubFile = useCallback((href: string, signal: AbortSignal) =>
+    pageApi.githubFile(spaceId!, pageId!, token, href, signal), [spaceId, pageId, token]);
   const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
   // The page on screen in this tab is read at its head once it has been there a moment.
   useEffect(() => {
@@ -597,10 +595,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
     setFocused(null);
   }, [pageId]);
 
+  // A token renewal (hourly) must not rebuild the session: that would drop
+  // the document and any edit the Hub has not received yet.
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const hasToken = Boolean(token);
   useEffect(() => {
-    if (!spaceId || !pageId || !userId || !token) return;
+    if (token) session?.setToken(token);
+  }, [session, token]);
+
+  useEffect(() => {
+    if (!spaceId || !pageId || !userId || !hasToken) return;
     // One session per page; it must not churn when the auth context re-renders.
-    const live = new PageLiveSession({ spaceId, pageId, token,
+    const live = new PageLiveSession({ spaceId, pageId, token: tokenRef.current,
       user: { name: userName, color: pageAuthorColor({ kind: "user", id: userId }) } });
     setSession(live);
     setNotice(null);
@@ -617,7 +624,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
         // The edit is sent as it is made; the session keeps it as it arrives.
         saveTimer.current = window.setTimeout(() => setSaveState(connectedRef.current ? "saved" : "offline"), 700);
       }
-      if (event.type === "synced") setSynced(true);
+      if (event.type === "synced") {
+        setSynced(true);
+        setNotice((current) => current === PAGE_SERVER_OUTDATED_NOTICE ? null : current);
+      }
       if (event.type === "session") { setCanEdit(event.canEdit); setHeadRevision(event.headRevision); }
       if (event.type === "access") {
         if (event.canRead === false) setNotice("You no longer have access to this page.");
@@ -627,6 +637,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
         setHeadRevision(event.headRevision);
         // An Agent that just edited is on the page from now; its caret shows once its live Run is known.
         void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree-agents") });
+        // Taking a reference out pauses its Automation; whoever is on the page hears it at once.
+        const detached = event.detachedAutomations ?? [];
+        if (detached.length) {
+          setNotice(`${event.author ?? "An edit"} removed the reference to ${detached.map((automation) =>
+            `“${automation.name}”`).join(", ")}, so ${detached.length === 1 ? "it is" : "they are"} paused. Put the reference back to resume.`);
+        }
       }
       if (event.type === "suggestion") setNotice(`${event.author} suggested a change — see History.`);
       if (event.type === "claims") {
@@ -635,12 +651,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       }
       if (event.type === "error" && event.code === "page_body_too_large") setNotice("This page is over 256 KiB.");
       if (event.type === "error" && event.code === "page_server_outdated") {
-        setNotice("Live editing is being updated; the page will open for editing in a moment.");
+        setNotice(PAGE_SERVER_OUTDATED_NOTICE);
       }
     });
     return () => { off(); live.destroy(); setSession(null); setConnected(false); setSynced(false); setEditorReady(false);
       setSaveState("idle"); };
-  }, [spaceId, pageId, token, userId, userName, queryClient]);
+  }, [spaceId, pageId, hasToken, userId, userName, queryClient]);
 
   // The editor reads the page's sections from its document as it changes.
   const [blocks, setBlocks] = useState<PageDocBlock[]>([]);
@@ -734,7 +750,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
   // The Agents whose live Run read or edited the page stay on it while that Run lives, as in
   // the tree; a live session only shows an Agent at the moment it reads or edits (§3.2).
   const pageAgents = usePageAgents(spaceId, token);
-  const liveOnPage = useMemo(() => pageAgents.data?.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
+  const liveOnPage = useMemo(() => pageAgents.data?.agents.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
   const staying = useMemo(() => liveOnPage.filter((agent) =>
     !presence.some(({ state }) => liveRunOf(state, [agent]))), [liveOnPage, presence]);
   // An Agent's caret rests at its last edit while its Run lives, dimmed while the Run is not working;
@@ -808,7 +824,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       await pageApi.publish(spaceId, page.pageId, token, !page.publishedAt);
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Could not change who can read this page");
+      setNotice(userErrorMessage(cause, "Couldn't change who can read this page"));
     }
   };
   const publicUrl = spaceId && page ? `/p/${encodeURIComponent(spaceId)}/${encodeURIComponent(page.pageId)}` : null;
@@ -820,9 +836,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       await pageApi.setGovernance(spaceId, token, { governancePageId: page.governance ? null : page.pageId });
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Could not change who edits this page");
+      setNotice(userErrorMessage(cause, "Couldn't change who edits this page"));
     }
   };
+
+  const titleInput = useRef<HTMLInputElement>(null);
+  const titledPageId = useRef<string | null>(null);
+  useEffect(() => {
+    const input = titleInput.current;
+    if (!input || !page || page.pageId !== freshPageId || titledPageId.current === page.pageId) return;
+    titledPageId.current = page.pageId;
+    input.focus();
+    input.select();
+  }, [canEdit, freshPageId, page]);
 
   const renamePage = async (value: string) => {
     const title = value.trim();
@@ -831,9 +857,25 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       await pageApi.update(spaceId, page.pageId, token, { title });
       await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Could not rename the page");
+      setNotice(userErrorMessage(cause, "Couldn't rename the page"));
     }
   };
+
+  // The page's name, when the document does not already open with it. Plain text: a field well would repeat the heading.
+  const titleField = page && !documentOpensWithTitle(page.title, blocks, document.data?.body) ? (canEdit ? (
+    <input ref={titleInput} key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
+      data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") { event.currentTarget.value = page.title; event.currentTarget.blur(); }
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.value.trim()) event.currentTarget.value = page.title;
+        void renamePage(event.currentTarget.value);
+      }}
+      className="page-title mr-auto min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-2xl font-black shadow-none outline-none" />
+  ) : (
+    <h1 className="mr-auto text-2xl font-black">{page.title}</h1>
+  )) : null;
 
   const toggleSuggestOnly = async () => {
     if (!spaceId || !page) return;
@@ -882,21 +924,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
     .then(() => setNotice("Link copied."), (cause: Error) => setNotice(cause.message));
   const copyLink = (blockId: string) => copy(blockLink(blockId));
   // Asking about a passage, or asking for it to change, is a discussion on it whose first message
-  // addresses xMatrix; it opens beside the page, where the answer arrives.
+  // addresses @auto, which routes to an enabled harness; it opens beside the page, where the answer arrives.
   const ask: NonNullable<PageSectionActions["ask"]> = async (blockId, anchor, request) => {
     if (!page) return;
     const quote = anchor.quote.split("\n").map((line) => `> ${line}`).join("\n");
     const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
     const firstMessage = request.mode === "ask"
-      ? `@xMatrix ${request.prompt}\n\nAbout this passage of ${where}:\n${quote}`
-      : `@xMatrix ${request.prompt}\n\nChange this passage of ${where} with \`xmatrix page edit\`, then resolve this ` +
+      ? `@auto ${request.prompt}\n\nAbout this passage of ${where}:\n${quote}`
+      : `@auto ${request.prompt}\n\nChange this passage of ${where} with \`xmatrix page edit\`, then resolve this ` +
         `discussion with \`xmatrix page resolve\` (its link id is under \`discussion:\` in \`xmatrix page read\`):\n${quote}`;
     try {
       await onDiscuss({ spaceId, pageId: page.pageId, blockId, restricted,
         name: `${request.mode === "ask" ? "Ask" : "Change"}: ${request.prompt.slice(0, 60)}`, anchor, firstMessage });
       void links.refetch();
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : "Could not ask");
+      setNotice(userErrorMessage(cause, "Couldn't send the question"));
       throw cause;
     }
   };
@@ -1032,6 +1074,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
   })();
   const listSection = dialog && typeof dialog === "object" && dialog.kind === "conversations" ? dialog : null;
 
+  const hasChildren = pages.some((item) => item.parentPageId === pageId);
+  const removePage = async () => {
+    if (!spaceId || !page) return;
+    await pageApi.remove(spaceId, page.pageId, token);
+    queryClient.setQueryData<PageSummary[]>(xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-tree", [spaceId]), (current) =>
+      current?.filter((item) => item.pageId !== page.pageId));
+    setDialog(null);
+    onPageDeleted();
+    await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
+  };
+
   const controls = (
     <>
       <PresenceStack people={people} onFollow={jumpTo} />
@@ -1048,6 +1101,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       <Button variant="ghost" size="sm" onClick={() => setDialog("share")}>
         <Share2 /> Share
       </Button>
+      {canEdit && (
+        <Button variant="ghost" size="sm" title="Delete page" aria-label="Delete page"
+          onClick={() => setDialog("delete")}><Trash2 /></Button>
+      )}
     </>
   );
 
@@ -1057,25 +1114,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       <PageScrollMarks marks={scrollMarks} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
-        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-4"
+        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
           : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
           <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
             {phone ? (
-              <div className="flex items-center justify-end gap-1 py-2" data-testid="page-controls">{controls}</div>
+              <>
+                <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{controls}</div>
+                {titleField && <div className="mb-4 flex">{titleField}</div>}
+              </>
             ) : (
               <header className="app-band-header mb-4 flex flex-wrap items-center gap-1.5" data-testid="page-controls">
-                {page && !documentOpensWithTitle(page.title, blocks, document.data?.body) ? (canEdit ? (
-                  // The page's name, when the document does not already open with it. Plain text: a field well would repeat the heading.
-                  <input key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
-                    data-testid="page-title" onKeyDown={(event) => {
-                      if (event.key === "Enter") event.currentTarget.blur();
-                      if (event.key === "Escape") { event.currentTarget.value = page.title; event.currentTarget.blur(); }
-                    }}
-                    onBlur={(event) => void renamePage(event.currentTarget.value)}
-                    className="page-title mr-auto min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-2xl font-black shadow-none outline-none" />
-                ) : (
-                  <h1 className="mr-auto text-2xl font-black">{page.title}</h1>
-                )) : <span className="mr-auto" />}
+                {titleField ?? <span className="mr-auto" />}
                 <span className="mr-1 text-xs text-muted-foreground" data-testid="page-save-state"
                   title={`Revision ${headRevision ?? page?.headRevision ?? ""}`}>
                   {saveState === "saving" ? "Saving…" : saveState === "saved" ? "All changes saved"
@@ -1116,7 +1165,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} />}
+                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
                   </div>
                 </div>
                 {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
@@ -1140,6 +1189,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, conver
       {docked && renderConversation?.("dock")}
       {page && (
         <>
+          <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}
+            onClose={() => setDialog(null)} onDelete={removePage} />
           <ShareDialog open={dialog === "share"} onClose={() => setDialog(null)} canPublish={canMigrate}
             canEdit={canEdit} published={Boolean(page.publishedAt)} restricted={restricted} publicUrl={publicUrl}
             suggestOnly={page.agentSuggestOnly} rulesPage={page.governance} onTogglePublished={() => void togglePublished()}

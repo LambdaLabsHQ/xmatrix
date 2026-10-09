@@ -105,6 +105,7 @@ try {
     "packages/db/test/client-postgres.test.mjs",
     "packages/db/test/page-control-postgres.test.mjs",
     "packages/db/test/agent-registration-launch-postgres.test.mjs", "packages/db/test/agent-lifecycle-cleanup.test.mjs",
+    "packages/db/test/first-message-launch-choice-postgres.test.mjs",
     "packages/db/test/legacy-hostname-retirement-postgres.test.mjs",
     "packages/db/test/agent-registration-control-postgres.test.mjs",
     "packages/db/test/secret-request-postgres.test.mjs",
@@ -119,6 +120,11 @@ try {
     // serialize with a Space move on the placement row lock.
     "packages/db/test/message-history-postgres.test.mjs",
     "packages/db/test/placement-fence-postgres.test.mjs"], {
+    XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
+  });
+  // Catalog/metadata fixtures reset their Space closure: run after the other
+  // PostgreSQL files, never concurrently with their live authorities.
+  if (hubSuitePackages) run("node", ["--test", "packages/db/test/channel-catalog-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
   });
   // Workspace packages whose SQL only a real database proves declare test:postgres.

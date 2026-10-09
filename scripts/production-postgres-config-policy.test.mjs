@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -40,6 +41,7 @@ bindings = [
   { name = "RELAY_RUNTIME", class_name = "A" },
   { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "A" },
   { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "A" },
+  { name = "GITHUB_SUBSCRIPTION_INDEX", class_name = "A" },
   { name = "DEVICE_AUTH", class_name = "A" }
 ]
 [[hyperdrive]]
@@ -67,13 +69,27 @@ function readback(binding) {
     },
     caching: { disabled: true },
     mtls: { sslmode: "require" },
-    origin_connection_limit: shard ? 10 : 30,
+    origin_connection_limit: shard ? 8 : 24,
   };
 }
 
 test("production config selects PostgreSQL for every fact domain", () => {
   assert.deepEqual(verifyProductionPostgresConfig(config()).hyperdrives, ids);
   assert.throws(() => verifyProductionPostgresConfig(`${config()}\n[[hyperdrive]]\nbinding = "RELAY_POSTGRES_CACHED"\nid = "${"2".repeat(32)}"`), /exactly two uncached Hyperdrive bindings/u);
+});
+
+test("production config rejects unterminated comments without hanging the release", () => {
+  // A child process bounds the regression: vulnerable smol-toml loops forever
+  // synchronously, so a test timeout in the same process cannot interrupt it.
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", `
+    import assert from "node:assert/strict";
+    import { verifyProductionPostgresConfig } from ${JSON.stringify(new URL("./production-postgres-config-policy.mjs", import.meta.url).href)};
+    for (const source of ["a=[1 #", "a={b=1 #"]) {
+      assert.throws(() => verifyProductionPostgresConfig(source), /production config is not valid TOML/);
+    }
+  `], { encoding: "utf8", timeout: 5_000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test("production config rejects D1 and retired fact Durable Object bindings", () => {

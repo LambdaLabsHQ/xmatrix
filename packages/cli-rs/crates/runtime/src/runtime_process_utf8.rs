@@ -58,8 +58,8 @@ use agent_presentation::{
 };
 use cli::{
     AttachmentCommand, Cli, CliEnvironmentArg, Commands, DaemonCommand, EnvironmentCommand,
-    ManagementCommand, MigrateCommand, MigrationHistoryMode, ProfileCommand, RequestCommand,
-    SecretCommand, SetupCommand,
+    MigrateCommand, MigrationHistoryMode, ProfileCommand, RequestCommand, SecretCommand,
+    SetupCommand,
 };
 use config::CliSession;
 use error::CliError;
@@ -97,87 +97,47 @@ pub fn configure_process_utf8() {
     terminal::configure_process_utf8();
 }
 
-/// One default a Windows harness child gets so its shells and tools read and
-/// write UTF-8. `respects` lists the variables that, when the user or caller
-/// already set any of them, leave the default out.
-struct WindowsUtf8EnvDefault {
-    key: &'static str,
-    value: &'static str,
-    respects: &'static [&'static str],
-}
-
-/// Python (including tools written in it) and Git Bash/MSYS (via `LANG`) use
-/// UTF-8 for text and pipes. `LANG` is skipped when any locale variable is
-/// already set, so a configured locale is never replaced. The system ANSI
-/// code page itself is never changed.
-const WINDOWS_UTF8_CHILD_ENV: &[WindowsUtf8EnvDefault] = &[
-    WindowsUtf8EnvDefault {
-        key: "PYTHONUTF8",
-        value: "1",
-        respects: &["PYTHONUTF8"],
-    },
-    WindowsUtf8EnvDefault {
-        key: "PYTHONIOENCODING",
-        value: "utf-8",
-        respects: &["PYTHONIOENCODING"],
-    },
-    WindowsUtf8EnvDefault {
-        key: "LANG",
-        value: "C.UTF-8",
-        respects: &["LANG", "LC_ALL", "LC_CTYPE"],
-    },
-    WindowsUtf8EnvDefault {
-        key: "DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION",
-        value: "1",
-        respects: &["DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION"],
-    },
+/// Agent text transport is UTF-8 even when the daemon or preset inherited an
+/// older locale. This is a child-process policy, never a machine locale edit.
+const WINDOWS_UTF8_CHILD_ENV: &[(&str, &str)] = &[
+    ("PYTHONUTF8", "1"),
+    ("PYTHONIOENCODING", "utf-8"),
+    ("LANG", "C.UTF-8"),
+    ("LC_ALL", "C.UTF-8"),
 ];
 
-/// The UTF-8 defaults not already decided by `is_configured` (which sees the
-/// caller's explicit child env and the daemon's own environment).
-fn windows_utf8_env_defaults(
-    is_configured: impl Fn(&str) -> bool,
-) -> Vec<(&'static str, &'static str)> {
-    WINDOWS_UTF8_CHILD_ENV
-        .iter()
-        .filter(|default| !default.respects.iter().any(|key| is_configured(key)))
-        .map(|default| (default.key, default.value))
-        .collect()
-}
-
-/// Whether `key` is set (Windows names are case-insensitive) in `explicit` or
-/// in this process's environment, which the child would inherit.
-fn utf8_env_key_configured<'a>(
-    key: &str,
-    mut explicit: impl Iterator<Item = &'a std::ffi::OsStr>,
-) -> bool {
-    explicit.any(|name| name.to_string_lossy().eq_ignore_ascii_case(key))
-        || std::env::vars_os().any(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case(key))
-}
-
-fn apply_windows_utf8_env(command: &mut std::process::Command) {
+fn apply_windows_utf8_env(command: &mut std::process::Command) -> error::Result<()> {
     if !cfg!(windows) {
-        return;
+        return Ok(());
     }
-    let defaults = windows_utf8_env_defaults(|key| {
-        utf8_env_key_configured(key, command.get_envs().map(|(name, _)| name))
-    });
-    command.envs(defaults);
-}
-
-fn apply_windows_utf8_env_tokio(command: &mut tokio::process::Command) {
-    if !cfg!(windows) {
-        return;
+    command.envs(WINDOWS_UTF8_CHILD_ENV.iter().copied());
+    // Keep the existing .NET color-redirection default independent of encoding.
+    const COLOR_ENV: &str = "DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION";
+    if std::env::var_os(COLOR_ENV).is_none()
+        && !command
+            .get_envs()
+            .any(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case(COLOR_ENV))
+    {
+        command.env(COLOR_ENV, "1");
     }
-    let defaults = windows_utf8_env_defaults(|key| {
-        utf8_env_key_configured(key, command.as_std().get_envs().map(|(name, _)| name))
-    });
-    command.envs(defaults);
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
+        let path = command
+            .get_envs()
+            .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case("PATH"))
+            .and_then(|(_, value)| value.map(std::ffi::OsStr::to_os_string));
+        command.envs(runtime_utf8_shell::child_env(path.as_deref()).map_err(CliError::Launch)?);
     }
+    Ok(())
+}
+
+fn apply_windows_utf8_env_tokio(command: &mut tokio::process::Command) -> error::Result<()> {
+    apply_windows_utf8_env(command.as_std_mut())?;
+    #[cfg(windows)]
+    {
+        command.creation_flags(0x0800_0000);
+    }
+    Ok(())
 }
 
 /// A vendor app-server child, bound to its process tree, whose stdout carries
@@ -204,13 +164,13 @@ impl AppServerChild {
     ) -> error::Result<Self> {
         let (spawn_cmd, spawn_args) = shell_wrap(cmd, app_args);
         let mut command = tokio::process::Command::new(&spawn_cmd);
-        apply_windows_utf8_env_tokio(&mut command);
         command
             .args(&spawn_args)
             .stdin(stdin)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
         configure(&mut command);
+        apply_windows_utf8_env_tokio(&mut command)?;
         if let Some(dir) = cwd {
             command.current_dir(dir);
         }
@@ -334,21 +294,52 @@ fn loopback_ws_bind_address(bind_env: &str, server: &str) -> error::Result<Strin
     Ok(format!("127.0.0.1:{port}"))
 }
 
-fn append_windows_utf8_env(env_vars: &mut Vec<(String, String)>) {
+fn append_windows_utf8_env(env_vars: &mut Vec<(String, String)>) -> error::Result<()> {
     if !cfg!(windows) {
-        return;
+        return Ok(());
     }
-    let defaults = windows_utf8_env_defaults(|key| {
-        utf8_env_key_configured(
-            key,
-            env_vars.iter().map(|(name, _)| std::ffi::OsStr::new(name)),
-        )
+    env_vars.retain(|(name, _)| {
+        !WINDOWS_UTF8_CHILD_ENV
+            .iter()
+            .any(|(key, _)| name.eq_ignore_ascii_case(key))
     });
+    const COLOR_ENV: &str = "DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION";
+    if std::env::var_os(COLOR_ENV).is_none()
+        && !env_vars
+            .iter()
+            .any(|(key, _)| key.eq_ignore_ascii_case(COLOR_ENV))
+    {
+        env_vars.push((COLOR_ENV.into(), "1".into()));
+    }
     env_vars.extend(
-        defaults
-            .into_iter()
+        WINDOWS_UTF8_CHILD_ENV
+            .iter()
             .map(|(key, value)| (key.to_string(), value.to_string())),
     );
+    #[cfg(windows)]
+    {
+        let path = env_vars
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+            .map(|(_, value)| std::ffi::OsString::from(value));
+        let shell_env = runtime_utf8_shell::child_env(path.as_deref()).map_err(CliError::Launch)?;
+        env_vars.retain(|(key, _)| {
+            !shell_env
+                .iter()
+                .any(|(name, _)| key.eq_ignore_ascii_case(&name.to_string_lossy()))
+        });
+        for (name, value) in shell_env {
+            env_vars.push((
+                name.into_string().map_err(|_| {
+                    CliError::Launch("UTF-8 shell environment name is not Unicode".into())
+                })?,
+                value.into_string().map_err(|_| {
+                    CliError::Launch("UTF-8 shell environment value is not Unicode".into())
+                })?,
+            ));
+        }
+    }
+    Ok(())
 }
 
 const ACCESS_TOKEN_REFRESH_AGE_SECS: u64 = 45 * 60;
@@ -420,9 +411,8 @@ impl CodexTransportRecoveryState {
 
 const INBOUND_DELIVERY_BATCH_MAX_MESSAGES_ENV: &str = "XMATRIX_INBOUND_DELIVERY_BATCH_MAX_MESSAGES";
 const DEFAULT_INBOUND_DELIVERY_BATCH_MAX_MESSAGES: usize = 25;
-const LONG_LIVED_REGISTER_RETRY_BASE_MS: u64 = 1_000;
-const LONG_LIVED_REGISTER_RETRY_MAX_MS: u64 = 30_000;
-const LONG_LIVED_REGISTER_RETRY_JITTER_MS: u64 = 500;
+const LONG_LIVED_REGISTER_RETRY_BASE: std::time::Duration = std::time::Duration::from_secs(1);
+const LONG_LIVED_REGISTER_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(30);
 const DEFAULT_DAEMON_SELF_UPDATE_INTERVAL_SECS: u64 = 30 * 60;
 const DAEMON_SELF_UPDATE_STARTUP_TIMEOUT_SECS: u64 = 15;
 const DAEMON_SELF_UPDATE_PERIODIC_TIMEOUT_SECS: u64 = 120;
@@ -849,10 +839,6 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         Some(Commands::Page { command }) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
             cmd_page(&hub_url, &token, command).await
-        }
-        Some(Commands::Management { command }) => {
-            let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
-            cmd_management(&hub_url, &token, *command).await
         }
         Some(Commands::Automation { command }) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
@@ -1873,140 +1859,6 @@ async fn cmd_attachment(command: AttachmentCommand) -> error::Result<()> {
             Ok(())
         }
     }
-}
-
-async fn cmd_management(
-    hub_url: &str,
-    token: &str,
-    mut command: ManagementCommand,
-) -> error::Result<()> {
-    let space = command.space_mut();
-    *space = xmatrix_cli_core::space_ref::resolve_space_ref(hub_url, token, space).await?;
-    match command {
-        ManagementCommand::Channels {
-            space,
-            query,
-            limit,
-            json,
-        } => cmd_management_channels(hub_url, token, &space, &query, limit, json).await,
-        ManagementCommand::Channel {
-            space,
-            channel,
-            message_limit,
-            json,
-        } => cmd_management_channel(hub_url, token, &space, &channel, message_limit, json).await,
-    }
-}
-
-async fn cmd_management_channels(
-    hub_url: &str,
-    token: &str,
-    space_id: &str,
-    query: &str,
-    limit: u32,
-    json_output: bool,
-) -> error::Result<()> {
-    let response: Value = http::request_json(
-        &with_route(
-            hub_url,
-            &protocol::space_management_channels_route(space_id, query, limit.clamp(1, 200)),
-        ),
-        "GET",
-        Some(token),
-        None,
-    )
-    .await?;
-    if json_output {
-        println!("{}", serde_json::to_string_pretty(&response)?);
-        return Ok(());
-    }
-    let matches = response["matches"].as_array().cloned().unwrap_or_default();
-    println!(
-        "Management channel search in {}: {} matches{}",
-        space_id,
-        matches.len(),
-        if response["truncated"].as_bool() == Some(true) {
-            " (truncated)"
-        } else {
-            ""
-        }
-    );
-    for item in matches {
-        let channel = &item["detail"]["channel"];
-        println!(
-            "- {} ({}) fields={}",
-            channel["name"].as_str().unwrap_or("unnamed"),
-            channel["id"].as_str().unwrap_or("unknown"),
-            item["matchedFields"]
-                .as_array()
-                .map(|fields| fields
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(","))
-                .unwrap_or_default()
-        );
-    }
-    Ok(())
-}
-
-async fn cmd_management_channel(
-    hub_url: &str,
-    token: &str,
-    space_id: &str,
-    channel_id: &str,
-    message_limit: u32,
-    json_output: bool,
-) -> error::Result<()> {
-    let response: Value = http::request_json(
-        &with_route(
-            hub_url,
-            &protocol::space_management_channel_route(
-                space_id,
-                channel_id,
-                message_limit.clamp(1, 100),
-            ),
-        ),
-        "GET",
-        Some(token),
-        None,
-    )
-    .await?;
-    if json_output {
-        println!("{}", serde_json::to_string_pretty(&response)?);
-        return Ok(());
-    }
-    let detail = &response["detail"];
-    let channel = &detail["channel"];
-    println!(
-        "{} ({}) mode={} archived={} frozen={} runs={} loops={} claims={} bindings={} failures={}",
-        channel["name"].as_str().unwrap_or("unnamed"),
-        channel["id"].as_str().unwrap_or(channel_id),
-        channel["mode"].as_str().unwrap_or("unknown"),
-        detail["archived"].as_bool().unwrap_or(false),
-        detail["frozen"].as_bool().unwrap_or(false),
-        detail["liveRunIds"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-        detail["openLoops"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-        detail["claims"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-        detail["bindings"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-        detail["recentFailures"]
-            .as_array()
-            .map(Vec::len)
-            .unwrap_or_default(),
-    );
-    Ok(())
 }
 
 async fn ensure_setup_machine_name(hub_url: &str, name: Option<&str>) -> error::Result<()> {

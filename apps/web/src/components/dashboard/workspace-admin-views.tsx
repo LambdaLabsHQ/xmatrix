@@ -15,7 +15,6 @@ import {
   desktopDaemonLabel,
   desktopUpdateDescription,
   desktopUpdateLabel,
-  errorMessage,
 } from "./workspace-shell-desktop-labels";
 
 import { type AppView } from "./workspace-shell-navigation";
@@ -23,8 +22,8 @@ import { type AppView } from "./workspace-shell-navigation";
 import {
   COUNT_CHIP_MATERIAL_CLASS,
   WORKING_SPACE_KV_KEY,
-  XMATRIX_RELEASE_VERSION,
 } from "./workspace-shell-constants";
+import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
 
 import {
   agentPresetOrCustom,
@@ -60,7 +59,6 @@ import {
   noteChannelContentRevision,
   parseChannelContentRevision,
 } from "@/lib/relay-v2/channel-content-revision";
-import { mergeSpaceSnapshot } from "./workspace-space-snapshot";
 import type { SpaceJoinRequest } from "@/components/dashboard/space-join-requests";
 import { HumanProfileSummary } from "@/components/dashboard/human-profile-summary";
 import {
@@ -178,7 +176,8 @@ import {
 } from "@/lib/desktop/bridge";
 
 import { cn } from "@/lib/utils";
-import { xmatrixApiRequest, requireResponseOk } from "@/lib/query/api-client";
+import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
@@ -188,7 +187,6 @@ import type {
   ChannelCatalogSyncMetadata,
   ChannelMessage,
   ChannelMemberPresence,
-  ManagementChannelVisibility,
   ObservabilityEvent,
   SerializedAgent,
   SerializedAgentInstance,
@@ -365,7 +363,7 @@ export function SettingsView({
   const canManageSecrets = secretQuery.data?.canManage === true;
   const secretCatalogLoaded = secretQuery.isFetched;
   const secretCatalogLoading = secretQuery.isFetching;
-  const secretCatalogError = secretActionError ?? secretQuery.error?.message ?? null;
+  const secretCatalogError = secretActionError ?? userErrorMessage(secretQuery.error, "Couldn't load secrets");
   const secretSaving = secretMutation.isPending && secretMutation.variables?.kind === "save";
   const deletingSecretRef = secretMutation.isPending && secretMutation.variables?.kind === "delete"
     ? secretMutation.variables.secretRef ?? null : null;
@@ -388,7 +386,7 @@ export function SettingsView({
       await getDesktopBridge()?.switchEnvironment?.(environment);
       window.location.assign(clientAppUrl(environment));
     } catch (error) {
-      setEnvironmentSwitchError(errorMessage(error, "Could not switch environments."));
+      setEnvironmentSwitchError(userErrorMessage(error, "Couldn't switch environments"));
       setEnvironmentSwitching(false);
     }
   }
@@ -462,7 +460,7 @@ export function SettingsView({
       setSecretCatalogError(null);
     } catch (err) {
       setSecretEditor((current) =>
-        current ? { ...current, error: errorMessage(err, "Could not save secret.") } : current
+        current ? { ...current, error: userErrorMessage(err, "Couldn't save secret") ?? "" } : current
       );
     }
   }
@@ -485,7 +483,7 @@ export function SettingsView({
         current?.draft.secretRef === entry.secretRef ? null : current
       );
     } catch (err) {
-      setSecretCatalogError(errorMessage(err, "Could not delete secret."));
+      setSecretCatalogError(userErrorMessage(err, "Couldn't delete secret"));
     }
   }
 
@@ -914,14 +912,6 @@ export function SettingsView({
   return <SectionedToolView title="Settings" sections={sections} />;
 }
 
-export type ManagementAgentPatch = {
-  enabled?: boolean;
-  sideEffectsEnabled?: boolean;
-  /** Null restores the platform template. */
-  prompt?: string | null;
-  defaultChannelVisibility?: ManagementChannelVisibility;
-};
-
 export interface SpaceMemberActions {
   onDecideJoinRequest: (spaceId: string, requestId: string, approve: boolean) => Promise<void>;
   onCreateSpaceInviteCode: (
@@ -937,10 +927,6 @@ export interface SpaceMemberActions {
     userId: string,
     role: SpaceInviteRole
   ) => Promise<SpaceMemberActionResult>;
-  onUpdateSpaceManagementAgent: (
-    spaceId: string,
-    patch: ManagementAgentPatch
-  ) => Promise<void>;
   onUpdateSpaceMemberPermissions: (
     spaceId: string,
     patch: Partial<SpaceMemberPermissions>
@@ -955,206 +941,21 @@ export interface SpaceMemberActions {
 }
 
 
-export function SpaceManagementAgentCard({
-  space,
-  canManage,
-  setupHighlight,
-  onUpdate,
-  onDismissSetup,
-}: {
-  space: SerializedSpace;
-  canManage: boolean;
-  setupHighlight: boolean;
-  onUpdate: (
-    spaceId: string,
-    patch: ManagementAgentPatch
-  ) => Promise<void>;
-  onDismissSetup: () => void;
-}) {
-  const config = space.managementAgent;
-  const enabled = config?.enabled === true;
-  const sideEffectsEnabled = config?.sideEffectsEnabled !== false;
-  const savedPrompt = config?.prompt ?? "";
-  const [promptDraft, setPromptDraft] = useState<string | null>(null);
-  const prompt = promptDraft ?? savedPrompt;
-  const [pending, setPending] = useState(false);
-  const [cardError, setCardError] = useState<string | null>(null);
-  const defaultReadMode = config?.defaultChannelVisibility || "management-visible";
-  const needsSetup = canManage && !enabled;
-  const promptChanged = promptDraft !== null && promptDraft !== savedPrompt;
-  async function submit(patch: ManagementAgentPatch) {
-    if (pending) return;
-    setPending(true);
-    setCardError(null);
-    try {
-      await onUpdate(space.id, patch);
-      if (patch.prompt !== undefined) setPromptDraft(null);
-      if (setupHighlight && patch.enabled) onDismissSetup();
-    } catch (err) {
-      setCardError((err as Error).message);
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <div
-      className={cn(
-        "mt-4 border-t border-border/60 pt-4",
-        needsSetup && "border-primary/40",
-        setupHighlight && needsSetup && "border-l-2 border-l-primary pl-3"
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-black">
-            {needsSetup ? "Set up xMatrix" : "xMatrix assistant"}
-          </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Where xMatrix runs when it answers <code>@xMatrix</code> and keeps Channel summaries current.
-            Write a summon such as <code>@auto harness:codex</code>.
-          </p>
-        </div>
-        <span
-          className={cn(
-            "app-status-chip shrink-0 px-3 py-1 text-xs font-bold",
-            COUNT_CHIP_MATERIAL_CLASS
-          )}
-        >
-          {enabled ? (sideEffectsEnabled ? "enabled" : "read-only") : needsSetup ? "not set up" : "off"}
-        </span>
-      </div>
-      {canManage ? (
-        <div className="mt-3 grid grid-cols-3 items-center gap-2 sm:flex sm:flex-wrap">
-          <textarea
-            value={prompt}
-            disabled={pending}
-            autoFocus={setupHighlight && needsSetup}
-            onChange={(event) => setPromptDraft(event.target.value)}
-            aria-label={`xMatrix prompt for ${space.name}`}
-            placeholder="@auto harness:codex"
-            rows={8}
-            spellCheck={false}
-            className="col-span-3 min-h-40 w-full rounded border border-border bg-card px-2 py-1.5 font-mono text-xs outline-none disabled:opacity-60"
-          />
-          <button
-            type="button"
-            disabled={pending || (enabled && !promptChanged)}
-            onClick={() =>
-              void submit({
-                ...(enabled ? {} : { enabled: true }),
-                ...(promptChanged ? { prompt: promptDraft!.trim() ? promptDraft : null } : {}),
-              })
-            }
-            className={cn(
-              "h-8 min-w-0 rounded border border-border bg-card px-2 text-xs font-bold hover:text-primary disabled:cursor-not-allowed disabled:opacity-60 sm:shrink-0 sm:px-3",
-              !enabled && "col-span-3"
-            )}
-          >
-            {pending ? "Saving…" : enabled ? "Save prompt" : "Enable"}
-          </button>
-          {config?.prompt !== undefined ? (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void submit({ prompt: null })}
-              className={actionClass({ variant: "secondary", size: "sm" }, "min-w-0 sm:shrink-0 sm:px-3")}
-              title="Use the platform template again"
-            >
-              Reset to template
-            </button>
-          ) : null}
-          {enabled ? (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void submit({ sideEffectsEnabled: !sideEffectsEnabled })}
-              className={actionClass({ variant: "secondary", size: "sm" }, "min-w-0 sm:shrink-0 sm:px-3")}
-              title={
-                sideEffectsEnabled
-                  ? "Pause every management side effect while preserving read-only diagnosis and audit access"
-                  : "Resume Hub-authorized management side effects"
-              }
-            >
-              {sideEffectsEnabled ? "Pause actions" : "Resume actions"}
-            </button>
-          ) : null}
-          {enabled ? (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void submit({ enabled: false })}
-              className={actionClass({ variant: "secondary", size: "sm" }, "min-w-0 sm:shrink-0 sm:px-3")}
-            >
-              Disable
-            </button>
-          ) : null}
-          {enabled && !sideEffectsEnabled ? (
-            <p className={noticeClass("attention", "col-span-3 w-full text-xs font-bold")}>
-              The management fuse is active. xMatrix can still inspect events and audit records,
-              but Hub rejects every side effect.
-            </p>
-          ) : null}
-          <label className="col-span-3 flex min-w-0 flex-1 items-center gap-2 text-xs font-bold text-muted-foreground">
-            Default
-            <div className="min-w-0 flex-1">
-              <GlassSelect
-                value={defaultReadMode}
-                disabled={pending}
-                aria-label={`Management assistant default read mode for ${space.name}`}
-                options={[
-                  { value: "management-visible", label: "Read channels" },
-                  { value: "metadata-only", label: "Activity only" },
-                  { value: "excluded", label: "Off by default" },
-                ]}
-                onChange={(value) =>
-                  void submit({
-                    defaultChannelVisibility: value as ManagementChannelVisibility,
-                  })
-                }
-                className="h-8 rounded bg-card px-2 text-xs font-bold text-foreground"
-              />
-            </div>
-          </label>
-          {setupHighlight && needsSetup ? (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={onDismissSetup}
-              className="h-8 shrink-0 rounded px-2 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-60"
-            >
-              Skip for now
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Only owners and admins can change this.
-        </p>
-      )}
-      {cardError ? <p className="mt-2 text-xs text-destructive">{cardError}</p> : null}
-    </div>
-  );
-}
-
 export function TeamView({
   token,
   user,
   currentSpace,
   error,
-  managementSetupSpaceId,
   joinRequestsBySpace,
   onDecideJoinRequest,
   onCreateSpaceInviteCode,
   onInviteSpaceMembers,
   onUpdateSpaceMemberRole,
   onRemoveSpaceMember,
-  onUpdateSpaceManagementAgent,
   onUpdateSpaceMemberPermissions,
   onUpdateSpacePreferredLanguage,
   onDeleteSpace,
   onRestoreSpace,
-  onDismissManagementSetup,
   spaces,
   creatingSpace,
   onCreateSpace,
@@ -1164,10 +965,8 @@ export function TeamView({
   user: { id: string; email: string; name?: string; avatarUrl?: string };
   currentSpace: SerializedSpace | null;
   error: string | null;
-  managementSetupSpaceId: string | null;
   joinRequestsBySpace: Record<string, SpaceJoinRequest[]>;
 
-  onDismissManagementSetup: () => void;
   spaces: SerializedSpace[];
   creatingSpace: boolean;
   onCreateSpace: (name: string) => Promise<SerializedSpace | undefined>;
@@ -1214,7 +1013,7 @@ export function TeamView({
     } catch (error) {
       setCodeErrorBySpace((current) => ({
         ...current,
-        [spaceId]: error instanceof Error ? error.message : "Failed to decide this request",
+        [spaceId]: userErrorMessage(error, "Couldn't decide this request") ?? "",
       }));
     }
   }
@@ -1234,7 +1033,7 @@ export function TeamView({
     } catch (error) {
       setCodeErrorBySpace((current) => ({
         ...current,
-        [space.id]: error instanceof Error ? error.message : "Failed to create invite code",
+        [space.id]: userErrorMessage(error, "Couldn't create the invite code") ?? "",
       }));
     } finally {
       setCreatingCodeSpaceId(null);
@@ -1283,7 +1082,7 @@ export function TeamView({
     } catch (err) {
       setInviteStatusBySpace((current) => ({
         ...current,
-        [space.id]: { type: "error", message: (err as Error).message },
+        [space.id]: { type: "error", message: userErrorMessage(err, "Couldn't send the invite") ?? "" },
       }));
     } finally {
       setInvitingSpaceId(null);
@@ -1299,7 +1098,7 @@ export function TeamView({
       await operation();
       setMemberStatusBySpace(current => ({ ...current, [spaceId]: { type: "success", message } }));
     } catch (err) {
-      setMemberStatusBySpace(current => ({ ...current, [spaceId]: { type: "error", message: (err as Error).message } }));
+      setMemberStatusBySpace(current => ({ ...current, [spaceId]: { type: "error", message: userErrorMessage(err, "Couldn't update the member") ?? "" } }));
     } finally { setMemberActionKey(null); }
   }
 
@@ -1329,7 +1128,7 @@ export function TeamView({
     } catch (error) {
       setPermissionErrorBySpace((current) => ({
         ...current,
-        [space.id]: error instanceof Error ? error.message : "Failed to update member permissions",
+        [space.id]: userErrorMessage(error, "Couldn't update member permissions") ?? "",
       }));
     } finally {
       setPermissionBusyBySpace((current) => ({ ...current, [space.id]: false }));
@@ -1371,13 +1170,6 @@ export function TeamView({
                   <div className="mt-3 text-xs text-muted-foreground">
                     {space.members.length} {space.members.length === 1 ? "member" : "members"}
                   </div>
-                  <SpaceManagementAgentCard
-                    space={space}
-                    canManage={canManage}
-                    setupHighlight={space.id === managementSetupSpaceId}
-                    onUpdate={onUpdateSpaceManagementAgent}
-                    onDismissSetup={onDismissManagementSetup}
-                  />
                   {canManage ? (
                     <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:flex">
                       <span className="font-bold">Language / 语言</span>
@@ -1814,9 +1606,14 @@ export function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** A component's version, marked when it is older than this web/hub release. */
-export function MachineVersionValue({ version, className }: { version?: string; className?: string }) {
-  const status = releaseVersionStatus(version);
+/** A component's version, marked when it is older than that component's stable release. */
+export function MachineVersionValue({ version, component, className }: {
+  version?: string;
+  component: ReleaseComponent;
+  className?: string;
+}) {
+  const latestVersion = useLatestComponentRelease(component);
+  const status = releaseVersionStatus(version, latestVersion);
   return (
     <span className={cn("flex min-h-5 min-w-0 flex-wrap items-center gap-1.5", className)}>
       <span className="min-w-0 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
@@ -1825,7 +1622,7 @@ export function MachineVersionValue({ version, className }: { version?: string; 
       {status === "outdated" && (
         <span
           className={statusChipClass("attention", "inline-flex h-5 shrink-0 items-center gap-1 px-1.5")}
-          title={`This component is older than web/hub ${formatVersion(XMATRIX_RELEASE_VERSION)}.`}
+          title={`The latest stable release is ${formatVersion(latestVersion!)}.`}
         >
           <AlertTriangle className="size-3.5" />
           Update
@@ -1883,7 +1680,7 @@ export async function fetchChannelCatalog(
   let res: Response;
   try {
     res = await runWorkspaceFetchWithRetry(() =>
-      fetch(route, {
+      xmatrixRawResponse(route, {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
         signal: workspaceAttemptSignal(sequenceSignal),
@@ -1891,14 +1688,11 @@ export async function fetchChannelCatalog(
       { signal: sequenceSignal },
     );
   } catch (error) {
-    if (sequenceSignal.aborted) throw new Error("Channel list request timed out", { cause: error });
+    if (sequenceSignal.aborted) throw new DOMException("Channel list request timed out", "TimeoutError");
     throw error;
   }
 
-  if (!res.ok) {
-    const payload = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(payload.error || "Failed to load channels");
-  }
+  if (!res.ok) throw await errorFromResponse(res);
 
   const data = (await res.json()) as {
     channels?: SerializedChannel[];
@@ -2056,7 +1850,7 @@ export async function patchAutomation(
   automationId: string,
   input: AutomationUpdateRequest
 ): Promise<SerializedAutomation> {
-  const res = await fetch(WEB_PROXY_ROUTES.automation(automationId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automationId), {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2065,14 +1859,7 @@ export async function patchAutomation(
     body: JSON.stringify(input),
     cache: "no-store",
   });
-  const payload = (await res.json().catch(() => ({}))) as {
-    automation?: SerializedAutomation;
-    error?: string;
-  };
-  if (!res.ok || !payload.automation) {
-    throw new Error(payload.error || "Failed to update Automation");
-  }
-  return payload.automation;
+  return requireField<SerializedAutomation>(res, "automation", "The Automation");
 }
 
 export async function setAutomationPaused(
@@ -2083,32 +1870,30 @@ export async function setAutomationPaused(
   const route = paused
     ? WEB_PROXY_ROUTES.automation_pause(automation.id)
     : WEB_PROXY_ROUTES.automation_resume(automation.id);
-  const res = await fetch(route, {
+  const res = await xmatrixRawResponse(route, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ expectedVersion: automation.version }),
     cache: "no-store",
   });
-  const payload = (await res.json().catch(() => ({}))) as { automation?: SerializedAutomation; error?: string };
-  if (!res.ok || !payload.automation) throw new Error(payload.error || "Failed to change Automation state");
-  return payload.automation;
+  return requireField<SerializedAutomation>(res, "automation", "The Automation");
 }
 
 export async function removeAutomation(token: string, automation: SerializedAutomation): Promise<void> {
-  const res = await fetch(WEB_PROXY_ROUTES.automation(automation.id), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automation.id), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ expectedVersion: automation.version }),
     cache: "no-store",
   });
-  await requireResponseOk(res, "Failed to delete Automation", 404);
+  await requireResponseOk(res, 404);
 }
 
 export async function registerWorkspace(
   token: string,
   candidate: DesktopWorkspaceCandidate
 ): Promise<SerializedWorkspace> {
-  const res = await fetch(WEB_PROXY_ROUTES.workspaces, {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.workspaces, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2126,24 +1911,20 @@ export async function registerWorkspace(
     cache: "no-store",
   });
 
-  const payload = (await res.json().catch(() => ({}))) as {
-    workspace?: SerializedWorkspace;
-    error?: string;
-  };
-  if (!res.ok || !payload.workspace) {
-    throw new Error(payload.error || "Failed to register workspace");
-  }
+  if (!res.ok) throw await errorFromResponse(res);
+  const payload = (await res.json().catch(() => ({}))) as { workspace?: SerializedWorkspace };
+  if (!payload.workspace) throw unexpectedResponse("The workspace");
   return payload.workspace;
 }
 
 export async function deleteWorkspace(token: string, workspace: SerializedWorkspace): Promise<void> {
-  const res = await fetch(WEB_PROXY_ROUTES.workspaces, {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.workspaces, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ machineId: workspace.machineId, canonicalCwd: workspace.canonicalCwd }),
     cache: "no-store",
   });
-  await requireResponseOk(res, "Failed to remove workspace", 404);
+  await requireResponseOk(res, 404);
 }
 
 export type ChannelHistoryPage = {
@@ -2175,17 +1956,14 @@ export async function fetchChannelHistory(
   if (options.afterSequence !== undefined) {
     params.set("afterSequence", String(options.afterSequence));
   }
-  const res = await fetch(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
+  const res = await xmatrixRawResponse(`${WEB_PROXY_ROUTES.channel_history(channelId)}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
     signal: options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS)])
       : AbortSignal.timeout(CHANNEL_HISTORY_FETCH_TIMEOUT_MS),
   });
-  if (!res.ok) {
-    const payload = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-    throw new Error(payload.error || "Failed to load channel history");
-  }
+  if (!res.ok) throw await errorFromResponse(res);
   const data = (await res.json()) as {
     messages?: ChannelMessage[];
     hasMore?: unknown;
@@ -2244,7 +2022,7 @@ export async function syncChannelReadCursor(
   channelId: string,
   sequence: number
 ): Promise<ChannelReadStateUpdate | undefined> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_read(channelId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_read(channelId), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2270,7 +2048,7 @@ export async function reactToChannelMessage(
   messageId: string,
   emoji: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message_reactions(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_reactions(channelId, messageId), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2280,7 +2058,7 @@ export async function reactToChannelMessage(
     cache: "no-store",
   });
 
-  return requireMessageResponse(res, "Failed to update reaction");
+  return requireMessageResponse(res);
 }
 
 export async function updateChannelMessage(
@@ -2289,7 +2067,7 @@ export async function updateChannelMessage(
   messageId: string,
   body: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -2299,7 +2077,7 @@ export async function updateChannelMessage(
     cache: "no-store",
   });
 
-  return requireMessageResponse(res, "Failed to edit message");
+  return requireMessageResponse(res);
 }
 
 export async function recallChannelMessage(
@@ -2307,13 +2085,13 @@ export async function recallChannelMessage(
   channelId: string,
   messageId: string
 ): Promise<ChannelMessage> {
-  const res = await fetch(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message(channelId, messageId), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
 
-  return requireMessageResponse(res, "Failed to recall message");
+  return requireMessageResponse(res);
 }
 
 export function replaceChannel(channels: SerializedChannel[], channel: SerializedChannel): SerializedChannel[] {
@@ -2805,7 +2583,7 @@ export function replaceSpace(spaces: SerializedSpace[], space: SerializedSpace):
   const exists = spaces.some((current) => current.id === space.id);
   const next = exists
     ? spaces.map((current) =>
-        current.id === space.id ? mergeSpaceSnapshot(current, space) : current
+        current.id === space.id ? space : current
       )
     : [...spaces, space];
   return sortSpaces(next);
@@ -2858,7 +2636,6 @@ export function channelReadSequenceFromEvent(event: ObservabilityEvent): number 
 
 export { normalizeChannelSearchText } from "./workspace-shell-search-model";
 
-export { mergeWorkspaceSearchResults } from "./workspace-shell-search-model";
 
 export { channelReadCountsStorageKey } from "./workspace-shell-search-model";
 
@@ -2875,8 +2652,9 @@ export async function fetchWorkingSpace(token: string, signal?: AbortSignal): Pr
   }
 }
 
-async function requireMessageResponse(response: Response, fallback: string): Promise<ChannelMessage> {
-  const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: ChannelMessage };
-  if (!response.ok || !payload.message) throw new Error(payload.error || fallback);
+async function requireMessageResponse(response: Response): Promise<ChannelMessage> {
+  if (!response.ok) throw await errorFromResponse(response);
+  const payload = (await response.json().catch(() => ({}))) as { message?: ChannelMessage };
+  if (!payload.message) throw unexpectedResponse("The message");
   return payload.message;
 }

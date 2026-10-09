@@ -6,6 +6,28 @@ export const AGENT_TRACE_ON_DEMAND_CONCURRENCY = 4;
 export const AGENT_TRACE_ON_DEMAND_TIMEOUT_MS = 10_000;
 /** Refresh only while the corresponding trace detail remains open. */
 export const AGENT_TRACE_LIVE_SYNC_INTERVAL_MS = 1_000;
+const AGENT_TRACE_LIVE_SYNC_MAX_BACKOFF_MS = 30_000;
+const AGENT_TRACE_LIVE_SYNC_HIDDEN_MS = 15_000;
+
+/**
+ * The next live read's delay. A failing read backs off (offline, or the Hub
+ * redeploying) instead of asking every second, and a hidden tab asks rarely.
+ */
+export function liveSyncDelayMs(input: {
+  held: boolean;
+  failed: boolean;
+  refreshIntervalMs: number;
+  failures: Map<string, number>;
+  instanceId: string;
+  hidden: boolean;
+}): number {
+  const failures = input.failed ? (input.failures.get(input.instanceId) ?? 0) + 1 : 0;
+  input.failures.set(input.instanceId, failures);
+  const delay = failures > 0
+    ? Math.min(AGENT_TRACE_LIVE_SYNC_MAX_BACKOFF_MS, input.refreshIntervalMs * 2 ** failures)
+    : input.held ? 0 : input.refreshIntervalMs;
+  return input.hidden ? Math.max(delay, AGENT_TRACE_LIVE_SYNC_HIDDEN_MS) : delay;
+}
 /** Matches the Agent host's retention, so loaded earlier pages are kept. */
 export const AGENT_TRACE_REPLICA_MAX_EVENTS = 5_000;
 /** A live delta larger than one page follows its cursor at most this far. */
@@ -438,6 +460,7 @@ export function startAgentTraceHistorySync(
     },
   };
 
+  const failures = new Map<string, number>();
   const schedule = (instanceId: string, delayMs: number) => {
     if (!active) return;
     timers.set(instanceId, setTimeout(() => follow(instanceId), delayMs));
@@ -450,6 +473,7 @@ export function startAgentTraceHistorySync(
     const waitMs = sinceByInstance.has(instanceId) ? input.waitMs ?? 0 : 0;
     const startedAt = Date.now();
     let received = false;
+    let failed = false;
     const current = startAgentTraceHistoryBootstrap({
       ...input,
       instanceIds: [instanceId],
@@ -457,7 +481,10 @@ export function startAgentTraceHistorySync(
       sinceByInstance,
       waitMs,
       reportLoading: false,
-      onState: trackSince.onState,
+      onState: (state) => {
+        if (state.phase === "error") failed = true;
+        trackSince.onState(state);
+      },
       onEvents: (id, events) => {
         received = true;
         trackSince.onEvents(id, events);
@@ -470,7 +497,10 @@ export function startAgentTraceHistorySync(
       // A host that held the read answered on news or at its deadline: ask
       // again at once. One that answered an empty read early cannot wait.
       const held = waitMs > 0 && (received || Date.now() - startedAt >= waitMs / 2);
-      schedule(instanceId, held ? 0 : refreshIntervalMs);
+      schedule(instanceId, liveSyncDelayMs({
+        held, failed, refreshIntervalMs, failures, instanceId,
+        hidden: typeof document !== "undefined" && document.hidden,
+      }));
     };
     void current.done.then(next, next);
   };
@@ -588,10 +618,24 @@ export function agentTraceHistoryStatusCopy(
       detail: "The exact Agent host did not answer the latest live-sync request. Sync retries while this detail stays open; Hub and R2 provide no fallback history.",
     };
   }
-  if (state.phase === "unavailable") {
+  if (state.phase === "unavailable" && state.reason === "host_overloaded") {
+    return {
+      title: "Agent host is busy",
+      detail: "Too many trace reads are open for this instance right now. Sync retries while this detail stays open; Hub and R2 provide no fallback history.",
+    };
+  }
+  // Only a Hub that holds no connection for the instance knows its host is
+  // offline; any other unavailable answer comes from a host that is connected.
+  if (state.phase === "unavailable" && state.reason === "host_offline") {
     return {
       title: "Agent host is offline",
       detail: "Local trace history is unavailable until the exact Agent host can answer. Sync retries while this detail stays open; Hub and R2 provide no fallback history.",
+    };
+  }
+  if (state.phase === "unavailable") {
+    return {
+      title: "Agent host could not read its trace",
+      detail: "The Agent host is connected but did not return this instance's trace history. Sync retries while this detail stays open; Hub and R2 provide no fallback history.",
     };
   }
   if (state.phase === "error" &&

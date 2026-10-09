@@ -13,6 +13,7 @@ import type {
 import type {
   AgentGoalStatus,
   AgentInvocationSelections,
+  DraftSummonIntent,
   AgentRuntimeState,
   ChannelAttachment,
   ChannelMessage,
@@ -25,10 +26,13 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
 } from "react";
+import { UserFacingProblem } from "../../lib/user-facing-error";
 
 export type ComposerSendSnapshot = {
   body: string;
   invocationSelections?: AgentInvocationSelections;
+  /** Jev's reading of each summon while the author typed this exact body. */
+  summonIntents?: DraftSummonIntent[];
   attachments: ChannelAttachment[];
 };
 
@@ -154,7 +158,7 @@ export function messageAttachmentBindings(
   return attachments.map((attachment) => {
     const upload = (attachment as ComposerChannelAttachment).relayV2Upload;
     if (!upload) {
-      throw new Error("This draft contains an outdated attachment. Remove it and attach the file again.");
+      throw new UserFacingProblem("This draft contains an outdated attachment. Remove it and attach the file again.");
     }
     const presentationResidual = {
       ...(attachment.durationMs === undefined ? {} : { durationMs: attachment.durationMs }),

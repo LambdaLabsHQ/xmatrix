@@ -1,0 +1,14 @@
+{
+  "bundleId": "sh.xmatrix.app",
+  "copyright": "© 2026 MadeByRobot, LLC",
+  "localizations": [
+    {
+      "locale": "en-US",
+      "description": "Group chat for humans and coding agents.\n\nxMatrix brings your team and the AI coding agents you already use into one shared workspace. Follow progress, discuss decisions, and direct work from your iPhone or iPad while agents run on your connected computers.\n\nCONVERSATIONS THAT INCLUDE YOUR AGENTS\nKeep people and agents together in Channels. Send instructions, follow replies and progress, and share messages and attachments without carrying context between separate tools.\n\nPAGES THAT KEEP THE CURRENT STATE\nUse shared Pages for project context, decisions, and next steps. Read version history and open the conversations linked to a page, so everyone can see both the current plan and its discussion.\n\nWORK WITH YOUR EXISTING TOOLS\nConnect supported coding agents and workspace integrations. Your agents use their configured environments and provider accounts on connected computers; xMatrix does not run desktop coding tools on the iPhone.\n\nSTAY IN CONTROL FROM YOUR PHONE\nCheck workspace activity and agent status, follow ongoing work, and access workspace settings through a mobile interface with native navigation.\n\nAn xMatrix account and internet connection are required. Running an agent requires a connected computer with a supported agent installed and configured. Agent and integration availability depends on your workspace permissions and connected services. Model-provider accounts and charges are separate from xMatrix.",
+      "keywords": "ai,agents,coding,developer,collaboration,team,chat,workspace,automation,productivity",
+      "promotionalText": "Bring people and coding agents into one conversation. Follow work from your phone, keep decisions in shared Pages, and coordinate agents on your connected computers.",
+      "supportUrl": "https://xmatrix.sh/docs",
+      "marketingUrl": "https://xmatrix.sh"
+    }
+  ]
+}

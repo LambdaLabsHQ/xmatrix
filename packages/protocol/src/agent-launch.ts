@@ -48,6 +48,7 @@ export interface SerializedAgentLaunch {
 
 /** Safe, bounded projection of the exact Run associated with a launch. */
 export interface AgentLaunchActivity {
+  repositoryBaseline?: import("./repository-baseline.js").RepositoryBaseline;
   runStatus: string;
   instanceStatus?: string;
   hostName?: string;

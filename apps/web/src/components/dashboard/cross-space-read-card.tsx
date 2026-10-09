@@ -7,7 +7,10 @@ import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import { actionClass } from "@/components/ui/action-tone";
 import { statusChipClass } from "@/components/ui/status-tone";
+import { ErrorNotice } from "@/components/ui/error-notice";
+import { errorFromResponse } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
 /**
@@ -63,9 +66,8 @@ function useGrantFetch(userId: string, token: string | null | undefined) {
       headers: { Authorization: `Bearer ${token}` }, signal, cache: "no-store",
     });
     if (response.status === 403 || response.status === 404) return null;
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Grant is unavailable");
-    return payload.grant as CrossSpaceReadGrant;
+    if (!response.ok) throw await errorFromResponse(response);
+    return (await response.json()).grant as CrossSpaceReadGrant;
   };
 }
 
@@ -134,12 +136,12 @@ export function CrossSpaceReadCard({ request, token, userId }: {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(action === "approve" && narrow ? { action, scope: "channel" } : { action }),
       });
+      if (!response.ok) throw await errorFromResponse(response);
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Decision failed");
       queryClient.setQueryData(queryKey, payload.grant as CrossSpaceReadGrant);
       void queryClient.invalidateQueries({ queryKey: ["channel-pending-cross-space-reads", userId] });
     } catch (decisionError) {
-      setError((decisionError as Error).message);
+      setError(userErrorMessage(decisionError, "Couldn't record your decision"));
     } finally {
       setBusy(false);
     }
@@ -183,9 +185,9 @@ export function CrossSpaceReadCard({ request, token, userId }: {
             </div>
           )}
           {isOwner && grantQuery.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
-          {(error || grantQuery.error) && (
-            <div role="alert" className="mt-2 text-xs text-destructive">{error || grantQuery.error?.message}</div>
-          )}
+          {error ? <div role="alert" className="mt-2 text-xs text-destructive">{error}</div>
+            : <ErrorNotice error={grantQuery.error} action="Couldn't load this access request"
+              className="mt-2 text-xs text-destructive" onRetry={() => void grantQuery.refetch()} />}
           {isOwner && grant?.status === "pending" && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {grant.scope === "space" && (

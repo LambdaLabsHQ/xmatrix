@@ -20,6 +20,7 @@ export interface Env {
   /** Global fact-free publisher for durable PostgreSQL Agent Launches. */
   /** One Agent Launch coordinator per Channel, addressed by Channel id. */
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
+  GITHUB_SUBSCRIPTION_INDEX?: DurableObjectNamespace<import("./github-subscription-index").GitHubSubscriptionIndex>;
   /** Per-shard permits bounding concurrent background passes; holds no work. */
   RELAY_POSTGRES_BACKGROUND_ADMISSION?: DurableObjectNamespace;
   /** Concurrent Channel coordinator passes admitted per PostgreSQL shard (default 8). */
@@ -133,6 +134,7 @@ export interface Env {
   /** Verified console protocol/delivery/identifiers and approved template; absent keeps company installation closed. */
   CONNECTOR_DINGTALK_COMPANY_CONFIG?: string;
   /** Server-only Stripe API key. A public Payment Link is never an entitlement. */
+  APPLE_SUBSCRIPTIONS_CONFIG?: string;
   STRIPE_SECRET_KEY?: string;
   /** Server-only signing secret for the exact Stripe webhook endpoint. */
   STRIPE_WEBHOOK_SECRET?: string;

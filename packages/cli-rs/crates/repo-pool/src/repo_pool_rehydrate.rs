@@ -50,29 +50,7 @@ fn rehydrate_path(layout: &RepoPoolLayout) -> PathBuf {
 
 fn load_rehydrate_records(layout: &RepoPoolLayout) -> Result<Vec<RehydrateRecord>, PoolError> {
     let path = rehydrate_path(layout);
-    match std::fs::symlink_metadata(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => {
-            return Err(PoolError::new(
-                PoolErrorCode::Io,
-                "cannot stat rehydrate records",
-            ));
-        }
-        Ok(meta) => {
-            ensure_regular_file_no_reparse(&path, &meta)?;
-            if meta.len() > MAX_MANIFEST_BYTES as u64 {
-                return Err(PoolError::new(
-                    PoolErrorCode::ManifestCorrupt,
-                    "rehydrate records exceed size limit",
-                ));
-            }
-        }
-    }
-    let mut raw = Vec::new();
-    open_existing_control_file(&path)?
-        .take(MAX_MANIFEST_BYTES as u64 + 1)
-        .read_to_end(&mut raw)
-        .map_err(|_| PoolError::new(PoolErrorCode::Io, "cannot read rehydrate records"))?;
+    let Some(raw) = read_private_pool_record(&path, "rehydrate records")? else { return Ok(Vec::new()); };
     let file: RehydrateFile = serde_json::from_slice(&raw)
         .map_err(|_| PoolError::new(PoolErrorCode::ManifestCorrupt, "rehydrate records invalid"))?;
     if file.version != REHYDRATE_VERSION {
@@ -326,6 +304,7 @@ pub async fn rehydrate_retained_lease_at(
         base_ref: record.last_base_ref.clone(),
         reused_available: false,
         spawn_claim_token,
+        baseline: None,
     })
 }
 

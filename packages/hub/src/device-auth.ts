@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { ControlError } from "@xmatrix/db";
 import { deriveHumanConnectionUrl, type AuthUser } from "@xmatrix/protocol";
 import { appOrigin } from "./deployment-origins";
 import type { Env } from "./types";
@@ -10,6 +11,8 @@ import {
   verifyAuthToken,
 } from "./auth";
 import { logAuthMetric } from "./auth-observability";
+import { postgresControlErrorResponse } from "./postgres-authority-http";
+import { transientError } from "./error-contract";
 import { SESSION_EXCHANGE_USER_MISMATCH } from "./auth-errors";
 import { createBetterAuthSessionForUser } from "./better-auth";
 import {
@@ -240,7 +243,10 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     } catch (error) {
       if (!(error instanceof InvalidAuthTokenError)) {
         await logAuthMetric({ routeGroup: "device_approve", status: 503, outcome: "verification_unavailable" });
-        return Response.json({ error: "Sign-in could not be checked right now. Try again." }, { status: 503 });
+        // The token was never judged: a key set or database outage is retryable, a defect is not.
+        return postgresControlErrorResponse(new ControlError("auth_verification_unavailable", 503,
+          "Sign-in could not be checked right now. Try again.",
+          error instanceof ControlError ? error.retryable : transientError(error)));
       }
       await logAuthMetric({
         routeGroup: "device_approve",
@@ -555,7 +561,7 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     const session = await this.loadSession(deviceCode);
     if (!session) {
       await logAuthMetric({ routeGroup, status: 404, outcome: "unknown_code" });
-      return Response.json({ error: "Unknown device code" }, { status: 404 });
+      return Response.json({ error: "Unknown device code", code: "unknown_device_code" }, { status: 404 });
     }
     const expired = this.isExpired(session);
     if (expired) await this.ctx.storage.delete(this.sessionKey(deviceCode));

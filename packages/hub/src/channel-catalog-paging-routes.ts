@@ -137,6 +137,20 @@ function rowsWithLiveHumanPresence(
   return rows.map((row, index) => ({ ...row, channel: channels[index]! }));
 }
 
+/** `from=user:<id>` or `from=agent:<name>`; absent is undefined, malformed is null. */
+function messageSearchFrom(value: string | undefined):
+  { kind: "user"; userId: string } | { kind: "agent"; name: string } | undefined | null {
+  const raw = (value || "").trim();
+  if (!raw) return undefined;
+  const at = raw.indexOf(":");
+  const kind = raw.slice(0, at);
+  const id = raw.slice(at + 1).trim();
+  if (at < 0 || !id || id.length > 300) return null;
+  if (kind === "user") return { kind, userId: id };
+  if (kind === "agent") return { kind, name: id };
+  return null;
+}
+
 export function registerChannelCatalogPagingRoutes(
   app: Hono<{ Bindings: Env }>,
   boundary: ChannelCatalogPagingBoundary = hubBoundary,
@@ -154,12 +168,17 @@ export function registerChannelCatalogPagingRoutes(
     const spaceId = (c.req.query("spaceId") || "").trim();
     const query = (c.req.query("query") || "").trim();
     const cursor = (c.req.query("cursor") || "").trim();
-    if (!spaceId || spaceId.length > 300 || !query || query.length > 200 || cursor.length > 300) {
+    const channelId = (c.req.query("channelId") || "").trim();
+    const from = messageSearchFrom(c.req.query("from"));
+    if (!spaceId || spaceId.length > 300 || (!query && !channelId && !from) || query.length > 200
+      || cursor.length > 300 || channelId.length > 300 || from === null) {
       return c.json({ error: "Message search query is invalid" }, 400);
     }
     const page = await postgresMessageSearch(c.env, {
       spaceId, query, principal: { kind: "user", id: userId },
       ...(cursor ? { resumeToken: cursor } : {}),
+      ...(channelId ? { channelId } : {}),
+      ...(from ? { from } : {}),
     });
     return c.json(page, 200, { "cache-control": "private, no-store" });
   }));

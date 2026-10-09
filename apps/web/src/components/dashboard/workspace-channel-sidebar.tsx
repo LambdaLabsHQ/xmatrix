@@ -6,11 +6,10 @@ import { useAndroidBackDismiss } from "./use-android-back";
 
 import {
   ChannelPresenceAvatars,
-  CountPill,
   channelHasWorkInHand,
-  ManagementSetupNotice,
   MobileTabDock,
 } from "./workspace-shell-chrome";
+import { CountPill } from "./count-pill";
 import { ListCreate, type CreateAction } from "./list-create";
 import { ListSectionHeading } from "./list-section-heading";
 
@@ -28,6 +27,7 @@ import { channelEventViews } from "./workspace-shell-presence";
 
 const NO_EVENTS: readonly ObservabilityEvent[] = [];
 const NO_CHANNELS: readonly SerializedChannel[] = [];
+const NO_PINNED_CHANNEL_IDS: ReadonlySet<string> = new Set();
 
 /** Keeps the last painted rows for this Space across a refresh that has not
  *  answered yet. Rows remembered for another Space are ignored, so a switch
@@ -63,11 +63,11 @@ import {
   channelHasUnreadMention,
   channelUnreadCount,
   channelUnreadMentionJumpId,
+  rankCatalogChannels,
 } from "./workspace-shell-helpers-extra";
 
 import { ChannelRowPreview } from "./channel-row-preview";
 import { MentionMark } from "./mention-mark";
-import { SpacePlanBadge } from "./space-plan-badge";
 import { CONVERSATION_QUERY, INTAKE_QUERY, type SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
 import { AppView, MOBILE_CHANNEL_ACTION_LONG_PRESS_MS, MOBILE_CHANNEL_ACTION_MOVE_TOLERANCE_PX } from "./workspace-shell-navigation";
@@ -110,7 +110,6 @@ import {
   Pin,
   PinOff,
   Settings2,
-  Users,
   } from "lucide-react";
 
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
@@ -163,7 +162,6 @@ export type ChannelSidebarProps = {
   onCopyChannelLink: (channel: SerializedChannel) => Promise<void>;
   onSelectSpace: (spaceId: string) => void;
   onSelect: (channelId: string, messageId?: string) => void;
-  onOpenManagementSetup: (spaceId: string) => void;
   catalogPaging: SpaceChannelCatalog;
   /** Durable catalog rows, painted until this Space's live answer arrives. */
   fallbackChannels?: readonly SerializedChannel[];
@@ -192,7 +190,6 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   onCopyChannelLink,
   onSelectSpace,
   onSelect,
-  onOpenManagementSetup,
   catalogPaging,
   fallbackChannels = NO_CHANNELS,
   create = null,
@@ -225,9 +222,9 @@ export const ChannelSidebar = memo(function ChannelSidebar({
     [maintainer, intakeCatalogPage.rows],
   );
   const liveChannels = useMemo(
-    () => rootCatalogPage.rows.map((row) => row.channel)
-      .filter((channel) => !currentSpaceId || channel.spaceId === currentSpaceId),
-    [rootCatalogPage.rows, currentSpaceId]
+    () => rankCatalogChannels(rootCatalogPage.rows.map((row) => row.channel)
+      .filter((channel) => !currentSpaceId || channel.spaceId === currentSpaceId), pinState.pinnedChannelIds),
+    [rootCatalogPage.rows, currentSpaceId, pinState.pinnedChannelIds]
   );
   const paintedChannels = usePaintedChannelRows(
     currentSpaceId, rootCatalogPage.loaded, liveChannels, fallbackChannels,
@@ -250,7 +247,6 @@ export const ChannelSidebar = memo(function ChannelSidebar({
     () => ({ pinnedChannelIds: new Set(pinState.pinnedChannelIds) }),
     [pinState]
   );
-  const currentSpace = spaces.find((space) => space.id === currentSpaceId) || null;
 
   useLayoutEffect(() => {
     if (view !== "messages" || !selectedChannelId) return;
@@ -361,11 +357,6 @@ export const ChannelSidebar = memo(function ChannelSidebar({
         onManageSpaces={onManageSpaces}
       />
       <ListCreate action={create} />
-      <ManagementSetupNotice
-        space={currentSpace}
-        currentUserId={currentUserId}
-        onSetUp={onOpenManagementSetup}
-      />
       {/* The material sheet rides the scrolling content so rows and texture
           move together. */}
       <div
@@ -418,6 +409,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
             scrollToChannelRef={scrollToConversationRef}
             channels={visibleChannels}
             events={events}
+            pinnedChannelIds={channelPinLookup.pinnedChannelIds}
             row={(channel) => {
               const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
               const hasUnreadMention = channelHasUnreadMention(
@@ -505,6 +497,10 @@ export function areChannelSidebarPropsEqual(previous: ChannelSidebarProps, next:
   );
 }
 
+function prefersReducedMotion() {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}
+
 export function SidebarSpaceHeader({
   spaces,
   currentSpaceId,
@@ -530,6 +526,15 @@ export function SidebarSpaceHeader({
   // with it — "xMatrix" reads as a workspace the user does not have.
   const currentSpacePending = Boolean(currentSpaceId) && !currentSpace;
   const [open, setOpen] = useState(false);
+  /* Closing keeps the panel's glass until its rows have collapsed back into
+     the header, so they never show bare over the list. The collapse ends on
+     the grid's own transitionend; without motion there is none to wait for. */
+  const [wasOpen, setWasOpen] = useState(open);
+  const [closing, setClosing] = useState(false);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    setClosing(!open && !prefersReducedMotion());
+  }
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState("");
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -586,70 +591,67 @@ export function SidebarSpaceHeader({
   function renderSpaceRow(space: SerializedSpace) {
     const selected = space.id === currentSpaceId;
     const duplicateName = normalizedNameCounts[space.name.trim().toLowerCase()] > 1;
-    const currentUserRole = spaceRoleFor(space, currentUserId);
-    const ownerLabel = spaceOwnerLabel(space);
     const memberLabel = `${space.members.length} member${space.members.length === 1 ? "" : "s"}`;
     const disambiguator = duplicateName ? ` · ${spaceDisambiguatorId(space.id)}` : "";
-    const subtitle = `${memberLabel} · ${currentUserRole}${disambiguator} · owner ${ownerLabel}`;
+    const detail = `${memberLabel} · ${spaceRoleFor(space, currentUserId)} · owner ${spaceOwnerLabel(space)}`;
+    const windowHint = openSpaceInOwnWindow
+      ? ` · ${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"}-click opens it in a new window`
+      : "";
 
     const openInOwnWindow = () => {
       setOpen(false);
       void openSpaceInOwnWindow?.(`${spaceAppPath(space.id, spaces)}/channels`);
     };
 
-    /* The new-window control stays a sibling of the option button: nesting a
-       button is invalid markup. The hover fill is on the row, so the bar still
-       runs edge to edge behind both hit targets. */
+    /* One line per Space: who it is and how many are in it. The rest of what
+       a Space is — your role, its owner — is in the tooltip; Manage has it in
+       full. On the desktop a modifier-click or a middle-click opens the Space
+       in its own window. */
     return (
-      <div key={space.id} className="app-space-switcher-row flex w-full min-w-0 items-center">
-        <LiquidGlassPill
-          as="button"
-          type="button"
-          role="option"
-          aria-selected={selected}
-          enabled={false}
-          className={cn(
-            "app-space-switcher-option flex min-h-12 min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sidebar-foreground",
-            selected && "app-space-switcher-option-active"
-          )}
-          title={`${space.name} · ${subtitle}`}
-          onClick={(event: ReactMouseEvent<HTMLElement>) => {
-            if (openSpaceInOwnWindow && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              openInOwnWindow();
-              return;
-            }
-            setOpen(false);
-            onSelectSpace(space.id);
-          }}
-          onAuxClick={(event: ReactMouseEvent<HTMLElement>) => {
-            if (!openSpaceInOwnWindow || event.button !== 1) return;
+      <button
+        key={space.id}
+        type="button"
+        role="option"
+        aria-selected={selected}
+        className="app-space-switcher-option flex w-full min-w-0 items-center gap-3 text-left"
+        title={`${space.name} · ${detail}${windowHint}`}
+        onClick={(event: ReactMouseEvent<HTMLElement>) => {
+          if (openSpaceInOwnWindow && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
             openInOwnWindow();
-          }}
-        >
-          <SpaceAvatar space={space} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-black leading-5">{space.name}</span>
-            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] font-semibold leading-4 text-sidebar-foreground/50">
-              <Users className="size-3 shrink-0" />
-              <span className="truncate">{subtitle}</span>
-            </span>
-          </span>
-          {selected && <Check className="size-4 shrink-0" />}
+            return;
+          }
+          setOpen(false);
+          onSelectSpace(space.id);
+        }}
+        onAuxClick={(event: ReactMouseEvent<HTMLElement>) => {
+          if (!openSpaceInOwnWindow || event.button !== 1) return;
+          event.preventDefault();
+          openInOwnWindow();
+        }}
+      >
+        <SpaceAvatar space={space} />
+        <span className="app-space-switcher-option-name min-w-0 flex-1 truncate">{space.name}</span>
+        <span className="app-space-switcher-option-meta shrink-0">{memberLabel}{disambiguator}</span>
+        <span className="flex w-4 shrink-0 justify-end">{selected && <Check className="size-4" />}</span>
+      </button>
+    );
+  }
+
+  /* The panel's actions: round glass buttons, each labelled under it. */
+  function renderAction(label: string, icon: ReactNode, onClick: () => void, disabled = false) {
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClick}
+        className="app-space-switcher-action flex min-w-0 flex-1 flex-col items-center gap-1 disabled:opacity-50"
+      >
+        <LiquidGlassPill as="span" className="app-space-switcher-action-disc flex size-10 items-center justify-center rounded-full">
+          {icon}
         </LiquidGlassPill>
-        {openSpaceInOwnWindow ? (
-          <button
-            type="button"
-            title={`Open ${space.name} in a new window`}
-            aria-label={`Open ${space.name} in a new window`}
-            className="app-space-switcher-open-window flex size-8 shrink-0 items-center justify-center text-sidebar-foreground"
-            onClick={openInOwnWindow}
-          >
-            <ExternalLink className="size-4" />
-          </button>
-        ) : null}
-      </div>
+        <span className="truncate">{label}</span>
+      </button>
     );
   }
 
@@ -666,6 +668,7 @@ export function SidebarSpaceHeader({
           <SpaceAvatar space={currentSpace} />
           <input
             autoFocus
+            aria-label="Workspace name"
             value={draftName}
             disabled={renamingCurrentSpace}
             onChange={(event) => setDraftName(event.target.value)}
@@ -689,14 +692,22 @@ export function SidebarSpaceHeader({
           </button>
         </form>
       ) : (
-        <div className={cn("app-space-switcher-shell group relative", open && "app-space-switcher-shell-open")}>
+        /* At rest the header is the Space's name and a chevron at the row's
+           end, printed on the list. Opening grows the header row itself into
+           one glass panel — the composer's glass — with the Spaces and the
+           panel's actions inside it, floating over the list. The anchor keeps
+           the row's height in the flow; the panel floats in a plain frame
+           because glass forces its own position to relative. */
+        <div className="app-space-switcher-anchor relative">
+        <div className="app-space-switcher-float absolute inset-x-0 top-0">
+        <div className={cn("app-space-switcher-shell relative", (open || closing) && "app-space-switcher-shell-open", open && "app-space-switcher-shell-opening")}>
           <button
             type="button"
             aria-haspopup="listbox"
             aria-expanded={open}
             aria-busy={currentSpacePending || undefined}
             aria-label={currentSpacePending ? "Loading workspace" : undefined}
-            className="app-space-switcher-trigger flex w-full min-w-0 items-center gap-3 rounded-md px-3 text-left text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            className="app-space-switcher-trigger flex w-full min-w-0 items-center gap-3 text-left text-sidebar-foreground"
             onClick={() => setOpen((current) => !current)}
           >
             {!currentSpace && !currentSpacePending && (
@@ -704,83 +715,49 @@ export function SidebarSpaceHeader({
                 <Building className="size-5 text-sidebar-foreground/70" />
               </span>
             )}
-            {/* The chevron belongs to the name it switches, so the labels do
-                not stretch to push it across the row. */}
-            <span className="app-space-switcher-labels min-w-0 flex flex-initial flex-col">
-              {currentSpacePending ? (
-                <span
-                  aria-hidden
-                  className="app-space-switcher-name-pending"
-                />
-              ) : (
-                /* The name gives up width before the mark does: a Space with
-                   a long name must still show which plan it is on. */
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="app-space-switcher-name min-w-0 truncate font-black">
-                    {currentSpace?.name || "xMatrix"}
-                  </span>
-                  {currentSpace && (
-                    /* The rename control is an overlay pinned to the right of
-                       this row, and it lands exactly where the mark would sit.
-                       The margin is on the mark rather than on the row so that
-                       a Space whose plan has not been read yet — which renders
-                       no mark — gives up none of its name width for a slot
-                       nothing occupies. */
-                    <SpacePlanBadge
-                      userId={currentUserId}
-                      spaceId={currentSpace.id}
-                      className="mr-7"
-                    />
-                  )}
-                </span>
-              )}
-            </span>
-            <ChevronDown className={cn("size-4 shrink-0 text-sidebar-foreground/60 transition-transform", open && "rotate-180")} />
+            {currentSpacePending ? (
+              <span aria-hidden className="app-space-switcher-name-pending" />
+            ) : (
+              <span className="app-space-switcher-name min-w-0 truncate font-black">
+                {currentSpace?.name || "xMatrix"}
+              </span>
+            )}
+            <ChevronDown className={cn("app-space-switcher-chevron ml-auto size-4 shrink-0 transition-transform", open && "rotate-180")} />
           </button>
-          {currentSpace && (
-            <button
-              type="button"
-              title={`Rename ${currentSpace.name}`}
-              onClick={() => {
-                setOpen(false);
-                setDraftName(currentSpace.name);
-                setEditingName(true);
-              }}
-              disabled={renamingCurrentSpace}
-              className="app-space-switcher-rename absolute right-10 top-1/2 z-[3] flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-sidebar-foreground/60 opacity-100 hover:text-sidebar-foreground disabled:pointer-events-none disabled:opacity-50 md:opacity-0 md:group-hover:opacity-100"
-            >
-              {renamingCurrentSpace ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
-            </button>
-          )}
           <div
-            className="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
+            className="grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none"
             style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none" }}
             aria-hidden={!open}
+            onTransitionEnd={(event) => {
+              if (event.target === event.currentTarget && event.propertyName === "grid-template-rows" && !open) setClosing(false);
+            }}
           >
-            <div className="min-h-0 overflow-hidden">
-            <div className="app-space-switcher-menu relative z-10 mt-0 rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg" role="listbox">
-              {spaces.length > 0 && (
-                <div className="py-1">{spaces.map((space) => renderSpaceRow(space))}</div>
-              )}
-              {spaces.length === 0 && (
-                <div className="px-2 py-2 text-sm text-muted-foreground">No workspaces</div>
-              )}
-              <div className="mt-1 border-t border-border/70 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    onManageSpaces();
-                  }}
-                  className="flex h-9 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-sm font-black text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                >
-                  <Settings2 className="size-4 shrink-0" />
-                  <span className="truncate">Manage workspaces</span>
-                </button>
+            <div className="app-space-switcher-body min-h-0 overflow-hidden">
+              <div className="app-space-switcher-menu" role="listbox">
+                {spaces.map((space) => renderSpaceRow(space))}
+                {spaces.length === 0 && (
+                  <div className="app-space-switcher-empty">No workspaces</div>
+                )}
+              </div>
+              <div className="app-space-switcher-actions flex">
+                {currentSpace && renderAction("Rename", <Pencil className="size-4" />, () => {
+                  setOpen(false);
+                  setDraftName(currentSpace.name);
+                  setEditingName(true);
+                }, renamingCurrentSpace)}
+                {currentSpace && openSpaceInOwnWindow && renderAction("New window", <ExternalLink className="size-4" />, () => {
+                  setOpen(false);
+                  void openSpaceInOwnWindow(`${spaceAppPath(currentSpace.id, spaces)}/channels`);
+                })}
+                {renderAction("Manage", <Settings2 className="size-4" />, () => {
+                  setOpen(false);
+                  onManageSpaces();
+                })}
               </div>
             </div>
-            </div>
           </div>
+        </div>
+        </div>
         </div>
       )}
       {error && (
@@ -796,15 +773,24 @@ export { SpaceAvatar, spaceAvatarStyle, spaceDisambiguatorId } from "./workspace
 import { SpaceAvatar, spaceDisambiguatorId } from "./workspace-shell-chrome";
 
 /**
- * A conversation list's sections: those whose Agents have work in hand, then
- * the rest, each in the list's own order and each conversation once. A
- * section with no conversations is not shown.
+ * A conversation list's sections: the reader's pins, then those whose Agents
+ * have work in hand, then the rest, each in the list's own order and each
+ * conversation once. A section with no conversations is not shown.
  */
-export function channelListSections(channels: readonly SerializedChannel[], events: ObservabilityEvent[]) {
+export function channelListSections(
+  channels: readonly SerializedChannel[],
+  events: ObservabilityEvent[],
+  pinnedChannelIds: ReadonlySet<string>,
+) {
+  const pinned: SerializedChannel[] = [];
   const inProgress: SerializedChannel[] = [];
   const recent: SerializedChannel[] = [];
-  for (const channel of channels) (channelHasWorkInHand(channel, events) ? inProgress : recent).push(channel);
+  for (const channel of channels) {
+    if (pinnedChannelIds.has(channel.id)) pinned.push(channel);
+    else (channelHasWorkInHand(channel, events) ? inProgress : recent).push(channel);
+  }
   return [
+    { label: "Pinned", count: undefined, channels: pinned },
     { label: "In progress", count: inProgress.length as number | undefined, channels: inProgress },
     { label: "Recent", count: undefined, channels: recent },
   ].filter((section) => section.channels.length > 0);
@@ -816,7 +802,8 @@ function ChannelSectionRows({ channels, events, row }: {
   events: ObservabilityEvent[];
   row: (channel: SerializedChannel) => ReactNode;
 }) {
-  return channelListSections(channels, events).map((section) => (
+  // The cold-start paint has no pins yet; they arrive with the signed-in shell.
+  return channelListSections(channels, events, NO_PINNED_CHANNEL_IDS).map((section) => (
     <Fragment key={section.label}>
       <ListSectionHeading label={section.label} count={section.count} />
       {section.channels.map(row)}
@@ -833,18 +820,19 @@ type ChannelSectionItem =
  * and rows are items, and only those near the viewport are mounted, scrolled
  * by the list's own material sheet (`scrollRoot`).
  */
-function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, events, row }: {
+function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, events, pinnedChannelIds, row }: {
   scrollRoot: HTMLElement | null;
   /** Receives a function that brings a conversation's row into view. */
   scrollToChannelRef?: MutableRefObject<((channelId: string) => void) | null>;
   channels: readonly SerializedChannel[];
   events: ObservabilityEvent[];
+  pinnedChannelIds: ReadonlySet<string>;
   row: (channel: SerializedChannel) => ReactNode;
 }) {
-  const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, events).flatMap((section) => [
+  const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, events, pinnedChannelIds).flatMap((section) => [
     { kind: "heading" as const, label: section.label, count: section.count },
     ...section.channels.map((channel) => ({ kind: "row" as const, channel })),
-  ]), [channels, events]);
+  ]), [channels, events, pinnedChannelIds]);
   const listRef = useRef<VirtuosoHandle | null>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -1344,9 +1332,9 @@ export function MobileChannelChatList({
     void catalogPaging.load(CONVERSATION_QUERY);
   }, [catalogPaging]);
   const liveConversations = useMemo(
-    () => page.rows.map((row) => row.channel)
-      .filter((channel) => !currentSpaceId || channel.spaceId === currentSpaceId),
-    [currentSpaceId, page.rows]
+    () => rankCatalogChannels(page.rows.map((row) => row.channel)
+      .filter((channel) => !currentSpaceId || channel.spaceId === currentSpaceId), pinState.pinnedChannelIds),
+    [currentSpaceId, page.rows, pinState.pinnedChannelIds]
   );
   const paintedConversations = usePaintedChannelRows(
     currentSpaceId, page.loaded, liveConversations, fallbackChannels,
@@ -1369,6 +1357,7 @@ export function MobileChannelChatList({
   }, [conversations, events]);
 
   const [listScrollRoot, setListScrollRoot] = useState<HTMLDivElement | null>(null);
+  const pinnedChannelIds = useMemo(() => new Set(pinState.pinnedChannelIds), [pinState]);
 
   return (
     <>
@@ -1399,6 +1388,7 @@ export function MobileChannelChatList({
               scrollRoot={listScrollRoot}
               channels={conversations}
               events={events}
+              pinnedChannelIds={pinnedChannelIds}
               row={(channel) => {
                 const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
                 const hasMention = channelHasUnreadMention(

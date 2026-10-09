@@ -125,59 +125,64 @@ test("a stale pause conflicts and does not disable the Automation", async () => 
   assert.equal(db.calls.some((call) => call.name === "automation_update_v1"), false);
 });
 
-function managementPauseDatabase() {
+function agentPauseDatabase(task = authoredTask) {
   return database(placed((query) =>
     query.name === "automation_entity_space_legacy_v1" ? [{ space_id: "space-1" }]
-      : query.name === "automation_current_lock_v1" ? [authoredTask]
+      : query.name === "automation_current_lock_v1" ? [task]
         : query.name.startsWith("channel_capability_") ? [channel]
-          : query.name === "automation_agent_authority_v3"
-            ? [{ channel_id: "channel-manager", space_id: "space-1", instance_id: "manager:1",
-                metadata_json: { executionKey: "execution-1", machineId: "machine-1", hostId: "host-1",
-                  managementSpaceId: "space-1", managementConfigGeneration: 2 },
-                config_version: 2, config_json: { enabled: true, sideEffectsEnabled: true } }]
+          : query.name === "automation_agent_authority_v4"
+            ? [{ channel_id: "channel-1", space_id: "space-1", instance_id: "agent:1",
+                metadata_json: { executionKey: "execution-1", machineId: "machine-1", hostId: "host-1" } }]
             : query.name === "automation_control_head_v1" ? [{ commit_sequence: 14 }] : []));
 }
 
-function managementMutation(automationAction, enabled) {
+function agentMutation(automationAction, enabled, extra = {}) {
   return {
-    commandId: `command-management-${automationAction}`, actorUserId: "user-2", at: "2026-08-30T00:00:00.000Z",
+    commandId: `command-agent-${automationAction}`, actorUserId: "user-2", at: "2026-08-30T00:00:00.000Z",
     kind: "automation_put", automationId: "task-authored", expectedVersion: 3,
     channelId: "channel-1", nextRunAt: "2026-08-31T00:00:00.000Z", enabled, automationAction,
-    // Re-serialized by the Hub under the Agent; a pause keeps the person's own.
-    payload: evaluatorPayload({ kind: "agent", id: "manager:1" }, "user-2"),
-    principal: { kind: "agent", id: "manager:1" },
-    automationAgent: { ownerUserId: "user-2", runId: "run-manager", executionKey: "execution-1",
-      channelId: "channel-manager", machineId: "machine-1", hostId: "host-1", instanceId: "manager:1",
-      managementSpaceId: "space-1" },
-    managementAudit: { actionId: `audit-${automationAction}`, actionType: `automation_${automationAction}`,
-      evidence: {}, reason: "The report is no longer needed", payloadHash: "hash", idempotencyKey: "key" },
+    payload: evaluatorPayload({ kind: "agent", id: "agent:1" }, "user-2"),
+    principal: { kind: "agent", id: "agent:1" },
+    automationAgent: { ownerUserId: "user-2", runId: "run-agent", executionKey: "execution-1",
+      channelId: "channel-1", machineId: "machine-1", hostId: "host-1", instanceId: "agent:1" },
+    ...extra,
   };
 }
 
-test("the management Agent pauses a person's Automation directly and leaves an audit", async () => {
-  const db = managementPauseDatabase();
-  const paused = await new PostgresAutomationRepository(db).mutate(managementMutation("pause", false));
-  assert.equal(paused.entityVersion, 4);
-  const update = db.calls.find((call) => call.name === "automation_update_v1");
-  assert.equal(update.values[1], authoredTask.next_run_at, "the schedule stays the person's");
-  assert.equal(update.values[2], false);
-  assert.deepEqual(JSON.parse(update.values[4]), evaluatorPayload(), "the definition stays the person's");
-  const audit = db.calls.find((call) => call.name === "automation_management_audit_v1");
-  assert.equal(audit.values[2], "automation_pause");
-  assert.equal(JSON.parse(audit.values[3]).automationGovernance.reason, "The report is no longer needed");
+test("an Agent may not pause or otherwise change a person's Automation", async () => {
+  for (const [action, enabled] of [["pause", false], ["update", true], ["resume", true]]) {
+    const db = agentPauseDatabase();
+    await assert.rejects(new PostgresAutomationRepository(db).mutate(agentMutation(action, enabled)),
+      (error) => error instanceof AutomationControlError && error.status === 403
+        && error.message === "A person's Automation is changed by people");
+    assert.equal(db.calls.some((call) => call.name === "automation_update_v1"), false);
+  }
 });
 
-test("the management Agent may not otherwise change a person's Automation", async () => {
-  for (const [action, enabled] of [["update", true], ["resume", true]]) {
-    await assert.rejects(new PostgresAutomationRepository(managementPauseDatabase())
-      .mutate(managementMutation(action, enabled)),
-    (error) => error instanceof AutomationControlError && error.status === 403);
-  }
+test("an Agent pauses its own Automation in its birth Channel", async () => {
+  const own = { ...authoredTask, owner_user_id: "user-2",
+    payload_json: evaluatorPayload({ kind: "agent", id: "agent:1" }, "user-2") };
+  const db = agentPauseDatabase(own);
+  const paused = await new PostgresAutomationRepository(db).mutate(agentMutation("pause", false));
+  assert.equal(paused.entityVersion, 4);
+  assert.equal(db.calls.find((call) => call.name === "automation_update_v1").values[2], false);
+});
+
+test("a retired management context grants an Agent no Space-wide authority and writes no audit", async () => {
+  const db = agentPauseDatabase();
+  await assert.rejects(new PostgresAutomationRepository(db).mutate(agentMutation("pause", false, {
+    automationAgent: { ...agentMutation("pause", false).automationAgent, managementSpaceId: "space-1" },
+    managementAudit: { actionId: "audit-pause", actionType: "automation_pause", evidence: {},
+      reason: "no longer needed", payloadHash: "hash", idempotencyKey: "key" },
+  })), (error) => error instanceof AutomationControlError && error.status === 403);
+  const authority = db.calls.find((call) => call.name === "automation_agent_authority_v4");
+  assert.doesNotMatch(authority.text, /space_management_configs/u);
+  assert.equal(db.calls.some((call) => /management_actions/u.test(call.text ?? "")), false);
 });
 
 test("an Agent cannot pause a page Automation outside its page", async () => {
   const db = memberPauseDatabase({ ...authoredTask, page_id: "page-1" });
-  await assert.rejects(new PostgresAutomationRepository(db).mutate(managementMutation("pause", false)),
+  await assert.rejects(new PostgresAutomationRepository(db).mutate(agentMutation("pause", false)),
     (error) => error instanceof AutomationControlError && error.code === "forbidden"
       && error.message === "A page's Automation is changed through its page, as the Agent's owner");
   assert.equal(db.calls.some((call) => call.name === "automation_update_v1"), false);
@@ -251,10 +256,10 @@ test("a replacement fails closed for the author, a stale version, a lineage, a p
 test("a live Agent creates only its exact evaluator authority in PostgreSQL", async () => {
   const db = database(placed((query) => query.name === "channel_capability_automation_new_work_v3"
     ? [channel]
-    : query.name === "automation_agent_authority_v3"
+    : query.name === "automation_agent_authority_v4"
       ? [{ channel_id: "channel-1", space_id: "space-1", profile_name: "Reviewer",
           metadata_json: { executionKey: "execution-1", machineId: "machine-1", hostId: "host-1" },
-          instance_id: "instance-1", config_version: null, config_json: null }]
+          instance_id: "instance-1" }]
       : query.name === "automation_creation_policy_v1"
           ? [{ policy: "members", role: "member" }]
           : query.name === "automation_control_head_v1"
@@ -274,12 +279,12 @@ test("a live Agent creates only its exact evaluator authority in PostgreSQL", as
 });
 
 test("a registration Run's Instance lists Automations in its birth Channel without a Profile grant", async () => {
-  const db = database(placed((query) => query.name === "automation_agent_authority_v3"
+  const db = database(placed((query) => query.name === "automation_agent_authority_v4"
     ? [{ channel_id: "channel-1", space_id: "space-1", profile_name: null,
         metadata_json: { executionKey: "execution-1", machineId: "machine-1", hostId: "host-1" },
-        instance_id: "channel-1:1", config_version: null, config_json: null }]
+        instance_id: "channel-1:1" }]
     : query.name === "automation_agent_birth_binding_v1" ? [{ present: 1 }]
-      : query.name === "automation_agent_list_v4" ? [{
+      : query.name === "automation_agent_list_v5" ? [{
         automation_id: "task-agent", owner_user_id: "user-1", channel_id: "channel-1",
         next_run_at: "2026-08-30T01:00:00.000Z", enabled: true, version: 1,
         payload_json: evaluatorPayload({ kind: "agent", id: "channel-1:1" }), run_count: 0,

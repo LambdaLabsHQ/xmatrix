@@ -25,6 +25,7 @@ test("a body match carries the message coordinates and a snippet around the hit"
     kind: "message", entityId: "message-1", entityVersion: 2, matchTier: "verified_substring",
     field: "body", fieldPriority: 0, searchRankSeq: "pg:00000000000000000042", snippet: undefined,
     channelId: "channel-1", messageId: "message-1", timelineSequence: 7,
+    senderLabel: "", sentAt: "2026-10-04T00:00:00.000Z",
   });
   assert.match(hit.snippet, /release train/u);
 });
@@ -51,4 +52,16 @@ test("a long body is trimmed to a bounded snippet", () => {
   const hit = matchMessageSearchCandidate(candidate({ legacyBody: body }), "needle");
   assert.ok(hit.snippet.length <= 162);
   assert.match(hit.snippet, /^…a+ needle b+…$/u);
+});
+
+test("an empty needle matches every message from its start, for a filter-only search", () => {
+  const hit = matchMessageSearchCandidate(candidate(), "");
+  assert.equal(hit.field, "body");
+  assert.match(hit.snippet, /^Deploy the Hub/u);
+});
+
+test("an Agent filter keeps only messages sent under that Agent's name", () => {
+  const agent = candidate({ authorKind: "agent", authorId: "instance-1" });
+  // Legacy rows carry no sender snapshot, so no Agent name can match them.
+  assert.equal(matchMessageSearchCandidate(agent, "deploy", "claude"), null);
 });

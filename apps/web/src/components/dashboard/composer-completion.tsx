@@ -82,6 +82,7 @@ import {
   sectionReferenceCandidates,
   type ReferenceCandidate,
 } from "./reference-complete";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 type MentionDynamicLoadState =
   | { status: "loading" }
@@ -273,7 +274,7 @@ export function useComposerCompletion({
   const launchTargetLoadState: LaunchTargetLoadState | undefined = launchTargetsQuery.isError
     ? {
         status: "error",
-        message: launchTargetsQuery.error.message || "Could not load launch targets.",
+        message: userErrorMessage(launchTargetsQuery.error, "Couldn't load launch targets") ?? "",
       }
     : launchTargetsQuery.isFetching
       ? { status: "loading" }

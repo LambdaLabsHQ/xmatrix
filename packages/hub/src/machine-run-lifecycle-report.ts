@@ -1,8 +1,9 @@
+import { cleanRepositoryBaseline } from "@xmatrix/protocol";
 import { PostgresMachineLifecycleRepository, RuntimeControlError, type AuthorityDatabase } from "@xmatrix/db";
 
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { isRecoverableLaunchFailure } from "./live-run-admission";
-import { publishMachineRunFailureNotice, publishMachineStopResultNotice } from "./machine-run-failure-notice";
+import { publishMachineRunFailureNotice, publishMachineStopResultNotice, publishRepositoryBaselineNotice } from "./machine-run-failure-notice";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import {
   POSTGRES_AUTHORITY_TIMEOUTS,
@@ -59,12 +60,14 @@ export async function machineRunLifecycleReport(
     eventType: text(input.eventType, "eventType", 80),
     payload,
     recoverableLaunchFailure: isRecoverableLaunchFailure(payload.error),
+    repositoryBaseline: input.eventType === "machine_spawn_result" ? cleanRepositoryBaseline(
+      payload.metadata && typeof payload.metadata === "object" ? (payload.metadata as Record<string, unknown>).repositoryBaseline : undefined) : undefined,
     repoPool: input.eventType === "machine_spawn_result" ? machineSpawnRepoPoolMetadata(payload) : undefined,
     preserveInstanceForReborn: input.runLifecycleStopPurpose === "reborn-predecessor",
   });
   if (input.eventType === "machine_spawn_result" && payload.ok !== true &&
       isRecoverableLaunchFailure(payload.error)) {
-    await wakeAgentLaunchCoordinator(env, text(input.channelId, "channelId", 300));
+    await wakeAgentLaunchCoordinator(env, text(input.channelId, "channelId", 300), ["runTerminal", "reborn"]);
   }
   const ownerEmail = (ownerUserId: unknown) => typeof input.ownerEmail === "string"
     ? input.ownerEmail : `${String(ownerUserId)}@unknown.invalid`;
@@ -79,6 +82,17 @@ export async function machineRunLifecycleReport(
         hostId: optionalHostname(context.hostId), machineName: optionalMachineName(context.machineName), ...failure,
       });
     }
+  }
+  if ("repositoryBaselineNoticeContext" in value) {
+    const context = object(value.repositoryBaselineNoticeContext, "repositoryBaselineNoticeContext");
+    const baseline = cleanRepositoryBaseline(context.baseline);
+    if (baseline?.relationship === "diverged" && baseline.noticeKey) {
+      await publishRepositoryBaselineNotice(env, {
+        channelId: text(context.channelId, "channelId"), ownerUserId: text(context.ownerUserId, "ownerUserId"),
+        ownerEmail: ownerEmail(context.ownerUserId), baseline,
+      });
+    }
+    delete value.repositoryBaselineNoticeContext;
   }
   if ("stopResultNoticeContext" in value) {
     const context = object(value.stopResultNoticeContext, "stopResultNoticeContext");

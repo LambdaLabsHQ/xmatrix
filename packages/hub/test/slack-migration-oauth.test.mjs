@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Hono } from "hono";
-
 import { HUB_ROUTES } from "../../protocol/src/authority-foundation.ts";
-import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
+import { createObservabilityMemoryApp } from "./support/observability-memory-routes.mjs";
 
-const load = await compileCommonJsSourceModule(new URL("../src/index-routes-observability-memory.ts", import.meta.url));
 const env = { RELAY_POSTGRES: { connectionString: "postgres://test" }, RELAY_POSTGRES_SHARD_ID: "shard-test",
   XMATRIX_SECRET_CATALOG_KEY: "material", SLACK_CLIENT_ID: "client", SLACK_CLIENT_SECRET: "secret" };
 const state = `123e4567-e89b-42d3-a456-426614174000.${"a".repeat(64)}`;
@@ -25,19 +22,16 @@ function fixture(signedIn) {
     }
   }
   const imports = {
-    "@xmatrix/protocol": { HUB_ROUTES, utf8ByteLength: (value) => new TextEncoder().encode(value).byteLength },
     "@xmatrix/db": { ControlError: SlackOAuthControlError, SlackOAuthControlError, PostgresSlackOAuthRepository },
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
     "./email-delivery": { escapeHtml: (value) => value.replace(/[&<>"']/gu, (char) => `&#${char.charCodeAt(0)};`) },
-    "./postgres-authority-http": { postgresAuthorityDatabase: () => ({}) },
     "./index-shared": {
       requireAuth: async () => ({ id: signedIn }), requireHumanAuth: (user) => user,
       hubOrigin: () => "https://hub.test", productCommandId: (_request, kind, id) => `${kind}:${id}`,
       jsonErrors: async (context, run) => { try { return await run(); } catch (error) { return context.json({ error: error.message }, error.status ?? 500); } },
     },
   };
-  const app = new Hono();
-  load((name) => imports[name] ?? {}).registerObservabilityMemoryRoutes(app);
+  const app = createObservabilityMemoryApp(imports);
   return { app, approvals };
 }
 

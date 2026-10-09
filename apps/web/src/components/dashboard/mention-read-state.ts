@@ -325,6 +325,8 @@ export type ComposerMentionSpan = {
   forced?: boolean;
   invalid?: boolean;
   self?: boolean;
+  /** Jev's reading of a summon while the author types: still reading, a request, or not one. */
+  intent?: "reading" | "summon" | "declined";
 };
 
 /**

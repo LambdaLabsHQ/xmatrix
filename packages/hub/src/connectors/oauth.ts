@@ -21,16 +21,25 @@ import { cloudflareGrantContext } from "./cloudflare-api";
 
 const STATE_TTL_MS = 10 * 60_000;
 const REFRESH_MARGIN_MS = 2 * 60_000;
-const GOOGLE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+/* Each Google provider holds exactly one scope, on its own connection and token. */
+const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
+  google: { scope: "https://www.googleapis.com/auth/drive.file", name: "per-file" },
+  googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
+  googleadsense: { scope: "https://www.googleapis.com/auth/adsense.readonly", name: "AdSense" },
+};
 
-function validateGoogleGrant(payload: Record<string, unknown>, initial: boolean): void {
+/* Providers that sign in with another provider's company OAuth client. */
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google" };
+
+function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
+  const { scope, name } = GOOGLE_GRANTS[providerId]!;
   const expires = Number(payload.expires_in);
   const scopes = typeof payload.scope === "string" ? payload.scope.split(/\s+/u).filter(Boolean) : [];
   if (!Number.isFinite(expires) || expires <= 0 || expires > 86_400 ||
       typeof payload.token_type !== "string" || payload.token_type.toLowerCase() !== "bearer" ||
-      ((initial || payload.scope !== undefined) && (scopes.length !== 1 || scopes[0] !== GOOGLE_FILE_SCOPE)) ||
+      ((initial || payload.scope !== undefined) && (scopes.length !== 1 || scopes[0] !== scope)) ||
       (initial && (typeof payload.refresh_token !== "string" || !payload.refresh_token))) {
-    throw new ProviderRequestError(502, "Google did not confirm an offline, per-file OAuth grant; reconnect with the requested permission");
+    throw new ProviderRequestError(502, `Google did not confirm an offline, ${name} OAuth grant; reconnect with the requested permission`);
   }
 }
 
@@ -65,7 +74,7 @@ export function oauthClient(env: Env, providerId: string): OAuthClient | undefin
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
   if (!manifest?.oauth || manifest.status !== "available") return undefined;
   if (providerId === "discord" && !discordCompanyApp(env)) return undefined;
-  const prefix = `CONNECTOR_${manifest.id.toUpperCase()}`;
+  const prefix = `CONNECTOR_${(SHARED_OAUTH_CLIENTS[manifest.id] ?? manifest.id).toUpperCase()}`;
   const clientId = envValue(env, `${prefix}_CLIENT_ID`);
   const clientSecret = envValue(env, `${prefix}_CLIENT_SECRET`);
   if (!clientId || !clientSecret) return undefined;
@@ -206,7 +215,7 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
   const proof = client.manifest.oauth.pkce ? await pkceGrantProof(client, state, redirectUri) : undefined;
   const payload = await tokenRequest(client, { grant_type: "authorization_code", code, redirect_uri: redirectUri,
     ...(proof ? { code_verifier: proof } : {}) });
-  if (client.manifest.id === "google") validateGoogleGrant(payload, true);
+  if (GOOGLE_GRANTS[client.manifest.id]) validateGoogleGrant(client.manifest.id, payload, true);
   if (client.manifest.id === "bitbucket") validateBitbucketGrant(payload, true);
   const fields = oauthTokenFields(client, payload);
   const vercelFields = client.manifest.oauth.flow === "vercel-integration" ? await vercelOAuthFields(client.clientId, payload) : {};
@@ -247,8 +256,10 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
  * when nothing needs refreshing. The caller stores the returned fields.
  */
 export async function refreshOAuthFields(env: Env, providerId: string, values: Readonly<Record<string, string>>,
-  now = Date.now(), options: { notionUnauthorized?: boolean } = {}): Promise<Record<string, string | null> | undefined> {
-  if (providerId === "sentry" && isSentryInstallationGrant(values)) return refreshSentryInstallation(env, values, now);
+  now = Date.now(), options: { unauthorized?: boolean } = {}): Promise<Record<string, string | null> | undefined> {
+  if (providerId === "sentry" && isSentryInstallationGrant(values)) {
+    return refreshSentryInstallation(env, values, now, options.unauthorized === true);
+  }
   const expiresAt = Number(values.oauthExpiresAt);
   if (providerId === "discord" && isDiscordInstallationGrant(values)) {
     const configured = discordCompanyApp(env);
@@ -262,7 +273,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
       throw new ProviderRequestError(503, "PagerDuty OAuth application changed or is unavailable; reconnect");
     }
   }
-  const afterNotionUnauthorized = providerId === "notion" && options.notionUnauthorized === true;
+  const afterNotionUnauthorized = providerId === "notion" && options.unauthorized === true;
   if (providerId === "bitbucket" && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
     throw new ProviderRequestError(401, "Bitbucket OAuth requires a complete expiring grant; reconnect");
@@ -276,7 +287,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     return undefined;
   }
   const payload = await tokenRequest(client, { grant_type: "refresh_token", refresh_token: values.oauthRefreshToken });
-  if (providerId === "google") validateGoogleGrant(payload, false);
+  if (GOOGLE_GRANTS[providerId]) validateGoogleGrant(providerId, payload, false);
   if (providerId === "bitbucket") validateBitbucketGrant(payload, false);
   if (providerId === "notion" && (typeof payload.refresh_token !== "string" || !payload.refresh_token)) {
     throw new ProviderRequestError(502, "Notion did not return its rotated refresh token");

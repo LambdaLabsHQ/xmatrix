@@ -17,7 +17,7 @@ pub fn response_mime_type(response: &reqwest::Response) -> Option<&str> {
 use serde::de::DeserializeOwned;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use crate::error::{CliError, Result};
+use crate::error::{CliError, HttpStatusError, Result};
 
 pub const CLIENT_COMPATIBILITY_PROTOCOL_VERSION: u32 = 2;
 pub const CLIENT_UPGRADE_REQUIRED_CLOSE_CODE: u16 = 4003;
@@ -82,6 +82,9 @@ pub fn client_identity_headers(component: ClientComponent) -> HeaderMap {
 /// `peer closed connection without sending TLS close_notify`.
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 const TCP_KEEPALIVE: Duration = Duration::from_secs(30);
+/// Bounds only reaching the Hub. There is deliberately no whole-request
+/// timeout: long polls and streamed bodies outlive any fixed budget.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 static CLI_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static DAEMON_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -113,37 +116,140 @@ pub fn client_for(component: ClientComponent) -> Result<reqwest::Client> {
         .redirect(reqwest::redirect::Policy::none())
         .pool_idle_timeout(POOL_IDLE_TIMEOUT)
         .tcp_keepalive(TCP_KEEPALIVE)
+        .connect_timeout(CONNECT_TIMEOUT)
         .build()?;
     Ok(cell.get_or_init(|| built).clone())
 }
 
-/// Sends a request, retrying once if the connection was never established.
+/// Sends a request, replaying it only where a replay cannot duplicate an effect.
 ///
-/// A connect-phase failure — including a TLS handshake the peer drops — means
-/// the request never reached the Hub, so replaying it cannot duplicate an
-/// effect even for a POST. That single retry is what keeps one dropped
-/// handshake from being reported as a dead Hub session: the daemon used to tear
-/// down its connection and re-enroll, and every such window is one in which the
-/// Hub has no live daemon for this host and queues agent launches.
-async fn send_with_connect_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
-    let retry = request.try_clone();
-    let response = match request.send().await {
-        Err(error) if error.is_connect() => match retry.as_ref().and_then(|r| r.try_clone()) {
-            Some(retry) => retry.send().await?,
-            // A streaming body cannot be replayed; report the original failure.
-            None => return Err(error.into()),
-        },
-        result => result?,
-    };
-    // Over its allowance, the Hub says how long to wait. Waiting once is the
-    // backoff a command loop needs; a second refusal is reported, not chased.
-    match (rate_limit_wait(&response), retry) {
-        (Some(wait), Some(retry)) => {
+/// - A connect-phase failure — including a TLS handshake the peer drops — means
+///   the request never reached the Hub, so it is replayed once even for a POST.
+///   That single retry keeps one dropped handshake from being reported as a
+///   dead Hub session: the daemon used to tear down its connection and
+///   re-enroll, and in every such window the Hub queues agent launches.
+/// - Over its allowance (429) the Hub says how long to wait. Waiting once is the
+///   backoff a command loop needs; a second refusal is reported, not chased.
+/// - A transient failure (502/503/504) is replayed up to
+///   [`TRANSIENT_ATTEMPTS`] sends in all, honouring `Retry-After`, when the Hub
+///   said `retryable: true` — it says so only where a replay is safe — or, for
+///   a GET or HEAD, when the reply carries `Retry-After` and no verdict.
+async fn send_with_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
+    let (client, request) = request.build_split();
+    let mut request = request?;
+    let safe_method = matches!(
+        *request.method(),
+        reqwest::Method::GET | reqwest::Method::HEAD
+    );
+    let mut connect_retried = false;
+    let mut rate_limit_waited = false;
+    let mut sends = 1;
+    loop {
+        // A streaming body cannot be replayed; such a request is sent once.
+        let replay = request.try_clone();
+        let response = match client.execute(request).await {
+            Err(error) if error.is_connect() && !connect_retried => match replay {
+                Some(replay) => {
+                    connect_retried = true;
+                    request = replay;
+                    continue;
+                }
+                None => return Err(error.into()),
+            },
+            result => result?,
+        };
+        let Some(replay) = replay else {
+            return Ok(response);
+        };
+        if !rate_limit_waited && let Some(wait) = rate_limit_wait(&response) {
+            rate_limit_waited = true;
             tokio::time::sleep(wait).await;
-            Ok(retry.send().await?)
+            request = replay;
+            continue;
         }
-        _ => Ok(response),
+        if sends >= TRANSIENT_ATTEMPTS || !transient_status(response.status().as_u16()) {
+            return Ok(response);
+        }
+        let (response, body) = buffered(response).await?;
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok());
+        match transient_retry_wait(
+            response.status().as_u16(),
+            retry_after,
+            &body,
+            safe_method,
+            sends,
+        ) {
+            Some(wait) => {
+                tokio::time::sleep(crate::backoff::jitter_above(wait, MAX_TRANSIENT_WAIT)).await;
+                sends += 1;
+                request = replay;
+            }
+            None => return Ok(response),
+        }
     }
+}
+
+/// Sends in all, the first included, for a request the Hub calls transient.
+const TRANSIENT_ATTEMPTS: u32 = 3;
+/// The longest a single transient replay waits, whatever `Retry-After` asks.
+const MAX_TRANSIENT_WAIT: Duration = Duration::from_secs(30);
+/// The wait before the first replay when the Hub names none; it doubles.
+const DEFAULT_TRANSIENT_WAIT: Duration = Duration::from_secs(1);
+
+/// Statuses the Hub, or the edge in front of it, answers a passing outage with.
+fn transient_status(status: u16) -> bool {
+    matches!(status, 502..=504)
+}
+
+/// How long to wait before replaying a transient failure; `None` when the
+/// reply must be reported. `sends` counts the sends already made.
+fn transient_retry_wait(
+    status: u16,
+    retry_after: Option<&str>,
+    body: &[u8],
+    safe_method: bool,
+    sends: u32,
+) -> Option<Duration> {
+    if sends >= TRANSIENT_ATTEMPTS || !transient_status(status) {
+        return None;
+    }
+    let verdict = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("retryable").and_then(serde_json::Value::as_bool));
+    let retry_after = retry_after.and_then(parse_retry_after);
+    let replay = match verdict {
+        Some(retryable) => retryable,
+        None => safe_method && retry_after.is_some(),
+    };
+    replay.then(|| {
+        retry_after
+            .unwrap_or_else(|| DEFAULT_TRANSIENT_WAIT.saturating_mul(1u32 << (sends - 1).min(4)))
+            .min(MAX_TRANSIENT_WAIT)
+    })
+}
+
+/// `Retry-After` in delta-seconds, the form the Hub sends.
+fn parse_retry_after(value: &str) -> Option<Duration> {
+    value.trim().parse::<u64>().ok().map(Duration::from_secs)
+}
+
+/// Reads a reply's body so it can be inspected, returning an equivalent reply
+/// for the caller to report.
+async fn buffered(response: reqwest::Response) -> Result<(reqwest::Response, Vec<u8>)> {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response.bytes().await?.to_vec();
+    let mut rebuilt = tokio_tungstenite::tungstenite::http::Response::builder().status(status);
+    if let Some(slot) = rebuilt.headers_mut() {
+        *slot = headers;
+    }
+    let rebuilt = rebuilt
+        .body(body.clone())
+        .map_err(|error| CliError::Http(format!("Invalid Hub reply: {error}")))?;
+    Ok((reqwest::Response::from(rebuilt), body))
 }
 
 /// The longest a single request waits out a rate limit before retrying.
@@ -154,14 +260,12 @@ fn rate_limit_wait(response: &reqwest::Response) -> Option<Duration> {
     if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS {
         return None;
     }
-    let seconds = response
+    let wait = response
         .headers()
         .get(reqwest::header::RETRY_AFTER)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse::<u64>().ok());
-    Some(seconds.map_or(MAX_RATE_LIMIT_WAIT, |seconds| {
-        Duration::from_secs(seconds).min(MAX_RATE_LIMIT_WAIT)
-    }))
+        .and_then(parse_retry_after);
+    Some(wait.map_or(MAX_RATE_LIMIT_WAIT, |wait| wait.min(MAX_RATE_LIMIT_WAIT)))
 }
 
 pub fn with_access_header(
@@ -252,7 +356,18 @@ pub fn websocket_connect_error(
             response.status().as_u16(),
         ));
     }
-    CliError::Relay(format!("{context}: {error}"))
+    // A handshake the Hub answered with a client error is its refusal; any
+    // other failure — no route, a dropped TLS handshake, a 5xx from a
+    // restarting Hub — is an outage a redial can get past.
+    let refused = matches!(&error, tokio_tungstenite::tungstenite::Error::Http(response)
+        if response.status().is_client_error()
+            && !matches!(response.status().as_u16(), 408 | 429));
+    let reason = format!("{context}: {error}");
+    if refused {
+        CliError::Relay(reason)
+    } else {
+        CliError::RelayTransient(reason)
+    }
 }
 
 pub fn is_upgrade_required_close(
@@ -447,7 +562,7 @@ pub async fn request_json_direct<T: DeserializeOwned>(
         req = req.json(&b);
     }
 
-    let response = send_with_connect_retry(req).await?;
+    let response = send_with_retry(req).await?;
     let status = response.status();
 
     if status.is_redirection() || status.is_client_error() || status.is_server_error() {
@@ -496,8 +611,11 @@ pub async fn request_journaled_message<T: DeserializeOwned>(
 }
 
 fn agent_send_may_use_run_token(err: &CliError) -> bool {
-    match err {
-        CliError::Http(message) | CliError::Auth(message) => {
+    match err.http_message().or(match err {
+        CliError::Auth(message) => Some(message.as_str()),
+        _ => None,
+    }) {
+        Some(message) => {
             let message = message.to_ascii_lowercase();
             message.contains("unauthorized")
                 || message.contains("capability not granted")
@@ -772,7 +890,7 @@ pub async fn put_bytes<T: DeserializeOwned>(
         .header("x-xmatrix-content-sha256", checksum_sha256)
         .body(body);
     request = with_access_header(request, url)?;
-    let response = send_with_connect_retry(request).await?;
+    let response = send_with_retry(request).await?;
     let status = response.status();
     if status.is_redirection() || status.is_client_error() || status.is_server_error() {
         let error = response_rejection_error(response, url).await?;
@@ -875,10 +993,21 @@ pub fn response_status_error(status: reqwest::StatusCode, body: &str) -> CliErro
         None => detail,
     };
     if status == reqwest::StatusCode::UPGRADE_REQUIRED {
-        CliError::UpgradeRequired(detail)
-    } else {
-        CliError::Http(detail)
+        return CliError::UpgradeRequired(detail);
     }
+    let field = |name: &str| response.as_ref().and_then(|value| value.get(name));
+    CliError::HttpStatus(Box::new(HttpStatusError {
+        status: status.as_u16(),
+        code: field("code")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+        // The Hub marks only an outage or a rate limit retryable; the flag on
+        // any other status is not a verdict this client acts on.
+        retryable: (transient_status(status.as_u16())
+            || status == reqwest::StatusCode::TOO_MANY_REQUESTS)
+            && field("retryable").and_then(serde_json::Value::as_bool) == Some(true),
+        message: detail,
+    }))
 }
 
 fn channel_catalog_timeout_boundary(
@@ -1046,6 +1175,241 @@ mod tests {
             denied(),
         );
         assert!(matches!(production_error, CliError::Relay(_)));
+        assert!(!production_error.is_transient());
+    }
+
+    #[test]
+    fn a_websocket_handshake_the_hub_could_not_answer_is_transient() {
+        let unavailable = tokio_tungstenite::tungstenite::Error::Http(Box::new(
+            tokio_tungstenite::tungstenite::http::Response::builder()
+                .status(tokio_tungstenite::tungstenite::http::StatusCode::SERVICE_UNAVAILABLE)
+                .body(None)
+                .unwrap(),
+        ));
+        let error = websocket_connect_error(
+            "wss://xmatrix-hub.xmatrix.sh/ws",
+            "WebSocket handshake failed",
+            unavailable,
+        );
+        assert!(error.is_transient(), "{error:?}");
+        let dropped = websocket_connect_error(
+            "wss://xmatrix-hub.xmatrix.sh/ws",
+            "WebSocket handshake failed",
+            tokio_tungstenite::tungstenite::Error::ConnectionClosed,
+        );
+        assert!(dropped.is_transient());
+        assert_eq!(
+            dropped.to_string(),
+            "WebSocket handshake failed: Connection closed normally"
+        );
+    }
+
+    fn refusal(status: u16, body: &str) -> CliError {
+        response_status_error(reqwest::StatusCode::from_u16(status).unwrap(), body)
+    }
+
+    #[test]
+    fn a_hub_refusal_keeps_its_status_code_and_verdict_and_reads_as_before() {
+        let error = refusal(
+            503,
+            r#"{"error":"xMatrix is restarting; try again","code":"service_restarting","retryable":true}"#,
+        );
+        assert_eq!(error.to_string(), "xMatrix is restarting; try again");
+        assert_eq!(
+            error.http_status(),
+            Some(&HttpStatusError {
+                status: 503,
+                code: Some("service_restarting".into()),
+                retryable: true,
+                message: "xMatrix is restarting; try again".into(),
+            })
+        );
+        assert!(error.is_transient());
+
+        for (status, body) in [
+            (
+                500,
+                r#"{"error":"Internal error","code":"internal_error","retryable":false}"#,
+            ),
+            (403, r#"{"error":"forbidden","retryable":true}"#),
+            (503, r#"{"error":"unavailable"}"#),
+            (502, "<html>bad gateway</html>"),
+        ] {
+            let error = refusal(status, body);
+            assert!(!error.is_transient(), "{status} {body}");
+            assert_eq!(error.http_status().map(|error| error.status), Some(status));
+        }
+        assert_eq!(
+            refusal(502, "<html>bad gateway</html>").to_string(),
+            "Request failed with status 502 Bad Gateway"
+        );
+    }
+
+    const RESTARTING: &[u8] = br#"{"error":"xMatrix is restarting; try again","code":"service_restarting","retryable":true}"#;
+
+    #[test]
+    fn a_retryable_hub_failure_is_replayed_for_any_method_after_its_retry_after() {
+        for safe_method in [true, false] {
+            assert_eq!(
+                transient_retry_wait(503, Some("2"), RESTARTING, safe_method, 1),
+                Some(Duration::from_secs(2))
+            );
+        }
+        // Without Retry-After the wait starts at a second and doubles.
+        assert_eq!(
+            transient_retry_wait(503, None, RESTARTING, false, 1),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(
+            transient_retry_wait(503, None, RESTARTING, false, 2),
+            Some(Duration::from_secs(2))
+        );
+        // A long Retry-After is capped rather than waited out.
+        assert_eq!(
+            transient_retry_wait(503, Some("3600"), RESTARTING, true, 1),
+            Some(MAX_TRANSIENT_WAIT)
+        );
+    }
+
+    #[test]
+    fn a_transient_failure_is_replayed_a_bounded_number_of_times() {
+        assert!(
+            transient_retry_wait(503, Some("1"), RESTARTING, true, TRANSIENT_ATTEMPTS - 1)
+                .is_some()
+        );
+        assert_eq!(
+            transient_retry_wait(503, Some("1"), RESTARTING, true, TRANSIENT_ATTEMPTS),
+            None
+        );
+    }
+
+    #[test]
+    fn only_the_hub_verdict_or_a_safe_method_permits_a_replay() {
+        let refused = br#"{"error":"Internal error","retryable":false}"#;
+        // The Hub's explicit verdict wins, even for a GET with Retry-After.
+        assert_eq!(transient_retry_wait(503, Some("1"), refused, true, 1), None);
+        // No verdict: a GET or HEAD the reply asks to retry later is replayed,
+        // a POST is not — it may already have taken effect.
+        let edge = b"<html>503 Service Unavailable</html>";
+        for status in [502, 503, 504] {
+            assert_eq!(
+                transient_retry_wait(status, Some("3"), edge, true, 1),
+                Some(Duration::from_secs(3))
+            );
+            assert_eq!(
+                transient_retry_wait(status, Some("3"), edge, false, 1),
+                None
+            );
+        }
+        assert_eq!(transient_retry_wait(503, None, edge, true, 1), None);
+        // Other statuses are never transient here, whatever they say.
+        for status in [400, 404, 409, 500] {
+            assert_eq!(
+                transient_retry_wait(status, Some("1"), RESTARTING, true, 1),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn retry_after_is_read_as_delta_seconds() {
+        assert_eq!(parse_retry_after("5"), Some(Duration::from_secs(5)));
+        assert_eq!(parse_retry_after(" 0 "), Some(Duration::ZERO));
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT"), None);
+        assert_eq!(parse_retry_after("-1"), None);
+        assert_eq!(parse_retry_after(""), None);
+    }
+
+    /// Serves the given raw replies in order, one per connection, and counts
+    /// the requests that arrived.
+    async fn serve_replies(
+        replies: Vec<&'static str>,
+    ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/api/fixture", listener.local_addr().unwrap());
+        let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = served.clone();
+        tokio::spawn(async move {
+            for reply in replies {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0u8; 4096];
+                // Read the head and the small fixture body before answering.
+                while !String::from_utf8_lossy(&request).contains("\r\n\r\n") {
+                    let read = stream.read(&mut buffer).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                stream.write_all(reply.as_bytes()).await.unwrap();
+                let _ = stream.shutdown().await;
+            }
+        });
+        (url, served)
+    }
+
+    const RESTARTING_REPLY: &str = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-type: application/json\r\nretry-after: 0\r\ncontent-length: 89\r\n\r\n{\"error\":\"xMatrix is restarting; try again\",\"code\":\"service_restarting\",\"retryable\":true}";
+    const REFUSED_REPLY: &str = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-type: application/json\r\nretry-after: 0\r\ncontent-length: 60\r\n\r\n{\"error\":\"Internal error\",\"code\":\"failed\",\"retryable\":false}";
+    const OK_REPLY: &str = "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: 11\r\n\r\n{\"ok\":true}";
+
+    #[tokio::test]
+    async fn a_post_the_hub_calls_retryable_is_replayed_until_it_succeeds() {
+        let (url, served) = serve_replies(vec![RESTARTING_REPLY, RESTARTING_REPLY, OK_REPLY]).await;
+        let reply: serde_json::Value =
+            request_json(&url, "POST", None, Some(serde_json::json!({"n": 1})))
+                .await
+                .expect("third send succeeds");
+        assert_eq!(reply, serde_json::json!({"ok": true}));
+        assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_that_outlasts_the_attempts_keeps_the_hub_verdict() {
+        let (url, served) = serve_replies(vec![
+            RESTARTING_REPLY,
+            RESTARTING_REPLY,
+            RESTARTING_REPLY,
+            OK_REPLY,
+        ])
+        .await;
+        let error = request_json::<serde_json::Value>(&url, "POST", None, None)
+            .await
+            .expect_err("three outages are reported");
+        assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert_eq!(error.to_string(), "xMatrix is restarting; try again");
+        let status = error.http_status().expect("structured refusal");
+        assert_eq!(status.status, 503);
+        assert_eq!(status.code.as_deref(), Some("service_restarting"));
+        assert!(status.retryable && error.is_transient());
+    }
+
+    #[tokio::test]
+    async fn a_failure_the_hub_calls_final_is_not_replayed() {
+        let (url, served) = serve_replies(vec![REFUSED_REPLY, OK_REPLY]).await;
+        let error = request_json::<serde_json::Value>(&url, "GET", None, None)
+            .await
+            .expect_err("reported");
+        assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(!error.is_transient());
+        assert_eq!(error.to_string(), "Internal error");
+    }
+
+    #[tokio::test]
+    async fn a_buffered_reply_reports_the_same_status_headers_and_body() {
+        let response = tokio_tungstenite::tungstenite::http::Response::builder()
+            .status(503)
+            .header("retry-after", "1")
+            .body(RESTARTING.to_vec())
+            .unwrap();
+        let (rebuilt, body) = buffered(reqwest::Response::from(response)).await.unwrap();
+        assert_eq!(body, RESTARTING);
+        assert_eq!(rebuilt.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(rebuilt.headers().get("retry-after").unwrap(), "1");
+        assert_eq!(rebuilt.bytes().await.unwrap(), RESTARTING);
     }
 }
 

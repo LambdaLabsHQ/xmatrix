@@ -1,5 +1,5 @@
 import { sha256Hex, SECRET_REQUEST_MESSAGE_KIND, type SecretRequestCard } from "@xmatrix/protocol";
-import { XMATRIX_MANAGEMENT_AVATAR_URL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL } from "./xmatrix-system-identity";
 
 /** Same card retries the same append; changed request state gets a new card.
  * Only public request metadata enters this identity, never a credential value. */
@@ -21,7 +21,7 @@ export async function secretRequestAppend(card: SecretRequestCard, saved: boolea
     messageKind: SECRET_REQUEST_MESSAGE_KIND,
     senderSnapshot: { identityId: `user:${owner.id}`, kind: "user", userId: owner.id,
       email: owner.email, label: "xMatrix secret request", name: "xMatrix secret request",
-      avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL },
+      avatarUrl: XMATRIX_SYSTEM_AVATAR_URL },
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, secretRequest: metadata } },
   };
   const identity = await sha256Hex(JSON.stringify(append));

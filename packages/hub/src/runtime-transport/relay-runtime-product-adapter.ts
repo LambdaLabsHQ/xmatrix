@@ -48,8 +48,10 @@ export interface RelayRuntimeProductPortFactory {
   machineDaemon(terminateInstance?: (instanceId: string) => void,
     deliverPending?: (identity: MachineDaemonRouteIdentity) => Promise<unknown>,
     quotaChanged?: (route: { ownerUserId: string; machineId: string }) => Promise<void>): MachineDaemonSocketBackend;
-  onRegistrationQuotaChange?: (input: { ownerUserId: string; machineId: string;
-    liveHumanSessions: readonly LiveHumanSessionSnapshot[];
+  /** Who may see a Channel of this Space may have changed. */
+  onChannelCatalogChanged?: (spaceId: string) => void;
+  /** A daemon read its machine's quota again: the owner's Agents show the new reading. */
+  onRegistrationQuotaChange?: (input: { ownerUserId: string;
     deliver: (userId: string, message: import("@xmatrix/protocol/connections/human").HumanServerMessage) => boolean;
   }) => Promise<void>;
   /** Optional process-memory Human presence fanout for product sockets. */
@@ -152,7 +154,7 @@ export function createRelayRuntimeProductAdapter(
     factory.machineDaemon(instanceId => {
       agentInstance.terminateTraceSession(instanceId, "Agent run ended on its authenticated host");
     }, identity => machineDaemon.claimPending(identity), async route => {
-      await factory.onRegistrationQuotaChange?.({ ...route, liveHumanSessions: human.liveSessions(),
+      await factory.onRegistrationQuotaChange?.({ ownerUserId: route.ownerUserId,
         deliver: (userId, message) => human.deliverToUser(userId, message) });
     }),
     options.allowLegacyProtocol === true,
@@ -175,6 +177,7 @@ export function createRelayRuntimeProductAdapter(
     human,
     agentInstance,
     machineDaemon,
+    factory.onChannelCatalogChanged,
   );
   restore.pending = false;
   return adapter;
@@ -197,6 +200,7 @@ export class RelayRuntimeProductCallbackAdapter {
     private readonly human: HumanRuntimeTransport,
     private readonly agentInstance: AgentInstanceRuntimeTransport,
     private readonly machineDaemon: MachineDaemonRuntimeTransport,
+    private readonly onChannelCatalogChanged?: (spaceId: string) => void,
   ) {
     for (const socket of context.getWebSockets()) {
       const attachment = socket.deserializeAttachment();
@@ -270,6 +274,7 @@ export class RelayRuntimeProductCallbackAdapter {
     message: HumanChannelCatalogChangedMessage,
     recipientUserIds: readonly string[],
   ): HumanProjectionPublishResult {
+    this.onChannelCatalogChanged?.(message.spaceId);
     return this.human.publishChannelCatalogChanged(message, recipientUserIds);
   }
 

@@ -12,7 +12,6 @@ import type {
 } from "./authority-foundation.js";
 import type {
   ChannelMode,
-  SpaceManagementAgentConfig,
   SpaceRole,
 } from "./authority-management.js";
 import type {
@@ -43,7 +42,6 @@ export interface SerializedSpace {
   /** Present only when the viewer may administer this Space. */
   pendingJoinRequestCount?: number;
   memberPermissions?: SpaceMemberPermissions;
-  managementAgent?: SpaceManagementAgentConfig;
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -71,7 +69,7 @@ export type AppConnectorConnectionStatus = "configured" | "disconnected" | "erro
 export type AppConnectorProviderId =
   | "github" | "webhook" | "sentry" | "linear" | "pagerduty" | "gitlab" | "slack" | "jira" | "vercel"
   | "cloudflare" | "feishu" | "discord" | "notion" | "bitbucket" | "circleci" | "buildkite" | "stripe" | "grafana"
-  | "opsgenie" | "netlify" | "telegram" | "teams" | "googlechat" | "google" | "dingtalk" | "wecom" | "openconnector";
+  | "opsgenie" | "netlify" | "telegram" | "teams" | "googlechat" | "google" | "googlesearchconsole" | "googleadsense" | "dingtalk" | "wecom" | "openconnector";
 export type AppConnectorProviderKind =
   | "code-host" | "docs" | "webhook" | "observability" | "issue-tracker" | "incident" | "chat" | "deploy" | "ci"
   | "billing" | "gateway";
@@ -727,6 +725,16 @@ export function localLlmUsage(usage: LlmUsage | undefined): LlmUsage | undefined
   return Object.keys(local).length ? local : undefined;
 }
 
+/** Keep per-Instance accounting; replace all account fields from the authoritative pool. */
+export function withRegistrationQuota(local: LlmUsage | undefined, quota: LlmUsage | undefined): LlmUsage {
+  return { ...localLlmUsage(local), quotaState: quota?.quotaState ?? (quota?.quotaSource === "provider_api" ? "observed" : "unknown"),
+    ...(quota?.quotaObservedAt ? { quotaObservedAt: quota.quotaObservedAt } : {}),
+    ...(quota?.quotaSource === "provider_api" && quota.quotaState !== "unknown" ? {
+      quotaSource: quota.quotaSource, quotaUsages: quota.quotaUsages,
+      ...(quota.quotaAccount ? { quotaAccount: quota.quotaAccount } : {}),
+    } : {}) };
+}
+
 /** A provider read time small enough to store and parse. Anything else is not a reading. */
 export function parseQuotaObservedAt(value: unknown): string | undefined {
   return typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value))
@@ -851,7 +859,6 @@ export type ObservabilityEventType =
   | "space_claim_renewed"
   | "space_claim_released"
   | "space_claim_expired"
-  | "space_management_action_executed"
   | "workspace_updated"
   | "automation_created"
   | "automation_updated"
@@ -872,7 +879,6 @@ export type ObservabilityEventType =
   | "connector_github_release"
   | "connector_credential_failed"
   | "connector_action_finished"
-  | "management_fuse_updated"
   | "security_policy_updated"
   | "agent_goal_updated"
   | "agent_tool_failed"

@@ -9,18 +9,16 @@ import { decideNewConversationLaunch, dispatchRegistrationInput, prepareRegistra
 import { runtimeRepository } from "./runtime";
 import { launchHandoffSuccessorElsewhere } from "./handoff-elsewhere";
 import { ControlError, RegistrationAccessError } from "@xmatrix/db";
-import { getChannel, getSpace, getSpaceManagementConfig } from "./spaces";
+import { getChannel, getSpace } from "./spaces";
 import {
-  hasProductManagementAgentMention,
   orchestrateProductAgentMentions,
   orchestrateProductChannelAbout,
-  orchestrateProductManagementAgentMention,
   orchestrateProductNewConversationStart,
   productSpacePreferredLanguage,
   type ProductAgentMentionPort,
   type ProductAgentMentionOrchestrationResult,
   type ProductChannelView } from "./product-agent-mention";
-import { XMATRIX_MANAGEMENT_AVATAR_URL, XMATRIX_MANAGEMENT_LABEL } from "./management-identity";
+import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
 import { sha256Hex } from "@xmatrix/protocol";
@@ -36,7 +34,7 @@ export async function dispatchPreparedAgentLaunchWake(input: {
   // A fully rejected batch is a valid prepare result. There is no durable work
   // to wake, and the coordinator intentionally rejects an empty launch set.
   if (input.launchIds.length === 0) return "skipped";
-  const wake = await wakeAgentLaunchChannel(input.channels, input)
+  const wake = await wakeAgentLaunchChannel(input.channels, { ...input, work: ["launch"] })
     .catch(() => { throw new AgentLaunchHandoverUnavailable(); });
   if (!wake.ok) throw new AgentLaunchHandoverUnavailable(wake.status);
   return "woken";
@@ -69,9 +67,9 @@ export function productAgentSystemNoticeSenderSnapshot(
     kind: "user",
     userId: actorUserId,
     email: `${actorUserId.replace(/[^a-zA-Z0-9._-]/gu, "_")}@unknown.invalid`,
-    label: XMATRIX_MANAGEMENT_LABEL,
-    name: XMATRIX_MANAGEMENT_LABEL,
-    avatarUrl: XMATRIX_MANAGEMENT_AVATAR_URL,
+    label: XMATRIX_SYSTEM_LABEL,
+    name: XMATRIX_SYSTEM_LABEL,
+    avatarUrl: XMATRIX_SYSTEM_AVATAR_URL,
   };
 }
 
@@ -158,6 +156,13 @@ export function createProductAgentMentionAuthorityPort(input: {
     actorUserId: input.actorUserId, ...handoff,
   });
   const principal = { kind: "user" as const, id: input.actorUserId };
+  /** A prepared reborn or handoff is the Channel coordinator's to carry: tell it before answering. */
+  const handedToReborn = async (channelId: string, result: { intentId?: unknown; state?: unknown },
+    failure: "registration_reborn_failed" | "registration_handoff_failed") => {
+    if (typeof result.intentId !== "string") throw new RegistrationAccessError(failure, 502);
+    await wakeAgentLaunchCoordinator(input.env, channelId, ["reborn"]);
+    return { intentId: result.intentId, state: String(result.state) };
+  };
 
   return {
     launchRegistrationInput: (launch) => dispatchRegistrationInput({
@@ -180,6 +185,7 @@ export function createProductAgentMentionAuthorityPort(input: {
       }
       return {
         id: channel.id,
+        ...(typeof channel.name === "string" ? { name: channel.name } : {}),
         spaceId: channel.spaceId,
         mode: channel.mode === "closed" ? "closed" : "open",
         ...(typeof channel.archivedAt === "string" ? { archivedAt: channel.archivedAt } : {}),
@@ -187,25 +193,6 @@ export function createProductAgentMentionAuthorityPort(input: {
           ? { metadata: channel.metadata as Record<string, unknown> }
           : {}),
       } satisfies ProductChannelView;
-    },
-
-    async getManagementConfig(spaceId) {
-      const payload = await readOrLog("get-space-management-config",
-        () => getSpaceManagementConfig(input.env, { spaceId, principal }),
-        { spaceId, sourceMessageId: input.sourceMessageId });
-      if (!payload) return { enabled: false, generation: 0 };
-      const config = payload.managementAgent as Record<string, unknown> | undefined;
-      return {
-        enabled: config?.enabled === true,
-        ...(typeof config?.sideEffectsEnabled === "boolean"
-          ? { sideEffectsEnabled: config.sideEffectsEnabled }
-          : {}),
-        generation: Number.isSafeInteger(payload.version) ? Number(payload.version) : 0,
-        ...(typeof config?.prompt === "string" ? { prompt: config.prompt } : {}),
-        ...(typeof config?.managementChannelId === "string"
-          ? { managementChannelId: config.managementChannelId }
-          : {}),
-      };
     },
 
     async getSpacePreferredLanguage(spaceId) {
@@ -219,17 +206,13 @@ export function createProductAgentMentionAuthorityPort(input: {
         commandId: `registration-reborn:${sourceMessageId}:${sourceInstanceId}`.slice(0, 200),
         actorUserId: input.actorUserId, channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt,
       }) as { intentId?: unknown; state?: unknown };
-      if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_reborn_failed", 502);
-      await wakeAgentLaunchCoordinator(input.env, channelId);
-      return { intentId: result.intentId, state: String(result.state) };
+      return handedToReborn(channelId, result, "registration_reborn_failed");
     },
 
     async prepareRegisteredHandoff({ channelId, sourceInstanceId, sourceMessageId, sourceMention, successorHarness, prompt }) {
       const result = await handoffPrepare({ channelId, sourceInstanceId, sourceMessageId, sourceMention,
         successorHarness, prompt });
-      if (typeof result.intentId !== "string") throw new RegistrationAccessError("registration_handoff_failed", 502);
-      await wakeAgentLaunchCoordinator(input.env, channelId);
-      return { intentId: result.intentId, state: String(result.state) };
+      return handedToReborn(channelId, result, "registration_handoff_failed");
     },
 
     async prepareRegisteredAutoHandoff({ channelId, sourceInstanceId, sourceMessageId, sourceMention, prompt }) {
@@ -312,8 +295,9 @@ export function createProductAgentMentionAuthorityPort(input: {
         channelId, body });
     },
 
-    reportDiagnostic(diagnostic) {
-      console.error("Product agent mention operation failed", diagnostic);
+    reportDiagnostic({ stage, error, ...where }) {
+      // Stage and code lead the message, so error reporting groups each cause once and names it.
+      console.error(`Product agent mention ${stage} failed: ${error}`, JSON.stringify(where));
     },
   };
 }
@@ -362,27 +346,6 @@ export async function dispatchProductAgentMentionsAfterAuthorityMessage(
   return result;
 }
 
-export async function dispatchProductManagementAgentMentionAfterAuthorityMessage(input: {
-  env: ProductAgentMentionAuthorityEnv;
-  channelId: string;
-  messageId: string;
-  body: string;
-  actorUserId: string;
-}): Promise<ProductAgentMentionOrchestrationResult | undefined> {
-  if (!hasProductManagementAgentMention(input.body)) return undefined;
-  return orchestrateProductManagementAgentMention({
-    channelId: input.channelId,
-    messageId: input.messageId,
-    body: input.body,
-    actorUserId: input.actorUserId,
-    port: createProductAgentMentionAuthorityPort({
-      env: input.env,
-      actorUserId: input.actorUserId,
-      sourceMessageId: input.messageId,
-    }),
-  });
-}
-
 /** A new conversation's first message that summons nobody; see
  * `orchestrateProductNewConversationStart`. */
 export async function dispatchProductNewConversationStart(input: {
@@ -402,6 +365,7 @@ export async function dispatchProductChannelAbout(input: {
   spaceId?: string;
   channelId: string;
   requestId: string;
+  triggerMessageId?: string;
   successorOfRunId?: string;
   actorUserId: string;
   skipDaemonWake?: boolean;
@@ -412,6 +376,7 @@ export async function dispatchProductChannelAbout(input: {
     ...(input.spaceId ? { spaceId: input.spaceId } : {}),
     channelId: input.channelId,
     requestId: input.requestId,
+    ...(input.triggerMessageId ? { triggerMessageId: input.triggerMessageId } : {}),
     ...(input.successorOfRunId ? { successorOfRunId: input.successorOfRunId } : {}),
     actorUserId: input.actorUserId,
     port: createProductAgentMentionAuthorityPort({

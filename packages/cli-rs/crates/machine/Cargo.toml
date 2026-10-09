@@ -11,4 +11,5 @@ serde_json = { workspace = true }
 urlencoding = { workspace = true }
 xmatrix-cli-args = { path = "../args" }
 xmatrix-cli-core = { path = "../core" }
+xmatrix-repo-pool = { path = "../repo-pool" }
 xmatrix-windows-continuity = { path = "../windows-continuity" }

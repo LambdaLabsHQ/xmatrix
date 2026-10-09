@@ -54,8 +54,9 @@ designed for both.
    intent are visible to people. It is derived from live sources and never
    stored (parent §2.7).
 4. **Facts with an authority are referenced, not restated.** A pull request,
-   release, CI run, schedule or claim is embedded as a live reference that
-   renders its current state. Prose holds what has no other authority.
+   release, CI run, schedule, claim or repository file is embedded as a live
+   reference that renders its current state. Prose holds what has no other
+   authority.
 5. **Markdown stays the Agent's medium and the durable format.** Revisions,
    git and Agent edits remain markdown; the editor is a view over it.
 
@@ -424,7 +425,11 @@ section it keeps true, and it is written there:
   not deleted. Putting the reference back, by undo or by restoring a
   revision, resumes one that was paused only for that reason. A heading's
   *Attach* offers the page's detached Automations with *Put back here*; the
-  Space's Schedules list every Automation, with *Delete*.
+  Space's Schedules list every Automation, with *Delete*. The edit says so
+  when it happens: its result names each Automation it detached or resumed
+  and each top section it removed, `page edit` prints a line for each, and
+  people on the page see a notice. A resumed Automation that never ran gets
+  its first delay again, at most one interval.
 - **Each Automation works in a conversation of its own**, created with it and
   linked to its section. Each occurrence is a fresh Run in that conversation
   and writes back to the section (§5.2). The conversation is where it runs,
@@ -499,10 +504,46 @@ change.
   Automations by trigger key, and delivered to the Automation's authority as
   "due now".
 - There is no Channel-scoped Automation: the page creates one on one of its
-  sections, and a Management Agent's `automation_*` operations act through the
-  page as its owner. The contract migration moved the existing ones: each
+  sections. The contract migration moved the existing ones: each
   one's reference was appended to the page its conversation was last linked
   to, or else its Space's first root page.
+
+### 6.5 A GitHub file is embedded by reference
+
+A section that needs a repository file, a prompt or a runbook, shows it in
+place without copying it:
+
+```
+## Startup prompt
+[bootstrap.md](xmatrix:github-file/LambdaLabsHQ/xmatrix/docs/prompts/bootstrap.md)
+```
+
+- **The link is the embed.** `xmatrix:github-file/<owner>/<repo>/<path>` names
+  one file on the repository's default branch; `?ref=<branch, tag or commit>`
+  pins it. The `/` menu's *GitHub file* turns a pasted GitHub file link into
+  one. A link that does not parse stays an ordinary link.
+- **The editor draws the file below the paragraph** that holds the link:
+  markdown as the page draws its own text, read only, with its links pointing
+  where they do on GitHub; any other text file as code; a binary file, or one
+  too large for GitHub to inline, as a link. It reads on the page's paper,
+  aligned with the surrounding text, between two hairlines. The repository,
+  path, revision and GitHub link form a small source citation below the text.
+  A long file starts folded, with its source still visible.
+- **It is read through, never stored.** `GET
+  /api/spaces/:spaceId/pages/:pageId/github-file?href=` reads the file as the
+  caller: only a Space member who may read the page, only a file the page's
+  head revision references, and only through the Space's GitHub connection,
+  with a token that reads that one repository's contents. The Hub keeps a
+  read for a minute per connection; the page keeps nothing. A link the page
+  has only just gained is shown once the page session commits it.
+- **Each refusal names what is missing**: no GitHub connection, a repository
+  the connection does not reach, a file that is not there, a folder.
+- **A published page shows the link, not the file**, so a public reader never
+  sees a private repository's contents. Agents read the link in `page read`
+  and the file in their checkout.
+- **A directory is never mounted.** Mounting a repository's `docs/` into the
+  page tree assumed one layout and was removed (parent §3); an embed is one
+  file a page chose to show.
 
 ## 7. Around the page
 
@@ -516,12 +557,20 @@ There is no side panel. What its tabs held is shown where it acts:
 | Attached: connectors | A conversation linked to its section, a card like any other; *Attach* on the heading adds one |
 | History | A mode of the page: the margin lists revisions, and the document shows the chosen one's changes colored by author, with restore |
 | Settings: publishing, suggestion mode | The Share dialog from the header |
-| Settings: project governance | Open participation on the Space in Team; the governance page in Share (only owners and admins edit this page), both for Space owners and admins |
+| Settings: project governance | Open participation on the Space in Team; the governance page in Share ("Space rules": only owners and admins edit it, every Agent follows it), both for Space owners and admins |
 | The move to pages | A notice on the page while an Agent's draft waits for an owner or admin |
 
 A phone shows the same things on the page itself: avatars and the
 conversation count in the header, headings and bubbles in the text,
 and Share and History in the page's top bar.
+
+Creating a page works as in Notion: the desktop list's + and Ctrl/⌘+N, the
+phone's FAB, the empty list and a parent row's sub-page + each make an
+"Untitled" page at once, with no dialog or browser prompt, and open it under
+the chosen parent. The page opens with its title field focused and selected, on
+a phone as on a desktop, so typing names it; Enter or leaving the field saves
+the name, and an emptied field keeps the old one. While one creation is on its
+way another cannot start; a failure shows its error above the page list.
 
 ## 8. Build order
 

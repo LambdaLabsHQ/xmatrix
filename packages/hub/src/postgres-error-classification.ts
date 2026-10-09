@@ -10,6 +10,10 @@ const RETRYABLE_NETWORK_CODES = new Set([
   "DATABASE_COMMIT_UNKNOWN",
   // The shard's connectivity breaker refused before any PostgreSQL work.
   "DATABASE_CIRCUIT_OPEN",
+  // The db client's names for the code-less driver failures above.
+  "CONNECT_TIMEOUT",
+  "QUERY_READ_TIMEOUT",
+  "CONNECTION_UNUSABLE",
 ]);
 
 /** Seconds a client should wait before replaying a retryable PostgreSQL failure. */
@@ -49,6 +53,8 @@ export function retryablePostgresFailure(error: unknown): boolean {
   // "timeout exceeded when trying to connect".
   if (!code && [
     "Connection terminated unexpectedly",
+    "Client has encountered a connection error and is not queryable",
+    "Client was closed and is not queryable",
     "Connection terminated due to connection timeout",
     "timeout exceeded when trying to connect",
     "Query read timeout",

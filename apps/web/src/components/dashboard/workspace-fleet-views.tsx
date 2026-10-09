@@ -14,6 +14,8 @@ import {
 } from "./workspace-admin-views";
 
 import { GoogleChatRoomLink } from "./googlechat-room-link";
+import { GitHubInstallationAccounts } from "./github-installation-accounts";
+import { takeGitHubConnectOutcome } from "@/lib/github-connect-return";
 import { WeComCompanyConnection } from "./wecom-company-connection";
 import { DingTalkCompanyConnection } from "./dingtalk-company-connection";
 import type { HumanProfile } from "@xmatrix/protocol";
@@ -49,6 +51,7 @@ import {
 import { daemonPresenceLabel } from "./machine-daemon-presence";
 import { MachineLoadGlance, MachineLoadPanel } from "./machine-load-panel";
 import { MachineHarnessPanel } from "./machine-harness-panel";
+import { MachineWorktreesPanel } from "./machine-worktrees-panel";
 import { MachineGlyph } from "./machine-glyph";
 import { machineOs } from "./machine-os";
 import {
@@ -94,7 +97,7 @@ import {
   Shield,
   Siren,
   Terminal,
-  Cpu,
+  Bot,
   Trash2,
   PowerOff,
   Unplug,
@@ -130,7 +133,8 @@ import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCred
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
 
 import { useAuth } from "@/lib/auth-context";
-import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { xmatrixApiRequest, unexpectedResponse } from "@/lib/query/api-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { GoogleDocFileSelection } from "./google-doc-file-selection";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
@@ -220,7 +224,7 @@ export function MoreView({
     {
       label: "Operations",
       items: [
-        viewItem("agents", "Agents", "Registered agents and where they run", Cpu),
+        viewItem("agents", "Agents", "Registered agents and where they run", Bot),
         viewItem("machines", "Machines", "Registered machines and daemons", Terminal),
         viewItem("automation", "Schedules", "Scheduled channel activity", Clock),
       ],
@@ -247,7 +251,7 @@ export function MoreView({
     groups.push({
       label: "Platform",
       items: [
-        viewItem("admin", "Platform admin", "Platform-wide usage, invites, and product prompts", Shield),
+        viewItem("admin", "Platform admin", "Platform usage, users, Spaces, and the audit trail", Shield),
       ],
     });
   }
@@ -395,6 +399,7 @@ export function LocalMacView({
   machineName,
   onNameMachine,
   harnesses,
+  worktrees,
   hubRecord,
   onStartDaemon,
   onRestartDaemon,
@@ -427,6 +432,8 @@ export function LocalMacView({
   onNameMachine: (name: string) => void;
   /** The machine's harness inventory, shown after its daemon as on every Machine's page. */
   harnesses?: React.ReactNode;
+  /** The Machine's git worktrees; renders its own section. */
+  worktrees?: React.ReactNode;
   /** The Hub's record of this machine: more daemon facts and its load. */
   hubRecord?: { facts: React.ReactNode; load: React.ReactNode } | null;
   onStartDaemon: () => void;
@@ -542,6 +549,7 @@ export function LocalMacView({
       </ToolDetailSection>
 
       {harnesses && <ToolDetailSection title="Harnesses">{harnesses}</ToolDetailSection>}
+      {worktrees}
 
       <ToolDetailSection
         title={`Agents · ${agents.length}`}
@@ -752,6 +760,7 @@ export function MachinesView({
   loading,
   error,
   token,
+  spaceId,
   thisMachine,
   defaultItem,
 }: {
@@ -759,6 +768,8 @@ export function MachinesView({
   loading: boolean;
   error: string | null;
   token?: string | null;
+  /** The Space being viewed: an owner turns each installed harness on or off for it. */
+  spaceId?: string;
   /** The desktop app's own machine: its row's state and its page. */
   thisMachine?: {
     machineId?: string;
@@ -824,7 +835,7 @@ export function MachinesView({
       setRenamed((current) => ({ ...current, [editing.machineId]: name }));
       setEditing(null);
     } catch (reason) {
-      setRenameError(reason instanceof Error ? reason.message : "The Machine could not be renamed");
+      setRenameError(userErrorMessage(reason, "Couldn't rename the Machine"));
     } finally {
       savingName.current = false;
       setRenameBusy(false);
@@ -841,7 +852,7 @@ export function MachinesView({
       const saved = await setMachineAutoAssign(token, machineId, on);
       setAssigned((current) => ({ ...current, [machineId]: saved }));
     } catch (reason) {
-      setAssignError(reason instanceof Error ? reason.message : "Automatic assignment could not be changed");
+      setAssignError(userErrorMessage(reason, "Couldn't change automatic assignment"));
     } finally {
       setAssignBusy(null);
     }
@@ -859,7 +870,7 @@ export function MachinesView({
       setEditing(null);
       select(null);
     } catch (reason) {
-      setRemoveError(reason instanceof Error ? reason.message : "The Machine could not be removed");
+      setRemoveError(userErrorMessage(reason, "Couldn't remove the Machine"));
     } finally {
       setRemovingId(null);
     }
@@ -886,8 +897,11 @@ export function MachinesView({
   const thisLabel = thisOs === "macos" ? "This Mac" : thisOs === "windows" ? "This PC" : "This Machine";
   const thisTag = <span className="font-semibold text-foreground" data-testid="this-machine-tag">{thisLabel}</span>;
   // What a Machine is doing now: Agents running on it while online, when it was last seen once offline.
+  // "Online" follows connection events only; work it left unanswered says it is not actually responding.
+  const unresponsive = (machine: MachineSummary) => machine.status === "online" && Boolean(machine.daemon?.unansweredSince);
   const stateOf = (machine: MachineSummary) => machine.status === "online"
-    ? machine.activeRuns === undefined ? null
+    ? unresponsive(machine) ? "Not responding"
+      : machine.activeRuns === undefined ? null
       : machine.activeRuns === 0 ? "Idle" : `${machine.activeRuns} ${machine.activeRuns === 1 ? "agent" : "agents"} running`
     : machine.lastSeenAt ? `Offline · seen ${relativeTime(machine.lastSeenAt)}` : "Offline";
 
@@ -908,6 +922,7 @@ export function MachinesView({
           const name = machine ? nameOf(machine) : thisMachine!.name;
           const host = machine ? hostOf(machine) : undefined;
           const online = machine ? machine.status === "online" : thisMachine!.online;
+          const stalled = Boolean(machine && unresponsive(machine));
           const facts = [host ? `WSL on ${nameOf(host)}` : null,
             machine ? stateOf(machine) : thisMachine!.summary,
             machine && !autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
@@ -917,8 +932,9 @@ export function MachinesView({
               shownBeside={local ? showThisBeside && !item
                 : !chosen && !showingThis && !showThisBeside && machine!.id === shown?.id}
               onSelect={() => select(local ? THIS_MACHINE_ITEM : machine!.id)}
-              leading={<span className={cn("app-tool-state-icon", host && "pl-4")} data-state={online ? "running" : "offline"}
-                aria-label={`${name}: ${online ? "online" : "offline"}`} role="img">
+              leading={<span className={cn("app-tool-state-icon", host && "pl-4")}
+                data-state={stalled ? "attention" : online ? "running" : "offline"}
+                aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
                 <MachineGlyph os={machineOs(local ? thisMachine!.platform : platformOf(machine!))} /></span>}
               trailing={machine && <MachineLoadGlance machine={machine} now={now} />}
               title={name}
@@ -940,6 +956,7 @@ export function MachinesView({
     const unnamed = name === "Unnamed machine";
     const renaming = Boolean(machine && editing && machine.machineId && editing.machineId === machine.machineId);
     const online = machine ? machine.status === "online" : thisMachine!.online;
+    const stalled = Boolean(machine && unresponsive(machine));
     const titleControl = "flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
     detail = (
       <ToolDetail
@@ -989,10 +1006,12 @@ export function MachinesView({
         ) : undefined}
         status={
           <span className="flex flex-wrap items-center gap-x-2">
-            <ToolStateDot state={online ? "running" : "offline"} />
-            <span className="capitalize text-foreground">{online ? "online" : "offline"}</span>
+            <ToolStateDot state={stalled ? "attention" : online ? "running" : "offline"} />
+            <span className="capitalize text-foreground">{stalled ? "not responding" : online ? "online" : "offline"}</span>
             <span>· {local ? thisTag : null}{local && host ? " · " : null}{host ? `WSL on ${nameOf(host)}` : local ? null : "machine"}</span>
-            {machine?.lastSeenAt && <span>· seen {relativeTime(machine.lastSeenAt)}</span>}
+            {/* While online, the stored time is its last connection, not a heartbeat. */}
+            {machine?.lastSeenAt && <span>· {online ? "connected" : "seen"} {relativeTime(machine.lastSeenAt)}</span>}
+            {stalled && machine?.daemon?.unansweredSince && <span>· work waiting since {relativeTime(machine.daemon.unansweredSince)}</span>}
           </span>
         }
       >
@@ -1020,7 +1039,7 @@ export function MachinesView({
               <MachineVersionFacts machine={machine} />
             </>
           ),
-          load: <MachineLoadPanel machine={machine} now={now} />,
+          load: <MachineLoadPanel machine={machine} now={now} token={token} />,
         } : null) : machine && (
           <>
             <ToolDetailSection title="Daemon">
@@ -1028,11 +1047,12 @@ export function MachinesView({
                 <ToolFact label="Daemon">{daemonPresenceLabel(machine.daemon)}</ToolFact>
                 <MachineVersionFacts machine={machine} />
               </ToolFacts>
-              <MachineLoadPanel machine={machine} now={now} />
+              <MachineLoadPanel machine={machine} now={now} token={token} />
             </ToolDetailSection>
             <ToolDetailSection title="Harnesses">
-              <MachineHarnessPanel key={machine.id} daemon={machine.daemon} token={token} />
+              <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId} />
             </ToolDetailSection>
+            <MachineWorktreesPanel key={`worktrees:${machine.id}`} daemon={machine.daemon} token={token} />
             <ToolDetailSection title={`Directories · ${machine.workspaces.length}`}>
               {machine.workspaces.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No directories registered on this machine.</p>
@@ -1149,8 +1169,8 @@ export function AppsView({
   });
   const connections = connectionsQuery.data ?? NO_CONNECTIONS;
   const executions = executionsQuery.data ?? NO_EXECUTIONS;
-  const connectionsError = connectionActionError ?? connectionsQuery.error?.message ?? null;
-  const executionsError = executionActionError ?? executionsQuery.error?.message ?? null;
+  const connectionsError = connectionActionError ?? userErrorMessage(connectionsQuery.error, "Couldn't load app connections");
+  const executionsError = executionActionError ?? userErrorMessage(executionsQuery.error, "Couldn't load app actions");
   const loadingExecutions = executionsQuery.isFetching;
   const setConnections = useCallback((update: (
     current: SerializedAppConnectorConnection[],
@@ -1193,11 +1213,8 @@ export function AppsView({
   }, []);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    const status = url.searchParams.get("github");
+    const status = takeGitHubConnectOutcome();
     if (!status) return;
-    url.searchParams.delete("github");
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
     if (status === "connected") {
       setSetupNotice({
         tone: "success",
@@ -1217,11 +1234,12 @@ export function AppsView({
       });
     } else if (status === "cancelled") {
       setSetupNotice({ tone: "warning", message: "GitHub connection was cancelled before installation completed." });
-    } else if (status === "account_required") {
+    } else if (status === "authorized") {
       setSetupNotice({
-        tone: "warning",
-        message: "Link the GitHub account that installed the app in your profile, then Connect GitHub again.",
+        tone: "success",
+        message: "GitHub confirmed your accounts. Choose which ones this Space reaches under GitHub accounts.",
       });
+      setSelectedConnectorId("github");
     } else {
       setSetupNotice({
         tone: "warning",
@@ -1238,7 +1256,7 @@ export function AppsView({
 
   async function configureConnector(
     connector: AppConnectorManifest,
-    options?: { mode?: "add" | "manage" | "install"; installationId?: string }
+    options?: { mode?: "add" | "manage" | "install" | "account"; installationId?: string }
   ) {
     if (!token || !currentSpace) return;
     const existingConnection = connectionsByProvider.get(connector.id);
@@ -1250,7 +1268,9 @@ export function AppsView({
         const installationId = options?.installationId?.trim()
           || retainedInstallationIds[0]
           || "";
-        if (existingConnection?.status !== "configured" && installationId && options?.mode !== "add") {
+        // Only a connection in error recovers by a check; after Disconnect,
+        // Connect authorizes on GitHub again.
+        if (existingConnection?.status === "error" && installationId && options?.mode !== "add") {
           const checkPayload = await connectionMutation.mutateAsync({
             url: WEB_PROXY_ROUTES.space_app_connection_check(currentSpace.id, connector.id),
             method: "POST",
@@ -1276,7 +1296,7 @@ export function AppsView({
             installationId: mode === "manage" ? installationId || undefined : undefined,
           }),
         });
-        if (!payload.url) throw new Error("Failed to start GitHub install");
+        if (!payload.url) throw unexpectedResponse("The GitHub install link");
         window.location.assign(payload.url);
         return;
       }
@@ -1297,14 +1317,14 @@ export function AppsView({
           url: WEB_PROXY_ROUTES.space_app_connection_oauth_start(currentSpace.id, connector.id),
           method: "POST",
         });
-        if (!started.url) throw new Error(`Failed to start connecting ${connector.name}`);
+        if (!started.url) throw unexpectedResponse("The sign-in link");
         window.location.assign(started.url);
         return;
       }
 
       await connectWithCredentials(connector);
     } catch (error) {
-      setConnectionsError((error as Error).message);
+      setConnectionsError(userErrorMessage(error, `Couldn't connect ${connector.name}`));
     } finally {
       setUpdatingProviderId(null);
     }
@@ -1336,11 +1356,11 @@ export function AppsView({
     await checkConnector(connector);
   }
 
-  async function patchConnectorConnection(providerId: string, body: Record<string, unknown>, fallback: string) {
+  async function patchConnectorConnection(providerId: string, body: Record<string, unknown>) {
     const payload = await connectionMutation.mutateAsync({
       url: WEB_PROXY_ROUTES.space_app_connection(currentSpace!.id, providerId), method: "PATCH", body,
     });
-    if (!payload.connection) throw new Error(fallback);
+    if (!payload.connection) throw unexpectedResponse("The connection");
     setConnections(current => [...current.filter(connection => connection.providerId !== providerId), payload.connection!]);
   }
 
@@ -1350,11 +1370,10 @@ export function AppsView({
     setDisconnectingProviderId(connector.id);
     setConnectionsError(null);
     try {
-      await patchConnectorConnection(connector.id, { providerId: connector.id, status: "disconnected" },
-        "Failed to disconnect app connection");
+      await patchConnectorConnection(connector.id, { providerId: connector.id, status: "disconnected" });
       if (configuringProviderId === connector.id) closeConnectorConfiguration();
     } catch (error) {
-      setConnectionsError((error as Error).message);
+      setConnectionsError(userErrorMessage(error, `Couldn't disconnect ${connector.name}`));
     } finally {
       setUpdatingProviderId(null);
       setDisconnectingProviderId(null);
@@ -1370,7 +1389,7 @@ export function AppsView({
         url: WEB_PROXY_ROUTES.space_app_connection_check(currentSpace.id, connector.id),
         method: "POST",
       });
-      if (!payload.connection) throw new Error("Failed to check app connection");
+      if (!payload.connection) throw unexpectedResponse("The connection");
       setConnections((current) => [
         ...current.filter((connection) => connection.providerId !== connector.id),
         payload.connection!,
@@ -1380,7 +1399,7 @@ export function AppsView({
         setConnectionsError(payload.connection.error || payload.message || "App connection check failed");
       }
     } catch (error) {
-      setConnectionsError((error as Error).message);
+      setConnectionsError(userErrorMessage(error, `Couldn't check ${connector.name}`));
     } finally {
       setCheckingProviderId(null);
     }
@@ -1431,10 +1450,10 @@ export function AppsView({
       await patchConnectorConnection(connector.id, {
         providerId: connector.id,
         metadata: { ...connection.metadata, repository: configurationDraft.repository, actionsWorkflowIds },
-      }, "Failed to save connector configuration");
+      });
       closeConnectorConfiguration();
     } catch (error) {
-      setConnectionsError((error as Error).message);
+      setConnectionsError(userErrorMessage(error, `Couldn't save the ${connector.name} settings`));
     } finally {
       setSavingProviderId(null);
     }
@@ -1572,6 +1591,16 @@ export function AppsView({
               afterRefresh={async () => { await connectionsQuery.refetch(); }} />
           </ToolDetailSection>
         ) : null)}
+      {connector.id === "github" && token && currentSpace ? (
+        // Shown in every state, so a disconnected Space can link an account directly.
+        <ToolDetailSection title="GitHub accounts">
+          <GitHubInstallationAccounts key={currentSpace.id} spaceId={currentSpace.id} token={token}
+            onManage={(installationId) => void configureConnector(connector, { mode: "manage", installationId })}
+            onAuthorize={() => void configureConnector(connector, { mode: "add" })}
+            onInstall={() => void configureConnector(connector, { mode: "account" })}
+            onChanged={async () => { await connectionsQuery.refetch(); }} />
+        </ToolDetailSection>
+      ) : null}
       {configuring && selectedConnection && configurationDraft ? (
         <ToolDetailSection title="Configuration">
           <p className="mb-4 text-sm text-muted-foreground">Choose where this connector can run and which write actions are allowed.</p>
@@ -1582,11 +1611,6 @@ export function AppsView({
             onChange={setConfigurationDraft}
             onCancel={closeConnectorConfiguration}
             onSave={() => void saveConnectorConfiguration(connector, selectedConnection)}
-            onUpdateProviderAccess={() => void configureConnector(connector, {
-              mode: "manage",
-              installationId: githubConnectionInstallationIdsFromMetadata(selectedConnection.metadata)[0],
-            })}
-            onAddProviderAccount={() => void configureConnector(connector, { mode: "add" })}
           />
         </ToolDetailSection>
       ) : (
@@ -1664,8 +1688,6 @@ export function ConnectorConfiguration({
   onChange,
   onCancel,
   onSave,
-  onUpdateProviderAccess,
-  onAddProviderAccount,
 }: {
   connector: AppConnectorManifest;
   draft: AppConnectorConfigurationDraft;
@@ -1673,8 +1695,6 @@ export function ConnectorConfiguration({
   onChange: (draft: AppConnectorConfigurationDraft) => void;
   onCancel: () => void;
   onSave: () => void;
-  onUpdateProviderAccess: () => void;
-  onAddProviderAccount: () => void;
 }) {
   function update(patch: Partial<AppConnectorConfigurationDraft>) {
     onChange({ ...draft, ...patch });
@@ -1729,34 +1749,6 @@ export function ConnectorConfiguration({
         </fieldset>
       ) : null}
 
-      {connector.id === "github" ? (
-        <div className="app-connector-provider-access border-t border-border/60 pt-4">
-          <p className="text-sm font-bold">GitHub repository access</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Each GitHub account or organization keeps its own App installation. Manage repo selection
-            for an existing account, or add another account without replacing the first.
-            xMatrix does not edit GitHub permissions here.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onUpdateProviderAccess}
-              className={cn("app-connector-secondary-action inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-bold", COUNT_CHIP_MATERIAL_CLASS)}
-            >
-              <GitPullRequest className="size-4" />
-              Manage access on GitHub
-            </button>
-            <button
-              type="button"
-              onClick={onAddProviderAccount}
-              className={cn("app-connector-secondary-action inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-bold", COUNT_CHIP_MATERIAL_CLASS)}
-            >
-              <Plus className="size-4" />
-              Add account or organization
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-4">
         <button
@@ -2045,14 +2037,13 @@ export {
   desktopUpdateDescription,
   desktopUpdateErrorStatus,
   desktopUpdateLabel,
-  errorMessage,
 } from "./workspace-shell-desktop-labels";
 
 function MachineVersionFacts({ machine }: { machine: MachineSummary }) {
   return <>
-    <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} /></ToolFact>
-    <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} /></ToolFact>
-    <ToolFact label="App version"><MachineVersionValue version={machine.appVersion} /></ToolFact>
+    <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} component="cli" /></ToolFact>
+    <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} component="cli" /></ToolFact>
+    <ToolFact label="App version"><MachineVersionValue version={machine.appVersion} component="desktop" /></ToolFact>
     <ToolFact label="Last seen">{machine.lastSeenAt ? relativeTime(machine.lastSeenAt) : "-"}</ToolFact>
   </>;
 }

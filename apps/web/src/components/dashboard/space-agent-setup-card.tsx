@@ -4,7 +4,6 @@ import { useState } from "react";
 import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
 import { Check, CloudOff, Copy, Download, HardDrive, Loader2, PlayCircle, RefreshCw, Terminal } from "lucide-react";
-import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { noticeClass } from "@/components/ui/status-tone";
 import { quickStartRunbookUrl, quickStartSeedPrompt } from "@/lib/quick-start";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
@@ -17,6 +16,8 @@ import {
   type ConnectStep, type InstallPlatform,
 } from "./connect-machine";
 import { useSetupIntent } from "./use-setup-intent";
+import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
+import type { useInstalledHarnesses } from "./use-installed-harnesses";
 import type {
   SpaceAgentSetupCandidate,
   SpaceAgentSetupState,
@@ -51,6 +52,9 @@ export function SpaceAgentSetupCard({
   onStartDaemon,
   onRefresh,
   onRetryAgents,
+  fleet,
+  onBringAll,
+  onManageMachines,
 }: {
   state: SpaceAgentSetupState;
   spaceId: string | null;
@@ -63,7 +67,20 @@ export function SpaceAgentSetupCard({
   onStartDaemon: () => void;
   onRefresh: () => void;
   onRetryAgents: () => void;
+  fleet?: ReturnType<typeof useInstalledHarnesses>;
+  onBringAll: () => void;
+  onManageMachines: () => void;
 }) {
+  if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
+    <SetupCardHeader title="Your installed agents" body="Turn them on to summon them. Choose a working folder when you send the first task." />
+    <InstalledHarnessSwitchList fleet={fleet} />
+    <button type="button" disabled={!fleet.ready || Boolean(fleet.pending) || fleet.enablingAll}
+      onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
+      {fleet.enablingAll ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+      {fleet.enablingAll ? "Enabling…" : "Bring them in"}
+    </button>
+    <button type="button" onClick={onManageMachines} className={actionClass({ variant: "secondary", size: "md" }, "mt-4 ml-2")}>Manage machines</button>
+  </SetupCardShell>;
   if (state.kind === "hidden") return null;
 
   return (
@@ -85,7 +102,7 @@ export function SpaceAgentSetupCard({
           <>
             <SetupCardHeader
               title={`Found ${describeCandidates(state.candidates)} on ${hostLabel}`}
-              body="Bind one to this space and it can pick up work here. Nothing is installed or changed until you confirm."
+              body="Turn on the installed agents so they can take work."
             />
             {state.kind === "daemon-stopped" && (
               <div className={noticeClass("attention", "mt-4 p-3")}>
@@ -102,7 +119,7 @@ export function SpaceAgentSetupCard({
                 </button>
               </div>
             )}
-            <div className="mt-4 grid gap-3">
+            <div className="mt-4">
               {state.candidates.map((candidate) => (
                 <CandidateRow
                   key={candidate.presetId}
@@ -112,12 +129,12 @@ export function SpaceAgentSetupCard({
                 />
               ))}
             </div>
+            <button type="button" disabled={state.kind === "daemon-stopped" || Boolean(busy) || !fleet?.ready}
+              onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
+              <Check className="size-4" /> Bring them in
+            </button>
             <p className="mt-4 text-xs text-muted-foreground">
-              Detected on this machine by checking which agent commands are installed. Nothing about
-              your projects is read or uploaded by this step. To add a harness from another machine,
-              its owner runs{" "}
-              <code>{agentAddCommand(spaceId)}</code>
-              {" "}there.
+              Detected by checking installed commands. Manage installed harnesses and their Space switches from Machines.
             </p>
           </>
         )}
@@ -140,7 +157,7 @@ function CandidateRow({
   onBind: () => void;
 }) {
   return (
-    <LiquidGlassCard className="app-space-agent-candidate rounded-[20px] p-4">
+    <div className="border-b border-border py-4 last:border-0">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <IdentityAvatar
@@ -176,10 +193,10 @@ function CandidateRow({
           className={actionClass({ variant: "primary", size: "md" })}
         >
           <Check className="size-4" />
-          Add to xMatrix
+          Enable
         </button>
       </div>
-    </LiquidGlassCard>
+    </div>
   );
 }
 
@@ -247,9 +264,9 @@ function UnreachablePanel({ onRetry }: { onRetry: () => void }) {
 }
 
 /* Web and mobile: agents are not in this tab, so the one thing to learn here
-   is where they are. The desktop app finds the ones already installed; a
-   machine with the CLI adds one with a single command. */
-export function BringAgentsInPanel({ spaceId, token, userId }: {
+   is where they are. The desktop app finds the ones already installed; any
+   other machine connects with one command approved on this page. */
+function BringAgentsInPanel({ spaceId, token, userId }: {
   spaceId: string | null; token: string | undefined; userId: string | undefined;
 }) {
   return (
@@ -270,8 +287,8 @@ export function BringAgentsInPanel({ spaceId, token, userId }: {
 }
 
 /* One command for the machine, then what happened to it, as it happens: the
-   terminal asking to be approved, the machine coming online, the agents it
-   has, and one click to bring them into this Space. */
+   terminal asking to be approved, the machine coming online and the agents it
+   has. Once they are reported, the installed-agent switches take over. */
 export function ConnectMachine({ spaceId, token, userId, centered = false }: {
   spaceId: string | null; token: string | undefined; userId: string | undefined; centered?: boolean;
 }) {
@@ -300,32 +317,31 @@ export function ConnectMachine({ spaceId, token, userId, centered = false }: {
         {platform === "windows" ? "On macOS or Linux?" : "On Windows?"}
       </button>
       {step && <ConnectStepLine step={step} busy={intent.busy} centered={centered}
-        onApprove={(code) => void intent.approve(code)} onDecline={() => void intent.decline()}
-        onBringIn={(ids) => void intent.bringIn(ids)} />}
+        onApprove={(code) => void intent.approve(code)} onDecline={() => void intent.decline()} />}
       {intent.error && <p role="alert" className="mt-2 text-sm text-destructive">{intent.error}</p>}
     </div>
   );
 }
 
-function ConnectStepLine({ step, busy, centered, onApprove, onDecline, onBringIn }: {
+function ConnectStepLine({ step, busy, centered, onApprove, onDecline }: {
   step: ConnectStep; busy: boolean; centered: boolean;
-  onApprove: (userCode: string) => void; onDecline: () => void; onBringIn: (harnessIds: string[]) => void;
+  onApprove: (userCode: string) => void; onDecline: () => void;
 }) {
-  const row = cn("mt-3 flex min-w-0 flex-wrap items-center gap-2 text-sm", centered && "justify-center");
+  const row = cn("flex min-w-0 flex-wrap items-center gap-2 text-sm", centered && "justify-center");
   const waiting = <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />;
   const done = <Check className="size-4 shrink-0 text-primary" />;
   switch (step.kind) {
     case "waiting":
       return (
         <div role="status" className="mt-3 text-sm text-muted-foreground">
-          <p className={row.replace("mt-3 ", "")}>{waiting} Waiting for the command…</p>
+          <p className={row}>{waiting} Waiting for the command…</p>
           {step.hint === "check-terminal" && <p className="mt-1">Nothing yet? The terminal says what went wrong.</p>}
           {step.hint === "try-desktop" && <p className="mt-1">Still nothing? The desktop app connects without a terminal.</p>}
         </div>
       );
     case "approval":
       return (
-        <div role="status" className={row}>
+        <div role="status" className={cn(row, "mt-3")}>
           <span><strong>{step.hostname}</strong> wants to connect with code{" "}
             <code className="font-mono font-semibold">{step.userCode}</code>.
             Approve it only if the terminal shows the same code.</span>
@@ -336,31 +352,24 @@ function ConnectStepLine({ step, busy, centered, onApprove, onDecline, onBringIn
         </div>
       );
     case "connecting":
-      return <p role="status" className={row}>{waiting} {step.hostname} is signing in…</p>;
+      return <p role="status" className={cn(row, "mt-3")}>{waiting} {step.hostname} is signing in…</p>;
     case "looking":
-      return <p role="status" className={row}>{done} {step.machineName} is connected. Looking for agents…</p>;
+      return <p role="status" className={cn(row, "mt-3")}>{done} {step.machineName} is connected. Looking for agents…</p>;
     case "found":
       return (
-        <div role="status" className={row}>
-          {done}
-          <span>{step.machineName} is connected. Found {listNames(step.harnesses.map((harness) => harness.name))}.</span>
-          <button type="button" disabled={busy} onClick={() => onBringIn(step.harnesses.map((harness) => harness.id))}
-            className={actionClass({ variant: "primary", size: "sm" })}>
-            {step.harnesses.length === 1 ? "Bring it in" : "Bring them in"}
-          </button>
-        </div>
+        <p role="status" className={cn(row, "mt-3")}>
+          {done} {step.machineName} is connected. Found {listNames(step.harnesses.map((harness) => harness.name))}.
+        </p>
       );
     case "none-installed":
       return (
         <div role="status" className="mt-3 text-sm">
-          <p className={row.replace("mt-3 ", "")}>{done} {step.machineName} is connected, but no agent is installed there yet.</p>
+          <p className={row}>{done} {step.machineName} is connected, but no agent is installed there yet.</p>
           <p className="mt-1 text-muted-foreground">
             Install one there, for example <code className="font-mono text-xs">{RUNTIME_INSTALL_COMMANDS[0]!.command}</code>
           </p>
         </div>
       );
-    case "done":
-      return <p role="status" className={row}>{done} Your agents on {step.machineName} are in this Space.</p>;
   }
 }
 

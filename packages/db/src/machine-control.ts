@@ -2,8 +2,9 @@ import { storeScopedCommandReplay } from "./command-replay.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import type { QueryResultRow } from "pg";
 import {
-  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
+  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
+  MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
   stableMachineDaemonId,
   sha256Hex } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
@@ -25,18 +26,35 @@ const ACTIONS = new Set(["enroll", "connect", "report", "unregister", "issue", "
   "renew", "complete", "retry", "failed-deliver", "migration_preflight", "migration_fence", "recover_connect",
   "activation_begin", "activation_prepare", "activation_advance"]);
 const COMMAND_TYPES = new Set(["spawn", "stop", "cleanup", "request_resolve", "recover_reply", "quota_probe",
-  "harness_action"]);
+  "harness_action", "worktree_action"]);
 const RESULT_TYPES: Record<string, string> = {
   spawn: "machine_spawn_result", stop: "machine_stop_result",
   recover_reply: "machine_recover_reply_result",
   quota_probe: "machine_quota_probe_result",
   harness_action: "machine_harness_action_result",
+  worktree_action: "machine_worktree_action_result",
   cleanup: "machine_worktree_cleanup_result", request_resolve: "machine_request_resolve_result",
 };
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const COMMAND_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
-// An owner's harness action that no daemon claimed soon must not run unexpectedly later.
-const HARNESS_ACTION_CLAIM_TTL_MS = 10 * 60 * 1_000;
+/**
+ * A connected daemon claims a command within a second of its wake and renews a
+ * held lease every 15 s. Work left unclaimed, or a lease left lapsed, this long
+ * is evidence the "online" route is not responding.
+ */
+const UNANSWERED_AFTER_MS = 60_000;
+/** Only recent work counts, so one command that can never be claimed does not
+ * mark a working machine as not responding for its whole lifetime. */
+const UNANSWERED_WINDOW_MS = 30 * 60 * 1_000;
+/**
+ * A command handed to its daemon this many times, each time left to lapse
+ * without a word, fails instead of going out again: the daemon takes it and
+ * never reports, so another lease would be the same. Whoever issued it reads
+ * the failure (2026-10-09: spawns a Workstation daemon never answered were
+ * leased ~6,600 times each over three days, their Launches silently queued).
+ */
+const MAX_UNANSWERED_DELIVERIES = 10;
+const UNANSWERED_FAILURE = `The machine was given this ${MAX_UNANSWERED_DELIVERIES} times and never answered, so it was not run`;
 const MACHINE_ACTIVATION_RUN_LIMIT = 1_000;
 const SNAPSHOT_ROUTE_WINDOW_MS = 15 * 60 * 1_000;
 const ACTIVATION_TERMINAL_PHASES = new Set(["stable_granted", "aborted"]);
@@ -142,6 +160,8 @@ function daemon(row: QueryResultRow) {
     ...(row.parent_machine_id ? { parentMachineId: String(row.parent_machine_id) } : {}),
     ...(row.auto_assign === false ? { autoAssign: false } : {}),
     ...(row.active_runs != null ? { activeRuns: Number(row.active_runs) } : {}),
+    ...(row.unanswered_since && row.status === "online"
+      ? { unansweredSince: new Date(row.unanswered_since as Date | string).toISOString() } : {}),
     capabilities: Array.isArray(row.capabilities_json) ? row.capabilities_json : [],
     metadata: row.metadata_json && typeof row.metadata_json === "object" ? row.metadata_json : {},
     version: Number(row.version), connectedAt: new Date(row.created_at as Date).toISOString(),
@@ -253,6 +273,16 @@ function exactResult(commandType: string, issued: Record<string, unknown>, event
       }
     } catch {
       throw new MachineControlError("machine_command_result_mismatch", 409, "Harness result differs from the issued action");
+    }
+  }
+  if (commandType === "worktree_action") {
+    try {
+      parseWorktreeActionResult(payload.result, parseWorktreeActionRequest(issued));
+      if (Object.keys(payload).some(key => !["type", "requestId", "result", "relayLease"].includes(key))) {
+        throw new Error("Unexpected worktree result field");
+      }
+    } catch {
+      throw new MachineControlError("machine_command_result_mismatch", 409, "Worktree result differs from the issued action");
     }
   }
   const identityFields = commandType === "spawn"
@@ -477,6 +507,26 @@ export class PostgresMachineControlRepository {
               OR metadata_json->'machineResources'->>'observedAt' < $4)`,
           values: [daemonId, connectionEpoch, JSON.stringify({ ...resources, connectionEpoch }),
             resources.observedAt], maxRows: 0 });
+        // History keeps one sample per Machine per minute: the latest one the live
+        // connection reported in that minute.
+        if (resources) await tx.query({ name: "machine_resource_history_sample_v1", text: `INSERT INTO
+          data.machine_resource_samples (owner_user_id,machine_id,observed_at,cpu_usage_percent,
+            load_average_1m,memory_total_bytes,memory_available_bytes,swap_total_bytes,swap_free_bytes,
+            disk_total_bytes,disk_available_bytes)
+          SELECT $1,$2,date_trunc('minute',$4::timestamptz),$5,$6,$7,$8,$9,$10,$11,$12
+          WHERE EXISTS (SELECT 1 FROM data.machine_daemons WHERE daemon_id=$3 AND status='online'
+            AND connection_epoch=$13)
+          ON CONFLICT (owner_user_id,machine_id,observed_at) DO UPDATE SET
+            cpu_usage_percent=EXCLUDED.cpu_usage_percent, load_average_1m=EXCLUDED.load_average_1m,
+            memory_total_bytes=EXCLUDED.memory_total_bytes,
+            memory_available_bytes=EXCLUDED.memory_available_bytes,
+            swap_total_bytes=EXCLUDED.swap_total_bytes, swap_free_bytes=EXCLUDED.swap_free_bytes,
+            disk_total_bytes=EXCLUDED.disk_total_bytes, disk_available_bytes=EXCLUDED.disk_available_bytes`,
+          values: [ownerUserId, machineId, daemonId, resources.observedAt, resources.cpuUsagePercent ?? null,
+            resources.loadAverage?.[0] ?? null, resources.memoryTotalBytes ?? null,
+            resources.memoryAvailableBytes ?? null, resources.swapTotalBytes ?? null,
+            resources.swapFreeBytes ?? null, resources.diskTotalBytes ?? null,
+            resources.diskAvailableBytes ?? null, connectionEpoch], maxRows: 0 });
 
         // A harness inventory is an observation of the connection that sent it.
         // An invalid one is dropped rather than failing the Run snapshot it rides on.
@@ -966,6 +1016,23 @@ export class PostgresMachineControlRepository {
       if (!current[0]) throw new MachineControlError("harness_action_unavailable", 409,
         "The Machine is offline or its xMatrix daemon cannot manage harnesses yet");
     }
+    if (commandType === "worktree_action") {
+      try {
+        const action = parseWorktreeActionRequest(payload);
+        if (payload.type !== "machine_worktree_action" || action.requestId !== controlId ||
+            Object.keys(payload).some(key => !["type", "requestId", "action", "paths"].includes(key))) {
+          throw new Error("Invalid worktree action envelope");
+        }
+      } catch {
+        throw new MachineControlError("invalid_worktree_action", 400, "Worktree action is invalid");
+      }
+      const current = await tx.query({ name: "machine_worktree_action_daemon_v1", text: `SELECT 1
+        FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
+          AND status='online' AND capabilities_json ? $3 FOR SHARE`,
+      values: [ownerUserId, machineId, MACHINE_WORKTREE_ACTION_CAPABILITY], maxRows: 1 });
+      if (!current[0]) throw new MachineControlError("worktree_action_unavailable", 409,
+        "The Machine is offline or its xMatrix daemon cannot manage worktrees yet");
+    }
     if (commandType === "recover_reply") {
       for (const field of ["runId", "instanceId", "executionKey", "channelId", "executionId"]) text(payload[field], `payload.${field}`, 300);
       if (Object.keys(payload).some(key => !["type", "requestId", "runId", "instanceId", "executionKey", "channelId", "executionId", "messageId", "relayLease"].includes(key))) {
@@ -989,7 +1056,8 @@ export class PostgresMachineControlRepository {
       ON CONFLICT (command_id) DO NOTHING RETURNING command_id`, values: [controlId, ownerUserId,
       machineId, hostId, commandType, JSON.stringify(payload), at,
       new Date(Date.parse(at) + (commandType === "quota_probe" ? 15_000
-        : commandType === "harness_action" ? HARNESS_ACTION_CLAIM_TTL_MS : COMMAND_TTL_MS)).toISOString()], maxRows: 1 });
+        : commandType === "harness_action" ? HARNESS_ACTION_CLAIM_TTL_MS
+          : commandType === "worktree_action" ? WORKTREE_ACTION_CLAIM_TTL_MS : COMMAND_TTL_MS)).toISOString()], maxRows: 1 });
     if (!rows[0]) throw new MachineControlError("machine_command_exists", 409,
       "Machine command already exists");
     if (commandType === "spawn" || commandType === "stop" &&
@@ -1114,7 +1182,13 @@ export class PostgresMachineControlRepository {
       "invalid_machine_command", 400, "Machine claim includes an unknown command type");
     const leaseMs = Math.min(integer(input.leaseMs ?? 30_000, "leaseMs", 1), 60_000);
     const leaseOwner = `machine-daemon:${String(current.owner_user_id)}:${String(current.machine_id)}:epoch:${connectionEpoch}`;
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v7", text: `SELECT
+    await tx.query({ name: "machine_control_unanswered_fail_v1", text: `UPDATE data.machine_daemon_commands SET
+        status='failed',result_json=jsonb_build_object('ok',false,'error',$3::text),lease_owner=NULL,lease_until=NULL,
+        completed_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp()
+      WHERE owner_user_id=$1 AND machine_id=$2 AND attempts>=$4
+        AND (status='pending' OR (status='leased' AND lease_until<=clock_timestamp()))`,
+    values: [current.owner_user_id, current.machine_id, UNANSWERED_FAILURE, MAX_UNANSWERED_DELIVERIES], maxRows: 0 });
+    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v8", text: `SELECT
       command.command_id,command.command_type,
       CASE WHEN command.command_type='spawn' AND launch.launch_id IS NOT NULL
         THEN command.payload_json || jsonb_build_object(
@@ -1139,8 +1213,9 @@ export class PostgresMachineControlRepository {
           (command.payload_json->>'action'<>'uninstall' OR $8::boolean) AND
           (command.payload_json->>'action'<>'release' OR $9::boolean) AND
           (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean)))
+        AND (command.command_type<>'worktree_action' OR $11::boolean)
       ORDER BY command.created_at,command.command_id LIMIT 5
-      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY)],
+      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)],
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {
@@ -1322,15 +1397,28 @@ export class PostgresMachineControlRepository {
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "machine-control.list" }, async (tx) => {
       // A retired Machine is gone from its owner's list; a live one says how many Agents it is running.
-      const rows = await tx.query<QueryResultRow>({ name: "machine_control_list_v6", text: `SELECT
+      // Reachability follows connection events only, so an online daemon also says since when it
+      // left work unanswered: a command available but unclaimed, or a lease it stopped renewing,
+      // for longer than UNANSWERED_AFTER_MS. Quota probes are bound to one connection and excluded.
+      const rows = await tx.query<QueryResultRow>({ name: "machine_control_list_v8", text: `SELECT
         daemon.*,machine.name AS machine_name,machine.parent_machine_id,machine.auto_assign,
         (SELECT COUNT(*) FROM data.runs run WHERE run.owner_user_id=daemon.owner_user_id
-          AND run.metadata_json->>'machineId'=daemon.machine_id AND run.status IN (${ACTIVE_RUN_STATUS_SQL})) AS active_runs
+          AND run.metadata_json->>'machineId'=daemon.machine_id AND run.status IN (${ACTIVE_RUN_STATUS_SQL})) AS active_runs,
+        (SELECT MIN(CASE WHEN command.status='pending'
+            THEN COALESCE(command.available_at,command.created_at) ELSE command.lease_until END)
+          FROM data.machine_daemon_commands command
+          WHERE daemon.status='online' AND command.owner_user_id=daemon.owner_user_id
+            AND command.machine_id=daemon.machine_id AND command.command_type<>'quota_probe'
+            AND (command.expires_at IS NULL OR command.expires_at>clock_timestamp())
+            AND ((command.status='pending' AND COALESCE(command.available_at,command.created_at) BETWEEN
+                clock_timestamp()-($5::integer*interval '1 millisecond') AND clock_timestamp()-($4::integer*interval '1 millisecond'))
+              OR (command.status='leased' AND command.lease_until BETWEEN
+                clock_timestamp()-($5::integer*interval '1 millisecond') AND clock_timestamp()-($4::integer*interval '1 millisecond')))) AS unanswered_since
         FROM data.machine_daemons daemon
         LEFT JOIN data.machines machine ON machine.owner_user_id=daemon.owner_user_id AND machine.machine_id=daemon.machine_id
         WHERE daemon.owner_user_id=$1 AND daemon.daemon_id>$2 AND machine.retired_at IS NULL
         ORDER BY daemon.daemon_id LIMIT $3`,
-      values: [ownerUserId, cursor, limit + 1], maxRows: limit + 1 });
+      values: [ownerUserId, cursor, limit + 1, UNANSWERED_AFTER_MS, UNANSWERED_WINDOW_MS], maxRows: limit + 1 });
       return { daemons: rows.slice(0, limit).map(daemon),
         cursor: rows.length > limit ? String(rows[limit - 1]?.daemon_id ?? "") : null };
     });

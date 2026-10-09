@@ -21,11 +21,6 @@ function readAction(id: string, label: string, description: string, usage: strin
   return { id, label, description, usage, effect: "read", completion: { trailingDelimiter: ":" } };
 }
 
-/* A write an Agent may run by default, unless a Space admin denies it in the Channel. */
-function agentWriteAction(id: string, label: string, description: string, usage: string): Action {
-  return { ...writeAction(id, label, description, usage), defaultPolicy: "allow" };
-}
-
 /* Every provider with write actions takes the per-Channel policy command. */
 function withPolicy(actions: Action[]): Action[] {
   return actions.length === 0 ? [] : [...actions, {
@@ -124,6 +119,42 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/drive.file"], secretRefs: [] },
   },
+  {
+    ...actionConnector({
+      id: "googlesearchconsole", name: "Google Search Console", kind: "observability",
+      description: "Read search performance, sitemaps and URL index status for the Search Console properties the connected Google account can see, and submit sitemaps.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/webmasters"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS],
+      actions: [
+        readAction("list_sites", "List properties", "List the Search Console properties and permission levels of the connected account.", "*"),
+        readAction("query", "Query search performance", "Clicks, impressions, CTR and average position, grouped by up to three dimensions. Defaults: by=query days=28 limit=25 type=web.",
+          "<sc-domain:example.com or https://www.example.com/> [by=query,page|none] [days=1-480] [limit=1-250] [type=web|image|video|news|discover|googleNews]"),
+        readAction("list_sitemaps", "List sitemaps", "List submitted sitemaps with their errors, warnings and indexed counts.", "<property>"),
+        readAction("inspect_url", "Inspect URL", "Read Google's index status, last crawl and canonical for one page of the property.", "<property> <page url>"),
+        writeAction("submit_sitemap", "Submit sitemap", "Submit or resubmit a sitemap URL that belongs to the property.", "<property> <sitemap url>"),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/webmasters"], secretRefs: [] },
+  },
+  {
+    ...actionConnector({
+      id: "googleadsense", name: "Google AdSense", kind: "observability",
+      description: "Read AdSense accounts, sites and earnings reports for the accounts the connected Google account can see. Read-only.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/adsense.readonly"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS],
+      actions: [
+        readAction("list_accounts", "List accounts", "List the AdSense accounts of the connected Google account with their state and time zone.", "*"),
+        readAction("list_sites", "List sites", "List the sites of an account with their approval state.", "<pub-…>"),
+        readAction("report", "Earnings report", "Estimated earnings, page views, page RPM, impressions and clicks. Defaults: by=date days=7 limit=50.",
+          "<pub-…> [by=date,domain,site,country,platform,page,month|none] [days=1-1095] [limit=1-250]"),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/adsense.readonly"], secretRefs: [] },
+  },
   eventConnector({
     id: "webhook",
     name: "Webhook",
@@ -165,9 +196,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     defaultFeatures: ["issue.created", "issue.regressed", "alert"],
     actions: [
       readAction("read_issue", "Read issue context", "Read one Sentry issue and bounded latest-event exception frames.", "<issue short id or numeric id>"),
-      agentWriteAction("resolve", "Resolve issue", "Mark a Sentry issue resolved.", "<issue short id>"),
-      agentWriteAction("unresolve", "Unresolve issue", "Mark a Sentry issue unresolved.", "<issue short id>"),
-      agentWriteAction("ignore", "Ignore issue", "Mark a Sentry issue ignored.", "<issue short id>"),
+      writeAction("resolve", "Resolve issue", "Mark a Sentry issue resolved.", "<issue short id>"),
+      writeAction("unresolve", "Unresolve issue", "Mark a Sentry issue unresolved.", "<issue short id>"),
+      writeAction("ignore", "Ignore issue", "Mark a Sentry issue ignored.", "<issue short id>"),
     ],
   }),
   eventConnector({

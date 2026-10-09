@@ -1,5 +1,4 @@
 "use client";
-import { responseErrorMessage } from "@/lib/auth-error-policy";
 
 import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -34,6 +33,8 @@ import {
   normalizeNativeLoginClient,
   type NativeLoginClient,
 } from "@/lib/native-login-client";
+import { errorFromResponse, isTransientFailure, xmatrixRawResponse, XMatrixApiError, unexpectedResponse } from "@/lib/query/api-client";
+import { isAbort, userErrorMessage } from "@/lib/user-facing-error";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const LOGIN_CODE_LENGTH = 6;
@@ -259,16 +260,14 @@ function LoginContent() {
       }
 
       try {
-        const tokenResponse = await fetch(WEB_PROXY_ROUTES.cli_device_token, {
+        const tokenResponse = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_token, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ deviceCode: pendingLogin.deviceCode }),
         });
 
+        if (!tokenResponse.ok) throw await errorFromResponse(tokenResponse);
         const payload = (await tokenResponse.json().catch(() => ({}))) as DeviceLoginPollResponse;
-        if (!tokenResponse.ok) {
-          throw new Error(payload.error || "Browser login failed");
-        }
 
         if (payload.status === "approved") {
           pendingPollCount = 0;
@@ -302,7 +301,7 @@ function LoginContent() {
           setDesktopLogin({
             status: "error",
             verificationUrl: pendingLogin.verificationUrl,
-            error: payload.error || "Browser login expired. Start a fresh sign-in.",
+            error: "Browser login expired. Start a fresh sign-in.",
           });
           return;
         }
@@ -351,13 +350,11 @@ function LoginContent() {
     setDesktopLogin({ status: "opening" });
 
     try {
-      const startResponse = await fetch(WEB_PROXY_ROUTES.cli_device_start, {
+      const startResponse = await xmatrixRawResponse(WEB_PROXY_ROUTES.cli_device_start, {
         method: "POST",
       });
 
-      if (!startResponse.ok) {
-        throw new Error(await responseErrorMessage(startResponse, "Failed to start browser login"));
-      }
+      if (!startResponse.ok) throw await errorFromResponse(startResponse);
 
       const deviceLogin = (await startResponse.json()) as DeviceLoginStartResponse;
       const verificationUrl = new URL(deviceLogin.verificationUriComplete);
@@ -416,7 +413,7 @@ function LoginContent() {
         }
         deviceApprovalSubmittedRef.current = false;
         setDeviceApprovalConfirmed(false);
-        setError((nextError as Error).message);
+        setError(userErrorMessage(nextError, "Couldn't approve the terminal sign-in") ?? "");
       } finally {
         setLoading(false);
       }
@@ -436,16 +433,13 @@ function LoginContent() {
       setError("");
 
       try {
-        const { exchangeResponse, cliSession } = await requestCliSessionExchange(session.access_token);
-        if (!exchangeResponse.ok) {
-          throw new Error(cliSession.error || "Failed to create an independent CLI session.");
-        }
+        const cliSession = await requestCliSessionExchange(session.access_token);
         if (!cliSession.token || !cliSession.user || !cliSession.hubUrl || !cliSession.relayUrl) {
-          throw new Error("CLI session exchange response was incomplete.");
+          throw unexpectedResponse("The terminal session");
         }
 
         const callbackUrl = new URL(cliCallbackContext.callbackUrl);
-        const response = await fetch(callbackUrl.toString(), {
+        const response = await xmatrixRawResponse(callbackUrl.toString(), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -457,14 +451,12 @@ function LoginContent() {
           }),
         });
 
-        if (!response.ok) {
-          throw new Error(await responseErrorMessage(response, "Failed to return CLI session to localhost callback."));
-        }
+        if (!response.ok) throw await errorFromResponse(response);
 
         setCliComplete(true);
       } catch (nextError) {
         legacyCliSubmittedRef.current = false;
-        setError((nextError as Error).message);
+        setError(userErrorMessage(nextError, "Couldn't hand the session to your terminal") ?? "");
       } finally {
         setLoading(false);
       }
@@ -927,7 +919,9 @@ function normalizeNextPath(next: string | null): string {
 }
 
 function formatLoginError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error || "");
+  // Read only to recognise Better Auth's rate-limit wording; never shown.
+  // eslint-disable-next-line no-restricted-syntax
+  const message = error instanceof Error ? error.message : "";
   const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
 
   if (code === "over_email_send_rate_limit" || /email rate limit/i.test(message)) {
@@ -938,22 +932,14 @@ function formatLoginError(error: unknown): string {
     return "Email sign-in codes are not configured. Use Google sign-in while the mail setup is fixed.";
   }
 
-  return message || "Login failed. Please try again.";
+  return userErrorMessage(error, "Couldn't sign you in") ?? "";
 }
 
+/** A poll that got no answer, or the proxy's own deadline; the next poll may get one. */
 function isTransientDeviceLoginPollError(error: unknown): boolean {
-  const message = formatLoginError(error).toLowerCase();
-  return (
-    message === "load failed" ||
-    message.includes("failed to fetch") ||
-    message.includes("network") ||
-    message.includes("aborted") ||
-    message.includes("timeout") ||
-    message.includes("xmatrix hub is unavailable") ||
-    // The proxy now separates its own timeout from an unreachable Hub; both
-    // stay transient for device-login polling.
-    message.includes("did not respond in time")
-  );
+  return isTransientFailure(error) || isAbort(error) ||
+    (error instanceof Error && error.name === "TimeoutError") ||
+    (error instanceof XMatrixApiError && error.status === 504);
 }
 
 async function approveDeviceLoginWithRetry(
@@ -983,7 +969,7 @@ async function approveDeviceLoginWithRetry(
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("Failed to approve device login");
+  throw lastError;
 }
 
 async function approveDeviceLogin(
@@ -991,7 +977,7 @@ async function approveDeviceLogin(
   deviceCode: string,
   userCode: string
 ): Promise<void> {
-  const response = await fetch("/api/xmatrix/cli/device/approve", {
+  const response = await xmatrixRawResponse("/api/xmatrix/cli/device/approve", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -1003,14 +989,12 @@ async function approveDeviceLogin(
     }),
   });
 
-  if (!response.ok) {
-    throw new Error(await responseErrorMessage(response, "Failed to approve CLI login"));
-  }
+  if (!response.ok) throw await errorFromResponse(response);
 }
 
 function isDeviceLoginAlreadyCompletedError(error: unknown): boolean {
-  const message = formatLoginError(error).toLowerCase();
-  return message.includes("unknown device code");
+  return error instanceof XMatrixApiError && error.status === 404 &&
+    (error.code === "unknown_device_code" || error.message === "Unknown device code");
 }
 
 function delay(ms: number): Promise<void> {

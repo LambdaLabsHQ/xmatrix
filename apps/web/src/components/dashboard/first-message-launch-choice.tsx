@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { preparationFailureSummary, type InteractionDecisionWindow, type InteractionLaunchOption } from "@xmatrix/protocol";
 import { avatarImageSrc } from "./identity-avatar";
 import { launchChoiceRead, launchChoiceView, type LaunchChoiceView } from "./first-message-launch-choice-state";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /** The option's own icon, from its launch option; never rebuilt from the harness name here. */
 function OptionMark({ option }: { option: InteractionLaunchOption }) {
@@ -83,7 +84,7 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, op
       setPending(harness);
       setError(null);
       try { await onChoose(harness); }
-      catch (failure) { setPending(undefined); setError((failure as Error).message); }
+      catch (failure) { setPending(undefined); setError(userErrorMessage(failure, "Couldn't start the Agent")); }
     };
     // The window lists Jev's pick even when the reader's catalog has not loaded yet.
     const listed = window?.options.length ? window.options : options;
@@ -91,7 +92,7 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, op
       <div className="launch-choice" data-state={view.kind} role="group" aria-label="Choose the Agent that starts">
         <div className="launch-choice-row">
           <span className="launch-choice-label">
-            {view.kind === "reading" ? "Jev is deciding" : remaining === undefined ? "Jev is reading" : "Start"}
+            {view.kind === "reading" ? "xMatrix is deciding" : remaining === undefined ? "xMatrix is reading" : "Start"}
           </span>
           <div className="launch-choice-options">
             {listed.map(option => (
@@ -99,10 +100,10 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, op
                 data-recommended={recommended === option.optionId || undefined}
                 data-picked={pending === option.harness || undefined}
                 disabled={!choosing} onClick={() => void choose(option.harness)}
-                aria-label={`Start ${option.displayName}${recommended === option.optionId ? " (Jev's pick)" : ""}`}>
+                aria-label={`Start ${option.displayName}${recommended === option.optionId ? " (xMatrix's pick)" : ""}`}>
                 <OptionMark option={option} />
                 <span>{option.displayName}</span>
-                {recommended === option.optionId && <span className="launch-choice-jev">Jev</span>}
+                {recommended === option.optionId && <span className="launch-choice-jev">xMatrix</span>}
               </button>
             ))}
           </div>
@@ -129,13 +130,13 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, op
 }
 
 function DecidedLaunchChoice({ view, own }: { view: Extract<LaunchChoiceView, { kind: "chosen" | "none" }>; own: boolean }) {
-  const by = view.by === "jev" ? "Jev's pick" : own ? "Your pick" : "Author's pick";
+  const by = view.by === "jev" ? "xMatrix's pick" : own ? "Your pick" : "Author's pick";
   if (view.kind === "none") {
     return (
       <div className="launch-choice launch-choice-settled" data-state="none" role="status">
         <span className="launch-choice-label">No Agent started</span>
         <span className="launch-choice-note">
-          {view.failureCode ? failureNote(view.failureCode) : view.by === "jev" ? "Jev read this as conversation" : by}
+          {view.failureCode ? failureNote(view.failureCode) : view.by === "jev" ? "xMatrix read this as conversation" : by}
         </span>
       </div>
     );

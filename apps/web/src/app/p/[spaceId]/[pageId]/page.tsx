@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
+import { gitHubFileUrl, parseGitHubFileReference } from "@xmatrix/protocol";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 import { loadPublicPage as load } from "@/lib/pages/public-page";
 import { PublicPageLive } from "./public-page-live";
@@ -16,6 +17,12 @@ function summary(body: string): string {
   const paragraph = body.split(/\n{2,}/u).map((part) => part.trim())
     .find((part) => part && !part.startsWith("#") && !part.startsWith("|") && !part.startsWith("```"));
   return (paragraph ?? "").replace(/[*_`>[\]]/gu, "").slice(0, 200);
+}
+
+/** A file the page embeds links to GitHub here: a public reader is never shown a repository's contents. */
+function publicPageUrl(url: string): string {
+  const reference = parseGitHubFileReference(url);
+  return reference ? gitHubFileUrl(reference) : defaultUrlTransform(url);
 }
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
@@ -36,7 +43,7 @@ export default async function PublicPageView({ params }: Params) {
     <main className="mx-auto min-h-screen max-w-3xl px-6 py-10" data-testid="public-page">
       <p className="mb-6 text-sm text-muted-foreground">{page.spaceName}</p>
       <article className="prose max-w-none">
-        <Markdown remarkPlugins={markdownRemarkPlugins}>{page.body}</Markdown>
+        <Markdown remarkPlugins={markdownRemarkPlugins} urlTransform={publicPageUrl}>{page.body}</Markdown>
       </article>
       {page.children.length > 0 && (
         <nav className="mt-10 border-t pt-4" aria-label="Pages below">

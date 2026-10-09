@@ -2,23 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readPostgresAdminOverviewFromFleet } from "../src/postgres-admin-overview.ts";
+import { adminQueryDatabase } from "./support/admin-query-database.mjs";
 
-function database(resultByQuery) {
-  return {
-    cacheMode: "disabled",
-    async transaction(_context, callback) {
-      return callback({
-        async query(query) {
-          if (!Number.isSafeInteger(query.maxRows) || query.maxRows < 0 || query.maxRows > 10_000) {
-            throw new Error("query.maxRows must be between 0 and 10000");
-          }
-          if (!(query.name in resultByQuery)) throw new Error(`unexpected query ${query.name}`);
-          const result = resultByQuery[query.name];
-          return typeof result === "function" ? result(query) : result;
-        },
-      });
-    },
+function database(results) {
+  const sections = {
+    totals: "postgres_admin_totals_v4", spaces: "postgres_admin_spaces_v3",
+    users: "postgres_admin_users_v4", activity: "postgres_admin_activity_v3",
+    storage: "postgres_admin_storage_v2", machines: "postgres_admin_machines_v3",
   };
+  return adminQueryDatabase({ postgres_admin_overview_v1(query) {
+    return [Object.fromEntries(Object.entries(sections).map(([section, name]) => [
+      section, typeof results[name] === "function" ? results[name](query) : results[name] ?? [],
+    ]))];
+  } });
 }
 
 function totals(overrides = {}) {
@@ -158,14 +154,14 @@ test("PostgreSQL admin activity uses exactly the requested UTC calendar days", a
     physicalShards: [{ shardId: "shard-0", database: database(resultByQuery) }],
   }, { now: "2026-08-31T03:00:00.000Z", spaceLimit: 20, userLimit: 20, activityDays: 14 });
 
-  assert.deepEqual(activityQuery.values, [
+  assert.deepEqual(activityQuery.values.slice(3, 5), [
     "2026-08-18T00:00:00.000Z",
     "2026-09-01T00:00:00.000Z",
   ]);
-  assert.equal(activityQuery.maxRows, 14);
+  assert.equal(activityQuery.maxRows, 1);
   assert.match(activityQuery.text, /generate_series/u);
   assert.match(activityQuery.text, /LEFT JOIN daily_counts/u);
-  assert.match(activityQuery.text, /created_at >= \$1 AND created_at < \$2/u);
+  assert.match(activityQuery.text, /created_at >= \$4 AND created_at < \$5/u);
   assert.equal(overview.activity.length, 14);
   assert.equal(overview.activity[0].date, "2026-08-18");
   assert.equal(overview.activity.at(-1).date, "2026-08-31");
@@ -189,14 +185,18 @@ test("PostgreSQL admin complete inventories reserve one overflow sentinel row", 
     }) }],
   }, { now: "2026-08-31T03:00:00.000Z", spaceLimit: 20, userLimit: 20, activityDays: 14 });
 
-  assert.equal(observed.get("postgres_admin_users_v4").maxRows, 10_000);
-  assert.match(observed.get("postgres_admin_users_v4").text, /COUNT\(\*\) OVER \(\) AS total_count/u);
-  assert.match(observed.get("postgres_admin_users_v4").text, /LIMIT 10000/u);
-  assert.equal(observed.get("postgres_admin_storage_v2").maxRows, 1_001);
-  assert.match(observed.get("postgres_admin_storage_v2").text, /LIMIT 1001/u);
-  assert.equal(observed.get("postgres_admin_machines_v3").maxRows, 10_000);
-  assert.match(observed.get("postgres_admin_machines_v3").text, /COUNT\(\*\) OVER \(\) AS total_count/u);
-  assert.match(observed.get("postgres_admin_machines_v3").text, /LIMIT 10000/u);
+  const query = observed.get("postgres_admin_overview_v1");
+  assert.equal(query.maxRows, 1);
+  assert.match(query.text, /COUNT\(\*\) OVER \(\) AS total_count/u);
+  assert.match(query.text, /LIMIT 10000/u);
+  assert.match(query.text, /LIMIT 1001/u);
+  assert.match(query.text, /WHERE \$6::boolean/u);
+  assert.match(query.text, /AS MATERIALIZED/u);
+  assert.equal(query.text.match(/FROM data\.messages\b/gu).length, 1);
+  assert.equal(query.values[5], true);
+  assert.equal(query.values[2], 21);
+  assert.doesNotMatch(query.text, /\b(body|metadata_json|content|preview)\b/u);
+
 });
 
 test("PostgreSQL admin complete inventories reject a proven overflow", async () => {
@@ -209,4 +209,22 @@ test("PostgreSQL admin complete inventories reject a proven overflow", async () 
     }) }],
   }, { now: "2026-08-31T03:00:00.000Z", spaceLimit: 20, userLimit: 20, activityDays: 14 }),
   /user bound was reached/u);
+});
+
+test("JSON-envelope inventories fail closed on nested overflow or invalid counts", async () => {
+  const input = { now: "2026-08-31T03:00:00.000Z", spaceLimit: 20, userLimit: 20, activityDays: 14 };
+  for (const [overrides, expected] of [
+    [{ postgres_admin_spaces_v3: Array(22).fill({}) }, /result bound/],
+    [{ postgres_admin_activity_v3: Array(15).fill({}) }, /result bound/],
+    [{ postgres_admin_storage_v2: Array(1001).fill({}) }, /storage-category bound/],
+    [{ postgres_admin_machines_v3: [{ total_count: 10001 }] }, /machine-owner bound/],
+    [{ postgres_admin_totals_v4: totals({ messages: Number.MAX_SAFE_INTEGER + 1 }) }, /invalid count/],
+  ]) {
+    await assert.rejects(readPostgresAdminOverviewFromFleet({
+      defaultShardId: "shard-0",
+      physicalShards: [{ shardId: "shard-0", database: database({
+        postgres_admin_totals_v4: totals(), ...overrides,
+      }) }],
+    }, input), expected);
+  }
 });

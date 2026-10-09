@@ -17,6 +17,7 @@ use crate::InboundChannelMessage;
 use crate::runtime_agent_connection_lifecycle::emit_agent_connection_reconnected_lifecycle;
 use crate::runtime_claude_stream_session::ClaudeStreamSession;
 use crate::runtime_claude_turn::run_claude_stream_turn;
+use crate::runtime_harness_questions::{ack_questionnaire_reply, inbound_questionnaire_reply};
 use crate::runtime_trusted_role_prompt::claude_goal_turn_input;
 use crate::{
     ChannelControlledRuntime, CliError, ExternalRun, HeadlessRuntimeBoundary, LocalImageFiles,
@@ -55,7 +56,7 @@ pub(crate) async fn run_headless_external(run: ExternalRun<'_>) -> error::Result
             agent.instance_id.clone().unwrap_or_default(),
         ),
     ];
-    append_windows_utf8_env(&mut agent_env);
+    append_windows_utf8_env(&mut agent_env)?;
     let pty_wrapper = pty::PtyWrapper::spawn(&spawn_cmd, &spawn_args, cwd, &agent_env, cols, rows)?;
 
     // ZCode / Z.ai Coding Plan: publish 5h+weekly (and MCP) quotas into presence when available.
@@ -505,6 +506,22 @@ pub(crate) async fn run_claude_print_external(run: ExternalRun<'_>) -> error::Re
                 messages: inbound_messages,
                 passthrough,
             } => {
+                // A turn Claude started by itself can ask too; its card's
+                // answer arrives here, between this loop's turns.
+                let questions = session.interrupter();
+                let mut unanswered = Vec::with_capacity(inbound_messages.len());
+                for message in inbound_messages {
+                    match inbound_questionnaire_reply(&message) {
+                        Some(reply) if questions.answer_question(&reply).await => {
+                            ack_questionnaire_reply(&relay, &reply);
+                        }
+                        _ => unanswered.push(message),
+                    }
+                }
+                let inbound_messages = unanswered;
+                if inbound_messages.is_empty() {
+                    continue;
+                }
                 // `/goal` needs rewriting onto Claude's native grammar (its
                 // `status`/`resume` spellings would otherwise *set* a goal
                 // with that literal objective); other slash commands pass

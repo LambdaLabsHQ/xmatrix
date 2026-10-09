@@ -34,7 +34,7 @@ test("Jev's choices fill only the fields the author left blank, in the order Jev
     { field: "repo", value: "LambdaLabsHQ/xmatrix" },
   ]);
   assert.equal(jevFilledAnnouncement(tags),
-    "Jev filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix");
+    "xMatrix filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix");
 });
 
 test("a field the author wrote is not drawn again, even when Jev disagrees", () => {
@@ -52,7 +52,7 @@ test("routing's Machine is a machine tag, and a Machine the author named is not 
   assert.deepEqual(tags.map(tag => tag.field), ["harness", "model", "effort", "repo", "machine"]);
   assert.deepEqual(tags.find(tag => tag.field === "machine"), { field: "machine", value: "Workstation", source: "routing" });
   assert.equal(jevFilledAnnouncement(tags),
-    "Jev filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix. Routing filled machine:Workstation");
+    "xMatrix filled harness:grok, model:grok-4, effort:high, repo:LambdaLabsHQ/xmatrix. Routing filled machine:Workstation");
   assert.deepEqual(jevFilledTags(mention({ machine: "Laptop" }), evidence(), "Workstation").map(tag => tag.field),
     ["harness", "model", "effort", "repo"]);
 });
@@ -81,6 +81,14 @@ test("a directory Jev chose is never named", () => {
     ],
   });
   assert.deepEqual(jevFilledTags(mention({}), local), [{ field: "model", value: "grok-4" }]);
+});
+
+test("a skipped model decision adds no model or effort tag to summons or handoffs", () => {
+  const parameters = evidence({ rubricVersion: "registration-parameters-v9",
+    selections: { workspaceKind: "repo", repo: "LambdaLabsHQ/xmatrix" },
+    choices: [{ key: "workspace", selected: "workspace_0", probabilities: { workspace_0: 1 } }] });
+  assert.deepEqual(jevFilledTags(mention({}), parameters).map(tag => tag.field), ["harness", "repo"]);
+  assert.deepEqual(jevFilledTagsForHandoff("grok", parameters, "Workstation").map(tag => tag.field), ["repo", "machine"]);
 });
 
 test("@auto shows the harness Jev picked; a named successor does not repeat it", () => {
@@ -112,4 +120,15 @@ test("the arrival plays once, only after a reading the reader actually saw", () 
   assert.equal(jevFillShouldArrive("message:2"), false);
   consumeJevFillArrival("message:1");
   assert.equal(jevFillShouldArrive("message:1"), false);
+});
+
+test("a jointly placed harness is filled by routing beside the machine", () => {
+  const parameters = evidence({ rubricVersion: "registration-parameters-v10", harness: undefined,
+    fit: { inputDigest: DIGEST, scores: { codex: { score: 1, probabilities: {} }, claude: { score: 1, probabilities: {} } } },
+    placement: { profile: "balanced", ranking: [{ harness: "codex", machineId: "m", fit: 1 / 3, headroom: 0.86, frontier: true, utility: 0.334 }] } });
+  assert.deepEqual(jevFilledTags(mention({}), parameters, "build-idle").slice(-2), [
+    { field: "harness", value: "codex", source: "routing" }, { field: "machine", value: "build-idle", source: "routing" }]);
+  assert.equal(jevFilledTags(mention({ harness: "claude" }), parameters).some(tag => tag.field === "harness"), false);
+  // One harness had no fit to compare: nothing was chosen about it.
+  assert.equal(jevFilledTags(mention({}), { ...parameters, fit: undefined }).some(tag => tag.field === "harness"), false);
 });

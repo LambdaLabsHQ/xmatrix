@@ -5,6 +5,15 @@ use colored::Colorize;
 use xmatrix_cli_args::Cli;
 
 fn main() {
+    if let Some(result) = xmatrix_cli_runtime::maybe_run_utf8_shell() {
+        match result {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("UTF-8 shell: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     xmatrix_cli_core::version::register(env!("CARGO_PKG_VERSION"));
     // Clap's derived command tree exceeds the 1 MiB default Windows main-thread
     // stack in debug builds, so construct the Tokio runtime and CLI on a

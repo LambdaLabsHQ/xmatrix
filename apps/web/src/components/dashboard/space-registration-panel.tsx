@@ -7,7 +7,7 @@ import type { AgentRegistrationSummary } from "@xmatrix/protocol";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { SetupCardHeader, SetupCardShell } from "./space-setup-card-chrome";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { registrationCatalogErrorText } from "./my-agents-registrations";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import { ErrorPanel } from "./workspace-admin-views";
 import { agentAddCommand } from "./space-agent-setup-card";
@@ -34,7 +34,8 @@ export function SpaceRegistrationPanel({ spaceId, token }: { spaceId: string; to
       </div>
       {catalog.isError ? (
         <div className="mt-3">
-          <ErrorPanel title="Registered locations unavailable" error={registrationCatalogErrorText(catalog.error)} />
+          <ErrorPanel title="Registered locations unavailable"
+            error={userErrorMessage(catalog.error, "Couldn't load registered locations") ?? ""} />
         </div>
       ) : !catalog.data ? (
         <ListSkeleton label="Loading registered locations" rows={3} className="mt-3" />

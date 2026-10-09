@@ -68,7 +68,7 @@ impl HarnessPolicy {
             .iter()
             .map(|(id, enabled)| (id.clone(), serde_json::json!({ "autoUpdate": enabled })))
             .collect();
-        write_json_atomically(path, &serde_json::Value::Object(document))
+        config::write_json_atomically(path, &serde_json::Value::Object(document))
     }
 }
 
@@ -85,24 +85,6 @@ fn lock_policy(path: &Path) -> Result<crate::runtime_private_journal::JournalLoc
     file.try_lock_exclusive()
         .map_err(|_| "another harness policy change is in progress".to_string())?;
     Ok(crate::runtime_private_journal::JournalLock(file))
-}
-
-/// Same-directory temporary file, then a replace-existing rename.
-fn write_json_atomically(path: &Path, value: &serde_json::Value) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("{}: {error}", parent.display()))?;
-    }
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
-    bytes.push(b'\n');
-    let temporary = config::unique_temporary_path(path);
-    let written = std::fs::write(&temporary, &bytes)
-        .and_then(|()| config::replace_file_atomically(&temporary, path));
-    if let Err(error) = written {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(format!("{}: {error}", path.display()));
-    }
-    Ok(())
 }
 
 /// The state the harness itself would act on: its switches and disabling
@@ -357,7 +339,7 @@ pub(crate) fn set_json_control(
         control.disabled
     };
     set_dotted_key(&mut document, &control.key, serde_json::Value::Bool(value))?;
-    write_json_atomically(&path, &document)?;
+    config::write_json_atomically(&path, &document)?;
     Ok(path)
 }
 
@@ -377,7 +359,7 @@ fn create_json_control(
             control.disabled
         }),
     )?;
-    write_json_atomically(&path, &document)?;
+    config::write_json_atomically(&path, &document)?;
     Ok(path)
 }
 

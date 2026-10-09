@@ -1,13 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import {
-  AGENT_PRESETS, WEB_PROXY_ROUTES, agentLaunchExecutable, canonicalRegistrationHarness,
-  type SetupIntentStatus,
-} from "@xmatrix/protocol";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { WEB_PROXY_ROUTES, type SetupIntentStatus } from "@xmatrix/protocol";
 import { XMatrixApiError, xmatrixApiRequest } from "@/lib/query/api-client";
-import { defaultAgentName } from "./workspace-shell-formatters";
+import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 const POLL_MS = 2_000;
 
@@ -35,13 +32,16 @@ function remember(spaceId: string, intentId: string | null): void {
 /**
  * The setup command this page shows for a Space and what has happened since:
  * one intent per Space and tab, kept across a reload, replaced once expired.
- * It is read every two seconds while the page waits, and not once it is done.
+ * It is read every two seconds while the page waits, and not once the machine
+ * reports an installed harness: from there the installed-harness switches,
+ * which read the same machine report, carry on.
  */
 export function useSetupIntent(spaceId: string | null, token: string | undefined, userId: string | undefined) {
   const [intentId, setIntentId] = useState<string | null>(() => (spaceId ? rememberedIntent(spaceId) : null));
   const [shownAt, setShownAt] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     setIntentId(spaceId ? rememberedIntent(spaceId) : null);
@@ -69,15 +69,15 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       url: WEB_PROXY_ROUTES.setup_intent(intentId!), token, signal,
     }),
     enabled: Boolean(intentId && token),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      const settled = data?.phase === "connected" && data.machine?.harnesses &&
-        data.machine.harnesses.filter((harness) => harness.installed)
-          .every((harness) => data.registeredHarnesses.includes(harness.id));
-      return settled ? false : POLL_MS;
-    },
+    refetchInterval: (query) => (reported(query.state.data) ? false : POLL_MS),
     retry: (count, reason) => !(reason instanceof XMatrixApiError && reason.status === 404) && count < 3,
   });
+
+  const machineReported = reported(status.data);
+  useEffect(() => {
+    if (!machineReported || !userId) return;
+    void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons") });
+  }, [machineReported, queryClient, userId]);
 
   // An expired or unknown command is replaced by a fresh one.
   const expired = status.error instanceof XMatrixApiError && status.error.status === 404;
@@ -106,33 +106,9 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   const decline = () => act(() => xmatrixApiRequest({
     url: WEB_PROXY_ROUTES.setup_intent_decline(intentId!), token, method: "POST",
   }));
-  /* Each detected harness becomes this owner's agent on that machine, the way
-     the desktop app's Bind adds one; the Space's policy still decides. */
-  const bringIn = (harnessIds: string[]) => act(async () => {
-    const machineId = status.data?.machine?.machineId;
-    if (!spaceId || !userId || !machineId) return;
-    for (const harnessId of harnessIds) {
-      const preset = AGENT_PRESETS.find((candidate) => candidate.id === harnessId);
-      if (!preset) continue;
-      await xmatrixApiRequest({
-        url: WEB_PROXY_ROUTES.space_agent_registration_command(spaceId), token, method: "POST",
-        body: {
-          action: "create",
-          commandId: `registration-connect:${crypto.randomUUID()}`,
-          key: { spaceId, ownerUserId: userId, machineId, harness: canonicalRegistrationHarness(preset.id) },
-          displayName: defaultAgentName(preset),
-          environment: {
-            schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
-            launch: {
-              runtime: agentLaunchExecutable(preset.runtime),
-              runtimeArgs: preset.defaultArgs,
-              ...(preset.backend ? { backend: preset.backend } : {}),
-            },
-          },
-        },
-      });
-    }
-  });
+  return { intentId, status: status.data, shownAt, error, busy, approve, decline };
+}
 
-  return { intentId, status: status.data, shownAt, error, busy, approve, decline, bringIn };
+function reported(status: SetupIntentStatus | undefined): boolean {
+  return status?.phase === "connected" && Boolean(status.machine?.harnesses?.some((harness) => harness.installed));
 }

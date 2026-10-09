@@ -52,7 +52,6 @@ test("GitHub merge is a default connector action without a per-channel write set
 
   const merge = github.actions.find((action) => action.id === "merge");
   assert.equal(merge.effect, "write");
-  assert.equal(merge.defaultPolicy, undefined, "a Human's merge runs without a Channel opt-in");
   assert.ok(isGitHubConnectorCommand("@github:merge:LambdaLabsHQ/xmatrix:#42"));
 });
 

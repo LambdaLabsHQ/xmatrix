@@ -69,16 +69,13 @@ test("a subscription is the Channel's policy to deny, without needing an Agent a
 
 function webhookHarness(exposure) {
   const appended = [];
-  const route = { installationId: "42", sourceRef: "github:repo:acme/app", spaceId: "space-1",
+  const route = { installationId: "42", sourceRef: "github:repo:acme/app", sourceKind: "repository", spaceId: "space-1",
     channelId: "channel-1", connectionId: "connection-1", authorityRootUserId: "user-1" };
   return {
     appended,
     dependencies: {
       exposure,
       resolveRoutes: async () => [route],
-      listConnections: async () => [{ id: "connection-1", providerId: "github", status: "configured",
-        channelState: { channelId: "channel-1", bound: true, subscriptions: [
-          { kind: "repository", source: "github:repo:acme/app", features: ["commits"] }] } }],
       append: async (_env, channelId, message) => {
         appended.push({ channelId, body: message.body });
         return { ok: true };

@@ -116,9 +116,61 @@ integration("event routes are the configured connection's Channels subscribed to
     assert.deepEqual(await apps.connectorEventRoutes({ requestId: "routes-1", connectionId: `${space}:webhook`,
       sourceRef: "Webhook:Deploys", limit: 10 }), [{ spaceId: space, channelId: `${space}:a`,
       authorityRootUserId: "owner", features: ["delivery"] }]);
+    const creators = async (sourceRef) => (await apps.connectorEventRoutes({ requestId: crypto.randomUUID(),
+      connectionId: `${space}:webhook`, sourceRef, limit: 10 })).map(route => route.authorityRootUserId);
+    assert.deepEqual(await creators("webhook:other"), ["member"]);
+    // Deliveries are appended as the subscriber: one who may no longer post is skipped, not a failed append.
+    await sql("UPDATE data.space_members SET role='viewer' WHERE space_id=$1 AND user_id='member'", [space]);
+    assert.deepEqual(await creators("webhook:other"), []);
+    await sql(`INSERT INTO data.space_deletions(space_id,space_name,owner_user_id,requested_at,purge_after,state,
+      members_json,automations_json,version,updated_at) VALUES($1,'test','owner',$2,$2::timestamptz+interval '1 day',
+      'scheduled','[]','[]',1,$2)`, [space, at]);
+    try { assert.deepEqual(await creators("webhook:deploys"), [], "a Space being deleted delivers nothing"); }
+    finally { await sql("DELETE FROM data.space_deletions WHERE space_id=$1", [space]); }
     await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE space_id=$1", [space]);
     assert.deepEqual(await apps.connectorEventRoutes({ requestId: "routes-2", connectionId: `${space}:webhook`,
       sourceRef: "webhook:deploys", limit: 10 }), []);
+  });
+});
+
+integration("GitHub routes require their creator's current user append capability", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await addConnection(sql, space, "github");
+    await sql(`UPDATE data.app_connector_connections SET metadata_json='{"installationId":"42"}'
+      WHERE connection_id=$1`, [`${space}:github`]);
+    await sql(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at)
+      VALUES ($1,'viewer','viewer',1,$2,$2)`, [space, at]);
+    const sourceRef = "github:issue:acme/app#7";
+    for (const [name, creator, mode] of [["owner", "owner", "closed"], ["member", "member", "open"],
+      ["legacy", "agent:retired", "open"], ["viewer", "viewer", "open"], ["private", "member", "closed"]]) {
+      await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,
+        version,created_at,updated_at) VALUES ($1,$2,$3,$3,$4,$1,1,$5,$5)`,
+      [`${space}:${name}`, space, name, mode, at]);
+      await sql(`INSERT INTO data.app_source_relations (relation_id,connection_id,space_id,channel_id,
+        source_kind,source_ref,features_json,version,created_by,created_at,updated_at)
+        VALUES ($1,$2,$3,$4,'issue',$5,'["pulls"]',1,$6,$7,$7)`,
+      [`${space}:relation:${name}`, `${space}:github`, space, `${space}:${name}`, sourceRef, creator, at]);
+    }
+    const routes = () => new PostgresAppRepository(database).githubSubscriptionRoutes({
+      requestId: crypto.randomUUID(), installationId: "42", sourceRefs: [sourceRef], feature: "pulls", limit: 20 });
+    const creators = async () => (await routes()).map(route => route.authorityRootUserId).sort();
+    assert.deepEqual(await creators(), ["member", "owner"],
+      "legacy Agent identities, viewers and ungranted closed Channels cannot act as users");
+    // The subscription index is a superset: whoever may act on a source now, it is listed.
+    const subscribed = (installationId) => new PostgresAppRepository(database).githubSubscribedSources({
+      requestId: crypto.randomUUID(), installationId, limit: 100 });
+    assert.deepEqual(await subscribed("42"), [{ sourceKind: "issue", sourceRef, feature: "pulls" }]);
+    assert.deepEqual(await subscribed("43"), []);
+    await sql("DELETE FROM data.space_members WHERE space_id=$1 AND user_id='member'", [space]);
+    assert.deepEqual(await creators(), ["owner"], "membership revocation invalidates existing subscriptions");
+    await sql(`INSERT INTO data.space_deletions(space_id,space_name,owner_user_id,requested_at,purge_after,state,
+      members_json,automations_json,version,updated_at) VALUES($1,'test','owner',$2,$2::timestamptz+interval '1 day',
+      'scheduled','[]','[]',1,$2)`, [space, at]);
+    try { assert.deepEqual(await creators(), [], "a Space being deleted delivers nothing"); }
+    finally { await sql("DELETE FROM data.space_deletions WHERE space_id=$1", [space]); }
+    assert.deepEqual(await subscribed("42"), [{ sourceKind: "issue", sourceRef, feature: "pulls" }]);
+    assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_source_relations WHERE space_id=$1",
+      [space])).rows[0].n, 5, "invalid subscriptions remain stored without being dispatched");
   });
 });
 
@@ -856,3 +908,41 @@ integration("a GitHub install appends its installation and keeps every other ins
   });
 });
 
+
+
+integration("an imported PR subscription keeps its identity through update, routing and removal", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    const apps = new PostgresAppRepository(database);
+    await addConnection(sql, space, "github");
+    await sql("UPDATE data.app_connector_connections SET metadata_json=$2::jsonb WHERE connection_id=$1",
+      [`${space}:github`, JSON.stringify({ installationId: "42" })]);
+    const channelId = `${space}:pr`;
+    const relationId = `${space}:imports-source:opaque-pr`;
+    const sourceRef = "github:issue:acme/app#7";
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      created_at,updated_at) VALUES ($2,$3,'pr','pr','open',$3||':rank-pr',1,$1,$1)`, [at, channelId, space]);
+    await sql(`INSERT INTO data.app_source_relations (relation_id,connection_id,space_id,channel_id,source_kind,
+      source_ref,features_json,version,created_by,created_at,updated_at) VALUES
+      ($2,$3||':github',$3,$4,'issue',$5,'["pulls"]',1,'owner',$1,$1)`,
+      [at, relationId, space, channelId, sourceRef]);
+    const updated = await apps.command({ commandId: `resubscribe-${space}`, connectionId: `${space}:github`,
+      channelId, sourceKind: "issue", sourceRef, features: ["pulls", "checks"],
+      principal: { kind: "user", id: "owner" }, at }, "put-relation");
+    assert.equal(updated.relation.id, relationId);
+    assert.equal(updated.relation.version, 2);
+    assert.deepEqual(updated.githubInstallations, ["42"], "a widened subscription names its installation's index");
+    const routes = await apps.githubSubscriptionRoutes({ requestId: `route-${space}`, installationId: "42",
+      sourceRefs: [sourceRef], feature: "pulls", limit: 100 });
+    const route = routes.find(value => value.channelId === channelId);
+    assert.equal(route?.relationId, relationId);
+    await assert.rejects(apps.command({ commandId: `unauthorized-remove-${space}`, relationId,
+      principal: { kind: "user", id: "outsider" }, at }, "remove-relation"),
+      error => error.code === "channel_not_found");
+    const input = { commandId: `remove-${space}`, relationId: route.relationId,
+      principal: { kind: "user", id: "owner" }, at };
+    assert.equal((await apps.command(input, "remove-relation")).ok, true);
+    assert.equal((await apps.command(input, "remove-relation")).reused, true);
+    assert.equal((await sql("SELECT relation_id FROM data.app_source_relations WHERE channel_id=$1", [channelId]))
+      .rows.length, 0);
+  });
+});

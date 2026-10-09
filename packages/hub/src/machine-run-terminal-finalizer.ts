@@ -23,7 +23,7 @@ export interface MachineRunTerminalPort {
   /** Closes the Runtime socket of an Instance the lifecycle made terminal. */
   terminateInstance(instanceId: string, ownerUserId: string): Promise<void>;
   dispatchChannelAbout(followUp: {
-    spaceId: string; channelId: string; requestId: string; successorOfRunId: string; actorUserId: string;
+    spaceId: string; channelId: string; requestId: string; successorOfRunId: string; actorUserId: string; triggerMessageId?: string;
   }): Promise<unknown>;
 }
 
@@ -50,6 +50,7 @@ async function finalizeReport(report: MachineRunTerminalReport, port: MachineRun
       requestId: text(followUp.requestId, "channelAboutFollowUps[].requestId"),
       successorOfRunId: text(followUp.successorOfRunId, "channelAboutFollowUps[].successorOfRunId"),
       actorUserId: text(followUp.actorUserId, "channelAboutFollowUps[].actorUserId"),
+      ...(followUp.triggerMessageId !== undefined ? { triggerMessageId: text(followUp.triggerMessageId, "channelAboutFollowUps[].triggerMessageId") } : {}),
     });
   }
 }

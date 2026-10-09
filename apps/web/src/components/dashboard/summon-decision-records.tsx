@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronRight, X } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
-import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
+  type LaunchParameterEvidence } from "@xmatrix/protocol";
 import { formatZonedDateTime } from "./time-display";
-import { jevDecisions, jevReadings, type JevQuestion, type JevReading } from "./jev-decision-trace";
+import { fitLevel, jevDecisions, jevReadings, placementReason, roomText, type JevReading } from "./jev-decision-trace";
+import { errorFromResponse } from "@/lib/query/api-client";
+import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
 type DecisionRecord = { refId: string; createdAt: string; encodedBytes: number };
 type FailureRecord = { invocationId?: unknown; status?: unknown; reason?: unknown; code?: unknown;
@@ -48,8 +51,10 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
     setBusy(true); setError("");
     try {
       const response = await fetcher(`${route}${after ? `?after=${encodeURIComponent(after)}` : ""}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(response.status === 403 || response.status === 404
-        ? "Jev's decisions are visible only to the summoning user." : "Jev's decisions could not be loaded.");
+      if (response.status === 403 || response.status === 404) {
+        throw new UserFacingProblem("Routing decisions are visible only to the summoning user.");
+      }
+      if (!response.ok) throw await errorFromResponse(response);
       const result = await response.json() as { records: DecisionRecord[]; nextCursor: string | null };
       const read = await Promise.all(result.records.slice(0, MAX_DETAILS).map(async record => {
         const key = `${route}?refId=${encodeURIComponent(record.refId)}`;
@@ -63,7 +68,7 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
       }));
       setRecords(previous => after ? [...(previous ?? []), ...read] : read);
       setCursor(result.nextCursor);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "Jev's decisions could not be loaded."); }
+    } catch (failure) { setError(userErrorMessage(failure, "Couldn't load routing decisions") ?? ""); }
     finally { setBusy(false); }
   }, [fetcher, route]);
   useEffect(() => { if (user && enabled) void load(null); }, [enabled, load, user]);
@@ -83,33 +88,69 @@ export function useJevDecisions({ channelId, messageId, sourceMention, invocatio
 
 const percent = (value: number | undefined) => value === undefined ? "" : `${Math.round(value * 100)}%`;
 
-/** A done or failed mark, drawn like the startup steps' marks below it. */
-function Mark({ failed }: { failed?: boolean }) {
-  return <span aria-hidden="true" className={`flex size-4 items-center justify-center rounded-full ${failed
-    ? "border border-destructive text-destructive" : "bg-accent"}`}>{failed ? <X size={11} /> : <Check size={11} />}</span>;
+/** A routing question is a choice, not a step: its options are listed with
+ *  radio marks, the chosen one filled, so it never reads like the ticked
+ *  startup timeline below it. */
+type ChoiceOption = { key: string; title: string; meta?: string; chosen: boolean; hint?: string };
+const SHOWN_OPTIONS = 3;
+// Arbitrary edge width: the app-wide `.rounded-*.border` rules would turn a chip into glass.
+const CHIP = "inline-flex max-w-full items-center gap-1.5 rounded-full border-[1px] border-solid px-2 py-0.5 text-xs";
+
+/** One routing question as a row of option chips, tag-sized: the chosen one
+ *  with a darker edge and a faint fill, the others faint. */
+function RoutingChoice({ label, options, note, hint }: { label: string; options: readonly ChoiceOption[]; note?: string; hint?: string }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? options : options.slice(0, SHOWN_OPTIONS);
+  const hidden = options.length - shown.length;
+  return <li className="grid grid-cols-[4.75rem_minmax(0,1fr)] items-start gap-x-2 py-1" aria-label={label}>
+    <span className="pt-0.5 text-muted-foreground" title={hint}>{label}</span>
+    <div className="min-w-0">
+      <ul className="m-0 flex list-none flex-wrap gap-1 p-0" aria-label={`${label} options`}>
+        {shown.map(option => <li key={option.key} data-selected={option.chosen || undefined} title={option.hint}
+          className={`${CHIP} ${option.chosen ? "border-foreground/45 bg-foreground/[0.05] text-foreground" : "border-border text-muted-foreground"}`}>
+          <span className={`truncate ${option.chosen ? "font-semibold" : ""}`}>{option.title}</span>
+          {option.meta && <span className="shrink-0 text-[11px] tabular-nums opacity-75">{option.meta}</span>}
+        </li>)}
+        {hidden > 0 && <li className="contents"><button type="button" onClick={() => setAll(true)}
+          className={`${CHIP} cursor-pointer border-dashed border-border text-muted-foreground hover:text-foreground`}>+{hidden}</button></li>}
+      </ul>
+      {note && <p className="m-0 mt-1 text-[11px] leading-snug text-muted-foreground">{note}</p>}
+    </div>
+  </li>;
 }
 
-const ROW = "grid grid-cols-[16px_4.75rem_minmax(0,1fr)_auto_12px] items-center gap-x-2 py-[5px]";
-
-/** What Jev decided, one row per question in the order it answered them: the
- *  question, its answer and how sure it was. A row opens to the options it
- *  weighed; "Input" opens what it read. */
-export function JevDecisionSection({ decisions }: { decisions: JevReading[] }) {
-  return <>{decisions.map(decision => <section key={decision.decisionId} aria-label={`Jev's decision${decision.summon ? ` for ${decision.summon}` : ""}`}
-    className="mt-3 border-t border-border pt-3">
-    <details className="group/input">
-      <summary className="flex cursor-pointer list-none items-center justify-between text-[11px] text-muted-foreground [&::-webkit-details-marker]:hidden">
-        <span className="font-semibold uppercase tracking-wide">Jev</span>
-        <span className="flex items-center gap-1">Input<ChevronRight size={12} className="transition-transform group-open/input:rotate-90" /></span>
-      </summary>
-      <JevInput decision={decision} />
-    </details>
-    <ol className="m-0 mt-1 list-none p-0" aria-label="Jev's answers">
-      {decision.questions.map(question => <JevAnswer key={question.key} question={question} />)}
-      {decision.failure && <li className={ROW}><Mark failed /><span className="text-muted-foreground">Failed</span>
-        <span className="truncate text-destructive">{decision.failure}</span></li>}
-    </ol>
-  </section>)}</>;
+/** What routing chose, one choice per question in the order it was answered:
+ *  the options weighed, the chosen one marked, with how sure Jev was or how
+ *  each environment measured. "Input" opens what Jev read. Its per-Agent fit scores are not
+ *  rows of their own: with the launch's recorded placement they become one
+ *  "Agent" row, the Agent and machine chosen from fit and room together. */
+export function JevDecisionSection({ decisions, parameters }: { decisions: JevReading[]; parameters?: LaunchParameterEvidence }) {
+  const ranking = parameters?.placement?.ranking;
+  return <>{decisions.map(decision => {
+    const fits = decision.questions.filter(question => question.key.startsWith("fit_"));
+    const placed = ranking?.length ? ranking : undefined;
+    const rows = placed ? decision.questions.filter(question => !question.key.startsWith("fit_")) : decision.questions;
+    return <section key={decision.decisionId} aria-label={`Routing decision${decision.summon ? ` for ${decision.summon}` : ""}`}
+      className="mt-3 border-t border-border pt-3">
+      <details className="group/input">
+        <summary className="flex cursor-pointer list-none items-center justify-between text-[11px] text-muted-foreground [&::-webkit-details-marker]:hidden">
+          <span className="font-semibold uppercase tracking-wide">Routing</span>
+          <span className="flex items-center gap-1">Input<ChevronRight size={12} className="transition-transform group-open/input:rotate-90" /></span>
+        </summary>
+        <JevInput decision={decision} />
+      </details>
+      <ol className="m-0 mt-1 list-none p-0" aria-label="Routing answers">
+        {rows.map(question => <RoutingChoice key={question.key} label={question.label} hint={question.instructions}
+          options={question.options.map(option => ({ key: option.handle, title: option.title, meta: percent(option.probability), chosen: option.selected }))} />)}
+        {placed && <RoutingChoice label="Agent" note={placementReason(placed, fits.length > 0)}
+          options={placed.map((item, index) => ({ key: `${item.harness}:${item.machineId}`,
+            title: `${item.harness} · ${item.machineName || "unnamed machine"}`, chosen: index === 0,
+            meta: `${fits.length > 0 ? `${fitLevel(item.fit)} · ` : ""}${roomText(item.headroom)}` }))} />}
+        {decision.failure && <li className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-2 py-1.5"><span className="text-muted-foreground">Failed</span>
+          <span className="truncate text-destructive">{decision.failure}</span></li>}
+      </ol>
+    </section>;
+  })}</>;
 }
 
 function JevInput({ decision }: { decision: JevReading }) {
@@ -127,43 +168,13 @@ function JevInput({ decision }: { decision: JevReading }) {
   </div>;
 }
 
-function JevAnswer({ question }: { question: JevQuestion }) {
-  const chosen = question.options.find(option => option.selected);
-  return <li>
-    <details className="group/answer">
-      <summary className={`${ROW} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
-        <Mark />
-        <span className="text-muted-foreground">{question.label}</span>
-        <span className="truncate font-semibold" title={chosen?.title}>{chosen?.title ?? "No answer"}</span>
-        <span className="text-[11px] tabular-nums text-muted-foreground">{percent(chosen?.probability)}</span>
-        <ChevronRight size={12} aria-hidden="true" className="text-muted-foreground transition-transform group-open/answer:rotate-90" />
-      </summary>
-      <div className="mb-2 ml-6 grid gap-1 text-xs">
-        <ol className="m-0 grid list-none gap-0.5 p-0" aria-label={`${question.label} options`}>
-          {question.options.map(option => <li key={option.handle} data-selected={option.selected || undefined}
-            className="grid grid-cols-[minmax(0,1fr)_3rem_2.25rem] items-center gap-x-2 rounded-md px-2 py-1 text-muted-foreground data-[selected]:bg-foreground/[0.05] data-[selected]:text-foreground">
-            <span className={`break-words ${option.selected ? "font-semibold" : ""}`}>{option.title}</span>
-            <span className="h-1 overflow-hidden rounded-full bg-foreground/10" aria-hidden="true">
-              <span className="block h-full rounded-full bg-foreground/50" style={{ width: percent(option.probability ?? 0) }} />
-            </span>
-            <span className="text-right tabular-nums">{percent(option.probability) || "—"}</span>
-            {option.detail && <span className="col-span-3 line-clamp-2 break-words text-[11px] text-muted-foreground">{option.detail}</span>}
-          </li>)}
-        </ol>
-        {question.instructions && <p className="m-0 px-2 text-[11px] leading-snug text-muted-foreground" title={question.instructions}>
-          <span className="font-semibold">Asked: </span><span className="line-clamp-2 inline">{question.instructions}</span></p>}
-      </div>
-    </details>
-  </li>;
-}
-
 /** The raw records behind the timeline, folded into the panel's Details. */
 export function JevDecisionFiles({ state }: { state: JevDecisionState }) {
   if (state.error) return <p className="app-invocation-description">{state.error}</p>;
   const refs = state.decisions.flatMap(decision => decision.refs);
   if (!refs.length && !state.cursor) return null;
   return <p className="app-invocation-description">
-    Jev records (kept 30 days):{" "}
+    Routing records (kept 30 days):{" "}
     {refs.map((refId, index) => <span key={refId}>{index > 0 && " · "}
       <a className="underline" href={`${state.route}?refId=${encodeURIComponent(refId)}`} download="summon-decision.json">
         {refId.endsWith(":started") ? "input" : refId.endsWith(":failed") ? "failure" : "result"}

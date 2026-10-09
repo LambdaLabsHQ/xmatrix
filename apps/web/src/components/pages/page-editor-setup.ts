@@ -21,6 +21,7 @@ import {
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { automationChips } from "./page-automation-chips";
+import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
 import { mountSectionAgents, type SectionAgent } from "./page-section-agents";
 
@@ -1015,6 +1016,8 @@ export function editorPlugins(input: {
   focusConversation: (conversationId: string) => void;
   headingActions: () => HeadingActions;
   cursorPresence: () => CursorPresence;
+  /** Reads a GitHub file the page embeds; without it an embed only links to GitHub. */
+  readGitHubFile: () => ReadGitHubFile | undefined;
 }): Plugin[] {
   const presenceOf = (clientId: number) => {
     const state = input.awareness.getStates().get(clientId);
@@ -1050,6 +1053,7 @@ export function editorPlugins(input: {
     remoteChanges(input.fragment, input.awareness),
     readerChanges(input.fragment),
     automationChips(input.openConversation),
+    githubFileEmbeds(input.readGitHubFile),
   ];
 }
 

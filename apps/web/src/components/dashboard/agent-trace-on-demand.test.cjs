@@ -351,6 +351,12 @@ test("request planning and UI copy preserve bounded and non-complete host states
     instanceId: "i1", phase: "error", complete: false, eventCount: 0, reason: "trace_access_denied",
   });
   assert.equal(offline.title, "Agent host is offline");
+  assert.equal(agentTraceHistoryStatusCopy({
+    instanceId: "i1", phase: "unavailable", complete: false, eventCount: 0, reason: "host_overloaded",
+  }).title, "Agent host is busy", "a connected host with too many reads is not offline");
+  assert.equal(agentTraceHistoryStatusCopy({
+    instanceId: "i1", phase: "unavailable", complete: false, eventCount: 0,
+  }).title, "Agent host could not read its trace", "only host_offline says offline");
   assert.equal(timeout.title, "Agent host timed out");
   assert.equal(expired.title, "Local trace retention expired");
   assert.equal(incomplete.title, "Only recent trace history is available");
@@ -630,4 +636,19 @@ test("one instance holding its read open does not delay another instance", async
   assert.equal(reads["instance:slow"], 2, "the slow host is still holding its first live read");
   sync.cancel();
   releaseSlow();
+});
+
+test("a failing live read backs off and a hidden tab asks rarely", () => {
+  const { liveSyncDelayMs } = require("./agent-trace-on-demand.ts");
+  const failures = new Map();
+  const next = (failed, extra = {}) => liveSyncDelayMs({
+    held: false, failed, refreshIntervalMs: 1_000, failures, instanceId: "i", hidden: false, ...extra,
+  });
+  assert.equal(next(false), 1_000);
+  assert.deepEqual([next(true), next(true), next(true)], [2_000, 4_000, 8_000]);
+  for (let i = 0; i < 10; i += 1) next(true);
+  assert.equal(next(true), 30_000);
+  assert.equal(next(false), 1_000, "a success resets the backoff");
+  assert.equal(next(false, { held: true }), 0);
+  assert.equal(next(false, { hidden: true }), 15_000);
 });

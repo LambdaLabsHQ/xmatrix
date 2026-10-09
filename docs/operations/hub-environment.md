@@ -38,10 +38,11 @@ Leave unset to keep the feature off.
 
 | Name | Kind | What it does |
 | --- | --- | --- |
+| `APPLE_SUBSCRIPTIONS_CONFIG` | secret | Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases. |
 | `CONNECTOR_DINGTALK_COMPANY_CONFIG` | secret | Verified company-console JSON: suite-ticket protocol, sync-http delivery, numeric suiteId, developerCorpId, appId and approved templateId/templateField. Requires complete native suite keys; unset keeps company routes and actions unavailable. |
 | `DIAGNOSTICS_AE` | binding | Analytics Engine dataset for client diagnostics. Unset: diagnostics are dropped. |
 | `DIAGNOSTICS_HASH_SECRET` | secret | Key that pseudonymizes users in diagnostics; defaults to BETTER_AUTH_SECRET. |
-| `GITHUB_APP_CLIENT_ID` | var | GitHub App OAuth client id. |
+| `GITHUB_APP_CLIENT_ID` | var | GitHub App OAuth client id (public). Connect and GitHub account linking need it with the other GITHUB_APP_* values. |
 | `GITHUB_APP_CLIENT_SECRET` | secret | GitHub App OAuth client secret. |
 | `GITHUB_APP_ID` | var | GitHub App id for the Space GitHub connection. Unset with the other GITHUB_APP_* values: Spaces cannot connect GitHub. |
 | `GITHUB_APP_PRIVATE_KEY` | secret | GitHub App private key (PEM). |
@@ -96,6 +97,7 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED` | var | Admits the last client generation that sends no compatibility identity. |
 | `DEVICE_AUTH` | binding | Device-code login broker for the CLI and apps. |
 | `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` | var | Mints repository tokens for daemons that name no Run (pre-binding CLI); refused unless "true". |
+| `GITHUB_SUBSCRIPTION_INDEX` | binding | Per-installation index of subscribed GitHub sources; a delivery nobody subscribed to reads no routes. |
 | `MACHINE_NAME_REQUIRED` | var | Require a recorded owner-chosen Machine name before enrollment, connect or recovery; production pins true. |
 | `RATE_LIMIT_ENFORCED` | var | Refuses over-limit requests with 429 and Retry-After only when "true"; otherwise they are only logged. |
 | `RELAY_AGENT_APP_POLICY_LOCATOR` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |

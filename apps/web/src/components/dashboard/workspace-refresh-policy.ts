@@ -1,6 +1,10 @@
 // Pure, testable policy helpers for workspace loading: when the background
 // refresh may be skipped, and which workspace fetch failures are worth retrying.
 // Kept free of React/DOM imports so it can be unit-tested via node --test.
+// Which failures are transient is not decided here: it is the one client rule
+// in api-client.ts (isTransientFailure), shared with every Query.
+
+import { XMatrixApiError, errorFromResponse, isTransientFailure } from "../../lib/query/api-client";
 
 export const WORKSPACE_FETCH_MAX_ATTEMPTS = 3;
 
@@ -19,11 +23,19 @@ export function workspaceAttemptSignal(parent?: AbortSignal): AbortSignal {
 // couple of fast retries to ride out transient jitter, not a long tail.
 export const WORKSPACE_FETCH_RETRY_DELAYS_MS = [400, 1200];
 
-// Mirror the established attachment-upload retry classification: only transient
-// failures (request timeout, rate limit, server errors) are retried. Real
-// validation/auth failures (4xx other than 408/429) fail fast.
-export function isRetriableWorkspaceFetchStatus(status: number): boolean {
-  return status === 408 || status === 429 || status >= 500;
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+
+/**
+ * A failed response under the shared rule. A real Response is read for the
+ * Hub's `retryable` label; a bare status (a test double) is read as a gateway
+ * would answer it.
+ */
+export async function workspaceResponseIsTransient(response: WorkspaceFetchLike): Promise<boolean> {
+  if (response.ok) return false;
+  const error = typeof (response as Partial<Response>).clone === "function"
+    ? await errorFromResponse(response as Response)
+    : new XMatrixApiError({ message: "", status: response.status, retryable: GATEWAY_STATUSES.has(response.status) });
+  return isTransientFailure(error);
 }
 
 export function workspaceFetchRetryDelayMs(attempt: number): number {
@@ -53,8 +65,8 @@ export function workspaceResponseDefersRetry(
   return Number.isFinite(retryAt) && retryAt > nowMs;
 }
 
-// Retry a workspace fetch on transient failures (network throw or retriable
-// status), with backoff. `attemptFetch` is invoked per attempt so each retry is a
+// Retry a workspace fetch on transient failures (a transport failure or a
+// transient response under isTransientFailure), with backoff. `attemptFetch` is invoked per attempt so each retry is a
 // fresh request. Non-retriable responses (including a final-attempt retriable
 // one) are returned to the caller to handle; a network throw on the last attempt
 // is rethrown. `sleep` is injectable for tests.
@@ -115,15 +127,18 @@ export async function runWorkspaceFetchWithRetry<T extends WorkspaceFetchLike>(
       const result = await attemptFetch();
       if (
         result.ok ||
-        !isRetriableWorkspaceFetchStatus(result.status) ||
         workspaceResponseDefersRetry(result) ||
-        attempt >= maxAttempts
+        attempt >= maxAttempts ||
+        !(await workspaceResponseIsTransient(result))
       ) {
         return result;
       }
     } catch (error) {
       lastError = error;
-      if (attempt >= maxAttempts) throw error;
+      // One attempt's own deadline (workspaceAttemptSignal) is a hop that hung,
+      // as transient as a dropped one; a caller abort or a real answer is not.
+      const attemptTimedOut = error instanceof DOMException && error.name === "TimeoutError" && !signal?.aborted;
+      if (attempt >= maxAttempts || !(isTransientFailure(error) || attemptTimedOut)) throw error;
       if (signal?.aborted) throw signal.reason;
     }
     await sleep(workspaceFetchRetryDelayMs(attempt));

@@ -53,9 +53,7 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
   return (
     <div className="space-y-3">
       <p className="text-xs leading-5 text-muted-foreground">
-        A Human&apos;s own command runs a write action unless the channel denies it. Agents need an allow here,
-        except actions marked <strong>agents allowed by default</strong>, which a channel can still deny.
-        Actions marked <strong>off by default</strong> run only in channels that allow them.
+        Every action runs for people and Agents by default. Deny an action here to turn it off in one channel.
       </p>
       {write.error || policies.error ? (
         <p className="text-sm font-medium text-destructive">{(write.error ?? policies.error)?.message}</p>
@@ -79,9 +77,7 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
       </ul>
       <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
         <GlassSelect className={selectClassName} value={actionId} aria-label="Action" onChange={setActionId}
-          options={actions.map((candidate) => ({ value: candidate.id,
-            label: `${candidate.label}${candidate.defaultPolicy === "deny" ? " (off by default)"
-              : candidate.defaultPolicy === "allow" ? " (agents allowed by default)" : ""}` }))} />
+          options={actions.map((candidate) => ({ value: candidate.id, label: candidate.label }))} />
         <GlassSelect className={selectClassName} value={channelId} placeholder="Channel" aria-label="Channel"
           onChange={setChannelId} options={channels.map((channel) => ({ value: channel.id, label: `#${channelTitle(channel)}` }))} />
         <GlassSelect className={selectClassName} value={mode} aria-label="Policy"

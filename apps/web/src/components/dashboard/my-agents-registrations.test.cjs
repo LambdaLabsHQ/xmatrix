@@ -3,7 +3,7 @@ const test = require("node:test");
 const { compileTsModules } = require("./compile-ts-modules.cjs");
 
 const compiled = compileTsModules(__dirname, ["my-agents-registrations", "time-display"]);
-const { registrationActions, registrationActivity, registrationSwitch, registrationCatalogErrorText,
+const { registrationActions, registrationActivity, registrationSwitch,
   registrationListed, registrationRowTitle, registrationStatus } = compiled.exports;
 
 test.after(compiled.dispose);
@@ -43,7 +43,7 @@ test("a row says what the location is doing, or why it cannot take work", () => 
     "Ready · 14% quota left");
   assert.equal(activity({ live: live({ quota: { remainingPercent: 60, observedAt: "", expiresAt: "" } }) }).line, "Ready");
   assert.deepEqual(activity({ live: live({ quota: { remainingPercent: 0, observedAt: "", expiresAt: "" } }) }),
-    { state: "attention", line: "Out of quota", rank: 2 });
+    { state: "attention", line: "Out of quota · window unavailable", rank: 2 });
   assert.deepEqual(activity({ live: live(), routingReady: false, routingBlocker: "owner_environment_missing" }),
     { state: "attention", line: "Not set up on its machine", rank: 2 });
   assert.deepEqual(activity({ live: { machine: { online: false, lastSeenAt: "2026-09-07T12:00:00Z" }, running: [] } }),
@@ -116,11 +116,16 @@ test("a removed agent leaves the list for everyone but its owner, who can add it
   assert.equal(registrationListed(registration({ state: "revoked", canManageOwnerGrant: true })), true);
 });
 
-test("a catalog failure explains itself with the server's reason and code", () => {
-  const failure = Object.assign(new Error("Registration request failed"), { code: "registration_internal_error" });
-  assert.equal(registrationCatalogErrorText(failure), "Registration request failed (registration_internal_error)");
-  assert.equal(registrationCatalogErrorText(Object.assign(new Error("Request failed (502)"), { code: "request_failed" })),
-    "Request failed (502)");
-  assert.equal(registrationCatalogErrorText(new Error("")), "The agent list could not be loaded.");
-  assert.equal(registrationCatalogErrorText(undefined), "The agent list could not be loaded.");
+test("quota status names exhausted windows and drops windows that have reset", () => {
+  const now = Date.parse("2026-10-08T12:00:00Z");
+  const activity = windows => registrationActivity(registration({ live: {
+    machine: { online: true }, running: [], quota: { remainingPercent: 0, windows },
+  } }), { conversationTitle: () => undefined, now });
+  const five = { label: "5h", usedPercent: 100 };
+  const week = { label: "1w", usedPercent: 100 };
+  assert.equal(activity([five, { ...week, usedPercent: 50 }]).line, "5h limit reached");
+  assert.equal(activity([{ ...five, usedPercent: 50 }, week]).line, "1w limit reached");
+  assert.equal(activity([five, week, five]).line, "5h + 1w limit reached");
+  assert.equal(activity([{ ...five, resetAt: "2026-10-08T11:00:00Z" }, week]).line, "1w limit reached");
+  assert.equal(activity([{ usedPercent: 100 }]).line, "Out of quota · window unavailable");
 });

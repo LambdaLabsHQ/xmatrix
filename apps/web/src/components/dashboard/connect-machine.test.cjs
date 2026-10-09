@@ -3,7 +3,7 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  connectStep, defaultInstallPlatform, harnessesToBringIn, listNames, setupInstallCommand,
+  connectStep, defaultInstallPlatform, listNames, setupInstallCommand,
 } = require("./connect-machine.ts");
 
 const INTENT = "0123456789abcdef0123456789abcdef";
@@ -46,17 +46,15 @@ test("a terminal asks for approval, then signs in, then the machine reports", ()
   assert.deepEqual(connectStep(connected(undefined), 0), { kind: "looking", machineName: "Laptop" });
 });
 
-test("installed harnesses not yet in the Space are offered, and only those", () => {
+test("the installed harnesses are reported, whatever the Space already has", () => {
   const harnesses = [
     { id: "claude", installed: true, login: "signed_in" },
     { id: "codex", installed: true },
     { id: "gemini", installed: false },
   ];
-  const found = connectStep(connected(harnesses), 0);
+  const found = connectStep(connected(harnesses, ["claude"]), 0);
   assert.equal(found.kind, "found");
   assert.deepEqual(found.harnesses.map((harness) => harness.id), ["claude", "codex"]);
-  assert.deepEqual(harnessesToBringIn(connected(harnesses, ["claude"])).map((harness) => harness.id), ["codex"]);
-  assert.deepEqual(connectStep(connected(harnesses, ["claude", "codex"]), 0), { kind: "done", machineName: "Laptop" });
   assert.deepEqual(connectStep(connected([{ id: "gemini", installed: false }]), 0),
     { kind: "none-installed", machineName: "Laptop" });
 });

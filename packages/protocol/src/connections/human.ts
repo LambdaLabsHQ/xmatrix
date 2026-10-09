@@ -1,5 +1,6 @@
 import { isPlainRecord as isRecord } from "../plain-record.js";
 import { utf8ByteLength } from "../hex.js";
+import type { AgentRegistrationKey } from "../agent-registration.js";
 import type {
   AgentLifecycleLayer,
   AgentLifecycleReason,
@@ -7,6 +8,7 @@ import type {
   AgentLifecycleStatus,
   AuthUser,
   ChannelMessage,
+  LlmUsage,
   MessageSender,
   ObservabilityEvent,
   SerializedAgent,
@@ -66,6 +68,15 @@ export interface HumanFocusChannelMessage {
   historyLimit?: number;
 }
 
+/**
+ * The web client's heartbeat. The Hub answers this exact frame with
+ * `HUMAN_HEARTBEAT_PONG` itself (a WebSocket auto-response) without waking the
+ * Durable Object that holds the socket, so the web can probe often for free.
+ * Both are compared byte for byte: never build them any other way.
+ */
+export const HUMAN_HEARTBEAT_PING = '{"type":"ping","requestId":"web-heartbeat"}';
+export const HUMAN_HEARTBEAT_PONG = '{"type":"pong","requestId":"web-heartbeat"}';
+
 export type HumanClientMessage =
   | HumanConnectMessage
   | HumanFocusChannelMessage
@@ -97,13 +108,28 @@ export type HumanWorkspaceResourceChangedMessage = {
   revision: number;
 };
 
+/**
+ * A registration's account quota was read again and changed. Every Agent this
+ * client shows under the registration takes it the way a Channel read would
+ * have projected it (`withRegistrationQuota`): the account fields are
+ * replaced and each Instance keeps its own counters. It is sent to the user
+ * whose machine was probed or whose Agent reported; others see the reading on
+ * the presence cards of the Agents they watch.
+ */
+type HumanRegistrationQuotaMessage = {
+  type: "registration_quota";
+  registration: AgentRegistrationKey;
+  usage: LlmUsage;
+};
+
 export type HumanTraceAccessServerMessage =
   | { type: "trace_access_requested"; grant: TraceAccessGrant }
   | { type: "trace_access_updated"; grant: TraceAccessGrant };
 
 export type HumanServerMessage =
   | { type: "error"; requestId?: string; message: string; failure?: import("../runtime-operation-failure.js").RuntimeOperationFailure }
-  | { type: "pong"; requestId?: string; ts: string }
+  /** `ts` is absent on the auto-response to `HUMAN_HEARTBEAT_PING`. */
+  | { type: "pong"; requestId?: string; ts?: string }
   | { type: "auth_refreshed"; requestId?: string; ts: string }
   | { type: "user_subscribed"; requestId?: string; user: AuthUser }
   | { type: "human_connected"; requestId?: string; user: AuthUser }
@@ -113,6 +139,7 @@ export type HumanServerMessage =
   | { type: "presence"; online: boolean; agent: SerializedAgent }
   | { type: "enhanced_presence"; agent: SerializedAgent }
   | HumanPresenceDigestMessage
+  | HumanRegistrationQuotaMessage
   | {
       type: "agent_lifecycle";
       ts: string;

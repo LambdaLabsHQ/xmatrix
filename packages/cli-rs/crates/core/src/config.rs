@@ -367,6 +367,28 @@ pub fn unique_temporary_path(destination: &Path) -> PathBuf {
     destination.with_file_name(file_name)
 }
 
+/// Writes `value` as pretty JSON through a same-directory temporary file and a
+/// replace-existing rename, creating the parent directory first.
+pub fn write_json_atomically(
+    path: &Path,
+    value: &serde_json::Value,
+) -> std::result::Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("{}: {error}", parent.display()))?;
+    }
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    bytes.push(b'\n');
+    let temporary = unique_temporary_path(path);
+    let written =
+        std::fs::write(&temporary, &bytes).and_then(|()| replace_file_atomically(&temporary, path));
+    if let Err(error) = written {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(format!("{}: {error}", path.display()));
+    }
+    Ok(())
+}
+
 /// Root of Claude Code's per-project transcript store (`<claude config>/projects`).
 /// Honors `CLAUDE_CONFIG_DIR`, else falls back to `~/.claude`. Claude resolves
 /// `--resume <id>` against the transcript directory for the *current* working

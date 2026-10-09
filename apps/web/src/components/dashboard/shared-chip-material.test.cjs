@@ -38,15 +38,13 @@ test("display labels across dashboard surfaces reuse the shared chip material", 
     ["workspace-composer-dialogs.tsx", "data-tag-row"],
     ["workspace-composer-dialogs.tsx", "data-usage-meter-chip"],
     ["workspace-composer-dialogs.tsx", "app-automation-state"],
-    ["workspace-message-timeline.tsx", "Claude question"],
     ["workspace-message-timeline.tsx", "shouldShowProvenanceBadge(message.provenance)"],
     ["workspace-message-timeline.tsx", "app-sender-instance-stale-badge"],
     ["secret-request-card.tsx", "app-request-broker-status"],
-    ["workspace-shell-chrome.tsx", "app-command-result-badge"],
     ["workspace-shell-recovered.tsx", "app-status-chip-badge"],
     ["workspace-admin-views.tsx", "secretAccessChipClass(entry.access)"],
     ["workspace-admin-views.tsx", "{spaceRoleFor(space, user.id)}"],
-    ["workspace-admin-views.tsx", "This component is older than web/hub"],
+    ["workspace-admin-views.tsx", "The latest stable release is"],
   ];
 
   for (const [file, marker] of labels) assertMaterialNear(file, marker);

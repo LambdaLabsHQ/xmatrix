@@ -9,6 +9,7 @@ import { GlassSelect } from "@/components/ui/glass-select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { formatAutomationCadence } from "./page-automation-format";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /** A new Automation for a section (docs/design/pages-live-document.md §6). */
 export interface PageScheduleInput {
@@ -56,7 +57,7 @@ export function PageAttached({ automations, canEdit, onSchedule, onPutBack, onCo
       await work();
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "That did not work");
+      setError(userErrorMessage(cause, "That didn't work"));
       return false;
     } finally {
       setBusy(false);

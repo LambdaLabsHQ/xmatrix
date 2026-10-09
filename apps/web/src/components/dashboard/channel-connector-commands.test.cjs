@@ -14,8 +14,10 @@ const {
 test("a subscription source round-trips to the repository the command names", () => {
   assert.equal(githubSubscriptionRepository("github:repo:lambdalabshq/xmatrix"), "lambdalabshq/xmatrix");
   assert.equal(githubSubscriptionRepository("github:repo:Owner/Repo"), "Owner/Repo");
-  // Not a repository source: leave unrecognised values alone rather than guess.
-  assert.equal(githubSubscriptionRepository("github:issue:owner/repo#42"), "github:issue:owner/repo#42");
+  // The pull request a Run opened here reads as GitHub names it.
+  assert.equal(githubSubscriptionRepository("github:issue:owner/repo#42"), "owner/repo#42");
+  // Not a GitHub source: leave unrecognised values alone rather than guess.
+  assert.equal(githubSubscriptionRepository("sentry:web"), "sentry:web");
 });
 
 test("stored features are presented in manifest order and unknown names dropped", () => {

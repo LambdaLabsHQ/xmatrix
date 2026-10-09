@@ -1,7 +1,7 @@
 import { integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { PostgresMachineControlRepository, readHarnessActionStatus } from "../dist/index.js";
+import { PostgresMachineControlRepository, readHarnessActionStatus, readRecentHarnessActions } from "../dist/index.js";
 
 
 integration("harness actions need the owner and a capable daemon, answer exactly, and fold the re-probe in", async () => {
@@ -169,5 +169,106 @@ integration("a remote sign-in needs a login-capable daemon, delivers the pasted 
     assert.equal(stored.code, undefined, "a spent sign-in code is not kept");
     const finished = await readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "owner", controlId: finishId });
     assert.deepEqual([finished.status, finished.result.login.state], ["succeeded", "signed_in"]);
+  } finally { await fixture.close(); }
+});
+
+integration("an unanswered action shows on the Machine, settles as expired, and is listed after reload", async () => {
+  const fixture = await isolatedPostgres("harness_unanswered", { shard: true });
+  const { client, session } = fixture;
+  try {
+    const controls = new PostgresMachineControlRepository(session);
+    const machine = { ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "quiet-machine",
+      hostId: "quiet-host", daemonId: "quiet-daemon" };
+    const principal = { kind: "machine", id: "machine-daemon:owner:quiet-machine:quiet-host",
+      ownerUserId: "owner", machineId: "quiet-machine", hostId: "quiet-host" };
+    const connected = await controls.command({ ...machine, commandId: randomUUID(), action: "connect", principal,
+      capabilities: ["machine_harness_action_v1"], payload: {}, metadata: {} });
+    const issue = (requestId, patch = {}) => controls.command({ ...machine, commandId: randomUUID(),
+      action: "issue", principal: { kind: "user", id: "owner" }, controlId: requestId, commandType: "harness_action",
+      payload: { type: "machine_harness_action", requestId, presetId: "codex", action: "install", ...patch } });
+    const listed = async () => (await controls.list({ requestId: randomUUID(), ownerUserId: "owner" }))
+      .daemons.find(daemon => daemon.machineId === machine.machineId);
+    const read = controlId => readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "owner", controlId });
+
+    const queuedId = `harness:${randomUUID()}`;
+    await issue(queuedId);
+    assert.equal((await listed()).unansweredSince, undefined, "a just-issued action is not yet evidence");
+    await client.query("UPDATE data.machine_daemon_commands SET created_at=now()-interval '2 minutes',"
+      + "available_at=now()-interval '2 minutes' WHERE command_id=$1", [queuedId]);
+    const quiet = await listed();
+    assert.equal(quiet.status, "online");
+    assert.ok(quiet.unansweredSince, "unclaimed work marks an online daemon as not responding");
+
+    // The daemon claims it, then stops renewing its lease and never answers.
+    const claimed = await controls.command({ ...machine, commandId: randomUUID(), action: "claim",
+      principal, connectionEpoch: connected.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
+    assert.equal(claimed.commands.length, 1);
+    assert.equal((await listed()).unansweredSince, undefined);
+    assert.equal((await read(queuedId)).status, "running");
+    await client.query("UPDATE data.machine_daemon_commands SET lease_until=now()-interval '1 second',"
+      + "created_at=now()-interval '40 minutes',expires_at=now()-interval '30 minutes' WHERE command_id=$1", [queuedId]);
+    const settled = await read(queuedId);
+    assert.equal(settled.status, "expired");
+    assert.match(settled.error, /stopped responding/u);
+
+    // A newer action on the same preset is the one listed; Hub's own release notices are not.
+    const laterId = `harness:${randomUUID()}`;
+    await issue(laterId, { action: "update" });
+    const recent = await readRecentHarnessActions(session, { requestId: randomUUID(), ownerUserId: "owner",
+      machineId: machine.machineId });
+    assert.deepEqual(recent.map(action => [action.controlId, action.status]), [[laterId, "queued"]]);
+    assert.deepEqual(await readRecentHarnessActions(session, { requestId: randomUUID(), ownerUserId: "intruder",
+      machineId: machine.machineId }), []);
+
+    // The late result still lands and replaces the settled reading.
+    await controls.command({ ...machine, commandId: randomUUID(), action: "complete", principal,
+      connectionEpoch: connected.connectionEpoch, controlId: queuedId, eventType: "machine_harness_action_result",
+      relayLease: claimed.commands[0].payload.relayLease, payload: { type: "machine_harness_action_result", requestId: queuedId,
+        result: { presetId: "codex", action: "install", status: "succeeded", exitCode: 0,
+          item: { id: "codex", installed: false, probeStatus: "missing" } } } });
+    assert.equal((await read(queuedId)).status, "succeeded");
+  } finally { await fixture.close(); }
+});
+
+integration("a command handed out ten times and never answered fails instead of going out again", async () => {
+  const fixture = await isolatedPostgres("unanswered_command", { shard: true });
+  const { client, session } = fixture;
+  try {
+    const controls = new PostgresMachineControlRepository(session);
+    const machine = { ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "silent-machine",
+      hostId: "silent-host", daemonId: "silent-daemon" };
+    const principal = { kind: "machine", id: "machine-daemon:owner:silent-machine:silent-host",
+      ownerUserId: "owner", machineId: "silent-machine", hostId: "silent-host" };
+    const connected = await controls.command({ ...machine, commandId: randomUUID(), action: "connect",
+      principal, capabilities: ["machine_harness_action_v1"], payload: {}, metadata: {} });
+    const claim = () => controls.command({ ...machine, commandId: randomUUID(), action: "claim",
+      principal, connectionEpoch: connected.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
+    const issue = requestId => controls.command({ ...machine, commandId: randomUUID(), action: "issue",
+      principal: { kind: "user", id: "owner" }, controlId: requestId, commandType: "harness_action",
+      payload: { type: "machine_harness_action", requestId, presetId: "claude", action: "update" } });
+    const lapse = (requestId, attempts) => client.query(`UPDATE data.machine_daemon_commands SET status='leased',
+      attempts=$2,lease_owner='silent-daemon',lease_until=now()-interval '1 second' WHERE command_id=$1`,
+    [requestId, attempts]);
+
+    const retried = `harness:${randomUUID()}`;
+    await issue(retried);
+    await lapse(retried, 9);
+    assert.deepEqual((await claim()).commands.map(command => command.payload.requestId), [retried],
+      "a lapsed lease is handed out again while deliveries remain");
+
+    const silent = `harness:${randomUUID()}`;
+    await issue(silent);
+    await lapse(retried, 10);
+    await lapse(silent, 10);
+    assert.deepEqual((await claim()).commands, []);
+    for (const requestId of [retried, silent]) {
+      assert.equal((await readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "owner",
+        controlId: requestId })).status, "failed");
+    }
+    const [stored] = (await client.query("SELECT status,result_json FROM data.machine_daemon_commands WHERE command_id=$1",
+      [silent])).rows;
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.result_json.ok, false);
+    assert.match(stored.result_json.error, /never answered/u);
   } finally { await fixture.close(); }
 });

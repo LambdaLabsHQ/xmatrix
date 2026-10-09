@@ -1,32 +1,46 @@
 import { DEFAULT_HUB_URL, normalizeHubUrl } from "@xmatrix/protocol";
 
+import { noteRejectedToken } from "../auth-events";
+
 export interface XMatrixErrorPayload {
   error?: string;
   message?: string;
   code?: string;
   retryable?: boolean;
   details?: unknown;
+  /** The Hub's error report for an internal failure. */
+  reference?: string;
 }
 
 export class XMatrixApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly retryable: boolean;
+  /** The server's Retry-After, when it named one. */
+  readonly retryAfterMs?: number;
   readonly details?: unknown;
+  /** Set once the shared retry policy gave up on a transient failure: it is no longer passing. */
+  persistent = false;
+  /** The Hub's report of this failure, when it filed one, for a person to quote. */
+  readonly reference?: string;
 
   constructor(input: {
     message: string;
     status: number;
     code?: string;
     retryable?: boolean;
+    retryAfterMs?: number;
     details?: unknown;
+    reference?: string;
   }) {
     super(input.message);
     this.name = "XMatrixApiError";
     this.status = input.status;
     this.code = input.code || "request_failed";
     this.retryable = input.retryable === true;
+    this.retryAfterMs = input.retryAfterMs;
     this.details = input.details;
+    this.reference = input.reference;
   }
 }
 
@@ -39,7 +53,9 @@ export class XMatrixRawResponseError extends XMatrixApiError {
       status: error.status,
       code: error.code,
       retryable: error.retryable,
+      retryAfterMs: error.retryAfterMs,
       details: error.details,
+      reference: error.reference,
     });
     this.name = "XMatrixRawResponseError";
     this.response = response;
@@ -56,19 +72,44 @@ export function xmatrixHubOrigin(): string {
   }
 }
 
-async function errorFromResponse(response: Response): Promise<XMatrixApiError> {
+/** Statuses a gateway in front of the Hub answers while the Hub restarts or is unreachable. */
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+const MAX_RETRY_AFTER_MS = 30_000;
+
+/** Retry-After as delta-seconds or an HTTP date, in milliseconds from now. */
+export function retryAfterMs(value: string | null | undefined, nowMs = Date.now()): number | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const ms = /^\d+(?:\.\d+)?$/u.test(trimmed) ? Number(trimmed) * 1_000 : Date.parse(trimmed) - nowMs;
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, MAX_RETRY_AFTER_MS) : undefined;
+}
+
+/**
+ * A failed response as the one error every client path classifies. The Hub
+ * labels its own failures `retryable`; a gateway status without the Hub's
+ * error body never reached the Hub's logic, so it is transient too.
+ */
+export async function errorFromResponse(response: Response): Promise<XMatrixApiError> {
   const payload = await response.clone().json().catch(() => ({})) as XMatrixErrorPayload;
+  const fromHub = typeof payload.code === "string" || typeof payload.retryable === "boolean";
   return new XMatrixApiError({
     message: payload.error || payload.message || `Request failed (${response.status})`,
     status: response.status,
     code: payload.code,
-    retryable: payload.retryable,
+    retryable: fromHub ? payload.retryable : GATEWAY_STATUSES.has(response.status),
+    retryAfterMs: retryAfterMs(response.headers.get("retry-after")),
     details: payload.details,
+    reference: typeof payload.reference === "string" ? payload.reference : undefined,
   });
 }
 
-function throwTransportError(cause: unknown): never {
-  if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+/**
+ * A request that got no answer. The caller ending it (its abort or its own
+ * deadline) is the caller's outcome and passes through unchanged; anything
+ * else is the network, and transient.
+ */
+function throwTransportError(cause: unknown, signal: AbortSignal | null | undefined): never {
+  if (signal?.aborted || (cause instanceof DOMException && cause.name === "AbortError")) throw cause;
   throw new XMatrixApiError({
     message: cause instanceof Error ? cause.message : "Network request failed",
     status: 0,
@@ -105,8 +146,9 @@ export async function xmatrixApiRequest<T>(input: {
       cache: "no-store",
     });
   } catch (cause) {
-    throwTransportError(cause);
+    throwTransportError(cause, input.signal);
   }
+  noteRejectedToken(response.status, Boolean(input.token));
   if (!response.ok) throw await errorFromResponse(response);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -120,9 +162,11 @@ export async function xmatrixRawResponse(
   init?: RequestInit,
 ): Promise<Response> {
   try {
-    return await fetch(input, { cache: "no-store", ...init });
+    const response = await fetch(input, { cache: "no-store", ...init });
+    noteRejectedToken(response.status, sendsBearer(input, init));
+    return response;
   } catch (cause) {
-    throwTransportError(cause);
+    throwTransportError(cause, init?.signal ?? (input instanceof Request ? input.signal : undefined));
   }
 }
 
@@ -143,16 +187,58 @@ export async function xmatrixQueryRawResponse(
   return response;
 }
 
-export function shouldRetryXMatrixQuery(failureCount: number, error: unknown): boolean {
-  if (failureCount >= 2) return false;
+function sendsBearer(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  return /^bearer\s/iu.test(headers.get("authorization") ?? "");
+}
+
+/**
+ * The one client rule for a failure worth replaying (docs/architecture/client-resilience.md):
+ * the request never got an answer, the server asked us to slow down, or the
+ * server said the failure is transient. Anything else is a real answer.
+ */
+export function isTransientFailure(error: unknown): boolean {
   if (!(error instanceof XMatrixApiError)) return false;
   if (error.status === 0 || error.status === 408 || error.status === 429) return true;
   return error.status >= 500 && error.retryable;
 }
 
-/** Preserve the plain Error contract of raw-response command consumers. */
-export async function requireResponseOk(response: Response, fallback: string, ignoredStatus?: number): Promise<void> {
+export function shouldRetryXMatrixQuery(failureCount: number, error: unknown): boolean {
+  if (!isTransientFailure(error)) return false;
+  if (failureCount < 2) return true;
+  (error as XMatrixApiError).persistent = true;
+  return false;
+}
+
+/** The server's Retry-After when it named one, else jittered exponential backoff. */
+export function xmatrixRetryDelayMs(failureCount: number, error: unknown): number {
+  if (error instanceof XMatrixApiError && error.retryAfterMs !== undefined) return error.retryAfterMs;
+  const ceiling = Math.min(MAX_RETRY_AFTER_MS, 1_000 * 2 ** failureCount);
+  return ceiling / 2 + Math.random() * (ceiling / 2);
+}
+
+/** A failure a caller raises itself: a response missing the record it promised. */
+export function unexpectedResponse(what: string): XMatrixApiError {
+  return new XMatrixApiError({ message: `${what} was missing from the response`, status: 500, code: "unexpected_response" });
+}
+
+/** A successful response's JSON; a failed one throws the classified error before its body is read. */
+export async function requireJson<T>(response: Response): Promise<T> {
+  if (!response.ok) throw await errorFromResponse(response);
+  return await response.json() as T;
+}
+
+/** The record a successful response promised under `field`; `what` names it if it is missing. */
+export async function requireField<T>(response: Response, field: string, what: string): Promise<T> {
+  if (!response.ok) throw await errorFromResponse(response);
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  const value = payload[field];
+  if (value === undefined || value === null) throw unexpectedResponse(what);
+  return value as T;
+}
+
+/** Throws a failed raw response as the classified error `describeError` shows. */
+export async function requireResponseOk(response: Response, ignoredStatus?: number): Promise<void> {
   if (response.ok || response.status === ignoredStatus) return;
-  const payload = (await response.json().catch(() => ({}))) as { error?: string };
-  throw new Error(payload.error || fallback);
+  throw await errorFromResponse(response);
 }

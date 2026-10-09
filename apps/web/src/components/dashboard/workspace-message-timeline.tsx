@@ -10,6 +10,7 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 import { sha256 } from "@noble/hashes/sha2.js";
 
 import { nonOperationalMentionRanges, lowercaseHex } from "@xmatrix/protocol";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 export {
   replyPreviewsEqual,
@@ -35,7 +36,7 @@ import {
 import { agentInstanceDisplayStatus } from "./workspace-shell-presence";
 
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
-import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
+import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
   RichMessageContent,
@@ -67,7 +68,7 @@ import {
   copyImageAttachmentToClipboard,
   copyTextToClipboard,
   dataUrlToBlob,
-  fixedContainingBlockRect, centeredToolbarPosition, observeToolbarLayout,
+  fixedContainingBlockRect, centeredToolbarPosition, morphPanelPosition, observeToolbarLayout,
   isMessageActionBypassTarget,
   isTimelineNearBottom,
   presentationAttachmentKind,
@@ -96,7 +97,6 @@ import {
   formatFileSize,
   formatTime,
   isMachineRunFailureNotice,
-  isXMatrixDelegateInstance,
   presenceStatusLabel,
   provenanceBadgeClass,
   provenanceLabel,
@@ -155,7 +155,6 @@ import {
   Download,
   FileText,
   Hash,
-  HelpCircle,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -164,9 +163,7 @@ import {
   Pencil,
   RefreshCw,
   Reply,
-  ArrowUp,
   ArrowRightLeft,
-  Shield,
   SmilePlus,
   Trash2,
   X,
@@ -282,33 +279,11 @@ import type {
 
 export type { TimelineItem, ThreadReplyParticipant } from "./workspace-shell-message-model";
 import type { TimelineItem } from "./workspace-shell-message-model";
-
-
-
-export type QuestionnaireOption = {
-  id: string;
-  label: string;
-  value?: string;
-  description?: string;
-};
-
-
-
-export type QuestionnaireQuestion = {
-  id: string;
-  label: string;
-  selectionMode: "single" | "multiple";
-  options: QuestionnaireOption[];
-};
-
-
-
-export type QuestionnaireMetadata = {
-  kind: "xmatrix.questionnaire.v1";
-  toolUseId?: string;
-  selectionMode?: "single" | "multiple";
-  questions: QuestionnaireQuestion[];
-};
+import {
+  AnsweredQuestionnairesProvider,
+  QuestionnaireMessage,
+  questionnaireMetadata,
+} from "./questionnaire-card";
 
 
 
@@ -368,13 +343,13 @@ function useChannelAgentLaunches(channel: SerializedChannel | null, token: strin
     },
     queryFn: ({ signal }) => loadInvocationPages({ channelId: channel!.id, sourceMessageIds, signal,
       fetchPage: async (request, pageSignal) => {
-        const response = await fetch(WEB_PROXY_ROUTES.channel_agent_launches(channel!.id), {
+        const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_agent_launches(channel!.id), {
           method: "POST", signal: pageSignal, cache: "no-store",
           headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
           body: JSON.stringify(request),
         });
         if ([401, 403, 404].includes(response.status)) throw new InvocationAccessError(response.status);
-        if (!response.ok) throw new Error(`Agent Launch query failed (${response.status})`);
+        if (!response.ok) throw await errorFromResponse(response);
         return response.json();
       },
     }),
@@ -542,13 +517,13 @@ export const MessageTimeline = memo(function MessageTimeline({
   [launchChoicesByMessage, launchOptions]);
   const chooseFirstLaunch = useCallback(async (messageId: string, body: string, harness: string | null | "shown") => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.channel_message_launch_choice(channel.id, messageId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_choice(channel.id, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, ...(harness === "shown" ? { shown: true } : harness ? { harness } : {}) }),
     });
     // Someone already decided: the refreshed record says what.
-    if (!response.ok && response.status !== 409) throw new Error(`Choosing the Agent failed (${response.status})`);
+    if (!response.ok && response.status !== 409) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channel, refetchAgentLaunches, token]);
   const messageTargetEvidence = useMemo(() => {
@@ -561,24 +536,24 @@ export const MessageTimeline = memo(function MessageTimeline({
   }, [invocationQueryData]);
   const retryAgentLaunch = useCallback(async (launch: SerializedAgentLaunch) => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.agent_launch_retry(launch.launchId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.agent_launch_retry(launch.launchId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ channelId: channel.id }),
     });
-    if (!response.ok) throw new Error(`Agent Launch retry failed (${response.status})`);
+    if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channel, refetchAgentLaunches, token]);
   // The author answers Jev's intent question for one declined summon; the Hub
   // rechecks the body against the stored message and the caller's authorship.
   const launchAnyway = useCallback(async (messageId: string, body: string, sourceMention: string) => {
     if (!token || !channel) return;
-    const response = await fetch(WEB_PROXY_ROUTES.channel_message_launch_anyway(channel.id, messageId), {
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_anyway(channel.id, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, sourceMention }),
     });
-    if (!response.ok) throw new Error(`Launch anyway failed (${response.status})`);
+    if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
   }, [channel, refetchAgentLaunches, token]);
   // One media store per channel view. A new one is built — and the previous
@@ -821,6 +796,7 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   return (
     <PageReferenceScopeProvider scope={pageReferenceScope}>
+    <AnsweredQuestionnairesProvider timeline={timeline}>
     <MentionReadChannelScopeProvider scope={mentionReadScope}>
     <div
       ref={setTimelineScrollRoot}
@@ -909,17 +885,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                     and topic. Repeating them here as an icon, a title and a
                     #name stacked three names above the first message, so the
                     intro only holds what the top bar does not say. */}
-                {!isThread && channel?.metadata?.xmatrixManagementChannel === true && (
-                  <div className="message-timeline-intro px-5 pb-4">
-                    <div className={noticeClass("secondary", "flex max-w-3xl flex-wrap items-center gap-2 text-xs")}>
-                      <Shield className="size-4 shrink-0" />
-                      <span className="font-bold">xMatrix management office</span>
-                      <span className="text-muted-foreground">
-                        Queries, action claims, proposals, and audit facts for this space appear here.
-                      </span>
-                    </div>
-                  </div>
-                )}
 
           {error && (
             <div className="mx-5 mb-3 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -1077,6 +1042,7 @@ export const MessageTimeline = memo(function MessageTimeline({
       )}
     </div>
     </MentionReadChannelScopeProvider>
+    </AnsweredQuestionnairesProvider>
     </PageReferenceScopeProvider>
   );
 });
@@ -1258,166 +1224,6 @@ export function MessageTimestamp({ value, clock = false, className }: { value: s
       {clock ? formatMessageClockTime(value) : formatMessageTimestamp(value)}
     </time>
   );
-}
-
-
-
-export function QuestionnaireMessage({
-  questionnaire,
-  message,
-  onAnswer,
-}: {
-  questionnaire: QuestionnaireMetadata;
-  message: TimelineItem;
-  onAnswer: (message: TimelineItem, answer: string) => void;
-}) {
-  const [selected, setSelected] = useState<Record<string, string[]>>({});
-  const canSubmit = questionnaire.questions.every((question) => {
-    if (question.options.length === 0) return true;
-    return (selected[question.id] || []).length > 0;
-  });
-
-  function toggle(question: QuestionnaireQuestion, option: QuestionnaireOption) {
-    setSelected((current) => {
-      const currentValues = current[question.id] || [];
-      if (question.selectionMode === "multiple") {
-        const exists = currentValues.includes(option.id);
-        return {
-          ...current,
-          [question.id]: exists
-            ? currentValues.filter((value) => value !== option.id)
-            : [...currentValues, option.id],
-        };
-      }
-      return { ...current, [question.id]: [option.id] };
-    });
-  }
-
-  function submit() {
-    const lines = questionnaire.questions.map((question) => {
-      const ids = selected[question.id] || [];
-      const labels = question.options
-        .filter((option) => ids.includes(option.id))
-        .map((option) => option.value || option.label);
-      return `${question.label}: ${labels.length > 0 ? labels.join(", ") : ""}`;
-    });
-    onAnswer(message, lines.join("\n"));
-  }
-
-  return (
-    <div className="mt-2 max-w-3xl border border-border bg-background p-3">
-      <div className="mb-2 flex items-center gap-2 text-sm font-black">
-        <HelpCircle className="size-4 text-primary" />
-        <span>Claude question</span>
-        <span className={cn("px-1.5 py-0.5 text-[11px] font-bold uppercase text-muted-foreground", COUNT_CHIP_MATERIAL_CLASS)}>
-          {questionnaire.selectionMode === "multiple" ? "multi" : "single"}
-        </span>
-      </div>
-      <div className="space-y-3">
-        {questionnaire.questions.map((question) => (
-          <fieldset key={question.id} className="min-w-0">
-            <legend className="mb-1 text-sm font-bold">{question.label}</legend>
-            {question.options.length > 0 ? (
-              <div className="grid gap-1.5">
-                {question.options.map((option) => {
-                  const checked = (selected[question.id] || []).includes(option.id);
-                  return (
-                    <label
-                      key={option.id}
-                      className={cn(
-                        "flex min-w-0 cursor-pointer items-start gap-2 border border-border px-2.5 py-2 text-sm transition hover:bg-muted/60",
-                        checked && "border-primary bg-primary/10"
-                      )}
-                    >
-                      <input
-                        type={question.selectionMode === "multiple" ? "checkbox" : "radio"}
-                        name={`${message.messageId || message.id}:${question.id}`}
-                        checked={checked}
-                        onChange={() => toggle(question, option)}
-                        className="mt-0.5 size-4 shrink-0 accent-primary"
-                      />
-                      <span className="min-w-0">
-                        <span className="block break-words font-bold">{option.label}</span>
-                        {option.description && (
-                          <span className="mt-0.5 block break-words text-xs text-muted-foreground">
-                            {option.description}
-                          </span>
-                        )}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Free-form answer requested.</p>
-            )}
-          </fieldset>
-        ))}
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          disabled={!canSubmit}
-          onClick={submit}
-          className="inline-flex h-8 items-center gap-1.5 rounded bg-primary px-2.5 text-xs font-bold text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <ArrowUp className="size-3.5" strokeWidth={2.5} />
-          Send answer
-        </button>
-      </div>
-    </div>
-  );
-}
-
-
-
-export function questionnaireMetadata(metadata: Record<string, unknown> | undefined): QuestionnaireMetadata | null {
-  if (!metadata || metadata.kind !== "xmatrix.questionnaire.v1") return null;
-  const rawQuestions = Array.isArray(metadata.questions) ? metadata.questions : [];
-  const questions = rawQuestions
-    .map((item, index): QuestionnaireQuestion | null => {
-      if (!item || typeof item !== "object") return null;
-      const record = item as Record<string, unknown>;
-      const label = typeof record.label === "string" ? record.label.trim() : "";
-      if (!label) return null;
-      const selectionMode = record.selectionMode === "multiple" ? "multiple" : "single";
-      const options = Array.isArray(record.options)
-        ? record.options
-            .map((option, optionIndex): QuestionnaireOption | null => {
-              if (!option || typeof option !== "object") return null;
-              const optionRecord = option as Record<string, unknown>;
-              const optionLabel = typeof optionRecord.label === "string" ? optionRecord.label.trim() : "";
-              if (!optionLabel) return null;
-              return {
-                id:
-                  typeof optionRecord.id === "string" && optionRecord.id.trim()
-                    ? optionRecord.id.trim()
-                    : `o${optionIndex + 1}`,
-                label: optionLabel,
-                value: typeof optionRecord.value === "string" ? optionRecord.value : undefined,
-                description:
-                  typeof optionRecord.description === "string" && optionRecord.description.trim()
-                    ? optionRecord.description.trim()
-                    : undefined,
-              };
-            })
-            .filter((option): option is QuestionnaireOption => Boolean(option))
-        : [];
-      return {
-        id: typeof record.id === "string" && record.id.trim() ? record.id.trim() : `q${index + 1}`,
-        label,
-        selectionMode,
-        options,
-      };
-    })
-    .filter((question): question is QuestionnaireQuestion => Boolean(question));
-  if (questions.length === 0) return null;
-  return {
-    kind: "xmatrix.questionnaire.v1",
-    toolUseId: typeof metadata.toolUseId === "string" ? metadata.toolUseId : undefined,
-    selectionMode: metadata.selectionMode === "multiple" ? "multiple" : "single",
-    questions,
-  };
 }
 
 
@@ -1649,10 +1455,7 @@ export const MessageRow = memo(function MessageRow({
         return next;
       })().catch((error) => {
         if (!mediaStore.active || mediaStore.released) throw error;
-        mediaStore.failures.set(
-          identity,
-          error instanceof Error ? error.message : "attachment media load failed",
-        );
+        mediaStore.failures.set(identity, "attachment media load failed");
         throw error;
       }).finally(() => {
         mediaStore.loads.delete(identity);
@@ -2214,7 +2017,7 @@ export const MessageRow = memo(function MessageRow({
               title="Reply"
               aria-label="Reply"
               onClick={() => onReply(message)}
-              className="hidden size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
+              className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
             >
               <Reply className="size-3.5" />
             </button>
@@ -2231,7 +2034,7 @@ export const MessageRow = memo(function MessageRow({
                 aria-expanded={reactionPickerOpen}
                 onClick={() => setReactionPickerOpen((open) => !open)}
                 className={cn(
-                  "flex size-7 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                  "flex size-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
                   reactionPickerOpen ? "opacity-100" : "opacity-0"
                 )}
               >
@@ -2259,7 +2062,7 @@ export const MessageRow = memo(function MessageRow({
                 title="Edit message"
                 aria-label="Edit message"
                 onClick={requestEdit}
-                className="hidden size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
+                className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 md:flex"
               >
                 <Pencil className="size-3.5" />
               </button>
@@ -2268,7 +2071,7 @@ export const MessageRow = memo(function MessageRow({
                 title="Recall message"
                 aria-label="Recall message"
                 onClick={requestRecall}
-                className="hidden size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 md:flex"
+                className="hidden size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 md:flex"
               >
                 <Trash2 className="size-3.5" />
               </button>
@@ -2821,8 +2624,8 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
         if (!source) throw new Error("Markdown attachment is unavailable");
         const text = source.startsWith("data:")
           ? await dataUrlToBlob(source).text()
-          : await fetch(source, { cache: "no-store" }).then(async (response) => {
-              if (!response.ok) throw new Error("Markdown attachment request failed");
+          : await xmatrixRawResponse(source, { cache: "no-store" }).then(async (response) => {
+              if (!response.ok) throw await errorFromResponse(response);
               return response.text();
             });
         if (!cancelled) {
@@ -2832,7 +2635,7 @@ export function MarkdownAttachmentViewer({ attachment }: { attachment: ChannelAt
       } catch (err) {
         if (!cancelled) {
           setContent("");
-          setError((err as Error).message || "Failed to load Markdown attachment");
+          setError(userErrorMessage(err, "Couldn't load this file"));
         }
       }
     }
@@ -2911,7 +2714,7 @@ function MessageCopyButton({
       aria-label={copied ? "Copied" : "Copy message"}
       onClick={onCopy}
       className={cn(
-        "ml-auto flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+        "ml-auto flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
         className
       )}
     >
@@ -3115,6 +2918,7 @@ function QuickReactionPicker({
 
 export type { AgentWorkItem } from "./workspace-shell-message-model";
 import type { AgentWorkItem } from "./workspace-shell-message-model";
+import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 
 
 
@@ -3305,8 +3109,10 @@ export function AgentWorkAvatar({
   const touchHandledRef = useRef(false);
   const suppressNextClickRef = useRef(false);
   const avatarButtonRef = useRef<HTMLButtonElement | null>(null);
+  const actionPopupRef = useRef<HTMLDivElement | null>(null);
   const actionToolbarRef = useRef<HTMLDivElement | null>(null);
   const hoverStackRef = useRef<HTMLDivElement | null>(null);
+  const morphContentRef = useRef<HTMLDivElement | null>(null);
   // Which part of the item the pointer is on picks the card above it: the
   // island's words have their own (what it waits on), the face the Instance's.
   const [hoverPart, setHoverPart] = useState<"instance" | "intent">("instance");
@@ -3380,23 +3186,35 @@ export function AgentWorkAvatar({
 
   const positionActionToolbar = useCallback(() => {
     const avatar = avatarButtonRef.current;
-    if (!avatar) return;
-    const anchor = (hoverPart === "intent"
-      ? avatar.closest(".app-agent-work-item")?.querySelector(".app-agent-work-intent") : null) ?? avatar;
-    const viewportPosition = centeredToolbarPosition(anchor,
-      hoverStackRef.current?.getBoundingClientRect().width || (canReborn ? 220 : 140));
-    const containingBlockRect = fixedContainingBlockRect(avatar);
+    const popup = actionPopupRef.current;
+    const stack = hoverStackRef.current;
+    const content = morphContentRef.current;
+    if (!avatar || !popup || !stack || !content) return;
+    // The panel grows up out of the capsule the pointer is on: the island,
+    // or the bare disc when there is none.
+    const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    // The content keeps its final layout whatever size the glass is at, so
+    // it measures the panel the glass grows into.
+    const contentRect = content.getBoundingClientRect();
+    const morph = morphPanelPosition(capsule, contentRect.width);
+    // The panel sits outside the glass island. Its backdrop filter contains
+    // the avatar, but does not contain this sibling popup.
+    const containingBlockRect = fixedContainingBlockRect(popup);
     const nextPosition = {
-      left: viewportPosition.left - (containingBlockRect?.left ?? 0),
-      top: viewportPosition.top - (containingBlockRect?.top ?? 0),
-    };
+      left: morph.left - (containingBlockRect?.left ?? 0),
+      top: morph.bottom - (containingBlockRect?.top ?? 0),
+      "--app-agent-work-capsule-x": `${morph.capsuleLeft}px`,
+      "--app-agent-work-capsule-w": `${morph.capsuleWidth}px`,
+      "--app-agent-work-capsule-h": `${morph.capsuleHeight}px`,
+      "--app-agent-work-panel-w": `${Math.max(contentRect.width, morph.capsuleWidth)}px`,
+      "--app-agent-work-panel-h": `${contentRect.height}px`,
+    } as CSSProperties;
     setActionToolbarPosition((currentPosition) => {
-      if (currentPosition.left === nextPosition.left && currentPosition.top === nextPosition.top) {
-        return currentPosition;
-      }
-      return nextPosition;
+      const current = currentPosition as Record<string, unknown>;
+      const next = nextPosition as Record<string, unknown>;
+      return Object.keys(next).every((key) => current[key] === next[key]) ? currentPosition : nextPosition;
     });
-  }, [canReborn, hoverPart]);
+  }, []);
 
   // On the island the capsule is the one glass.
   const island = Boolean(item.intent || waiting || issue || notice);
@@ -3415,6 +3233,8 @@ export function AgentWorkAvatar({
     </div>
   );
   const hoverCards = hoverPart === "intent" && intentCard ? intentCard : instanceCards;
+  const { left: actionLayerLeft, top: actionLayerTop, ...morphGeometry } = actionToolbarPosition;
+  const actionLayerPosition = { left: actionLayerLeft, top: actionLayerTop };
   const hasHoverCards = Boolean(hoverCards);
 
   useLayoutEffect(() => {
@@ -3424,9 +3244,18 @@ export function AgentWorkAvatar({
     const layoutRoot = avatar?.closest(".app-message-surface");
     if (!avatar || !stack || !workItem || !layoutRoot) return;
 
-    return observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
+    // The panel opens from the capsule's shape, so that shape has to be known
+    // before the pointer arrives: follow the capsule's size while at rest too.
+    const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    const capsuleObserver = new ResizeObserver(() => positionActionToolbar());
+    capsuleObserver.observe(capsule);
+    const stopFollowingLayout = observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
       () => workItem.matches(":hover, :focus-within"));
-  }, [positionActionToolbar, hasHoverCards]);
+    return () => {
+      capsuleObserver.disconnect();
+      stopFollowingLayout();
+    };
+  }, [positionActionToolbar, hasHoverCards, island]);
 
   useLayoutEffect(() => {
     positionActionToolbar();
@@ -3528,6 +3357,10 @@ export function AgentWorkAvatar({
   return (
     <div
       className="app-agent-work-item group relative flex shrink-0 items-center"
+      data-morph={hoverCards ? (island ? "panel" : "row") : undefined}
+      // The capsule's geometry rides on the item, so a stretching disc can
+      // push the items after it aside by exactly the width it grows.
+      style={morphGeometry}
       onPointerOver={(event) => {
         // Moving onto the card itself keeps the card it is on.
         const target = event.target as Element;
@@ -3558,9 +3391,18 @@ export function AgentWorkAvatar({
         </LiquidGlassPill>
       ) : avatarButton}
       {hoverCards ? (
-        // Every card the item shows sits above it in one column, in one chrome.
-        <div className="app-agent-work-actions" style={actionToolbarPosition}>
-          <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
+        // The island grows up into a panel, as the composer does for its
+        // completions: one glass whose bottom row is the island itself (the
+        // seat), with the card the pointer asked for above it. A bare disc
+        // has no words to sit under, so it just stretches right into a
+        // capsule with its controls beside the face.
+        <div ref={actionPopupRef} className="app-agent-work-actions" style={actionLayerPosition}>
+          <LiquidGlassPill className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
+            <div ref={morphContentRef} className="app-agent-work-morph-content">
+              <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
+              <span className="app-agent-work-morph-seat" aria-hidden="true" />
+            </div>
+          </LiquidGlassPill>
         </div>
       ) : null}
     </div>
@@ -3728,7 +3570,6 @@ export function agentWorkHandoffSuccessors(harnesses: readonly string[]): string
 export function agentWorkCanReborn(item: AgentWorkItem): boolean {
   if (item.canStop === false) return false;
   if (item.avatarKind === "system") return false;
-  if (isXMatrixDelegateInstance(item.instance)) return false;
   const channelInstanceId = item.instance.channelInstanceId?.trim();
   return Boolean(channelInstanceId && /^[1-9]\d*$/.test(channelInstanceId));
 }

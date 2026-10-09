@@ -4,11 +4,12 @@ import type { Env } from "./types";
 import { registerAgentRebornRoutes } from "./index-routes-agent-reborn";
 import { registerAgentRegistrationRoutes } from "./index-routes-agent-registration";
 import { registerAgentRoutingRoutes } from "./index-routes-agent-routing";
+import { registerSummonIntentRoutes } from "./index-routes-summon-intent";
 import { actorUserId, requireAuth, requireHumanAuth, jsonErrors } from "./index-shared";
 import { claimFirstMessageLaunch, dispatchRegistrationLaunchAnyway, showFirstMessageLaunch } from "./registration-launch-dispatch";
 import { runtimePlacement, runtimeRepository } from "./runtime";
 import { summonFirstMessageHarness } from "./product-message-post-commit";
-import { wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
+import { AgentLaunchHandoverUnavailable, wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
 
 const NO_STORE = { "cache-control": "private, no-store" };
 
@@ -16,6 +17,7 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
   registerAgentRegistrationRoutes(app);
   registerAgentRoutingRoutes(app);
   registerAgentRebornRoutes(app);
+  registerSummonIntentRoutes(app);
   app.post("/api/invocations/diagnostics", (c) => jsonErrors(c, async () => {
     const user = await requireAuth(c.req.raw, c.env);
     const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
@@ -132,8 +134,8 @@ export function registerAgentLaunchRoutes(app: Hono<{ Bindings: Env }>): void {
     const retried = await runtimeRepository(c.env).retryAgentLaunch({ requestId: crypto.randomUUID(),
       launchId: c.req.param("launchId"), channelId, actorUserId: actorUserId(authUser), at: new Date().toISOString() });
     const wake = await wakeAgentLaunchChannel(c.env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL,
-      { channelId, launchIds: [c.req.param("launchId")] }).catch(() => undefined);
-    if (!wake?.ok) return c.json({ error: "Agent Launch coordinator is unavailable" }, 503);
+      { channelId, launchIds: [c.req.param("launchId")], work: ["launch"] }).catch(() => undefined);
+    if (!wake?.ok) throw new AgentLaunchHandoverUnavailable(wake?.status);
     return c.json(retried, 200, NO_STORE);
   }));
 }

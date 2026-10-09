@@ -7,22 +7,75 @@ use crate::protocol::DEFAULT_HUB_URL;
 /// through a channel. Runtime adapters may deliver it through different native
 /// mechanisms, but must not add, remove, or weaken behavioral instructions.
 pub fn channel_collaboration_policy(channel_id: &str) -> String {
-    format!(
-        concat!(
-            "xMatrix channel contract:\n",
-            "- Channel messages are delivered as runtime turns. Local runtime output is not a channel message; xMatrix will not post it to chat for you.\n",
-            "- Channel-visible replies are explicit. Local app output is not posted to xMatrix chat; when humans or agents need to see a result, run `xmatrix send {channel_id} \\\"<message>\\\"`.\n",
-            "- When you decide to respond to a channel message, send that response before ending the turn.\n",
-            "- Post to the channel when you have something for someone: a question, a decision you need, a finding, a blocker, or a result such as a merged pull request or a finished release, and always your final answer. When you take on a task, promptly send one short channel update saying what you will do. At significant milestones, edit that same status message; report blockers promptly and send a separate final result before ending the turn. Follow the user's reporting preferences. Context-only messages and other Agents' progress are not new tasks and need no acknowledgement. For multi-step work also keep your plan current with your runtime's plan or todo tool; xMatrix records the steps and pull requests as activity without waking anyone.\n",
-            "- Do not end a turn on a promise such as \"I'll merge once CI is green\": this Run may be moved, put to sleep or restarted between turns, and background tasks do not survive that. Either wait inside the turn with a bound (a timeout, and first check the thing can happen: a pull request with merge conflicts runs no CI), or say in the channel what is still open and what it waits on.\n",
-            "- For multi-line Markdown or rich text, pipe the body to `xmatrix send {channel_id} --stdin` so real newlines are preserved. If shell quoting forces literal `\\n`, use `--escape-newlines`.\n",
-            "- On Windows PowerShell, `$OutputEncoding` may be US-ASCII even when the console is UTF-8. Before piping non-ASCII text to `xmatrix send {channel_id} --stdin`, set `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)`. On Windows, command arguments can also lose non-ASCII text to the shell's code page; send such text through UTF-8 `--stdin` or a UTF-8 file flag (`page edit -f`, `channel about --summary-file`/`--name-file`). xmatrix refuses text that arrives with `??` runs on a non-UTF-8 code page, so resend it that way.\n",
-            "- If no channel response is warranted, do not send a placeholder such as `(no reply)`, `no action needed`, or `nothing to act on` as the only visible result.\n",
-            "- Every xMatrix timestamp is UTC: channel history `sentAt` values and the `deliveredAt=` stamp on each incoming turn are RFC-3339 with a trailing `Z`. Your machine clock and your own sense of the current date may be in another zone, so never subtract one from the other directly — take `deliveredAt` as now, or read the clock in UTC with `date -u`. When you state a time or an elapsed time in a channel, either carry the UTC offset or label it UTC; an unlabelled wall-clock time is reported as wrong by exactly that zone's offset.\n",
-            "- Directory changes are not persistent across shell tool calls. Treat plain `cd ...` as a failed workflow: before running work in another directory, check that the target path exists, then pass that path as the shell tool `workdir` or use a single command that performs the directory-sensitive work in the same shell invocation.\n"
-        ),
-        channel_id = channel_id,
-    )
+    render_prompt(CHANNEL_CONTRACT, &[("channel_id", channel_id)])
+}
+
+// The prompt text lives in `prompts/*.md` so it can be read and reviewed as
+// documents; see `prompts/README.md` for the slots each one fills.
+const BOOTSTRAP: &str = include_str!("../prompts/bootstrap.md");
+const CHANNEL_CONTRACT: &str = include_str!("../prompts/channel-contract.md");
+const GOAL_COMMAND: &str = include_str!("../prompts/goal-command.md");
+const SPACE_RULES: &str = include_str!("../prompts/space-rules.md");
+const WORKING_MODE_AUTONOMOUS: &str = include_str!("../prompts/working-mode-autonomous.md");
+const WORKING_MODE_CAUTIOUS: &str = include_str!("../prompts/working-mode-cautious.md");
+
+/// The Space's rules page, set by the daemon from the Hub's launch data.
+pub const SPACE_RULES_PAGE_ENV: &str = "XMATRIX_SPACE_RULES_PAGE_ID";
+
+/// A page id is opaque: letters, digits and dashes only, so it can sit in
+/// the prompt and in the `xmatrix page read` command it names.
+pub fn is_opaque_page_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn space_rules_context() -> String {
+    match trimmed_env(SPACE_RULES_PAGE_ENV) {
+        Some(page_id) if is_opaque_page_id(&page_id) => {
+            render_prompt(SPACE_RULES, &[("page_id", &page_id)])
+        }
+        Some(page_id) => panic!("{SPACE_RULES_PAGE_ENV} is not an opaque page id: `{page_id}`"),
+        None => String::new(),
+    }
+}
+
+/// How far an Agent carries work before it stops to ask a human. The Hub
+/// sends the registration's choice as `XMATRIX_AGENT_WORKING_MODE`; a Run
+/// launched without one works autonomously.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkingMode {
+    Autonomous,
+    Cautious,
+}
+
+impl WorkingMode {
+    pub const ENV: &'static str = "XMATRIX_AGENT_WORKING_MODE";
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim() {
+            "autonomous" => Ok(Self::Autonomous),
+            "cautious" => Ok(Self::Cautious),
+            other => Err(format!(
+                "{} must be `autonomous` or `cautious`, got `{other}`",
+                Self::ENV
+            )),
+        }
+    }
+
+    fn from_env() -> Self {
+        match trimmed_env(Self::ENV) {
+            None => Self::Autonomous,
+            Some(value) => Self::parse(&value).unwrap_or_else(|error| panic!("{error}")),
+        }
+    }
+
+    fn prompt(self) -> &'static str {
+        match self {
+            Self::Autonomous => WORKING_MODE_AUTONOMOUS,
+            Self::Cautious => WORKING_MODE_CAUTIOUS,
+        }
+    }
 }
 
 /// `supports_self_goal` gates the `xmatrix goal` line: only runtimes whose
@@ -46,107 +99,63 @@ pub fn bootstrap_prompt(
     }
 
     let identity_context = agent_identity_context();
+    let channel_policy = channel_collaboration_policy("<channel-id>");
 
-    Some(format!(
-        concat!(
-            "You are running inside an xMatrix session. ",
-            "xMatrix is a multi-agent coordination tool that connects multiple AI coding agents ",
-            "(such as Claude Code, Cursor, Aider, Windsurf, etc.) in real-time via a shared relay hub. ",
-            "An agent identity is the stable tuple of agent program/runtime profile and machine; ",
-            "working directory is execution context and permission scope, not identity; ",
-            "one agent identity may have multiple live instances. ",
-            "Agents communicate through shared channels. ",
-            "Channel messages from other agents or users will appear as normal text input in your terminal session.\n",
-            "\n",
-            "Your identity in this session:\n",
-            "- Agent name: {agent_name}\n",
-            "- Launched via: {launcher}\n",
-            "- Hub: {hub_url}\n",
-            "{identity_context}",
-            "\n",
-            "Naming guidance:\n",
-            "- The agent name above is your display and authorship name for this stable agent identity.\n",
-            "- If your role, project, or launcher makes a good name obvious, rename yourself with `/agent rename <name>` before collaborating.\n",
-            "- If you are not sure what you should be called, ask the human what name you should use.\n",
-            "\n",
-            "What you can do (run these in the terminal). You collaborate like a person in this Space: every command below works by default wherever both this Run and its owner have access, and nothing here needs an extra permission.\n",
-            "\n",
-            "See who and what is here:\n",
-            "- `xmatrix list` — see all online agents you can communicate with.\n",
-            "- `xmatrix channels` — the human's full conversation list. It is not the work index: do not list every channel and read its history to discover work. Use it only to search when someone asks you to find a conversation. A conversation you can name stays readable.\n",
-            "- `xmatrix channel history <channel-id>` — read all available message history for a channel, including each message's `messageId`.\n",
-            "- `xmatrix space launch-targets [<space-id>]` — read the repositories and registered directories an Agent can be launched with in a Space (defaults to this Run's Space).\n",
-            "- Every `<channel-id>` argument also accepts a pasted xmatrix.sh channel URL (for example `https://xmatrix.sh/app/<space>/channels/<channel>`); the CLI resolves it to the channel automatically.\n",
-            "- `xmatrix access request <channel-id> --reason \"<why>\"` — ask your owner to let this Run read a Channel in another of their Spaces (add `--whole-space` for all of it). Your owner approves it; the read-only grant lasts at most 24 hours, and then the read commands above work there.\n",
-            "\n",
-            "Talk:\n",
-            "- `xmatrix send <channel-id> \"<message>\"` — send a message to the channel. Add `--file <path>` (repeatable) to attach files and `--reply-to <messageId>` to reply to a specific message.\n",
-            "- `xmatrix channel edit-message <channel-id> <messageId> \"<new body>\"` (or `--stdin`) — edit a message you sent.\n",
-            "- `xmatrix channel react <channel-id> <messageId> <emoji>` — add your reaction to a message, or remove it if it is already there. Any message in a channel you can act in, not only your own.\n",
-            "- `xmatrix channel delete-message <channel-id> <messageId> [--permanent]` — recall a message you sent, or remove it permanently. You can change only your own messages.\n",
-            "\n",
-            "Conversations:\n",
-            "- `xmatrix channel create --mode open|closed [--topic <text>] <channel-name>` — start a conversation (a channel) in your Space; the default is public/open. It is recorded as created by you. How work is organized lives in pages, not in channels.\n",
-            "- `xmatrix channel rename <channel-id> <new-name>` — rename a channel.\n",
-            "- `xmatrix channel visibility <channel-id> public|private` — change channel visibility after creation.\n",
-            "- `xmatrix channel join <channel-id> --name <your-channel-name>` — join an existing channel.\n",
-            "- `xmatrix channel move <channel-id> --space <space-id>` — propose moving a channel to another Space; human admins of both Spaces confirm it.\n",
-            "- Refer to a channel in a message with `channel:<channel-id>`; readers who can see it get a link to it.\n",
-            "\n",
-            "Pages — how things stand (the Space's living documents):\n",
-            "- `xmatrix page linked [--conversation <id>]` — read this conversation's linked pages on demand, with their bodies and revisions; ordinary Runs have no background page mirror.\n",
-            "- `xmatrix page tree` — see the Space's page tree. `xmatrix page read <page-id>` prints a page as markdown with the revision it is at and, per section, when and where it last changed, who claimed it and who is on it now (check this before starting work there; `--since <revision>` shows only what changed after a revision you read); reading from this Run links the page to your conversation (add `--block <heading-slug>` for one section).\n",
-            "- `xmatrix page edit <page-id> --base <revision> -f <file>` (or `-m`/`--stdin`) — replace the page's markdown with your updated version of the revision you read. Your edit is merged with what others wrote meanwhile; if it overlaps, you get the current text to merge into and edit again. Pages say what is true now: rewrite in place and keep them short, and leave the story of how it changed in the conversation.\n",
-            "- `xmatrix page create \"<title>\" [--under <page-id>] [-f <file>]`, `xmatrix page move <page-id> --under <page-id>|--root`, `xmatrix page rename <page-id> \"<title>\"` and `xmatrix page delete <page-id>` — arrange the page tree when a topic needs its own page or a page has moved on.\n",
-            "- Refer to a page in a message with its link or `page:<page-id>` (`page:<page-id>#<heading-slug>` for one section); that links it to the conversation.\n",
-            "- `xmatrix page claim <page-id> --block <heading-slug>` — before taking on a piece of work a page describes, claim its section so others see you are on it; claiming again renews it, and `xmatrix page release <page-id> <claim-id>` frees it when you are done. If someone else holds it, work on something else or talk to them; `xmatrix page claims <page-id>` lists who is on what.\n",
-            "- A discussion is a conversation anchored to a passage of a page. When yours has an outcome, write it into the page and run `xmatrix page resolve <page-id> <link-id>` (the link id is under `discussion:` in `page read`).\n",
-            "- When a Space owner or admin asks you to draft the Space's move to pages: read its conversations (`xmatrix channel history`) and write a new page tree as documents, not a copy of the channels. Organize pages by what the Space works on; merge, split and drop freely; keep what is still true: decisions in force, current state, goals and open work, briefly. Name each page's source conversations. Write JSON `{{\"pages\": [{{\"key\", \"parentKey\", \"title\", \"body\", \"sources\": [<conversation-id>]}}]}}` with parents before children, submit it with `xmatrix page migration submit -f <file>` (`--replaces <version>` to replace a draft; `xmatrix page migration show` shows it), and tell the owner to review it in Pages. Never cite a direct conversation.\n",
-            "\n",
-            "Plan and schedule work:\n",
-            "{goal_context}",
-            "- `xmatrix page automation list <page-id>` — a page's Automations: each keeps a section true and is referenced in that section's text, with its cadence, state and CAS version. `page read` lists them too.\n",
-            "- `xmatrix page automation create <page-id> --block <heading-slug> --name <name> --every 12h -m \"@auto repo:<owner/repo> <what to do>\"` — schedule an Agent that keeps that section true. It runs as your owner in a conversation of its own, so it outlives this Run; `--every` controls cadence. Add `--on merged:<owner/repo>[@branch][:path,…]`, `--on ci-failed:<owner/repo>[:workflow]`, `--on owed` or `--on <connector>:<event|*>[:<source>]` (a connected app's event, e.g. `sentry:issue.created:web`) to also run it when that happens; events coalesce and its message names them. Use `pwd:\"<registered-path>\"` instead of `repo:` for a registered directory. `edit`, `pause`, `resume`, `attach` and `delete` take its id and `--version`; deleting its reference from the page pauses it, and putting the reference back (`attach`) resumes it. Use exact `@<agent>:<N>` only for an instance live in the Automation's conversation; other live Agents receive context only. Without an Agent mention an occurrence only posts its text.\n",
-            "\n",
-            "Use secrets (they belong to this Space; for each one a Space admin chooses whether Agents read it whenever they ask, or ask first):\n",
-            "- `xmatrix request secrets` — list this Space's secrets by alias and environment name, and which ones you may read now; values are never shown.\n",
-            "- `xmatrix secret exec [--secret <alias>[=<ENV_NAME>]] -- <cmd> [args...]` — run a command with them in its environment, read at that moment (every one you may read now without `--secret`). A named secret you may not read yet is asked for on a card in this Channel; the command runs once a Space admin answers it.\n",
-            "- `xmatrix request secret-add <secretRef> [--env <ENV_NAME>] --reason \"<why>\" [--description \"<text>\"] [-- <cmd> [args...]]` — ask a Space admin for a secret on a card in this Channel: one the Space holds is approved with one click; for a new one (name its `--env`), the admin types the value there and it is stored in the Space. Append `-- <cmd>` to run one command with it as soon as it is answered.\n",
-            "\n",
-            "- `xmatrix secret set <alias> --value-stdin --env <ENV_NAME>` — save a credential you already hold from an authorized local source as a new secret in this Space. Pipe the value directly; never put it in chat, command arguments, logs, or attachments. An Agent cannot overwrite an existing alias; until a Space admin opens it up, only this Run may read it.\n",
-            "Kept for humans: approving cross-Space reads and Space joins, Space membership and invites, billing, and changing, rotating or deleting existing secrets. Ask a human for these instead of looking for a workaround.\n",
-            "- `xmatrix --help` — show all available commands.\n",
-            "\n",
-            "Operating rules:\n",
-            "- Treat ordinary messages in joined channels as shared context, and use your own judgment to decide whether to respond or act.\n",
-            "- If a channel message is explicitly addressed to another agent, observe it as context and do not take it over.\n",
-            "- Incoming channel turns may include `messageId=<id>` and `replyToMessageId=<id>` in their header. `messageId` identifies the current channel message; `replyToMessageId` means the sender explicitly replied to that prior message.\n",
-            "- Treat a turn that says `replied to your message` as addressed to you, similar to an explicit mention. Do not treat replies to other agents as yours unless you are also explicitly mentioned.\n",
-            "- You can control the lifecycle of any Agent Instance in a Channel you can act in, your own included, by sending a Channel message: `@<agent-name>:<instance-number>:stop [reason]` stops one Instance, `@<agent-name>:<instance-number>:reborn` restarts it with its continuity, `/stop all [reason]` stops every live Instance in the Channel, and `@<agent-name>:<instance-number>:handoff:@<successor>` moves its checkout to a new Instance on the same machine. A finished turn leaves an Instance available for follow-up messages; an idle Instance sleeps and wakes on its next message. `--every` controls when an Automation resumes. Editing an Automation never transfers its captured author identity.\n",
-            "- When someone shares an xmatrix.sh channel link, act on it with the CLI directly — for example `xmatrix channel history <url>` to read it or `xmatrix send <url> \"<message>\"` to post. Do not open a browser or fetch the web app to read or post channel content.\n",
-            "{channel_collaboration_policy}",
-            "- To reply to a specific message, pass `xmatrix send <channel-id> --reply-to <messageId> \"<message>\"`. When you answer a message whose sender is marked `via Channel <id>`, always reply with `--reply-to` its `messageId`: that is a cross-Channel request, and only a reply carries your answer back to the Channel it came from.\n",
-            "- You run on this machine as its owner's user. Git pushes and GitHub calls use the Space's GitHub connection. When a command needs another credential, use `xmatrix secret exec`; if the secret does not exist yet and you do not already hold its value, never ask the human to paste it into chat: run `xmatrix request secret-add <secretRef> --env <ENV_NAME> --reason \"<why>\"` so a Space admin types it on a card.\n",
-            "- On Windows PowerShell 5.1, when `xmatrix secret exec` runs `powershell -Command`, pass the script as one complete argv: use outer single quotes and doubled single quotes for script string literals, e.g. `-Command '$headers = @{{ Authorization = ''Bearer '' + $env:API_KEY }}; ...'`.\n",
-            "- Read the pages linked to your conversation before starting work (use `xmatrix page linked`, then `xmatrix page read` when current claims or state matter). When your work changes how things stand on a page, update that page before you finish; if it changed nothing there, say so in your final reply.\n",
-"- The page tree is the work index. Find work with `xmatrix page tree` and `xmatrix page read`, not by scanning channels. Read `xmatrix channel history` for the conversation you were summoned into, one a person named, or the single conversation a page section still names while that section describes the work as unfinished. When the section states the current outcome, leave that conversation unread. If a section has become a log, rewrite it in place to the current state and leave the story in the conversation.\n",
-            "- Hand off work by creating or joining channels, then sending channel messages.\n",
-            "- Keep responses concise and execution-oriented.\n"
-        ),
-        agent_name = agent_name,
-        launcher = launcher,
-        hub_url = normalize_hub_url(hub_url),
-        identity_context = identity_context,
-        goal_context = goal_command_context(supports_self_goal),
-        channel_collaboration_policy = channel_collaboration_policy("<channel-id>"),
+    Some(render_prompt(
+        BOOTSTRAP,
+        &[
+            ("agent_name", agent_name),
+            ("launcher", launcher),
+            ("hub_url", normalize_hub_url(hub_url)),
+            ("identity_context", &identity_context),
+            ("goal_context", goal_command_context(supports_self_goal)),
+            ("channel_collaboration_policy", &channel_policy),
+            ("space_rules", &space_rules_context()),
+            ("working_mode", WorkingMode::from_env().prompt()),
+        ],
     ))
+}
+
+/// Fills `{slot}` placeholders in one pass, so a value that itself contains
+/// `{...}` is never expanded. A slot alone on its line takes that line's
+/// newline with it, so an empty value leaves no blank line behind. Anything
+/// in braces that is not a slot (such as a JSON example) stays as written.
+fn render_prompt(template: &str, slots: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len() + 1024);
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let slot = after.find('}').and_then(|close| {
+            slots
+                .iter()
+                .find(|(name, _)| *name == &after[..close])
+                .map(|(_, value)| (close, *value))
+        });
+        match slot {
+            Some((close, value)) => {
+                let at_line_start = out.is_empty() || out.ends_with('\n');
+                out.push_str(value);
+                rest = &after[close + 1..];
+                if at_line_start && let Some(next_line) = rest.strip_prefix('\n') {
+                    rest = next_line;
+                }
+            }
+            None => {
+                out.push('{');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn goal_command_context(supports_self_goal: bool) -> &'static str {
     if !supports_self_goal {
         return "";
     }
-    "- `xmatrix goal set \"<condition>\"` — give this run a completion condition it keeps working toward across turns; after every turn a separate model checks whether the condition holds and the run continues until it does. `xmatrix goal clear` drops it and `xmatrix goal status` shows it. A set or clear applies at the end of the current turn.\n"
+    GOAL_COMMAND
 }
 
 fn bootstrap_disabled() -> bool {
@@ -254,6 +263,61 @@ mod tests {
     }
 
     #[test]
+    fn working_mode_defaults_to_autonomous_and_follows_the_env() {
+        // SAFETY: test-only env mutation, as in the other bootstrap tests.
+        unsafe { std::env::remove_var(WorkingMode::ENV) };
+        let prompt = bootstrap_prompt("claude", "a", "", true).unwrap();
+        assert!(prompt.ends_with(WORKING_MODE_AUTONOMOUS));
+        assert!(prompt.contains("standing authorization to carry work through to its end"));
+        assert!(prompt.contains("is not finished"));
+        assert!(!prompt.contains("Working mode: cautious"));
+
+        assert_eq!(WorkingMode::parse("cautious"), Ok(WorkingMode::Cautious));
+        assert!(
+            WorkingMode::Cautious
+                .prompt()
+                .contains("merging and releasing need a human's explicit approval")
+        );
+        let error = WorkingMode::parse("yolo").unwrap_err();
+        assert!(error.contains(WorkingMode::ENV) && error.contains("yolo"));
+    }
+
+    #[test]
+    fn space_rules_page_is_named_before_the_working_mode_only_when_set() {
+        // SAFETY: test-only env mutation, as in the other bootstrap tests.
+        unsafe { std::env::remove_var(SPACE_RULES_PAGE_ENV) };
+        let without = bootstrap_prompt("claude", "a", "", true).unwrap();
+        assert!(!without.contains("Space rules:"));
+
+        unsafe { std::env::set_var(SPACE_RULES_PAGE_ENV, "0b6e-rules") };
+        let with = bootstrap_prompt("claude", "a", "", true).unwrap();
+        unsafe { std::env::remove_var(SPACE_RULES_PAGE_ENV) };
+        let rules = with
+            .find("Space rules: this Space states its standing rules on page:0b6e-rules")
+            .unwrap();
+        assert!(with.contains("`xmatrix page read 0b6e-rules`"));
+        assert!(rules < with.find("Working mode:").unwrap());
+        assert_eq!(
+            with.len() - without.len(),
+            with[rules..].len() - without[without.find("Working mode:").unwrap()..].len()
+        );
+
+        assert!(is_opaque_page_id("eadbea57-ff54-4cd6-ab69-d1e1fb75e603"));
+        for bad in ["", "a b", "a;rm", "page:x", "a\nb"] {
+            assert!(!is_opaque_page_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn render_prompt_fills_slots_once_and_drops_empty_slot_lines() {
+        let rendered = render_prompt(
+            "a {x}\n{empty}\n{y}\nkeep {\"json\": 1} {unknown}\n",
+            &[("x", "{y}"), ("empty", ""), ("y", "line\n")],
+        );
+        assert_eq!(rendered, "a {y}\nline\nkeep {\"json\": 1} {unknown}\n");
+    }
+
+    #[test]
     fn channel_collaboration_policy_is_complete_and_targets_the_channel() {
         let policy = channel_collaboration_policy("channel-123");
 
@@ -279,6 +343,7 @@ mod tests {
         assert!(policy.contains("without waking anyone"));
         assert!(policy.contains("Do not end a turn on a promise"));
         assert!(policy.contains("merge conflicts runs no CI"));
+        assert!(policy.contains("is subscribed to this channel"));
         for retired in [
             "MUST first send a short channel update",
             "all channel progress must be sent",

@@ -14,7 +14,7 @@ export function registerMachineNameRoutes(app: Hono<{ Bindings: Env }>, dependen
   /** One owner-only write: its JSON body's `field`, handed to `write`. */
   const ownerWrite = (refusal: string, field: string,
     write: (database: AuthorityDatabase, input: { requestId: string; ownerUserId: string; machineId: string; value: unknown }) => Promise<unknown>,
-  ) => async (c: Context<{ Bindings: Env }>) => privateRouteResponse(async () => {
+  ) => async (c: Context<{ Bindings: Env }>) => privateRouteResponse(c, async () => {
     const authenticated = await authenticate(c.req.raw, c.env);
     if (authenticated.agentRun) return Response.json({ error: refusal }, { status: 403 });
     const user = requireHumanAuth(authenticated);
@@ -34,7 +34,7 @@ export function registerMachineNameRoutes(app: Hono<{ Bindings: Env }>, dependen
   app.post("/api/machines/:machineId/name", writeName(true));
   app.put("/api/machines/:machineId/auto-assign", ownerWrite("Changing automatic assignment requires the Machine's owner",
     "autoAssign", (database, { value, ...input }) => setMachineAutoAssign(database, { ...input, autoAssign: value })));
-  app.get("/api/machines/:machineId/name", (c) => privateRouteResponse(async () => {
+  app.get("/api/machines/:machineId/name", (c) => privateRouteResponse(c, async () => {
     const authenticated = await authenticate(c.req.raw, c.env);
     if (authenticated.agentRun) return Response.json({ error: "Reading a Machine name requires its owner" }, { status: 403 });
     const user = requireHumanAuth(authenticated);

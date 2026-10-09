@@ -54,6 +54,8 @@ export const HUB_ENVIRONMENT = {
   RELAY_CHANNEL_FAMILY_DIRECTORY: retired,
   RELAY_POSTGRES_CHANNEL_COORDINATOR: product("binding", "Per-Channel message sequence coordinator."),
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL: product("binding", "Per-Channel Agent Launch coordinator."),
+  GITHUB_SUBSCRIPTION_INDEX: product("binding",
+    "Per-installation index of subscribed GitHub sources; a delivery nobody subscribed to reads no routes."),
   RELAY_POSTGRES_BACKGROUND_ADMISSION: product("binding", "Per-shard permits for background passes."),
   RELAY_CHANNEL_CATALOG_AUTHORITY: test("binding", "Pre-PostgreSQL Channel catalog authority; bound only by test configs."),
   RELAY_SCHEDULER_AUTHORITY: test("binding", "Pre-PostgreSQL scheduler authority; bound only by test configs."),
@@ -142,6 +144,7 @@ export const HUB_ENVIRONMENT = {
   XMATRIX_SECRET_CATALOG_KEY: { kind: "secret", scope: "required", summary: "Encrypts Space secrets (at least 32 characters). Unset: Space secrets cannot be stored or read." },
 
   // Optional integrations.
+  APPLE_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases." },
   STRIPE_SECRET_KEY: { kind: "secret", scope: "feature", summary: "Stripe API key for paid plans. Unset with the webhook secret: checkout and the billing portal answer 503." },
   STRIPE_WEBHOOK_SECRET: { kind: "secret", scope: "feature", summary: "Stripe webhook signing secret." },
   STRIPE_PRO_MONTHLY_PRICE_ID: { kind: "var", scope: "feature", summary: "Stripe price for the monthly Pro seat." },
@@ -150,7 +153,7 @@ export const HUB_ENVIRONMENT = {
   SLACK_CLIENT_ID: { kind: "secret", scope: "feature", summary: "Slack OAuth client id for the Slack connector. Unset: the Slack connector cannot be connected." },
   SLACK_CLIENT_SECRET: { kind: "secret", scope: "feature", summary: "Slack OAuth client secret." },
   GITHUB_APP_ID: { kind: "var", scope: "feature", summary: "GitHub App id for the Space GitHub connection. Unset with the other GITHUB_APP_* values: Spaces cannot connect GitHub." },
-  GITHUB_APP_CLIENT_ID: { kind: "var", scope: "feature", summary: "GitHub App OAuth client id." },
+  GITHUB_APP_CLIENT_ID: { kind: "var", scope: "feature", summary: "GitHub App OAuth client id (public). Connect and GitHub account linking need it with the other GITHUB_APP_* values." },
   GITHUB_APP_CLIENT_SECRET: { kind: "secret", scope: "feature", summary: "GitHub App OAuth client secret." },
   GITHUB_APP_PRIVATE_KEY: { kind: "secret", scope: "feature", summary: "GitHub App private key (PEM)." },
   GITHUB_APP_SLUG: { kind: "var", scope: "feature", summary: "GitHub App slug used for install links." },

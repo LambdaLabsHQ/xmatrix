@@ -1,4 +1,4 @@
-import { createSignedJsonReceiver } from "./hmac";
+import { createSignedJsonReceiver } from "./delivery-proof";
 import { connectorEvent, excerpt, lowerHeader, record, safeUrl, sourceToken, text } from "./event-format";
 
 /*
@@ -23,7 +23,7 @@ function browseUrl(issue: Record<string, unknown>): string | undefined {
 }
 
 export const receiveJiraDelivery = createSignedJsonReceiver({
-  name: "Jira", secretField: "webhookSecret", signatureHeader: "x-hub-signature", stripSha256Prefix: true,
+  name: "Jira", secretField: "webhookSecret", proof: { header: "x-hub-signature", prefix: "sha256=" },
 }, (delivery, payload) => {
   const event = text(payload.webhookEvent);
   const issue = record(payload.issue);

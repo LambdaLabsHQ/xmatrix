@@ -455,9 +455,10 @@ async fn handle_daemon_spawn_request(
                         slot_id: existing_slot.as_str().to_string(),
                         base_repo: base_repo.clone(),
                         resumed: false,
+                        baseline: None,
                     });
                 }
-                let lease = if intent.handoff_transfer {
+                let mut lease = if intent.handoff_transfer {
                     let source_session = intent
                         .handoff_source_resume_session_key
                         .as_deref()
@@ -567,6 +568,11 @@ async fn handle_daemon_spawn_request(
                 .map_err(|error| {
                     CliError::Launch(format!("repo pool lease unavailable ({error})"))
                 })?;
+                match repo_pool::observe_lease_baseline_at(&layout, &base_repo, &request, &lease,
+                    intent.resume || intent.handoff_transfer).await {
+                    Ok(baseline) => lease.baseline = Some(baseline),
+                    Err(error) => eprintln!("repo pool: baseline evidence unavailable ({error})"),
+                }
                 Ok::<_, CliError>((base_repo, lease))
             })
             .await?;
@@ -625,6 +631,7 @@ async fn handle_daemon_spawn_request(
             slot_id: lease.slot_id.as_str().to_string(),
             base_repo,
             resumed: intent.resume,
+            baseline: lease.baseline,
         });
         repo_pool_spawn_claim = Some(DaemonRepoPoolSpawnClaim {
             canonical_repo_identity: canonical.as_str().to_string(),
@@ -720,6 +727,10 @@ async fn handle_daemon_spawn_request(
         }
     }
 
+    let baseline_warning_prompt = repo_pool_binding.as_ref().and_then(|binding| binding.baseline.as_ref())
+        .filter(|baseline| baseline.warn_agent).map(|baseline| format!(
+            "Repository continuity warning: this continued task's recorded base {} @ {} is no longer an ancestor of the confirmed remote default branch. Your checkout and uncommitted work have been preserved. Before publishing, check the current remote history and avoid reintroducing removed commits.\n\n{}",
+            baseline.base_ref, baseline.base_oid, intent.prompt));
     let spawn_result = if let Err(error) = command_lease.confirm_live(&relay).await {
         Err(error)
     } else if let Err(error) =
@@ -745,6 +756,8 @@ async fn handle_daemon_spawn_request(
             agent_name: &intent.agent_name,
             identity_id: intent.identity_id.as_deref(),
             role_initial_prompt: intent.role_initial_prompt.as_deref(),
+            working_mode: intent.working_mode.as_deref(),
+            space_rules_page_id: intent.space_rules_page_id.as_deref(),
             resume: intent.resume,
             resume_instance_id: intent.resume_instance_id.as_deref(),
             resume_session_key: intent.resume_session_key.as_deref(),
@@ -759,7 +772,7 @@ async fn handle_daemon_spawn_request(
             materializer_id: intent.materializer_id.as_deref(),
             execution_key: intent.execution_key.as_deref(),
             instance_id: intent.instance_id.as_deref(),
-            prompt: &intent.prompt,
+            prompt: baseline_warning_prompt.as_deref().unwrap_or(&intent.prompt),
             source_message_id: intent.source_message_id(),
             attachments: intent.attachments(),
             // Direct daemon routing workspace (registered cwd or management
@@ -1010,6 +1023,14 @@ async fn record_daemon_spawn_result(
                 );
             }
             let metadata = (!metadata.is_empty()).then_some(Value::Object(metadata));
+            let warning_receipt = child.repo_pool_binding.as_ref()
+                .filter(|binding| binding.baseline.as_ref().is_some_and(|baseline| baseline.warn_agent))
+                .and_then(|binding| Some((binding.repo_key_id.clone(), repo_pool::LeaseRequest {
+                    session_key: child.resume_session_key.clone()?,
+                    instance_id: child.instance_id.clone()?,
+                    run_id: child.run_id.clone()?,
+                    execution_key: child.execution_key.clone()?,
+                })));
             if let Err(error) = register_daemon_child(run_registry, child, identity_id, None).await
             {
                 return DaemonSpawnResultParts {
@@ -1025,6 +1046,16 @@ async fn record_daemon_spawn_result(
                     // authority safely idempotent when rollback did finish.
                     metadata,
                 };
+            }
+            if let Some((repo_key, request)) = warning_receipt {
+                let receipt = async {
+                    let pools_root = repo_pool::default_repo_pools_root()?;
+                    let layout = repo_pool::RepoPoolLayout::from_persisted(&pools_root, &repo_key)?;
+                    repo_pool::acknowledge_baseline_warning_at(&layout, &request).await
+                }.await;
+                if let Err(error) = receipt {
+                    eprintln!("repo pool: warning receipt unavailable ({error})");
+                }
             }
             if let Some(log) = log {
                 println!(
@@ -1636,7 +1667,8 @@ fn daemon_repo_pool_spawn_metadata(binding: Option<&DaemonRepoPoolBinding>) -> O
                 "repoIdentity": binding.canonical_repo_identity,
                 "repoKeyId": binding.repo_key_id,
                 "slotId": binding.slot_id,
-            }
+            },
+            "repositoryBaseline": binding.baseline,
         })
     })
 }
@@ -2014,6 +2046,8 @@ struct HeadlessAgentSpawn<'a> {
     agent_name: &'a str,
     identity_id: Option<&'a str>,
     role_initial_prompt: Option<&'a str>,
+    working_mode: Option<&'a str>,
+    space_rules_page_id: Option<&'a str>,
     resume: bool,
     resume_instance_id: Option<&'a str>,
     resume_session_key: Option<&'a str>,
@@ -2058,6 +2092,8 @@ async fn spawn_headless_agent(
         agent_name,
         identity_id,
         role_initial_prompt,
+        working_mode,
+        space_rules_page_id,
         resume,
         resume_instance_id,
         resume_session_key,
@@ -2091,7 +2127,13 @@ async fn spawn_headless_agent(
     );
     let runtime_args = auto_update.runtime_args;
     let mut local_env = apply_authoritative_agent_execution_env(
-        apply_spawn_initial_prompt(BTreeMap::new(), role_initial_prompt),
+        apply_spawn_space_rules(
+            apply_spawn_working_mode(
+                apply_spawn_initial_prompt(BTreeMap::new(), role_initial_prompt),
+                working_mode,
+            )?,
+            space_rules_page_id,
+        )?,
         agent_backend,
         agent_preset_id,
         &auto_update.acp_args,
@@ -2164,7 +2206,6 @@ async fn spawn_headless_agent(
             }
         };
     let mut command = std::process::Command::new(&exe);
-    apply_windows_utf8_env(&mut command);
     for key in [
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
@@ -2377,6 +2418,7 @@ async fn spawn_headless_agent(
         command.env_remove(DAEMON_REQUEST_CAPABILITY_ENV);
     }
     apply_agent_spawn_path(&mut command, &local_env);
+    apply_windows_utf8_env(&mut command)?;
     xmatrix_cli_agent::apply_agent_cli_binary(&mut command, &exe);
     match local_env.get("XMATRIX_AGENT_BACKEND").map(String::as_str) {
         Some("codex-app") => {

@@ -37,12 +37,14 @@ import { ACTIVE_RUN_STATUS_SQL,
   type AutoLaunchTags,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
+  type DraftSummonIntent,
   type AgentRegistrationLaunch, utf8ByteLength, hasControlCharacter,
   currentRoutingQuotaWindows,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { registrationInstructionsSpawnFields } from "./registration-instructions-spawn.js";
+import { spaceRulesSpawnFields } from "./space-rules-spawn.js";
 import { RegistrationAccessError, registrationRouteRefusal } from "./agent-registration-errors.js";
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
@@ -53,7 +55,7 @@ import { initialMessageSource, withInitialMessageSource } from "./runtime-initia
 import { MessageAuthorityError } from "./message-authority-error.js";
 import { lockChannelLifecycle } from "./channel-capability-policy.js";
 import { instanceOrdinalFor, reserveNaturalKey } from "./natural-keys.js";
-import { commitRuntime, managementActivationDecision } from "./runtime-control.js";
+import { commitRuntime } from "./runtime-control.js";
 
 interface LaunchRequest {
   commandId: string; actorUserId: string; channelId: string;
@@ -73,11 +75,8 @@ interface LaunchRequest {
   runMetadata?: Record<string, unknown>;
   /** Caller-owned Run/Instance identities, e.g. a schedule occurrence's. */
   runId?: string; instanceId?: string;
-  /** Space management Run: always a private management directory for that Space. */
-  management?: RegistrationManagementLaunch;
-  /** One live delegate per Channel: a serving one is reused instead of launched. */
-  coalesce?: RegistrationLaunchCoalesce;
-  /** A Channel About session: a background Run with no Channel Instance. */
+  /** A Channel About session: a background Run with no Channel Instance, in a
+   * private directory of its own that reads its Channel on demand. */
   aboutSession?: RegistrationAboutSession;
   /** The message this launch answers; its wrapper acknowledges it. Not a fence. */
   initialMessageId?: string;
@@ -90,9 +89,6 @@ interface LaunchRequest {
   machineName?: string;
 }
 
-/** A management launch runs in a synthetic workspace and reads its Space on demand. */
-export interface RegistrationManagementLaunch { spaceId: string }
-export interface RegistrationLaunchCoalesce { routedAs: "management_assistant_mention"; configGeneration: number }
 /** One Channel About session per Channel; a new trigger joins the serving session. */
 /**
  * A Channel About session that finished its turn but still runs. Only its
@@ -127,7 +123,7 @@ const ABOUT_SESSION_DONE_PHASES = new Set([
   "wrapper_startup_failed", "run_delivery_failed",
 ]);
 
-export interface RegistrationAboutSession { triggerRequestId: string; successorOfRunId?: string; configGeneration: number }
+export interface RegistrationAboutSession { triggerMessageId?: string; triggerRequestId: string; successorOfRunId?: string }
 
 export interface RegistrationLaunchCandidate {
   key: SpaceAgentRegistrationKey;
@@ -161,7 +157,9 @@ export type RegistrationLaunchChooser = (input: {
   managedWorkspace?: boolean;
   /** The mention being decided, when a message launches: Jev first reads
    * whether its author is asking an Agent to start, unless `launch:force`. */
-  summon?: { text: string; start: number; end: number; authorKind: "user" | "agent" };
+  summon?: { text: string; start: number; end: number; authorKind: "user" | "agent";
+    /** Jev read it as a request while the author typed, and the author sent it. */
+    readInDraft?: true };
   /** A message that summons nobody: Jev first reads whether its author wants
    * an Agent to start now. */
   askToStart?: true;
@@ -460,10 +458,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (!routes.length) throw await refuse(unrouted, () => repoRoutes([]), input.key);
         if (routes.length !== 1) throw new RegistrationAccessError(unrouted, 409);
         const managedKey = `registration-${(await digestCanonicalCloneCborV1([input.key,input.commandId])).slice(0,48)}`;
-        // `syntheticManagementWorkspace` marks a management Run; the generic flag
-        // marks an unregistered cwd. Released daemons pre-sync a whole-Space
-        // mirror unless the projection kind is "channel" (read on demand).
-        const flags = input.management && !repo
+        // `syntheticManagementWorkspace` marks a Channel About session; the
+        // generic flag marks an unregistered cwd. Released daemons pre-sync a
+        // whole-Space mirror unless the projection kind is "channel" (read on demand).
+        const flags = input.aboutSession && !repo
           ? { syntheticManagementWorkspace: true, managementProjectionKind: "channel" }
           : { syntheticManagedWorkspace: true };
         return { hostname: routes[0]!.hostname, canonical_cwd: `.xmatrix-management/${managedKey}`, managed_key: managedKey,
@@ -506,10 +504,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           policyRevision: Number(row.policy_revision), policyExecutionRevision: Number(row.policy_execution_revision) } });
       await tx.query({ name: "registration_launch_channel_lock_v1", text: `SELECT pg_advisory_xact_lock(hashtextextended('runtime-instance:'||$1,0))`,
       values: [input.channelId], maxRows: 1 });
-      if (input.coalesce && await this.delegateKeeper(tx, input.channelId, input.coalesce, false, String(row.run_id))) {
-        throw new RegistrationAccessError("management_delegate_active", 409);
-      }
-      if (input.aboutSession && (await this.aboutKeeper(tx, input.channelId, input.aboutSession, false, String(row.run_id))).keeper) {
+      if (input.aboutSession && (await this.aboutKeeper(tx, input.channelId, false, String(row.run_id))).keeper) {
         throw new RegistrationAccessError("about_session_active", 409);
       }
       // A natural Instance id carries its ordinal; the counter skips the
@@ -528,26 +523,29 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       // The daemon's durable harness-session map and Runtime recovery must use
       // the same key. A registration identity alone does not identify a session.
       const resumeSessionKey = `resume:${input.key.ownerUserId}:${input.channelId}:${row.instance_id}`;
+      const spaceRules = await spaceRulesSpawnFields(tx, input.key.spaceId);
       const payload = withInitialMessageSource({ type: "machine_spawn_agent", requestId: row.control_id, spaceId: input.key.spaceId,
         channelId: input.channelId, runId: row.run_id, instanceId: row.instance_id, launchId: row.launch_id,
         executionKey: row.execution_key, registration: registrationLaunchBindingForDaemon(binding), identityId: row.instance_id, resumeSessionKey,
         ...registrationLaunchSpawnFields(launch, input.key.harness),
         agentName: row.display_name, prompt: input.body,
-        // The daemon places a non-repository managed directory by this key; a
-        // management Run's mirror, overlay and `--space` need the real Space id.
+        // The daemon places a non-repository managed directory by this key; an
+        // About session's overlay and `--space` need the real Space id.
         ...(workspace.managed_key && !workspace.remote_repo
-          ? { managementSpaceId: input.management?.spaceId ?? workspace.managed_key } : {}),
+          ? { managementSpaceId: input.aboutSession ? input.key.spaceId : workspace.managed_key } : {}),
         ...(initialMessageId !== undefined ? { sourceMessageId: initialMessageId } : {}),
         context: { ...(!input.useRuntimeDefaultModel ? { requestedModel: allocation.runtimeModel } : {}),
           ...(input.requirements.effort ? { requestedEffort: input.requirements.effort } : {}),
           ...(input.requirements.parameters ? { requestedParameters: input.requirements.parameters } : {}) },
-        ...registrationInstructionsSpawnFields(configuration),
+        ...registrationInstructionsSpawnFields(configuration), ...spaceRules,
         ...(workspace.remote_repo ? { remoteRepo: workspace.remote_repo, runWorktree: true } : {}),
         workspace: { ...(workspace.managed_key ? { managedKey: workspace.managed_key, metadata: workspace.metadata_json } : {}), ownerUserId: input.key.ownerUserId, machineId: input.key.machineId, hostId: workspace.hostname ?? "", hostname: workspace.hostname ?? undefined,
           canonicalCwd: workspace.canonical_cwd, displayName: String(workspace.metadata_json?.displayName ?? "Workspace"),
           visibility: "private", createdAt: at, updatedAt: at, lastSeenAt: at } }, messageSource);
       const session = input.aboutSession ? { runtimeSessionId: String(row.instance_id), channelWriteAllowed: false,
         channelAboutTriggerRequestId: input.aboutSession.triggerRequestId,
+        channelAboutTriggerMessageId: input.aboutSession.triggerMessageId ?? null,
+        channelAboutPendingMessageId: input.aboutSession.triggerMessageId ?? null,
         channelAboutPendingRequestId: input.aboutSession.triggerRequestId, channelAboutPendingActorUserId: input.actorUserId,
         ...(input.aboutSession.successorOfRunId ? { channelAboutSuccessorOfRunId: input.aboutSession.successorOfRunId } : {}) } : {};
       // The spawn command's id is how a delete of a still-starting Instance waits
@@ -628,6 +626,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     /** The author's "launch anyway" for one mention Jev read as a non-request:
      * only that summon is prepared, as if it carried `launch:force`. */
     forceMention?: string;
+    /** Jev's reading of each summon while the author typed, by its text; the
+     * author sent the message knowing it, so it answers the intent question. */
+    draftIntents?: ReadonlyArray<DraftSummonIntent>;
   }, choose?: RegistrationLaunchChooser) {
     const actorUserId = text(input.actorUserId), channelId = text(input.channelId),
       sourceMessageId = text(input.sourceMessageId), commandId = text(input.commandId, 200);
@@ -652,6 +653,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (recovered) { prepared.push(recovered); continue; }
         const options = selectionLaunchConditions(input.body, selection);
         if (options.error) throw new RegistrationAccessError("invalid_registration_launch", 400);
+        const draftRead = input.forceMention === undefined && source.authorKind === "user"
+          ? input.draftIntents?.find(item => item.start === selection.start && item.end === options.end &&
+            item.mention === summonText(selection))?.choice : undefined;
+        if (draftRead !== undefined && draftRead !== "summon" && options.tags.launch !== "force") {
+          rejected.push({ selectionIndex, code: `summon_intent_${draftRead}`, sourceMention: summonText(selection) });
+          continue;
+        }
         // Read alongside the candidates: the repository list comes from GitHub.
         const repositoryCatalog = summonRepositoryCatalog(this.repositoryReader, actorUserId, options.tags.repo);
         const listed = await this.candidatesFor(selection.target.kind === "registration"
@@ -675,7 +683,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates,
             blocked: listed.blocked,
             tags: input.forceMention !== undefined ? { ...options.tags, launch: "force" } : options.tags,
-            summon: { text: summonText(selection), start: selection.start, end: options.end, authorKind: source.authorKind } });
+            summon: { text: summonText(selection), start: selection.start, end: options.end, authorKind: source.authorKind,
+              ...(draftRead === "summon" ? { readInDraft: true as const } : {}) } });
         }
         catch (error) {
           // A model or its input read failed before any launch allocation. Do not
@@ -716,9 +725,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     /** The predecessor's stable Agent registration cannot receive its own work. */
     excludeSourceInstanceId?: string;
     commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
-    runId?: string; instanceId?: string; management?: RegistrationManagementLaunch;
-    coalesce?: RegistrationLaunchCoalesce; initialMessageId?: string; presentationMessageId?: string; aboutSession?: RegistrationAboutSession;
-    /** Constraints the caller's own text states, e.g. a Space management prompt's summon. */
+    runId?: string; instanceId?: string;
+    initialMessageId?: string; presentationMessageId?: string; aboutSession?: RegistrationAboutSession;
+    /** Constraints the caller's own text states. */
     tags?: AutoLaunchTags;
     /** Capabilities the work needs; those a daemon can prove gate where it runs. */
     requiredCapabilities?: readonly string[];
@@ -759,13 +768,6 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       }
       return this.withHost(commandId, await this.prepare({ ...request, body: input.body }));
     }
-    if (input.management && input.management.spaceId !== this.placement.spaceId) {
-      throw new RegistrationAccessError("invalid_registration_launch", 400);
-    }
-    if (input.coalesce) {
-      const keeper = await this.servingDelegate(commandId, channelId, input.coalesce);
-      if (keeper) return keeper;
-    }
     let retiredAboutSessions: ChannelAboutSessionStopTarget[] = [];
     if (input.aboutSession) {
       const serving = await this.servingAboutSession(commandId, channelId, actorUserId, input.aboutSession);
@@ -773,14 +775,14 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       if (serving.keeper) return withRetiredAboutSessions(serving.keeper, retiredAboutSessions);
     }
     // Read alongside the candidates: the repository list comes from GitHub.
-    const repositoryCatalog = input.management ? undefined
+    const repositoryCatalog = input.aboutSession ? undefined
       : summonRepositoryCatalog(this.repositoryReader, actorUserId, input.tags?.repo);
     const requiredHostCapabilities = hostObservedRequirements(input.requiredCapabilities ?? []);
     const listed = await this.candidatesFor({ managedWorkspace: true, requiredHostCapabilities }, repositoryCatalog);
     const authorized = listed.offered
       .filter(candidate => !excluded || !sameAgentRegistration(candidate.key, excluded));
-    // A management Run works in its Space management directory, never a repository.
-    const candidates = input.management
+    // An About session works in its private directory, never a repository.
+    const candidates = input.aboutSession
       ? authorized.map(candidate => ({ ...candidate, workspaces: [] })) : authorized;
     if (!candidates.length) {
       // Say which requirement left nothing, rather than that nothing exists.
@@ -791,16 +793,16 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         : launchRefusalCode("registration_not_found", input.tags?.machine, listed.blocked);
       throw new RegistrationAccessError(code, code === "registration_daemon_offline" ? 409 : 404);
     }
-    // A management Run works in its Space directory, so it takes no location;
+    // An About session works in its private directory, so it takes no location;
     // any other caller may constrain the directory or repository it states.
-    if (input.management && (input.tags?.repo || input.tags?.pwd)) {
+    if (input.aboutSession && (input.tags?.repo || input.tags?.pwd)) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
     const tags: AutoLaunchTags = { ...input.tags };
     const selected = await choose({ message: input.body, tags, candidates, blocked: listed.blocked, managedWorkspace: true });
     const candidate = candidates.find(item => sameAgentRegistration(item.key, selected.key) && item.key.spaceId === selected.key.spaceId);
     if (!candidate || !selectedModelGranted(candidate, selected) || (selected.workspaceReference !== undefined &&
-        (input.management || !candidate.workspaceReferences.includes(selected.workspaceReference))) ||
+        (input.aboutSession || !candidate.workspaceReferences.includes(selected.workspaceReference))) ||
         (input.tags?.pwd || input.tags?.repo) && selected.workspaceReference === undefined) {
       throw new RegistrationAccessError("registration_selection_invalid", 409);
     }
@@ -811,8 +813,6 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       ...(input.runMetadata ? { runMetadata: input.runMetadata } : {}),
       ...(input.runId !== undefined ? { runId: input.runId } : {}),
       ...(input.instanceId !== undefined ? { instanceId: input.instanceId } : {}),
-      ...(input.management ? { management: input.management } : {}),
-      ...(input.coalesce ? { coalesce: input.coalesce } : {}),
       ...(input.aboutSession ? { aboutSession: input.aboutSession } : {}),
       ...(input.initialMessageId !== undefined ? { initialMessageId: text(input.initialMessageId) } : {}),
       ...(input.presentationMessageId !== undefined ? { presentationMessageId: text(input.presentationMessageId) } : {}),
@@ -822,10 +822,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     catch (error) {
       // A concurrent launch won the Channel while this one was being chosen.
       if (!(error instanceof RegistrationAccessError)) throw error;
-      const keeper = error.code === "management_delegate_active" && input.coalesce
-        ? await this.servingDelegate(commandId, channelId, input.coalesce)
-        : error.code === "about_session_active" && input.aboutSession
-          ? (await this.servingAboutSession(commandId, channelId, actorUserId, input.aboutSession)).keeper : undefined;
+      const keeper = error.code === "about_session_active" && input.aboutSession
+        ? (await this.servingAboutSession(commandId, channelId, actorUserId, input.aboutSession)).keeper : undefined;
       if (!keeper) throw error;
       return withRetiredAboutSessions(keeper, retiredAboutSessions);
     }
@@ -845,60 +843,17 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     return selected.key.harness;
   }
 
-  /** The delegate already serving this Channel under the current management
-   * generation, after fencing every obsolete one. Its Channel delivery carries
-   * the new message, so no Run is launched. */
-  private async servingDelegate(commandId: string, channelId: string, coalesce: RegistrationLaunchCoalesce) {
-    const keeper = await this.database.transaction({ requestId: commandId, operation: "registration.launch.coalesce",
-      placement: this.placement }, async tx => {
-      await this.requireManagementGeneration(tx, coalesce.configGeneration);
-      await tx.query({ name: "registration_launch_channel_lock_v1", text: `SELECT pg_advisory_xact_lock(hashtextextended('runtime-instance:'||$1,0))`,
-        values: [channelId], maxRows: 1 });
-      return this.delegateKeeper(tx, channelId, coalesce, true);
-    });
-    return keeper ? { runId: String(keeper.run_id), instanceId: String(keeper.instance_id), launchId: "",
-      agentName: String(keeper.metadata_json?.agentName ?? "Agent"), hostId: String(keeper.metadata_json?.hostname ?? keeper.metadata_json?.hostId ?? ""),
-      reused: true, coalesced: true } : undefined;
-  }
-
-  /** Caller holds the Channel's runtime-instance lock. */
-  private async delegateKeeper(tx: DatabaseTransaction, channelId: string, coalesce: RegistrationLaunchCoalesce,
-    fence: boolean, exceptRunId?: string) {
-    const candidates = await tx.query({ name: "registration_launch_delegate_candidates_v1",
-      text: `SELECT i.instance_id,i.status AS instance_status,i.version AS instance_version,i.updated_at AS instance_updated_at,
-        r.run_id,r.status AS run_status,r.version AS run_version,r.created_at AS run_created_at,r.metadata_json
-        FROM data.runs r JOIN data.instances i ON i.run_id=r.run_id
-        WHERE r.channel_id=$1 AND i.channel_id=$1 AND r.status IN (${ACTIVE_RUN_STATUS_SQL})
-          AND r.metadata_json->>'routedAs'=$2 AND r.run_id IS DISTINCT FROM $3
-        ORDER BY r.created_at DESC,r.run_id LIMIT 51 FOR UPDATE OF r,i`,
-    values: [channelId, coalesce.routedAs, exceptRunId ?? null], maxRows: 51 });
-    if (candidates.length > 50) throw new RegistrationAccessError("management_delegate_limit", 409);
-    const at = new Date().toISOString();
-    const priority = { connected: 0, connecting: 1, reconnecting: 2 } as const;
-    const keeper = candidates.map(candidate => ({ candidate,
-      decision: managementActivationDecision(candidate, coalesce.configGeneration, Date.parse(at)) }))
-      .filter((entry): entry is { candidate: QueryResultRow; decision: keyof typeof priority } => entry.decision !== null)
-      .sort((left, right) => priority[left.decision] - priority[right.decision])[0]?.candidate;
-    if (!fence) return keeper;
-    for (const candidate of candidates) {
-      if (candidate.run_id === keeper?.run_id) continue;
-      await tx.query({ name: "registration_launch_delegate_instance_fence_v1", text: `UPDATE data.instances
-        SET status='offline',version=version+1,updated_at=$1 WHERE instance_id=$2 AND version=$3`,
-      values: [at, candidate.instance_id, candidate.instance_version], maxRows: 0 });
-      await tx.query({ name: "registration_launch_delegate_run_fence_v1", text: `UPDATE data.runs
-        SET status='stopped',version=version+1,updated_at=$1,finished_at=$1
-        WHERE run_id=$2 AND version=$3 AND status IN (${ACTIVE_RUN_STATUS_SQL})`,
-      values: [at, candidate.run_id, candidate.run_version], maxRows: 0 });
-    }
-    return keeper;
-  }
-
   /** The About session already serving this Channel; a new trigger is recorded
    * as its pending request. A successor must follow its exact terminal predecessor. */
   private async servingAboutSession(commandId: string, channelId: string, actorUserId: string, about: RegistrationAboutSession) {
     const serving = await this.database.transaction({ requestId: commandId, operation: "registration.launch.about-session",
       placement: this.placement }, async tx => {
-      await this.requireManagementGeneration(tx, about.configGeneration);
+      if (about.triggerMessageId) {
+        const trigger = await tx.query({ name: "registration_about_trigger_message_v1",
+          text: "SELECT message_id FROM data.messages WHERE space_id=$1 AND channel_id=$2 AND message_id=$3",
+          values: [this.placement.spaceId,channelId,about.triggerMessageId], maxRows: 1 });
+        if (!trigger[0]) throw new RegistrationAccessError("channel_about_input_mismatch", 403);
+      }
       await tx.query({ name: "registration_launch_channel_lock_v1", text: `SELECT pg_advisory_xact_lock(hashtextextended('runtime-instance:'||$1,0))`,
         values: [channelId], maxRows: 1 });
       if (about.successorOfRunId) {
@@ -911,7 +866,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           throw new RegistrationAccessError("about_successor_mismatch", 409);
         }
       }
-      const { keeper, retired } = await this.aboutKeeper(tx, channelId, about, true);
+      const { keeper, retired } = await this.aboutKeeper(tx, channelId, true);
       if (!keeper) return { retired };
       const body = keeper.metadata_json ?? {};
       const original = typeof body.channelAboutTriggerRequestId === "string" ? body.channelAboutTriggerRequestId : undefined;
@@ -920,6 +875,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         await tx.query({ name: "registration_launch_about_pending_v1", text: `UPDATE data.runs SET metadata_json=$1::jsonb,
           version=version+1,updated_at=clock_timestamp() WHERE run_id=$2 AND version=$3`,
         values: [JSON.stringify({ ...body, channelAboutPendingRequestId: about.triggerRequestId,
+          channelAboutPendingMessageId: about.triggerMessageId ?? null,
           channelAboutPendingActorUserId: actorUserId }), keeper.run_id, keeper.run_version], maxRows: 0 });
       }
       return { keeper, retired };
@@ -934,7 +890,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   }
 
   /** Caller holds the Channel's runtime-instance lock. */
-  private async aboutKeeper(tx: DatabaseTransaction, channelId: string, about: RegistrationAboutSession,
+  private async aboutKeeper(tx: DatabaseTransaction, channelId: string,
     fence: boolean, exceptRunId?: string) {
     const candidates = await tx.query({ name: "registration_launch_about_candidates_v2",
       text: `SELECT r.run_id,r.channel_id,r.status AS run_status,r.version AS run_version,r.metadata_json,
@@ -950,8 +906,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     // since a reported phase never terminalizes a Run by itself.
     const done = (candidate: QueryResultRow) =>
       ABOUT_SESSION_DONE_PHASES.has(String(candidate.metadata_json?.invocationProgress?.phase ?? ""));
-    const keeper = candidates.find(candidate => !candidate.instance_id && !done(candidate) &&
-      Number(candidate.metadata_json?.managementConfigGeneration) === about.configGeneration);
+    const keeper = candidates.find(candidate => !candidate.instance_id && !done(candidate));
     const retired = candidates.filter(done).map(aboutSessionStopTarget)
       .filter((target): target is ChannelAboutSessionStopTarget => Boolean(target));
     if (!fence) return { keeper, retired };
@@ -964,14 +919,6 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       values: [at, candidate.run_id, candidate.run_version], maxRows: 0 });
     }
     return { keeper, retired };
-  }
-
-  private async requireManagementGeneration(tx: DatabaseTransaction, configGeneration: number) {
-    const config = (await tx.query({ name: "registration_launch_management_config_v1", text: `SELECT version,config_json
-      FROM data.space_management_configs WHERE space_id=$1 FOR SHARE`, values: [this.placement.spaceId], maxRows: 1 }))[0];
-    if (!config || Number(config.version) !== configGeneration || config.config_json?.enabled !== true) {
-      throw new RegistrationAccessError("management_generation_changed", 409);
-    }
   }
 
   private async withHost<T extends { launchId: string }>(commandId: string, launch: T): Promise<T & { hostId: string }> {

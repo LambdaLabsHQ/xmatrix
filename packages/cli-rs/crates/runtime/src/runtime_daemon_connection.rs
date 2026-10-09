@@ -115,6 +115,7 @@ fn replay_result_matches_command(
         ),
         Some("machine_quota_probe") => ("machine_quota_probe_result", &["requestId"]),
         Some("machine_harness_action") => ("machine_harness_action_result", &["requestId"]),
+        Some("machine_worktree_action") => ("machine_worktree_action_result", &["requestId"]),
         _ => return Ok(false),
     };
     if result_type != Some(expected_result_type)
@@ -174,7 +175,8 @@ fn command_admission_report(command: &MachineDaemonCommand) -> error::Result<Mac
             ..
         } => (request_id.clone(), None, Some(channel_id.clone())),
         MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
-        | MachineDaemonCommand::MachineHarnessAction { request_id, .. } => {
+        | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
+        | MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id.clone(), None, None)
         }
     };
@@ -244,6 +246,9 @@ fn prepare_command_effect(
         MachineDaemonCommand::MachineQuotaProbe { request_id, .. } => (request_id, "quota_probe"),
         MachineDaemonCommand::MachineHarnessAction { request_id, .. } => {
             (request_id, "harness_action")
+        }
+        MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
+            (request_id, "worktree_action")
         }
     };
     let mut payload = serde_json::to_value(command)?;
@@ -455,6 +460,38 @@ where
     })
 }
 
+/// Renew an owner action's lease while it runs; `None` when it cannot be held.
+async fn hold_owner_action_lease(
+    hub_url: &str,
+    relay: &SharedMachineDaemonConnection,
+    request_id: &str,
+    lease: &MachineDaemonCommandLease,
+    label: &str,
+) -> Option<DaemonCommandLeaseHeartbeat> {
+    let heartbeat = match relay.machine_credential() {
+        Ok(credential) => {
+            DaemonCommandLeaseHeartbeat::start(
+                hub_url,
+                &credential,
+                relay.clone(),
+                request_id,
+                lease,
+                false,
+                DaemonSpawnDelivery::Socket,
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    match heartbeat {
+        Ok(heartbeat) => Some(heartbeat),
+        Err(error) => {
+            eprintln!("{} {label} lease could not be held: {error}", "⚠".yellow().bold());
+            None
+        }
+    }
+}
+
 /// An install may outlive the short admission lease. Renew it for the whole
 /// action, or the Hub would redeliver the command and the still-`Admitted`
 /// effect would run the recipe a second time. A redelivery that arrives while
@@ -476,31 +513,7 @@ async fn execute_leased_harness_action(
     };
     let _in_flight = runtime_daemon_harness_action::claim_request(&request_id)?;
     let lease = relay_lease.as_ref()?;
-    let heartbeat = match relay.machine_credential() {
-        Ok(credential) => {
-            DaemonCommandLeaseHeartbeat::start(
-                hub_url,
-                &credential,
-                relay.clone(),
-                &request_id,
-                lease,
-                false,
-                DaemonSpawnDelivery::Socket,
-            )
-            .await
-        }
-        Err(error) => Err(error),
-    };
-    let _heartbeat = match heartbeat {
-        Ok(heartbeat) => heartbeat,
-        Err(error) => {
-            eprintln!(
-                "{} harness action lease could not be held: {error}",
-                "⚠".yellow().bold()
-            );
-            return None;
-        }
-    };
+    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "harness action").await?;
     // Re-reading inventory or a registry changes nothing a redelivery could repeat.
     let result = if matches!(
         action,
@@ -530,6 +543,41 @@ async fn execute_leased_harness_action(
             eprintln!("Harness inventory report deferred: {error}");
         }
     Some(MachineDaemonReport::MachineHarnessActionResult {
+        request_id,
+        result,
+        relay_lease,
+    })
+}
+
+/// Listing sizes every tree and reclaim snapshots un-landed work, both of
+/// which outlast the short admission lease; renew it for the whole action. A
+/// redelivery of a reclaim is harmless: trees already gone are reported kept.
+async fn execute_leased_worktree_action(
+    hub_url: &str,
+    relay: &SharedMachineDaemonConnection,
+    live_cwds: std::collections::HashSet<std::path::PathBuf>,
+    command: MachineDaemonCommand,
+) -> Option<MachineDaemonReport> {
+    let MachineDaemonCommand::MachineWorktreeAction {
+        request_id,
+        action,
+        paths,
+        relay_lease,
+    } = command
+    else {
+        return None;
+    };
+    let lease = relay_lease.as_ref()?;
+    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "worktree action").await?;
+    use xmatrix_repo_pool::machine_worktree_actions::{WorktreeActionKind, execute_worktree_action};
+    let kind = match action {
+        machine_daemon_connection::WorktreeAction::List => WorktreeActionKind::List,
+        machine_daemon_connection::WorktreeAction::Reclaim => WorktreeActionKind::Reclaim,
+        machine_daemon_connection::WorktreeAction::AutoReclaimOn => WorktreeActionKind::AutoReclaimOn,
+        machine_daemon_connection::WorktreeAction::AutoReclaimOff => WorktreeActionKind::AutoReclaimOff,
+    };
+    let result = execute_worktree_action(kind, paths.as_deref().unwrap_or_default(), &live_cwds).await;
+    Some(MachineDaemonReport::MachineWorktreeActionResult {
         request_id,
         result,
         relay_lease,
@@ -1794,7 +1842,7 @@ async fn register_long_lived_relay(
     refresh_daemon_auth: bool,
 ) -> error::Result<(protocol::SerializedAgent, Vec<protocol::SerializedAgent>)> {
     let mut attempt: u32 = 0;
-    let mut delay_ms = LONG_LIVED_REGISTER_RETRY_BASE_MS;
+    let mut backoff = long_lived_register_backoff();
     let mut next_daemon_auth_refresh = refresh_daemon_auth
         .then(|| Instant::now() + Duration::from_secs(AGENT_RUN_TOKEN_REFRESH_INTERVAL_SECS));
     loop {
@@ -1830,7 +1878,7 @@ async fn register_long_lived_relay(
                 attempt = attempt.saturating_add(1);
                 write_current_run_error_status("relay_register_retrying", false, &err);
                 wait_long_lived_register_retry(
-                    &mut delay_ms,
+                    &mut backoff,
                     attempt,
                     &format!("{label} relay registration failed ({err})"),
                     true,
@@ -1846,7 +1894,7 @@ async fn register_long_lived_machine_daemon(
     connection: &mut MachineDaemonConnectionClient,
 ) -> error::Result<SerializedMachineDaemon> {
     let mut attempt: u32 = 0;
-    let mut delay_ms = LONG_LIVED_REGISTER_RETRY_BASE_MS;
+    let mut backoff = long_lived_register_backoff();
 
     loop {
         match connection.register().await {
@@ -1854,7 +1902,7 @@ async fn register_long_lived_machine_daemon(
             Err(err) if is_retryable_initial_register_error(&err) => {
                 attempt = attempt.saturating_add(1);
                 wait_long_lived_register_retry(
-                    &mut delay_ms,
+                    &mut backoff,
                     attempt,
                     &format!("machine daemon connection failed ({err})"),
                     false,
@@ -1875,7 +1923,10 @@ fn operation_retryable_or(err: &CliError, fallback: impl FnOnce(&CliError, &str)
 
 fn is_retryable_initial_register_error(err: &CliError) -> bool {
     operation_retryable_or(err, |err, message| {
-        matches!(err, CliError::RelayTransient(_) | CliError::Request(_))
+        // The Hub's `retryable` verdict or a network failure; the text
+        // matches below cover errors that reach here only as strings.
+        err.is_transient()
+            || matches!(err, CliError::RelayTransient(_) | CliError::Request(_))
             || message.contains("error sending request")
             || message.contains("websocket handshake failed")
             || message.contains("websocket handshake timed out")
@@ -1908,7 +1959,7 @@ async fn join_long_lived_initial_channel(
     history_limit: u32,
 ) -> error::Result<()> {
     let mut attempt: u32 = 0;
-    let mut delay_ms = LONG_LIVED_REGISTER_RETRY_BASE_MS;
+    let mut backoff = long_lived_register_backoff();
 
     loop {
         match relay.join_channel(channel_id.clone(), history_limit).await {
@@ -1924,7 +1975,7 @@ async fn join_long_lived_initial_channel(
                 attempt = attempt.saturating_add(1);
                 write_current_run_error_status("channel_join_retrying", false, &err);
                 wait_long_lived_register_retry(
-                    &mut delay_ms,
+                    &mut backoff,
                     attempt,
                     &format!("initial channel join failed ({err})"),
                     true,
@@ -1944,14 +1995,21 @@ fn is_retryable_relay_operation_error(err: &CliError) -> bool {
     })
 }
 
+fn long_lived_register_backoff() -> xmatrix_cli_core::backoff::Backoff {
+    xmatrix_cli_core::backoff::Backoff::new(
+        LONG_LIVED_REGISTER_RETRY_BASE,
+        LONG_LIVED_REGISTER_RETRY_MAX,
+    )
+}
+
 async fn wait_long_lived_register_retry(
-    delay_ms: &mut u64,
+    backoff: &mut xmatrix_cli_core::backoff::Backoff,
     attempt: u32,
     failure: &str,
     record_connection_retry: bool,
 ) {
-    let jitter_ms = current_time_millis().unwrap_or_default() % LONG_LIVED_REGISTER_RETRY_JITTER_MS;
-    let sleep_ms = delay_ms.saturating_add(jitter_ms);
+    let delay = backoff.next_delay();
+    let sleep_ms = u64::try_from(delay.as_millis()).unwrap_or(u64::MAX);
     if record_connection_retry {
         write_current_connection_retry(attempt, sleep_ms);
     }
@@ -1961,14 +2019,7 @@ async fn wait_long_lived_register_retry(
         sleep_ms,
         attempt
     );
-    tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-    *delay_ms = next_long_lived_register_retry_delay_ms(*delay_ms);
-}
-
-fn next_long_lived_register_retry_delay_ms(current_ms: u64) -> u64 {
-    current_ms
-        .saturating_mul(2)
-        .min(LONG_LIVED_REGISTER_RETRY_MAX_MS)
+    tokio::time::sleep(delay).await;
 }
 
 fn current_time_millis() -> Option<u64> {
@@ -2045,6 +2096,8 @@ async fn cmd_daemon_connected(
             "machine_harness_login_v1",
             // A stop may push the Run's whole checkout to a handoff branch.
             "machine_handoff_export_v1",
+            // The owner lists and reclaims this machine's git worktrees.
+            "machine_worktree_action_v1",
         ],
     });
     if let Some(platform) = runtime_daemon_harness_action::daemon_platform() {
@@ -2090,6 +2143,7 @@ async fn cmd_daemon_connected(
             "machine_harness_release_v1".to_string(),
             "machine_harness_login_v1".to_string(),
             "machine_handoff_export_v1".to_string(),
+            "machine_worktree_action_v1".to_string(),
         ],
     );
     if let Some(activation) = activation.clone() {
@@ -2446,6 +2500,11 @@ async fn cmd_daemon_connected(
                             let Some(result) = result else {
                                 return;
                             };
+                            // Resolve retained disk authority only after the stop:
+                            // never hold the pool lock while awaiting registry work.
+                            let export_source = if export_source.is_none() && result.is_ok() {
+                                request.retained_export_source().await
+                            } else { export_source };
                             let handoff_export = handoff_export_for_stop(
                                 request.handoff_export.as_ref(),
                                 &result,
@@ -2613,6 +2672,24 @@ async fn cmd_daemon_connected(
                             };
                             if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
                                 eprintln!("{} failed to report harness action result: {error}", "⚠".yellow().bold());
+                            }
+                        });
+                    }
+                    MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineWorktreeAction { .. }) => {
+                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let live_cwds: std::collections::HashSet<std::path::PathBuf> = run_registry
+                            .lock()
+                            .await
+                            .values()
+                            .filter_map(|child| child.cwd.clone())
+                            .collect();
+                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { hub_url, relay, effect_journal, effect_id } = context;
+                            let Some(report) = execute_leased_worktree_action(&hub_url, &relay, live_cwds, command).await else {
+                                return;
+                            };
+                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                                eprintln!("{} failed to report worktree action result: {error}", "⚠".yellow().bold());
                             }
                         });
                     }
@@ -3404,6 +3481,17 @@ struct RepositoryTokenResponse {
     token: String,
 }
 
+/// The Run a repository token is for, so the Hub mints only for the repository
+/// it admitted that Run into on this machine.
+fn repository_token_request(grant: &DaemonGitCredentialGrantState) -> serde_json::Value {
+    serde_json::json!({
+        "channelId": grant.channel_id,
+        "repository": grant.repository,
+        "runId": grant.run_id,
+        "executionKey": grant.execution_key,
+    })
+}
+
 async fn mint_repository_token(
     hub_url: &str,
     relay: &SharedMachineDaemonConnection,
@@ -3414,10 +3502,7 @@ async fn mint_repository_token(
         &with_route(hub_url, HubRoutes::MACHINE_DAEMON_GITHUB_REPOSITORY_TOKEN),
         "POST",
         Some(&machine_credential),
-        Some(serde_json::json!({
-            "channelId": grant.channel_id,
-            "repository": grant.repository,
-        })),
+        Some(repository_token_request(grant)),
     )
     .await?;
     Ok(response.token)
@@ -3487,4 +3572,28 @@ async fn write_daemon_auth_broker_response<
     );
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.flush().await;
+}
+
+#[cfg(test)]
+mod repository_token_request_tests {
+    use super::*;
+
+    #[test]
+    fn a_repository_token_request_names_its_run() {
+        let grant = DaemonGitCredentialGrantState {
+            channel_id: "channel-1".to_string(),
+            run_id: "run-1".to_string(),
+            execution_key: "execution-1".to_string(),
+            repository: "owner/repo".to_string(),
+        };
+        assert_eq!(
+            repository_token_request(&grant),
+            serde_json::json!({
+                "channelId": "channel-1",
+                "repository": "owner/repo",
+                "runId": "run-1",
+                "executionKey": "execution-1",
+            })
+        );
+    }
 }
