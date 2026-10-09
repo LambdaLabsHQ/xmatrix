@@ -100,6 +100,7 @@ test("a message right after its sender's own drops the header, until tags or tim
   const branch = (branchName, minute) => said(claude1, "x", minute, { senderGitBranch: branchName });
   const [, changed] = buildConversationRows([branch("main", 0), branch("feat/x", 1)]);
   assert.equal(changed.continuation, undefined, "changed tags reappear");
+  assert.deepEqual(changed.retagged.keys, ["branch"], "the header names the tag that changed");
   const [, other] = buildConversationRows([said(claude1, "x", 0), said(claude2, "y", 1)]);
   assert.equal(other.continuation, undefined, "another Instance of the same Agent");
   const beforeMidnight = { ...said(yiming, "late", 0), sentAt: new Date(2026, 8, 27, 23, 59).toISOString() };
@@ -128,4 +129,23 @@ test("the since digest counts what happened after the reader's position", () => 
     "Since you last read · 1 mention of you · 1 message · ↗ a/b#3043 · 2 updates folded · from claude:1");
   assert.equal(sinceDigest(rows, 99, "user:yiming"), undefined, "nothing unread");
   assert.equal(sinceDigest(rows, undefined, "user:yiming"), undefined, "position unknown");
+});
+
+test("a header back within a turn names the changed tags, across the sender's own fold", () => {
+  const chips = (effort) => [{ id: "Model", value: "opus" }, { id: "effort", value: effort }];
+  const rows = buildConversationRows([
+    said(claude1, "merging was my call", 30, { senderGitBranch: "paper-label-tags", senderStatusChips: chips("med") }),
+    pullRequest(claude1, 245, 30),
+    said(claude1, "effort is its own tag again", 31, { senderGitBranch: "split-effort-tag", senderStatusChips: chips("high") }),
+  ]);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[2].continuation, undefined);
+  assert.equal(rows[2].retagged.previous, rows[0], "compared with the message above the fold");
+  assert.deepEqual(rows[2].retagged.keys, ["branch", "effort"]);
+  const [, sameTags] = buildConversationRows([said(claude1, "a", 0), pullRequest(claude1, 1, 1), said(claude1, "b", 2)]);
+  assert.equal(sameTags.retagged, undefined);
+  const [, , afterOther] = buildConversationRows([
+    said(claude1, "a", 0, { senderGitBranch: "x" }), said(yiming, "ok", 1), said(claude1, "b", 2, { senderGitBranch: "y" }),
+  ]);
+  assert.equal(afterOther.retagged, undefined, "someone else in between starts a fresh header");
 });

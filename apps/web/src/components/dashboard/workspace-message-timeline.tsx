@@ -90,6 +90,7 @@ import { parsePresentedRoutingDecision, RoutingDecisionBoard } from "./routing-d
 
 import {
   GoalStatusBadge,
+  goalStatusBadgeLabel,
   MachineRunFailureNotice,
   StatusChipBadge,
   avatarInitials,
@@ -164,6 +165,7 @@ import {
   RefreshCw,
   Reply,
   ArrowRightLeft,
+  ArrowRight,
   SmilePlus,
   Trash2,
   X,
@@ -1240,6 +1242,51 @@ function NamedAgentIdentityLabels({ message, spaceId, token }: {
     machineTarget={machine} />;
 }
 
+/* One tag that changed within a sender's turn: what it was, faint, then what
+   it is now. */
+function RetagPair({ from, to }: { from?: ReactNode; to?: ReactNode }) {
+  return (
+    <span className="app-message-retag inline-flex min-w-0 items-center gap-1">
+      {from ? <span className="app-message-retag-from inline-flex min-w-0">{from}</span> : null}
+      {from && to ? <ArrowRight aria-label="now" className="size-3 shrink-0 text-muted-foreground" /> : null}
+      {to}
+    </span>
+  );
+}
+
+/* A header back within one sender's turn because tags changed carries only
+   those tags, each as old → new; the rest are what the header above says
+   (user 2026-10-09: 搞个箭头那种比较好，其他的签没必要显示). */
+function RetaggedHeaderTags({ message, previous, keys }: {
+  message: TimelineItem; previous: TimelineItem; keys: readonly string[];
+}) {
+  const goal = (item: TimelineItem) =>
+    goalStatusBadgeLabel(item.senderGoal, "historical") ? <GoalStatusBadge goal={item.senderGoal} /> : null;
+  const branch = (item: TimelineItem) => item.senderGitBranch ? <BranchBadge branch={item.senderGitBranch} /> : null;
+  const stale = (item: TimelineItem) => item.senderInstanceStale ? (
+    <span className={tagClass("app-sender-instance-stale-badge")}
+      title="This message came from an agent instance that is no longer live in this channel.">
+      instance offline
+    </span>
+  ) : null;
+  const before = previous.senderStatusChips ?? [];
+  const after = message.senderStatusChips ?? [];
+  const chipIds = [...new Set([...after, ...before].map((chip) => chip.id.toLowerCase()))]
+    .filter((id) => keys.includes(id));
+  const chipOf = (chips: typeof after, id: string) => {
+    const chip = chips.find((candidate) => candidate.id.toLowerCase() === id);
+    return chip ? <StatusChipBadge chip={chip} /> : null;
+  };
+  return (
+    <>
+      {keys.includes("stale") && <RetagPair from={stale(previous)} to={stale(message)} />}
+      {keys.includes("goal") && <RetagPair from={goal(previous)} to={goal(message)} />}
+      {keys.includes("branch") && <RetagPair from={branch(previous)} to={branch(message)} />}
+      {chipIds.map((id) => <RetagPair key={id} from={chipOf(before, id)} to={chipOf(after, id)} />)}
+    </>
+  );
+}
+
 function NamedMachineRunFailureNotice({ body, metadata, spaceId, token }: {
   body: string; metadata?: Record<string, unknown>; spaceId?: string; token: string | null;
 }) {
@@ -1978,7 +2025,8 @@ export const MessageRow = memo(function MessageRow({
             </span>
           )}
           <span className="contents">
-          {message.senderKind === "agent" && !message.reservedSystemAgent && (
+          {message.senderKind === "agent" && !message.reservedSystemAgent &&
+            (!message.retagged || message.retagged.keys.some((key) => key === "owner" || key === "machine")) && (
             <NamedAgentIdentityLabels message={message} spaceId={channel?.spaceId} token={token} />
           )}
           {message.linkOrigin && (
@@ -1997,6 +2045,9 @@ export const MessageRow = memo(function MessageRow({
               {provenanceLabel(message.provenance, message.body)}
             </span>
           )}
+          {message.retagged ? (
+            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
+          ) : (<>
           {message.senderInstanceStale && (
             <span
               className={tagClass("app-sender-instance-stale-badge")}
@@ -2015,6 +2066,7 @@ export const MessageRow = memo(function MessageRow({
             message.senderStatusChips?.map((chip) => (
               <StatusChipBadge key={chip.id} chip={chip} />
             ))}
+          </>)}
           </span>
           </div>
           )}

@@ -2099,6 +2099,12 @@
 
 /* The message author's disc is paper like the labels beside it: the same flat
    ink tint, with no edge, lens or shadow. Its status dot drops its glow. */
+/* The old value of a tag that changed within one turn (a → b): its ink fades,
+   the label's material stays, since a translucent label would turn grey. */
+.xmatrix-app .app-message-retag-from > * {
+  color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
+}
+
 .xmatrix-app .message-author-avatar .identity-avatar-face.identity-avatar-face {
   background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
   -webkit-backdrop-filter: none !important;
