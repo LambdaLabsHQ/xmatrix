@@ -105,7 +105,7 @@ for (const mobile of [false, true]) {
       await page.screenshot({ path: testInfo.outputPath("failed-turn-hover.png") });
       await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeEnabled();
       await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
-      await expect(page.getByRole("heading", { name: "Stop agent?" })).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "Confirm stop codex:1" })).toBeVisible();
     });
   });
 }
@@ -170,16 +170,32 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeFocused();
 });
 
-test("stop from the Instance card uses the card address when agent_list is empty", async ({ page }) => {
+test("Stop asks in place and posts the card's address on the second press", async ({ page }) => {
   await openActiveAgentWorkspace(page);
+  await fixtureJson(page, "stop-send", new RegExp(`/api/xmatrix/channels/${ACTIVE_AGENT_CHANNEL.id}/messages$`, "u"),
+    { message: { messageId: "m-stop" } }, { method: "POST" });
 
   const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+  const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
   await avatar.hover();
-  await page.getByRole("button", { name: "Stop codex:1" }).click();
+  await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
 
-  await expect(page.getByRole("heading", { name: "Stop agent?" })).toBeVisible();
+  // The first press only arms the button; nothing is sent and no dialog opens.
+  const confirm = toolbar.getByRole("button", { name: "Confirm stop codex:1" });
+  await expect(confirm).toHaveText("Confirm");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await fixtureRequestBodies(page, "stop-send")).toEqual([]);
+
+  // Leaving the controls disarms it.
+  await page.mouse.move(5, 5);
+  await avatar.hover();
+  await expect(toolbar.getByRole("button", { name: "Stop codex:1" })).toHaveText("Stop");
+
+  await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
+  await confirm.click();
   await expect(page.getByText("This instance has no channel address to stop.")).toHaveCount(0);
-  await expect(page.getByRole("paragraph").filter({ hasText: /^codex:1$/ })).toBeVisible();
+  await expect.poll(async () => (await fixtureRequestBodies(page, "stop-send")).map((body) => body.body))
+    .toEqual([expect.stringMatching(/^@codex:1:stop$/iu)]);
 });
 
 test("Handoff picks a successor and posts the handoff mention", async ({ page }) => {

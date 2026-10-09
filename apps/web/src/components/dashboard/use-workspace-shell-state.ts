@@ -99,7 +99,6 @@ import type {
 import {
   AgentConfigDialogState,
   AgentConfigForm,
-  AgentInstanceStopRequest,
   AgentTraceHistoryPanelState,
   AgentTraceTarget,
   AppView,
@@ -530,9 +529,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [reborningAgentInstanceId, setReborningAgentInstanceId] = useState<string | null>(null);
   const [handingOffAgentInstanceId, setHandingOffAgentInstanceId] = useState<string | null>(null);
-
-  const [agentInstanceStopRequest, setAgentInstanceStopRequest] =
-    useState<AgentInstanceStopRequest | null>(null);
 
   const [renamingChannelId, setRenamingChannelId] = useState<string | null>(null);
 
@@ -2825,8 +2821,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setReborningAgentInstanceId,
     handingOffAgentInstanceId,
     setHandingOffAgentInstanceId,
-    agentInstanceStopRequest,
-    setAgentInstanceStopRequest,
     renamingChannelId,
     setRenamingChannelId,
     updatingChannelVisibilityId,
