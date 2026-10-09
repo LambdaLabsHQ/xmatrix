@@ -89,9 +89,22 @@ test("a page's Automation is anchored by its reference and managed by whoever ca
     assert.equal(paused.enabled, false);
     assert.equal(paused.detachedAt, undefined);
     assert.equal(paused.id, created.id, "pausing keeps its author");
-    const resumedByOwner = (await ok(await call(ownerToken, `${automations}/${created.id}/resume`, "POST",
+    assert.equal(paused.capabilities.run, false);
+    const runPaused = await call(memberToken, `${automations}/${created.id}/run`, "POST",
+      { expectedVersion: paused.version });
+    assert.equal(runPaused.status, 409, "a paused Automation is resumed, not run");
+    const resumed = (await ok(await call(ownerToken, `${automations}/${created.id}/resume`, "POST",
       { expectedVersion: paused.version }))).automation;
-    assert.equal(resumedByOwner.enabled, true);
+    assert.equal(resumed.enabled, true);
+
+    // Running it now makes its next occurrence due at once, as its author, and keeps its cadence.
+    const before = Date.now();
+    const resumedByOwner = (await ok(await call(memberToken, `${automations}/${created.id}/run`, "POST",
+      { expectedVersion: resumed.version }))).automation;
+    assert.equal(resumedByOwner.id, created.id, "running it keeps its author");
+    assert.equal(resumedByOwner.intervalMinutes, resumed.intervalMinutes);
+    assert.ok(Date.parse(resumedByOwner.nextRunAt) <= Date.now() &&
+      Date.parse(resumedByOwner.nextRunAt) >= before - 1_000, "due now");
 
     // A member's edit replaces it with their own, and the page points at the replacement.
     const replaced = (await ok(await call(memberToken, `${automations}/${created.id}`, "PATCH", {

@@ -30,7 +30,7 @@ import {
   SettingsView,
   TeamView,
 } from "./workspace-admin-views";
-import { SchedulesView } from "./schedules-view";
+import { SchedulesView, type ScheduleActions } from "./schedules-view";
 import { formatAutomationCadence } from "@/components/pages/page-automation-format";
 import { ToolPaper } from "./tool-split";
 
@@ -2221,6 +2221,7 @@ export function ToolSurface({
   onCompleteDesktopSetup,
   onUpdateAutomation,
   onToggleAutomation,
+  onRunAutomation,
   onDeleteAutomation,
   joinRequestsBySpace,
   onDecideJoinRequest,
@@ -2299,9 +2300,6 @@ export function ToolSurface({
   onRevealLocalWorkspace: (workspace: SerializedWorkspace) => void;
   onCheckLocalRuntime: (runtime: string) => void;
   onCompleteDesktopSetup: () => void;
-  onUpdateAutomation: (automationId: string, input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
-  onToggleAutomation: (automation: SerializedAutomation) => void;
-  onDeleteAutomation: (automation: SerializedAutomation) => void;
   joinRequestsBySpace: Record<string, SpaceJoinRequest[]>;
 
   creatingSpace: boolean;
@@ -2314,7 +2312,7 @@ export function ToolSurface({
   onChangeView: (view: AppView, item?: string) => void;
   /** Opens the GitHub issue form for a report. */
   onReportIssue?: () => void;
-} & SpaceMemberActions) {
+} & SpaceMemberActions & ScheduleActions) {
   const currentSpaceChannelIds = useMemo(
     () => spaceChannelIdSet(channels, currentSpace?.id),
     [channels, currentSpace?.id],
@@ -2369,6 +2367,7 @@ export function ToolSurface({
         onFocusConsumed={onScheduleFocusConsumed}
         onUpdateAutomation={onUpdateAutomation}
         onToggleAutomation={onToggleAutomation}
+        onRunAutomation={onRunAutomation}
         onDeleteAutomation={onDeleteAutomation}
         onOpenPage={onOpenPage}
         onOpenConversation={onOpenConversation}

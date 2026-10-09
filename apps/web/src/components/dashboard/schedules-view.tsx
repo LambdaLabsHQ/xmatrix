@@ -13,7 +13,7 @@ import {
   type SerializedSpace,
 } from "@xmatrix/protocol";
 import { AlertTriangle, ChevronRight, Clock, FileText, Loader2, MessageSquare, Pause, Pencil, Play,
-  Trash2 } from "lucide-react";
+  Trash2, Zap } from "lucide-react";
 import { pageDocumentQuery, usePageTree } from "@/components/pages/pages-view";
 import { PageTreeRow } from "@/components/pages/page-tree-row";
 import { pageChildren } from "@/lib/pages/page-client";
@@ -37,6 +37,14 @@ import {
 } from "./tool-split";
 import { AutomationExpressionGuidance, automationExpressionFromText } from "./workspace-admin-views";
 import { evaluationBindingLabel, formatDateTime } from "./workspace-shell-recovered";
+
+/** What Schedules can do to an Automation; whoever shows Schedules passes these through. */
+export type ScheduleActions = {
+  onUpdateAutomation: (automationId: string, input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
+  onToggleAutomation: (automation: SerializedAutomation) => void;
+  onRunAutomation: (automation: SerializedAutomation) => void;
+  onDeleteAutomation: (automation: SerializedAutomation) => void;
+};
 
 /**
  * The Space's Schedules: every Automation it runs, on the page tree, and
@@ -63,6 +71,7 @@ export function SchedulesView({
   onFocusConsumed,
   onUpdateAutomation,
   onToggleAutomation,
+  onRunAutomation,
   onDeleteAutomation,
   onOpenPage,
   onOpenConversation,
@@ -82,13 +91,10 @@ export function SchedulesView({
   /** An Automation to open with its editor, e.g. from a conversation's details. */
   focusAutomationId?: string;
   onFocusConsumed?: () => void;
-  onUpdateAutomation: (automationId: string, input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
-  onToggleAutomation: (automation: SerializedAutomation) => void;
-  onDeleteAutomation: (automation: SerializedAutomation) => void;
   onOpenPage: (pageId: string) => void;
   onOpenConversation: (channelId: string) => void;
   onOpenPages: () => void;
-}) {
+} & ScheduleActions) {
   const { user } = useAuth();
   const [selectedId, select] = useToolItem();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -213,6 +219,7 @@ export function SchedulesView({
         setEditingId(null);
       }}
       onToggle={() => onToggleAutomation(selected)}
+      onRun={() => onRunAutomation(selected)}
       onDelete={() => onDeleteAutomation(selected)}
       onOpenWhere={() => selected.pageId ? onOpenPage(selected.pageId) : onOpenConversation(selected.channelId)}
       onOpenConversation={() => onOpenConversation(selected.lastChannelId ?? selected.channelId)}
@@ -420,6 +427,7 @@ function ScheduleDetail({
   onEditingChange,
   onUpdate,
   onToggle,
+  onRun,
   onDelete,
   onOpenWhere,
   onOpenConversation,
@@ -440,6 +448,7 @@ function ScheduleDetail({
   onEditingChange: (editing: boolean) => void;
   onUpdate: (input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
   onToggle: () => void;
+  onRun: () => void;
   onDelete: () => void;
   onOpenWhere: () => void;
   onOpenConversation: () => void;
@@ -482,6 +491,12 @@ function ScheduleDetail({
               {busy === `toggle:${automation.id}` ? <Loader2 className="animate-spin" />
                 : automation.enabled ? <Pause /> : <Play />}
               {automation.enabled ? "Pause" : "Resume"}
+            </Button>
+          )}
+          {automation.capabilities.run && (
+            <Button size="sm" variant="outline" onClick={onRun} title="Run it once now; its schedule stays"
+              disabled={Boolean(busy) || executionEnabled !== true}>
+              {busy === `run:${automation.id}` ? <Loader2 className="animate-spin" /> : <Zap />} Run now
             </Button>
           )}
           {automation.detachedAt && automation.pageId && (

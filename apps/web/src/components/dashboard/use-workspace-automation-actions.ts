@@ -10,6 +10,7 @@ import {
   setAutomationPaused,
   sortAutomations,
 } from "./workspace-shell-modules";
+import { pageApi } from "../../lib/pages/page-client";
 import { UserFacingProblem, userErrorMessage } from "../../lib/user-facing-error";
 
 type AutomationActionState = {
@@ -33,6 +34,24 @@ export function useWorkspaceAutomationActions(state: AutomationActionState) {
       state.setAutomations((current) => sortAutomations(replaceAutomation(current, updated)));
     } catch (error) {
       state.setError(userErrorMessage(error, "Couldn't update the Automation"));
+    } finally {
+      state.setBusy(null);
+    }
+  }
+
+  /** Makes a page Automation's next occurrence due now; its cadence stays. */
+  async function runAutomation(automation: SerializedAutomation) {
+    if (!state.token || state.busy) return;
+    if (!automation.spaceId || !automation.pageId) return;
+    state.setBusy(`run:${automation.id}`);
+    state.setError(null);
+    try {
+      const { automation: updated } = await pageApi.changeAutomation(automation.spaceId, automation.pageId,
+        state.token, automation, "run");
+      if (!updated) throw new UserFacingProblem("Automation is no longer available.");
+      state.setAutomations((current) => sortAutomations(replaceAutomation(current, updated)));
+    } catch (error) {
+      state.setError(userErrorMessage(error, "Couldn't run the Automation"));
     } finally {
       state.setBusy(null);
     }
@@ -84,6 +103,7 @@ export function useWorkspaceAutomationActions(state: AutomationActionState) {
 
   return {
     toggleAutomation,
+    runAutomation,
     updateAutomation,
     deleteAutomation,
   };

@@ -105,7 +105,7 @@ export const pageApi = {
     xmatrixApiRequest<{ automation: SerializedAutomation }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, method: "POST", body: input }),
   changeAutomation: (spaceId: string, pageId: string, token: string, automation: SerializedAutomation,
-    action: "pause" | "resume" | "reference" | "delete", blockId?: string) =>
+    action: "pause" | "resume" | "run" | "reference" | "delete", blockId?: string) =>
     xmatrixApiRequest<{ automation?: SerializedAutomation }>({
       url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations/${encodeURIComponent(automation.id)}${
         action === "delete" ? `?expectedVersion=${automation.version}` : `/${action}`}`,
