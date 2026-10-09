@@ -29,9 +29,9 @@ export function providerUrl(base: string, path = ""): URL {
   return url;
 }
 
-export async function providerJson(url: URL | string, init: RequestInit & { json?: unknown } = {}):
+export async function providerJson(url: URL | string, init: RequestInit & { json?: unknown; describeError?: (payload: Record<string, unknown>) => string | undefined } = {}):
   Promise<Record<string, unknown>> {
-  const { json, ...rest } = init;
+  const { json, describeError, ...rest } = init;
   const headers = new Headers(rest.headers);
   if (json !== undefined) headers.set("content-type", "application/json");
   headers.set("accept", headers.get("accept") ?? "application/json");
@@ -60,7 +60,7 @@ export async function providerJson(url: URL | string, init: RequestInit & { json
   const payload = parsed && typeof parsed === "object" && !Array.isArray(parsed)
     ? parsed as Record<string, unknown> : { items: parsed };
   if (!response.ok) {
-    const reason = [payload.message, payload.error, payload.error_description, payload.errorMessages, payload.errors]
+    const reason = describeError?.(payload) ?? [payload.message, payload.error, payload.error_description, payload.errorMessages, payload.errors]
       .map((value) => Array.isArray(value) ? value.map((item) => typeof item === "string" ? item
         : typeof (item as { message?: unknown })?.message === "string" ? (item as { message: string }).message : "")
         .filter(Boolean).join("; ") : typeof value === "string" ? value : "")
