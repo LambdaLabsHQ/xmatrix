@@ -39,7 +39,20 @@ test("different Channel identities read one tuple quota; stale samples cannot re
 });
 
 class Socket { readyState = 1; send() {} close() {} }
-function fixture() {
+
+/** A Durable Object's storage, which outlives the cell's hibernation. */
+function cellStorage() {
+  const values = new Map();
+  return {
+    values,
+    get: async key => structuredClone(values.get(key)),
+    put: async (key, value) => { values.set(key, structuredClone(value)); },
+    delete: async keys => { for (const key of [keys].flat()) values.delete(key); },
+    list: async ({ prefix }) => new Map([...values].filter(([key]) => key.startsWith(prefix))),
+  };
+}
+
+function fixture({ storage } = {}) {
   const channels = { a: channel("a"), b: channel("b", { ...key, machineId: "another-machine" }), sleeping: channel("sleeping") };
   for (const c of Object.values(channels)) c.memberPresence[c.id].usage = quota(12);
   const readings = { owner: [{ registration: key, usage: quota(12) },
@@ -53,6 +66,7 @@ function fixture() {
     },
     readOwnerQuota: async ownerUserId => readings[ownerUserId] ?? [],
     readQuota: async registration => { quotaReads.push(registration); return pool.usage; },
+    ...(storage ? { storage } : {}),
     analytics: { writeDataPoint() {} }, readHistory: async () => { throw Error("unexpected history"); } });
   const transport = new AgentInstanceRuntimeTransport(factory.agentInstance());
   const sessions = ["a", "b"].map(id => ({ principal: { ownerUserId: "owner", agentId: id,
@@ -80,8 +94,8 @@ function recordDelivered(frames) {
 const quotaFrames = frames => frames.filter(({ frame }) => frame.type === "registration_quota");
 
 /** The fixture, with one presence change of its first Instance recorded per call. */
-function reporting() {
-  const context = fixture(), frames = [];
+function reporting(options) {
+  const context = fixture(options), frames = [];
   const report = (reason = "update") => context.factory.onAgentPresenceChange({ reason, session: context.sessions[0],
     liveHumanSessions: [], ...recordDelivered(frames) });
   return { ...context, frames, report };
@@ -189,6 +203,32 @@ test("a status report after the Channel was read reads nothing and sends only th
   assert.deepEqual(channelReads, ["a"], "a status report reads no Channel");
   assert.deepEqual(frames.map(({ userId, frame }) => [userId, frame.type]),
     [["owner", "enhanced_presence"], ["viewer", "enhanced_presence"]]);
+});
+
+test("a status report after the cell hibernated still reads nothing", async () => {
+  const storage = cellStorage();
+  await reporting({ storage }).report("connect");
+  // A woken cell starts with empty memory; what it kept is in its storage.
+  const { channelReads, quotaReads, frames, report } = reporting({ storage });
+  await report("update");
+  assert.deepEqual(channelReads, []);
+  assert.deepEqual(quotaReads, []);
+  assert.deepEqual(frames.map(({ userId, frame }) => [userId, frame.type]),
+    [["owner", "enhanced_presence"], ["viewer", "enhanced_presence"]]);
+  assert.equal(frames[0].frame.agent.usage.quotaUsages[0].percent, 12, "the kept quota reading is shown");
+});
+
+test("a catalog change forgets the Space's kept audiences; leaving forgets the Instance's", async () => {
+  const storage = cellStorage();
+  const { factory, report } = reporting({ storage });
+  await report("connect");
+  assert.equal([...storage.values.keys()].filter(key => key.startsWith("presence-audience:")).length, 1);
+  factory.onChannelCatalogChanged("space");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal([...storage.values.keys()].filter(key => key.startsWith("presence-audience:")).length, 0);
+  await report("connect");
+  await report("disconnect");
+  assert.equal([...storage.values.keys()].filter(key => key.startsWith("presence-audience:")).length, 0);
 });
 
 test("a catalog change in the Space, or leaving, reads the Channel again", async () => {
