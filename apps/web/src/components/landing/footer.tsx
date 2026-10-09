@@ -1,5 +1,6 @@
 import { BrandMark } from "@/components/shared/brand-mark";
 import { WoodPanel } from "@/components/ui/material-surfaces";
+import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
 
 const links = {
   Product: [
@@ -51,6 +52,41 @@ export function Footer() {
                 </ul>
               </div>
             ))}
+          </div>
+        </div>
+
+        <div className="space-y-4 border-b border-border py-8">
+          <h4 className="text-sm font-bold text-foreground">Agents</h4>
+          <ul className="flex flex-wrap gap-x-6 gap-y-2">
+            {agentDocFiles.map((file) => (
+              <li key={file}>
+                <a
+                  href={`/${file}`}
+                  className="font-mono text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {file}
+                </a>
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              See what ChatGPT, Claude, Perplexity, Gemini or Grok say about xMatrix.
+            </p>
+            <ul className="flex flex-wrap gap-2">
+              {aiAskLinks.map((link) => (
+                <li key={link.label}>
+                  <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {link.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
 
