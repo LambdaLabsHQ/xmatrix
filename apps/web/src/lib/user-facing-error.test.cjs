@@ -97,8 +97,8 @@ test("a browser defect report keeps the message shape but not what it quoted", (
     "Unexpected token '…', \"…\" is not valid JSON");
 });
 
-test("browser defect forwarding preserves the first Safari and Firefox frame for the Worker parser", async (t) => {
-  const { reportClientDefect } = require("./client-defect-report.ts");
+/** Runs the test in a page and collects the defect reports it would send. */
+function capturedDefectReports(t) {
   const previousWindow = global.window;
   global.window = {};
   t.after(() => {
@@ -110,6 +110,12 @@ test("browser defect forwarding preserves the first Safari and Firefox frame for
     sent.push(JSON.parse(init.body));
     return new Response(null, { status: 202 });
   });
+  return sent;
+}
+
+test("browser defect forwarding preserves the first Safari and Firefox frame for the Worker parser", async (t) => {
+  const { reportClientDefect } = require("./client-defect-report.ts");
+  const sent = capturedDefectReports(t);
   for (const [engine, stack] of [
     ["Safari", "load@https://xmatrix.sh/app.js:10:20"],
     ["Firefox", "load@https://xmatrix.sh/app.js:10:20\n@https://xmatrix.sh/index.js:1:2"],
@@ -137,18 +143,8 @@ test("browser defect forwarding preserves the first Safari and Firefox frame for
 });
 
 test("a specific headline is shown, and only its action from the closed set is reported", async (t) => {
-  const previousWindow = global.window;
-  global.window = {};
-  t.after(() => {
-    if (previousWindow === undefined) delete global.window;
-    else global.window = previousWindow;
-  });
   t.mock.method(console, "error", () => {});
-  const sent = [];
-  t.mock.method(global, "fetch", async (_url, init) => {
-    sent.push(JSON.parse(init.body));
-    return new Response(null, { status: 202 });
-  });
+  const sent = capturedDefectReports(t);
   assert.equal(userErrorMessage(new TypeError("Cannot read properties of undefined"), "Couldn't connect the app",
     "Couldn't connect private-account"),
   "Couldn't connect private-account. Something went wrong. Try again, and report it if it keeps happening.");
