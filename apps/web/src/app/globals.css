@@ -6904,15 +6904,15 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   }
 }
 
-.xmatrix-app .app-detail-plank :where(.app-detail-note, .app-detail-member-row, .app-detail-member-badge) {
+.xmatrix-app .app-detail-plank :where(.app-detail-note) {
   background: transparent !important;
   background-color: transparent !important;
   @apply app-flat-control-recipe;
   transform: none !important;
 }
 
-.xmatrix-app .app-detail-plank :where(.app-detail-note, .app-detail-member-row, .app-detail-member-badge)::before,
-.xmatrix-app .app-detail-plank :where(.app-detail-note, .app-detail-member-row, .app-detail-member-badge)::after {
+.xmatrix-app .app-detail-plank :where(.app-detail-note)::before,
+.xmatrix-app .app-detail-plank :where(.app-detail-note)::after {
   content: none !important;
   display: none !important;
 }
