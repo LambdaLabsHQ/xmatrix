@@ -187,7 +187,10 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   place; a superseded message opens to its full text.
 - **Header continuation.** A message from the same sender as the entry above
   it, within ten minutes and with the same identity tags, drops the avatar
-  and header. Identity tags reappear only when they change.
+  and header. Identity tags reappear only when they change, and a header that
+  is back within one sender's turn (same Instance, ten minutes, past any fold
+  of its own activity) only because a tag changed carries only the changed
+  tags, each as old → new.
 
 ### 4.2 Work dock
 
