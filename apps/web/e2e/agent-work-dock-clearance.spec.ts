@@ -184,18 +184,18 @@ test("a composer that grows pushes the dock up and the timeline tail with it", a
   expect(overDock).toBe(false);
 });
 
-/* The @ completion panel grows the composer box upward, over the timeline. It
-   is a popup: if its height reached --app-composer-height, the timeline would
-   pad its tail by it and shove every message up while you pick a name. */
-test("the @ completion panel covers the timeline instead of pushing it up", async ({ page }) => {
+/* A completion panel (@, /, [[, #) grows the composer box upward, over the
+   timeline. It is a popup: if its height reached --app-composer-height, the
+   timeline would pad its tail by it and shove every message up while you pick.
+   The / panel always has commands, so it stands in for all of them. */
+test("a completion panel covers the timeline instead of pushing it up", async ({ page }) => {
   await openChannelWithAgents(page, 3);
-
+  const beforeGeometry = await tailGeometry(page);
   const composer = page.locator(".app-composer");
   const before = await composer.boundingBox();
-  const beforeGeometry = await tailGeometry(page);
 
-  await page.locator(".composer-textarea").fill("@codex");
-  await expect(page.locator(".app-mention-suggestions").getByRole("option").first()).toBeVisible();
+  await page.locator(".composer-textarea").fill("/");
+  await expect(page.locator(".app-mention-suggestions button").first()).toBeVisible();
   await expect
     .poll(async () => (await composer.boundingBox())?.height ?? 0)
     .toBeGreaterThan((before?.height ?? 0) + 40);
