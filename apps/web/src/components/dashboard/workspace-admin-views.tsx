@@ -500,7 +500,7 @@ export function SettingsView({
             <HumanProfileSummary profile={profile} className="py-3" />
             <PrivateSignInEmail
               email={user.email}
-              className="app-tool-hairline flex items-start gap-3 border-t py-3.5"
+              className="flex items-start gap-3 py-3.5"
               emailClassName="mt-1 truncate text-sm text-muted-foreground"
             />
           </ToolDetailSection>
@@ -670,7 +670,7 @@ export function SettingsView({
               <p className="py-4 text-sm text-muted-foreground">No saved secrets yet.</p>
             ) : (
               secretCatalogEntries.map((entry) => (
-                <div key={entry.secretRef} className="app-tool-hairline flex flex-col gap-3 border-b py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                <div key={entry.secretRef} className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <p className="min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{entry.secretRef}</p>
@@ -828,7 +828,7 @@ export function SettingsView({
               ["/subprocessors", "Subprocessors"],
             ] as const).map(([href, label]) => (
               <a key={href} href={href}
-                className="app-tool-hairline flex items-center justify-between border-b py-3 text-sm font-semibold hover:text-foreground/80">
+                className="flex items-center justify-between py-2.5 text-sm font-semibold hover:text-foreground/80">
                 {label}
                 <ChevronRight className="size-4 text-muted-foreground" />
               </a>
@@ -1208,7 +1208,7 @@ export function TeamView({
               {/* A list on the paper, as GitHub and Notion draw members: a quiet
                   header and hairlines between rows, no frame around them. */}
               <div>
-                <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] gap-3 app-tool-hairline border-b py-2 text-xs font-medium text-muted-foreground md:grid">
+                <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] gap-3 py-2 text-xs font-medium text-muted-foreground md:grid">
                   <span>Name</span>
                   <span>Email</span>
                   <span>Role</span>
@@ -1222,7 +1222,7 @@ export function TeamView({
                       return (
                       <div
                         key={member.userId}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 app-tool-hairline border-b py-2.5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] md:gap-3"
+                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 py-2.5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] md:gap-3"
                       >
                         <div className="col-span-2 min-w-0 md:col-span-1">
                           <p className="truncate text-sm font-bold text-foreground">{memberLabel}</p>
@@ -1292,7 +1292,7 @@ export function TeamView({
                           {(joinRequestsBySpace[space.id] || []).map((request) => (
                             <div
                               key={request.id}
-                              className="flex flex-wrap items-center gap-2 app-tool-hairline border-b py-2 text-sm"
+                              className="flex flex-wrap items-center gap-2 py-2 text-sm"
                             >
                               <span className="min-w-0 flex-1 truncate font-medium">
                                 {request.name || request.email || request.userId}

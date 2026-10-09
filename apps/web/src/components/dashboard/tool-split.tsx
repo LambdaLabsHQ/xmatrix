@@ -317,7 +317,7 @@ export function ToolSettingRow({ title, description, control, below }: {
   below?: ReactNode;
 }) {
   return (
-    <div className="app-tool-hairline border-b py-3.5">
+    <div className="py-3.5">
       <div className="flex items-center gap-6">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">{title}</div>

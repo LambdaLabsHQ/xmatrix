@@ -21,7 +21,6 @@ import { DingTalkCompanyConnection } from "./dingtalk-company-connection";
 import type { HumanProfile } from "@xmatrix/protocol";
 
 import {
-  COUNT_CHIP_MATERIAL_CLASS,
   EVENT_ICONS,
 } from "./workspace-shell-constants";
 
@@ -58,8 +57,9 @@ import {
 import { machineOs } from "./machine-os";
 import {
   ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListRow, ToolSplit,
-  ToolStateDot, useToolItem,
+  ToolSettingRow, ToolStateDot, useToolItem,
 } from "./tool-split";
+import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
@@ -1686,7 +1686,7 @@ export function ConnectorConfiguration({
     >
       {connector.id === "github" ? (
         <div>
-          <label className="mb-2 block text-xs font-bold uppercase text-muted-foreground" htmlFor="github-default-repository">
+          <label className="mb-1.5 block text-[13px] font-semibold" htmlFor="github-default-repository">
             Default repository
           </label>
           <Input
@@ -1704,7 +1704,7 @@ export function ConnectorConfiguration({
 
       {connector.id === "github" ? (
         <fieldset>
-          <legend className="mb-1 text-xs font-bold uppercase text-muted-foreground">Workflow dispatch</legend>
+          <legend className="mb-1 text-[13px] font-semibold">Workflow dispatch</legend>
           <p className="mb-3 text-xs leading-5 text-muted-foreground">
             Which channels may run each write action is set under Channel action policy.
           </p>
@@ -1726,19 +1726,19 @@ export function ConnectorConfiguration({
       ) : null}
 
 
-      <div className="flex flex-wrap justify-end gap-2 border-t border-border/60 pt-4">
+      <div className="flex flex-wrap justify-end gap-2 pt-2">
         <button
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className={cn("app-connector-secondary-action inline-flex h-9 items-center rounded-md px-3 text-sm font-bold disabled:opacity-50", COUNT_CHIP_MATERIAL_CLASS)}
+          className={actionClass({ variant: "quiet" })}
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={saving}
-          className={cn("app-connector-primary-action inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50", COUNT_CHIP_MATERIAL_CLASS)}
+          className={actionClass({ variant: "primary" })}
         >
           {saving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
           {saving ? "Saving" : "Save configuration"}
@@ -1776,28 +1776,25 @@ export function ConnectorDetail({
       : connection
         ? "Disconnected"
         : "Not connected";
+  const quickStart = connector.id === "github"
+    ? { command: "@github:subscribe:OWNER/REPO all",
+        description: "Run this in a channel to receive commit, issue, pull request, comment, and review updates from the repository." }
+    : connector.events
+      ? { command: `@${connector.id}:subscribe:${connector.events.source.placeholder}`,
+          description: `Run this in a channel to receive ${connector.name} events. ${connector.events.source.description}` }
+      : null;
   return (
-    <div className="space-y-5">
-      <div>
-        <p className="mb-2 text-xs font-bold uppercase text-muted-foreground">Connection</p>
-        <div
-          className={cn(
-            "app-connector-setup-state rounded-lg border border-border/70 p-3",
-            needsAttention && "border-destructive/30"
-          )}
-        >
-          <div className="flex items-center gap-2">
-            {configured ? (
-              <Check className="size-4 text-foreground" />
-            ) : needsAttention ? (
-              <AlertTriangle className="size-4 text-destructive" />
-            ) : (
-              <Circle className="size-4 text-muted-foreground" />
-            )}
-            <p className="text-sm font-black">{statusLabel}</p>
-          </div>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            {configured
+    <div className="space-y-10">
+      <ToolDetailSection title="Connection">
+        <ToolSettingRow
+          title={
+            <span className={cn("flex items-center gap-2", needsAttention && "text-destructive")}>
+              {configured ? <Check className="size-4" /> : needsAttention ? <AlertTriangle className="size-4" /> : <Circle className="size-4 text-muted-foreground" />}
+              {statusLabel}
+            </span>
+          }
+          description={
+            configured
               ? connector.id === "github"
                 ? "Repository access is authorized. Connector commands can now run from enabled channels."
                 : nativeChat
@@ -1809,84 +1806,55 @@ export function ConnectorDetail({
                   ? "Connect the provider, choose the repositories or resources xMatrix may access, then use connector commands in a channel."
                   : native && ["googlechat", "feishu", "telegram", "teams"].includes(connector.id)
                     ? `Link your ${connector.name} ${connector.id === "teams" ? "conversation" : connector.id === "googlechat" ? "space" : "groups"} above, or explicitly configure your own connection below.`
-                    : `${oauth ? `Connect with ${connector.name}, or save` : "Save"} the credentials below. xMatrix checks them with ${connector.name} before the app counts as connected.`}
-          </p>
-        </div>
-      </div>
+                    : `${oauth ? `Connect with ${connector.name}, or save` : "Save"} the credentials below. xMatrix checks them with ${connector.name} before the app counts as connected.`
+          }
+        />
+        {configured ? (
+          <div className="pb-2 text-sm">
+            <DetailRow
+              label="Last checked"
+              value={connection.lastCheckedAt ? relativeTime(connection.lastCheckedAt) : "Not checked yet"}
+            />
+            <DetailRow label="Authorization" value={connector.id === "github" ? "GitHub App"
+              : nativeChat ? connector.id === "googlechat" ? "Google Chat app" : `${connector.name} company app` : credentialLabels(connector, connection.credentialFields) || "No credentials saved"} />
+          </div>
+        ) : connector.id === "github" ? (
+          <ol className="list-decimal space-y-1.5 pb-2 pl-5 text-sm text-muted-foreground marker:text-muted-foreground">
+            <li>Connect your provider account.</li>
+            <li>Choose the repositories or resources xMatrix may access.</li>
+            <li>Use a connector command in the channel that should receive updates.</li>
+          </ol>
+        ) : null}
+      </ToolDetailSection>
 
-      {configured ? (
-        <div className="space-y-2 text-sm text-muted-foreground">
-          <DetailRow
-            label="Last checked"
-            value={connection.lastCheckedAt ? relativeTime(connection.lastCheckedAt) : "Not checked yet"}
+      {quickStart ? (
+        <ToolDetailSection title="Quick start">
+          <code className="app-paper-tag mt-2 block overflow-x-auto px-3 py-2 font-mono text-xs text-foreground">
+            {quickStart.command}
+          </code>
+          <p className="mt-2 text-[13px] leading-5 text-muted-foreground">{quickStart.description}</p>
+        </ToolDetailSection>
+      ) : null}
+
+      <ToolDetailSection title="What you can do">
+        {connector.actions.map((action) => (
+          <ToolSettingRow
+            key={action.id}
+            title={action.label}
+            description={<>
+              {action.description}
+              {action.usage ? (
+                <code className="mt-1 block font-mono text-xs">@{connector.id}:{action.id}:{action.usage}</code>
+              ) : null}
+            </>}
           />
-          <DetailRow label="Authorization" value={connector.id === "github" ? "GitHub App"
-            : nativeChat ? connector.id === "googlechat" ? "Google Chat app" : `${connector.name} company app` : credentialLabels(connector, connection.credentialFields) || "No credentials saved"} />
-        </div>
-      ) : connector.id === "github" ? (
-        <ol className="app-connector-setup-steps space-y-3 text-sm text-muted-foreground">
-          <li className="flex gap-3">
-            <span className="app-connector-step-number">1</span>
-            <span>Connect your provider account.</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="app-connector-step-number">2</span>
-            <span>Choose the repositories or resources xMatrix may access.</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="app-connector-step-number">3</span>
-            <span>Use a connector command in the channel that should receive updates.</span>
-          </li>
-        </ol>
-      ) : null}
+        ))}
+      </ToolDetailSection>
 
-      {connector.id === "github" ? (
-        <div>
-          <p className="mb-2 text-xs font-bold uppercase text-muted-foreground">Quick start</p>
-          <code className="app-connector-command block overflow-x-auto rounded-lg px-3 py-2 font-mono text-xs text-foreground">
-            @github:subscribe:OWNER/REPO all
-          </code>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Run this in a channel to receive commit, issue, pull request, comment, and review updates from the repository.
-          </p>
-        </div>
-      ) : connector.events ? (
-        <div>
-          <p className="mb-2 text-xs font-bold uppercase text-muted-foreground">Quick start</p>
-          <code className="app-connector-command block overflow-x-auto rounded-lg px-3 py-2 font-mono text-xs text-foreground">
-            @{connector.id}:subscribe:{connector.events.source.placeholder}
-          </code>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Run this in a channel to receive {connector.name} events. {connector.events.source.description}
-          </p>
-        </div>
-      ) : null}
-
-      <div>
-        <p className="mb-2 text-xs font-bold uppercase text-muted-foreground">What you can do</p>
-        <div className="app-connector-capabilities divide-y divide-border/60">
-          {connector.actions.map((action) => (
-            <div key={action.id} className="app-connector-capability flex gap-3 py-2.5 first:pt-0 last:pb-0">
-              <Check className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-bold">{action.label}</p>
-                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{action.description}</p>
-                {action.usage ? (
-                  <code className="mt-1 block font-mono text-xs text-muted-foreground">@{connector.id}:{action.id}:{action.usage}</code>
-                ) : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="app-connector-security-note flex gap-3 border-t border-border/60 pt-4 text-xs leading-5 text-muted-foreground">
-        <Shield className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <p className="font-bold text-foreground">Credentials stay out of chat</p>
-          <p>xMatrix uses scoped provider authorization and short-lived credentials for connector actions.</p>
-        </div>
-      </div>
+      <p className="flex gap-2 text-xs leading-5 text-muted-foreground">
+        <Shield className="mt-0.5 size-3.5 shrink-0" />
+        Credentials stay out of chat: xMatrix uses scoped provider authorization and short-lived credentials for connector actions.
+      </p>
     </div>
   );
 }
@@ -1907,20 +1875,19 @@ export function ConnectorExecutionList({
     return <p className="text-sm text-muted-foreground">No executions recorded for this connector yet.</p>;
   }
   return (
-    <div className="space-y-3">
+    <div>
       {executions.map((execution) => (
-        <div key={execution.id} className="app-connector-card rounded border border-border/70 p-3">
+        <div key={execution.id} className="py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="truncate text-sm font-black">{execution.actionLabel || execution.actionId || "Default action"}</p>
+              <p className="truncate text-sm font-semibold">{execution.actionLabel || execution.actionId || "Default action"}</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {relativeTime(execution.createdAt)} by {execution.requestedByLabel || execution.requestedBy}
               </p>
             </div>
             <span
               className={cn(
-                "app-connector-status app-status-chip shrink-0 px-2 py-1 text-xs font-bold capitalize",
-                COUNT_CHIP_MATERIAL_CLASS,
+                "app-connector-status app-status-chip app-paper-tag shrink-0 px-1.5 py-0.5 text-[11px] font-semibold capitalize",
                 appExecutionStatusClassName(execution.status)
               )}
             >
