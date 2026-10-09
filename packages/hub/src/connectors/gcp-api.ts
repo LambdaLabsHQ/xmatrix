@@ -1,56 +1,18 @@
-import { providerJson, ProviderRequestError } from "./http";
-import { oneLine, record, text } from "./event-format";
+import { ProviderRequestError } from "./http";
+import { record, text } from "./event-format";
 import type { ConnectorAction, ConnectorActionStatement } from "./provider";
-import { quoteRetrievedText } from "./actions/common";
+import { GCP_PROJECT, PAGE_SIZE, request, list, report, columns, project, projectOnly } from "./gcp-common";
+import { GCP_BILLING_ACTIONS } from "./gcp-billing";
+import { GCP_SERVICE_ACTIONS } from "./gcp-services";
+import { GCP_COST_REPORT_ACTIONS } from "./gcp-cost-report";
 
 /* Google IAM remains authoritative. Fixed endpoints and typed resource names
  * prevent targets from becoming arbitrary URLs; no container environment,
  * metadata, access policies or credentials are returned with resource status. */
-export const GCP_PROJECT = /^(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{5,19})$/u;
 const REGION = /^[a-z]+-[a-z]+[1-9][0-9]?$/u;
 const SERVICE = /^[a-z][a-z0-9-]{0,61}[a-z0-9]$|^[a-z]$/u;
-const PAGE_SIZE = 30;
 const MAX_MINUTES = 10_080;
 type Credentials = Readonly<Record<string, string>>;
-
-function headers(credentials: Credentials): Record<string, string> {
-  const token = credentials.oauthToken;
-  if (!token || token.length > 16_384 || /\s/u.test(token)) {
-    throw new ProviderRequestError(401, "Connect Google Cloud with OAuth first");
-  }
-  return { authorization: `Bearer ${token}` };
-}
-
-async function request(credentials: Credentials, url: URL | string, json?: unknown) {
-  return providerJson(url, { headers: headers(credentials), ...(json === undefined ? {} : { method: "POST", json }) });
-}
-
-function list(result: Record<string, unknown>, key: string): unknown[] {
-  if (result[key] !== undefined && !Array.isArray(result[key])) {
-    throw new ProviderRequestError(502, `Google Cloud did not return a ${key} list`);
-  }
-  return ((result[key] ?? []) as unknown[]).slice(0, PAGE_SIZE);
-}
-
-function report(title: string, rows: string[], result: Record<string, unknown>, url?: string) {
-  const content = rows.join("\n");
-  const truncated = content.length > 12_000 || Boolean(result.nextPageToken) ||
-    Object.values(result).some(value => Array.isArray(value) && value.length > PAGE_SIZE);
-  return { summary: `${title}${truncated ? " (truncated; first page only)" : ""}:\n` +
-    quoteRetrievedText(content.slice(0, 12_000) || "(no results)"), ...(url ? { url } : {}) };
-}
-
-function columns(...values: unknown[]): string {
-  return values.map(value => oneLine(typeof value === "boolean" ? String(value) : text(value), 400)).join("\t");
-}
-
-function project(statement: ConnectorActionStatement) {
-  return GCP_PROJECT.test(statement.target) ? { project: statement.target } : "name a Google Cloud project ID or number";
-}
-
-function projectOnly(statement: ConnectorActionStatement) {
-  return statement.text.trim() ? "this action takes only a project ID or number" : project(statement);
-}
 
 function runTarget(statement: ConnectorActionStatement, service: boolean) {
   const parts = statement.target.split("/");
@@ -103,14 +65,17 @@ export async function verifyGcp(credentials: Credentials): Promise<void> {
 }
 
 export const GCP_ACTIONS: Record<string, ConnectorAction> = {
+  ...GCP_BILLING_ACTIONS,
+  ...GCP_SERVICE_ACTIONS,
+  ...GCP_COST_REPORT_ACTIONS,
   list_projects: {
     effect: "read", requires: ["oauthToken"],
     parse: statement => statement.target === "*" && !statement.text.trim() ? {} : "use @gcp:list_projects:*",
     async execute({ credentials }) {
       const result = await projects(credentials);
-      return report("Google Cloud projects (ID, name, state)", list(result, "projects").map(value => {
+      return report("Google Cloud projects (ID, name, state, resource name)", list(result, "projects").map(value => {
         const row = record(value);
-        return columns(row.projectId, row.displayName, row.state);
+        return columns(row.projectId, row.displayName, row.state, row.name);
       }), result);
     },
   },
