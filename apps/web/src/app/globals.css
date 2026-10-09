@@ -5099,7 +5099,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app :is(
    different compositing/backdrop-filter path. Re-adding them here is the
    regression that made every tool page read as flat translucent cards on the
    muted background. A chip on the paper is a paper label, not glass (see
-   "Labels take the material they sit on").
+   "Labels take the material they sit on"), so it is excluded here: this
+   rule's specificity outranks that one, and only chips that happened to carry
+   the `inline-flex` class escaped it — count chips, flex by CSS, stayed glass.
    ============================================================ */
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(
   .app-liquid-glass-fill,
@@ -5110,7 +5112,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(
   .app-composer-box,
   .app-search,
   .bg-popover
-):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex):not(:is(.app-tool-detail, .app-tool-list) .app-shared-chip:not(.app-material-wood-panel *)) {
+):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex):not(.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *)) {
   --app-liquid-surface-bg: var(--app-liquid-shared-surface-bg);
   position: relative !important;
   isolation: isolate !important;
@@ -5121,7 +5123,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(
   background-image: none !important;
   @apply app-liquid-material-recipe;
 }
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-liquid-glass-fill, .app-sidebar .app-sidebar-glass-item, .app-space-switcher-shell-open, .app-space-switcher-edit-form, .app-ability-button, .app-composer-box, .app-search, .bg-popover):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex):not(:is(.app-tool-detail, .app-tool-list) .app-shared-chip:not(.app-material-wood-panel *))::before {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-liquid-glass-fill, .app-sidebar .app-sidebar-glass-item, .app-space-switcher-shell-open, .app-space-switcher-edit-form, .app-ability-button, .app-composer-box, .app-search, .bg-popover):not(.message-image-attachment):not(.composer-image-attachment):not(.app-agent-work-kill):not(.message-collapse-button):not(.app-member-row):not(.app-agent-work-card):not(.bg-primary):not(.inline-flex):not(.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *))::before {
   @apply app-glass-caustic-recipe;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
@@ -5239,7 +5241,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
    WoodPanel, the space-setup plank) that stays the liquid-glass pill; everywhere
    else it is a paper label: a flat ink tint cut as a rounded rectangle, with no
    edge, lens, rim or shadow (user 2026-10-09: 只有木板上的走 liquid glass).
-   Counts stay round discs; connector actions are buttons, not labels. The
+   Counts are the same rounded rectangle (user 2026-10-09: 消息数量那里也改成纸面
+   风格); only the avatar stack's "+N" stays a disc beside the round faces.
+   Connector actions are buttons, not labels. The
    repeated class outranks the final glass override above. A usage meter's tone
    is softened on paper so the label's ink stays legible over it. */
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action) {
@@ -5250,7 +5254,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   box-shadow: none !important;
 }
 
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action):not(.app-count-pill, .app-overflow-count) {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action):not(.app-overflow-count) {
   border-radius: 0.375rem !important;
 }
 
