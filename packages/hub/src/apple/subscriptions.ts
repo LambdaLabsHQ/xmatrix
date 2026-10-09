@@ -139,7 +139,8 @@ export function subscriptionFact(config: AppleSubscriptionConfig, realm: AppleEn
     retrying: !transaction.revocationDate && status === 3, cancelAtPeriodEnd: renewal.autoRenewStatus === 0 };
 }
 
-export function appleBillingFact(subscription: VerifiedAppleSubscription, binding: { spaceId: string; ownerUserId: string }): BillingSubscriptionFact {
+export function appleBillingFact(subscription: VerifiedAppleSubscription, binding: { spaceId: string; ownerUserId: string; accountDeleted?: boolean }): BillingSubscriptionFact {
+  if (binding.accountDeleted) throw new AppleBillingError("apple_purchase_account_deleted", "Deleted accounts cannot receive subscription access");
   return { billingProvider: "apple", id: `apple:${subscription.environment}:${subscription.originalTransactionId}`,
     customerId: subscription.appAccountToken, priceId: subscription.productId,
     status: subscription.active ? "active" : subscription.retrying ? "unpaid" : "canceled", quantity: 1,

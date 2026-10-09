@@ -48,6 +48,8 @@ integration("deletion erases only the confirmed identity, revokes it, and cannot
     assert.equal((await f.run("SELECT name FROM data.machines WHERE owner_user_id='other-user'"))[0].name,"Other laptop");
     await assert.rejects(f.run(`INSERT INTO control.auth_users(id,name,email,created_at,updated_at)
       VALUES('delete-user','Resurrected','new@example.test',now(),now())`),/closing or deleted/);
+    await assert.rejects(f.run(`INSERT INTO control.apple_account_tokens(app_account_token,space_id,owner_user_id)
+      VALUES($1,'retired-space','delete-user')`,[randomUUID()]),/closing or deleted/);
     await f.repo.advance("delete-user",async()=>{throw Error("completed work must not rerun");});
   }finally{await f.close();}
 });

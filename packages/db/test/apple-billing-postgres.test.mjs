@@ -53,6 +53,12 @@ integration("Apple purchase ownership is immutable under concurrent claims and b
     await f.run("UPDATE data.space_billing_subscriptions SET current_period_end=now()-interval '1 second' WHERE space_id=$1", [binding.spaceId]);
     const expired = await billing.readSpaceBilling({ requestId: randomUUID(), spaceId: binding.spaceId, actorUserId: "apple-owner" });
     assert.equal(expired.billing.plan, "free");
+    // A retired identity remains permanently bound; it cannot receive renewed access.
+    await f.run(`INSERT INTO control.account_deletion_requests(user_id,request_id,state,receipt_hash,committed_at)
+      VALUES('apple-owner',$1,'committed',$2,now())`, [randomUUID(), "b".repeat(64)]);
+    const retired = await apple.resolve(randomUUID(), winner.appAccountToken);
+    assert.equal(retired.accountDeleted, true);
+    assert.equal(retired.spaceId, binding.spaceId);
     // Restore cannot silently move the original transaction even after expiry.
     await assert.rejects(apple.claim(randomUUID(), "Production", "1000001",
       winner === a ? b.appAccountToken : a.appAccountToken), { code: "apple_subscription_bound_elsewhere" });

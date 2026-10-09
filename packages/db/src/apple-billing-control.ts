@@ -6,6 +6,7 @@ export interface AppleAccountBinding {
   appAccountToken: string;
   spaceId: string;
   ownerUserId: string;
+  accountDeleted: boolean;
 }
 
 /** Immutable global purchase identity; this table does not grant entitlements. */
@@ -33,12 +34,14 @@ export class PostgresAppleBillingRepository {
   async resolve(requestId: string, token: string): Promise<AppleAccountBinding | null> {
     if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(token)) return null;
     return this.database.transaction({ requestId, operation: "apple.purchase.resolve" }, async (tx) => {
-      const rows = await tx.query<{ app_account_token: string; space_id: string; owner_user_id: string }>({
-        name: "apple_account_token_read_v1", text: `SELECT app_account_token,space_id,owner_user_id
-          FROM control.apple_account_tokens WHERE app_account_token=$1 LIMIT 1`, values: [token], maxRows: 1,
+      const rows = await tx.query<{ app_account_token: string; space_id: string; owner_user_id: string; account_deleted: boolean }>({
+        name: "apple_account_token_read_v2", text: `SELECT t.app_account_token,t.space_id,t.owner_user_id,
+          EXISTS (SELECT 1 FROM control.account_deletion_requests d WHERE d.user_id=t.owner_user_id
+            AND d.state IN ('committed','completed')) AS account_deleted
+          FROM control.apple_account_tokens t WHERE t.app_account_token=$1 LIMIT 1`, values: [token], maxRows: 1,
       });
       const row = rows[0];
-      return row ? { appAccountToken: row.app_account_token, spaceId: row.space_id, ownerUserId: row.owner_user_id } : null;
+      return row ? { appAccountToken: row.app_account_token, spaceId: row.space_id, ownerUserId: row.owner_user_id, accountDeleted: row.account_deleted } : null;
     });
   }
 

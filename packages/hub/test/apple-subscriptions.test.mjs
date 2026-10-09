@@ -70,3 +70,9 @@ test("Apple API credentials stay in the header, destinations are fixed, and fail
   await assert.rejects(retrieveAppleSubscription(config, "../../secrets", "Production", async () => { throw new Error("must not fetch"); }), /Invalid Apple transaction/);
   await assert.rejects(retrieveAppleSubscription(config, "100", "Xcode", async () => { throw new Error("must not fetch"); }), /Invalid Apple environment/);
 });
+
+test("a verified Apple purchase never grants access to a retired identity", () => {
+  const verified = subscriptionFact(config, "Production", 1, transaction, renewal);
+  assert.throws(() => appleBillingFact(verified, { spaceId: "space", ownerUserId: "owner", accountDeleted: true }),
+    { code: "apple_purchase_account_deleted" });
+});

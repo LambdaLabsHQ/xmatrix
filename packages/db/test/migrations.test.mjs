@@ -257,6 +257,7 @@ test("checked-in PostgreSQL migration manifest is contiguous and names every con
     { id: "0169_expand_worktree_action_commands", phase: "expand" },
     { id: "0170_expand_apple_subscriptions", phase: "expand" },
     { id: "0171_expand_account_deletion", phase: "expand" },
+    { id: "0172_expand_account_billing_fences", phase: "expand" },
   ]);
   assert.equal(manifest.every(({ checksumSha256 }) => /^[0-9a-f]{64}$/u.test(checksumSha256)), true);
 });
