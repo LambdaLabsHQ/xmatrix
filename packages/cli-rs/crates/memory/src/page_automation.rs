@@ -351,10 +351,10 @@ async fn set_running(
     )
     .await?;
     done(
-        if action == "pause" {
-            "Paused"
-        } else {
-            "Resumed"
+        match action {
+            "pause" => "Paused",
+            "run" => "Due now; it runs in a new conversation",
+            _ => "Resumed",
         },
         &changed,
     );
@@ -474,6 +474,12 @@ pub async fn cmd_page_automation(
             version,
             space,
         } => set_running(hub_url, token, space, &page, &automation, version, "resume").await,
+        PageAutomationCommand::Run {
+            page,
+            automation,
+            version,
+            space,
+        } => set_running(hub_url, token, space, &page, &automation, version, "run").await,
         PageAutomationCommand::Attach {
             page,
             automation,

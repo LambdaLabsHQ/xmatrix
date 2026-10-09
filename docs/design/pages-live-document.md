@@ -455,7 +455,9 @@ section it keeps true, and it is written there:
 ### 6.2 Triggers
 
 Every Automation has a cadence, and a page's Automation may add event
-triggers. A trigger never queues work; it makes the next occurrence due now.
+triggers. Whoever can manage it can also run a running Automation now
+(Schedules' *Run now*, `xmatrix page automation run`): its next occurrence is
+due at once, as its author, and its cadence continues from that run. A trigger never queues work; it makes the next occurrence due now.
 A GitHub trigger records the installation of the Space's GitHub connection
 that covers its repository, and fires only on that installation's events
 while the Space is still connected to it.

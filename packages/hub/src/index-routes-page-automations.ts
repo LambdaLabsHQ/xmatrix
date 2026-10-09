@@ -234,18 +234,20 @@ function expectedVersionOf(body: Record<string, unknown>, automation: Automation
 }
 
 /**
- * Edits, pauses or resumes a page's Automation. An Automation runs as its
- * author, so an edit by anyone else replaces it with their own and points the
- * page's reference at the replacement.
+ * Edits, pauses, resumes or runs now a page's Automation. An Automation runs
+ * as its author, so an edit by anyone else replaces it with their own and
+ * points the page's reference at the replacement. Running it now makes its
+ * next occurrence due at once, as its author, without changing its cadence.
  */
 export async function changePageAutomation(env: Env, request: Request, authUser: AuthUser, spaceId: string,
-  pageId: string, automationId: string, action: "update" | "pause" | "resume",
+  pageId: string, automationId: string, action: "update" | "pause" | "resume" | "run",
   body: Record<string, unknown>): Promise<AutomationRecord> {
   const { page, userId, current } = await target(env, authUser, spaceId, pageId, automationId);
   const version = expectedVersionOf(body, current);
   if (!current.capabilities[action]) {
     refuse(409, current.detachedAt ? "automation_detached" : "forbidden", current.detachedAt
       ? "Its reference is not on the page; put the reference back to resume it"
+      : action === "run" && !current.enabled ? "This Automation is paused; resume it to run it"
       : `This Automation cannot ${action} now`);
   }
   const parsed = expressionPayload(hubBoundary, current, action === "update" ? authoring(body) : {});
@@ -281,7 +283,8 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
     // An Agent Run acts as its owner, but never with a Human admin's creation exception.
     viaAgentRun: Boolean(authUser.agentRun), automationId: current.id,
     expectedVersion: version, channelId: current.channelId,
-    nextRunAt: retimed ? new Date(Date.now() + parsed.intervalMinutes * 60_000).toISOString() : current.nextRunAt,
+    nextRunAt: action === "run" ? new Date().toISOString()
+      : retimed ? new Date(Date.now() + parsed.intervalMinutes * 60_000).toISOString() : current.nextRunAt,
     enabled: action === "pause" ? false : action === "resume" ? true : current.enabled,
     payload: commandPayload(hubBoundary, parsed, current, current.channelId, binding.actor,
       binding.authorityRootUserId, current.id),
@@ -356,7 +359,7 @@ export function registerPageAutomationRoutes(app: Hono<{ Bindings: Env }>): void
   app.patch(`${base}/:automationId`, (c) => run(c, async (authUser, body) => ({
     automation: await changePageAutomation(c.env, c.req.raw, authUser, ...ids(c), c.req.param("automationId")!,
       "update", body) })));
-  for (const action of ["pause", "resume"] as const) {
+  for (const action of ["pause", "resume", "run"] as const) {
     app.post(`${base}/:automationId/${action}`, (c) => run(c, async (authUser, body) => ({
       automation: await changePageAutomation(c.env, c.req.raw, authUser, ...ids(c), c.req.param("automationId")!,
         action, body) })));

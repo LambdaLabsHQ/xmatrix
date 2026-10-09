@@ -2455,6 +2455,19 @@ pub enum PageAutomationCommand {
         #[arg(long)]
         space: Option<String>,
     },
+    /// Run a running Automation once now; its cadence stays
+    Run {
+        /// Page ID
+        page: String,
+        /// Automation ID
+        automation: String,
+        /// The version you read
+        #[arg(long)]
+        version: u64,
+        /// Space ID (defaults to this Run's conversation's Space)
+        #[arg(long)]
+        space: Option<String>,
+    },
     /// Put an Automation's reference in a section, which moves it there or resumes a detached one
     Attach {
         /// Page ID
