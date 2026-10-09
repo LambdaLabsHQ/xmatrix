@@ -74,11 +74,11 @@ pub async fn execute_worktree_action(
     result
 }
 
+/// Git diagnostics reach the owner's browser: redact credentials the way every
+/// other repo-pool failure is redacted, not only control characters.
 fn bounded(text: &str) -> String {
-    let clean: String = text.chars().filter(|ch| !ch.is_control()).collect();
-    if clean.chars().count() > 1_000 {
-        clean.chars().take(999).chain(['…']).collect()
-    } else if clean.is_empty() {
+    let clean = crate::failure_detail::sanitize(text, 1_000);
+    if clean.trim().is_empty() {
         "failed".to_string()
     } else {
         clean
@@ -132,7 +132,10 @@ async fn list(live_cwds: &HashSet<PathBuf>) -> Result<Value, String> {
         })
         .collect();
     // One answer travels as one WebSocket message; keep it well under the Hub's limit.
-    let mut bytes: usize = entries.iter().map(|entry| entry.to_string().len() + 1).sum();
+    let mut bytes: usize = entries
+        .iter()
+        .map(|entry| entry.to_string().len() + 1)
+        .sum();
     while bytes > LISTING_BYTES_MAX {
         let Some(entry) = entries.pop() else { break };
         bytes -= entry.to_string().len() + 1;
@@ -285,6 +288,19 @@ mod tests {
     include!("../../core/tests/support/fs_cleanup.rs");
 
     use crate::test_support::{git_available, run_git, seed_remote, unique_temp_dir};
+
+    #[test]
+    fn reported_git_failures_carry_no_credentials() {
+        let reason = bounded(
+            "fatal: unable to access 'https://x-access-token:ghs_secret123@github.com/acme/app.git/'\nAuthorization: Bearer abc",
+        );
+        assert!(
+            !reason.contains("ghs_secret123") && !reason.contains("abc"),
+            "{reason}"
+        );
+        assert!(reason.contains("github.com/acme/app.git"), "{reason}");
+        assert_eq!(bounded("\u{1b}"), "failed");
+    }
 
     #[test]
     fn disk_usage_counts_nested_files() {
