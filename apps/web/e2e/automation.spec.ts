@@ -176,17 +176,21 @@ test("Schedules lists Automations by page and makes none; an empty Space is sent
   await expect(page).toHaveURL(/\/pages/);
 });
 
-test("a page's Automation is listed by what it is doing, names its page, and its address names it", async ({ page }) => {
+test("a page's Automation is listed under its page on the page tree, says what it is doing, and its address names it", async ({ page }) => {
   await openWorkspaceWithStubs(page, {
     ...E2E_AUTOMATION_READY_FIXTURES,
     automations: [{ ...E2E_AUTOMATION, pageId: `goals-${E2E_SPACE.id}`, spaceId: E2E_SPACE.id, blockId: "architecture" }],
   });
   const goals = await stubAutomationPages(page);
   await page.getByRole("button", { name: "Schedules" }).click();
-  const group = page.locator('[data-testid="schedule-row"]').locator("xpath=ancestor::section[1]");
-  await expect(group.getByText("Running", { exact: true })).toBeVisible();
+  const branch = page.getByRole("button", { name: new RegExp(`^${goals.title}`, "u") });
+  await expect(branch).toContainText("1 running");
   await expect(page.getByRole("tab")).toHaveCount(0);
-  await expect(scheduleRow(page, "Existing schedule")).toContainText(goals.title);
+  await expect(scheduleRow(page, "Existing schedule")).toHaveAttribute("data-state", "running");
+  await expect(branch.locator("xpath=ancestor::li[1]").getByTestId("schedule-row")).toContainText("Existing schedule");
+  await branch.click();
+  await expect(scheduleRow(page, "Existing schedule")).toHaveCount(0);
+  await branch.click();
   await expect(page.getByText("Up next")).toBeVisible();
 
   await scheduleRow(page, "Existing schedule").click();

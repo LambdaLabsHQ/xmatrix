@@ -149,6 +149,15 @@ test("Team lists every workspace and tags the one you are in", async ({ page }) 
   const view = page.locator(".app-tool-detail");
   await expect(view.getByRole("heading", { level: 2, name: "Lambda Labs" })).toBeVisible();
 
+  // On the paper a framed panel or field is never an island or a capsule.
+  const radii = await view.locator(".border, textarea, input:not([type=checkbox]):not([type=radio])").evaluateAll((elements) =>
+    elements
+      .filter((element) => element.getBoundingClientRect().height > 0)
+      .map((element) => parseFloat(getComputedStyle(element).borderTopLeftRadius))
+  );
+  expect(radii.length).toBeGreaterThan(0);
+  expect(Math.max(...radii)).toBeLessThanOrEqual(8);
+
   // Another Space offers to switch to it.
   await personal.click();
   await expect(view.getByRole("heading", { level: 2, name: E2E_SPACE.name })).toBeVisible();

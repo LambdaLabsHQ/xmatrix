@@ -1232,12 +1232,14 @@ export function TeamView({
                       <p className="mt-2 text-xs font-medium text-destructive">{permissionErrorBySpace[space.id]}</p>
                     ) : null}
                   </div>
-                  <div className="mt-4 overflow-hidden rounded-md border border-border">
-                    <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_48px] gap-3 border-b border-border bg-muted/50 px-3 py-2 text-xs font-bold uppercase text-muted-foreground md:grid">
+                  {/* A list on the paper, as GitHub and Notion draw members: a quiet
+                      header and hairlines between rows, no frame around them. */}
+                  <div className="mt-4">
+                    <div className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] gap-3 border-b border-border/60 pb-2 text-xs font-medium text-muted-foreground md:grid">
                       <span>Name</span>
                       <span>Email</span>
                       <span>Role</span>
-                      <span className="text-right">Remove</span>
+                      <span className="sr-only">Remove</span>
                     </div>
                     {space.members.map((member) => {
                       const memberLabel = member.name || member.email || shortId(member.userId);
@@ -1247,7 +1249,7 @@ export function TeamView({
                       return (
                       <div
                         key={member.userId}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-border px-3 py-3 last:border-b-0 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_48px] md:gap-3"
+                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-border/60 py-2.5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_140px_32px] md:gap-3"
                       >
                         <div className="col-span-2 min-w-0 md:col-span-1">
                           <p className="truncate text-sm font-bold text-foreground">{memberLabel}</p>
@@ -1257,19 +1259,15 @@ export function TeamView({
                           <p className="truncate text-sm text-muted-foreground">{member.email || member.userId}</p>
                         </div>
                         {member.role === "owner" ? (
-                          <span
-                            className={tagClass("app-status-chip h-8 w-fit px-3")}
-                          >
-                            owner
-                          </span>
+                          <span className="text-sm text-muted-foreground">Owner</span>
                         ) : (
                           <GlassSelect
                             value={member.role}
                             disabled={!canEditMember || memberActionKey === roleActionKey}
                             options={[
-                              { value: "admin", label: "admin" },
-                              { value: "member", label: "member" },
-                              { value: "viewer", label: "viewer" },
+                              { value: "admin", label: "Admin" },
+                              { value: "member", label: "Member" },
+                              { value: "viewer", label: "Viewer" },
                             ]}
                             onChange={(value) =>
                               void updateMemberRole(space, member.userId, value as SpaceInviteRole)
@@ -1285,7 +1283,7 @@ export function TeamView({
                             onClick={() => void removeMember(space, member.userId, memberLabel)}
                             disabled={memberActionKey === removeActionKey}
                             title={`Remove ${memberLabel}`}
-                            className={actionClass({ variant: "secondary", size: "icon" }, "shrink-0")}
+                            className={actionClass({ variant: "quiet", size: "icon" }, "shrink-0")}
                           >
                             {memberActionKey === removeActionKey ? (
                               <Loader2 className="size-4 animate-spin" />
@@ -1293,9 +1291,7 @@ export function TeamView({
                               <Trash2 className="size-4" />
                             )}
                           </button>
-                          ) : (
-                            <span className="flex size-8 items-center justify-center text-xs font-bold text-muted-foreground">-</span>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                       );
