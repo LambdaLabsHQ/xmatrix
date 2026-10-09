@@ -660,6 +660,7 @@ export class PostgresPageRepository {
           WHERE space_id=$1 AND page_id=$2`,
         values: [spaceId, pageId, revision, now], maxRows: 0,
       });
+      await this.settleEditedClaims(tx, spaceId, pageId, head, text, conversationIds);
       return reconcilePageAutomations(tx, { spaceId, pageId, body: text, at: now, revision });
     })();
     for (const conversationId of conversationIds) {
@@ -674,6 +675,43 @@ export class PostgresPageRepository {
       basedOnRevision: input.baseRevision, createdAt: now,
     }, automationChannels: anchoring.channels, detachedAutomations: anchoring.detached,
     attachedAutomations: anchoring.attached };
+  }
+
+  /**
+   * An edit writes back the sections it changes (§5.2): claims on them that
+   * already ended, and those the editing conversation still holds. A claim
+   * another conversation holds still owes its own write-back.
+   */
+  private async settleEditedClaims(tx: DatabaseTransaction, spaceId: string, pageId: string, head: number,
+    text: string, conversationIds: string[]): Promise<void> {
+    const open = await tx.query<QueryResultRow & { claim_id: string; block_id: string }>({
+      name: "page_claims_unsettled_v1",
+      text: `SELECT claim_id,block_id FROM data.page_claims
+        WHERE space_id=$1 AND page_id=$2 AND written_back_at IS NULL
+          AND (state IN ('completed','released') OR expires_at <= now() OR conversation_id = ANY($3::text[]))
+          AND updated_at > now() - interval '${OWED_WINDOW_DAYS} days'
+        LIMIT ${MAX_LINKS}`,
+      values: [spaceId, pageId, conversationIds], maxRows: MAX_LINKS,
+    });
+    if (open.length === 0) return;
+    const before = (await tx.query<QueryResultRow & { body: string | null }>({
+      name: "page_revision_body_v1",
+      text: "SELECT body FROM data.page_revisions WHERE space_id=$1 AND page_id=$2 AND revision=$3",
+      values: [spaceId, pageId, head], maxRows: 1,
+    }))[0]?.body ?? "";
+    // An empty block id claims the whole page: any changed section writes it back.
+    const blocks = new Set(open.map((row) => row.block_id));
+    const changed = new Set(pageChangedDocBlocks(before, text, canonicalPageMarkdown,
+      blocks.has("") ? undefined : blocks));
+    const settled = open.filter((row) => row.block_id === "" ? changed.size > 0 : changed.has(row.block_id))
+      .map((row) => row.claim_id);
+    if (settled.length === 0) return;
+    await tx.query({
+      name: "page_claims_settle_edit_v1",
+      text: `UPDATE data.page_claims SET written_back_at=now()
+        WHERE space_id=$1 AND page_id=$2 AND claim_id = ANY($3::text[]) AND written_back_at IS NULL`,
+      values: [spaceId, pageId, settled], maxRows: 0,
+    });
   }
 
   /** Accepts a suggestion, or restores an earlier revision, as a new head. */
@@ -770,12 +808,13 @@ export class PostgresPageRepository {
           updates.set(blockId, { revision, authors, conversationIds, createdAt });
         }
       }
-      // Claimed work that ended after its section last changed, not yet written back (§5).
+      // Claimed work that ended and was not written back (§5.2). An edit to the
+      // section records its write-back on the claim, so this reads the claims
+      // alone, however long ago the section changed.
       const ended = await tx.query<QueryResultRow & { block_id: string; state: string; holder_label: string;
-        conversation_id: string | null; pull_request_url: string | null; claimed_at: Date | string;
-        ended_at: Date | string }>({
-        name: "page_claims_owed_v2",
-        text: `SELECT block_id,state,holder_label,conversation_id,pull_request_url,created_at AS claimed_at,
+        conversation_id: string | null; pull_request_url: string | null; ended_at: Date | string }>({
+        name: "page_claims_owed_v3",
+        text: `SELECT block_id,state,holder_label,conversation_id,pull_request_url,
             CASE WHEN state='active' THEN expires_at ELSE updated_at END AS ended_at
           FROM data.page_claims WHERE space_id=$1 AND page_id=$2 AND written_back_at IS NULL
             AND (state IN ('completed','released') OR (state='active' AND expires_at <= now()))
@@ -787,16 +826,9 @@ export class PostgresPageRepository {
       const sections = new Set(order);
       for (const row of ended) {
         // A section taken off the page has nothing left to update.
-        if (row.block_id !== "" && !sections.has(row.block_id)) continue;
-        const at = iso(row.ended_at);
-        const update = updates.get(row.block_id);
-        // A release ends a lease, not work: a section its holder's conversation
-        // wrote while holding it was written back before the release.
-        const wroteBack = row.state === "released" && row.conversation_id !== null
-          && update?.conversationIds.includes(row.conversation_id) === true && update.createdAt >= iso(row.claimed_at);
-        if (owed.has(row.block_id) || (update && update.createdAt >= at) || wroteBack) continue;
+        if (owed.has(row.block_id) || (row.block_id !== "" && !sections.has(row.block_id))) continue;
         owed.set(row.block_id, { reason: row.state === "completed" ? "merged" : row.state === "released" ? "released"
-          : "lapsed", at, holder: row.holder_label, conversationId: row.conversation_id,
+          : "lapsed", at: iso(row.ended_at), holder: row.holder_label, conversationId: row.conversation_id,
           pullRequestUrl: row.pull_request_url });
       }
       return { headRevision, order, updates, owed };
@@ -1031,20 +1063,23 @@ export class PostgresPageRepository {
 
   /** Releases a claim: its holder, the person it counts against, or a Space owner or admin. */
   async releaseClaim(input: { requestId: string; spaceId: string; pageId: string; claimId: string;
-    principal: PagePrincipal }): Promise<{ released: boolean; blockId?: string }> {
+    principal: PagePrincipal }): Promise<{ released: boolean; blockId?: string; owesUpdate?: boolean }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.claim.release", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, true);
       await this.page(tx, spaceId, actor, pageId, "read");
-      const released = await tx.query({ name: "page_claim_release_v2",
+      const released = await tx.query({ name: "page_claim_release_v3",
         text: `UPDATE data.page_claims SET state='released', updated_at=now()
           WHERE space_id=$1 AND page_id=$2 AND claim_id=$3 AND state='active'
             AND ((holder_kind=$4 AND holder_id=$5) OR owner_user_id=$6 OR $7)
-          RETURNING claim_id, block_id`,
+          RETURNING claim_id, block_id, written_back_at IS NULL AS owes_update`,
         values: [spaceId, pageId, bounded(input.claimId, "claimId"), actor.author.kind, actor.author.id, actor.userId,
           actor.role === "owner" || actor.role === "admin"], maxRows: 1 });
-      return released[0] ? { released: true, blockId: String(released[0].block_id) } : { released: false };
+      // A release ends a lease, not work: a section its holder's conversation
+      // edited while holding it was written back before the release.
+      return released[0] ? { released: true, blockId: String(released[0].block_id),
+        owesUpdate: released[0].owes_update === true } : { released: false };
     });
   }
 
