@@ -18,7 +18,7 @@ import { fireGitHubAutomationTriggers } from "./automation-triggers";
 import { checkPullRequestClaims } from "./github-claim-check";
 import { MAX_INVITE_EMAILS_PER_REQUEST, InviteEmailRequest, AdminInviteEmailRequest, normalizeInviteEmails, signGitHubAppState, verifyGitHubAppState, sendSpaceInviteEmails, requireAuth, requireHumanAuth, requireAdmin, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
-import { connectorCredentialRepository } from "./connectors/credentials";
+import { forgetConnectionGrant } from "./connectors/forget-grant";
 import { grantFieldsForgottenOnDisconnect } from "./connectors/oauth";
 
 /* The emails and role an invite-email request asks for, or why it is refused. */
@@ -392,11 +392,9 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
         return c.json({ error: "GitHub installations are linked only by installing the GitHub App" }, 400);
       }
     }
-    const forgotten = body.status === "disconnected" ? grantFieldsForgottenOnDisconnect(providerId) : undefined;
-    if (forgotten && await findAppConnection(c.env, { spaceId: c.req.param("spaceId"), providerId, actorUserId: authUser.id })) {
-      await connectorCredentialRepository(c.env).put({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-        providerId, actorUserId: authUser.id, fields: forgotten, policy: { allowed: Object.keys(forgotten) },
-        at: new Date().toISOString() });
+    if (body.status === "disconnected" && grantFieldsForgottenOnDisconnect(providerId) &&
+        await findAppConnection(c.env, { spaceId: c.req.param("spaceId"), providerId, actorUserId: authUser.id })) {
+      await forgetConnectionGrant(c.env, { spaceId: c.req.param("spaceId"), providerId, actorUserId: authUser.id });
     }
     return c.json(await upsertAppConnection(c.env, {
       commandId: productCommandId(c.req.raw, "upsert-app-connection"),
