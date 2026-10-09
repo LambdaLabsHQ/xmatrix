@@ -2091,6 +2091,20 @@
   @apply app-liquid-material-recipe;
 }
 
+/* A message's author sits on the conversation's paper beside ink tags, so the
+   disc is paper too: a flat tint and a hairline, with no lens, rim or shadow
+   (user 2026-10-09: 头像和标签都改成纸面风格). Its status dot drops its glow. */
+.xmatrix-app .message-author-avatar .identity-avatar-face.identity-avatar-face {
+  background: color-mix(in oklch, var(--foreground) 5.5%, transparent) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklch, var(--foreground) 22%, transparent) !important;
+}
+
+.xmatrix-app .message-author-avatar .identity-avatar-status {
+  box-shadow: none !important;
+}
+
 @media (max-width: 767px) {
   :root:not(.dark) .xmatrix-app .app-sidebar {
     background-color: oklch(1 0 0 / 0.55) !important;
@@ -5216,6 +5230,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
 .xmatrix-app.xmatrix-app .app-usage-meter-fill[data-tone="red"] {
   background: oklch(0.577 0.245 27.325) !important;
   background-color: oklch(0.577 0.245 27.325) !important;
+}
+
+/* The faint track under a meter's line, in the tag's own ink. */
+.xmatrix-app .app-usage-meter-track {
+  background: color-mix(in oklch, currentColor 16%, transparent);
 }
 
 /* Mobile app shell reset.

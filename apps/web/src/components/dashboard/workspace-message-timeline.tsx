@@ -1875,6 +1875,7 @@ export const MessageRow = memo(function MessageRow({
           initials={avatarInitials(message.author)}
           size="md"
           showKindBadge={false}
+          glass={false}
           className="message-author-avatar size-9 min-h-9 min-w-9 max-h-9 max-w-9 p-0"
           onClick={
             message.senderKind === "agent" && !message.reservedSystemAgent
