@@ -763,6 +763,7 @@ function LoginContent() {
             </div>
           ) : step === "email" ? (
             <form onSubmit={handleSendEmail} className="mt-6 space-y-4">
+              <Link href={`/login/password${searchParams.toString() ? `?${searchParams}` : ""}`} className="block text-center text-sm underline">Sign in with password</Link>
               {cliMode ? (
                 <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
                   This browser session was opened by{" "}

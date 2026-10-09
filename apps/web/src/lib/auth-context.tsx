@@ -12,6 +12,7 @@ import {
   signInWithBetterAuthGoogle,
   signOutBetterAuth,
   verifyBetterAuthOtp,
+  verifyBetterAuthPassword,
   type WebAuthSession,
 } from "./auth-client";
 import {
@@ -37,6 +38,7 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   signInWithOtp: (email: string) => Promise<void>;
   verifyOtp: (email: string, token: string) => Promise<void>;
+  signInWithPassword: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (redirectTo?: string) => Promise<void>;
   setSessionFromAuthResponse: (payload: AuthResponse) => Promise<void>;
   logout: (options?: { redirectTo?: "/login" | "/account/delete" }) => Promise<void>;
@@ -272,6 +274,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signInWithBetterAuthGoogle(buildBetterAuthCallbackUrl(redirectTo));
   };
 
+  const signInWithPassword = async (email: string, password: string) => {
+    await verifyBetterAuthPassword(email, password);
+    const next = await loadBetterAuthSessionAfterSignIn();
+    if (!next.session || !next.user) throw new Error("Couldn't confirm sign-in. Try again.");
+    setState({ ...next, loading: false });
+  };
+
   const logout = async (options?: { redirectTo?: "/login" | "/account/delete" }) => {
     if (mockAuthState) {
       setState(mockAuthState || { session: null, user: null, loading: false });
@@ -291,6 +300,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...state,
         signInWithOtp,
         verifyOtp,
+        signInWithPassword,
         signInWithGoogle,
         setSessionFromAuthResponse,
         logout,

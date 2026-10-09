@@ -164,6 +164,8 @@ export function betterAuthRouteGroup(path: string, status?: number): string {
   if (path.includes("/callback/google")) return "google_callback";
   if (path.includes("/email-otp/")) return "better_auth_email_otp";
   if (path.includes("/sign-in/email-otp")) return "better_auth_email_otp";
+  if (path.endsWith("/sign-in/email")) return "better_auth_password";
+  if (path.includes("/request-password-reset") || path.includes("/reset-password")) return "better_auth_password_reset";
   if (path.includes("/get-session")) return "better_auth_get_session";
   if (path.includes("/jwks")) return "better_auth_jwks";
   return "better_auth";
@@ -186,11 +188,11 @@ export async function logBetterAuthHandlerMetrics(path: string, response: Respon
     });
   }
 
-  if (path.includes("/sign-in/email-otp") && response.ok) {
+  if ((path.includes("/sign-in/email-otp") || path.endsWith("/sign-in/email")) && response.ok) {
     await logAuthMetric({
       routeGroup: "session_created",
       status: response.status,
-      outcome: "better_auth_email_otp",
+      outcome: path.endsWith("/sign-in/email") ? "better_auth_password" : "better_auth_email_otp",
       authProvider: "better-auth",
     });
   }
