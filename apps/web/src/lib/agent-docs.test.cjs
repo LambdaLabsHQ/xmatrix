@@ -4,10 +4,13 @@ const path = require("node:path");
 const test = require("node:test");
 require("../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
 
-const { agentDocFiles, agentGuideFiles, aiAskLinks, joinAgentGuides } = require("./agent-docs.ts");
+const { agentDocFiles, aiAskLinks } = require("./agent-docs.ts");
 
 const publicDir = path.join(__dirname, "..", "..", "public");
 const read = (file) => fs.readFileSync(path.join(publicDir, file), "utf8");
+const agentGuideFiles = agentDocFiles.filter((file) => file.endsWith(".md"));
+const joinAgentGuides = (files) =>
+  files.map((file) => `<!-- https://xmatrix.sh/${file} -->\n${read(file).trim()}\n`).join("\n---\n\n");
 
 test("every agent doc the footer lists is published", () => {
   for (const file of agentDocFiles) assert.ok(fs.existsSync(path.join(publicDir, file)), file);
@@ -20,7 +23,7 @@ test("llms.txt links every guide and only published guides", () => {
 });
 
 test("llms-full.txt joins the current guides", () => {
-  const expected = joinAgentGuides(agentGuideFiles.map((file) => ({ file, body: read(file) })));
+  const expected = joinAgentGuides(agentGuideFiles);
   if (process.env.UPDATE_AGENT_DOCS === "1") fs.writeFileSync(path.join(publicDir, "llms-full.txt"), expected);
   assert.equal(read("llms-full.txt"), expected, "run with UPDATE_AGENT_DOCS=1 to regenerate public/llms-full.txt");
 });

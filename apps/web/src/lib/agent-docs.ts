@@ -11,14 +11,6 @@ export const agentDocFiles = [
   "about.md",
 ];
 
-export const agentGuideFiles = agentDocFiles.filter((file) => file.endsWith(".md"));
-
-export function joinAgentGuides(guides: { file: string; body: string }[]): string {
-  return guides
-    .map(({ file, body }) => `<!-- https://xmatrix.sh/${file} -->\n${body.trim()}\n`)
-    .join("\n---\n\n");
-}
-
 const askPrompt =
   "What is xMatrix (https://xmatrix.sh) and is it a good fit for coordinating AI coding agents such as Claude Code and Codex with my team? " +
   "Explain how it works, how to set it up, which services it connects to and what it costs. " +
