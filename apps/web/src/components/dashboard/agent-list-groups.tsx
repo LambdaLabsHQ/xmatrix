@@ -16,7 +16,6 @@ import { ToolListGroup, ToolListRow } from "./tool-split";
 import { registrationTupleId } from "./use-registration-command";
 
 export type AgentListGroup = ReturnType<typeof agentListGroups>[number];
-export type AgentListRow = AgentListGroup["rows"][number];
 
 /** The Space's registrations under their runtime; within one, what is working comes first and what cannot work last. */
 export function agentListGroups(catalog: { capabilities: AgentCapabilitySummary[] } | undefined,
