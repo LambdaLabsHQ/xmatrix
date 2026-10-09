@@ -20,6 +20,7 @@ integration("scheduled timeout immediately cancels execution; cleanup remains bo
     await client.query("CREATE SCHEMA data");
     await client.query("CREATE SCHEMA control");
     await createCanonicalTables(client, [
+      ["0171_expand_account_deletion.sql", ["account_deletion_fences"]],
       ["0007_expand_space_control_facts.sql", ["channels", "space_members", "channel_access"]],
       ["0002_expand_data_substrate.sql", ["outbox"]],
       ["0011_expand_space_control_authority.sql", ["space_control_heads"]],
