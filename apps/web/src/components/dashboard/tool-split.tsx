@@ -100,6 +100,14 @@ export function ToolList({ title, action, create, createLead, toolbar, children 
  * name does (its padding, 2rem icon and gap), so they read as its children. */
 const IdentityIndent = createContext(false);
 
+/** Rows that sit one line tall: the line under the name moves beside it. Status lists
+ * every destination's rows at once this way, so the Space fits on one screen. */
+const Dense = createContext(false);
+
+export function ToolListDense({ children }: { children: ReactNode }) {
+  return <Dense.Provider value>{children}</Dense.Provider>;
+}
+
 export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity, children }: {
   title: string;
   icon?: ReactNode;
@@ -111,6 +119,7 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
   identity?: boolean;
   children: ReactNode;
 }) {
+  const dense = useContext(Dense);
   const label = (
     <>
       {icon}
@@ -126,7 +135,7 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
   const titleClass = cn(
     "app-tool-list-group-title flex min-w-0 items-center pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] text-left",
     identity
-      ? "app-list-row gap-2.5 py-2 text-base font-semibold text-foreground"
+      ? cn("app-list-row gap-2.5 text-base font-semibold text-foreground", dense ? "app-list-row-dense py-1" : "py-2")
       : "gap-1.5 py-1.5 text-xs font-bold text-muted-foreground",
     onTitle && "w-full hover:text-foreground",
   );
@@ -164,21 +173,33 @@ export function ToolListRow({ selected, shownBeside, onSelect, leading, title, e
   state?: string;
 }) {
   const indented = useContext(IdentityIndent);
+  const dense = useContext(Dense);
   return (
     <li className={phoneOnly ? "md:hidden" : undefined}>
       <button type="button" onClick={onSelect} aria-current={selected ? "true" : undefined} data-testid={testId}
         data-state={state}
-        className={cn("app-tool-list-row app-list-row relative flex w-full min-w-0 items-center gap-2.5 pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] py-2.5 text-left",
+        className={cn("app-tool-list-row app-list-row relative flex w-full min-w-0 items-center gap-2.5 pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] text-left",
+          dense ? "app-list-row-dense py-1" : "py-2.5",
           indented && "pl-[calc(var(--app-list-row-start)+2.625rem)]",
           selected && "app-tool-list-row-selected", shownBeside && "app-tool-list-row-beside")}>
-        {leading && <span className={cn("flex shrink-0 items-center", subtitle && "mt-[3px] self-start")}>{leading}</span>}
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="app-list-row-title min-w-0 flex-1 truncate font-semibold">{title}</span>
+        {leading && <span className={cn("flex shrink-0 items-center", subtitle && !dense && "mt-[3px] self-start")}>{leading}</span>}
+        {dense ? (
+          <span className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className={cn("app-list-row-title min-w-0 truncate font-semibold", subtitle ? "max-w-[60%] shrink-0" : "flex-1")}>
+              {title}
+            </span>
+            {subtitle && <span className="app-list-row-meta min-w-0 flex-1 truncate text-xs text-muted-foreground">{subtitle}</span>}
             {end && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{end}</span>}
           </span>
-          {subtitle && <span className="app-list-row-meta block truncate text-xs text-muted-foreground">{subtitle}</span>}
-        </span>
+        ) : (
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="app-list-row-title min-w-0 flex-1 truncate font-semibold">{title}</span>
+              {end && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{end}</span>}
+            </span>
+            {subtitle && <span className="app-list-row-meta block truncate text-xs text-muted-foreground">{subtitle}</span>}
+          </span>
+        )}
         {trailing}
       </button>
     </li>
