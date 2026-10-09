@@ -7,7 +7,6 @@ import { SearchGlyph } from "@/components/ui/search-glyph";
 import { actionClass } from "@/components/ui/action-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { readGitHubGrant } from "@/lib/github-connect-return";
-import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
 type GitHubInstallationAccount = {
