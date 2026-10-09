@@ -37,6 +37,8 @@ const RETAINED_DO_BINDINGS = Object.freeze([
   "RELAY_GLOBAL_DIRECTORY_AUTHORITY", "RELAY_AGENT_APP_POLICY_LOCATOR",
   "RELAY_SPACE_PROJECTION", "RELAY_SPACE_CAPACITY_AUTHORITY", "RELAY_RUNTIME",
   "RELAY_RUNTIME_ROUTE_DIRECTORY", "RELAY_RUNTIME_CHANNEL_FANOUT", "DEVICE_AUTH",
+  // A per-installation cache of subscribed GitHub sources, rebuilt from PostgreSQL; never an authority.
+  "GITHUB_SUBSCRIPTION_INDEX",
 ]);
 
 function parseConfig(source) {
