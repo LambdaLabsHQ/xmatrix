@@ -3,7 +3,7 @@ import { columns, report, request } from "./gcp-common";
 import { record } from "./event-format";
 
 const APIS = ["appoptimize.googleapis.com", "cloudbilling.googleapis.com", "bigquery.googleapis.com", "cloudasset.googleapis.com",
-  "cloudresourcemanager.googleapis.com", "run.googleapis.com", "logging.googleapis.com", "monitoring.googleapis.com"];
+  "cloudresourcemanager.googleapis.com", "run.googleapis.com", "logging.googleapis.com", "monitoring.googleapis.com", "apikeys.googleapis.com"];
 
 function apiTarget(statement: ConnectorActionStatement): Record<string, string> | string {
   const parts = statement.target.split("/");

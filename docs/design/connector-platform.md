@@ -6,7 +6,7 @@ Status: proposed (2026-10-02). Owner: claude (Space channel "你怎么看 connec
 
 The Google Cloud operations provider is documented in
 [GCP connector](../connectors/gcp.md), including its separate OAuth grant,
-bounded resource/cost reads, direct App Optimize reports, SKU attribution, aggregated API usage and explicit IAM-checked quota projects, BigQuery charge bounds and task resume, explicit
+bounded resource/cost reads, direct App Optimize reports, SKU attribution, daily or credential/method API usage, secret-free key metadata, bounded audit-principal summaries and explicit IAM-checked quota projects, BigQuery charge bounds and task resume, explicit
 temporary report/API enablement writes, Monitoring authentication and native acceptance.
 
 Turn the GitHub-only App connector into a provider-neutral platform. Then use

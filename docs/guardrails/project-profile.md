@@ -18,7 +18,7 @@ English is the default language for repository documentation, guardrails, releas
 The Google Cloud operations connector uses a separate GCP OAuth grant and
 provides bounded resource, Cloud Run status, log, metric and alert-policy reads,
 plus direct App Optimize gross-cost reports, billing/export discovery and
-parameterized cost/credit analysis, public SKU attribution and bounded daily API request counts. Explicit quota project selection preserves Google IAM and the same OAuth grant. Temporary report creation and API enablement is a separate policy-controlled write; no IAM grants are changed.
+parameterized cost/credit analysis, public SKU attribution, bounded daily or credential/method API request counts, secret-free API key metadata and historical audit-principal summaries. Caller evidence distinguishes key IDs, key administrators and actual inference identities. Explicit quota project selection preserves Google IAM and the same OAuth grant. Temporary report creation and API enablement is a separate policy-controlled write; no IAM grants are changed.
 Monitoring incident edges route by metrics-scope project through authenticated
 per-connection ingress. See [GCP connector](../connectors/gcp.md).
 
