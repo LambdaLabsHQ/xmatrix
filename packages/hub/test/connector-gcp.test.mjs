@@ -16,6 +16,19 @@ function input(command) {
 }
 const context = { credentials };
 
+test("Cloud Run queries support two-digit region numbers without accepting zones or path traversal", async () => {
+  for (const region of ["europe-west10", "europe-west12"]) {
+    const parsed = input(`@gcp:list_services:project-1/${region}`);
+    assert.deepEqual(parsed, { project: "project-1", region });
+    const read = await fetched([{ body: { services: [] } }], () => ACTIONS.list_services.execute(context, parsed));
+    assert.equal(read.calls[0].url, `https://run.googleapis.com/v2/projects/project-1/locations/${region}/services?pageSize=30`);
+    assert.deepEqual(input(`@gcp:read_service:project-1/${region}/web`), { project: "project-1", region, service: "web" });
+  }
+  for (const region of ["europe-west012", "us-central1-a", "europe-west12/../us-central1", "*"]) {
+    assert.equal(typeof input(`@gcp:list_services:project-1/${region}`), "string");
+  }
+});
+
 test("GCP uses an isolated offline Cloud grant with the company Google client, including refresh", async () => {
   const client = oauthClient(company, "gcp");
   const authorize = new URL(await oauthAuthorizeUrl(client, { spaceId: "space", userId: "admin", redirectUri: "https://hub.test/cb" }));

@@ -7,7 +7,7 @@ import { quoteRetrievedText } from "./actions/common";
  * prevent targets from becoming arbitrary URLs; no container environment,
  * metadata, access policies or credentials are returned with resource status. */
 export const GCP_PROJECT = /^(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{5,19})$/u;
-const REGION = /^[a-z]+-[a-z]+[0-9]$/u;
+const REGION = /^[a-z]+-[a-z]+[1-9][0-9]?$/u;
 const SERVICE = /^[a-z][a-z0-9-]{0,61}[a-z0-9]$|^[a-z]$/u;
 const PAGE_SIZE = 30;
 const MAX_MINUTES = 10_080;
