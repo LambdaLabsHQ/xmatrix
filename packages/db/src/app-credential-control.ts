@@ -122,6 +122,8 @@ export class PostgresAppCredentialRepository {
     initialize?: Record<string, string>;
     /** Refreshes must still be updating the grant they read before the provider request. */
     expectedVersion?: number;
+    /** User-requested provider effects cannot clear a replaced or recreated grant. */
+    expectedGrant?: Pick<ResolvedAppCredentials, "version" | "connectionVersion" | "connectionGeneration">;
     /** Discord callback commits only to the unchanged snapshot signed at initiation. */
     expectedInstallationSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string };
     /** A verified native installation replaces its grant and activates under both original versions. */
@@ -212,6 +214,11 @@ export class PostgresAppCredentialRepository {
           Number(current?.version ?? 0) !== verified.credentialVersion ||
           String(connections[0].search_rank_sequence) !== verified.connectionGeneration)) {
         throw new AppControlError("credential_changed", 409, "Sentry connection changed during installation", true);
+      }
+      const grant = input.expectedGrant;
+      if (grant && (Number(connections[0].version) !== grant.connectionVersion ||
+          Number(current?.version) !== grant.version || String(connections[0].search_rank_sequence) !== grant.connectionGeneration)) {
+        throw new AppControlError("credential_changed", 409, "Connector grant changed during the provider request", true);
       }
       if (input.asHub && (!Number.isSafeInteger(input.expectedVersion) ||
           input.expectedVersion !== Number(current?.version))) {
@@ -366,10 +373,22 @@ export class PostgresAppCredentialRepository {
    */
   async resolve(input: { requestId: string; spaceId: string; providerId: string }):
     Promise<ResolvedAppCredentials | null> {
+    return this.readCredentials(input, null);
+  }
+
+  /** User-requested provider effects read their grant only after live admin authorization. */
+  async resolveForAdmin(input: { requestId: string; spaceId: string; providerId: string; actorUserId: string }):
+    Promise<ResolvedAppCredentials | null> {
+    return this.readCredentials(input, text(input.actorUserId, "actorUserId"));
+  }
+
+  private async readCredentials(input: { requestId: string; spaceId: string; providerId: string }, actorUserId: string | null):
+    Promise<ResolvedAppCredentials | null> {
     const spaceId = text(input.spaceId, "spaceId");
     const providerId = text(input.providerId, "providerId", 80).toLowerCase();
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.credentials.resolve" }, async (tx) => {
+      if (actorUserId !== null) await requireSpaceAdmin(tx, spaceId, actorUserId);
       const rows = await tx.query<QueryResultRow>({ name: "app_credential_resolve_v1", text: `SELECT
         k.*,c.status,c.created_by,c.provider_id,c.version AS connection_version,c.search_rank_sequence FROM data.app_connector_credentials k
         JOIN data.app_connector_connections c ON c.connection_id=k.connection_id AND c.space_id=k.space_id
