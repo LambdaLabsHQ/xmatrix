@@ -8,10 +8,26 @@ things stand.
 
 A section that still describes unfinished work, and names a conversation, is
 the reason to open that one conversation. Once the section states the current
-outcome, do not open the conversation to recover it. Keep each section short.
-When a section has become a log, rewrite it in place to the current state and
-leave how it changed in the conversation. Decisions stay only while they are
-in force.
+outcome, do not open the conversation to recover it.
+
+## Writing a page
+
+A page is read far more often than it is written, so keep it what a newcomer
+needs to act now:
+
+- **Current truth only.** State, decisions in force (with the reason in one
+  line), and open work. Done work shrinks to a line or goes; a superseded
+  decision is deleted, not kept as history.
+- **No evidence on the page.** Commit SHAs, CI and release run ids,
+  timestamps of steps, test counts and who did what when belong in the pull
+  request and the conversation. A PR number is enough.
+- **One fact, one place.** Link to the page, section or repository file that
+  owns a fact instead of copying it.
+- **Small.** A section is a few lines; status is a table with one short
+  sentence per cell. When a page grows past a screen or two, cut what is no
+  longer true or split it into child pages.
+- **Rewrite, never append.** When a section has become a log, rewrite it in
+  place to the current state and leave how it changed in the conversation.
 
 Read the pages linked to your conversation on demand from the Hub. Ordinary Runs
 have no automatically refreshed page files:
