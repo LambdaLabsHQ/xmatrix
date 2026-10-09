@@ -141,7 +141,7 @@ test("a header back within a turn names the changed tags, across the sender's ow
   assert.equal(rows.length, 3);
   assert.equal(rows[2].continuation, undefined);
   assert.equal(rows[2].retagged.previous, rows[0], "compared with the message above the fold");
-  assert.deepEqual(rows[2].retagged.keys, ["branch", "model"], "effort shares the model's tag");
+  assert.deepEqual(rows[2].retagged.keys, ["branch", "effort"]);
   const [, sameTags] = buildConversationRows([said(claude1, "a", 0), pullRequest(claude1, 1, 1), said(claude1, "b", 2)]);
   assert.equal(sameTags.retagged, undefined);
   const [, , afterOther] = buildConversationRows([

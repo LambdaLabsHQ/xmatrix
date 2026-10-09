@@ -1247,7 +1247,7 @@ function NamedAgentIdentityLabels({ message, spaceId, token }: {
 function RetagPair({ from, to }: { from?: ReactNode; to?: ReactNode }) {
   return (
     <span className="app-message-retag inline-flex min-w-0 items-center gap-1">
-      {from ? <span className="app-message-retag-from inline-flex min-w-0 opacity-50">{from}</span> : null}
+      {from ? <span className="app-message-retag-from inline-flex min-w-0">{from}</span> : null}
       {from && to ? <ArrowRight aria-label="now" className="size-3 shrink-0 text-muted-foreground" /> : null}
       {to}
     </span>
@@ -1269,8 +1269,8 @@ function RetaggedHeaderTags({ message, previous, keys }: {
       instance offline
     </span>
   ) : null;
-  const before = headerStatusChips(previous.senderStatusChips) ?? [];
-  const after = headerStatusChips(message.senderStatusChips) ?? [];
+  const before = previous.senderStatusChips ?? [];
+  const after = message.senderStatusChips ?? [];
   const chipIds = [...new Set([...after, ...before].map((chip) => chip.id.toLowerCase()))]
     .filter((id) => keys.includes(id));
   const chipOf = (chips: typeof after, id: string) => {

@@ -30,10 +30,7 @@ function foldable(item: TimelineItem): boolean {
   return Boolean(item.supersededBy) || Boolean(timelineItemActivity(item));
 }
 
-/**
- * The header tags a message carries, by the key its tag is drawn with. Model
- * and effort share one tag in the header, so a change to either is the model's.
- */
+/** The header tags a message carries, by the key its tag is drawn with. */
 function headerTags(item: TimelineItem): Map<string, string> {
   const tags = new Map<string, string>([
     ["branch", item.senderGitBranch ?? ""],
@@ -43,9 +40,7 @@ function headerTags(item: TimelineItem): Map<string, string> {
     ["goal", `${item.senderGoal?.objective ?? ""}|${item.senderGoal?.status ?? ""}`],
   ]);
   for (const chip of item.senderStatusChips ?? []) {
-    const id = chip.id.toLowerCase();
-    const key = id === "effort" ? "model" : id;
-    tags.set(key, `${tags.get(key) ?? ""}|${id}=${chip.value ?? ""}`);
+    tags.set(chip.id.toLowerCase(), chip.value ?? "");
   }
   return tags;
 }
