@@ -22,27 +22,28 @@ type DirectoryEnv = Pick<
   "RELAY_POSTGRES_SHARD_4" | "RELAY_POSTGRES_SHARD_4_ID"
 >;
 
+/**
+ * The Channels subscribed to one GitHub delivery's sources. App connections
+ * and their source relations are written only to the directory shard (see
+ * `appRepository`), so one directory read answers; the Space shards hold none
+ * (2026-10-09: every delivery also asked each Space shard, an empty read).
+ */
 export async function resolveGitHubSubscriptionRoutes(
   env: DirectoryEnv,
   installationId: string,
   sourceRefs: string[],
   feature: string,
 ): Promise<GitHubSubscriptionRoute[]> {
-  const fleet = createPostgresAuthorityFleet(env, {
+  const directory = createPostgresAuthorityFleet(env, {
     applicationName: "xmatrix-hub-github-subscription-directory",
     statementTimeoutMs: 5_000,
     transactionTimeoutMs: 10_000,
     lockTimeoutMs: 2_000,
+  }).directoryDatabase;
+  const routes = await new PostgresAppRepository(directory).githubSubscriptionRoutes({
+    requestId: `github-routes:${crypto.randomUUID()}`.slice(0, 200),
+    installationId, sourceRefs, feature, limit: 1_001,
   });
-  const partitions = await Promise.all(fleet.physicalShards.map(({ shardId, database }) =>
-    new PostgresAppRepository(database).githubSubscriptionRoutes({
-      requestId: `github-routes:${shardId}:${crypto.randomUUID()}`.slice(0, 200),
-      installationId, sourceRefs, feature, limit: 1_001,
-    })));
-  const routes = partitions.flat().sort((left, right) =>
-    [left.channelId, left.spaceId, left.connectionId, left.sourceRef].join("\u001f").localeCompare(
-      [right.channelId, right.spaceId, right.connectionId, right.sourceRef].join("\u001f"),
-    ));
   if (routes.length > 1_000) throw new Error(
     "GitHub subscription route result exceeds 1,000 entries");
   return routes;
