@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { lowercaseHex, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { isAccountRevoked, lowercaseHex, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import type { AccountDeletionBlocker, AccountDeletionReceipt, AccountDeletionState } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, XMatrixApiError } from "@/lib/query/api-client";
@@ -58,7 +58,7 @@ export default function AccountDeletionPage() {
     try {
       const result = await xmatrixApiRequest<{ state: AccountDeletionState }>({ url: `${base}/status`, method: "POST", body: receipt });
       setState(result.state);
-      if (["committed", "completed"].includes(result.state) && !cleared.current) {
+      if (isAccountRevoked(result.state) && !cleared.current) {
         cleared.current = true;
         await logout({ redirectTo: "/account/delete" });
       }

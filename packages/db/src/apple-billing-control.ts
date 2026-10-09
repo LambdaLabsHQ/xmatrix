@@ -1,6 +1,7 @@
 import type { AuthorityDatabase } from "./contracts.js";
 import { BillingControlError, PostgresBillingRepository } from "./billing-control.js";
 import { boundedDatabaseIdentifier } from "./identifiers.js";
+import { accountRevokedSql } from "./account-deletion.js";
 
 export interface AppleAccountBinding {
   appAccountToken: string;
@@ -35,9 +36,8 @@ export class PostgresAppleBillingRepository {
     if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(token)) return null;
     return this.database.transaction({ requestId, operation: "apple.purchase.resolve" }, async (tx) => {
       const rows = await tx.query<{ app_account_token: string; space_id: string; owner_user_id: string; account_deleted: boolean }>({
-        name: "apple_account_token_read_v2", text: `SELECT t.app_account_token,t.space_id,t.owner_user_id,
-          EXISTS (SELECT 1 FROM control.account_deletion_requests d WHERE d.user_id=t.owner_user_id
-            AND d.state IN ('committed','completed')) AS account_deleted
+        name: "apple_account_token_read_v3", text: `SELECT t.app_account_token,t.space_id,t.owner_user_id,
+          ${accountRevokedSql("t.owner_user_id")} AS account_deleted
           FROM control.apple_account_tokens t WHERE t.app_account_token=$1 LIMIT 1`, values: [token], maxRows: 1,
       });
       const row = rows[0];

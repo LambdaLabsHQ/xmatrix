@@ -6,9 +6,27 @@ import { DetailedControlError } from "./control-error.js";
 export class AccountDeletionError extends DetailedControlError {
   override name = "AccountDeletionError";
 }
+import { ACCOUNT_REVOKED_STATES } from "@xmatrix/protocol";
 import type { AccountDeletionState, AccountDeletionBlocker } from "@xmatrix/protocol";
 export type { AccountDeletionState, AccountDeletionBlocker } from "@xmatrix/protocol";
 const LIMIT = 50;
+
+/**
+ * Whether the account a user id expression names was deleted: the directory's
+ * request reached commit. Every reader of that fact (sign-in, daemons, Apple
+ * notifications, Space restore) tests it through this one predicate.
+ */
+export function accountRevokedSql(userId: string): string {
+  return `EXISTS (SELECT 1 FROM control.account_deletion_requests revoked WHERE revoked.user_id=${userId}
+    AND revoked.state IN (${ACCOUNT_REVOKED_STATES.map((state) => `'${state}'`).join(",")}))`;
+}
+
+/** Read on the directory, which owns deletion decisions. */
+export async function accountIdentityRevoked(tx: DatabaseTransaction, userId: string): Promise<boolean> {
+  const rows = await tx.query<{ revoked: boolean }>({ name: "account_identity_revoked_v1",
+    text: `SELECT ${accountRevokedSql("$1")} AS revoked`, values: [userId], maxRows: 1 });
+  return rows[0]?.revoked === true;
+}
 
 /** Shared with the identity/Space admission path; never a name-based identity. */
 async function lockAccountDeletion(tx: DatabaseTransaction, userId: string): Promise<void> {
@@ -217,10 +235,8 @@ export class PostgresAccountDeletionRepository {
   }
 
   async revoked(userId: string): Promise<boolean> {
-    return this.directory.transaction({ requestId: crypto.randomUUID(), operation: "account-deletion.revocation" }, async (tx) =>
-      (await tx.query({ name: "account_deletion_revoked_v1",
-        text: "SELECT 1 FROM control.account_deletion_requests WHERE user_id=$1 AND state IN ('committed','completed')",
-        values: [userId], maxRows: 1 })).length !== 0);
+    return this.directory.transaction({ requestId: crypto.randomUUID(), operation: "account-deletion.revocation" },
+      (tx) => accountIdentityRevoked(tx, userId));
   }
 }
 

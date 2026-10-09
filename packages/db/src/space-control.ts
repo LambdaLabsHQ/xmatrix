@@ -16,6 +16,7 @@ import { insertSpaceMember, spaceMemberRole } from "./space-members.js";
 import { writeOutbox } from "./outbox.js";
 import { advanceSpaceControlHead } from "./space-control-head.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
+import { accountRevokedSql } from "./account-deletion.js";
 import {
   PostgresEntitySpaceDirectory,
   type EntitySpaceRouteKind,
@@ -1264,7 +1265,8 @@ export class PostgresSpaceControlRepository {
         name: "space_restore_head_v1", spaceId, at,
       });
       const deletedAccounts = await this.database.transaction({requestId,operation:"space.restore-account-status"}, tx => tx.query<{user_id:string}>({
-        name:"space_restore_deleted_accounts_v1",text:"SELECT user_id FROM control.account_deletion_requests WHERE user_id=ANY($1::text[]) AND state IN ('committed','completed')",
+        name:"space_restore_deleted_accounts_v2",text:`SELECT member.user_id FROM unnest($1::text[]) AS member(user_id)
+          WHERE ${accountRevokedSql("member.user_id")}`,
         values:[(deletion.members_json ?? []).map(member=>member.userId)],maxRows:10_000}));
       if(deletedAccounts.some(row=>row.user_id===actorUserId)) throw new SpaceControlError("forbidden",403,"Deleted accounts cannot restore Spaces");
       const members = await restoreSpaceDeletion(transaction, {
