@@ -92,7 +92,11 @@ test("signing failures are distinguished from transport failures without reflect
   await assert.rejects(retrieveAppleSubscription({ ...config, privateKey: "private sentinel" }, "100", "Sandbox", async () => {
     throw new Error("must not fetch");
   }), (error) => error.code === "apple_signing_failed" && error.retryable && !error.message.includes("sentinel"));
-  await assert.rejects(retrieveAppleSubscription(config, "100", "Sandbox", async () => {
+  let transportCalls = 0;
+  await assert.rejects(retrieveAppleSubscription(config, "100", "Sandbox", async (_url, init) => {
+    transportCalls++;
+    assert.match(init.headers.authorization, /^Bearer eyJ/);
     throw new Error("private sentinel");
   }), (error) => error.code === "apple_request_failed" && error.retryable && !error.message.includes("sentinel"));
+  assert.equal(transportCalls, 1);
 });
