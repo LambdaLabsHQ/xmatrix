@@ -119,12 +119,11 @@ test("agent message header shows sender context snapshots", async ({ page }) => 
     /Show model names in message headers/
   );
   await expect(row.locator(".app-message-branch-badge")).toContainText("fix-display-model-name");
+  // The header reads model and effort as one label.
   const modelChip = row.locator("[data-status-chip='model']");
-  await expect(modelChip).toContainText("gpt-5-codex");
-  await expect(modelChip).toHaveAttribute("aria-label", "Model: gpt-5-codex");
-  const effortChip = row.locator("[data-status-chip='effort']");
-  await expect(effortChip).toContainText("xhigh");
-  await expect(effortChip).toHaveAttribute("aria-label", "Effort: xhigh");
+  await expect(modelChip).toHaveText("gpt-5-codex · xhigh");
+  await expect(modelChip).toHaveAttribute("aria-label", "Model: gpt-5-codex · xhigh");
+  await expect(row.locator("[data-status-chip='effort']")).toHaveCount(0);
 });
 
 test("details rail shows live instance header labels instead of message snapshots", async ({ page }, testInfo) => {
@@ -223,16 +222,14 @@ test("details rail shows live instance header labels instead of message snapshot
     const chipRect = chip.getBoundingClientRect();
     const fillRect = fill.getBoundingClientRect();
     return {
-      chipBottom: chipRect.bottom,
+      chipHeight: chipRect.height,
       chipWidth: chipRect.width,
-      fillBottom: fillRect.bottom,
       fillHeight: fillRect.height,
       fillWidth: fillRect.width,
     };
   });
-  // The share used is a line under the words, not a wash behind them.
-  expect(usageGeometry.fillHeight).toBeLessThanOrEqual(3);
-  expect(Math.abs(usageGeometry.chipBottom - usageGeometry.fillBottom)).toBeLessThanOrEqual(1);
+  // The share used fills the label behind its words.
+  expect(usageGeometry.fillHeight).toBeGreaterThanOrEqual(usageGeometry.chipHeight - 1);
   expect(usageGeometry.fillWidth / usageGeometry.chipWidth).toBeCloseTo(0.35, 1);
   const screenshotPath = testInfo.outputPath("details-usage-meter-35-percent.png");
   await usageMeter.screenshot({ path: screenshotPath });

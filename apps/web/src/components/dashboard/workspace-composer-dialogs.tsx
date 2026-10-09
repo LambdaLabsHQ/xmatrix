@@ -155,7 +155,7 @@ export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
 import { AgentInstanceTagChips } from "./agent-instance-tag-chips";
 import { ListSkeleton, LoadingImage } from "./content-skeleton";
-import { BranchBadge, INK_TAG_CLASS, UsageMeterLine } from "./status-tag";
+import { BranchBadge, PAPER_TAG_CLASS, UsageMeterFill } from "./status-tag";
 
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
@@ -1653,7 +1653,7 @@ export function ChannelDetails({
                           </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
-                          <span className={cn("app-detail-member-badge py-0.5 text-[11px]", INK_TAG_CLASS)}>
+                          <span className={cn("app-detail-member-badge px-[7px] py-0.5 text-[11px]", PAPER_TAG_CLASS)}>
                             {kindLabel}
                           </span>
                         </div>
@@ -1818,7 +1818,7 @@ export function ChannelDetails({
                             </span>
                             {!automation.capabilities.update && !automation.capabilities.pause && !automation.capabilities.resume &&
                               !automation.capabilities.delete && (
-                              <span className={cn("shrink-0 py-0.5 text-[10px] font-bold", INK_TAG_CLASS)}>
+                              <span className={cn("shrink-0 px-[7px] py-0.5 text-[10px] font-bold", PAPER_TAG_CLASS)}>
                                 read only
                               </span>
                             )}
@@ -2102,8 +2102,8 @@ export function TagRow({
             title={tag.title}
             className={cn(
               "inline-flex items-center font-medium tabular-nums",
-              INK_TAG_CLASS,
-              compact ? "h-5 text-[10px] leading-none" : "h-6 text-[11px] leading-none"
+              PAPER_TAG_CLASS,
+              compact ? "h-5 px-1.5 text-[10px] leading-none" : "h-6 px-2 text-[11px] leading-none"
             )}
           >
             {tag.label}
@@ -2174,7 +2174,7 @@ export function MeterTag({
     tip.style.left = `${Math.max(8, Math.min(tipAnchor.left, maxLeft))}px`;
   }, [tipAnchor]);
 
-  // Ink on the paper like every `Tag`; the meter is the line under its words.
+  // A paper label like every `Tag`; the meter fills it from the left.
   return (
     <span
       data-usage-meter-chip
@@ -2183,14 +2183,14 @@ export function MeterTag({
       onPointerLeave={() => setTipAnchor(null)}
       className={cn(
         "relative inline-flex shrink-0 items-center overflow-hidden font-medium",
-        INK_TAG_CLASS,
+        PAPER_TAG_CLASS,
         compact
-          ? "h-5 w-full text-[10px] leading-none"
-          : "h-6 gap-1.5 text-[11px] leading-none"
+          ? "h-5 w-full px-2 text-[10px] leading-none"
+          : "h-6 gap-1.5 px-2 text-[11px] leading-none"
       )}
     >
       {displayPercent !== undefined && fillTone ? (
-        <UsageMeterLine percent={displayPercent} tone={fillTone} track />
+        <UsageMeterFill percent={displayPercent} tone={fillTone} />
       ) : null}
       <span
         className={cn(
