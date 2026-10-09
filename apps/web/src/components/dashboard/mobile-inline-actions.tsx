@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentType, ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,8 @@ export type MobileInlineAction = {
   label: string;
   destructive?: boolean;
   pressed?: boolean;
+  /** Ask in place: the first tap turns the option into "Confirm", the second selects it. */
+  confirm?: boolean;
   onSelect: () => void;
 };
 
@@ -31,6 +33,7 @@ export function MobileInlineActions({
   /** Rendered above the options, e.g. a quick-reaction row. */
   children?: ReactNode;
 }) {
+  const [armedKey, setArmedKey] = useState<string | null>(null);
   return (
     <div
       role="toolbar"
@@ -40,19 +43,31 @@ export function MobileInlineActions({
     >
       {children}
       <div className="app-mobile-inline-actions-row">
-        {actions.map(({ key, icon: Icon, label: actionLabel, destructive, pressed, onSelect }) => (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={pressed}
-            data-destructive={destructive || undefined}
-            className="app-mobile-inline-action"
-            onClick={onSelect}
-          >
-            <Icon className="size-[1.125rem] shrink-0" />
-            <span>{actionLabel}</span>
-          </button>
-        ))}
+        {actions.map(({ key, icon: Icon, label: actionLabel, destructive, pressed, confirm, onSelect }) => {
+          const armed = armedKey === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-label={armed ? `Confirm ${actionLabel.toLowerCase()}` : undefined}
+              aria-pressed={pressed}
+              data-destructive={destructive || undefined}
+              data-armed={armed || undefined}
+              className="app-mobile-inline-action"
+              onClick={() => {
+                if (confirm && !armed) {
+                  setArmedKey(key);
+                  return;
+                }
+                setArmedKey(null);
+                onSelect();
+              }}
+            >
+              <Icon className="size-[1.125rem] shrink-0" />
+              <span>{armed ? "Confirm" : actionLabel}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
