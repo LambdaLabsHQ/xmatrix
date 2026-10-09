@@ -784,7 +784,10 @@ export class PostgresPageRepository {
         values: [spaceId, pageId], maxRows: MAX_LINKS,
       });
       const owed = new Map<string, PageOwedUpdate>();
+      const sections = new Set(order);
       for (const row of ended) {
+        // A section taken off the page has nothing left to update.
+        if (row.block_id !== "" && !sections.has(row.block_id)) continue;
         const at = iso(row.ended_at);
         const update = updates.get(row.block_id);
         // A release ends a lease, not work: a section its holder's conversation
