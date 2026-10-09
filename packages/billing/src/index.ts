@@ -54,7 +54,7 @@ export interface SpaceBillingPolicy {
   /** Called before a Space is marked deleted; a rejection blocks deletion. */
   spaceDeletion(
     transaction: BillingTransaction,
-    input: { spaceId: string; now: string },
+    input: { spaceId: string; now: string; intent?: "account-deletion" },
   ): Promise<BillingRejection | null>;
   /** Called before someone becomes a billable member (owner, admin or member). */
   seatAdmission(

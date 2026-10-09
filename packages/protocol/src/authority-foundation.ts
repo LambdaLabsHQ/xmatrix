@@ -142,6 +142,7 @@ export const HUB_ROUTES = {
   account_deletion_status: "/api/account-deletion/status",
   account_deletion_cancel: "/api/account-deletion/cancel",
   account_deletion_leave: "/api/account-deletion/leave-space",
+  account_deletion_close: "/api/account-deletion/close-space",
   me_avatar: "/api/me/avatar",
   /** Unauthenticated read; see human-avatar.ts for why a face is public. */
   human_avatar: (objectPath: string) => `/api/avatars/${objectPath}`,
@@ -362,6 +363,7 @@ export const WEB_PROXY_ROUTES = {
   account_deletion_status: "/api/xmatrix/account-deletion/status",
   account_deletion_cancel: "/api/xmatrix/account-deletion/cancel",
   account_deletion_leave: "/api/xmatrix/account-deletion/leave-space",
+  account_deletion_close: "/api/xmatrix/account-deletion/close-space",
   me_avatar: "/api/xmatrix/me/avatar",
   machine_daemons: "/api/xmatrix/machine-daemons",
   agent_instances: "/api/xmatrix/agent-instances",
