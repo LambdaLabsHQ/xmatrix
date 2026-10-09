@@ -266,13 +266,13 @@ function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): b
 function relayRuntimeProductFactoryFromEnv(
   env: Env,
   scheduleBackground: (task: Promise<unknown>) => void,
-  runtimeSelf?: { cellName: () => string; fetch(request: Request): Promise<Response> },
+  runtimeSelf: { cellName: () => string; fetch(request: Request): Promise<Response> },
+  storage: DurableObjectStorage,
 ): RelayRuntimeProductPortFactory | undefined {
   // Every product port answers from PostgreSQL.
   if (!env.RELAY_POSTGRES) return undefined;
   try {
-    return createProductionRelayRuntimeProductPortFactory(env, { scheduleBackground,
-      ...(runtimeSelf ? { runtimeSelf } : {}) });
+    return createProductionRelayRuntimeProductPortFactory(env, { scheduleBackground, runtimeSelf, storage });
   } catch {
     return undefined;
   }
@@ -302,6 +302,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
         cellName: () => this.ownerCell ?? RELAY_RUNTIME_SELECTED_CELL,
         fetch: request => this.fetch(request),
       },
+      ctx.storage,
     );
     this.productAdapter = productFactory
       ? createRelayRuntimeProductAdapter(ctx, productFactory, {
