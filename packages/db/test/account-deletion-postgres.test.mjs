@@ -19,6 +19,10 @@ async function fixture() {
   return {...f,db,repo,proof};
 }
 
+async function expectState(f, state) {
+  assert.deepEqual(await f.repo.status(f.proof.requestId, f.proof.receiptHash), { state });
+}
+
 integration("deletion erases only the confirmed identity, revokes it, and cannot be replayed as another request",async()=>{
   const f=await fixture();
   try{
@@ -31,7 +35,7 @@ integration("deletion erases only the confirmed identity, revokes it, and cannot
     let avatars=0;
     await f.repo.advance("delete-user",async id=>{assert.equal(id,"delete-user");avatars++;return true;});
     assert.equal(avatars,1);
-    assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"completed"});
+    await expectState(f,"completed");
     assert.equal(await f.repo.status(f.proof.requestId,"b".repeat(64)),null);
     assert.equal(await f.repo.revoked("delete-user"),true);
     for(const table of ["auth_users","auth_sessions","auth_accounts"]){
@@ -62,7 +66,7 @@ integration("owned Spaces block without data loss and a non-owner may leave only
     const spaces=new PostgresSpaceControlRepository(f.db,"shard-0");
     await spaces.createSpace({requestId:randomUUID(),commandId:randomUUID(),spaceId:"owned-space",ownerUserId:"delete-user",name:"Keep this Space"});
     await f.repo.begin(f.proof);await f.repo.advance("delete-user",async()=>{throw Error("blocked");});
-    assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"blocked"});
+    await expectState(f,"blocked");
     assert.equal(await f.repo.revoked("delete-user"),false);
     assert.equal((await f.run("SELECT name FROM data.spaces WHERE space_id='owned-space'"))[0].name,"Keep this Space");
     assert.equal((await f.run("SELECT count(*)::int n FROM data.account_deletion_fences"))[0].n,0);
@@ -81,10 +85,10 @@ integration("an interrupted avatar cleanup resumes without restoring credentials
     await f.repo.begin(f.proof);
     await assert.rejects(f.repo.advance("delete-user",async()=>{throw Error("storage unavailable");}),/storage unavailable/);
     assert.equal(await f.repo.revoked("delete-user"),true);
-    assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"committed"});
+    await expectState(f,"committed");
     assert.deepEqual(await f.repo.pending(),["delete-user"]);
     await f.repo.advance("delete-user",async()=>true);
-    assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"completed"});
+    await expectState(f,"completed");
   }finally{await f.close();}
 });
 
@@ -93,12 +97,12 @@ integration("private cleanup is bounded and resumes; a receipt never completes w
   await f.run(`INSERT INTO data.user_space_locale_preferences(space_id,user_id,version,created_at,updated_at)
     SELECT 'space-'||n,'delete-user',1,now(),now() FROM generate_series(1,501) n`);
   await f.repo.begin(f.proof);await f.repo.advance("delete-user",async()=>true);
-  assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"committed"});
+  await expectState(f,"committed");
   assert.equal((await f.run("SELECT count(*)::int n FROM data.user_space_locale_preferences WHERE user_id='delete-user'"))[0].n,1);
   await assert.rejects(f.run(`INSERT INTO data.user_space_locale_preferences(space_id,user_id,version,created_at,updated_at)
     VALUES('new','delete-user',1,now(),now())`),/closing or deleted/);
   await f.repo.advance("delete-user",async()=>true);
-  assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"completed"});
+  await expectState(f,"completed");
  }finally{await f.close();}
 });
 
@@ -130,7 +134,7 @@ integration("a nonterminal subscription blocks deletion even without a membershi
     VALUES('billing-space','delete-user','customer','subscription','price','pro','active',1,now(),1,now(),now())`);
   assert.ok((await f.repo.preview("delete-user")).blockers.some(b=>b.kind==="subscription"));
   await f.repo.begin(f.proof);await f.repo.advance("delete-user",async()=>true);
-  assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"blocked"});
+  await expectState(f,"blocked");
   assert.equal((await f.run("SELECT status FROM data.space_billing_subscriptions WHERE space_id='billing-space'"))[0].status,"active");
   await f.run("UPDATE data.space_billing_subscriptions SET status='canceled' WHERE space_id='billing-space'");
   const retry={...f.proof,requestId:randomUUID()};await f.repo.begin(retry);await f.repo.advance("delete-user",async()=>true);
@@ -144,7 +148,7 @@ integration("pending Machine actions prevent deletion and no command is silently
   await f.run(`INSERT INTO data.machine_daemon_commands(command_id,owner_user_id,machine_id,command_type,payload_json,status,attempts,version,created_at,updated_at)
     VALUES('action','delete-user','machine','worktree_action','{}','pending',0,1,now(),now())`);
   await f.repo.begin(f.proof);await f.repo.advance("delete-user",async()=>true);
-  assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"blocked"});
+  await expectState(f,"blocked");
   assert.equal((await f.run("SELECT status FROM data.machine_daemon_commands WHERE command_id='action'"))[0].status,"pending");
  }finally{await f.close();}
 });
@@ -193,11 +197,11 @@ integration("concurrent workers share one lease and never repeat an in-flight de
     let sweeps=0;
     const first=f.repo.advance("delete-user",async()=>{sweeps++;entered();await held;return true;});
     await started;
-    assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"committed"});
+    await expectState(f,"committed");
     await f.repo.advance("delete-user",async()=>{throw Error("another worker cannot enter the held lease");});
     resume();await first;
     assert.equal(sweeps,1);
-    assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"completed"});
+    await expectState(f,"completed");
   }finally{await f.close();}
 });
 
@@ -213,9 +217,9 @@ integration("an expired prepare lease cannot commit after checking blockers",asy
     await f.repo.advance("delete-user",async()=>{throw Error("expired lease must not erase avatars");});
     assert.equal(await f.repo.revoked("delete-user"),false);
     assert.equal((await f.run("SELECT count(*)::int n FROM control.auth_users WHERE id='delete-user'"))[0].n,1);
-    assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"preparing"});
+    await expectState(f,"preparing");
     f.repo.preview=original;
     await f.repo.advance("delete-user",async()=>true);
-    assert.deepEqual(await f.repo.status(f.proof.requestId,f.proof.receiptHash),{state:"completed"});
+    await expectState(f,"completed");
   }finally{await f.close();}
 });
