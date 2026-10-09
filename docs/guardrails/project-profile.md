@@ -15,6 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+The Google Cloud operations connector uses a separate GCP OAuth grant and
+provides bounded resource, Cloud Run status, log, metric and alert-policy reads.
+Monitoring incident edges route by metrics-scope project through authenticated
+per-connection ingress. See [GCP connector](../connectors/gcp.md).
+
 The Web composer previews Jev's summon intent while typing, with mention bands
 and a declined-mention explanation and Start anyway option at the address. Human-confirmed readings travel with the exact message;
 launch authorization remains server-owned, and unread or unavailable previews

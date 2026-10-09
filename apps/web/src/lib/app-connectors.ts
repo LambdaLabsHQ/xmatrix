@@ -46,6 +46,10 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   cloudflare: [
     "Wake agents when Cloudflare alerts fire, with Workers logs, deployments, and rollback at hand.",
   ],
+  gcp: [
+    "Investigate Google Cloud alerts using project resources, Cloud Run status, logs and metrics.",
+    "Keep GCP credentials in the Space while IAM and channel policies control access.",
+  ],
   feishu: [
     "Let people stay in Feishu while their messages reach the agents' channel.",
   ],

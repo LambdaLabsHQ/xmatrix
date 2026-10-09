@@ -7,6 +7,7 @@ import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, refreshOAuthFields,
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { ProviderRequestError } from "../src/connectors/http.ts";
+import { GCP_ACTIONS } from "../src/connectors/gcp-api.ts";
 
 const exchangeOAuthCode = async (...args) => (await exchangeOAuthGrant(...args)).fields;
 
@@ -150,33 +151,37 @@ test("Google Check confirms a real minimal Drive identity without writing or acc
   });
 });
 
-test("a failed Google refresh stops before writes; a refreshed grant uses current-version CAS", async () => {
+test("Google and GCP refresh failures stop actions; refreshed grants use current-version CAS", async () => {
   const load = await compileCommonJsSourceModule(new URL("../src/connectors/connection-credentials.ts", import.meta.url));
   const credentials = { oauthToken: "old", oauthRefreshToken: "refresh", oauthExpiresAt: String(Date.now() - 1000) };
-  for (const [response, rejectCAS] of [[{ status: 401 }, false], [{ body: grant }, true], [{ body: grant }, false]]) {
-    const puts = [];
-    const dependencies = {
-      "../app-connectors": { getAppConnectorProvider },
-      "./credentials": { connectorCredentialRepository: () => ({ resolve: async () => ({ values: credentials, version: 7 }),
-        put: async input => { puts.push(input); if (rejectCAS) throw new Error("credentials changed"); } }) },
-      "./actions/notion": { verifyNotion: () => assert.fail("Google must not call Notion") },
-      "./http": { ProviderRequestError }, "./oauth": { refreshOAuthFields },
-    };
-    const exports = load(name => dependencies[name], { crypto, Date, Object });
-    await fetched([response, { body: { documentId: id, replies: [{}] } }], async calls => {
-      const operation = async () => {
-        const current = await exports.connectionCredentials(env, "space-google", "google");
-        await GOOGLE_ACTIONS.append_doc.execute({ credentials: current }, { document: id, text: "Once" });
+  for (const providerId of ["google", "gcp"]) {
+    const issued = { ...grant, scope: providerId === "gcp" ? "https://www.googleapis.com/auth/cloud-platform" : scope };
+    for (const [response, rejectCAS] of [[{ status: 401 }, false], [{ body: issued }, true], [{ body: issued }, false]]) {
+      const puts = [];
+      const dependencies = {
+        "../app-connectors": { getAppConnectorProvider },
+        "./credentials": { connectorCredentialRepository: () => ({ resolve: async () => ({ values: credentials, version: 7 }),
+          put: async input => { puts.push(input); if (rejectCAS) throw new Error("credentials changed"); } }) },
+        "./actions/notion": { verifyNotion: () => assert.fail("Google must not call Notion") },
+        "./http": { ProviderRequestError }, "./oauth": { refreshOAuthFields },
       };
-      if (response.status === 401 || rejectCAS) {
-        await assert.rejects(operation());
-        assert.equal(calls.length, 1);
-      } else {
-        await operation();
-        assert.equal(calls[1].headers.get("authorization"), `Bearer ${grant.access_token}`);
-        assert.equal(puts[0].expectedVersion, 7);
-        assert.equal(puts[0].asHub, true);
-      }
-    });
+      const exports = load(name => dependencies[name], { crypto, Date, Object });
+      await fetched([response, { body: providerId === "gcp" ? { projects: [] } : { documentId: id, replies: [{}] } }], async calls => {
+        const operation = async () => {
+          const current = await exports.connectionCredentials(env, "space-google", providerId);
+          if (providerId === "gcp") await GCP_ACTIONS.list_projects.execute({ credentials: current }, {});
+          else await GOOGLE_ACTIONS.append_doc.execute({ credentials: current }, { document: id, text: "Once" });
+        };
+        if (response.status === 401 || rejectCAS) {
+          await assert.rejects(operation());
+          assert.equal(calls.length, 1);
+        } else {
+          await operation();
+          assert.equal(calls[1].headers.get("authorization"), `Bearer ${grant.access_token}`);
+          assert.equal(puts[0].expectedVersion, 7);
+          assert.equal(puts[0].asHub, true);
+        }
+      });
+    }
   }
 });
