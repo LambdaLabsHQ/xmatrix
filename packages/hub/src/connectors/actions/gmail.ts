@@ -100,7 +100,7 @@ function messageLine(message: Record<string, unknown>): string {
 
 export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
   search: {
-    effect: "read", requires: ["oauthToken"],
+    effect: "read", requires: ["composioAccountId"],
     parse(statement) {
       const query = statement.text.trim();
       if (statement.target !== "*") return "use @gmail:search:* <Gmail search, e.g. from:noreply@example.com newer_than:1d>";
@@ -121,7 +121,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     },
   },
   read: {
-    effect: "read", requires: ["oauthToken"],
+    effect: "read", requires: ["composioAccountId"],
     parse(statement) {
       return MESSAGE_ID.test(statement.target) && !statement.text.trim()
         ? { id: statement.target } : "name a message id from @gmail:search";
