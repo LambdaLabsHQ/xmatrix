@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { GitPullRequest, Link2, Plus, Unlink } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
-import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
+import { actionClass } from "@/components/ui/action-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { readGitHubGrant } from "@/lib/github-connect-return";
 import { cn } from "@/lib/utils";
@@ -24,10 +24,7 @@ type GitHubInstallations = {
   authorized: boolean;
 };
 
-const ACTION_CLASS = cn(
-  "app-connector-secondary-action inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-bold disabled:opacity-50",
-  COUNT_CHIP_MATERIAL_CLASS,
-);
+const ACTION_CLASS = actionClass({ variant: "secondary", size: "sm" });
 
 /**
  * The GitHub accounts and organizations this Space reaches, one App
@@ -120,7 +117,7 @@ export function GitHubInstallationAccounts({ spaceId, token, onManage, onAuthori
       ) : null}
       {installations && installations.available.length > 0 ? (
         <>
-          <p className="mt-4 text-xs font-bold uppercase text-muted-foreground">Your GitHub accounts, not linked here</p>
+          <p className="mt-6 text-[13px] font-semibold">Your GitHub accounts, not linked here</p>
           <ul className="mt-2 space-y-2">
             {installations.available.map((account) => (
               <AccountRow key={account.installationId} account={account}>

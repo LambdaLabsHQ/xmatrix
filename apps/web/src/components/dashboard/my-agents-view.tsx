@@ -404,7 +404,7 @@ function RegistrationEditorForm({
         onSave({ displayName, model, workingMode, instructions });
       }}
     >
-      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+      <label className="grid gap-1.5 text-[13px] font-semibold">
         Name
         <input
           value={displayName}
@@ -414,7 +414,7 @@ function RegistrationEditorForm({
           className={INPUT_CLASS}
         />
       </label>
-      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+      <label className="grid gap-1.5 text-[13px] font-semibold">
         Default model
         <input
           value={model}
@@ -424,7 +424,7 @@ function RegistrationEditorForm({
           className={INPUT_CLASS}
         />
       </label>
-      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+      <label className="grid gap-1.5 text-[13px] font-semibold">
         Working mode
         <select
           value={workingMode}
@@ -437,7 +437,7 @@ function RegistrationEditorForm({
           <option value="cautious">Cautious</option>
         </select>
       </label>
-      <label className="grid gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground sm:col-span-3">
+      <label className="grid gap-1.5 text-[13px] font-semibold sm:col-span-3">
         Instructions
         <textarea
           value={instructions}
