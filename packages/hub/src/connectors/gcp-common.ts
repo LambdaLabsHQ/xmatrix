@@ -25,8 +25,11 @@ export const PAGE_SIZE = 30;
 type Credentials = Readonly<Record<string, string>>;
 
 
-export async function request(credentials: Credentials, url: URL | string, json?: unknown) {
-  return providerJson(url, { describeError: googleError, headers: googleHeaders(credentials, "Google Cloud"), ...(json === undefined ? {} : { method: "POST", json }) });
+export async function request(credentials: Credentials, url: URL | string, json?: unknown, quotaProject?: string) {
+  if (quotaProject !== undefined && !GCP_PROJECT.test(quotaProject)) throw new ProviderRequestError(400, "Invalid Google Cloud quota project");
+  return providerJson(url, { describeError: googleError,
+    headers: { ...googleHeaders(credentials, "Google Cloud"), ...(quotaProject ? { "x-goog-user-project": quotaProject } : {}) },
+    ...(json === undefined ? {} : { method: "POST", json }) });
 }
 
 export function list(result: Record<string, unknown>, key: string): unknown[] {
@@ -55,4 +58,3 @@ export function project(statement: ConnectorActionStatement) {
 export function projectOnly(statement: ConnectorActionStatement) {
   return statement.text.trim() ? "this action takes only a project ID or number" : project(statement);
 }
-
