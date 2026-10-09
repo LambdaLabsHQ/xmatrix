@@ -69,3 +69,10 @@ export async function composioGet(credentials: Readonly<Record<string, string>>,
   }
   return record(result.data);
 }
+
+/** Deletes a connected account and the Google grant Composio holds for it; one already gone counts as deleted. */
+export async function deleteComposioAccount(apiKey: string, accountId: string): Promise<void> {
+  if (!ACCOUNT_ID.test(accountId)) return;
+  await providerJson(`${API}/connected_accounts/${accountId}`, { method: "DELETE", headers: apiHeaders(apiKey) })
+    .catch((error: unknown) => { if (!(error instanceof ProviderRequestError && error.status === 404)) throw error; });
+}

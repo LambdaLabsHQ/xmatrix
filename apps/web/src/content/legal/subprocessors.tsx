@@ -44,6 +44,15 @@ const subprocessors: Provider[] = [
     region: "United States.",
     added: "October 2026",
   },
+  {
+    name: "Sampark Inc (Composio)",
+    purpose:
+      "Google sign-in and API access for the read-only Gmail app: Composio's verified Google application holds the Gmail grant and relays each search or read a Space member or Agent invokes.",
+    data:
+      "The connected Gmail account's OAuth grant, and the messages, headers, and metadata returned for each requested search or read.",
+    region: "United States and other locations described by Composio for its services.",
+    added: "October 2026",
+  },
 ];
 
 function ProviderCard({ provider }: { provider: Provider }) {
