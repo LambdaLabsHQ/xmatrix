@@ -5237,9 +5237,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-avatar .identity-a
   background-color: oklch(0.577 0.245 27.325) !important;
 }
 
-/* The faint track under a meter's line, in the tag's own ink. */
-.xmatrix-app .app-usage-meter-track {
-  background: color-mix(in oklch, currentColor 16%, transparent);
+/* On a paper label the meter's tone is softened so the label's ink stays legible over it. */
+.xmatrix-app .app-paper-tag > .app-usage-meter-fill {
+  opacity: 0.38;
 }
 
 /* Mobile app shell reset.

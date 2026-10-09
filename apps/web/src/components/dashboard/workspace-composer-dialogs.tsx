@@ -155,7 +155,7 @@ export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
 import { AgentInstanceTagChips } from "./agent-instance-tag-chips";
 import { ListSkeleton, LoadingImage } from "./content-skeleton";
-import { BranchBadge, PAPER_TAG_CLASS, UsageMeterLine } from "./status-tag";
+import { BranchBadge, PAPER_TAG_CLASS, UsageMeterFill } from "./status-tag";
 
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
@@ -2174,7 +2174,7 @@ export function MeterTag({
     tip.style.left = `${Math.max(8, Math.min(tipAnchor.left, maxLeft))}px`;
   }, [tipAnchor]);
 
-  // A paper label like every `Tag`; the meter is the line along its bottom edge.
+  // A paper label like every `Tag`; the meter fills it from the left.
   return (
     <span
       data-usage-meter-chip
@@ -2190,7 +2190,7 @@ export function MeterTag({
       )}
     >
       {displayPercent !== undefined && fillTone ? (
-        <UsageMeterLine percent={displayPercent} tone={fillTone} track />
+        <UsageMeterFill percent={displayPercent} tone={fillTone} />
       ) : null}
       <span
         className={cn(

@@ -31,19 +31,16 @@ export function tagClass(...extra: Array<string | false | undefined>): string {
   return cn(TAG_SHAPE_CLASS, PAPER_TAG_CLASS, ...extra);
 }
 
-/* A usage meter on a paper label is a line along its bottom edge: the share used in the
-   meter's tone, over a faint track when the meter is the tag's whole point. */
-export function UsageMeterLine({ percent, tone, track }: { percent: number; tone: string; track?: boolean }) {
+/* A usage meter on a paper label fills the label from the left, in the meter's
+   tone softened onto the paper (user 2026-10-09: 背景色的进度条，不要下面的横条). */
+export function UsageMeterFill({ percent, tone }: { percent: number; tone: string }) {
   return (
-    <>
-      {track ? <span aria-hidden className="app-usage-meter-track pointer-events-none absolute bottom-0 inset-x-0 h-0.5 rounded-full" /> : null}
-      <span
-        aria-hidden
-        className="app-usage-meter-fill pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-full"
-        data-tone={tone}
-        style={{ width: `${percent}%` }}
-      />
-    </>
+    <span
+      aria-hidden
+      className="app-usage-meter-fill pointer-events-none absolute inset-y-0 left-0"
+      data-tone={tone}
+      style={{ width: `${percent}%` }}
+    />
   );
 }
 

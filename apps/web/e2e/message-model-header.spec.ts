@@ -222,16 +222,14 @@ test("details rail shows live instance header labels instead of message snapshot
     const chipRect = chip.getBoundingClientRect();
     const fillRect = fill.getBoundingClientRect();
     return {
-      chipBottom: chipRect.bottom,
+      chipHeight: chipRect.height,
       chipWidth: chipRect.width,
-      fillBottom: fillRect.bottom,
       fillHeight: fillRect.height,
       fillWidth: fillRect.width,
     };
   });
-  // The share used is a line under the words, not a wash behind them.
-  expect(usageGeometry.fillHeight).toBeLessThanOrEqual(3);
-  expect(Math.abs(usageGeometry.chipBottom - usageGeometry.fillBottom)).toBeLessThanOrEqual(1);
+  // The share used fills the label behind its words.
+  expect(usageGeometry.fillHeight).toBeGreaterThanOrEqual(usageGeometry.chipHeight - 1);
   expect(usageGeometry.fillWidth / usageGeometry.chipWidth).toBeCloseTo(0.35, 1);
   const screenshotPath = testInfo.outputPath("details-usage-meter-35-percent.png");
   await usageMeter.screenshot({ path: screenshotPath });

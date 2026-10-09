@@ -28,7 +28,7 @@ import {
 } from "./workspace-shell-presence";
 
 import { statusChipClass } from "@/components/ui/status-tone";
-import { TAG_SHAPE_CLASS, Tag, UsageMeterLine } from "./status-tag";
+import { TAG_SHAPE_CLASS, Tag, UsageMeterFill } from "./status-tag";
 
 export {
   agentInstanceDisplayStatus,
@@ -2176,7 +2176,7 @@ export function StatusChipBadge({
       nowrap={untruncated}
       className={cn("app-status-chip-badge", staged && "text-foreground")}
       fill={fillPercent === undefined ? null : (
-        <UsageMeterLine percent={fillPercent} tone={chip.noteTone ?? meterTone(fillPercent)} />
+        <UsageMeterFill percent={fillPercent} tone={chip.noteTone ?? meterTone(fillPercent)} />
       )}
       {...(onToggleEditor ? { onClick: onToggleEditor, expanded } : {})}
     >
