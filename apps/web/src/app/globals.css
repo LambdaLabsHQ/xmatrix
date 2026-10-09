@@ -5258,6 +5258,13 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   border-radius: 0.375rem !important;
 }
 
+/* A count sits on the conversation list, itself a shade darker than the
+   paper, and has to read at a glance; at the labels' 5% it vanished there
+   (user 2026-10-09: 深色不够…还要更深). */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-count-pill.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *) {
+  background: color-mix(in oklch, var(--foreground) 14%, transparent) !important;
+}
+
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action)::before,
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip:not(:is(.app-rail, .app-material-wood-panel, .app-message-surface-space-setup) *, .app-connector-primary-action, .app-connector-secondary-action)::after {
   content: none !important;
