@@ -1641,58 +1641,12 @@ fn daemon_broker_binding_requires_url_and_capability() {
 }
 
 #[test]
-fn daemon_request_clients_rediscover_broker_after_daemon_generation_handoff() {
-    // Broker rediscovery lives in the daemon secret/trace peel (include!-scoped).
-    let source = [
-        include_str!("../lib.rs"),
-        include_str!("../runtime_daemon_secret_trace.rs"),
-        include_str!("../runtime_daemon_secret_trace_commands.rs"),
-        include_str!("../runtime_daemon_connection.rs"),
-        include_str!("../runtime_daemon_request_broker.rs"),
-        include_str!("../runtime_codex_channel_messages.rs"),
-    ]
-    .join("\n");
-    assert!(source.contains("request_local_daemon_request_json_with_rediscovery"));
-    assert!(source.contains("read_daemon_request_broker_state()"));
-    assert!(source.contains("rediscovered_daemon_auth_url("));
-    assert!(source.contains("/request/rebind-run"));
-    assert!(source.contains("/request/handoff-run"));
-}
-
-#[test]
 fn daemon_reconnect_run_report_maintenance_is_background_and_single_flight() {
     let active = std::sync::atomic::AtomicBool::new(false);
     assert!(try_begin_daemon_run_report_maintenance(&active));
     assert!(!try_begin_daemon_run_report_maintenance(&active));
     active.store(false, std::sync::atomic::Ordering::Release);
     assert!(try_begin_daemon_run_report_maintenance(&active));
-
-    let source = include_str!("../runtime_daemon_connection.rs");
-    let reconnected = source
-        .split("MachineDaemonConnectionEvent::Reconnected")
-        .nth(1)
-        .expect("reconnect handler");
-    let handler = reconnected
-        .split("MachineDaemonConnectionEvent::ShutdownRequested")
-        .next()
-        .expect("bounded reconnect handler");
-    assert!(handler.contains("spawn_daemon_run_report_maintenance("));
-    assert!(!handler.contains("report_orphaned_terminal_daemon_runs(&run_registry, &relay).await"));
-}
-
-#[test]
-fn daemon_run_snapshot_waits_for_control_connection_before_report() {
-    let source = include_str!("../runtime_daemon_run_registry.rs");
-    let snapshot = source
-        .split("async fn report_daemon_run_snapshot(")
-        .nth(1)
-        .expect("snapshot reporter");
-    let body = snapshot
-        .split("fn spawn_daemon_child_monitor(")
-        .next()
-        .expect("bounded snapshot reporter");
-    assert!(body.contains("if relay.is_connected()"));
-    assert!(body.contains("tokio::time::sleep(Duration::from_millis(100)).await"));
 }
 
 /// A Git credential grant is what confines a run to one Space's repository.

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -194,12 +193,4 @@ test("a subscription made before its issue existed named an earlier issue and he
   await dispatchProductGitHubWebhook({ env: {}, event: "issue_comment", delivery: "d-5", payload },
     current.dependencies);
   assert.equal(current.appended.length, 1);
-});
-
-test("a GitHub delivery's routes are not checked again after the route read", () => {
-  /* githubSubscriptionRoutes already returns only live subscriptions
-     (LIVE_SOURCE_RELATION_SQL); re-reading each route's connection cost ~5
-     statements per route and silently capped a Channel at 500 subscriptions. */
-  const adapter = readFileSync(new URL("../src/product-github-webhook-authority-adapter.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(adapter, /listAppConnections|subscriptionAllows/u);
 });

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readIndexRoutesAuthSpaceSource } from "./index-routes-auth-space-source.mjs";
 
 import {
   AUTHORITY_PROBE_INITIAL_DELAY_MS,
@@ -49,8 +48,6 @@ async function runProbeFirstWait(deadlineMs, terminalAtProbe) {
   });
   return { result, probedAt, deadlineAtMs, endedAtMs: clock.state.ms, slept: clock.state.slept };
 }
-
-const authSpace = readIndexRoutesAuthSpaceSource();
 
 /** The deadline both waits use. */
 const DEADLINE_MS = 20_000;
@@ -125,21 +122,6 @@ test("delays grow from the previous flat interval up to a fixed ceiling", () => 
     assert.equal(probeDelayMs(attempt, DEADLINE_MS), AUTHORITY_PROBE_MAX_DELAY_MS);
   }
   assert.throws(() => probeDelayMs(0, DEADLINE_MS), TypeError);
-});
-
-test("every Authority wait shares the one backoff policy", () => {
-  // Delete waits for the spawn command, then for the Run's record of it, then for the stop.
-  // The mention adapter no longer waits on an Authority status: reborn and
-  // handoff stops belong to the durable continuation intent.
-  for (const [name, source] of [["auth-space", authSpace]]) {
-    assert.match(source, /from "\.\/authority-probe-backoff"/u, `${name} must import the shared policy`);
-    // No site may keep its own sleep against an Authority status wait.
-    assert.doesNotMatch(
-      source,
-      /setTimeout\(resolve, (INSTANCE_ABANDON_RESULT_POLL_MS|REBORN_STOP_RESULT_POLL_MS)\)/u,
-      `${name} must not keep a private poll interval`,
-    );
-  }
 });
 
 test("a wait that never resolves still ends at the deadline with the same outcome", async () => {

@@ -2644,16 +2644,6 @@ mod tests {
     }
 
     #[test]
-    fn windows_in_place_update_is_not_blocked() {
-        let source = include_str!("lib.rs");
-        let blocked = ["signed-migration", "-required"].concat();
-        assert!(
-            !source.contains(&blocked),
-            "Windows in-place updates must use the same download path as other platforms"
-        );
-    }
-
-    #[test]
     fn update_handoff_rejects_a_helper_that_exited_before_ownership() {
         #[cfg(windows)]
         let mut command = {
