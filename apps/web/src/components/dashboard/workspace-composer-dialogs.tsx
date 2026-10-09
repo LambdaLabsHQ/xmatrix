@@ -72,7 +72,6 @@ import {
 } from "./workspace-shell-constants";
 
 import {
-  agentAvatarUrl,
   agentInstanceUsageLimit,
   channelAgentInstanceWorkspaceTag,
   formatPercent,
@@ -255,7 +254,6 @@ import type {
   ChannelAttachment,
   ChannelSummarySource,
   ObservabilityEvent,
-  SerializedAgent,
   SerializedAgentInstance,
   SerializedAppConnectorConnection,
   SerializedChannel,
@@ -283,12 +281,6 @@ export type AgentTraceHistoryPanelState = {
   missingExactInstance: boolean;
   /** "Load earlier" progress; its failure never clears loaded history. */
   older?: { loading: boolean; error?: string };
-};
-
-export type AgentInstanceStopRequest = {
-  instance: SerializedAgentInstance;
-  target: AgentTraceTarget;
-  body: string;
 };
 
 export type {
@@ -2662,28 +2654,6 @@ export function agentTraceTargetRequestKey(target: AgentTraceTarget): string {
     target.channelId || "",
     ...agentTraceExactInstanceIds(target).sort(),
   ].join(":");
-}
-
-export function agentTraceTargetFromAgentInstance(
-  agent: SerializedAgent,
-  instance: SerializedAgentInstance
-): AgentTraceTarget {
-  return {
-    id: agent.id,
-    instanceId: instance.id,
-    instanceIds: agentTraceInstanceIds(instance),
-    exactInstanceIds: [instance.id],
-    instanceScoped: true,
-    ownerUserId: agent.userId,
-    connectedAt: instance.connectedAt,
-    name: agentInstanceDisplayName(instance),
-    status: instance.status,
-    avatarUrl: agentAvatarUrl(agent),
-    activity: presenceStatusLabel(instance),
-    gitBranch: instance.gitBranch,
-    runtimeState: instance.runtimeState || agent.runtimeState,
-    usage: instance.usage || agent.usage,
-  };
 }
 
 export function agentTraceTargetFromInstance(
