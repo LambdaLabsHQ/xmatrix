@@ -1,3 +1,5 @@
+import { automationName } from "@xmatrix/db";
+import { openOccurrenceConversation } from "./automation-occurrence-conversation";
 import { appendChannelMessage } from "./channel-messages";
 import { PostgresScheduleOccurrenceLifecycle } from "./postgres-automation-authority";
 import { PostgresScheduledRunCleanup } from "./postgres-scheduled-run-cleanup";
@@ -37,6 +39,12 @@ export async function runSpaceAutomationAlarm(env: Env, spaceId: string, ports: 
         schedulePostCommit: (input) => ports.waitUntil(dispatchProductMessagePostCommit({
           env, ...input, scheduleBackground: (task) => ports.waitUntil(task),
         })),
+        openConversation: ({ occurrence, automation, storedName, body, userId }) => {
+          if (!automation.page_id) throw new Error("Automation has no page to run its occurrence from");
+          return openOccurrenceConversation(env, { spaceId, pageId: String(automation.page_id),
+            automationId: automation.id, occurrenceId: occurrence.id, name: automationName(storedName, body),
+            scheduledFor: occurrence.scheduled_for, userId });
+        },
       }, occurrence, automation, payload, lifecycle),
   };
   const leaseOwner = `space-automation:${crypto.randomUUID()}`;

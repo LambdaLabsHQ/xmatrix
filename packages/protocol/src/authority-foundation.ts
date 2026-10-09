@@ -907,6 +907,8 @@ export interface SerializedAutomation {
   deliveryCount: number;
   lastDeliveryAt?: string;
   lastMessageId?: string;
+  /** The conversation the last occurrence ran in; each occurrence opens its own. */
+  lastChannelId?: string;
   /** Legacy Agent-bound fields remain readable only until migration completes. */
   workspace?: WorkspaceRef;
   agentId?: string;
