@@ -1790,6 +1790,17 @@ export async function setAutomationPaused(
   return requireField<SerializedAutomation>(res, "automation", "The Automation");
 }
 
+/** The Automation as the Hub holds it now, or null once it is gone. */
+export async function fetchAutomation(token: string, automationId: string): Promise<SerializedAutomation | null> {
+  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automationId), {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  return requireField<SerializedAutomation>(res, "automation", "The Automation");
+}
+
 export async function removeAutomation(token: string, automation: SerializedAutomation): Promise<void> {
   const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automation.id), {
     method: "DELETE",
