@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -80,13 +81,10 @@ function harness({ routes, verdict = { state: "passed", failed: [], settledAt: "
     dependencies: {
       exposure: { channel: async () => ({ id: "channel-1", spaceId: "space-1", mode: "closed" }),
         openParticipation: async () => false },
-      resolveRoutes: async (_env, installationId, sourceRefs) => routes.filter((route) =>
-        installationId === "42" && sourceRefs.includes(route.sourceRef)),
-      listConnections: async (_env, { channelId }) => [{ id: "connection-1", providerId: "github",
-        status: "configured", channelState: { channelId, bound: true, subscriptions: routes
-          .filter((route) => route.channelId === channelId)
-          .map((route) => ({ kind: route.sourceKind, source: route.sourceRef,
-            features: route.sourceKind === "issue" ? features : repositoryFeatures })) } }],
+      /* The route read answers by source and feature (githubSubscriptionRoutes). */
+      resolveRoutes: async (_env, installationId, sourceRefs, feature) => routes.filter((route) =>
+        installationId === "42" && sourceRefs.includes(route.sourceRef) &&
+        (route.sourceKind === "issue" ? features : repositoryFeatures).includes(feature)),
       append: async (_env, channelId, input) => {
         appended.push({ channelId, ...input });
         return { ok: true };
@@ -196,4 +194,12 @@ test("a subscription made before its issue existed named an earlier issue and he
   await dispatchProductGitHubWebhook({ env: {}, event: "issue_comment", delivery: "d-5", payload },
     current.dependencies);
   assert.equal(current.appended.length, 1);
+});
+
+test("a GitHub delivery's routes are not checked again after the route read", () => {
+  /* githubSubscriptionRoutes already returns only live subscriptions
+     (LIVE_SOURCE_RELATION_SQL); re-reading each route's connection cost ~5
+     statements per route and silently capped a Channel at 500 subscriptions. */
+  const adapter = readFileSync(new URL("../src/product-github-webhook-authority-adapter.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(adapter, /listAppConnections|subscriptionAllows/u);
 });

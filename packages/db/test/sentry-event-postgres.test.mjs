@@ -30,7 +30,7 @@ async function fixture(run) {
   } finally {
     await sql("DELETE FROM data.app_sentry_event_receipts WHERE app_client_id=$1", [key.appClientId]);
     await sql("DELETE FROM data.app_sentry_installation_lifecycle WHERE app_client_id=$1", [key.appClientId]);
-    for (const table of ["app_source_relations", "channels", "space_deletions", "app_connector_oauth_installations", "app_connector_credentials", "app_connector_connections"])
+    for (const table of ["app_source_relations", "channels", "space_deletions", "app_connector_oauth_installations", "app_connector_credentials", "app_connector_connections", "space_members"])
       await sql(`DELETE FROM data.${table} WHERE space_id LIKE $1`, [spaceId+"%"]);
     await database.close?.();
     await client.end();
@@ -131,6 +131,9 @@ integration("Sentry current Space deletion and grant-scoped subscriptions fail c
       source_ref,features_json,version,created_by,created_at,updated_at)
       SELECT $1||':relation-'||n,$2,$1,$1||':channel-'||n,'repository','sentry:test','["issue.created"]',1,'owner',$3,$3
       FROM generate_series(1,2) n`, [spaceId, connectionId, at]);
+    // A route posts as its subscriber, who must still be able to post there.
+    await sql(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at)
+      VALUES ($1,'owner','owner',1,$2,$2)`, [spaceId, at]);
     const apps = new PostgresAppRepository(database);
     const binding = { providerId: "sentry", appClientId: key.appClientId, installationId: key.installationId,
       credentialVersion: 1, grantGeneration: generation };

@@ -237,6 +237,19 @@ function routeRead(input: { sourceRef: string; limit: number }): { sourceRef: st
   return { sourceRef, limit };
 }
 
+/**
+ * Whether subscription `r` of connection `c` in Channel `channel` delivers now:
+ * the connection is configured, the Space is not being deleted, and whoever
+ * subscribed may still post in the Channel, since every delivery is appended
+ * as them. Each ingress reads its routes through this one test, so a route it
+ * returns needs no second check, and a lapsed subscriber's route is skipped
+ * rather than failing the append for every other Channel.
+ */
+const LIVE_SOURCE_RELATION_SQL = `c.status='configured'
+          AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=r.space_id)
+          AND ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "channel",
+            principalKindSql: "'user'", principalIdSql: "r.created_by" })}`;
+
 /** A connection `c` linked to GitHub App installation `$1`, by its one id or its list. */
 const GITHUB_INSTALLATION_LINKED_SQL = `(c.metadata_json->>'installationId'=$1 OR EXISTS (
             SELECT 1 FROM jsonb_array_elements_text(CASE
@@ -380,16 +393,14 @@ export class PostgresAppRepository {
     const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v6", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v7", text: `SELECT
         r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
         JOIN data.channels channel ON channel.channel_id=r.channel_id
           AND channel.space_id=r.space_id
-        WHERE c.provider_id='github' AND c.status='configured'
+        WHERE c.provider_id='github' AND ${LIVE_SOURCE_RELATION_SQL}
           AND r.source_kind IN ('repository','issue') AND lower(r.source_ref)=ANY($2::text[])
-          AND ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "channel",
-            principalKindSql: "'user'", principalIdSql: "r.created_by" })}
           AND jsonb_typeof(r.features_json)='array' AND r.features_json ? $4
           AND ${GITHUB_INSTALLATION_LINKED_SQL}
         ORDER BY r.channel_id,r.space_id,r.connection_id,r.source_kind,lower(r.source_ref) LIMIT $3`,
@@ -552,13 +563,12 @@ export class PostgresAppRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.connector-event-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v8", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v9", text: `SELECT
         r.space_id,r.channel_id,r.created_by,r.features_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
         JOIN data.channels channel ON channel.channel_id=r.channel_id AND channel.space_id=r.space_id
-        WHERE r.connection_id=$1 AND c.status='configured' AND r.source_kind='repository'
-          AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=r.space_id)
+        WHERE r.connection_id=$1 AND ${LIVE_SOURCE_RELATION_SQL} AND r.source_kind='repository'
           AND lower(r.source_ref)=$2
           AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM data.app_connector_oauth_installations i
             JOIN data.app_connector_credentials k ON k.connection_id=i.connection_id AND k.space_id=i.space_id
