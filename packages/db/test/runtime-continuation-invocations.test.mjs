@@ -13,20 +13,8 @@ async function continuationQuery() {
   const start = source.indexOf(marker);
   assert.notEqual(start, -1, "continuation query v4");
   const sqlStart = start + marker.length;
-  const sql = source.slice(sqlStart, source.indexOf("`", sqlStart));
-  const intentBranch = sql.slice(0, sql.indexOf("UNION ALL"));
-  return { sql, intentBranch };
+  return { sql: source.slice(sqlStart, source.indexOf("`", sqlStart)) };
 }
-
-test("a handoff chip names the successor registration, not the predecessor", async () => {
-  const { intentBranch } = await continuationQuery();
-  const name = intentBranch.indexOf("successor_registration.display_name");
-  const predecessor = intentBranch.indexOf("registration.display_name");
-  assert.ok(name >= 0 && name < predecessor, "successor display name wins");
-  assert.match(intentBranch, /COALESCE\(successor_registration\.harness,intent\.run_input_json->'registration'->'key'->>'harness',/);
-  assert.match(intentBranch, /LEFT JOIN data\.instances instance ON instance\.run_id=intent\.successor_run_id\n/);
-  assert.equal(intentBranch.includes("instance.instance_id=intent.source_instance_id"), false);
-});
 
 integration("handoff from cursor to grok shows grok, and a reborn stays on its own registration", async () => {
   assert.ok(url);
