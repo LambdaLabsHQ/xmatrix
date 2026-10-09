@@ -107,6 +107,27 @@ final class AppleSubscriptions {
                 "productId": transaction.productID, "environment": environment]
     }
 
+    /// Preserve explicit framework cancellation across the JavaScript bridge.
+    /// Localized text alone is never evidence that an operation was cancelled.
+    nonisolated static func isCancellation(_ error: Error, depth: Int = 0) -> Bool {
+        if error is CancellationError { return true }
+        if let storeError = error as? StoreKitError {
+            switch storeError {
+            case .userCancelled: return true
+            case .systemError(let underlying):
+                return depth < 2 && isCancellation(underlying, depth: depth + 1)
+            default: return false
+            }
+        }
+        if let storeError = error as? SKError {
+            return storeError.code == .paymentCancelled || storeError.code == .overlayCancelled
+        }
+        if let urlError = error as? URLError {
+            return urlError.code == .cancelled || urlError.code == .userCancelledAuthentication
+        }
+        return false
+    }
+
     private func failure(_ message: String) -> NSError {
         NSError(domain: "sh.xmatrix.app.subscriptions", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
