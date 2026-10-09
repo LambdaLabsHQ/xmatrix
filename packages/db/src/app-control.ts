@@ -237,6 +237,32 @@ function routeRead(input: { sourceRef: string; limit: number }): { sourceRef: st
   return { sourceRef, limit };
 }
 
+/** A connection `c` linked to GitHub App installation `$1`, by its one id or its list. */
+const GITHUB_INSTALLATION_LINKED_SQL = `(c.metadata_json->>'installationId'=$1 OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(CASE
+              WHEN jsonb_typeof(c.metadata_json->'installationIds')='array'
+              THEN c.metadata_json->'installationIds' ELSE '[]'::jsonb END) AS linked(value)
+            WHERE linked.value=$1))`;
+
+function githubInstallationIds(row: QueryResultRow | undefined): string[] {
+  const metadata = row?.metadata_json && typeof row.metadata_json === "object" && !Array.isArray(row.metadata_json)
+    ? row.metadata_json as Record<string, unknown> : {};
+  const listed = Array.isArray(metadata.installationIds) ? metadata.installationIds : [];
+  return [metadata.installationId, ...listed].filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+/**
+ * The GitHub App installations whose subscriptions a write may have widened:
+ * every installation the connection was or now is linked to. The Hub tells
+ * each one's subscription index to read again before it answers.
+ */
+function githubInstallationsTouched(providerId: string, ...rows: (QueryResultRow | undefined)[]):
+  { githubInstallations?: string[] } {
+  if (providerId !== "github") return {};
+  const ids = [...new Set(rows.flatMap(githubInstallationIds))];
+  return ids.length ? { githubInstallations: ids } : {};
+}
+
 export class PostgresAppRepository {
   constructor(private readonly database: AuthorityDatabase) {
     if (database.cacheMode !== "disabled") throw new AppControlError(
@@ -354,7 +380,7 @@ export class PostgresAppRepository {
     const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v5", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v6", text: `SELECT
         r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
@@ -365,11 +391,7 @@ export class PostgresAppRepository {
           AND ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "channel",
             principalKindSql: "'user'", principalIdSql: "r.created_by" })}
           AND jsonb_typeof(r.features_json)='array' AND r.features_json ? $4
-          AND (c.metadata_json->>'installationId'=$1 OR EXISTS (
-            SELECT 1 FROM jsonb_array_elements_text(CASE
-              WHEN jsonb_typeof(c.metadata_json->'installationIds')='array'
-              THEN c.metadata_json->'installationIds' ELSE '[]'::jsonb END) AS linked(value)
-            WHERE linked.value=$1))
+          AND ${GITHUB_INSTALLATION_LINKED_SQL}
         ORDER BY r.channel_id,r.space_id,r.connection_id,r.source_kind,lower(r.source_ref) LIMIT $3`,
       values: [installationId, sourceRefs, limit, feature], maxRows: limit });
       return rows.map((row) => ({ relationId: String(row.relation_id), installationId, sourceRef: String(row.source_ref),
@@ -377,6 +399,34 @@ export class PostgresAppRepository {
         createdAt: iso(row.created_at as string | Date),
         spaceId: String(row.space_id), channelId: String(row.channel_id),
         connectionId: String(row.connection_id), authorityRootUserId: String(row.created_by) }));
+    });
+  }
+
+  /**
+   * Every source a relation of a GitHub connection linked to this installation
+   * subscribes to, with each feature: a superset of the routes, since it
+   * ignores the connection's status and the subscriber's current access,
+   * which only ever take routes away. A source missing here has no route.
+   */
+  async githubSubscribedSources(input: { requestId: string; installationId: string; limit: number }):
+    Promise<Array<{ sourceKind: "repository" | "issue"; sourceRef: string; feature: string }>> {
+    const installationId = text(input.installationId, "installationId", 100);
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 10_000) {
+      throw new AppControlError("invalid_app_request", 400, "limit is invalid");
+    }
+    return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
+      operation: "app.github-subscribed-sources" }, async (tx) => {
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscribed_sources_v1", text: `SELECT
+        DISTINCT r.source_kind,lower(r.source_ref) AS source_ref,feature.value AS feature
+        FROM data.app_source_relations r JOIN data.app_connector_connections c
+          ON c.connection_id=r.connection_id AND c.space_id=r.space_id
+        CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(r.features_json)='array'
+          THEN r.features_json ELSE '[]'::jsonb END) AS feature(value)
+        WHERE c.provider_id='github' AND r.source_kind IN ('repository','issue')
+          AND ${GITHUB_INSTALLATION_LINKED_SQL}
+        LIMIT $2`, values: [installationId, input.limit], maxRows: input.limit });
+      return rows.map((row) => ({ sourceKind: row.source_kind === "issue" ? "issue" as const : "repository" as const,
+        sourceRef: String(row.source_ref), feature: String(row.feature) }));
     });
   }
 
@@ -643,7 +693,8 @@ export class PostgresAppRepository {
         const updated = await tx.query<QueryResultRow>({ name: "app_connection_updated_v1",
           text: "SELECT * FROM data.app_connector_connections WHERE connection_id=$1 LIMIT 1",
           values: [id], maxRows: 1 });
-        const result = { connection: await connection(tx, updated[0]!), reused: false };
+        const result = { connection: await connection(tx, updated[0]!), reused: false,
+          ...githubInstallationsTouched(providerId, current, updated[0]) };
         await storeScopedCommandReplay(tx, "app_replay_write_v1", { ...replay, result, at, ttlMs: REPLAY_TTL_MS });
         return result;
       });
@@ -751,7 +802,8 @@ export class PostgresAppRepository {
     const updated = await tx.query<QueryResultRow>({ name: "app_relation_updated_v1",
       text: "SELECT * FROM data.app_source_relations WHERE relation_id=$1 LIMIT 1",
       values: [relationId], maxRows: 1 });
-    return { relation: relation(updated[0]!), reused: false };
+    return { relation: relation(updated[0]!), reused: false,
+      ...githubInstallationsTouched(String(current.provider_id), current) };
   }
 
   private async removeRelation(tx: DatabaseTransaction, input: Record<string, unknown>, actor: AppPrincipal) {

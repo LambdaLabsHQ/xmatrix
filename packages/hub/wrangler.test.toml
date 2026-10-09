@@ -37,7 +37,8 @@ bindings = [
   { name = "RELAY_RUNTIME", class_name = "RelayRuntimeLive" },
   { name = "RELAY_RUNTIME_ROUTE_DIRECTORY", class_name = "RelayRuntimeRouteDirectory" },
   { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "RelayRuntimeChannelFanout" },
-  { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" }
+  { name = "DEVICE_AUTH", class_name = "DeviceAuthBroker" },
+  { name = "GITHUB_SUBSCRIPTION_INDEX", class_name = "GitHubSubscriptionIndex" }
 ]
 
 [[r2_buckets]]
@@ -121,3 +122,7 @@ deleted_classes = ["RelaySecretAuthority"]
 [[migrations]]
 tag = "channel-fanout-test"
 new_sqlite_classes = ["RelayRuntimeChannelFanout"]
+
+[[migrations]]
+tag = "github-subscription-index-test"
+new_sqlite_classes = ["GitHubSubscriptionIndex"]
