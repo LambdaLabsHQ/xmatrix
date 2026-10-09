@@ -172,12 +172,7 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
 
 test("Stop asks in place and posts the card's address on the second press", async ({ page }) => {
   await openActiveAgentWorkspace(page);
-  await fixtureJson(page, "stop-send", new RegExp(`/api/xmatrix/channels/${ACTIVE_AGENT_CHANNEL.id}/messages$`, "u"),
-    { message: { messageId: "m-stop" } }, { method: "POST" });
-
-  const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
-  const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
-  await avatar.hover();
+  const { avatar, toolbar } = await hoverCodexControlsWithSend(page, "stop-send");
   await toolbar.getByRole("button", { name: "Stop codex:1" }).click();
 
   // The first press only arms the button; nothing is sent and no dialog opens.
@@ -198,6 +193,16 @@ test("Stop asks in place and posts the card's address on the second press", asyn
     .toEqual([expect.stringMatching(/^@codex:1:stop$/iu)]);
 });
 
+/** Records Channel sends under `key` and opens codex:1's controls. */
+async function hoverCodexControlsWithSend(page: Page, key: string) {
+  await fixtureJson(page, key, new RegExp(`/api/xmatrix/channels/${ACTIVE_AGENT_CHANNEL.id}/messages$`, "u"),
+    { message: { messageId: `m-${key}` } }, { method: "POST" });
+  const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+  const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
+  await avatar.hover();
+  return { avatar, toolbar };
+}
+
 test("Handoff picks a successor and posts the handoff mention", async ({ page }) => {
   await openWorkspaceWithStubs(page, {
     spaces: [E2E_SPACE],
@@ -206,12 +211,7 @@ test("Handoff picks a successor and posts the handoff mention", async ({ page })
       key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness },
     })),
   });
-  await fixtureJson(page, "handoff-send", new RegExp(`/api/xmatrix/channels/${ACTIVE_AGENT_CHANNEL.id}/messages$`, "u"),
-    { message: { messageId: "m-handoff" } }, { method: "POST" });
-
-  const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
-  const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
-  await avatar.hover();
+  const { toolbar } = await hoverCodexControlsWithSend(page, "handoff-send");
   await toolbar.getByRole("button", { name: "Hand off codex:1" }).click();
 
   await expect(toolbar.getByText("Hand off codex:1 to")).toBeVisible();
