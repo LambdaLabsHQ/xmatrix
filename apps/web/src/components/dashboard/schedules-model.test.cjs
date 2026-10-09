@@ -3,7 +3,7 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  groupSchedules, scheduleAttention, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
+  groupSchedules, nameUnderPage, scheduleAttention, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
 } = require("./schedules-model.ts");
 
 function automation(overrides) {
@@ -111,4 +111,12 @@ test("a detached Automation counts as paused, and the summary names the soonest 
 test("a section's slug stands in for its title until the page is read", () => {
   assert.equal(sectionFallbackTitle("release-checklist"), "Release checklist");
   assert.equal(sectionFallbackTitle(""), "Top of the page");
+});
+
+test("under its page an Automation's name drops the page title it repeats", () => {
+  assert.equal(nameUnderPage("xaccelerator.io 市场与用户", "xaccelerator.io"), "市场与用户");
+  assert.equal(nameUnderPage("DeepMarket: weekly SEO", "deepmarket"), "weekly SEO");
+  assert.equal(nameUnderPage("Docsify sync", "Docs"), "Docsify sync");
+  assert.equal(nameUnderPage("DeepMarket", "DeepMarket"), "DeepMarket");
+  assert.equal(nameUnderPage("市场与用户", undefined), "市场与用户");
 });

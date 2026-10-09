@@ -26,7 +26,7 @@ import { useAuth } from "@/lib/auth-context";
 import { ListSkeleton } from "./content-skeleton";
 import { nextRunPhrase, useScheduleWhere } from "./schedule-list-groups";
 import {
-  scheduleAttention, scheduleRunning, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
+  nameUnderPage, scheduleAttention, scheduleRunning, scheduleState, scheduleSummary, scheduleTree, sectionFallbackTitle,
   SCHEDULE_STATES, type ScheduleCounts, type SchedulePageNode, type ScheduleState,
 } from "./schedules-model";
 import { spaceMemberCanCreate } from "./space-member-permissions";
@@ -159,10 +159,10 @@ export function SchedulesView({
     : scheduleRunning(automation) ? nextRunPhrase(automation.nextRunAt, now) : "paused";
 
   // The tree is the page tree; each row's icon says what its Automation is doing.
-  const row = (automation: SerializedAutomation, depth: number) => {
+  const row = (automation: SerializedAutomation, depth: number, pageTitle?: string | null) => {
     const state = stateOf(automation);
     return (
-      <ScheduleRow key={automation.id} automation={automation} depth={depth} state={state}
+      <ScheduleRow key={automation.id} title={nameUnderPage(automation.name, pageTitle)} depth={depth} state={state}
         selected={automation.id === selectedId} onSelect={() => select(automation.id)}
         end={state === "paused" ? undefined : whenOf(automation)}
         subtitle={scheduleAttention(automation, executionEnabled) ?? formatAutomationCadence(automation.intervalMinutes)} />
@@ -244,13 +244,13 @@ export function SchedulesView({
 function SchedulePage({ node, depth, row }: {
   node: SchedulePageNode;
   depth: number;
-  row: (automation: SerializedAutomation, depth: number) => ReactNode;
+  row: (automation: SerializedAutomation, depth: number, pageTitle?: string | null) => ReactNode;
 }) {
   return (
     <ScheduleBranch depth={depth} icon={<FileText className="size-4 shrink-0 text-muted-foreground" />}
       title={node.title ?? "Untitled page"}
       meta={countsMeta(node.counts)}>
-      {node.automations.map((automation) => row(automation, depth + 1))}
+      {node.automations.map((automation) => row(automation, depth + 1, node.title))}
       {node.children.map((child) => <SchedulePage key={child.pageId} node={child} depth={depth + 1} row={row} />)}
     </ScheduleBranch>
   );
@@ -288,8 +288,8 @@ const STATE_ICON: Record<ScheduleState, ReactNode> = {
   paused: <Pause className="size-4 shrink-0 text-muted-foreground" />,
 };
 
-function ScheduleRow({ automation, depth, state, selected, onSelect, end, subtitle }: {
-  automation: SerializedAutomation;
+function ScheduleRow({ title, depth, state, selected, onSelect, end, subtitle }: {
+  title: string;
   depth: number;
   state: ScheduleState;
   selected: boolean;
@@ -304,7 +304,7 @@ function ScheduleRow({ automation, depth, state, selected, onSelect, end, subtit
           className="flex min-w-0 flex-1 flex-col text-left" onClick={onSelect}>
           <span className="app-page-row-title-line flex min-w-0 items-center gap-2">
             {STATE_ICON[state]}
-            <span className="app-page-row-title app-list-row-title min-w-0 flex-1 truncate">{automation.name}</span>
+            <span className="app-page-row-title app-list-row-title min-w-0 flex-1 truncate">{title}</span>
             {end && <span className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums">{end}</span>}
           </span>
           <span className="app-list-row-meta truncate">{subtitle}</span>

@@ -180,3 +180,11 @@ export function sectionFallbackTitle(blockId: string): string {
   const words = blockId.replace(/-/gu, " ").trim();
   return words ? words[0]!.toUpperCase() + words.slice(1) : "Top of the page";
 }
+
+/** Under its page, an Automation's name drops a leading repeat of the page title: "xaccelerator.io 市场与用户" → "市场与用户". */
+export function nameUnderPage(name: string, pageTitle: string | null | undefined): string {
+  const title = pageTitle?.trim();
+  if (!title || name.slice(0, title.length).toLocaleLowerCase() !== title.toLocaleLowerCase()) return name;
+  const rest = /^[\s:：·|/\-–—]+(.+)$/u.exec(name.slice(title.length))?.[1];
+  return rest ?? name;
+}
