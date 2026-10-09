@@ -4,6 +4,7 @@ import type { ConnectorAction, ConnectorActionStatement } from "./provider";
 import { GCP_PROJECT, PAGE_SIZE, request, list, report, columns, project, projectOnly } from "./gcp-common";
 import { GCP_BILLING_ACTIONS } from "./gcp-billing";
 import { GCP_SERVICE_ACTIONS } from "./gcp-services";
+import { GCP_COST_REPORT_ACTIONS } from "./gcp-cost-report";
 
 /* Google IAM remains authoritative. Fixed endpoints and typed resource names
  * prevent targets from becoming arbitrary URLs; no container environment,
@@ -66,14 +67,15 @@ export async function verifyGcp(credentials: Credentials): Promise<void> {
 export const GCP_ACTIONS: Record<string, ConnectorAction> = {
   ...GCP_BILLING_ACTIONS,
   ...GCP_SERVICE_ACTIONS,
+  ...GCP_COST_REPORT_ACTIONS,
   list_projects: {
     effect: "read", requires: ["oauthToken"],
     parse: statement => statement.target === "*" && !statement.text.trim() ? {} : "use @gcp:list_projects:*",
     async execute({ credentials }) {
       const result = await projects(credentials);
-      return report("Google Cloud projects (ID, name, state)", list(result, "projects").map(value => {
+      return report("Google Cloud projects (ID, name, state, resource name)", list(result, "projects").map(value => {
         const row = record(value);
-        return columns(row.projectId, row.displayName, row.state);
+        return columns(row.projectId, row.displayName, row.state, row.name);
       }), result);
     },
   },

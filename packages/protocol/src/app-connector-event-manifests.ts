@@ -158,7 +158,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...eventConnector({
       id: "gcp", name: "Google Cloud", kind: "observability",
-      description: "Analyze exported billing costs and investigate Google Cloud resources, Cloud Run status, logs, metrics and alert policies; route Monitoring incidents to channels and Automations.",
+      description: "Analyze project costs and billing exports, and investigate Google Cloud resources, Cloud Run status, logs, metrics and alert policies; route Monitoring incidents to channels and Automations.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/cloud-platform"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "consent", include_granted_scopes: "false" } },
@@ -179,8 +179,11 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         readAction("query_logs", "Query logs", "Read up to 30 newest entries in a bounded window. Options: minutes (1-10080), severity, Cloud Run service, text search.", '<project> {"minutes":60,"severity":"ERROR"}'),
         readAction("query_metrics", "Query metrics", "Read the newest returned point for each returned time series of an explicit metric in a bounded window.", '<project> {"metric":"compute.googleapis.com/instance/cpu/utilization","minutes":60}'),
         readAction("list_alert_policies", "List alert policies", "List up to 30 Monitoring alert policies and whether they are enabled.", "<project>"),
-        readAction("read_api_status", "Read API status", "Check whether a supported operations/billing API is enabled on a project.", "<project>/<api.googleapis.com>"),
-        writeAction("enable_api", "Enable API", "Enable one supported operations/billing API. Requires channel write policy and Google serviceusage.services.enable; verify completion with read_api_status.", "<project>/<api.googleapis.com>"),
+        readAction("read_api_status", "Read API status", "Check whether a supported operations/billing API is enabled on a project.", "<project-number>/<api.googleapis.com>"),
+        writeAction("enable_api", "Enable API", "Enable one supported operations/billing API. Requires channel write policy and Google serviceusage.services.enable; verify completion with read_api_status.", "<project-number>/<api.googleapis.com>"),
+        writeAction("create_cost_report", "Create project cost report", "Create an App Optimize cost report for one project within 90 days. Reports expire after 24h; costs are before credits. Existing cloud-platform scope applies.", '<project> {"from":"2026-09-01T00:00:00Z","to":"2026-10-01T00:00:00Z","groupBy":"product"}'),
+        readAction("read_cost_operation", "Check cost report", "Read the completion state of an App Optimize cost report operation.", "<project>/<operation-id>"),
+        readAction("read_cost_report", "Read project costs", "Read up to 30 cost report rows, keeping exact currency amounts and continuation. Gross costs before credits; not invoice totals.", '<project>/<report-id> {"pageToken":"optional"}'),
         readAction("list_billing_accounts", "List billing accounts", "List visible billing accounts and status; this is account metadata, not cost totals.", '* {"pageToken":"optional"}'),
         readAction("read_billing_info", "Read project billing", "Read the billing account linked to a project and whether billing is enabled; not actual costs.", "<project>"),
         readAction("list_datasets", "List BigQuery datasets", "Discover export datasets and their locations. Follow pageToken when returned.", '<project> {"pageToken":"optional"}'),

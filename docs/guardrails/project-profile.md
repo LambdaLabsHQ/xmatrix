@@ -17,8 +17,8 @@ English is the default language for repository documentation, guardrails, releas
 
 The Google Cloud operations connector uses a separate GCP OAuth grant and
 provides bounded resource, Cloud Run status, log, metric and alert-policy reads,
-plus billing/export discovery and parameterized cost/credit analysis. API
-enablement is a separate policy-controlled write; no IAM grants are changed.
+plus direct App Optimize gross-cost reports, billing/export discovery and
+parameterized cost/credit analysis. Temporary report creation and API enablement is a separate policy-controlled write; no IAM grants are changed.
 Monitoring incident edges route by metrics-scope project through authenticated
 per-connection ingress. See [GCP connector](../connectors/gcp.md).
 

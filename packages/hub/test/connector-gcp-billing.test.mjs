@@ -115,12 +115,48 @@ test("Google failures explain disabled APIs and missing IAM without echoing raw 
   await fetched([{ status: 403, body: { error: { status: "PERMISSION_DENIED", message: "Permission 'bigquery.jobs.create' denied for private-token" } } }],
     () => assert.rejects(actions.query_costs.execute(context, input("query_costs")), /permission=bigquery.jobs.create/u));
   assert.equal(actions.enable_api.effect, "write");
-  assert.deepEqual(actions.enable_api.parse({ target: "billing-project/bigquery.googleapis.com", text: "" }), { project: "billing-project", api: "bigquery.googleapis.com" });
+  assert.deepEqual(actions.enable_api.parse({ target: "123456789/bigquery.googleapis.com", text: "" }), { project: "123456789", api: "bigquery.googleapis.com" });
   for (const resource of ["billing-project/unknown.googleapis.com", "billing-project/bigquery.googleapis.com/", "billing-project/bigquery.googleapis.com/../other"]) {
     assert.equal(typeof actions.enable_api.parse({ target: resource, text: "" }), "string");
   }
-  const enabled = await fetched([{ body: { name: "operations/api-enable", done: false } }], () => actions.enable_api.execute(context, { project: "billing-project", api: "bigquery.googleapis.com" }));
+  const enabled = await fetched([{ body: { name: "operations/api-enable", done: false } }], () => actions.enable_api.execute(context, { project: "123456789", api: "bigquery.googleapis.com" }));
   assert.equal(enabled.calls[0].method, "POST");
-  assert.equal(enabled.calls[0].url, "https://serviceusage.googleapis.com/v1/projects/billing-project/services/bigquery.googleapis.com:enable");
+  assert.equal(enabled.calls[0].url, "https://serviceusage.googleapis.com/v1/projects/123456789/services/bigquery.googleapis.com:enable");
   assert.match(enabled.result.summary, /pending/u);
+});
+
+test("direct project cost reports use fixed project scope, supported dimensions and a bounded typed time filter", async () => {
+  const today = new Date();
+  const from = new Date(Date.now() - 7 * 86400000).toISOString();
+  const to = today.toISOString();
+  const parse = values => actions.create_cost_report.parse({ target: "deepmarket-485608", text: JSON.stringify({ from, to, ...values }) });
+  for (const bad of [{ filter: "true" }, { from: "2000-01-01T00:00:00Z" }, { from: "2026-02-30T00:00:00Z" }, { groupBy: "__proto__" }, { reportId: "path/escape" }]) assert.equal(typeof parse(bad), "string");
+  const creation = await fetched([{ body: { name: "projects/deepmarket-485608/locations/global/operations/op-1", done: false } }],
+    () => actions.create_cost_report.execute(context, parse({ groupBy: "product", reportId: "cost-test" })));
+  assert.equal(creation.calls[0].url, "https://appoptimize.googleapis.com/v1beta/projects/deepmarket-485608/locations/global/reports?reportId=cost-test");
+  assert.deepEqual(creation.calls[0].body.scopes, [{ project: "projects/deepmarket-485608" }]);
+  assert.deepEqual(creation.calls[0].body.metrics, ["cost"]);
+  assert.deepEqual(creation.calls[0].body.dimensions, ["project", "product_display_name"]);
+  assert.match(creation.calls[0].body.filter, /^hour >= timestamp\("20.+"\) && hour < timestamp\("20.+"\)$/u);
+  assert.equal(actions.create_cost_report.effect, "write");
+  assert.match(creation.result.summary, /gross costs before credits/u);
+});
+
+test("direct cost reads retain exact signed nanos, project scope and pagination; other metrics and schemas are refused", async () => {
+  const name = "projects/deepmarket-485608/locations/global/reports/cost-test";
+  const metadata = { name, scopes: [{ project: "projects/deepmarket-485608" }], metrics: ["cost"], filter: "hour >= timestamp(\"2026-10-01T00:00:00Z\")" };
+  const data = { columns: [{ name: "project" }, { name: "product_display_name" }, { name: "cost" }], rows: [
+    ["projects/deepmarket-485608", "Cloud Run", { currency_code: "USD", units: "123456789", nanos: 1 }],
+    ["projects/deepmarket-485608", "Adjustment", { currency_code: "USD", units: "0", nanos: -100000000 }],
+  ], nextPageToken: "more" };
+  const read = await fetched([{ body: metadata }, { body: data }], () => actions.read_cost_report.execute(context, { project: "deepmarket-485608", id: "cost-test" }));
+  assert.match(read.result.summary, /USD 123456789\.000000001/u);
+  assert.match(read.result.summary, /USD -0\.1/u);
+  assert.match(read.result.summary, /do not sum it as the project total/u);
+  assert.equal(read.calls[1].body.pageSize, 30);
+  for (const wrong of [{ ...metadata, scopes: [{ project: "projects/other-project" }] }, { ...metadata, metrics: ["cpu_mean_utilization"] }]) {
+    await fetched([{ body: wrong }], calls => assert.rejects(actions.read_cost_report.execute(context, { project: "deepmarket-485608", id: "cost-test" }), /only costs scoped to this project/u).then(() => assert.equal(calls.length, 1)));
+  }
+  const empty = await fetched([{ body: metadata }, { body: { columns: [{ name: "cost" }] } }], () => actions.read_cost_report.execute(context, { project: "deepmarket-485608", id: "cost-test" }));
+  assert.match(empty.result.summary, /does not establish zero spend/u);
 });

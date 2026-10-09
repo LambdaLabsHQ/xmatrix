@@ -4,8 +4,8 @@ The `gcp` connection gives Agents bounded operations context: projects, Cloud
 Asset Inventory, Cloud Run readiness/revisions/traffic, Logging entries,
 Monitoring metrics and alert policies, plus billing account/export discovery
 and cost analysis. Monitoring incidents reach Channels and page Automations.
-Resource data actions are reads; enabling a supported API is a separate
-policy-controlled write.
+Resource data actions are reads; creating a temporary cost report and enabling
+a supported API are separate policy-controlled writes.
 
 ## Connect
 
@@ -26,7 +26,7 @@ every resource API is enabled or authorized.
 
 Enable the relevant APIs in the company OAuth project and, where Google requires
 it, target projects: Cloud Resource Manager, Cloud Asset, Cloud Run Admin,
-Cloud Logging, Cloud Monitoring, Cloud Billing, BigQuery and Service Usage. Required permissions include
+Cloud Logging, Cloud Monitoring, Cloud Billing, BigQuery, App Optimize and Service Usage. Required permissions include
 `resourcemanager.projects.get`, `cloudasset.assets.searchAllResources`,
 `run.services.list/get`, `logging.logEntries.list`, `monitoring.timeSeries.list`
 and `monitoring.alertPolicies.list`. Billing metadata uses
@@ -69,6 +69,44 @@ point per returned series with resource/metric labels. These are samples, not
 complete exports or aggregate reports.
 
 ## Billing and cost analysis
+
+### Direct project cost reports (App Optimize)
+
+App Optimize provides project cost reports directly from Google's billing
+cost data. It does not require a pre-existing BigQuery billing export. Reports
+are automatically deleted after 24 hours; during Preview, generating/reading
+reports has no additional App Optimize fee. Its data normally lags usage by a
+day and can lag longer. Costs are gross contract-price usage costs **before
+credits**, not a final invoice or after-credit bill.
+
+```text
+@gcp:create_cost_report:my-project {"from":"2026-09-01T00:00:00Z","to":"2026-10-01T00:00:00Z","groupBy":"product"}
+@gcp:read_cost_operation:my-project/<operation-id>
+@gcp:read_cost_report:my-project/<report-id>
+```
+
+Report creation is a declared write of a temporary report resource. It needs
+`appoptimize.reports.create` (App Optimize Admin) and `billing.resourceCosts.get`
+(e.g. Viewer) on the scoped project. Reading needs the report get/getData and
+operation get permissions. `cloud-platform` already authorizes these calls.
+Enable `appoptimize.googleapis.com` using `enable_api` if needed.
+
+The scope is exactly the target project, location `global`, metrics only `cost`.
+No arbitrary CEL/filter is accepted. `from`/`to` are UTC RFC3339 timestamps,
+`to` exclusive, and the start must be in the last 90 days. `groupBy` is `total`,
+`product`, `month`, `month_product`, `day` or `sku` and maps to a supported
+dimension combination. Time dimensions use Pacific Time and the provider can
+expand the interval to whole periods; use `total`/`product` for a precise
+interval without time-dimension expansion. `reportId` is optional and can make
+an explicitly retried creation addressable without creating another ID.
+
+Reads verify the report's project scope and cost-only metrics, render exact
+currency units/nanos without floating-point rounding, and preserve the actual
+filter/expiry. Each page is capped at 30 rows. Continue with the returned
+`pageToken`; a partial page is not a project total, and an empty report does not
+prove zero spend. Reports can be reused by their IDs until expiry.
+
+### Exported credits and net costs (BigQuery)
 
 Cloud Billing account/catalog APIs describe accounts, linkage and prices; they
 are not a project-spend report. Actual exported usage/cost analysis uses an
@@ -129,8 +167,9 @@ is not a missing OAuth scope. Check or enable a supported API through Connector:
 
 `enable_api` is a declared write, uses the Channel's action policy and Google
 IAM, and returns an operation receipt; use `read_api_status` until `ENABLED`.
-Only Billing, BigQuery, Asset, Resource Manager, Run, Logging and Monitoring
-APIs are supported. It does not alter IAM bindings or create billable resources.
+Use the numeric project number (returned by `list_projects` or the Google
+error consumer). Only App Optimize, Billing, BigQuery, Asset, Resource Manager, Run, Logging and
+Monitoring APIs are supported. It does not alter IAM bindings or create billable resources.
 IAM denial requires the resource owner to grant the actual missing permission;
 a wider OAuth consent cannot override it.
 
@@ -179,4 +218,7 @@ References: [project search](https://docs.cloud.google.com/resource-manager/refe
 [billing export](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery),
 [export cost/credit queries](https://docs.cloud.google.com/billing/docs/how-to/bq-examples),
 [BigQuery queries](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/jobs/query),
-[Service Usage enable](https://docs.cloud.google.com/service-usage/docs/reference/rest/v1/services/enable).
+[Service Usage enable](https://docs.cloud.google.com/service-usage/docs/reference/rest/v1/services/enable),
+[App Optimize reports](https://docs.cloud.google.com/app-optimize/create-read-report),
+[App Optimize data semantics](https://docs.cloud.google.com/app-optimize/optimization-data),
+[App Optimize pricing](https://docs.cloud.google.com/app-optimize/overview#pricing).
