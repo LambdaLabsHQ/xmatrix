@@ -772,9 +772,10 @@ export class PostgresPageRepository {
       }
       // Claimed work that ended after its section last changed, not yet written back (§5).
       const ended = await tx.query<QueryResultRow & { block_id: string; state: string; holder_label: string;
-        conversation_id: string | null; pull_request_url: string | null; ended_at: Date | string }>({
-        name: "page_claims_owed_v1",
-        text: `SELECT block_id,state,holder_label,conversation_id,pull_request_url,
+        conversation_id: string | null; pull_request_url: string | null; claimed_at: Date | string;
+        ended_at: Date | string }>({
+        name: "page_claims_owed_v2",
+        text: `SELECT block_id,state,holder_label,conversation_id,pull_request_url,created_at AS claimed_at,
             CASE WHEN state='active' THEN expires_at ELSE updated_at END AS ended_at
           FROM data.page_claims WHERE space_id=$1 AND page_id=$2 AND written_back_at IS NULL
             AND (state IN ('completed','released') OR (state='active' AND expires_at <= now()))
@@ -785,8 +786,12 @@ export class PostgresPageRepository {
       const owed = new Map<string, PageOwedUpdate>();
       for (const row of ended) {
         const at = iso(row.ended_at);
-        const since = updates.get(row.block_id)?.createdAt;
-        if (owed.has(row.block_id) || (since && since >= at)) continue;
+        const update = updates.get(row.block_id);
+        // A release ends a lease, not work: a section its holder's conversation
+        // wrote while holding it was written back before the release.
+        const wroteBack = row.state === "released" && row.conversation_id !== null
+          && update?.conversationIds.includes(row.conversation_id) === true && update.createdAt >= iso(row.claimed_at);
+        if (owed.has(row.block_id) || (update && update.createdAt >= at) || wroteBack) continue;
         owed.set(row.block_id, { reason: row.state === "completed" ? "merged" : row.state === "released" ? "released"
           : "lapsed", at, holder: row.holder_label, conversationId: row.conversation_id,
           pullRequestUrl: row.pull_request_url });

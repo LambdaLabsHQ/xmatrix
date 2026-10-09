@@ -469,6 +469,32 @@ integration("claims: one holder per block, renewed by its holder, open for compe
   }
 });
 
+integration("a released claim owes an update unless its conversation wrote the section while holding it", async () => {
+  const { client, ids, pages, owner, agent } = await pageTest("claims-owed");
+  try {
+    const r = () => crypto.randomUUID();
+    const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
+      title: "Goals", body: "# Goals\n\n## Search\n\nNext.\n\n## Billing\n\nLater.\n" });
+    const base = { spaceId: ids.space, pageId: page.pageId };
+    const owed = async () => [...(await pages.blockUpdates({ requestId: r(), ...base, principal: owner })).owed.keys()];
+    const claim = async (blockId) => (await pages.claim({ requestId: r(), ...base, principal: agent, blockId,
+      conversationId: ids.open })).claim;
+
+    const written = await claim("search");
+    await pages.edit({ requestId: r(), ...base, principal: agent, baseRevision: 1, conversationIds: [ids.open],
+      body: "# Goals\n\n## Search\n\nShipped.\n\n## Billing\n\nLater.\n" });
+    await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: written.claimId });
+    assert.deepEqual(await owed(), [], "written back, then released: nothing is owed");
+
+    const silent = await claim("billing");
+    await pages.releaseClaim({ requestId: r(), ...base, principal: agent, claimId: silent.claimId });
+    assert.deepEqual(await owed(), ["billing"], "released without a write-back: the section owes an update");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
 integration("a page's conversations are described to readers only, with their newest message and live Agents", async () => {
   const { client, ids } = await pageTest("page-conversations");
   try {
