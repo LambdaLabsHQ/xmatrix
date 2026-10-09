@@ -9,6 +9,7 @@ import { discordCompanyApp, discordGrantContext, isDiscordInstallationGrant, val
 import type { AppOAuthInstallation } from "@xmatrix/db";
 import { isSentryInstallationGrant, refreshSentryInstallation } from "./sentry-installation";
 import { cloudflareGrantContext } from "./cloudflare-api";
+import { composioConnectedAccount, composioConnectUrl, composioUserId } from "./composio";
 
 /*
  * One-click OAuth for connectors (docs/design/connector-platform.md §3.2).
@@ -27,7 +28,6 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
   googleadsense: { scope: "https://www.googleapis.com/auth/adsense.readonly", name: "AdSense" },
   gcp: { scope: "https://www.googleapis.com/auth/cloud-platform", name: "Google Cloud" },
-  gmail: { scope: "https://www.googleapis.com/auth/gmail.readonly", name: "read-only Gmail" },
 };
 
 /**
@@ -41,7 +41,7 @@ export function grantFieldsForgottenOnDisconnect(providerId: string): Record<str
 }
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", gcp: "google", gmail: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", gcp: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
@@ -88,7 +88,8 @@ export function oauthClient(env: Env, providerId: string): OAuthClient | undefin
   if (providerId === "discord" && !discordCompanyApp(env)) return undefined;
   const prefix = `CONNECTOR_${(SHARED_OAUTH_CLIENTS[manifest.id] ?? manifest.id).toUpperCase()}`;
   const clientId = envValue(env, `${prefix}_CLIENT_ID`);
-  const clientSecret = envValue(env, `${prefix}_CLIENT_SECRET`);
+  /* Composio providers share the company Composio project key; their client id is the provider's auth config. */
+  const clientSecret = envValue(env, manifest.oauth.flow === "composio" ? "CONNECTOR_COMPOSIO_API_KEY" : `${prefix}_CLIENT_SECRET`);
   if (!clientId || !clientSecret) return undefined;
   return { manifest: manifest as OAuthClient["manifest"], clientId, clientSecret };
 }
@@ -110,6 +111,11 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
     ...(oauth.pkce || client.manifest.id === "discord" ? { clientId: client.clientId, redirectUri: input.redirectUri } : {}),
     ...(client.manifest.id === "discord" ? { connectionSnapshot: input.connectionSnapshot, authorizationStartedAt: input.now ?? Date.now() } : {}) };
   const state = await signGitHubAppState(claims, client.clientSecret);
+  if (oauth.flow === "composio") {
+    const callback = new URL(input.redirectUri);
+    callback.searchParams.set("state", state);
+    return composioConnectUrl(client, composioUserId(input.spaceId, claims.nonce), callback.toString());
+  }
   const url = new URL(oauth.authorizeUrl);
   if (oauth.flow === "vercel-integration") {
     url.searchParams.set("state", state);
@@ -216,6 +222,13 @@ async function providerContext(client: OAuthClient, token: string): Promise<Reco
 /** Provider-authenticated workspace evidence stays separate from user-editable metadata. */
 export async function exchangeOAuthGrant(client: OAuthClient, code: string, redirectUri: string, state?: string):
   Promise<{ fields: Record<string, string | null>; installation?: AppOAuthInstallation }> {
+  if (client.manifest.oauth.flow === "composio") {
+    const claims = state && state.length <= 4_096 ? await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined) : undefined;
+    if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" || typeof claims.nonce !== "string") {
+      throw new ProviderRequestError(400, "Invalid or expired connect request; restart Connect");
+    }
+    return { fields: { [client.manifest.oauth.tokenField]: await composioConnectedAccount(client, composioUserId(claims.spaceId, claims.nonce)) } };
+  }
   let discordStartedAt: string | undefined;
   if (client.manifest.id === "discord") {
     if (!code || code.length > 4096 || /\s/u.test(code)) throw new ProviderRequestError(400, "Invalid Discord authorization code");

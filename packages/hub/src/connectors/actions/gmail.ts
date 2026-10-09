@@ -1,12 +1,13 @@
 import type { ConnectorAction } from "../provider";
 import { record } from "../command-support";
-import { providerJson, ProviderRequestError } from "../http";
+import { ProviderRequestError } from "../http";
+import { composioGet } from "../composio";
 import { quoteRetrievedText } from "./common";
-import { googleHeaders } from "./google-headers";
 
 /*
- * Gmail (API v1), read-only. The grant is the single `gmail.readonly` scope on
- * the connected Google account's own mailbox. `read` lists every link in the
+ * Gmail (API v1), read-only, through Composio: the Google account signs in to
+ * Composio's verified Google app under the single `gmail.readonly` scope of
+ * the Composio auth config, and each call is proxied as the stored account. `read` lists every link in the
  * message so an Agent can open one itself (a sign-up verification link, for
  * example); the Hub never fetches a link found in mail.
  */
@@ -99,37 +100,34 @@ function messageLine(message: Record<string, unknown>): string {
 
 export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
   search: {
-    effect: "read", requires: ["oauthToken"],
+    effect: "read", requires: ["composioAccountId"],
     parse(statement) {
       const query = statement.text.trim();
       if (statement.target !== "*") return "use @gmail:search:* <Gmail search, e.g. from:noreply@example.com newer_than:1d>";
       return query.length <= MAX_QUERY ? { query } : `keep the search under ${MAX_QUERY} characters`;
     },
     async execute({ credentials }, input) {
-      const headers = googleHeaders(credentials, "Gmail");
-      const url = new URL(`${API}/messages`);
-      url.searchParams.set("maxResults", String(SEARCH_LIMIT));
-      if (input.query) url.searchParams.set("q", input.query);
-      const result = await providerJson(url, { headers });
+      const result = await composioGet(credentials, `${API}/messages`,
+        { maxResults: String(SEARCH_LIMIT), ...(input.query ? { q: input.query } : {}) });
       if (result.messages !== undefined && !Array.isArray(result.messages)) {
         throw new ProviderRequestError(502, "Google did not return a Gmail message list");
       }
       const ids = ((result.messages as unknown[] | undefined) ?? []).slice(0, SEARCH_LIMIT)
         .map(value => String(record(value).id)).filter(id => MESSAGE_ID.test(id));
-      const messages = await Promise.all(ids.map(id => providerJson(
-        `${API}/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`, { headers })));
+      const messages = await Promise.all(ids.map(id => composioGet(credentials,
+        `${API}/messages/${id}`, { format: "metadata", metadataHeaders: ["From", "Subject"] })));
       return { summary: `Newest Gmail messages${input.query ? ` matching ${line(input.query)}` : ""} (id, received UTC, from, subject, snippet); ` +
         "read one with @gmail:read:<id>:\n" + quoteRetrievedText(messages.map(messageLine).join("\n") || "(no messages)") };
     },
   },
   read: {
-    effect: "read", requires: ["oauthToken"],
+    effect: "read", requires: ["composioAccountId"],
     parse(statement) {
       return MESSAGE_ID.test(statement.target) && !statement.text.trim()
         ? { id: statement.target } : "name a message id from @gmail:search";
     },
     async execute({ credentials }, input) {
-      const message = await providerJson(`${API}/messages/${input.id}?format=full`, { headers: googleHeaders(credentials, "Gmail") });
+      const message = await composioGet(credentials, `${API}/messages/${input.id}`, { format: "full" });
       const payload = record(message.payload);
       if (!payload.mimeType) throw new ProviderRequestError(502, "Google did not return a Gmail message");
       const bodies = gmailBodies(payload);
@@ -150,6 +148,6 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
 
 /** Confirm the grant with a real read; the profile is not stored. */
 export async function verifyGmail(credentials: Readonly<Record<string, string>>): Promise<void> {
-  const profile = await providerJson(`${API}/profile`, { headers: googleHeaders(credentials, "Gmail") });
+  const profile = await composioGet(credentials, `${API}/profile`);
   if (typeof profile.emailAddress !== "string") throw new ProviderRequestError(502, "Google did not confirm Gmail access");
 }
