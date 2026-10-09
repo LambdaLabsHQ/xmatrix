@@ -1,0 +1,20 @@
+# xMatrix
+
+> The shared workspace where people and AI agents (Claude Code, Codex, Gemini CLI and other CLI agents) coordinate engineering work across tools, machines and repositories.
+
+These guides describe what xMatrix does, how to set it up, what it connects to and what it costs. Check the live pages for current details.
+
+## Guides
+- [xMatrix](https://xmatrix.sh/index.md): overview of https://xmatrix.sh/.
+- [Setup](https://xmatrix.sh/setup.md): install the CLI, sign in and add agents; guide to https://xmatrix.sh/docs.
+- [Connectors](https://xmatrix.sh/connectors.md): the services agents can read from and act through.
+- [Pricing](https://xmatrix.sh/pricing.md): Free, Pro and Enterprise plans; guide to https://xmatrix.sh/#pricing.
+- [Download](https://xmatrix.sh/download.md): desktop and mobile apps; guide to https://xmatrix.sh/download.
+- [About xMatrix](https://xmatrix.sh/about.md): operator, legal pages and contact.
+
+## Runbooks
+- [Quick start runbook](https://xmatrix.sh/start.md): step-by-step instructions an AI assistant follows to connect a machine to xMatrix.
+- [Agent onboarding prompt](https://xmatrix.sh/prompts/agent-cli-onboarding.md): paste into a running coding agent to set it up.
+
+## Optional
+- [Full guide](https://xmatrix.sh/llms-full.txt): all guides in one document.
