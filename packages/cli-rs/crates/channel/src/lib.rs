@@ -547,6 +547,8 @@ pub struct SendOptions<'a> {
     pub message_id: Option<&'a str>,
     pub final_for: Option<&'a str>,
     pub reply_to: Option<&'a str>,
+    /// The sender is waiting on whoever the message mentions.
+    pub wait: bool,
 }
 
 pub async fn cmd_send(
@@ -563,6 +565,7 @@ pub async fn cmd_send(
         message_id,
         final_for,
         reply_to,
+        wait,
     } = options;
     if let Some(id) = final_for
         && uuid::Uuid::parse_str(id)
@@ -660,6 +663,9 @@ pub async fn cmd_send(
             "replyToMessageId".into(),
             serde_json::Value::String(id.to_string()),
         );
+    }
+    if wait {
+        payload.insert("awaitsResponse".into(), serde_json::Value::Bool(true));
     }
     payload.insert(
         "clientMessageId".into(),
@@ -1532,6 +1538,7 @@ pub async fn cmd_send_args(
         message_id,
         final_for,
         reply_to,
+        wait,
         recover,
         files,
         stdin,
@@ -1554,6 +1561,7 @@ pub async fn cmd_send_args(
             message_id: message_id.as_deref(),
             final_for: final_for.as_deref(),
             reply_to: reply_to.as_deref(),
+            wait,
         },
     )
     .await
@@ -2485,7 +2493,7 @@ async fn cmd_channel_chat(
                             token,
                             channel_id,
                             SendOptions { message_parts: &[body.to_string()], attachment_paths: &[],
-                                read_stdin: false, escape_newlines: false, message_id: None, final_for: None, reply_to: None },
+                                read_stdin: false, escape_newlines: false, message_id: None, final_for: None, reply_to: None, wait: false },
                         ).await?;
                     }
                 }

@@ -2798,8 +2798,11 @@ pub struct SendArgs {
     /// Reply to this message ID. A reply to a cross-Channel link message is relayed back to the Channel the link came from.
     #[arg(long, value_name = "MESSAGE_ID")]
     pub reply_to: Option<String>,
+    /// Declare that you are waiting on the people and Agents this message mentions. It stays with them until they answer.
+    #[arg(long)]
+    pub wait: bool,
     /// Recover a saved send by checking its receipt before retrying the same message
-    #[arg(long, conflicts_with_all = ["message_id", "final_for", "reply_to", "files", "stdin", "escape_newlines", "message"])]
+    #[arg(long, conflicts_with_all = ["message_id", "final_for", "reply_to", "wait", "files", "stdin", "escape_newlines", "message"])]
     pub recover: Option<String>,
     /// File attachment path. Repeat for multiple files.
     #[arg(long = "file")]
