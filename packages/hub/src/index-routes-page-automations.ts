@@ -127,9 +127,24 @@ function initialNextRunAt(env: Env, intervalMinutes: number): string {
 
 /** The authoring fields: an instruction is the natural-language text posted each time. */
 function authoring(body: Record<string, unknown>): Record<string, unknown> {
-  const { instruction, ...rest } = body;
+  const { instruction, nextRunAt: _nextRunAt, ...rest } = body;
   return typeof instruction === "string"
     ? { ...rest, expression: { kind: "text", language: "natural-language", text: instruction } } : rest;
+}
+
+/**
+ * When an edit says its next occurrence is: a time ahead, no further than the
+ * longest cadence. Its cadence then counts from there, so Automations on the
+ * same cadence can run at different hours.
+ */
+function requestedNextRunAt(body: Record<string, unknown>): string | undefined {
+  if (body.nextRunAt === undefined) return undefined;
+  const at = typeof body.nextRunAt === "string" ? Date.parse(body.nextRunAt) : Number.NaN;
+  const ahead = at - Date.now();
+  if (!(ahead > 0 && ahead <= hubBoundary.AUTOMATION_MAX_INTERVAL_MINUTES * 60_000)) {
+    refuse(400, "invalid_next_run", "nextRunAt must be a time ahead, within the longest cadence");
+  }
+  return new Date(at).toISOString();
 }
 
 function invalidAuthoring(): never {
@@ -253,6 +268,7 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
   const parsed = expressionPayload(hubBoundary, current, action === "update" ? authoring(body) : {});
   const binding = automationEvaluatorBinding(current);
   if (!parsed || !binding) invalidAuthoring();
+  const requestedNext = action === "update" ? requestedNextRunAt(body) : undefined;
   if (action === "update" && body.triggers !== undefined) {
     const triggers = await resolvedTriggers(env, spaceId, userId, body.triggers);
     if (triggers.length) parsed.payload.triggers = triggers;
@@ -266,7 +282,8 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
     viaAgentRun: Boolean(authUser.agentRun),
       automationId: replacementId, expectedVersion: 0, channelId: current.channelId, pageId,
       // It resumes when the page's reference points at it, as the original did.
-      detached: current.enabled || Boolean(current.detachedAt), enabled: false, nextRunAt: current.nextRunAt,
+      detached: current.enabled || Boolean(current.detachedAt), enabled: false,
+      nextRunAt: requestedNext ?? current.nextRunAt,
       payload: commandPayload(hubBoundary, parsed, undefined, current.channelId, { kind: "user", id: userId }, userId,
         replacementId),
       automationAction: "update", replacesAutomation: { automationId: current.id, expectedVersion: version },
@@ -283,8 +300,8 @@ export async function changePageAutomation(env: Env, request: Request, authUser:
     // An Agent Run acts as its owner, but never with a Human admin's creation exception.
     viaAgentRun: Boolean(authUser.agentRun), automationId: current.id,
     expectedVersion: version, channelId: current.channelId,
-    nextRunAt: action === "run" ? new Date().toISOString()
-      : retimed ? new Date(Date.now() + parsed.intervalMinutes * 60_000).toISOString() : current.nextRunAt,
+    nextRunAt: action === "run" ? new Date().toISOString() : requestedNext
+      ?? (retimed ? new Date(Date.now() + parsed.intervalMinutes * 60_000).toISOString() : current.nextRunAt),
     enabled: action === "pause" ? false : action === "resume" ? true : current.enabled,
     payload: commandPayload(hubBoundary, parsed, current, current.channelId, binding.actor,
       binding.authorityRootUserId, current.id),

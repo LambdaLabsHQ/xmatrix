@@ -341,7 +341,7 @@ when it was written back.
 |---|---|---|
 | A pull request that names the section is merged | The section it names | The claim it completed |
 | A claim is released or lapses | The claimed section | The claim |
-| An Automation occurrence anchored to the section finishes | Its section | The occurrence (§6) |
+| An Automation occurrence that starts an Agent ends, or never starts, without the section written | Its section | The claim the occurrence opened (§6.1) |
 | A live reference in the section changes state (§5.4) | That section | The reference |
 
 An owed update is settled by the next edit to its section, or by the Run
@@ -445,6 +445,15 @@ section it keeps true, and it is written there:
   section (§5.2). An occurrence never inherits an earlier one's chatter: what
   carries over lives on the page. The chip and Schedules open the last
   occurrence's conversation.
+- **An occurrence that starts an Agent holds its section.** It claims the
+  section for its conversation, shown under the Automation's name. The Run
+  takes that claim over when it claims the section, and writing the section
+  settles it. A Run that never starts, or ends without writing, leaves the
+  claim to lapse, and the section owes an update (§5.2) that names the
+  occurrence's conversation. A section someone else is on is left to them.
+- **An edit can set the next run.** The cadence counts from it, so
+  Automations on the same cadence need not run in the same minute
+  (`xmatrix page automation edit --next <UTC time>`).
 - **Nothing runs unanchored.** An Automation is created only in a page
   section: from the page, `xmatrix page automation create` or a Management
   Agent acting through the page. The Space's Schedules only lists and
