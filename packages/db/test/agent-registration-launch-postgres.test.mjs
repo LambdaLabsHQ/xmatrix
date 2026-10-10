@@ -775,7 +775,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     // Connector repositories and machine directories are alternative locations.
     // No repo is copied into registration configuration, owner grant or policy.
     let catalogEnabled = true;
-    const catalog = { repositories: ['owner/shared'] };
+    const catalog = { repositories: ['owner/shared'], descriptions: { 'owner/shared': 'Shared model inference gateway' } };
     let catalogReads = 0;
     const readRepositories = async actor => { catalogReads++; assert.equal(actor, 'caller'); return catalogEnabled ? catalog : undefined; };
     const connectorLaunches = new PostgresRegistrationLaunchRepository(database, database, placement, readRepositories);
@@ -796,6 +796,13 @@ integration("launch survives a hostname change with stale Workspace metadata and
     });
     assert.equal(connected.prepared.length, 1);
     assert.equal(catalogReads, 0, 'a summon naming its repo reads no catalog');
+    // Automatic selection must receive the project purpose, not a generic
+    // authorization label, without changing any registration permissions.
+    await connectorLaunches.readHarnessToStart({ actorUserId: 'caller', body: 'Fix inference routing' }, async ({ candidates }) => {
+      assert.equal(candidates[0].workspaces.find(item => item.repo === 'owner/shared').description,
+        'Shared model inference gateway');
+      return { key: candidates[0].key, model: 'model', workspaceReference: 'repo:owner/shared' };
+    });
     assert.deepEqual((await sql(`SELECT configuration_json FROM data.space_agent_registrations`)).rows, beforeConfig);
     assert.deepEqual((await sql(`SELECT grant_limits,policy_limits,grant_revision,policy_revision FROM data.space_agent_registration_access`)).rows, beforeAccess);
     const connectorRun = connected.prepared[0];

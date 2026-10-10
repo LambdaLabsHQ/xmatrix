@@ -6,6 +6,8 @@ import { githubRepositoryReference, type RegistrationResourceLimits } from "@xma
  * cloning, pushing or opening a pull request there. */
 export interface RegistrationRepositoryCatalog {
   repositories: string[];
+  /** Project purposes from the same catalog; background data, never authority. */
+  descriptions?: Record<string, string>;
 }
 export type RegistrationRepositoryReader = (actorUserId: string) => Promise<RegistrationRepositoryCatalog | undefined>;
 
@@ -29,7 +31,10 @@ const REGISTRATION_REPOSITORY_CHOICE_LIMIT = 100;
 
 function repositoryCatalogForSummon(catalog: RegistrationRepositoryCatalog | undefined):
   RegistrationRepositoryCatalog | undefined {
-  return catalog && { repositories: catalog.repositories.slice(0, REGISTRATION_REPOSITORY_CHOICE_LIMIT) };
+  if (!catalog) return undefined;
+  const repositories = catalog.repositories.slice(0, REGISTRATION_REPOSITORY_CHOICE_LIMIT);
+  return { repositories, ...(catalog.descriptions ? { descriptions: Object.fromEntries(repositories.flatMap(repo =>
+    catalog.descriptions![repo] ? [[repo, catalog.descriptions![repo]]] : [])) } : {}) };
 }
 
 /** The repositories a summon offers Jev. One that names its `repo:` offers

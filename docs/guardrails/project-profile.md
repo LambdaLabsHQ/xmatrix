@@ -33,6 +33,12 @@ entrypoints that initialize console and pipeline encoding for each command. See
 
 The component map is `docs/ARCHITECTURE.md`. The rest of this snapshot is split into the files below. They keep the previous text.
 
+Automatic repository selection passes optional GitHub project descriptions
+alongside repository names to Jev, bounded per choice. Names and current task
+context remain semantic evidence; recent repository activity does not determine
+relevance. Explicit repository constraints retain their existing launch path.
+See [Space agent routing](../architecture/space-agent-routing.md).
+
 - [Repository map](profile-repository-map.md)
 - [Architecture boundaries](profile-architecture-boundaries.md)
 - [Public interfaces and domain contracts](profile-public-interfaces.md)

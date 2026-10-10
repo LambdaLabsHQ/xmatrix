@@ -1084,7 +1084,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             daemonCapable(daemon, "registration_default_effort_v1"), workspaces: [...workspaceReferences.flatMap(reference => {
             const repo = reference.startsWith("repo:") ? reference.slice(5) : undefined;
             return repo && repoSummonReference(repo) === repo ? [{ reference, repo,
-              description: "Authorized registered repository", machineId: candidate.key.machineId }] : [];
+              description: repositoryCatalog?.descriptions?.[repo] || "Authorized registered repository",
+              machineId: candidate.key.machineId }] : [];
           }), ...directories.map(row => ({ reference: row.workspace_id,
           canonicalCwd: row.canonical_cwd, machineId: candidate.key.machineId,
           description: typeof row.metadata_json?.displayName === "string"

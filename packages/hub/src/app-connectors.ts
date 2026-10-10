@@ -40,6 +40,7 @@ type GitHubInstallationRepository = {
   name: string;
   private: boolean;
   archived: boolean;
+  description?: string;
   /** Last GitHub push, falling back to repository metadata update. */
   activityAtMs: number;
 };
@@ -939,6 +940,7 @@ export async function spaceLaunchTargetRepositories(
     .map((repository) => ({
       value: `${repository.owner}/${repository.name}`,
       private: repository.private,
+      ...(repository.description ? { description: repository.description } : {}),
     }));
   await writeCachedLaunchTargetRepositories(cacheKey, targets);
   return targets;
@@ -2068,6 +2070,7 @@ async function fetchGitHubInstallationRepositories(
             name,
             private: githubBoolean(repository.private) === true,
             archived: githubBoolean(repository.archived) === true,
+            description: githubString(repository.description)?.trim().slice(0, 500),
             activityAtMs,
           });
         }
