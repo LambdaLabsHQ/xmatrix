@@ -31,6 +31,7 @@ import { PageMargin } from "./page-margin";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
+import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
 import { discussionDraft, discussionTitle } from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
@@ -133,15 +134,15 @@ function names(agents: readonly PageTreeAgent[]): string {
  * reading it, else how the page stands (its summary), else when it last changed.
  */
 export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary">, agents: readonly PageTreeAgent[],
-  latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()) {
+  latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()): ReactNode {
   const editing = agents.filter((agent) => agent.activity === "editing");
   if (editing.length > 0) {
     const sections = [...new Set(editing.map((agent) => agent.section).filter(Boolean))];
     return `${names(editing)} editing${sections.length === 1 ? ` · ${sections[0]}` : ""}`;
   }
-  if (latest) return `${latest.from.label}: ${latest.bodyPreview}`;
+  if (latest) return <>{latest.from.label}: <InlineRowPreview text={latest.bodyPreview} /></>;
   if (agents.length > 0) return `${names(agents)} reading`;
-  if (page.summary?.text) return page.summary.text;
+  if (page.summary?.text) return <InlineRowPreview text={page.summary.text} />;
   const age = formatRelativeAge(page.updatedAt, now);
   return age ? `Edited ${age}` : "";
 }
