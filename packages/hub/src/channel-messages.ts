@@ -12,6 +12,7 @@ import {
   channelMemberReadEvent,
 } from "./product-channel-read-fanout";
 import { sealMessageAttachments } from "./postgres-content-authority";
+import { messagePushNotification, pushConfig, pushDevices, pushToPeople } from "./push/notify";
 import {
   postgresMessageAcknowledge,
   postgresMessageAnnotations,
@@ -252,6 +253,14 @@ export async function publishChannelLiveDelivery(
   );
   const rejected = responses.find((response) => !response.ok);
   if (rejected) throw new Error(`RelayRuntime rejected PostgreSQL Channel delivery (${rejected.status})`);
+  // The people this message is addressed to are also reached where no client of theirs is open.
+  const addressed = routing.recipientNotifications.flatMap((entry) => typeof entry.userId === "string" ? [entry.userId] : []);
+  const notification = addressed.length > 0 && env.PUSH_CONFIG ? messagePushNotification(channelId, payload) : null;
+  if (notification) waitUntil(Promise.resolve().then(() => pushToPeople({
+    config: pushConfig(env.PUSH_CONFIG), devices: pushDevices(env), userIds: addressed, notification,
+  })).catch((error: unknown) => {
+    console.error("Push delivery failed", { channelId, error: error instanceof Error ? error.message : String(error) });
+  }));
   return;
 }
 

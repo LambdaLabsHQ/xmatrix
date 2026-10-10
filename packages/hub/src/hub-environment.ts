@@ -145,6 +145,7 @@ export const HUB_ENVIRONMENT = {
 
   // Optional integrations.
   APPLE_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases." },
+  PUSH_CONFIG: { kind: "secret", scope: "feature", summary: "JSON with the Hub's push identities; `vapid` (publicKey, privateKey, subject) enables browser Web Push. Unset: nothing is pushed and notifications appear only while a client is open." },
   STRIPE_SECRET_KEY: { kind: "secret", scope: "feature", summary: "Stripe API key for paid plans. Unset with the webhook secret: checkout and the billing portal answer 503." },
   STRIPE_WEBHOOK_SECRET: { kind: "secret", scope: "feature", summary: "Stripe webhook signing secret." },
   STRIPE_PRO_MONTHLY_PRICE_ID: { kind: "var", scope: "feature", summary: "Stripe price for the monthly Pro seat." },

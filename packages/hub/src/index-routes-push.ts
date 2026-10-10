@@ -1,16 +1,8 @@
-import { PostgresPushDeviceRepository } from "@xmatrix/db";
 import type { Hono } from "hono";
 
 import { readBoundedRequestBody, requestErrorResponse, requireAuth, requireHumanAuth } from "./index-shared";
-import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
+import { pushConfig, pushDevices } from "./push/notify";
 import type { Env } from "./types";
-
-function pushDevices(env: Env): PostgresPushDeviceRepository {
-  return new PostgresPushDeviceRepository(createPostgresAuthorityDatabase(env, {
-    applicationName: "xmatrix-hub-push-devices", ...POSTGRES_AUTHORITY_TIMEOUTS,
-  }));
-}
 
 /**
  * A person's own push devices. A client registers the token or subscription
@@ -18,6 +10,15 @@ function pushDevices(env: Env): PostgresPushDeviceRepository {
  * on sign-out. Only people register devices; an Agent Run has none.
  */
 export function registerIndexRoutesPush(app: Hono<{ Bindings: Env }>): void {
+  // What a browser subscribes with. Absent when this Hub does not push to browsers.
+  app.get("/api/push/config", async (c) => {
+    try {
+      requireHumanAuth(await requireAuth(c.req.raw, c.env));
+      const { vapid } = pushConfig(c.env.PUSH_CONFIG);
+      return c.json(vapid ? { vapidPublicKey: vapid.publicKey } : {}, 200, { "cache-control": "private, no-store" });
+    } catch (error) { return requestErrorResponse(c, error); }
+  });
+
   app.post("/api/push/devices", async (c) => {
     try {
       const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));

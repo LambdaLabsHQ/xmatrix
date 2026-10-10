@@ -51,6 +51,7 @@ Leave unset to keep the feature off.
 | `GOOGLE_CLIENT_ID` | secret | Google OAuth client id. Unset with its secret: Google sign-in is hidden. |
 | `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client secret. |
 | `JEV_AI_GATEWAY_API_KEY` | secret | Vercel AI Gateway key for Jev, the model that picks which Agent answers. Unset: message-triggered launches run without Jev's choice, while launches that need a choice (registration input dispatch) answer 503 `registration_selection_unconfigured`. |
+| `PUSH_CONFIG` | secret | JSON with the Hub's push identities; `vapid` (publicKey, privateKey, subject) enables browser Web Push. Unset: nothing is pushed and notifications appear only while a client is open. |
 | `RATE_LIMIT_ANONYMOUS` | binding | Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted. |
 | `RATE_LIMIT_CREDENTIAL` | binding | Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted. |
 | `RATE_LIMIT_HUMAN_CONNECT` | binding | Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted. |
