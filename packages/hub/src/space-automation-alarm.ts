@@ -43,7 +43,7 @@ export async function runSpaceAutomationAlarm(env: Env, spaceId: string, ports: 
           if (!automation.page_id) throw new Error("Automation has no page to run its occurrence from");
           return openOccurrenceConversation(env, { spaceId, pageId: String(automation.page_id),
             automationId: automation.id, occurrenceId: occurrence.id, name: automationName(storedName, body),
-            scheduledFor: occurrence.scheduled_for, userId });
+            scheduledFor: occurrence.scheduled_for, userId, body });
         },
       }, occurrence, automation, payload, lifecycle),
   };
