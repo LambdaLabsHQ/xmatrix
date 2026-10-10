@@ -1240,9 +1240,11 @@ export function truncateNotificationText(value: string, maxLength = 180): string
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
 
-export function nativeMessageNotificationTitle(message: ChannelMessage): string {
+/* The banner is titled by where the message is, so several Agents talking in
+   one channel read as one conversation; who said it leads the body. */
+export function nativeMessageNotificationTitle(message: ChannelMessage, channelName: string | undefined): string {
   if (secretRequestMetadata(messageRichMetadata(message))) return "Secret requested";
-  return message.from.label || "xMatrix";
+  return channelName || "xMatrix";
 }
 
 export function nativeMessageNotificationBody(message: ChannelMessage): string {
@@ -1257,7 +1259,7 @@ export function nativeMessageNotificationBody(message: ChannelMessage): string {
       : `Sent ${message.attachments.length} attachments`
     : "Sent a message";
   const body = preview || attachmentFallback;
-  return truncateNotificationText(body);
+  return truncateNotificationText(message.from.label ? `${message.from.label}: ${body}` : body);
 }
 
 export function nativeNotificationEventMessageId(event: ObservabilityEvent): string | null {

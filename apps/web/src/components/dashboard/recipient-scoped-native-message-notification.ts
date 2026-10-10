@@ -48,8 +48,7 @@ export function maybePushRecipientScopedNativeMessageNotification({
 
   markNotified(entry.messageId);
   void bridge.notify({
-    title: nativeMessageNotificationTitle(entry),
-    subtitle: channel ? `#${channelTitle(channel)}` : undefined,
+    title: nativeMessageNotificationTitle(entry, channel && channelTitle(channel)),
     body: nativeMessageNotificationBody(entry),
     url,
     channelId: entry.channelId,

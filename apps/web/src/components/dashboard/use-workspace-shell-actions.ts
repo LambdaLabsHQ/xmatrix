@@ -920,9 +920,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       : undefined;
     markNativeMessageNotified(nativeNotificationEventMessageId(latest));
     void s.desktopBridge.notify({
-      title: latest.agentName || "xMatrix activity",
-      subtitle: latestChannel ? `#${channelTitle(latestChannel)}` : undefined,
-      body: eventLabel(latest),
+      title: latestChannel ? channelTitle(latestChannel) : "xMatrix activity",
+      body: latest.agentName ? `${latest.agentName} ${eventLabel(latest)}` : eventLabel(latest),
       url: notificationPathForEvent(latest, s.channels, s.spaces, s.routeSpaceId),
       channelId: latest.channelId,
     });
