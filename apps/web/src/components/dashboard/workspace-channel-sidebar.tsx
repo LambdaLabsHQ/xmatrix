@@ -10,7 +10,7 @@ import {
 } from "./workspace-shell-chrome";
 import { CountPill } from "./count-pill";
 import { ListCreate, type CreateAction } from "./list-create";
-import { ListSectionHeading, type ListSectionTone } from "./list-section-heading";
+import { ListSectionHeading, type ListSectionMark } from "./list-section-heading";
 
 import { channelRowIndentPx, SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME } from "./workspace-shell-constants";
 
@@ -106,6 +106,7 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  Inbox,
   Loader2,
   Pencil,
   Pin,
@@ -385,7 +386,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
           )}
           {intakeChannels.length > 0 && (
             <div data-testid="intake-list">
-              <ListSectionHeading label="Intake" count={intakeChannels.length} />
+              <ListSectionHeading label="Intake" count={intakeChannels.length} mark={{ icon: Inbox, tone: "attention" }} />
               {intakeChannels.map((channel) => (
                 <ChannelNavItem
                   key={channel.id}
@@ -791,11 +792,11 @@ export function channelListSections(
   }
   const sections: Array<{
     label: string; count?: number; channels: SerializedChannel[];
-    mark: { icon: typeof Bell; tone: ListSectionTone };
+    mark: ListSectionMark;
   }> = [
     { label: "Needs you", count: needsYou.length, channels: needsYou, mark: { icon: Bell, tone: "attention" } },
-    { label: "Pinned", channels: pinned, mark: { icon: Pin, tone: "pinned" } },
-    { label: "Recent", channels: recent, mark: { icon: Clock, tone: "recent" } },
+    { label: "Pinned", channels: pinned, mark: { icon: Pin, tone: "primary" } },
+    { label: "Recent", channels: recent, mark: { icon: Clock, tone: "plain" } },
   ];
   return sections.filter((section) => section.channels.length > 0);
 }
@@ -815,7 +816,7 @@ function ChannelSectionRows({ channels, row }: {
 }
 
 type ChannelSectionItem =
-  | { kind: "heading"; label: string; count?: number; mark: { icon: typeof Bell; tone: ListSectionTone } }
+  | { kind: "heading"; label: string; count?: number; mark: ListSectionMark }
   | { kind: "row"; channel: SerializedChannel };
 
 /**

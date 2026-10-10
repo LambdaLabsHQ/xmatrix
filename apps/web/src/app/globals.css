@@ -7773,8 +7773,8 @@ html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-chan
   font: inherit;
 }
 
-/* A marked section's name is a paper label in its tone: brass for what waits
-   on the reader, blue for their pins, plain ink for the rest (user 2026-10-10:
+/* A list section's name is a paper label in its tone: brass for what waits
+   on the reader, blue for the list's own main set, plain ink for the rest (user 2026-10-10:
    全黑白有点太单调了). The tint is the label's own ink at the labels' strength;
    the repeated class outranks "Labels take the material they sit on". */
 .xmatrix-app .app-list-section-label {
@@ -7791,7 +7791,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-
   --app-list-section-ink: var(--m-ink-attention, var(--accent));
 }
 
-.xmatrix-app .app-list-section-label[data-tone="pinned"] {
+.xmatrix-app .app-list-section-label[data-tone="primary"] {
   --app-list-section-ink: oklch(45% 0.11 255);
 }
 

@@ -226,7 +226,7 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
     const style = getComputedStyle(node);
     return { tone: (node as HTMLElement).dataset.tone, ink: style.color, shadow: style.boxShadow, backdrop: style.backdropFilter };
   }));
-  expect(labels.map((label) => label.tone)).toEqual(["attention", "pinned", "recent"]);
+  expect(labels.map((label) => label.tone)).toEqual(["attention", "primary", "plain"]);
   expect(new Set(labels.map((label) => label.ink)).size).toBe(3);
   for (const label of labels) expect([label.shadow, label.backdrop]).toEqual(["none", "none"]);
 });
