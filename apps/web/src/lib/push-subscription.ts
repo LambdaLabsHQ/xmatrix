@@ -1,4 +1,4 @@
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { sha256Hex, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 
@@ -77,8 +77,8 @@ export async function disableBrowserPush(token: string): Promise<BrowserPushStat
   if (!supported()) return "unsupported";
   const subscription = await currentSubscription();
   if (subscription) {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`webpush\n${subscription.endpoint}`));
-    const deviceId = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    // The Hub names a device by the digest of its platform and token.
+    const deviceId = await sha256Hex(`webpush\n${subscription.endpoint}`);
     await request(token, WEB_PROXY_ROUTES.push_device(deviceId), { method: "DELETE" }).catch(() => undefined);
     await subscription.unsubscribe();
   }
