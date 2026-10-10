@@ -210,6 +210,7 @@ export class PostgresAccountDeletionRepository {
             SELECT v.id FROM control.auth_verifications v JOIN control.auth_users u ON u.id=$1
             WHERE v.identifier=ANY(ARRAY['sign-in-otp-'||u.email,'email-verification-otp-'||u.email,'forget-password-otp-'||u.email]) LIMIT 500)`,values:[userId],maxRows:0});
           await tx.query({name:"account_deletion_directory_fence_v1",text:"UPDATE data.account_deletion_fences SET committed=true WHERE user_id=$1 AND request_id=$2",values:[userId,job.request_id],maxRows:0});
+          await tx.query({ name: "account_deletion_push_devices_v1", text:"DELETE FROM control.push_devices WHERE user_id=$1",values:[userId],maxRows:0 });
           await tx.query({ name: "account_deletion_auth_erase_v1", text:"DELETE FROM control.auth_users WHERE id=$1",values:[userId],maxRows:0 });
           await tx.query({ name:"account_deletion_commit_v1",text:`UPDATE control.account_deletion_requests SET state='committed',
             committed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE user_id=$1 AND lease_token=$2`,values:[userId,lease],maxRows:0 });
