@@ -5,6 +5,7 @@ import type { LiquidGlassMaterial } from "@/components/ui/liquid-glass-material"
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import type { CreateAction } from "./list-create";
 import { useGlobalSearchClearance } from "./global-search-clearance";
+import { StarAsk, openRepositoryToStar, useStarPrompt } from "./star-prompt";
 
 import {
   agentInstanceDisplayName,
@@ -85,6 +86,7 @@ import {
   Share,
   Share2,
   Shield,
+  Star,
   Users,
   X,
 } from "lucide-react";
@@ -219,18 +221,25 @@ export function WorkspaceRail({
 }
 
 /** Help is one "?" on the rail: the docs and issue reports live in its menu,
-    so neither needs an icon of its own that could pass for something else. */
+    so neither needs an icon of its own that could pass for something else.
+    The ask for a GitHub star opens from the same place, where starring already
+    lives in the menu, and waits there without taking focus. */
 function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const starPrompt = useStarPrompt();
+  const star = () => {
+    starPrompt.settle();
+    openRepositoryToStar();
+  };
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open && !starPrompt.asking) return;
     const rect = anchorRef.current?.getBoundingClientRect();
     if (rect) setPos({ left: rect.right + 8, bottom: Math.max(12, window.innerHeight - rect.bottom) });
-  }, [open]);
+  }, [open, starPrompt.asking]);
 
   useEffect(() => {
     if (!open) return;
@@ -269,7 +278,21 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
               <span>Report an issue</span>
             </button>
           )}
+          <button type="button" role="menuitem" className={itemClassName} onClick={() => choose(star)}>
+            <Star className="size-4 shrink-0 text-muted-foreground" />
+            <span>Star on GitHub</span>
+          </button>
         </div>,
+        document.body
+      )}
+      {starPrompt.asking && !open && pos && typeof document !== "undefined" && createPortal(
+        <aside
+          aria-labelledby="star-ask-title"
+          className="xmatrix-app app-rail-help-menu fixed z-[var(--z-popover)] w-64 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
+          style={{ left: pos.left, bottom: pos.bottom }}
+        >
+          <StarAsk onStar={star} onLater={starPrompt.putOff} />
+        </aside>,
         document.body
       )}
     </span>
