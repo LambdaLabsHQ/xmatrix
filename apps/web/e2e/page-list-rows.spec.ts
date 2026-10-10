@@ -82,7 +82,7 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
 
       await page.goto("/app", { waitUntil: "domcontentloaded" });
       await page.getByRole("button", { name: "Pages", exact: true }).first().click();
-      const summary = page.locator(".app-page-row", { hasText: "Summary" }).locator(".app-list-row-meta");
+      const summary = page.locator(".app-page-row:visible", { hasText: "Summary" }).locator(".app-list-row-meta");
       await expect(summary.locator("strong")).toHaveText("状态");
       await expect(summary.locator("em")).toHaveText("shared");
       await expect(summary.locator("code")).toHaveText("syntax");
@@ -97,7 +97,7 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
           bold: Number(strong.fontWeight) > Number(style.fontWeight) };
       })).toEqual({ ellipsis: "ellipsis", whiteSpace: "nowrap", clipped: true, height: 18, bold: true });
 
-      const discussion = page.locator(".app-page-row", { hasText: "Discussion" }).locator(".app-list-row-meta");
+      const discussion = page.locator(".app-page-row:visible", { hasText: "Discussion" }).locator(".app-list-row-meta");
       await expect(discussion).toHaveText("**Ada**: Ship it Friday?");
       await expect(discussion.locator("strong")).toHaveText("Ship it");
       await expect(discussion.locator("em")).toHaveText("Friday");
