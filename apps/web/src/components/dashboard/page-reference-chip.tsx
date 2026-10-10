@@ -25,6 +25,7 @@ import { ContentSkeleton } from "@/components/dashboard/content-skeleton";
 import { useAppPortalContainer } from "./app-portal-container";
 import { useMessageReferenceCatalog } from "./message-reference-catalog";
 import { channelLabel } from "./reference-complete";
+import { InlineRowPreview } from "./inline-row-preview";
 
 export type PageReferenceScope = {
   spaceId: string;
@@ -41,7 +42,7 @@ export function pageStatusLine(page: PageDocument, blockId: string): string {
   if (!block) return "";
   const lines = page.body.slice(block.start, block.end).split("\n")
     .map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
-  return (lines[0] ?? "").replace(/^[-*>]\s*/u, "").slice(0, 160);
+  return (lines[0] ?? "").replace(/^(?:[-*+]\s+|>\s*)/u, "").slice(0, 160);
 }
 
 const PageReferenceContext = createContext<PageReferenceScope | null>(null);
@@ -212,7 +213,7 @@ export const PageReferenceChip = memo(function PageReferenceChip({ span }: { spa
       badge={revisionLabel}
       preview={page.isError
         ? "This page could not be loaded."
-        : preview || (page.isLoading
+        : preview ? <InlineRowPreview text={preview} /> : (page.isLoading
           ? <ContentSkeleton label="Loading page" lines={3} />
           : "Open this page")}
       ariaLabel={`Open page ${heading}`}

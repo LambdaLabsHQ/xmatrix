@@ -280,6 +280,24 @@ test("a conversation bookmarks the pages it touches, previewing them on hover", 
   await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
 });
 
+test("a page bookmark preserves and renders leading bold in its status and hover preview", async ({ page: browser }) => {
+  await openChannelTouchingRelay(browser, undefined, async () => {
+    const doc = editedPageDocument(page("p-relay", null, "Relay", "V"), 3);
+    doc.page.body = BODY.replace("In progress", "**状态**：已上线。 *shared* `syntax` ~~old~~ [notes](https://example.test)");
+    await fixtureJson(browser, "page-relay", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, doc);
+  });
+  const detail = browser.getByTestId("conversation-page-cards").locator(".conversation-page-bookmark-detail");
+  await expect(detail.locator("strong")).toHaveText("状态");
+  await expect(detail.locator("em")).toHaveText("shared");
+  await expect(detail.locator("code")).toHaveText("syntax");
+  await expect(detail.locator("s")).toHaveText("old");
+  await expect(detail).toHaveText("状态：已上线。 shared syntax old notes");
+  await expect(detail.locator("a")).toHaveCount(0);
+  await browser.getByTestId("conversation-page-chip").hover();
+  const preview = browser.getByTestId("conversation-page-preview");
+  await expect(preview.locator("strong")).toHaveText("状态");
+});
+
 test("a bookmark says in small type what the last change to its section did", async ({ page: browser }) => {
   await openChannelTouchingRelay(browser, undefined, async () => {
     // claude's revision 3 turned the section's "Planned" into "In progress".
@@ -291,10 +309,14 @@ test("a bookmark says in small type what the last change to its section did", as
     await fixtureJson(browser, "page-relay-revision-2", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\?revision=2$/u,
       { page: { ...page("p-relay", null, "Relay", "V"), body: BODY.replace("In progress", "Planned"),
         revisionInfo: { revision: 2, kind: "edit", authors: [], conversationIds: [], basedOnRevision: 1, createdAt: NOW } } });
+    const doc = editedPageDocument(page("p-relay", null, "Relay", "V"), 3);
+    doc.page.body = BODY.replace("In progress", "**In progress**");
+    await fixtureJson(browser, "page-relay", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, doc);
   });
   const card = browser.getByTestId("conversation-page-cards").getByRole("button", { name: /Relay › Status/u });
   await expect(card).toContainText("claude 2h ago");
   await expect(card).toContainText("In progress");
+  await expect(card.locator(".conversation-page-bookmark-detail strong")).toHaveText("In progress");
   await expect(card).not.toContainText("Planned");
 });
 
