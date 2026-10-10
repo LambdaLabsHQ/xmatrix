@@ -2081,6 +2081,8 @@ async fn cmd_daemon_connected(
             "registration_launch_v3",
             "registration_model_default_v1",
             "registration_optional_model_v1",
+            // A requested effort applies to the runtime's default model too.
+            "registration_default_effort_v1",
             // A registered launch may run in a private managed directory.
             "registration_managed_v1",
             "reply_recovery_v1",
@@ -2133,6 +2135,7 @@ async fn cmd_daemon_connected(
             "registration_launch_v3".to_string(),
             "registration_model_default_v1".to_string(),
             "registration_optional_model_v1".to_string(),
+            "registration_default_effort_v1".to_string(),
             "registration_managed_v1".to_string(),
             "reply_recovery_v1".to_string(),
             "machine_quota_probe_v2".to_string(),

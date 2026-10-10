@@ -1965,7 +1965,8 @@ fn registration_spawn_uses_the_hub_registration_preset_and_bound_model() {
         super::DaemonSpawnRequest::from_command(serde_json::from_value(defaults).unwrap()).unwrap();
     let defaults = super::resolve_registration_spawn(&defaults, "machine").unwrap();
     assert_eq!(defaults.requested_model, None);
-    assert_eq!(defaults.requested_effort, None);
+    // The effort the author asked for applies to the runtime's own default model.
+    assert_eq!(defaults.requested_effort.as_deref(), Some("high"));
     assert!(super::resolve_registration_spawn(&intent, "other-machine").is_err());
     // Every Run is a Run of a registration: an unbound spawn is refused.
     let mut unbound = wire.clone();

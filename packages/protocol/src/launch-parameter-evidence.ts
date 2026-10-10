@@ -41,7 +41,8 @@ export interface LaunchParameterEvidence {
    * `registration-parameters-v8` does not ask it: a laptop is the machine's own
    * reported form, not a Jev option. Older records may still carry the choice.
    * `registration-parameters-v9` omits modelEffort and selections.model when
-   * no models are declared, leaving the runtime's defaults untouched. */
+   * no models are declared, leaving the runtime's default model untouched;
+   * selections.effort is then the effort the author asked for on that model. */
   choices: Array<{ key: "modelEffort" | "workspace" | "placement";
     selected: string; probabilities: Record<string, number> }>;
 }
@@ -121,7 +122,7 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
   const selected = row.selections as Record<string, unknown>;
   const skipsModel = ["registration-parameters-v9", "registration-parameters-v10"].includes(row.rubricVersion) &&
     selected.model === undefined;
-  if ((!skipsModel && !text(selected.model, 160)) || skipsModel && selected.effort !== undefined ||
+  if ((!skipsModel && !text(selected.model, 160)) ||
       selected.effort !== undefined && !text(selected.effort, 80) ||
       !["repo", "local-path", "managed"].includes(String(selected.workspaceKind)) ||
       selected.repo !== undefined && (selected.workspaceKind !== "repo" || !text(selected.repo, 300))) return undefined;
