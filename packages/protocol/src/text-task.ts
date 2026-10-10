@@ -1,3 +1,5 @@
+import { utf8ByteLength as bytes } from "./hex.js";
+
 /**
  * One bounded piece of text work a Machine does for the Hub: an instruction
  * and the text it is about go to a harness, one piece of text comes back. The
@@ -21,7 +23,6 @@ export type TextTaskStatus = typeof TEXT_TASK_STATUSES[number];
 export interface TextTaskRequest { requestId: string; presetId: string; instruction: string; input: string }
 export interface TextTaskResult { presetId: string; status: TextTaskStatus; text?: string; reason?: string }
 
-const bytes = (value: string) => new TextEncoder().encode(value).length;
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Text task is not an object");
