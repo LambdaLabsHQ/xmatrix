@@ -36,14 +36,14 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
       expect(dockBox).not.toBeNull();
       expect(dockBox!.x + dockBox!.width / 2).toBeCloseTo(390 / 2, 0);
       // The dock and the + share a right edge, with 12px clearance. The bar is the
-      // board itself, screen edge to screen edge; its glyphs sit 1.25rem inside the dock's edges.
+      // board itself, screen edge to screen edge; its glyphs end on the content line, 16px in.
       expect(dockBox!.y - (fabBox!.y + fabBox!.height)).toBeCloseTo(12, 0);
       expect(fabBox!.x + fabBox!.width).toBeCloseTo(dockBox!.x + dockBox!.width, 0);
       const barBox = (await page.locator(".app-topbar").boundingBox())!;
       expect(barBox.x).toBe(0);
       expect(barBox.width).toBe(390);
       const searchBox = (await page.locator(".app-topbar .app-mobile-search-icon svg").boundingBox())!;
-      expect(dockBox!.x + dockBox!.width - (searchBox.x + searchBox.width)).toBeCloseTo(20, 0);
+      expect(390 - (searchBox.x + searchBox.width)).toBeCloseTo(16, 0);
       const paint = await fab.evaluate((button) => {
         const style = getComputedStyle(button);
         const dockStyle = getComputedStyle(document.querySelector(".app-mobile-tab-dock")!);
