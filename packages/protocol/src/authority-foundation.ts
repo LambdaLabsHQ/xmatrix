@@ -1364,6 +1364,37 @@ export function parseSecretRequestCard(value: unknown): SecretRequestCard | null
     ...optional("agentName", 120), runId, channelId };
 }
 
+/** A card an Agent posts asking that Space secrets be read without asking each time. */
+export const SECRET_ACCESS_REQUEST_MESSAGE_KIND = "xmatrix.system.secret-access-request";
+
+/** The most secrets one such card names. */
+export const SECRET_ACCESS_REQUEST_MAX = 100;
+
+/** What a secret access card asks: that each named secret become `auto`. A
+ * Space admin chooses which of them, on the card; the Agent changes nothing. */
+export interface SecretAccessRequestCard {
+  secretRefs: string[];
+  reason?: string;
+  agentName?: string;
+  runId: string;
+  channelId: string;
+}
+
+/** The trusted `secretAccessRequest` metadata of a card, or null. */
+export function parseSecretAccessRequestCard(value: unknown): SecretAccessRequestCard | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const text = (item: unknown, max: number) => typeof item === "string" && item.trim() && item.length <= max
+    ? item.trim() : undefined;
+  const listed = Array.isArray(row.secretRefs) ? row.secretRefs.map((item) => text(item, 160)) : [];
+  const secretRefs = [...new Set(listed.filter((item): item is string => item !== undefined))];
+  const runId = text(row.runId, 300), channelId = text(row.channelId, 200);
+  if (!secretRefs.length || secretRefs.length !== listed.length || secretRefs.length > SECRET_ACCESS_REQUEST_MAX ||
+      !runId || !channelId) return null;
+  const reason = text(row.reason, 600), agentName = text(row.agentName, 120);
+  return { secretRefs, ...(reason ? { reason } : {}), ...(agentName ? { agentName } : {}), runId, channelId };
+}
+
 /** One repo the Channel's Space is authorized to launch an Agent into. */
 export interface LaunchTargetRepo {
   /** The reference a mention carries, e.g. `owner/repo`. */

@@ -243,6 +243,32 @@ export class PostgresSpaceSecretRepository {
     });
   }
 
+  /**
+   * A Space admin answers a Run's card asking that secrets be read without
+   * asking: each one the admin chose becomes `auto`. Repeating it is harmless.
+   */
+  async makeAutomatic(input: { userId: string; runId: string; channelId: string; secretRefs: readonly string[] }) {
+    const refs = [...new Set(input.secretRefs.map(secretRefOf))];
+    return this.inChannelSpace(input.channelId, "space-secret.make-automatic", async (tx, spaceId) => {
+      await requireRunInChannel(tx, input.runId, input.channelId);
+      await requireRole(tx, spaceId, input.userId, SECRET_ADMINS, "changes how its secrets are read");
+      await tx.query({ name: "space_secret_make_automatic_v1", text: `UPDATE data.space_secrets
+        SET access='auto', updated_at=clock_timestamp()
+        WHERE space_id=$1 AND secret_ref=ANY($2::text[]) AND access<>'auto'`, values: [spaceId, refs], maxRows: 0 });
+      return accessStatus(tx, spaceId, refs, input.userId);
+    });
+  }
+
+  /** How each secret a secret access card names is read now, for whoever views it. */
+  async accessStatus(input: { userId: string; runId: string; channelId: string; secretRefs: readonly string[] }) {
+    const refs = [...new Set(input.secretRefs.map(secretRefOf))];
+    return this.inChannelSpace(input.channelId, "space-secret.access-status", async (tx, spaceId) => {
+      await requireRunInChannel(tx, input.runId, input.channelId);
+      await requireRole(tx, spaceId, input.userId, SECRET_READERS, "sees its secret requests");
+      return accessStatus(tx, spaceId, refs, input.userId);
+    });
+  }
+
   /** Whether a request card is answered, for whoever views it. */
   async requestStatus(input: { userId: string; runId: string; channelId: string; secretRef: string }) {
     const ref = secretRefOf(input.secretRef);
@@ -326,6 +352,16 @@ async function approveRun(tx: DatabaseTransaction, spaceId: string, runId: strin
   await tx.query({ name: "space_secret_approve_run_v1", text: `INSERT INTO data.run_secret_approvals
     (run_id,secret_ref,space_id,approved_by_user_id,approved_at) VALUES ($1,$2,$3,$4,clock_timestamp())
     ON CONFLICT (run_id,secret_ref) DO NOTHING`, values: [runId, ref, spaceId, userId], maxRows: 0 });
+}
+
+/** The named secrets the Space holds, each with how it is read; one it does not hold is left out. */
+async function accessStatus(tx: DatabaseTransaction, spaceId: string, refs: string[], userId: string) {
+  const rows = await tx.query({ name: "space_secret_access_status_v1", text: `SELECT secret_ref,env_name,access
+    FROM data.space_secrets WHERE space_id=$1 AND secret_ref=ANY($2::text[]) ORDER BY secret_ref`,
+  values: [spaceId, refs], maxRows: MAX_SPACE_SECRETS });
+  return { secrets: rows.map((row) => ({ secretRef: String(row.secret_ref), envName: String(row.env_name),
+    access: String(row.access) as SpaceSecretAccess })),
+    canApprove: SECRET_ADMINS.includes((await role(tx, spaceId, userId)) ?? "") };
 }
 
 async function requestStatus(tx: DatabaseTransaction, spaceId: string, runId: string, ref: string, userId: string) {

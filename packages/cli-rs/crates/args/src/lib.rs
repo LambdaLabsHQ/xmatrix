@@ -887,6 +887,35 @@ mod tests {
     }
 
     #[test]
+    fn request_secret_access_takes_several_aliases() {
+        let cli = Cli::try_parse_from([
+            "xmatrix",
+            "request",
+            "secret-access",
+            "metrics-readonly",
+            "billing-readonly",
+            "--reason",
+            "daily reports read them",
+        ])
+        .expect("request secret-access should parse");
+        let Some(Commands::Request {
+            command:
+                RequestCommand::SecretAccess {
+                    secret_refs,
+                    reason,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected request secret-access command");
+        };
+        assert_eq!(secret_refs, ["metrics-readonly", "billing-readonly"]);
+        assert_eq!(reason.as_deref(), Some("daily reports read them"));
+        assert!(!json);
+        assert!(Cli::try_parse_from(["xmatrix", "request", "secret-access"]).is_err());
+    }
+
+    #[test]
     fn request_secrets_parses_json_flag() {
         let cli = Cli::try_parse_from(["xmatrix", "request", "secrets", "--json"])
             .expect("request secrets should parse");
@@ -1596,6 +1625,22 @@ pub enum RequestCommand {
         /// Optional command to run with the secret once answered; must follow `--`.
         #[arg(last = true, allow_hyphen_values = true)]
         command: Vec<String>,
+    },
+    /// Ask a Space admin, on a card in this Channel, to let Agents read secrets without asking
+    ///
+    /// The card lists the named secrets that still ask first; a Space admin
+    /// ticks the ones to open up and answers once. This Agent changes nothing
+    /// itself, and the command returns as soon as the card is posted.
+    SecretAccess {
+        /// Aliases of secrets the Space holds (from `xmatrix request secrets`).
+        #[arg(required = true, num_args = 1..)]
+        secret_refs: Vec<String>,
+        /// Why Agents should read them without asking.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
