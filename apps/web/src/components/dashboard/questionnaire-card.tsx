@@ -6,10 +6,10 @@
 // as a reply the Run hands to that request, so the harness continues its turn.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { ArrowUp, Check, Circle, CircleDot, Pencil, Square, SquareCheck } from "lucide-react";
+import { ArrowUp, Check, Circle, CircleDot, CircleHelp, Pencil, Square, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { actionClass } from "@/components/ui/action-tone";
-import { ToolDetailSection } from "./tool-split";
+import { AskCard } from "./ask-card";
 import type { TimelineItem } from "./workspace-shell-message-model";
 
 const QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
@@ -189,29 +189,23 @@ export function QuestionnaireMessage({
   }
 
   const lone = questionnaire.questions.length === 1 ? questionnaire.questions[0] : undefined;
-  const title = [`${questionnaire.harness ?? "Agent"} asks`, lone?.header].filter(Boolean).join(" · ");
   return (
-    <div className="app-paper-card mt-1 max-w-2xl" data-questionnaire-card={answers ? "answered" : "open"}>
-      <ToolDetailSection
-        title={title}
-        action={answers ? (
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground">
-            <Check className="size-3.5" strokeWidth={2.5} />
-            Answered
-          </span>
-        ) : (
-          <button type="button" disabled={!canSubmit} onClick={submit} className={actionClass({ variant: "secondary", size: "sm" })}>
-            <ArrowUp className="size-3.5" strokeWidth={2.5} />
-            Send answer
-          </button>
-        )}
+    <div data-questionnaire-card={answers ? "answered" : "open"}>
+      <AskCard
+        who={questionnaire.harness ?? "Agent"}
+        kind={lone?.header}
+        icon={<CircleHelp className="size-3.5" />}
+        open={!answers}
+        question={lone ? lone.label : `${questionnaire.questions.length} questions`}
+        status={answers && { tone: "settled", label: "Answered" }}
       >
-        <div className="space-y-3">
+        <div className={lone ? undefined : "mt-2 space-y-3"}>
           {questionnaire.questions.map((question) => (
             <QuestionLines
               key={question.id}
               question={question}
               header={lone ? undefined : question.header}
+              lone={Boolean(lone)}
               group={`${message.messageId || message.id}:${question.id}`}
               picked={selected[question.id] ?? []}
               typed={other[question.id] ?? ""}
@@ -221,15 +215,24 @@ export function QuestionnaireMessage({
             />
           ))}
         </div>
-      </ToolDetailSection>
+        {!answers && (
+          <button type="button" disabled={!canSubmit} onClick={submit}
+            className={actionClass({ variant: "primary", size: "sm" }, "mt-2")}>
+            <ArrowUp className="size-3.5" strokeWidth={2.5} />
+            Send answer
+          </button>
+        )}
+      </AskCard>
     </div>
   );
 }
 
 /** One question: its prompt, then its options as paper lines. */
-function QuestionLines({ question, header, group, picked, typed, answer, onToggle, onType }: {
+function QuestionLines({ question, header, lone, group, picked, typed, answer, onToggle, onType }: {
   question: QuestionnaireQuestion;
   header?: string;
+  /** The card's own question line already shows this prompt. */
+  lone: boolean;
   group: string;
   picked: string[];
   typed: string;
@@ -245,7 +248,7 @@ function QuestionLines({ question, header, group, picked, typed, answer, onToggl
   const typedAnswer = answer?.filter((value) => !known.has(value)).join(", ");
   return (
     <fieldset className="min-w-0" disabled={Boolean(answer)}>
-      <legend className="text-[15px] font-bold leading-snug">
+      <legend className={lone ? "sr-only" : "text-[15px] font-bold leading-snug"}>
         {header ? <span className="mr-1.5 text-xs font-black uppercase tracking-wide text-muted-foreground">{header}</span> : null}
         {question.label}
       </legend>

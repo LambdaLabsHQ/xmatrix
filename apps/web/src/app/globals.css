@@ -8208,15 +8208,46 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   background: transparent !important;
 }
 
-/* The Pending approvals dock lies over the message stream, so it needs a
-   ground of its own: the white sheet a notice is, with no card inside it. */
-html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-dock .app-channel-approvals {
-  background: oklch(0.995 0.002 85) !important;
-  border-radius: 10px !important;
-  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.1), 0 1px 2px oklch(0.35 0.07 60 / 0.08) !important;
+/* A card on the paper is a slip of tinted paper laid on the page, not a box
+   lifted off it: one flat block of colour with square corners, no edge and no
+   shadow (user 2026-10-10: 做一个色块就可以了，也不用圆角). It is the paper
+   labels' material at the size of a card. An ask that waits on the reader is
+   a slip the colour of the app's wood, thinned into the paper, with brass on
+   the line saying who asks; once answered it fades to the plain ink tint.
+   The tint is mixed into the paper rather than laid over it, so the dock's
+   block, which lies over the message stream, is the same opaque colour. */
+.xmatrix-app .app-ask-card {
+  --app-ask-ink: var(--muted-foreground);
+  --app-ask-tint: color-mix(in oklch, var(--foreground) 4%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+  padding: 14px 16px 16px;
+  border-radius: 0 !important;
+  background: var(--app-ask-tint);
 }
 
-/* The sheet's heading keeps a list heading's label, not the room a list
+.xmatrix-app .app-ask-card[data-ask-card="open"],
+.xmatrix-app .app-channel-approvals {
+  --app-ask-ink: var(--m-ink-attention, var(--accent));
+  --app-ask-tint: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 35%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+
+.xmatrix-app .app-ask-card-kicker {
+  color: var(--app-ask-ink);
+}
+
+/* The Pending approvals dock is one such block, and the asks inside it are
+   its lines, not blocks of their own. */
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-dock .app-channel-approvals {
+  background: var(--app-ask-tint) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.xmatrix-app .app-channel-approvals .app-ask-card.app-ask-card {
+  padding: 6px 0;
+  background: none;
+}
+
+/* The dock's heading keeps a list heading's label, not the room a list
    leaves above each of its sections. */
 .xmatrix-app .app-channel-approvals .app-list-section-heading {
   min-height: 0;

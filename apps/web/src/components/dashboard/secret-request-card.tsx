@@ -9,7 +9,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { ApprovalCard, ApprovalError } from "./approval-card";
+import { AskCard, AskError } from "./ask-card";
 
 /**
  * A card an Agent posts when it needs a Space secret it may not read yet. A
@@ -105,32 +105,28 @@ export function SecretRequestCardView({ request, messageId, token, userId }: {
       Manage
     </button>
   );
+  const envName = status?.envName ?? request.envName;
+  const reason = request.reason || request.description;
   return (
-    <ApprovalCard
-      title={`Secret for ${request.agentName || "an Agent"}`}
-      icon={<KeyRound className="size-4" />}
-      state={!status || done ? "running" : "attention"}
-      status={status && {
-        tone: done ? "settled" : "attention",
-        label: done ? "In use" : !canApprove ? "A Space admin answers" : status.saved ? "Waiting for your approval"
-          : "Waiting for the value",
-      }}
+    <AskCard
+      who={request.agentName || "An Agent"}
+      kind="Secret"
+      icon={<KeyRound className="size-3.5" />}
+      open={Boolean(status) && !done && canApprove}
+      question={<>
+        {needsValue ? "Give" : "Let"} {request.agentName || "this Agent"} {needsValue ? "the secret" : "use the secret"}{" "}
+        <span className="font-mono text-[0.92em]">{request.secretRef}</span>?
+      </>}
+      detail={<>
+        {envName && <>Set as <span className="font-mono">{envName}</span></>}
+        {envName && reason && " · "}
+        {reason && <>“{reason}”</>}
+      </>}
+      status={status && (done ? { tone: "settled", label: "In use" }
+        : !canApprove && { tone: "secondary", label: "A Space admin answers" })}
     >
-      <div className="flex flex-wrap items-center gap-x-1.5 font-semibold">
-        <span className="font-mono [overflow-wrap:anywhere]">{request.secretRef}</span>
-        {(status?.envName ?? request.envName) && <>
-          <span className="font-normal text-muted-foreground">as</span>
-          <span className="font-mono [overflow-wrap:anywhere]">{status?.envName ?? request.envName}</span>
-        </>}
-      </div>
-      {(request.description || request.reason) && (
-        <div className="mt-0.5 text-xs text-muted-foreground">{request.reason || request.description}</div>
-      )}
-      {status && !done && !canApprove && (
-        <p className="mt-0.5 text-xs text-muted-foreground">Only a Space admin can answer this.</p>
-      )}
       {statusQuery.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
-      <ApprovalError error={error} loadError={statusQuery.error} action="Couldn't load this secret request"
+      <AskError error={error} loadError={statusQuery.error} action="Couldn't load this secret request"
         onRetry={() => void statusQuery.refetch()} />
       {status && !done && canApprove && (
         <form
@@ -166,6 +162,6 @@ export function SecretRequestCardView({ request, messageId, token, userId }: {
         </form>
       )}
       {done && manage && <div className="mt-3">{manage}</div>}
-    </ApprovalCard>
+    </AskCard>
   );
 }

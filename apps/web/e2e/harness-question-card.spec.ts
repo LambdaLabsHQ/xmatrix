@@ -61,7 +61,8 @@ async function openChannel(page: import("@playwright/test").Page, messages: unkn
 test("a harness question card answers its request with the picked option", async ({ page }) => {
   await openChannel(page, [questionCard]);
   const card = page.locator('[data-questionnaire-card="open"]');
-  await expect(card.getByRole("heading", { name: "Codex asks · Branch" })).toBeVisible();
+  await expect(card.getByText("Codex asks · Branch")).toBeVisible();
+  await expect(card.getByRole("heading", { name: "Which branch should I merge?" })).toBeVisible();
   const send = card.getByRole("button", { name: "Send answer" });
   await expect(send).toBeDisabled();
 

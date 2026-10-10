@@ -9,7 +9,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { ApprovalCard, ApprovalError } from "./approval-card";
+import { AskCard, AskError } from "./ask-card";
 import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
 /**
@@ -46,8 +46,7 @@ export function crossSpaceReadMetadata(metadata: Record<string, unknown> | undef
   return { grantId, spaceId, ownerUserId: text(record.ownerUserId), agentName: text(record.agentName) };
 }
 
-const STATUS_COPY: Record<CrossSpaceReadGrant["status"], string> = {
-  pending: "Waiting for you",
+const STATUS_COPY: Record<Exclude<CrossSpaceReadGrant["status"], "pending">, string> = {
   approved: "Approved · read-only",
   denied: "Denied",
   revoked: "Revoked",
@@ -149,39 +148,27 @@ export function CrossSpaceReadCard({ request, token, userId }: {
   const status = grant?.status ?? "pending";
   const agentName = grant?.agentName || request.agentName || "Agent";
   return (
-    <ApprovalCard
-      title="Read another Space"
-      icon={<Eye className="size-4" />}
-      state={status === "pending" ? "attention" : status === "approved" ? "running" : "offline"}
-      status={(grant || !isOwner) && {
-        tone: status === "pending" ? "attention" : status === "approved" ? "settled" : "alert",
-        label: grant ? STATUS_COPY[status] : "Owner decides",
-      }}
+    <AskCard
+      who={agentName}
+      kind="Read access"
+      icon={<Eye className="size-3.5" />}
+      open={isOwner && status === "pending"}
+      question={`Let ${agentName} read another Space?`}
+      detail={isOwner ? grant && <>
+        {grant.scope === "space" ? "The whole Space of Channel " : "Channel "}
+        <span className="font-mono [overflow-wrap:anywhere]">{grant.channelId}</span>
+        {grant.scope === "space" ? "" : " and its threads"}, read-only, for this Run only
+        {grant.reason && <> · “{grant.reason}”</>}
+        <div>What it reads may be repeated in this Channel.</div>
+        {status === "approved" && (
+          <div>Until {new Date(grant.expiresAt).toLocaleString()} · {grant.readCount} reads so far</div>
+        )}
+      </> : "Only this Agent's owner sees what it asks to read, and decides."}
+      status={!isOwner ? { tone: "secondary", label: "Owner decides" }
+        : grant && status !== "pending" && { tone: status === "approved" ? "settled" : "alert", label: STATUS_COPY[status] }}
     >
-      <div className="font-semibold">
-        {agentName}
-        {isOwner && grant && <>
-          <span className="font-normal text-muted-foreground"> reads </span>
-          <span className="font-mono [overflow-wrap:anywhere]">{grant.scope === "space"
-            ? `the whole Space of Channel ${grant.channelId}` : `Channel ${grant.channelId} and its threads`}</span>
-        </>}
-      </div>
-      {!isOwner && (
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Only this Agent&apos;s owner sees what it asks to read, and decides.
-        </p>
-      )}
-      {isOwner && grant && (
-        <div className="mt-0.5 space-y-0.5 text-xs text-muted-foreground">
-          {grant.reason && <div>{grant.reason}</div>}
-          <div>Read-only, for this Run only. What it reads may be repeated in this Channel.</div>
-          {status === "approved" && (
-            <div>Until {new Date(grant.expiresAt).toLocaleString()} · {grant.readCount} reads so far</div>
-          )}
-        </div>
-      )}
       {isOwner && grantQuery.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
-      <ApprovalError error={error} loadError={grantQuery.error} action="Couldn't load this access request"
+      <AskError error={error} loadError={grantQuery.error} action="Couldn't load this access request"
         onRetry={() => void grantQuery.refetch()} />
       {isOwner && grant?.status === "pending" && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -224,6 +211,6 @@ export function CrossSpaceReadCard({ request, token, userId }: {
           </button>
         </div>
       )}
-    </ApprovalCard>
+    </AskCard>
   );
 }
