@@ -1,5 +1,6 @@
 "use client";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
+import { timelineLayoutMoved } from "./timeline-send-rise";
 
 import type {
   AgentTraceTarget,
@@ -502,6 +503,7 @@ export function scrollTimelineToBottom(
   if (scrollContainer) {
     scrollContainer.scrollTop = scrollContainer.scrollHeight;
     timelineBottomLandings.set(scrollContainer, scrollContainer.scrollTop);
+    timelineLayoutMoved(scrollContainer);
     return;
   }
   endMarker?.scrollIntoView({ block: "end" });

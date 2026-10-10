@@ -139,7 +139,7 @@ import {
   type TimelineOpeningMeasure,
 } from "./timeline-opening-tail";
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
-import { isJustSentRow, playTimelineSendRise } from "./timeline-send-rise";
+import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, beginTimelineSendRise, isJustSentRow, playSentRowEntrance } from "./timeline-send-rise";
 import { FoldedActivityRow } from "./conversation-activity-row";
 import {
   buildConversationRows,
@@ -618,10 +618,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   // Stable, so it runs when a row mounts and not on every render: the row a
   // send just added is marked `sent` on the render that mounts it.
   const handleTimelineRowMount = useCallback((row: HTMLDivElement | null) => {
-    const scrollRoot = timelineScrollRef.current;
-    if (row && scrollRoot && row.dataset.timelineRiseRow === "sent") {
-      playTimelineSendRise(scrollRoot, row);
-    }
+    if (row && row.dataset.timelineRiseRow === "sent") playSentRowEntrance(timelineScrollRef.current, row);
   }, [timelineScrollRef]);
 
   const stableOnReact = useStableCallback(onReact);
@@ -691,6 +688,34 @@ export const MessageTimeline = memo(function MessageTimeline({
   // the next, so each row moves between two nodes that are both in the page.
   const [tailHandedOver, setTailHandedOver] = useState(false);
   const tailMounted = opening || tailHandedOver;
+  /* Messages that have just come in at the end of an open conversation: the
+     reader's own, an Agent's, anyone's. Each fades in and the rows above rise
+     by the room it takes. The page still shows the timeline as it was, so the
+     rise starts from there, ahead of the list making room. Older pages loaded
+     above, and a conversation being opened, bring no arrival. */
+  const arrivalsRef = useRef<{ lastRowId?: string; at: Map<string, number> }>({ at: new Map() });
+  const lastShownRowId = previousTimelineRef.current.channelId === channel?.id
+    ? previousTimelineRef.current.itemIds[previousTimelineRef.current.itemIds.length - 1]
+    : undefined;
+  const newestRowId = rows[rows.length - 1]?.id;
+  if (!opening && lastShownRowId && newestRowId && newestRowId !== lastShownRowId &&
+      arrivalsRef.current.lastRowId !== newestRowId) {
+    const shownUpTo = rows.findIndex((row) => row.id === lastShownRowId);
+    if (shownUpTo >= 0) {
+      arrivalsRef.current.lastRowId = newestRowId;
+      const now = Date.now();
+      for (const [rowId, arrivedAt] of arrivalsRef.current.at) {
+        if (now - arrivedAt > TIMELINE_ARRIVAL_FRESH_MS) arrivalsRef.current.at.delete(rowId);
+      }
+      for (const row of rows.slice(shownUpTo + 1)) arrivalsRef.current.at.set(row.id, now);
+      const scrollRoot = timelineScrollRef.current;
+      // A reader further up is not moved by what arrives below; their own send brings them down.
+      if (scrollRoot && (isTimelineNearBottom(scrollRoot) || isJustSentRow(rows[rows.length - 1]!))) {
+        beginTimelineSendRise(scrollRoot);
+      }
+    }
+  }
+  const arrivedAt = arrivalsRef.current.at;
   const openingRows = tailMounted
     ? rows.slice(-(openingScreenRows.get(timelineListKey) ?? Math.max(
       TIMELINE_OPENING_TAIL_ROWS,
@@ -995,7 +1020,9 @@ export const MessageTimeline = memo(function MessageTimeline({
                 key={message.id}
                 id={messageAnchorId(message)}
                 ref={handleTimelineRowMount}
-                data-timeline-rise-row={isJustSentRow(message) ? "sent" : ""}
+                data-timeline-rise-row={
+                  Date.now() - (arrivedAt.get(message.id) ?? 0) < TIMELINE_ARRIVAL_FRESH_MS ? "sent" : ""
+                }
                 data-exposure-channel={message.channelId ?? channel?.id}
                 data-exposure-sequence={
                   typeof message.sequence === "number" && Number.isFinite(message.sequence) && message.sequence > 0
@@ -1198,7 +1225,9 @@ export const MessageTimeline = memo(function MessageTimeline({
             // receives the same composer and dock clearance that the
             // non-virtualized timeline's content wrapper used to receive.
             footer: (
-              <div ref={messagesEndRef} className={timelineFooterClassName} />
+              <div ref={messagesEndRef} className={timelineFooterClassName}>
+                <TimelineHeightProbe />
+              </div>
             ),
           }}
           // A blank of the row's measured height until the list has landed.
@@ -1280,6 +1309,26 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
 
 
 
+/* As tall as the list's whole content, and nested deeper than any of its rows.
+   The list sets its height a step after measuring its rows, and a height that
+   shrinks moves every row at once. Within a frame a resize observer is only
+   told about elements deeper than those it has already reported, so the
+   list's own box changes unreported. These are told, one level deeper for
+   each time the height changes again in the same frame, and the rise
+   (timeline-send-rise.ts) draws the move in the frame it happens. */
+function TimelineHeightProbe({ deeper = 5 }: { deeper?: number }) {
+  const probe = { [TIMELINE_HEIGHT_PROBE_ATTRIBUTE]: "" };
+  return deeper === 5 ? (
+    <span aria-hidden="true" className="pointer-events-none invisible absolute inset-y-0 left-0 w-0" {...probe}>
+      <TimelineHeightProbe deeper={deeper - 1} />
+    </span>
+  ) : (
+    <span className="block h-full" {...probe}>
+      {deeper > 0 && <TimelineHeightProbe deeper={deeper - 1} />}
+    </span>
+  );
+}
+
 /* A send the server answers at once never shows this: a mark that appears and
    is gone within the same quarter second reads as a flicker, so it waits
    (.app-message-sending) and only a send that is really taking a while says so. */
@@ -1318,6 +1367,10 @@ function rememberOpeningScreenRows(listKey: string, screenRows: number): void {
   }
   openingScreenRows.set(listKey, screenRows + OPENING_SCREEN_ROWS_SPARE);
 }
+
+/* A row counts as just arrived only this long. The virtualizer mounts rows
+   again as they scroll back into view; that is not a message coming in. */
+const TIMELINE_ARRIVAL_FRESH_MS = 1_500;
 
 /** What the opening tail measured for one mount of the list. */
 interface OpeningRowMeasure {
