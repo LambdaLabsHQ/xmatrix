@@ -2418,6 +2418,9 @@ pub enum PageAutomationCommand {
         /// New cadence: minutes, or a number with m, h or d
         #[arg(long)]
         every: Option<String>,
+        /// When its next occurrence runs, as a UTC time such as 2026-10-11T02:00:00Z; its cadence counts from there
+        #[arg(long)]
+        next: Option<String>,
         /// Replace its event triggers (repeatable; see `create --help`)
         #[arg(long = "on", conflicts_with = "no_triggers")]
         triggers: Vec<String>,
