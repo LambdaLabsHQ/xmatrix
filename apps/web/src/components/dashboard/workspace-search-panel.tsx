@@ -25,8 +25,11 @@ const FIELD_ROW = 44;
 const PHONE_FIELD_ROW = 48;
 /** Below this width the panel is the phone's whole search screen. */
 const PHONE_WIDTH = 640;
-/** A phone's top-bar button is centred this far in from the panel's side. */
+/** A phone's glyph columns are centred this far in from the panel's sides, at most and at least. */
 const PHONE_COLUMN = 32;
+const PHONE_COLUMN_MIN = 20;
+/** A phone's panel may come this close to the screen's sides: the top bar's button sits on the content line. */
+const PHONE_EDGE = 4;
 /** Space kept between the panel and the window's edges. */
 const EDGE = 8;
 /** The top edge may come closer: the field row centres on a top-band control. */
@@ -59,19 +62,21 @@ function visibleSearchAnchor(): DOMRect | null {
  * right edge reaches just past it, so the close button lands where the
  * magnifier was. Without an anchor on screen it takes the window's top right.
  * On a phone it spans the screen and reaches down to the keyboard: search is
- * the whole screen there, not a card over it. Its sides keep the phone's
- * margin, the one the top bar's controls and the dock keep, so the glyph
- * columns sit as far in as the top bar's button centre does.
+ * the whole screen there, not a card over it. Its glyph columns narrow until
+ * the close button is centred on the top bar's button.
  */
 export function searchPanelPlacement(anchor: Pick<DOMRect, "top" | "right" | "width" | "height"> | null,
   viewport: { width: number; height: number }): PanelPlacement {
   const fill = viewport.width < PHONE_WIDTH;
   const row = fill ? PHONE_FIELD_ROW : FIELD_ROW;
-  const column = fill ? PHONE_COLUMN : row / 2;
-  const anchorRight = anchor ? anchor.right - anchor.width / 2 + column : viewport.width - EDGE;
-  const margin = Math.max(EDGE, viewport.width - anchorRight);
+  const edge = fill ? PHONE_EDGE : EDGE;
+  const anchorCentre = anchor ? anchor.right - anchor.width / 2 : null;
+  const column = !fill ? row / 2 : anchorCentre === null ? PHONE_COLUMN
+    : Math.max(PHONE_COLUMN_MIN, Math.min(PHONE_COLUMN, viewport.width - anchorCentre - edge));
+  const anchorRight = anchorCentre === null ? viewport.width - edge : anchorCentre + column;
+  const margin = Math.max(edge, viewport.width - anchorRight);
   const width = fill ? viewport.width - 2 * margin : Math.min(WIDTH, viewport.width - 2 * EDGE);
-  const right = Math.max(EDGE, Math.min(margin, viewport.width - width - EDGE));
+  const right = Math.max(edge, Math.min(margin, viewport.width - width - edge));
   const top = Math.max(TOP_EDGE, anchor ? anchor.top + anchor.height / 2 - row / 2 : EDGE);
   const room = viewport.height - top - EDGE;
   return { top, right, width, maxHeight: fill ? room : Math.min(MAX_HEIGHT, room), row, column, fill };
