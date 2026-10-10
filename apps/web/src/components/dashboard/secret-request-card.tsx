@@ -39,8 +39,10 @@ function statusQueryKey(userId: string, request: SecretRequestCard) {
   return ["secret-request-status", userId, request.runId, request.secretRef];
 }
 
-export function SecretRequestCardView({ request, token, userId }: {
+export function SecretRequestCardView({ request, messageId, token, userId }: {
   request: SecretRequestCard;
+  /** The card's own message, so answering it clears the wait this card declared and no other. */
+  messageId?: string;
   token?: string | null;
   userId: string;
 }) {
@@ -75,7 +77,7 @@ export function SecretRequestCardView({ request, token, userId }: {
       const response = await fetch(WEB_PROXY_ROUTES.secret_request_fulfill, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ ...request, ...(value.trim() ? { value } : {}) }),
+        body: JSON.stringify({ ...request, ...(messageId ? { messageId } : {}), ...(value.trim() ? { value } : {}) }),
       });
       if (!response.ok) throw await errorFromResponse(response);
       const payload = await response.json();

@@ -298,22 +298,24 @@ export async function publishChannelMemberRead(
 }
 
 /**
- * A person acted on a card in a conversation (approved a secret, decided an
- * access request): that answers what waited on them there, as a reply would.
- * Best effort: the decision already stands, and Done remains.
+ * A person decided a card (approved a secret, decided an access request):
+ * that answers the wait that card declared on them, and only that one. Their
+ * read position does not move. Best effort: the decision already stands, and
+ * Done remains.
  */
-export async function markChannelResponded(
+export async function markCardAnswered(
   env: Env,
   waitUntil: (task: Promise<unknown>) => void,
   channelId: string,
+  messageId: string,
   userId: string,
 ): Promise<void> {
   try {
     const result = await acknowledgeChannelMessage(env, channelId, {
       commandId: `product:acknowledge-message:${channelId}:${userId}:responded:${crypto.randomUUID()}`.slice(0, 200),
-      channelId, principal: { kind: "user", id: userId }, responded: true,
+      channelId, principal: { kind: "user", id: userId }, sequence: 0, responded: true, respondedMessageId: messageId,
     });
-    if (result.advanced !== true && result.responded !== true) return;
+    if (result.responded !== true) return;
     const attention = result.attention && typeof result.attention === "object" && !Array.isArray(result.attention)
       ? result.attention as import("@xmatrix/protocol").ChannelAttentionSummary : undefined;
     await publishChannelMemberRead(env, waitUntil, {
@@ -321,7 +323,7 @@ export async function markChannelResponded(
       ...(attention ? { attention } : {}),
     });
   } catch (error) {
-    console.error("Channel responded mark failed", {
+    console.error("Card answered mark failed", {
       channelId, error: error instanceof Error ? error.message : String(error),
     });
   }

@@ -9,7 +9,7 @@ import type { Context, Hono } from "hono";
 import { postgresControlErrorResponse } from "./postgres-authority-http";
 
 import type { AgentRunPrincipal } from "./auth";
-import { appendChannelMessage, markChannelResponded } from "./channel-messages";
+import { appendChannelMessage, markCardAnswered } from "./channel-messages";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
@@ -193,7 +193,8 @@ export function registerCrossSpaceReadRoutes(app: Hono<{ Bindings: Env }>): void
       ...(body.scope ? { scope: body.scope as "channel" | "space" } : {}) });
     if (!(grant instanceof Response)) {
       await notifyCrossSpaceRead(c.env, grant);
-      await markChannelResponded(c.env, (task) => c.executionCtx.waitUntil(task), grant.sourceChannelId, authUser.id);
+      await markCardAnswered(c.env, (task) => c.executionCtx.waitUntil(task), grant.sourceChannelId,
+        grant.noticeMessageId ?? `cross-space-read:${grant.id}`.slice(0, 200), authUser.id);
     }
     return grant;
   }));

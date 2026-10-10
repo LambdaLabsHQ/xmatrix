@@ -2372,6 +2372,8 @@ export class PostgresMessageRepository {
     messageId?: string;
     /** The reader has dealt with the mentions waiting on them here without replying. */
     responded?: boolean;
+    /** With `responded`: the one message the reader answered (a card they decided), not everything read. */
+    respondedMessageId?: string;
   }): Promise<Record<string, unknown>> {
     const { requestId, spaceId, channelId } = channelRequest(input);
     const commandId = bounded(input.commandId, "commandId");
@@ -2465,11 +2467,14 @@ export class PostgresMessageRepository {
         values: [spaceId, subjectId, channelId, ackedSequence, version, now], maxRows: 0,
       });
       const responded = input.responded === true && (await transaction.query({
-        name: "message_ack_attention_respond_v1",
+        name: "message_ack_attention_respond_v2",
         text: `UPDATE data.message_attention SET awaiting_response=FALSE
           WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3 AND awaiting_response
-            AND timeline_sequence<=$4 RETURNING message_id`,
-        values: [spaceId, subjectId, channelId, ackedSequence], maxRows: 10_000,
+            AND CASE WHEN $5::text IS NULL THEN timeline_sequence<=$4 ELSE message_id=$5 END
+          RETURNING message_id`,
+        values: [spaceId, subjectId, channelId, ackedSequence,
+          input.respondedMessageId === undefined ? null : bounded(input.respondedMessageId, "respondedMessageId")],
+        maxRows: 10_000,
       })).length > 0;
       if (advanced || responded) {
         await transaction.query({
