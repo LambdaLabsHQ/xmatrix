@@ -45,6 +45,7 @@ import { isRecoverableLaunchFailure } from "../live-run-admission";
 import { boundedOccurrenceAt } from "../bounded-occurrence-time";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { wakeMachineChannels } from "../registration-authority-wake";
+import { pageSummaryAnswered } from "../page-summary-answer";
 import type { ScheduledStep } from "../postgres-agent-launch-schedule";
 import { machineDaemonCommand } from "../machines";
 import { machineRunLifecycleReport } from "../machine-run-lifecycle-report";
@@ -125,6 +126,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       runLifecycleReport: (report) => machineRunLifecycleReport(input.env, report),
       launchUpdate: (update) => updateAgentLaunch(input.env, update),
       machineConnected: (route) => wakeMachineChannels(input.env, route),
+      textTaskAnswered: (task) => pageSummaryAnswered(input.env, task),
       terminateInstance: input.terminateInstance,
       quotaChanged: input.quotaChanged,
       dispatchChannelAboutFollowUp: (followUp) => dispatchProductChannelAbout({
