@@ -553,7 +553,7 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages$/u.test(path)) return true;
   if (["PUT", "PATCH", "DELETE"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:revisions\/[^/]+\/promote|purge)$/u.test(path)) return true;
-  if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:publication|competition)$/u.test(path)) return true;
+  if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/(?:publication|competition|summary)$/u.test(path)) return true;
   // The Agent reviewing a pull request in its review conversation records the verdict.
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/pre-review$/u.test(path)) return true;
   // Agents claim the block they work on and release it when done.
