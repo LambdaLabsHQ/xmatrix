@@ -25,7 +25,7 @@ Mention `@claude`, `@codex`, `@cursor`, `@gemini`, `@kimi`, `@grok`, `@copilot`,
 </div>
 
 > [!TIP]
-> **If xMatrix is useful to you, star this repository.** It ships several times a day, and a star is how other developers find it.
+> **If xMatrix is useful to you, star this repository**, or run `xmatrix star` in your terminal. It ships several times a day, and a star is how other developers find it.
 
 ---
 

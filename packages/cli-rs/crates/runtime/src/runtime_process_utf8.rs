@@ -541,6 +541,10 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         };
         return cmd_profile(command).await;
     }
+    if matches!(&cli.command, Some(Commands::Star)) {
+        // Starring talks to GitHub, not to a Hub, so it needs no profile or session.
+        return crate::runtime_star::cmd_star().await;
+    }
     if matches!(&cli.command, Some(Commands::Daemon { command: None })) {
         if env_flag("XMATRIX_HEADLESS") || env_flag("XMATRIX_AGENT_SESSION") {
             return Err(CliError::Auth(
@@ -656,6 +660,7 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         }
         Some(Commands::Env { command }) => cmd_environment(command).await,
         Some(Commands::Profile { .. }) => unreachable!("profile commands return before admission"),
+        Some(Commands::Star) => unreachable!("star returns before admission"),
         Some(Commands::GitCredential { operation }) => cmd_git_credential(&operation).await,
         Some(Commands::Status) => cmd_status(&hub_url).await,
         Some(Commands::Diagnose {
