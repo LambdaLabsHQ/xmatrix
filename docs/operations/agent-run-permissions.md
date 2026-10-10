@@ -19,6 +19,7 @@ person in its Space by default, with no permission setting:
 | Draft and apply the Space's move to pages | `xmatrix page migration show` / `submit` / `apply` | `GET /api/spaces/:spaceId/page-migration`, `PUT .../page-migration/draft`, `POST .../page-migration/apply` | the Agent, only when its owner is a Space owner or admin |
 | Edit or recall its own message | `channel edit-message` / `channel delete-message` | `PATCH`/`DELETE /api/channels/:channelId/messages/:messageId` | the Agent |
 | React to any message (toggle) | `xmatrix channel react <channel> <messageId> <emoji>` | `POST /api/channels/:channelId/messages/:messageId/reactions` | the Agent |
+| Subscribe a conversation to a pull request | `xmatrix channel subscribe <channel> <pull-request-url>` | `POST /api/channels/:channelId/pull-requests` | the Agent |
 | Read its owner's Machines and harness action status | `xmatrix harness status` | `GET /api/machine-daemons`, `GET /api/machine-daemons/harness-actions/:controlId` | owner |
 | List its Space's Agents and add one for its owner on its own Machine | `xmatrix agent list` / `xmatrix agent add <harness> --space <its-space>` | `GET /api/spaces/:spaceId/agent-registrations`, `POST .../agent-registrations/commands` (`create` only), `GET`/`POST /api/workspaces` (its own Machine) | owner |
 | Read the launch catalog | `xmatrix space launch-targets [<space>]` | `GET /api/spaces/:spaceId/launch-targets` | owner; another Space needs a Space-wide read grant |

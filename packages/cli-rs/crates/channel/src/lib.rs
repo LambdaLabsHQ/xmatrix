@@ -1341,6 +1341,13 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
             cmd_channel_react(hub_url, token, &channel_id, &message_id, &emoji).await
         }
+        ChannelCommand::Subscribe {
+            channel_id,
+            pull_request,
+        } => {
+            let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
+            cmd_channel_subscribe(hub_url, token, &channel_id, &pull_request).await
+        }
         ChannelCommand::DeleteMessage {
             channel_id,
             message_id,
@@ -1761,6 +1768,49 @@ async fn cmd_channel_react(
         message_id.dimmed()
     );
     Ok(())
+}
+
+/// The Hub answers once it is decided, so the caller knows whether the pull
+/// request will report to the conversation before it stops watching it.
+async fn cmd_channel_subscribe(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    pull_request: &str,
+) -> error::Result<()> {
+    let answer: serde_json::Value = http::request_json(
+        &with_route(
+            hub_url,
+            &format!(
+                "/api/channels/{}/pull-requests",
+                urlencoding::encode(channel_id)
+            ),
+        ),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({ "url": pull_request.trim() })),
+    )
+    .await?;
+    let name = format!(
+        "{}#{}",
+        answer["repository"].as_str().unwrap_or_default(),
+        answer["number"]
+    );
+    match answer["subscription"].as_str() {
+        Some("subscribed") => {
+            println!(
+                "{} Subscribed to {name}: its CI verdict, reviews, comments and merge arrive in this conversation",
+                "✓".green().bold()
+            );
+            Ok(())
+        }
+        Some("closed") => Err(CliError::Launch(format!(
+            "{name} is closed, so it reports nothing more and is not subscribed."
+        ))),
+        _ => Err(CliError::Launch(format!(
+            "This Space's GitHub connection does not reach {name}, so nothing about it will arrive in this conversation. Watch it yourself."
+        ))),
+    }
 }
 
 async fn cmd_channel_delete_message(
