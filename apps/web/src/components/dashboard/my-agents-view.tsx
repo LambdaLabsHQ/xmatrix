@@ -147,7 +147,7 @@ export function MyAgentsView({
         <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()}
           className={statusInkClass("alert", "px-4 text-sm md:px-5")} />
       ) : !catalog.data ? (
-        <ListSkeleton label="Loading agents" rows={4} className="px-4 md:px-5" />
+        <ListSkeleton label="Loading agents" rows={4} />
       ) : rows.length === 0 ? (
         <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
       ) : (

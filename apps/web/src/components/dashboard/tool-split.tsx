@@ -5,6 +5,15 @@ import { ChevronDown, ChevronLeft, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ListColumnResizeHandle } from "./list-column-resize";
 import { ListCreate, type CreateAction } from "./list-create";
+import {
+  LIST_ROW_CLASS_NAME,
+  LIST_ROW_COPY_CLASS_NAME,
+  LIST_ROW_LEADING_CLASS_NAME,
+  LIST_ROW_LEADING_TWO_LINE_CLASS_NAME,
+  LIST_ROW_META_CLASS_NAME,
+  LIST_ROW_TITLE_CLASS_NAME,
+  LIST_ROW_TITLE_LINE_CLASS_NAME,
+} from "./row-frames";
 import { parseAppLocation, pushBrowserPath, replaceBrowserPath, toolItemSelection } from "./workspace-shell-navigation";
 
 /*
@@ -194,16 +203,16 @@ export function ToolListRow({ selected, shownBeside, onSelect, leading, title, e
     <li className={phoneOnly ? "md:hidden" : undefined}>
       <button type="button" onClick={onSelect} aria-current={selected ? "true" : undefined} data-testid={testId}
         data-state={state}
-        className={cn("app-tool-list-row app-list-row relative flex w-full min-w-0 items-center gap-2.5 pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] py-2.5 text-left",
+        className={cn("app-tool-list-row", LIST_ROW_CLASS_NAME,
           indented && "pl-[calc(var(--app-list-row-start)+2.625rem)]",
           selected && "app-tool-list-row-selected", shownBeside && "app-tool-list-row-beside")}>
-        {leading && <span className={cn("flex shrink-0 items-center", subtitle && "mt-[3px] self-start")}>{leading}</span>}
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="app-list-row-title min-w-0 flex-1 truncate font-semibold">{title}</span>
+        {leading && <span className={cn(LIST_ROW_LEADING_CLASS_NAME, subtitle && LIST_ROW_LEADING_TWO_LINE_CLASS_NAME)}>{leading}</span>}
+        <span className={LIST_ROW_COPY_CLASS_NAME}>
+          <span className={LIST_ROW_TITLE_LINE_CLASS_NAME}>
+            <span className={LIST_ROW_TITLE_CLASS_NAME}>{title}</span>
             {end && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{end}</span>}
           </span>
-          {subtitle && <span className="app-list-row-meta block truncate text-xs text-muted-foreground">{subtitle}</span>}
+          {subtitle && <span className={LIST_ROW_META_CLASS_NAME}>{subtitle}</span>}
         </span>
         {trailing}
       </button>

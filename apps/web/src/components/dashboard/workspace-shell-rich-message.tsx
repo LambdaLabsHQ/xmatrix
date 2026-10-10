@@ -14,6 +14,7 @@ import {
   createMessageMarkdownComponents,
 } from "./workspace-shell-formatters";
 import { MentionRichText } from "./mention-read-chip";
+import { RICH_MESSAGE_CLASS_NAME } from "./row-frames";
 import { cn } from "@/lib/utils";
 
 export const messageMarkdownComponents: Components = createMessageMarkdownComponents();
@@ -37,7 +38,7 @@ export const RichMessageContent = memo(function RichMessageContent({
   return (
     <div
       className={cn(
-        "rich-message mt-0.5 min-w-0 max-w-full break-words [overflow-wrap:anywhere] text-[15px] leading-5 text-foreground",
+        RICH_MESSAGE_CLASS_NAME,
         collapsed && "rich-message-collapsed"
       )}
     >

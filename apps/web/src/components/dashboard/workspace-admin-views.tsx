@@ -667,7 +667,7 @@ export function SettingsView({
 
           <ToolDetailSection title="Saved secrets">
             {secretCatalogLoading && secretCatalogEntries.length === 0 ? (
-              <ListSkeleton label="Loading secrets" rows={3} className="py-4" />
+              <ListSkeleton label="Loading secrets" rows={3} mark={false} className="[--app-list-row-end:0px] [--app-list-row-start:0px]" />
             ) : secretCatalogEntries.length === 0 ? (
               <p className="py-4 text-sm text-muted-foreground">No saved secrets yet.</p>
             ) : (
