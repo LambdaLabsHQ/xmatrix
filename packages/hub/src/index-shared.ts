@@ -579,6 +579,8 @@ export function agentRunHttpRouteAllowed(
   if (["PATCH", "DELETE"].includes(request.method) &&
       /^\/api\/channels\/[^/]+\/messages\/[^/]+$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/[^/]+\/reactions$/u.test(path)) return true;
+  // A Run reports a pull request it opened; the route proves the exact Run.
+  if (request.method === "POST" && /^\/api\/channels\/[^/]+\/pull-requests$/u.test(path)) return true;
   if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/launch-targets$/u.test(path)) return true;
 
   if (request.method === "POST") {

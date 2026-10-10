@@ -1,6 +1,9 @@
 import { appCommand, findAppConnection } from "./apps";
 import { githubConnectionInstallationFor, type GitHubCommitCheckVerdict } from "./app-connectors";
 import { record, text, type GitHubRepositoryFeature } from "./github-subscription-domain";
+import {
+  CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE, channelActivityLine, normalizeChannelActivity,
+} from "@xmatrix/protocol";
 import type { Env } from "./types";
 
 /*
@@ -158,4 +161,56 @@ export async function subscribeConversationToPullRequest(env: Env, input: {
     principal: { kind: "user", id: input.ownerUserId },
   });
   return true;
+}
+
+/**
+ * The entry of one Instance opening one pull request. The Run's `gh` and its
+ * runtime may both report the same pull request; naming the entry by what it
+ * says makes the second report a replay of the first.
+ */
+export function pullRequestActivityMessageId(instanceId: string,
+  activity: { repository: string; number: number }): string {
+  return `activity:pull-request:${instanceId}:${activity.repository}#${activity.number}`.toLowerCase().slice(0, 200);
+}
+
+/** The Run reporting a pull request, as its credential names it. */
+export interface PullRequestReporter {
+  agentId: string; agentName: string; runId: string; executionKey: string; instanceId: string;
+  ownerUserId: string; spaceId: string;
+}
+
+/**
+ * A pull request the Run says it opened (`xmatrix channel subscribe`, which the
+ * Run's `gh` runs after `gh pr create`): the activity entry and the
+ * subscription, answered together so the caller knows both happened. One
+ * Instance reporting one pull request again writes nothing new.
+ */
+export async function reportRunPullRequest(input: {
+  run: PullRequestReporter;
+  channelId: string;
+  url: unknown;
+  append(command: Record<string, unknown>, context: { actorUserId: string; senderRunId: string }): Promise<unknown>;
+  subscribe(opened: Parameters<typeof subscribeConversationToPullRequest>[1]): Promise<boolean>;
+}): Promise<{ messageId: string; repository: string; number: number; subscribed: boolean }> {
+  const { run, channelId } = input;
+  const activity = normalizeChannelActivity({ kind: "pull_request", url: input.url });
+  if (activity.kind !== "pull_request") throw new Error("pull_request_activity_required");
+  const messageId = pullRequestActivityMessageId(run.instanceId, activity);
+  await input.append({
+    commandId: `agent-activity:${messageId}`.slice(0, 200),
+    messageId,
+    channelId,
+    body: channelActivityLine(activity),
+    messageKind: CHANNEL_ACTIVITY_MESSAGE_KIND,
+    principal: { kind: "agent", id: run.agentId },
+    agentRunProof: { runId: run.runId, executionKey: run.executionKey, instanceId: run.instanceId },
+    senderSnapshot: {
+      identityId: run.agentId, kind: "agent", agentId: run.agentId, label: run.agentName, name: run.agentName,
+      agentName: run.agentName, email: "", userId: run.ownerUserId, instanceId: run.instanceId,
+    },
+    residual: { appMetadata: { xmatrixProvenance: CHANNEL_ACTIVITY_PROVENANCE, xmatrixActivity: activity } },
+  }, { actorUserId: run.ownerUserId, senderRunId: run.runId });
+  const subscribed = await input.subscribe({ spaceId: run.spaceId, channelId, ownerUserId: run.ownerUserId,
+    repository: activity.repository, number: activity.number, commandId: messageId });
+  return { messageId, repository: activity.repository, number: activity.number, subscribed };
 }

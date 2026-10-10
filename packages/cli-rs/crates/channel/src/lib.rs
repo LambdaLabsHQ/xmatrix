@@ -1341,6 +1341,13 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
             cmd_channel_react(hub_url, token, &channel_id, &message_id, &emoji).await
         }
+        ChannelCommand::Subscribe {
+            channel_id,
+            pull_request,
+        } => {
+            let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
+            cmd_channel_subscribe(hub_url, token, &channel_id, &pull_request).await
+        }
         ChannelCommand::DeleteMessage {
             channel_id,
             message_id,
@@ -1761,6 +1768,44 @@ async fn cmd_channel_react(
         message_id.dimmed()
     );
     Ok(())
+}
+
+/// Only an Agent Run reports a pull request; the Hub answers once the entry
+/// is recorded and says whether the Space's GitHub connection reaches it.
+async fn cmd_channel_subscribe(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    pull_request: &str,
+) -> error::Result<()> {
+    let reported: serde_json::Value = http::request_json(
+        &with_route(
+            hub_url,
+            &format!(
+                "/api/channels/{}/pull-requests",
+                urlencoding::encode(channel_id)
+            ),
+        ),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({ "url": pull_request.trim() })),
+    )
+    .await?;
+    let name = format!(
+        "{}#{}",
+        reported["repository"].as_str().unwrap_or_default(),
+        reported["number"]
+    );
+    if reported["subscribed"].as_bool() == Some(true) {
+        println!(
+            "{} Subscribed to {name}: its CI verdict, reviews, comments and merge arrive in this conversation",
+            "✓".green().bold()
+        );
+        return Ok(());
+    }
+    Err(CliError::Launch(format!(
+        "{name} is recorded as opened, but this Space's GitHub connection does not reach it, so nothing about it will arrive here. Watch it yourself."
+    )))
 }
 
 async fn cmd_channel_delete_message(
