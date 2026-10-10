@@ -83,6 +83,11 @@ function sample(now: number) {
     messageCount: 4,
     lastMessage: { messageId: `${id}:last`, from, bodyPreview: preview, sentAt: iso(minutesAgo) },
     memberPresence: {
+      // Both people are online, so the narrow header's member count agrees with their avatars.
+      ...Object.fromEntries(space.members.map((member) => [
+        `user:${member.userId}`,
+        { kind: "user" as const, label: member.name, email: member.email, status: "online" as const, lastSeenAt: iso(0) },
+      ])),
       "agent:claude": agentPresence("claude", iso, "online"),
       "agent:codex": agentPresence("codex", iso, id === "landing" ? "busy" : "online"),
     },
