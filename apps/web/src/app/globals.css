@@ -7900,7 +7900,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 /* A row is one column of text: the line under a title starts where the title
    does, after the # and its gap, or after a page's icon and its gap. */
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row .app-channel-row-preview-line {
-  padding-left: 15px;
+  padding-left: 16px;
 }
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) :is(.app-recent-change > .app-list-row-meta, .app-page-row-meta-line) {
@@ -7914,9 +7914,10 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row span.app-channel-row-hash {
   /* Keep the marker's column equal on desktop buttons and mobile spans,
-     regardless of the platform font metrics: 10px + the 5px gap below. */
+     regardless of the platform font metrics: 10px + the 6px gap below, so
+     the title starts where the Space sign's glyph does on a phone. */
   width: 10px;
-  margin-right: 5px;
+  margin-right: 6px;
   font-weight: 500 !important;
   color: var(--app-panel-ink-faint) !important;
 }
