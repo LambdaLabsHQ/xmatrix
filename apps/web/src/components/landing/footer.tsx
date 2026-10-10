@@ -1,6 +1,7 @@
 import { BrandMark } from "@/components/shared/brand-mark";
 import { WoodPanel } from "@/components/ui/material-surfaces";
 import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
+import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 const links = {
   Product: [
@@ -9,6 +10,7 @@ const links = {
     { label: "Setup", href: "/#how-it-works" },
     { label: "Pricing", href: "/#pricing" },
     { label: "Docs", href: "/docs" },
+    { label: "GitHub", href: REPOSITORY_URL },
     { label: "Console", href: "/console" },
     { label: "Sign In", href: "/login" },
   ],
