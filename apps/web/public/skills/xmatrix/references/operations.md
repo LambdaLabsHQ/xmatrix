@@ -139,6 +139,15 @@ answered:
 xmatrix request secret-add <secretRef> --env <ENV_NAME> --description "<what it is for>" --reason "<why>" [-- <cmd> [args...]]
 ```
 
+When work keeps needing a secret that asks first each time (a scheduled Agent
+reading the same key on every run), ask a Space admin to let Agents read it
+without asking. A card lists the secrets; the admin ticks which and answers
+once, and nothing changes until then:
+
+```bash
+xmatrix request secret-access <alias>... --reason "<why>"
+```
+
 On Windows PowerShell 5.1, if the command itself uses `powershell -Command`,
 pass the script as one complete argv. Use outer single quotes and doubled
 single quotes for script string literals so `$env:<ENV_NAME>` is not expanded
