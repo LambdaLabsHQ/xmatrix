@@ -25,9 +25,14 @@ const RECORD_SIZE = 4096;
 /** A push service drops what was not delivered within a day; a day-old "needs you" is found in the list. */
 const TTL_SECONDS = 24 * 60 * 60;
 
+/** WebCrypto and `fetch` take an `ArrayBuffer`; a view may sit on a shared or larger one. */
+function buffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 async function hkdf(salt: Uint8Array, ikm: Uint8Array, info: Uint8Array, bytes: number): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
-  return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, key, bytes * 8));
+  const key = await crypto.subtle.importKey("raw", buffer(ikm), "HKDF", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: buffer(salt), info: buffer(info) }, key, bytes * 8));
 }
 
 /** RFC 8291 `aes128gcm`: only the subscribed browser can read what the push service relays. */
@@ -38,17 +43,17 @@ export async function encryptWebPush(subscription: WebPushSubscription, plaintex
   if (plaintext.length > RECORD_SIZE - 16 - 1 - 86) throw new TypeError("push payload too large");
   const server = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]) as CryptoKeyPair;
   const serverPublic = new Uint8Array(await crypto.subtle.exportKey("raw", server.publicKey) as ArrayBuffer);
-  const clientKey = await crypto.subtle.importKey("raw", clientPublic, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const clientKey = await crypto.subtle.importKey("raw", buffer(clientPublic), { name: "ECDH", namedCurve: "P-256" }, false, []);
   const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: clientKey }, server.privateKey, 256));
   const ikm = await hkdf(authSecret, shared,
     concatenateBytes([encoder.encode("WebPush: info\0"), clientPublic, serverPublic]), 32);
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const contentKey = await hkdf(salt, ikm, encoder.encode("Content-Encoding: aes128gcm\0"), 16);
   const nonce = await hkdf(salt, ikm, encoder.encode("Content-Encoding: nonce\0"), 12);
-  const key = await crypto.subtle.importKey("raw", contentKey, "AES-GCM", false, ["encrypt"]);
+  const key = await crypto.subtle.importKey("raw", buffer(contentKey), "AES-GCM", false, ["encrypt"]);
   // One record: the payload, then the delimiter that marks the last record.
-  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key,
-    concatenateBytes([plaintext, new Uint8Array([2])])));
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: buffer(nonce) }, key,
+    buffer(concatenateBytes([plaintext, new Uint8Array([2])]))));
   const header = new Uint8Array(16 + 4 + 1 + serverPublic.length);
   header.set(salt, 0);
   new DataView(header.buffer).setUint32(16, RECORD_SIZE);
@@ -67,7 +72,7 @@ export async function vapidAuthorization(vapid: VapidKeys, endpoint: string, now
   }, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const unsigned = `${base64UrlEncodeValue(JSON.stringify({ typ: "JWT", alg: "ES256" }))}.${
     base64UrlEncodeValue(JSON.stringify({ aud: new URL(endpoint).origin, exp: nowSeconds + 12 * 60 * 60, sub: vapid.subject }))}`;
-  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, encoder.encode(unsigned));
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, buffer(encoder.encode(unsigned)));
   return `vapid t=${unsigned}.${base64UrlEncodeValue(signature)}, k=${vapid.publicKey}`;
 }
 
@@ -91,7 +96,7 @@ export async function sendWebPush(input: {
       urgency: "high",
       ...(input.topic ? { topic: input.topic } : {}),
     },
-    body,
+    body: buffer(body),
   });
   if (response.ok) return "sent";
   return response.status === 404 || response.status === 410 ? "gone" : "failed";
