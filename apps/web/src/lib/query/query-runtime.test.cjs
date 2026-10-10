@@ -8,9 +8,60 @@ installTypeScriptRequire();
 
 const {
   XMatrixApiError,
+  xmatrixApiRequest,
+  requireJson,
+  requireField,
   shouldRetryXMatrixQuery,
   xmatrixQueryRawResponse,
 } = require("./api-client.ts");
+
+test("a dropped JSON body retries as transport failure, including compatibility readers", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  for (const [read, expected] of [
+    [(signal) => xmatrixApiRequest({ url: "/spaces", signal }), { spaces: ["space-1"] }],
+    [async () => requireJson(await fetch("/spaces")), { spaces: ["space-1"] }],
+    [async () => requireField(await fetch("/spaces"), "spaces", "Spaces"), ["space-1"]],
+  ]) {
+    const client = new QueryClient({ defaultOptions: { queries: {
+      retry: shouldRetryXMatrixQuery, retryDelay: 0,
+    } } });
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      if (calls === 1) return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"spaces":'));
+          controller.error(new TypeError("Load failed"));
+        },
+      }));
+      return Response.json({ spaces: ["space-1"] });
+    };
+    try {
+      const result = await client.fetchQuery({
+        queryKey: ["body-drop"], queryFn: ({ signal }) => read(signal),
+      });
+      assert.deepEqual(result, expected);
+      assert.equal(calls, 2);
+    } finally { client.clear(); }
+  }
+});
+
+test("JSON body classification preserves malformed JSON, locked bodies and caller cancellation", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => new Response("not json");
+  await assert.rejects(xmatrixApiRequest({ url: "/spaces" }), SyntaxError);
+  const locked = Response.json({ spaces: [] });
+  locked.body.getReader();
+  await assert.rejects(requireJson(locked), (error) => error instanceof TypeError && !(error instanceof XMatrixApiError));
+  const controller = new AbortController();
+  const cancellation = new DOMException("caller cancelled", "AbortError");
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    start(body) { controller.abort(cancellation); body.error(cancellation); },
+  }));
+  await assert.rejects(xmatrixApiRequest({ url: "/spaces", signal: controller.signal }), (error) => error === cancellation);
+});
 
 test("same-key subscribers share one in-flight query", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
