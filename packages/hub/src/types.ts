@@ -135,6 +135,7 @@ export interface Env {
   CONNECTOR_DINGTALK_COMPANY_CONFIG?: string;
   /** Server-only Stripe API key. A public Payment Link is never an entitlement. */
   APPLE_SUBSCRIPTIONS_CONFIG?: string;
+  PUSH_CONFIG?: string;
   STRIPE_SECRET_KEY?: string;
   /** Server-only signing secret for the exact Stripe webhook endpoint. */
   STRIPE_WEBHOOK_SECRET?: string;
