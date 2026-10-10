@@ -3,7 +3,7 @@ import { authorizeDingTalkEffect, finishDingTalkEffect, type DingTalkEffectAutho
 import { requireAgentChannelAccess } from "./agent-channel-access.js";
 import type { QueryResultRow } from "pg";
 import { resolveMessageAgentTargets } from "./message-agent-targets.js";
-import { channelStopScope, fenceChannelRunsForStop } from "./channel-stop-fence.js";
+import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from "./channel-stop-fence.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
 import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
@@ -1594,6 +1594,9 @@ export class PostgresMessageRepository {
             updated_at=EXCLUDED.updated_at`,
         values: [spaceId, `${senderKind}:${senderId}`, channelId, sentAt], maxRows: 0,
       });
+      // The sender went on after someone else spoke: the waits it declared before that are over.
+      if (senderKind === "user" || senderKind === "agent") await releaseDeclaredWaits(transaction, {
+        spaceId, channelId, authorKind: senderKind, authorIds: [senderId], at: sentAt, movedOnAt: sequence });
       const result = {
         messageId, channelId, spaceId, sequence, entityVersion: 1,
         ...(agentSendFingerprint ? { agentSendFingerprint } : {}),
