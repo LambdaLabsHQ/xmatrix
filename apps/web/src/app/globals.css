@@ -8211,9 +8211,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
 }
 
 /* A card on the paper is a slip of tinted paper laid on the page, not a box
-   lifted off it: one flat block of colour with square corners, no edge and no
-   shadow (user 2026-10-10: 做一个色块就可以了，也不用圆角). It is the paper
-   labels' material at the size of a card. An ask that waits on the reader is
+   lifted off it: one flat block of colour with no edge and no shadow (user
+   2026-10-10: 做一个色块就可以了), its corners rounded like a notice's. It is
+   the paper labels' material at the size of a card. An ask that waits on the reader is
    a slip the colour of the app's wood, thinned into the paper, with brass on
    the line saying who asks; once answered it fades to the plain ink tint.
    The tint is mixed into the paper rather than laid over it, so the dock's
@@ -8222,7 +8222,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   --app-ask-ink: var(--muted-foreground);
   --app-ask-tint: color-mix(in oklch, var(--foreground) 4%, var(--app-panel-paper, oklch(0.976 0.005 85)));
   padding: 14px 16px 16px;
-  border-radius: 0 !important;
+  border-radius: 10px !important;
   background: var(--app-ask-tint);
 }
 
@@ -8240,7 +8240,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
    its lines, not blocks of their own. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-dock .app-channel-approvals {
   background: var(--app-ask-tint) !important;
-  border-radius: 0 !important;
+  border-radius: 10px !important;
   box-shadow: none !important;
 }
 
