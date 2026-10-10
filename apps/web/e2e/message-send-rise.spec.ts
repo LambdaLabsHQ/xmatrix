@@ -218,10 +218,10 @@ test("a draft of several lines is sent without the rows above dropping", async (
     await draft.press("Enter");
     await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1}"]`)).toBeInViewport();
   });
-  // The composer's own shrinking can still reach a frame ahead of the rise:
-  // a drift of a few pixels, where the rows used to drop by the whole of it.
+  // One correction of the list's estimate can still land a frame late: a few
+  // pixels for one frame, where the rows used to drop by the composer's lines.
   const dropped = movesOfRowAbove(frames).filter((by) => by > 0).reduce((sum, by) => sum + by, 0);
-  expect(dropped).toBeLessThan(20);
+  expect(dropped).toBeLessThan(8);
   const above = `message:rise-${HISTORY_LENGTH}`;
   expect(frames[frames.length - 1]!.tops[above]).toBeLessThan(frames[0]!.tops[above]!);
 });
