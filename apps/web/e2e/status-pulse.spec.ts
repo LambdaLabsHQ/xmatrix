@@ -3,8 +3,7 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, openWorkspaceWithStubs } f
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 
 /* Status is a pulse line. A break runs along it while an Agent in the Space
-   works, the same "in progress" the conversation list shows; otherwise, and
-   under reduced motion, the line is whole. */
+   works; otherwise, and under reduced motion, the line is whole. */
 
 test.use(E2E_DESKTOP_CONTEXT);
 
