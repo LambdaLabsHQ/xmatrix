@@ -142,6 +142,10 @@ test.describe("a phone's list rows", () => {
     // Its # under the plank's name, its time under the search glyph.
     expect((await edges(conversation.locator(".app-channel-row-hash"), { text: true })).left).toBeCloseTo(line.start, 0);
     expect((await edges(conversation.locator(".app-channel-row-time"), { text: true })).right).toBeCloseTo(line.end, 0);
+    // Its title and the preview under it start where the sign's glyph is drawn: 2px inside the glyph's 20px box.
+    for (const text of [".app-list-row-title", ".app-channel-row-preview"]) {
+      expect((await edges(conversation.locator(text), { text: true })).left - (line.start + SIGN_PADDING)).toBeCloseTo(2, 0);
+    }
 
     const dock = page.getByRole("navigation", { name: "Primary" });
     await dock.getByRole("button", { name: "Pages" }).tap();
