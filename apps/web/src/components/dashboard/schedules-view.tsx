@@ -178,7 +178,7 @@ export function SchedulesView({
     <ToolList title="Schedules">
       {loadError && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{loadError}</p>}
       {loadingAutomations && automations.length === 0 ? (
-        <ListSkeleton label="Loading schedules" rows={4} className="px-4 md:px-5" />
+        <ListSkeleton label="Loading schedules" rows={4} />
       ) : automations.length === 0 ? (
         loadError ? null : <p className="px-4 text-sm text-muted-foreground md:px-5">No schedules yet.</p>
       ) : (

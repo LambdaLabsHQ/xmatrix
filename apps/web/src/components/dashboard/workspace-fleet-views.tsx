@@ -903,7 +903,7 @@ export function MachinesView({
       </p>}
       <ul>
         {loading && ordered.length === 0 ? (
-          <li className="list-none px-5 md:px-6"><ListSkeleton label="Loading machines" rows={4} /></li>
+          <li className="list-none"><ListSkeleton label="Loading machines" rows={4} /></li>
         ) : ordered.length === 0 ? (
           <li className="px-5 py-2 text-sm text-muted-foreground md:px-6">No machines registered.</li>
         ) : ordered.map((machine) => {
@@ -1877,7 +1877,7 @@ export function ConnectorExecutionList({
 }) {
   if (loading && executions.length === 0) {
     return (
-      <ListSkeleton label="Loading executions" rows={3} />
+      <ListSkeleton label="Loading executions" rows={3} mark={false} className="[--app-list-row-end:0px] [--app-list-row-start:0px]" />
     );
   }
   if (executions.length === 0) {

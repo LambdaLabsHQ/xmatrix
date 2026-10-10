@@ -92,7 +92,7 @@ for (const returnToList of [false, true]) {
     // Both speculative lanes are held. An interactive open overtakes the
     // waiting third Channel, which must no longer need a speculative read.
     await channelList.getByText("third", { exact: true }).first().tap();
-    await expect(page.locator(".app-message-row")).toContainText("third history");
+    await expect(page.locator(".app-message-row", { hasText: "third history" })).toBeVisible();
     if (returnToList) {
       await page.getByRole("button", { name: "Back to channels" }).tap();
       await expect(channelList).toBeVisible();

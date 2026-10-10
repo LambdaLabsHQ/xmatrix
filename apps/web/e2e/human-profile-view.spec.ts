@@ -147,7 +147,7 @@ test("picking a photo opens the crop step: drag reframes, save uploads", async (
 
 test("message avatar opens that member's profile page, and the timeline does not move", async ({ page }) => {
   await openChannel(page);
-  const avatar = page.locator(".message-author-avatar").first();
+  const avatar = page.locator(".identity-avatar.message-author-avatar").first();
   await avatar.waitFor({ state: "visible", timeout: 30_000 });
   await avatar.click();
   await expect(page.getByRole("heading", { name: "Yiming Hu" })).toBeVisible();

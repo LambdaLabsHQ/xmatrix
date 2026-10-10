@@ -109,6 +109,7 @@ import {
 } from "./workspace-shell-recovered";
 
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -187,6 +188,21 @@ import { Textarea } from "@/components/ui/textarea";
 
 
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import {
+  MESSAGE_AUTHOR_NAME_CLASS_NAME,
+  MESSAGE_AVATAR_CLASS_NAME,
+  MESSAGE_AVATAR_SLOT_CLASS_NAME,
+  MESSAGE_COLUMN_CLASS_NAME,
+  MESSAGE_HEADER_TIMESTAMP_CLASS_NAME,
+  MESSAGE_HEAD_CLASS_NAME,
+  MESSAGE_HEAD_HEADED_CLASS_NAME,
+  MESSAGE_META_CLASS_NAME,
+  MESSAGE_ROW_CLASS_NAME,
+  MESSAGE_ROW_HEADED_CLASS_NAME,
+  MESSAGE_TIMESTAMP_CLASS_NAME,
+  RICH_MESSAGE_CLASS_NAME,
+  RICH_MESSAGE_PARAGRAPH_CLASS_NAME,
+} from "./row-frames";
 import { ContentSkeleton, LoadingImage, MediaSkeleton } from "@/components/dashboard/content-skeleton";
 
 
@@ -1416,71 +1432,78 @@ export function EmptyConversation({ title, body }: { title: string; body: string
 
 
 
+/** A conversation of this many messages or fewer rarely fills the screen, so
+ *  its rows start at the top; a longer one fills the screen and ends at the composer. */
+const SHORT_HISTORY_MESSAGE_COUNT = 4;
+
+/** The width of each body line of each placeholder message, oldest first. */
+const MESSAGE_SKELETON_ROWS: ReadonlyArray<ReadonlyArray<string>> = [
+  ["62%"],
+  ["94%", "88%", "41%"],
+  ["36%"],
+  ["90%", "57%"],
+  ["48%"],
+  ["96%", "91%", "84%", "33%"],
+  ["71%"],
+  ["92%", "64%"],
+  ["28%"],
+  ["95%", "89%", "52%"],
+  ["58%"],
+  ["93%", "46%"],
+  ["39%"],
+  ["86%"],
+];
+
+/** Placeholder messages inside a message row's own boxes (row-frames): only
+ *  the name, the time and the text are bars, so nothing moves when history lands. */
 export function MessageTimelineSkeleton({ messageCount }: { messageCount?: number }) {
   const knownMessageCount = Number.isSafeInteger(messageCount) && (messageCount || 0) > 0
     ? messageCount
     : undefined;
   const formattedMessageCount = knownMessageCount?.toLocaleString();
+  const short = knownMessageCount !== undefined && knownMessageCount <= SHORT_HISTORY_MESSAGE_COUNT;
+  const rows = short ? MESSAGE_SKELETON_ROWS.slice(-(knownMessageCount ?? 0)) : MESSAGE_SKELETON_ROWS;
   return (
     <div
-      className="app-message-timeline-skeleton flex min-h-full flex-col justify-end gap-5 px-5 pb-28 pt-8"
+      className={cn("app-message-timeline-skeleton", short && "app-message-timeline-skeleton-short")}
       role="status"
       aria-label={formattedMessageCount
         ? `Loading history for ${formattedMessageCount} messages`
         : "Loading messages"}
     >
-      <MessageSkeletonRows />
+      {rows.map((lines, index) => (
+        <div key={index} className={cn(MESSAGE_ROW_CLASS_NAME, MESSAGE_ROW_HEADED_CLASS_NAME, "app-message-skeleton-row")}
+          aria-hidden="true">
+          <div className={MESSAGE_AVATAR_SLOT_CLASS_NAME}>
+            <span className={cn(MESSAGE_AVATAR_CLASS_NAME, "app-message-skeleton-avatar")} />
+          </div>
+          <div className={MESSAGE_COLUMN_CLASS_NAME}>
+            <div className={cn(MESSAGE_HEAD_CLASS_NAME, MESSAGE_HEAD_HEADED_CLASS_NAME)}>
+              <div className={MESSAGE_META_CLASS_NAME}>
+                <span className={MESSAGE_AUTHOR_NAME_CLASS_NAME}>
+                  <span className="app-skeleton-bar app-message-skeleton-line" style={{ width: "5rem" }} />
+                </span>
+                <span className={cn(MESSAGE_TIMESTAMP_CLASS_NAME, MESSAGE_HEADER_TIMESTAMP_CLASS_NAME)}>
+                  <span className="app-skeleton-bar app-message-skeleton-line" style={{ width: "4rem" }} />
+                </span>
+              </div>
+            </div>
+            <div className={RICH_MESSAGE_CLASS_NAME}>
+              <p className={RICH_MESSAGE_PARAGRAPH_CLASS_NAME}>
+                {lines.map((width, line) => (
+                  <Fragment key={line}>
+                    {line > 0 && <br />}
+                    <span className="app-skeleton-bar app-message-skeleton-line" style={{ width }} />
+                  </Fragment>
+                ))}
+              </p>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
-
-function MessageSkeletonLine({ kind }: { kind: "name" | "long" | "medium" | "short" }) {
-  const shape = {
-    name: "app-message-skeleton-line-name block h-2 w-20",
-    long: "app-message-skeleton-line-long block h-2.5 w-4/5",
-    medium: "app-message-skeleton-line-medium block h-2.5 w-3/5",
-    short: "app-message-skeleton-line-short block h-2.5 w-2/5",
-  }[kind];
-  return (
-    <span className={`app-message-skeleton-line ${shape} animate-pulse rounded-full bg-muted`} />
-  );
-}
-
-function MessageSkeletonRow({
-  lines,
-  compact = false,
-}: {
-  lines: ReadonlyArray<"name" | "long" | "medium" | "short">;
-  compact?: boolean;
-}) {
-  return (
-    <div className={cn(
-      "app-message-skeleton-row flex items-start gap-3",
-      compact && "app-message-skeleton-row-compact pl-11",
-    )}>
-      {compact ? null : (
-        <span className="app-message-skeleton-avatar size-8 shrink-0 animate-pulse rounded-full bg-muted" />
-      )}
-      <span className="app-message-skeleton-copy flex min-w-0 flex-1 flex-col gap-2 pt-1">
-        {lines.map((kind, index) => (
-          <MessageSkeletonLine key={`${kind}-${index}`} kind={kind} />
-        ))}
-      </span>
-    </div>
-  );
-}
-
-function MessageSkeletonRows() {
-  return (
-    <div className="flex w-full max-w-3xl flex-col gap-5" aria-hidden="true">
-      <MessageSkeletonRow lines={["name", "long", "short"]} />
-      <MessageSkeletonRow compact lines={["name", "medium"]} />
-      <MessageSkeletonRow lines={["name", "long", "medium"]} />
-    </div>
-  );
-}
-
-
 
 export function MessageTimestamp({ value, clock = false, className }: { value: string; clock?: boolean; className?: string }) {
   const fullDateTime = formatMessageDateTime(value);
@@ -1488,7 +1511,7 @@ export function MessageTimestamp({ value, clock = false, className }: { value: s
     <time
       dateTime={value}
       title={fullDateTime}
-      className={cn("app-message-timestamp shrink-0 tabular-nums", className)}
+      className={cn(MESSAGE_TIMESTAMP_CLASS_NAME, className)}
     >
       {clock ? formatMessageClockTime(value) : formatMessageTimestamp(value)}
     </time>
@@ -2119,14 +2142,14 @@ export const MessageRow = memo(function MessageRow({
       onClick={handleRowClick}
       data-actions-open={actionsOpen || undefined}
       className={cn(
-        "app-message-row group relative flex items-start gap-(--app-message-avatar-gap) px-5",
+        MESSAGE_ROW_CLASS_NAME,
         // Every message sits on the same paper: whose it is reads from the
         // header, not from a tinted row. An open action row is a state, not
         // an author, so it keeps its tone.
         // Only a header row opens with extra room, which sets one sender's
         // run apart from the last; every row closes alike, so the lines of a
         // run sit at one even pitch.
-        message.continuation ? "py-0.5" : "pt-3 pb-0.5",
+        message.continuation ? "py-0.5" : MESSAGE_ROW_HEADED_CLASS_NAME,
         actionsOpen && "bg-muted"
       )}
     >
@@ -2147,7 +2170,7 @@ export const MessageRow = memo(function MessageRow({
       <div
         ref={messageAvatarRef}
         className={cn(
-          "app-message-author-avatar relative mt-0.5 self-start",
+          MESSAGE_AVATAR_SLOT_CLASS_NAME,
           canRebornSender && (rebornControlVisible || reborningSender) && "app-message-author-reborn-open"
         )}
         onPointerDown={handleAvatarPointerDown}
@@ -2199,7 +2222,7 @@ export const MessageRow = memo(function MessageRow({
           size="md"
           showKindBadge={false}
           glass={false}
-          className="message-author-avatar size-9 min-h-9 min-w-9 max-h-9 max-w-9 p-0"
+          className={MESSAGE_AVATAR_CLASS_NAME}
           onClick={
             message.senderKind === "agent" && !message.reservedSystemAgent
               ? () => onOpenAgentTrace({
@@ -2261,12 +2284,12 @@ export const MessageRow = memo(function MessageRow({
         ) : null}
       </div>
       )}
-      <div className="min-w-0 flex-1">
+      <div className={MESSAGE_COLUMN_CLASS_NAME}>
         <MessageHead className={cn(
-          "app-message-head flex min-w-0 items-start gap-2",
+          MESSAGE_HEAD_CLASS_NAME,
           // As tall as the hover actions a sent message has beside its name,
           // so a row does not grow when the server confirms it.
-          message.continuation ? "hidden items-center gap-0.5 p-0.5 md:flex" : "md:min-h-7",
+          message.continuation ? "hidden items-center gap-0.5 p-0.5 md:flex" : MESSAGE_HEAD_HEADED_CLASS_NAME,
         )} {...(message.continuation ? { pinned: reactionPickerOpen } : {})}>
           {/* Sender, then the time, then every tag. The time is a property of the
               message itself, so it stays next to the author instead of being
@@ -2275,9 +2298,9 @@ export const MessageRow = memo(function MessageRow({
               something about the sender, so none is hidden or cut at the edge
               (user 2026-09-27, a phone showed half a Goal pill). */}
           {!message.continuation && (
-          <div className="app-message-meta flex min-h-6 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="app-message-author-name shrink-0 whitespace-nowrap text-[15px] font-black">{message.author}</span>
-          <MessageTimestamp value={message.sentAt} className="shrink-0 text-xs text-muted-foreground" />
+          <div className={MESSAGE_META_CLASS_NAME}>
+          <span className={MESSAGE_AUTHOR_NAME_CLASS_NAME}>{message.author}</span>
+          <MessageTimestamp value={message.sentAt} className={MESSAGE_HEADER_TIMESTAMP_CLASS_NAME} />
           {message.sendStatus === "pending" && <MessageSendingMark label />}
           {message.sendStatus === "unconfirmed" && (
             // Neither a spinner nor an error: the send passed its deadline and

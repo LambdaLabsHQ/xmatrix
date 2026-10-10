@@ -382,7 +382,7 @@ test("an existing-instance mention carries no status; status belongs to a startu
     launches: [], targets: [target("Alpha", 1), target("Beta", 2)], executions: [], nextCursor: null,
   });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  await expect(page.locator(".rich-message")).toContainText("@Alpha:1 review");
+  await expect(page.locator(".rich-message", { hasText: "@Alpha:1 review" })).toBeVisible();
   await expect(page.locator(".app-mention-invocation")).toHaveCount(0);
 });
 
