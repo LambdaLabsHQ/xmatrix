@@ -1,3 +1,17 @@
+// A display author does not make a platform card or activity entry that
+// author's speech. Both responding and moving on use this closed rule.
+const SPEECH = { authorKinds: ["user", "agent"], messageKind: "xmatrix.message.text" };
+
+export function messageIsSpeech(authorKind: string, messageKind: string): authorKind is "user" | "agent" {
+  return SPEECH.authorKinds.includes(authorKind) && messageKind === SPEECH.messageKind;
+}
+
+/** The same speech rule for stored messages, with a repository-owned SQL alias. */
+export function messageSpeechSql(alias: string): string {
+  return `${alias}.author_kind IN (${SPEECH.authorKinds.map(kind => `'${kind}'`).join(",")})
+    AND ${alias}.message_kind='${SPEECH.messageKind}'`;
+}
+
 /**
  * Whether a declared wait (`awaiting_response`) on the attention row `alias`
  * still stands. It ends with its asker: once the Agent Instance that asked

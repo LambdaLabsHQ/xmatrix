@@ -2,8 +2,9 @@ import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { commitRuntime, expireInstanceTraceAccess } from "./runtime-control.js";
-import { CHANNEL_ACTIVITY_MESSAGE_KIND, parseAgentStopCommand } from "@xmatrix/protocol";
+import { parseAgentStopCommand } from "@xmatrix/protocol";
 import { resolveMessageAgentTargets } from "./message-agent-targets.js";
+import { messageSpeechSql } from "./message-attention-wait.js";
 
 /** Bounded like every Runtime scan; a repeated `/kill all` fences the rest. */
 const CHANNEL_STOP_FENCE_LIMIT = 200;
@@ -73,7 +74,7 @@ export async function releaseDeclaredWaits(tx: DatabaseTransaction, input: {
   spaceId: string; channelId: string; authorKind: "user" | "agent"; authorIds: string[]; at: string;
   movedOnAt?: number;
 }): Promise<void> {
-  await tx.query({ name: "message_attention_release_waits_v1", text: `WITH released AS (
+  await tx.query({ name: "message_attention_release_waits_v2", text: `WITH released AS (
       UPDATE data.message_attention a SET awaiting_response=FALSE
       FROM data.messages m
       WHERE a.space_id=$1 AND a.channel_id=$2 AND a.awaiting_response
@@ -82,9 +83,8 @@ export async function releaseDeclaredWaits(tx: DatabaseTransaction, input: {
         AND ($5::bigint IS NULL OR EXISTS (SELECT 1 FROM data.messages other
           WHERE other.space_id=a.space_id AND other.channel_id=a.channel_id
             AND other.timeline_sequence>a.timeline_sequence AND other.timeline_sequence<$5
-            AND other.deleted_at IS NULL AND other.author_kind IN ('user','agent')
-            AND NOT (other.author_kind=$3 AND other.author_id=ANY($4::text[]))
-            AND other.message_kind<>'${CHANNEL_ACTIVITY_MESSAGE_KIND}'))
+            AND other.deleted_at IS NULL AND ${messageSpeechSql("other")}
+            AND NOT (other.author_kind=$3 AND other.author_id=ANY($4::text[]))))
       RETURNING a.subject_id
     ) INSERT INTO data.message_attention_revisions (space_id,subject_id,channel_id,revision,updated_at)
     SELECT DISTINCT $1,released.subject_id,$2,1,$6::timestamptz FROM released

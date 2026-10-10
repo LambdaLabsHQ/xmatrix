@@ -58,6 +58,11 @@ progress to where it belongs: an ordered, compact activity record, a live
 
 Ordinary messages (`xmatrix.message.text`) are unchanged: delivered as work,
 counted as unread, notified through attention when they mention someone.
+Only a person or Agent's ordinary text counts as speech when answering a
+declared wait or when its asker goes on after someone else's answer. Both
+transitions use the same closed speech rule. Platform cards and activity entries
+do not speak for their display author and cannot supply an answer the asker
+moves on with.
 
 ### 3.2 Activity entries
 
