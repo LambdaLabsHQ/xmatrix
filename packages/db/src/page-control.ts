@@ -141,6 +141,7 @@ type PageRow = QueryResultRow & {
   page_id: string; parent_page_id: string | null; title: string; position: string;
   access_mode: "open" | "restricted"; head_revision: string | number; agent_suggest_only: boolean;
   updated_at: Date | string; version: string | number; published_at: Date | string | null;
+  summary?: string | null; summary_revision?: string | number | null; summary_at?: Date | string | null;
 };
 
 type RevisionRow = QueryResultRow & {
@@ -275,9 +276,9 @@ type TreeRow = PageRow & AccessView & { governance: boolean };
 /** Every page in the Space with the actor's effective access, parents first. */
 async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor): Promise<TreeRow[]> {
   const rows = await tx.query<PageRow>({
-    name: "page_tree_v2",
+    name: "page_tree_v3",
     text: `SELECT page_id,parent_page_id,title,position,access_mode,head_revision,
-        agent_suggest_only,updated_at,version,published_at
+        agent_suggest_only,updated_at,version,published_at,summary,summary_revision,summary_at
       FROM data.pages WHERE space_id=$1 ORDER BY parent_page_id NULLS FIRST, position, page_id
       LIMIT ${MAX_PAGES + 1}`,
     values: [spaceId], maxRows: MAX_PAGES + 1,
@@ -383,6 +384,8 @@ export class PostgresPageRepository {
       updatedAt: iso(row.updated_at),
       publishedAt: row.published_at === null ? null : iso(row.published_at),
       governance: row.governance,
+      summary: row.summary && row.summary_revision && row.summary_at
+        ? { text: row.summary, revision: Number(row.summary_revision), at: iso(row.summary_at) } : null,
     };
   }
 
@@ -1096,6 +1099,34 @@ export class PostgresPageRepository {
       // edited while holding it was written back before the release.
       return released[0] ? { released: true, blockId: String(released[0].block_id),
         owesUpdate: released[0].owes_update === true } : { released: false };
+    });
+  }
+
+  /**
+   * Writes a page's summary for the revision its writer read. A summary of a
+   * revision the page has moved on from is refused, so the page never carries
+   * a line about text it no longer has; whoever may edit the page may write it.
+   */
+  async setSummary(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal;
+    baseRevision: number; summary: string }): Promise<{ summary: NonNullable<PageSummary["summary"]> }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    const text = typeof input.summary === "string" ? input.summary.replace(/\s+/gu, " ").trim() : "";
+    if (!text || [...text].length > 240) {
+      throw new PageControlError("invalid_request", 400, "summary must be 1 to 240 characters");
+    }
+    if (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 1) {
+      throw new PageControlError("invalid_request", 400, "baseRevision is invalid");
+    }
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.summary.set", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, true);
+      await this.page(tx, spaceId, actor, pageId, "edit");
+      const row = (await tx.query<QueryResultRow & { summary_at: Date | string }>({ name: "page_summary_set_v1",
+        text: `UPDATE data.pages SET summary=$3, summary_revision=$4, summary_at=now()
+          WHERE space_id=$1 AND page_id=$2 AND head_revision=$4 RETURNING summary_at`,
+        values: [spaceId, pageId, text, input.baseRevision], maxRows: 1 }))[0];
+      if (!row) throw new PageControlError("page_summary_stale", 409, "the page has changed since that revision");
+      return { summary: { text, revision: input.baseRevision, at: iso(row.summary_at) } };
     });
   }
 

@@ -145,6 +145,38 @@ test("sibling positions always sort strictly between their neighbours", () => {
   assert.ok(pagePositionBetween(null, keys[0]) < keys[0]);
 });
 
+integration("pages: a summary is written for the page's head revision and stays with the revision it describes", async () => {
+  const { client, ids, pages, owner, viewer, agent } = await pageTest("page-summary");
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
+    const summaryOf = async () => (await call("tree", { principal: owner })).pages[0].summary;
+    const { page } = await call("create", { principal: owner, title: "Plan", body: "# Plan\n" });
+    assert.equal(await summaryOf(), null, "a page starts without one");
+
+    const written = await call("setSummary", { principal: agent, pageId: page.pageId, baseRevision: 1,
+      summary: "  Ready:\n 41 of 47  " });
+    assert.equal(written.summary.text, "Ready: 41 of 47", "it is one line");
+    assert.deepEqual(await summaryOf(), written.summary);
+
+    await call("edit", { principal: owner, pageId: page.pageId, baseRevision: 1, body: "# Plan\n\nOne\n" });
+    assert.equal((await summaryOf()).revision, 1, "an edit leaves the line with the revision it was written for");
+    await assert.rejects(call("setSummary", { principal: agent, pageId: page.pageId, baseRevision: 1, summary: "Late" }),
+      code("page_summary_stale"), "a summary of text the page no longer has is refused");
+    assert.equal((await call("setSummary", { principal: owner, pageId: page.pageId, baseRevision: 2, summary: "One" }))
+      .summary.revision, 2);
+
+    await assert.rejects(call("setSummary", { principal: viewer, pageId: page.pageId, baseRevision: 2, summary: "No" }),
+      code("page_edit_forbidden"), "only someone who may edit the page writes its summary");
+    for (const summary of ["", "   ", "x".repeat(241)]) {
+      await assert.rejects(call("setSummary", { principal: owner, pageId: page.pageId, baseRevision: 2, summary }),
+        code("invalid_request"));
+    }
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
 integration("pages: how far a person has read a page is theirs, only moves forward and goes with the page", async () => {
   const { client, ids, pages, owner, viewer, agent } = await pageTest("page-reads");
   try {
