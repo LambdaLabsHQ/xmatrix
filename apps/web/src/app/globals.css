@@ -7779,7 +7779,12 @@ html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-chan
    the repeated class outranks "Labels take the material they sit on". */
 .xmatrix-app .app-list-section-label {
   --app-list-section-ink: var(--m-ink-settled, var(--muted-foreground));
-  color: var(--app-list-section-ink);
+}
+
+/* The sidebar's own ink rules are !important; a label's tone has to outrank them. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-heading .app-list-section-label.app-list-section-label,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-heading .app-list-section-label.app-list-section-label * {
+  color: var(--app-list-section-ink) !important;
 }
 
 .xmatrix-app .app-list-section-label[data-tone="attention"] {
