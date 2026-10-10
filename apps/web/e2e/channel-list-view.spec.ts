@@ -212,6 +212,11 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
       channelId: "channel-waiting", unreadAttentionCount: 1, lastMessageId: "waiting-mention", lastMessageSequence: 3,
       primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: pinned.updatedAt,
     },
+    // Something else was said since; the row still says who waits and on what.
+    lastMessage: { messageId: "waiting-later", from: { kind: "user", label: "Alex" }, bodyPreview: "unrelated chatter",
+      sentAt: pinned.updatedAt },
+    attentionMessage: { messageId: "waiting-mention", from: { kind: "agent", label: "claude:3" },
+      bodyPreview: "which one ships?", sentAt: pinned.updatedAt },
   };
   await openWorkspaceWithStubs(page, {
     spaces: [E2E_SPACE],
@@ -223,6 +228,8 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
   const order = await sidebar.locator(".app-list-section-heading, [data-channel-row-id]").evaluateAll((nodes) =>
     nodes.map((node) => (node as HTMLElement).dataset.channelRowId ?? node.textContent?.trim()));
   expect(order).toEqual(["Needs you1", waiting.id, "Pinned", pinned.id, "Recent", other.id]);
+  await expect(sidebar.locator(`[data-channel-row-id="${waiting.id}"] .app-channel-row-preview`))
+    .toHaveText("claude:3: which one ships?");
   // Each section's name is a paper label in its own ink, flat on the list.
   const labels = await sidebar.locator(".app-list-section-label").evaluateAll((nodes) => nodes.map((node) => {
     const style = getComputedStyle(node);

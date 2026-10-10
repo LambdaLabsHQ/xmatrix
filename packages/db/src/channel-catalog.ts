@@ -87,6 +87,14 @@ interface CatalogRow extends ChannelPresentationRow {
   head_preview_json: unknown;
   head_payload_bundle_base64: string | null;
   head_legacy_body: string | null;
+  waiting_message_id: string | null;
+  waiting_sent_at: string | Date | null;
+  waiting_author_kind: string | null;
+  waiting_author_id: string | null;
+  waiting_recalled_at: string | Date | null;
+  waiting_preview_json: unknown;
+  waiting_payload_bundle_base64: string | null;
+  waiting_legacy_body: string | null;
   sort_group: string | number;
   pin_rank: string | number;
 }
@@ -271,6 +279,19 @@ function serialize(
       payloadBundleBase64: row.head_payload_bundle_base64,
       legacyBody: row.head_legacy_body,
     } satisfies ChannelHeadMessage } : {}),
+    // The newest message that waits on the reader, so a list can say who waits and on what.
+    ...(attentionCount > 0 && row.waiting_message_id && row.waiting_sent_at &&
+        row.last_attention_sequence !== null ? { waitingMessage: {
+      messageId: row.waiting_message_id,
+      sequence: safeCount(row.last_attention_sequence),
+      authorKind: row.waiting_author_kind ?? "user",
+      authorId: row.waiting_author_id ?? "",
+      sentAt: iso(row.waiting_sent_at),
+      recalledAt: row.waiting_recalled_at ? iso(row.waiting_recalled_at) : null,
+      preview: readMessagePreview(row.waiting_preview_json),
+      payloadBundleBase64: row.waiting_payload_bundle_base64,
+      legacyBody: row.waiting_legacy_body,
+    } satisfies ChannelHeadMessage } : {}),
   };
 }
 
@@ -336,6 +357,21 @@ const HEAD_MESSAGE_FIELDS = `
   head.recalled_at AS head_recalled_at,head.preview_json AS head_preview_json,
   head.payload_bundle_base64 AS head_payload_bundle_base64,
   head.legacy_body AS head_legacy_body,`;
+
+/* The newest message that holds the principal's attention rides the row too,
+   read by its sequence on the timeline index, only for a row that has one. */
+const WAITING_MESSAGE_FIELDS = `
+  waiting.message_id AS waiting_message_id,waiting.sent_at AS waiting_sent_at,
+  waiting.author_kind AS waiting_author_kind,waiting.author_id AS waiting_author_id,
+  waiting.recalled_at AS waiting_recalled_at,waiting.preview_json AS waiting_preview_json,
+  waiting.payload_bundle_base64 AS waiting_payload_bundle_base64,
+  waiting.legacy_body AS waiting_legacy_body,`;
+const WAITING_MESSAGE_JOIN = `LEFT JOIN LATERAL (
+  SELECT ${HEAD_MESSAGE_COLUMNS} FROM data.messages message
+  WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
+    AND message.timeline_sequence=attention.last_attention_sequence
+    AND message.deleted_at IS NULL LIMIT 1
+) waiting ON TRUE`;
 
 /**
  * How far the principal has read a conversation. Activity entries after the
@@ -497,7 +533,7 @@ export class PostgresChannelCatalogRepository {
           AND channel_id>(SELECT cursor_channel_id FROM catalog_input))
       )` : "";
       const envelopes = input.countsOnly ? [] : await transaction.query<CatalogPageEnvelope>({
-        name: `channel_catalog_page_${input.view}_${input.filter}_v11`,
+        name: `channel_catalog_page_${input.view}_${input.filter}_v12`,
         text: `WITH RECURSIVE catalog_input AS (
           SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
             $4::text AS search_query,
@@ -524,7 +560,7 @@ export class PostgresChannelCatalogRepository {
             ${effectiveReadSequenceSql("COALESCE(head.timeline_sequence,0)")} AS read_sequence,
             COALESCE(attention.attention_count,0) AS attention_count,
             attention.last_attention_at,attention.last_attention_message_id,
-            attention.last_attention_sequence,attention.last_attention_kind,
+            attention.last_attention_sequence,attention.last_attention_kind,${WAITING_MESSAGE_FIELDS}
             CASE WHEN channel.mode='closed' THEN ARRAY(
               SELECT member.user_id FROM data.space_members member
               WHERE member.space_id=channel.space_id AND (
@@ -562,6 +598,7 @@ export class PostgresChannelCatalogRepository {
               AND item.subject_id=input.principal_kind||':'||input.principal_id
               AND (item.awaiting_response OR item.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
           ) attention ON TRUE
+          ${WAITING_MESSAGE_JOIN}
         )
         SELECT context.authorized AS principal_authorized,
           COALESCE((SELECT commit_sequence FROM data.space_control_heads
@@ -657,7 +694,7 @@ export class PostgresChannelCatalogRepository {
     return this.withPlacedTransaction(
       requestId, "channel-catalog.resolve", spaceId, async (transaction) => {
       const envelopes = await transaction.query<CatalogResolveEnvelope>({
-        name: "channel_catalog_resolve_v13",
+        name: "channel_catalog_resolve_v14",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
               $4::text[] AS requested_channel_ids,$5::text[] AS route_range_lowers,
@@ -695,7 +732,7 @@ export class PostgresChannelCatalogRepository {
               ${effectiveReadSequenceSql("COALESCE(head.timeline_sequence,0)")} AS read_sequence,
               COALESCE(attention.attention_count,0) AS attention_count,
               attention.last_attention_at,attention.last_attention_message_id,
-              attention.last_attention_sequence,attention.last_attention_kind,
+              attention.last_attention_sequence,attention.last_attention_kind,${WAITING_MESSAGE_FIELDS}
               CASE WHEN $8::boolean AND channel.mode='closed' THEN ARRAY(
                 SELECT member.user_id FROM data.space_members member
                 WHERE member.space_id=channel.space_id AND (
@@ -734,6 +771,7 @@ export class PostgresChannelCatalogRepository {
                 AND item.subject_id=input.principal_kind||':'||input.principal_id
                 AND (item.awaiting_response OR item.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
             ) attention ON TRUE
+            ${WAITING_MESSAGE_JOIN}
           )
           SELECT context.authorized AS principal_authorized,
             COALESCE((SELECT jsonb_agg(to_jsonb(resolved)
