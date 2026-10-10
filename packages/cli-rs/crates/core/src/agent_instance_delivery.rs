@@ -1,10 +1,15 @@
 //! Which Hub deliveries this connection acknowledges and drops before any
 //! runtime sees them: its own echoes, the summon that spawned it, orientation,
-//! and catch-up its first prompt already carried.
+//! and catch-up its first prompt already carried. Orientation is not lost with
+//! the turn it must not start: it is kept here for the run's next one.
 
-use std::sync::OnceLock;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
 
-use crate::protocol::{AgentInstanceServerMessage, SerializedAgent, cross_channel_reply_source};
+use crate::protocol::{
+    AgentInstanceServerMessage, CHANNEL_ACTIVITY_PROVENANCE, ChannelMessage, SerializedAgent,
+    cross_channel_reply_source,
+};
 
 /// Who this connection is as a channel author.
 ///
@@ -154,7 +159,8 @@ fn delivery_is_spawn_summon_echo(
 /// A fresh join's history window and the hub's own system facts about the
 /// channel are both context: the instance should know them, and it should not
 /// act on them. They are still acknowledged so the cursor advances and they are
-/// never served again — only the turn is skipped.
+/// never served again — only the turn is skipped, and
+/// [`keep_context_for_next_turn`] holds them for the turn that does run.
 ///
 /// An absent intent means work. A hub that predates the field must keep having
 /// its deliveries executed rather than silently dropped, so this can only ever
@@ -196,6 +202,104 @@ pub(crate) fn delivery_is_acknowledged_and_dropped(
         || delivery_is_spawn_summon_echo(server_msg, spawn_initial_message_id)
         || delivery_is_context_only(server_msg)
         || delivery_was_carried_by_prompt(server_msg, PROMPT_CARRIED_HISTORY.get())
+}
+
+/// How much orientation one channel holds for the next turn. A run that stays
+/// idle through more than this reads the channel itself; the newest is what
+/// tells it how things stand.
+const CONTEXT_FOR_NEXT_TURN_MAX: usize = 20;
+
+static CONTEXT_FOR_NEXT_TURN: OnceLock<Mutex<HashMap<String, VecDeque<ChannelMessage>>>> =
+    OnceLock::new();
+
+/// Whether a dropped delivery is orientation this run has not been shown.
+///
+/// `waterline` is the newest sequence this process accepted in the channel. A
+/// replay at or below it was already served; a replay before any waterline is
+/// the join window of a run that resumed its own session, which lived through
+/// those messages. A peer's activity entries narrate its tool calls and a
+/// thread's root copy repeats its parent, so neither says how the channel
+/// stands.
+fn context_is_new_to_this_run<'a>(
+    server_msg: &'a AgentInstanceServerMessage,
+    registered_author: Option<&RegisteredAuthor>,
+    spawn_initial_message_id: Option<&str>,
+    carried: Option<&PromptCarriedHistory>,
+    waterline: Option<u64>,
+) -> Option<&'a ChannelMessage> {
+    let (message, live) = match server_msg {
+        AgentInstanceServerMessage::ChannelMessageReceived { message, .. } => (message, true),
+        AgentInstanceServerMessage::ChannelHistoryReplay { message, .. } => (message, false),
+        _ => return None,
+    };
+    let own = registered_author.is_some_and(|author| {
+        message.from.instance_id.as_deref() == Some(author.instance_id.as_str())
+    });
+    let new = match (message.sequence, waterline) {
+        (Some(sequence), Some(waterline)) => sequence > waterline,
+        _ => live,
+    };
+    (delivery_is_context_only(server_msg)
+        && new
+        && !own
+        && !delivery_is_own_cross_channel_reply(server_msg, registered_author)
+        && !delivery_is_spawn_summon_echo(server_msg, spawn_initial_message_id)
+        && !delivery_was_carried_by_prompt(server_msg, carried)
+        && !message.message_id.starts_with("thread-root:")
+        && message
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("xmatrixProvenance")?.as_str())
+            != Some(CHANNEL_ACTIVITY_PROVENANCE))
+    .then_some(message)
+}
+
+/// Keep a dropped context delivery for the run's next turn.
+///
+/// The Hub marks a delivery context so that it starts no turn: a stop, reborn
+/// or handoff it carries out itself, a model switch, a summon addressed to
+/// another Agent, its own notices. Dropping it outright left every live peer
+/// unaware that an Instance beside it had been stopped or replaced. The next
+/// turn's input carries what is kept here ([`take_context_for_next_turn`]).
+pub(crate) fn keep_context_for_next_turn(
+    server_msg: &AgentInstanceServerMessage,
+    registered_author: Option<&RegisteredAuthor>,
+    spawn_initial_message_id: Option<&str>,
+    waterline: Option<u64>,
+) {
+    let Some(message) = context_is_new_to_this_run(
+        server_msg,
+        registered_author,
+        spawn_initial_message_id,
+        PROMPT_CARRIED_HISTORY.get(),
+        waterline,
+    ) else {
+        return;
+    };
+    let Ok(mut kept) = CONTEXT_FOR_NEXT_TURN.get_or_init(Default::default).lock() else {
+        return;
+    };
+    let channel = kept.entry(message.channel_id.clone()).or_default();
+    if channel
+        .iter()
+        .any(|held| held.message_id == message.message_id)
+    {
+        return;
+    }
+    if channel.len() == CONTEXT_FOR_NEXT_TURN_MAX {
+        channel.pop_front();
+    }
+    channel.push_back(message.clone());
+}
+
+/// The context `channel_id` saw since this run's last turn there, oldest first.
+/// Taking it empties it: each message is shown to the run once.
+pub fn take_context_for_next_turn(channel_id: &str) -> Vec<ChannelMessage> {
+    CONTEXT_FOR_NEXT_TURN
+        .get()
+        .and_then(|kept| kept.lock().ok()?.remove(channel_id))
+        .map(Vec::from)
+        .unwrap_or_default()
 }
 
 /// The newest channel message this run's first prompt already carried.
@@ -257,10 +361,11 @@ pub(crate) mod tests {
     use crate::protocol::{AgentInstanceServerMessage, ChannelMessage, MessageSender};
 
     use super::{
-        PromptCarriedHistory, RegisteredAuthor, delivery_is_acknowledged_and_dropped,
-        delivery_is_context_only, delivery_is_own_cross_channel_reply,
-        delivery_is_spawn_summon_echo, delivery_was_carried_by_prompt, join_after_sequence,
-        live_channel_delivery_is_own_echo, registered_author_from,
+        PromptCarriedHistory, RegisteredAuthor, context_is_new_to_this_run,
+        delivery_is_acknowledged_and_dropped, delivery_is_context_only,
+        delivery_is_own_cross_channel_reply, delivery_is_spawn_summon_echo,
+        delivery_was_carried_by_prompt, join_after_sequence, keep_context_for_next_turn,
+        live_channel_delivery_is_own_echo, registered_author_from, take_context_for_next_turn,
     };
 
     fn live_channel_message_from(
@@ -616,6 +721,130 @@ pub(crate) mod tests {
             delivery_intent: Some("context".into()),
         };
         assert!(delivery_is_context_only(&live_notice));
+    }
+
+    fn context_frame(
+        message_id: &str,
+        channel_id: &str,
+        sequence: u64,
+        body: &str,
+        live: bool,
+    ) -> AgentInstanceServerMessage {
+        let mut message = test_channel_message(
+            message_id,
+            Some(sequence),
+            "user",
+            Some("user:1"),
+            body,
+            "2026-10-10T18:28:24Z",
+        );
+        message.channel_id = channel_id.into();
+        if !live {
+            return replay_frame(message, Some("context"));
+        }
+        AgentInstanceServerMessage::ChannelMessageReceived {
+            message,
+            client_message_id: None,
+            ack_required: Some(true),
+            interrupt_requested: None,
+            delivery_intent: Some("context".into()),
+        }
+    }
+
+    /// A stop is context so that no peer spends a turn answering it. Dropping
+    /// it outright left every live peer unaware the Instance was gone.
+    #[test]
+    fn a_stop_delivered_as_context_reaches_the_peers_next_turn_once() {
+        let channel = "ch-context-stop";
+        let stop = context_frame("stop-1", channel, 7, "@codex:2:stop out of scope", true);
+        assert!(delivery_is_acknowledged_and_dropped(&stop, None, None));
+        keep_context_for_next_turn(&stop, None, None, Some(6));
+        // A reconnect serves it again; it is still one fact.
+        keep_context_for_next_turn(
+            &context_frame("stop-1", channel, 7, "@codex:2:stop out of scope", false),
+            None,
+            None,
+            Some(6),
+        );
+
+        let kept = take_context_for_next_turn(channel);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].body, "@codex:2:stop out of scope");
+        assert!(take_context_for_next_turn(channel).is_empty());
+    }
+
+    #[test]
+    fn only_the_newest_context_is_held_for_an_idle_run() {
+        let channel = "ch-context-bound";
+        for sequence in 1..=25 {
+            let frame = context_frame(&format!("notice-{sequence}"), channel, sequence, "n", true);
+            keep_context_for_next_turn(&frame, None, None, None);
+        }
+        let kept = take_context_for_next_turn(channel);
+        assert_eq!(kept.len(), 20);
+        assert_eq!(kept[0].message_id, "notice-6");
+        assert_eq!(kept[19].message_id, "notice-25");
+    }
+
+    #[test]
+    fn context_this_run_already_has_is_not_kept() {
+        let me = registered_author_from(&trace_test_agent("instance-1")).expect("instance author");
+        let new = |frame: &AgentInstanceServerMessage, waterline| {
+            context_is_new_to_this_run(frame, Some(&me), Some("summon-1"), None, waterline)
+                .is_some()
+        };
+        let stop = |live| context_frame("stop-1", "ch-1", 7, "@codex:2:stop", live);
+        assert!(new(&stop(true), Some(6)));
+        assert!(new(&stop(true), None));
+        // Catch-up after a reconnect is new above the waterline only, and the
+        // join window of a resumed session is not new at all.
+        assert!(new(&stop(false), Some(6)));
+        assert!(!new(&stop(false), Some(7)));
+        assert!(!new(&stop(false), None));
+        // Work is delivered as a turn, not kept beside one.
+        let work = live_channel_message_from("user", Some("user:1"));
+        assert!(!new(&work, None));
+
+        let with = |edit: fn(&mut ChannelMessage)| {
+            let mut frame = stop(true);
+            if let AgentInstanceServerMessage::ChannelMessageReceived { message, .. } = &mut frame {
+                edit(message);
+            }
+            frame
+        };
+        assert!(!new(
+            &with(|message| message.from.instance_id = Some("instance-1".into())),
+            None
+        ));
+        assert!(!new(
+            &with(|message| message.message_id = "summon-1".into()),
+            None
+        ));
+        assert!(!new(
+            &with(|message| message.message_id = "thread-root:stop-1".into()),
+            None
+        ));
+        assert!(!new(
+            &with(|message| {
+                message.metadata = Some(serde_json::json!({
+                    "xmatrixProvenance": "activity",
+                    "xmatrixActivity": {
+                        "kind": "pull_request", "repository": "LambdaLabsHQ/xmatrix",
+                        "number": 3043,
+                        "url": "https://github.com/LambdaLabsHQ/xmatrix/pull/3043",
+                    },
+                }));
+            }),
+            None
+        ));
+        let carried = PromptCarriedHistory {
+            channel_id: "ch-1".into(),
+            through_sequence: 7,
+        };
+        assert!(
+            context_is_new_to_this_run(&stop(false), Some(&me), None, Some(&carried), Some(3))
+                .is_none()
+        );
     }
 
     /// The runtime interrupts a running turn for any delivery that gets past
