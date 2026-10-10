@@ -36,14 +36,14 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
       expect(dockBox).not.toBeNull();
       expect(dockBox!.x + dockBox!.width / 2).toBeCloseTo(390 / 2, 0);
       // The dock and the + share a right edge, with 12px clearance. The bar is the
-      // board itself, screen edge to screen edge; its glyphs end on the content line, 16px in.
+      // board itself, screen edge to screen edge; its glyphs end on the content line, 30px in.
       expect(dockBox!.y - (fabBox!.y + fabBox!.height)).toBeCloseTo(12, 0);
       expect(fabBox!.x + fabBox!.width).toBeCloseTo(dockBox!.x + dockBox!.width, 0);
       const barBox = (await page.locator(".app-topbar").boundingBox())!;
       expect(barBox.x).toBe(0);
       expect(barBox.width).toBe(390);
       const searchBox = (await page.locator(".app-topbar .app-mobile-search-icon svg").boundingBox())!;
-      expect(390 - (searchBox.x + searchBox.width)).toBeCloseTo(16, 0);
+      expect(390 - (searchBox.x + searchBox.width)).toBeCloseTo(30, 0);
       const paint = await fab.evaluate((button) => {
         const style = getComputedStyle(button);
         const dockStyle = getComputedStyle(document.querySelector(".app-mobile-tab-dock")!);
@@ -145,7 +145,7 @@ test("create button clears native dock height and safe area, including older she
   }
 });
 
-test("the + and the content line keep their 16px inset whatever side gap the native dock reports", async ({ page }) => {
+test("the + keeps the 16px gutter and the content line its 30px, whatever side gap the native dock reports", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   await page.locator(".xmatrix-app-shell").evaluate((shell) => {
     shell.classList.add("xmatrix-app-native-dock");
@@ -160,7 +160,8 @@ test("the + and the content line keep their 16px inset whatever side gap the nat
       if (inset === null) document.documentElement.style.removeProperty("--app-native-dock-inset");
       else document.documentElement.style.setProperty("--app-native-dock-inset", `${inset}px`);
     }, inset);
-    const contentEdge = width - 16;
+    const gutter = width - 16;
+    const contentEdge = width - 30;
     await expect.poll(async () => {
       const [fabBox, searchBox, timeRight] = await Promise.all([fab.boundingBox(), search.boundingBox(),
         time.evaluate((element) => {
@@ -169,7 +170,7 @@ test("the + and the content line keep their 16px inset whatever side gap the nat
           return range.getBoundingClientRect().right;
         })]);
       if (!fabBox || !searchBox) return Infinity;
-      return Math.max(Math.abs(fabBox.x + fabBox.width - contentEdge), Math.abs(searchBox.x + searchBox.width - contentEdge),
+      return Math.max(Math.abs(fabBox.x + fabBox.width - gutter), Math.abs(searchBox.x + searchBox.width - contentEdge),
         Math.abs(timeRight - contentEdge));
     }).toBeLessThan(0.5);
   }
