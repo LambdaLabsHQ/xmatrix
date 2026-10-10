@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use xmatrix_cli_core::machine_daemon_connection::MachineTextTaskOutcome;
@@ -73,11 +72,8 @@ pub(crate) fn prompt(instruction: &str, input: &str) -> String {
 }
 
 fn private_directory(request_id: &str) -> PathBuf {
-    let digest = Sha256::digest(format!("text-task\0{request_id}").as_bytes());
-    let name: String = digest[..16]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let digest = xmatrix_cli_core::hex::sha256_hex(format!("text-task\0{request_id}").as_bytes());
+    let name = &digest[..32];
     std::env::temp_dir().join(format!("xmatrix-text-task-{name}"))
 }
 
