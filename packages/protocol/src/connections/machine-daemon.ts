@@ -516,6 +516,23 @@ export interface MachineDaemonWorktreeActionCommand {
   relayLease?: MachineDaemonCommandLease;
 }
 
+/** One bounded piece of text work for a fresh, tool-less harness process. */
+export interface MachineDaemonTextTaskCommand {
+  type: "machine_text_task";
+  requestId: string;
+  presetId: string;
+  instruction: string;
+  input: string;
+  relayLease?: MachineDaemonCommandLease;
+}
+
+export interface MachineDaemonTextTaskResultReport {
+  type: "machine_text_task_result";
+  requestId: string;
+  result: import("../text-task.js").TextTaskResult;
+  relayLease?: MachineDaemonCommandLease;
+}
+
 export interface MachineDaemonWorktreeActionResultReport {
   type: "machine_worktree_action_result";
   requestId: string;
@@ -533,6 +550,7 @@ export interface MachineDaemonQuotaProbeResultReport {
 export type MachineDaemonClientMessage =
   | MachineDaemonHarnessActionResultReport
   | MachineDaemonWorktreeActionResultReport
+  | MachineDaemonTextTaskResultReport
   | MachineDaemonQuotaProbeResultReport
   | MachineDaemonConnectMessage
   | { type: "ping"; requestId?: string }
@@ -564,6 +582,7 @@ type MachineDaemonShutdown = { reason?: string } & { type: "shutdown_requested" 
 export type MachineDaemonServerMessage =
   | MachineDaemonHarnessActionCommand
   | MachineDaemonWorktreeActionCommand
+  | MachineDaemonTextTaskCommand
   | MachineDaemonQuotaProbeCommand
   | MachineDaemonError
   | MachineDaemonPong
