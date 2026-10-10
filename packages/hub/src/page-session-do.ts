@@ -9,6 +9,7 @@ import {
   type PageSessionState,
 } from "./page-session";
 import { tellPageAutomationChannels } from "./page-automation-wake";
+import { startPageSummary } from "./page-summary";
 import type { Env } from "./types";
 
 /**
@@ -41,9 +42,7 @@ interface Attachment {
 
 interface Ticket extends Omit<Attachment, "connectionId"> { expiresAt: number }
 
-export function pageSessionId(spaceId: string, pageId: string): string {
-  return `${spaceId}\u0000${pageId}`;
-}
+export { pageSessionId } from "./page-session-id";
 
 export function pagePrincipalFromSession(principal: PageSessionPrincipal): PagePrincipal {
   if (principal.kind === "agent" && principal.runProof) {
@@ -59,6 +58,11 @@ function pages(env: Env): PostgresPageRepository {
     transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
   }));
 }
+
+/** The summary being written for this page, so a second one does not start beside it. */
+type SummaryExecution = { requestId: string; revision: number; startedAt: number; ended?: true };
+/** A summary that has not ended in this long is taken as lost: an unclaimed task expires, a claimed one times out. */
+const SUMMARY_EXECUTION_MS = 6 * 60 * 1_000;
 
 export class RelayPageSession extends DurableObject<Env> {
   private readonly session: PageSession;
@@ -185,6 +189,7 @@ export class RelayPageSession extends DurableObject<Env> {
         try {
           const result = await this.session.submitEdit(body.principal, body);
           await this.settle();
+          this.later(this.summaryDue());
           return Response.json(result);
         } catch (error) {
           if (error instanceof PageSessionConflict) {
@@ -193,6 +198,15 @@ export class RelayPageSession extends DurableObject<Env> {
           }
           throw error;
         }
+      }
+      if (request.method === "POST" && url.pathname === "/internal/summary-ended") {
+        const body = await request.json() as { spaceId: string; pageId: string; requestId: string };
+        this.bind(body.spaceId, body.pageId);
+        const running = await this.ctx.storage.get<SummaryExecution>("summary");
+        if (running?.requestId === body.requestId) await this.ctx.storage.put("summary", { ...running, ended: true });
+        // The page may have moved on while that one ran: the next one reads the new head.
+        this.later(this.summaryDue());
+        return Response.json({ ok: true });
       }
       if (request.method === "POST" && url.pathname === "/internal/view") {
         const body = await request.json() as { principal: PageSessionPrincipal; blockId: string };
@@ -281,6 +295,40 @@ export class RelayPageSession extends DurableObject<Env> {
     await this.ready();
     if (attachment) this.session.disconnect(attachment.connectionId);
     await this.settle();
+    // The last person leaving is when a page they edited gets its summary.
+    this.later(this.summaryDue(socket));
+  }
+
+  /**
+   * Starts the page's summary when its head has none, nobody is editing it by
+   * hand and no summary is already being written. A person in the editor
+   * commits every few seconds, so their page is summarised once, when the
+   * last of them leaves; an Agent's edit is summarised at once. One at a time:
+   * a change during a summary is picked up when that summary ends.
+   */
+  /** Work that outlives the call that started it; a test's context may not retain it. */
+  private later(task: Promise<unknown>): void {
+    try { this.ctx.waitUntil(task); } catch { void task; }
+  }
+
+  private async summaryDue(leaving?: WebSocket): Promise<void> {
+    try {
+      if (!this.spaceId || !this.pageId) return;
+      const people = this.ctx.getWebSockets().some((socket) => socket !== leaving &&
+        (socket.deserializeAttachment() as Attachment | null)?.principal.kind === "user");
+      if (people) return;
+      const last = await this.ctx.storage.get<SummaryExecution>("summary");
+      if (last && !last.ended && Date.now() - last.startedAt < SUMMARY_EXECUTION_MS) return;
+      const started = await startPageSummary(this.env, { spaceId: this.spaceId, pageId: this.pageId,
+        ...(last ? { triedRevision: last.revision } : {}) });
+      if (started.started) {
+        await this.ctx.storage.put("summary", { requestId: started.requestId, revision: started.revision,
+          startedAt: Date.now() } satisfies SummaryExecution);
+      }
+    } catch (error) {
+      console.error("Page summary did not start", { pageId: this.pageId,
+        error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   override async webSocketError(socket: WebSocket): Promise<void> {
