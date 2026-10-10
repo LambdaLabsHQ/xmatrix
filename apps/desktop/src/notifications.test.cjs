@@ -35,15 +35,14 @@ test("dockBadgeText tolerates non-finite/negative mention counts", () => {
 
 test("planNotification builds a Slack-style channel toast with inline reply on macOS", () => {
   const plan = planNotification(
-    { title: "Yiming Hu", subtitle: "#general", body: "ping", channelId: "c-1" },
+    { title: "general", body: "Yiming Hu: ping", channelId: "c-1" },
     "darwin"
   );
   assert.equal(plan.show, true);
   assert.equal(plan.canReply, true);
   assert.equal(plan.channelId, "c-1");
-  assert.equal(plan.options.title, "Yiming Hu");
-  assert.equal(plan.options.subtitle, "#general");
-  assert.equal(plan.options.body, "ping");
+  assert.equal(plan.options.title, "general");
+  assert.equal(plan.options.body, "Yiming Hu: ping");
   assert.equal(plan.options.hasReply, true);
   assert.equal(plan.options.replyPlaceholder, "Reply");
 });
@@ -77,11 +76,10 @@ test("planNotification disables inline reply without a channel id", () => {
   assert.equal(plan.canReply, false);
   assert.equal(plan.options.hasReply, false);
   assert.equal(plan.options.replyPlaceholder, undefined);
-  assert.equal(plan.options.subtitle, undefined);
 });
 
 test("planNotification disables inline reply off macOS", () => {
-  const plan = planNotification({ title: "Yiming Hu", channelId: "c-1" }, "win32");
+  const plan = planNotification({ title: "general", channelId: "c-1" }, "win32");
   assert.equal(plan.canReply, false);
   assert.equal(plan.options.hasReply, false);
 });
@@ -93,7 +91,7 @@ test("planNotification will not show without a title", () => {
 
 function brokerNotification(request) {
   return {
-    title: "xmatrix-daemon-host", subtitle: "#general", body: "raw body", channelId: "c-1",
+    title: "general", body: "raw body", channelId: "c-1",
     metadata: { requestBroker: { phase: "pending", agentName: "codex", ...request } },
   };
 }

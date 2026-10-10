@@ -12,7 +12,6 @@ export type NotificationPlan = {
   /** Electron NotificationConstructorOptions, only meaningful when show is true. */
   options: {
     title: string;
-    subtitle?: string;
     body?: string;
     silent?: boolean;
     hasReply: boolean;
@@ -42,7 +41,7 @@ export function dockBadgeText(state: DesktopBadgeState): string {
 
 /**
  * Builds the Electron notification options for a payload, mirroring Slack's
- * toast: sender title, "#channel" subtitle, message body, and an inline reply
+ * toast: channel title, "sender: message" body, and an inline reply
  * field for channel messages on macOS.
  */
 export function planNotification(
@@ -53,7 +52,6 @@ export function planNotification(
   const title = broker
     ? broker.secretAdd ? "Secret request needs approval" : "Privileged command needs approval"
     : typeof payload.title === "string" ? payload.title.trim() : "";
-  const subtitle = typeof payload.subtitle === "string" ? payload.subtitle.trim() : "";
   const body = broker
     ? truncateNotificationText(broker.secretAdd
       ? `${broker.agentName || "Agent"} asks to add secret ${broker.secretAdd.secretRef} as ${broker.secretAdd.envName}${
@@ -67,7 +65,6 @@ export function planNotification(
     show: Boolean(title),
     options: {
       title,
-      subtitle: subtitle || undefined,
       body,
       silent: payload.silent,
       hasReply: canReply,
