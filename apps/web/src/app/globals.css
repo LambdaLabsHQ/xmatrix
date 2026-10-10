@@ -7886,15 +7886,15 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   height: 24px;
 }
 
-html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > button:first-child {
-  margin-left: calc(var(--page-row-hang) - var(--page-row-reach));
-}
-
 /* The chevron's 20px mark and the +'s 16px one, centred on the 24px title line. */
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > :is(button:first-child, .app-page-row-create) {
   box-sizing: content-box;
   margin: calc(2px - var(--page-row-reach)) calc(-1 * var(--page-row-reach)) calc(-1 * var(--page-row-reach));
   padding: var(--page-row-reach);
+}
+
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > button:first-child {
+  margin-left: calc(var(--page-row-hang) - var(--page-row-reach));
 }
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > .app-page-row-create {
