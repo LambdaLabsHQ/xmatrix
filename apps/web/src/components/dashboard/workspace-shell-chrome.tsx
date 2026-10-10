@@ -51,6 +51,7 @@ import {
 } from "react";
 
 import { createPortal } from "react-dom";
+import { Dialog } from "@base-ui/react/dialog";
 
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { useAndroidBackDismiss } from "./use-android-back";
@@ -99,7 +100,6 @@ import {
   DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
 
-import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 
@@ -493,6 +493,7 @@ export function TopWorkspaceBar({
   onSelectSpace: (spaceId: string) => void;
 }) {
   const [spaceMenuOpen, setSpaceMenuOpen] = useState(false);
+  const spaceSignRef = useRef<HTMLButtonElement>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const conversationOverPage = view === "pages" && Boolean(channel) && Boolean(onClosePageConversation);
   const pageOpen = view === "pages" && Boolean(page) && !conversationOverPage;
@@ -554,6 +555,7 @@ export function TopWorkspaceBar({
               aria-label="Switch workspace"
               aria-haspopup="dialog"
               aria-expanded={spaceMenuOpen}
+              ref={spaceSignRef}
               onClick={() => setSpaceMenuOpen(true)}
               className="app-mobile-space-trigger flex h-11 w-full min-w-0 items-center gap-2.5 rounded-xl px-1 text-left active:bg-card/10"
             >
@@ -578,9 +580,10 @@ export function TopWorkspaceBar({
                 )}
               </span>
             </button>
-            <MobileSpaceSheet
+            <MobileSpacePlank
               open={spaceMenuOpen}
               onOpenChange={setSpaceMenuOpen}
+              signRef={spaceSignRef}
               spaces={spaces}
               currentSpaceId={currentSpaceId}
               onSelectSpace={onSelectSpace}
@@ -738,60 +741,83 @@ export function MobileChannelSummaryPlaque({
   );
 }
 
-export function MobileSpaceSheet({
+/**
+ * The Space sign unfolds into a plank listing every Space: the board grows
+ * down and out from the sign it covers, the current Space stays on the sign's
+ * line, and the others are cut into the wood beneath it. Tapping the sign,
+ * the paper around it or a Space folds it back.
+ */
+export function MobileSpacePlank({
   open,
   onOpenChange,
+  signRef,
   spaces,
   currentSpaceId,
   onSelectSpace,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  signRef: React.RefObject<HTMLElement | null>;
   spaces: SerializedSpace[];
   currentSpaceId: string | null;
   onSelectSpace: (spaceId: string) => void;
 }) {
+  const [sign, setSign] = useState<DOMRect | null>(null);
   useAndroidBackDismiss(open, () => onOpenChange(false));
+  useLayoutEffect(() => {
+    if (open && signRef.current) setSign(signRef.current.getBoundingClientRect());
+  }, [open, signRef]);
 
-  function renderOption(space: SerializedSpace) {
-    const selected = space.id === currentSpaceId;
-    const memberLabel = `${space.members.length} member${space.members.length === 1 ? "" : "s"}`;
-    return (
-      <button
-        key={space.id}
-        type="button"
-        role="option"
-        aria-selected={selected}
-        className={cn("app-mobile-space-option", selected && "app-mobile-space-option-active")}
-        onClick={() => {
-          onOpenChange(false);
-          if (!selected) onSelectSpace(space.id);
-        }}
-      >
-        <SpaceAvatar space={space} />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-black leading-5">{space.name}</span>
-          <span className="mt-0.5 block truncate text-[11px] font-semibold leading-4 text-muted-foreground">
-            {memberLabel}
-          </span>
-        </span>
-        {selected && <Check className="size-4 shrink-0" />}
-      </button>
-    );
-  }
+  const current = spaces.find((space) => space.id === currentSpaceId) || null;
+  const ordered = current ? [current, ...spaces.filter((space) => space !== current)] : spaces;
+  const style = sign
+    ? ({
+        "--sign-x": `${sign.left}px`,
+        "--sign-y": `${sign.top}px`,
+        "--sign-w": `${sign.width}px`,
+        "--sign-h": `${sign.height}px`,
+      } as CSSProperties)
+    : undefined;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" showCloseButton={false} className="xmatrix-app app-mobile-space-sheet md:hidden">
-        <div className="app-mobile-space-sheet-grabber" aria-hidden="true" />
-        <header className="app-mobile-space-sheet-header">
-          <h2>Switch workspace</h2>
-        </header>
-        <div className="app-mobile-space-sheet-list" role="listbox" aria-label="Workspaces">
-          {spaces.map(renderOption)}
-        </div>
-      </SheetContent>
-    </Sheet>
+    <Dialog.Root open={open && Boolean(sign)} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="xmatrix-app app-mobile-space-plank-scrim md:hidden" />
+        <Dialog.Popup
+          aria-label="Switch workspace"
+          className="xmatrix-app app-mobile-space-plank md:hidden"
+          style={style}
+        >
+          <div className="app-mobile-space-plank-board" role="listbox" aria-label="Workspaces">
+            {ordered.map((space) => {
+              const selected = space.id === currentSpaceId;
+              const memberLabel = `${space.members.length} member${space.members.length === 1 ? "" : "s"}`;
+              return (
+                <button
+                  key={space.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={cn("app-mobile-space-plank-row", selected && "app-mobile-space-plank-current")}
+                  onClick={() => {
+                    onOpenChange(false);
+                    if (!selected) onSelectSpace(space.id);
+                  }}
+                >
+                  {selected
+                    ? <Building className="app-mobile-space-glyph shrink-0" aria-hidden="true" />
+                    : <span className="app-mobile-space-glyph shrink-0" aria-hidden="true" />}
+                  <span className="min-w-0 flex-1">
+                    <span className="app-mobile-bar-title block truncate">{space.name}</span>
+                    {!selected && <span className="app-mobile-space-plank-meta block truncate">{memberLabel}</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
