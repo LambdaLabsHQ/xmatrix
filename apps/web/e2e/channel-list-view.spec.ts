@@ -200,6 +200,37 @@ test("pinned conversations sit under their own Pinned heading", async ({ page })
   expect(order).toEqual(["Pinned", pinned.id, "Recent", other.id]);
 });
 
+test("a conversation waiting on the reader sits under Needs you, above their pins", async ({ page }) => {
+  const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan" };
+  const other = { ...E2E_CHANNEL, id: "channel-other", name: "random" };
+  // Pinned too: a conversation is listed once, where it waits on the reader.
+  const waiting = {
+    ...E2E_CHANNEL, id: "channel-waiting", name: "design", messageCount: 5, historyHeadSequence: 5, readSequence: 0,
+    attention: {
+      channelId: "channel-waiting", unreadAttentionCount: 1, lastMessageId: "waiting-mention", lastMessageSequence: 3,
+      primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: pinned.updatedAt,
+    },
+  };
+  await openWorkspaceWithStubs(page, {
+    spaces: [E2E_SPACE],
+    channels: [pinned, other, waiting],
+    channelViewPreference: { pinnedChannelIds: [pinned.id, waiting.id] },
+  });
+  const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+  await expect(sidebar.locator(`[data-channel-row-id="${waiting.id}"]`)).toBeVisible();
+  const order = await sidebar.locator(".app-list-section-heading, [data-channel-row-id]").evaluateAll((nodes) =>
+    nodes.map((node) => (node as HTMLElement).dataset.channelRowId ?? node.textContent?.trim()));
+  expect(order).toEqual(["Needs you1", waiting.id, "Pinned", pinned.id, "Recent", other.id]);
+  // Each section's name is a paper label in its own ink, flat on the list.
+  const labels = await sidebar.locator(".app-list-section-label").evaluateAll((nodes) => nodes.map((node) => {
+    const style = getComputedStyle(node);
+    return { tone: (node as HTMLElement).dataset.tone, ink: style.color, shadow: style.boxShadow, backdrop: style.backdropFilter };
+  }));
+  expect(labels.map((label) => label.tone)).toEqual(["attention", "pinned", "recent"]);
+  expect(new Set(labels.map((label) => label.ink)).size).toBe(3);
+  for (const label of labels) expect([label.shadow, label.backdrop]).toEqual(["none", "none"]);
+});
+
 test("unpinning the last conversation removes Pinned and saves an empty list", async ({ page }) => {
   const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan",
     updatedAt: "2026-07-01T08:00:00.000Z" };
