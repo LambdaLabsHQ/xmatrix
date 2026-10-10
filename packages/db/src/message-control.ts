@@ -122,6 +122,8 @@ export interface AppendPostgresMessage {
   attentionBody?: string;
   /** The sender declares it is waiting on the people and Agents this message mentions. */
   awaitsResponse?: boolean;
+  /** People a card waits on though it mentions nobody. Set by the Hub for its own cards, never by a caller. */
+  waitsOnUserIds?: string[];
   /** Untrusted picker intent, validated against the canonical body and current grants. */
   invocationSelections?: unknown;
   runProof?: {
@@ -1440,6 +1442,9 @@ export class PostgresMessageRepository {
           targets.set(replySubjectId, "reply");
         }
       }
+      const waitsOn = new Set((input.waitsOnUserIds ?? []).map((userId) =>
+        `user:${bounded(userId, "waitsOnUserIds")}`));
+      for (const subjectId of waitsOn) targets.set(subjectId, "mention");
       if (targets.size > MAX_ATTENTION_TARGETS) {
         throw new MessageAuthorityError(
           "attention_target_limit_exceeded", 400, "Attention targets exceed 1000",
@@ -1558,14 +1563,14 @@ export class PostgresMessageRepository {
             attachmentOwnerUserId, sentAt], maxRows: 0,
         });
       if (targets.size > 0) await transaction.query({
-        name: "message_append_attention_batch_v4",
+        name: "message_append_attention_batch_v5",
         text: `WITH incoming AS MATERIALIZED (
-            SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(subject_id text,kind text)
+            SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(subject_id text,kind text,waits boolean)
           ), attention_rows AS (
             INSERT INTO data.message_attention
               (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
             SELECT $2,incoming.subject_id,$3,$4,incoming.kind,$5,$6,
-              CASE WHEN $7::boolean AND incoming.kind='mention' THEN TRUE END FROM incoming
+              CASE WHEN (incoming.waits OR $7::boolean) AND incoming.kind='mention' THEN TRUE END FROM incoming
             ON CONFLICT DO NOTHING RETURNING subject_id
           ) INSERT INTO data.message_attention_revisions
             (space_id,subject_id,channel_id,revision,updated_at)
@@ -1576,23 +1581,24 @@ export class PostgresMessageRepository {
             revision=data.message_attention_revisions.revision+1,
             updated_at=EXCLUDED.updated_at`,
         values: [JSON.stringify([...targets].map(([subjectId, kind]) => ({
-          subject_id: subjectId, kind,
+          subject_id: subjectId, kind, ...(waitsOn.has(subjectId) ? { waits: true } : {}),
         }))), spaceId, channelId, messageId, sequence, sentAt, input.awaitsResponse === true],
         maxRows: 0,
       });
       // The sender has responded: no mention in this conversation still waits on them.
       if (senderKind === "user" || senderKind === "agent") await transaction.query({
-        name: "message_append_attention_respond_v1",
+        name: "message_append_attention_respond_v2",
         text: `WITH responded AS (
             UPDATE data.message_attention SET awaiting_response=FALSE
-            WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3 AND awaiting_response RETURNING 1
+            WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3 AND awaiting_response
+              AND message_id<>$5 RETURNING 1
           ) INSERT INTO data.message_attention_revisions
             (space_id,subject_id,channel_id,revision,updated_at)
           SELECT $1,$2,$3,1,$4 WHERE EXISTS (SELECT 1 FROM responded)
           ON CONFLICT (space_id,subject_id,channel_id) DO UPDATE SET
             revision=data.message_attention_revisions.revision+1,
             updated_at=EXCLUDED.updated_at`,
-        values: [spaceId, `${senderKind}:${senderId}`, channelId, sentAt], maxRows: 0,
+        values: [spaceId, `${senderKind}:${senderId}`, channelId, sentAt, messageId], maxRows: 0,
       });
       // The sender went on after someone else spoke: the waits it declared before that are over.
       if (senderKind === "user" || senderKind === "agent") await releaseDeclaredWaits(transaction, {
