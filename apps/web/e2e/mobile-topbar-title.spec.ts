@@ -36,14 +36,14 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
       expect(dockBox).not.toBeNull();
       expect(dockBox!.x + dockBox!.width / 2).toBeCloseTo(390 / 2, 0);
       // The dock and the + share a right edge, with 12px clearance. The bar is the
-      // board itself, screen edge to screen edge; its glyphs sit 1.25rem inside the dock's edges.
+      // board itself, screen edge to screen edge; its glyphs end on the content line, 16px in.
       expect(dockBox!.y - (fabBox!.y + fabBox!.height)).toBeCloseTo(12, 0);
       expect(fabBox!.x + fabBox!.width).toBeCloseTo(dockBox!.x + dockBox!.width, 0);
       const barBox = (await page.locator(".app-topbar").boundingBox())!;
       expect(barBox.x).toBe(0);
       expect(barBox.width).toBe(390);
       const searchBox = (await page.locator(".app-topbar .app-mobile-search-icon svg").boundingBox())!;
-      expect(dockBox!.x + dockBox!.width - (searchBox.x + searchBox.width)).toBeCloseTo(20, 0);
+      expect(390 - (searchBox.x + searchBox.width)).toBeCloseTo(16, 0);
       const paint = await fab.evaluate((button) => {
         const style = getComputedStyle(button);
         const dockStyle = getComputedStyle(document.querySelector(".app-mobile-tab-dock")!);
@@ -145,7 +145,7 @@ test("create button clears native dock height and safe area, including older she
   }
 });
 
-test("the + follows the native dock's measured edge and the content line keeps its own inset", async ({ page }) => {
+test("the + and the content line keep their 16px inset whatever side gap the native dock reports", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   await page.locator(".xmatrix-app-shell").evaluate((shell) => {
     shell.classList.add("xmatrix-app-native-dock");
@@ -153,7 +153,7 @@ test("the + follows the native dock's measured edge and the content line keeps i
   const fab = page.locator(".app-mobile-create-fab");
   const search = page.locator(".app-topbar .app-mobile-search-icon svg");
   const time = page.locator(".app-mobile-chat-row .app-channel-row-time").first();
-  // Before the shell reports its dock, the + keeps the web dock's edge; after, the native one's.
+  // The native dock's side gap grows with the device corner; nothing on the paper follows it.
   for (const [width, inset] of [[390, null], [390, 28], [430, 21], [360, 12]] as const) {
     await page.setViewportSize({ width, height: 844 });
     await page.evaluate((inset) => {
@@ -161,9 +161,7 @@ test("the + follows the native dock's measured edge and the content line keeps i
       else document.documentElement.style.setProperty("--app-native-dock-inset", `${inset}px`);
     }, inset);
     // The web dock's side gap: clamp(0.875rem, 3.6vw, 1.125rem).
-    const webGap = Math.min(18, Math.max(14, width * 0.036));
-    const edge = width - (inset ?? webGap);
-    const contentEdge = width - webGap - 20;
+    const contentEdge = width - 16;
     await expect.poll(async () => {
       const [fabBox, searchBox, timeRight] = await Promise.all([fab.boundingBox(), search.boundingBox(),
         time.evaluate((element) => {
@@ -172,7 +170,7 @@ test("the + follows the native dock's measured edge and the content line keeps i
           return range.getBoundingClientRect().right;
         })]);
       if (!fabBox || !searchBox) return Infinity;
-      return Math.max(Math.abs(fabBox.x + fabBox.width - edge), Math.abs(searchBox.x + searchBox.width - contentEdge),
+      return Math.max(Math.abs(fabBox.x + fabBox.width - contentEdge), Math.abs(searchBox.x + searchBox.width - contentEdge),
         Math.abs(timeRight - contentEdge));
     }).toBeLessThan(0.5);
   }
