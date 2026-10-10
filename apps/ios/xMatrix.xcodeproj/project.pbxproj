@@ -102,6 +102,7 @@
 		12F7A2022C00000100000001 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1022C00000100000001 /* NativeBridge.swift */; };
 		12F7A2032C00000100000001 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1032C00000100000001 /* AppConfiguration.swift */; };
 		12F7A2042C00000100000001 /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1042C00000100000001 /* AppRouter.swift */; };
+		12F7A2072C00000100000001 /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1082C00000100000001 /* PushRegistration.swift */; };
 		12F7A2052C00000100000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 12F7A1062C00000100000001 /* Assets.xcassets */; };
 		12F7A2062C00000100000001 /* MobileTabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F7A1072C00000100000001 /* MobileTabBarView.swift */; };
 		CF310D587854D1B7C926F1D5 /* AppleSubscriptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04F893235851327B3AD47005 /* AppleSubscriptions.swift */; };
@@ -114,6 +115,8 @@
 		12F7A1022C00000100000001 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
 		12F7A1032C00000100000001 /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
 		12F7A1042C00000100000001 /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
+		12F7A1082C00000100000001 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
+		12F7A1092C00000100000001 /* xMatrix.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = xMatrix.entitlements; sourceTree = "<group>"; };
 		12F7A1052C00000100000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		12F7A1062C00000100000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		12F7A1072C00000100000001 /* MobileTabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTabBarView.swift; sourceTree = "<group>"; };
@@ -149,6 +152,8 @@
 				04F893235851327B3AD47005 /* AppleSubscriptions.swift */,
 				12F7A1032C00000100000001 /* AppConfiguration.swift */,
 				12F7A1042C00000100000001 /* AppRouter.swift */,
+				12F7A1082C00000100000001 /* PushRegistration.swift */,
+				12F7A1092C00000100000001 /* xMatrix.entitlements */,
 				12F7A1072C00000100000001 /* MobileTabBarView.swift */,
 				12F7A1062C00000100000001 /* Assets.xcassets */,
 				12F7A1052C00000100000001 /* Info.plist */,
@@ -241,6 +246,7 @@
 				CF310D587854D1B7C926F1D5 /* AppleSubscriptions.swift in Sources */,
 				12F7A2032C00000100000001 /* AppConfiguration.swift in Sources */,
 				12F7A2042C00000100000001 /* AppRouter.swift in Sources */,
+				12F7A2072C00000100000001 /* PushRegistration.swift in Sources */,
 				12F7A2062C00000100000001 /* MobileTabBarView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -369,6 +375,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = xMatrix/xMatrix.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -394,6 +401,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = xMatrix/xMatrix.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";

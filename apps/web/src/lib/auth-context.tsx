@@ -22,7 +22,7 @@ import {
   shouldRefreshAuthSessionState,
 } from "./auth-session-policy";
 import { getDesktopBridge } from "./desktop/bridge";
-import { disableBrowserPush } from "./push-subscription";
+import { disableBrowserPush, forgetPhonePush, registerPhonePush } from "./push-subscription";
 import { XMatrixQueryProvider } from "./query/query-provider";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 
@@ -138,6 +138,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // In a phone app, the device is registered for push as soon as its person is signed in.
+  const signedInUserId = state.user?.id;
+  useEffect(() => {
+    const accessToken = stateRef.current.session?.access_token;
+    if (mockAuthState || !signedInUserId || !accessToken) return;
+    void registerPhonePush(accessToken).catch(() => undefined);
+  }, [mockAuthState, signedInUserId]);
 
   useEffect(() => {
     if (mockAuthState) {
@@ -292,7 +300,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, loading: true }));
     // A signed-out browser is told nothing: forget its push subscription while the session can still say so.
     const accessToken = state.session?.access_token;
-    if (accessToken) await disableBrowserPush(accessToken).catch(() => undefined);
+    if (accessToken) {
+      await Promise.allSettled([disableBrowserPush(accessToken), forgetPhonePush(accessToken)]);
+    }
     await Promise.allSettled([clearNativeSession(), signOutBetterAuth()]);
     setState({ session: null, user: null, loading: false });
     router.push(options?.redirectTo === "/account/delete" ? "/account/delete" : "/login");
