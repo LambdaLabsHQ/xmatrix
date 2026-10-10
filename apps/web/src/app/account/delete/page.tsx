@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, XMatrixApiError } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { Button } from "@/components/ui/button";
-import { DeletionConfirmationFields } from "./confirmation-fields";
+import { DeletionConfirmationForm } from "./confirmation-form";
 import { CloseOwnedSpace } from "./close-owned-space";
 
 const RECEIPT_KEY = "xmatrix.account-deletion.receipt";
@@ -112,6 +112,10 @@ export default function AccountDeletionPage() {
     finally{setBusy(false);}
   }
 
+  const deletionForm = user ? <DeletionConfirmationForm email={email} confirmation={confirmation} acknowledge={acknowledge}
+    accountEmail={user.email} retry={Boolean(receipt)} busy={busy} onSubmit={submit}
+    onEmailChange={setEmail} onConfirmationChange={setConfirmation} onAcknowledgeChange={setAcknowledge} /> : null;
+
   return <main className="mx-auto max-w-2xl space-y-6 px-6 py-12">
     <Link href="/app" className="text-sm underline">Back to xMatrix</Link>
     <h1 className="text-3xl font-bold">Delete account</h1>
@@ -119,13 +123,7 @@ export default function AccountDeletionPage() {
       <h2 className="text-xl font-semibold">{state === "completed" ? "Your account has been deleted" : state === "blocked" ? "Deletion was not started" : "Account deletion is processing"}</h2>
       <p>{state === "completed" ? "Your sign-in credentials, profile and private account settings have been removed. Old sign-in credentials cannot regain access. Shared work retained by other Spaces follows their retention policy." : state === "blocked" ? "A Space or active execution still needs attention. Your account has not been deleted." : "Once committed, this request cannot be cancelled. Keep this tab to check the result; an interrupted cleanup resumes automatically."}</p>
       <Button variant="secondary" size="default" onClick={() => void checkReceipt()}>Check status</Button>
-      {state === null && user && <form className="space-y-3" onSubmit={event=>{event.preventDefault();void submit();}}>
-        <p>If delivery failed, confirm again to retry the same request. This retains your existing receipt.</p>
-        <DeletionConfirmationFields email={email} confirmation={confirmation} acknowledge={acknowledge}
-          onEmailChange={setEmail} onConfirmationChange={setConfirmation} onAcknowledgeChange={setAcknowledge}
-          acknowledgement="I confirm permanent account deletion." />
-        <Button type="submit" disabled={busy || !acknowledge || confirmation!=="DELETE" || email.trim().toLowerCase()!==user.email.toLowerCase()} variant="destructive" size="default">Retry same deletion request</Button>
-      </form>}
+      {state === null && deletionForm}
       {state === "preparing" && user && <Button disabled={busy} variant="secondary" size="default" onClick={()=>void cancel()}>Cancel deletion request</Button>}
       {state === "blocked" && <Button variant="secondary" size="default" onClick={() => {sessionStorage.removeItem(RECEIPT_KEY);setReceipt(null);setState(null);setBlockers(null);}}>Review requirements</Button>}
       {state === "completed" && <Link href="/login" className="block underline">Return to sign in</Link>}
@@ -148,12 +146,7 @@ export default function AccountDeletionPage() {
           </div>}
         </div>)}
         <Button variant="secondary" size="default" onClick={()=>void loadPreview()}>Check again</Button>
-      </section> : <form className="space-y-4" onSubmit={event=>{event.preventDefault();void submit();}}>
-        <DeletionConfirmationFields email={email} confirmation={confirmation} acknowledge={acknowledge}
-          onEmailChange={setEmail} onConfirmationChange={setConfirmation} onAcknowledgeChange={setAcknowledge}
-          acknowledgement="I understand this is permanent and does not cancel subscription renewal. I will lose access on every device and cannot restore scheduled Spaces or move a subscription by creating another account." />
-        <Button variant="destructive" size="default" disabled={busy || !acknowledge || confirmation!=="DELETE" || email.trim().toLowerCase()!==user.email.toLowerCase()} type="submit">{busy ? "Submitting…" : "Permanently delete account"}</Button>
-      </form>}
+      </section> : deletionForm}
       {reauthenticate && <Button variant="secondary" size="default" onClick={()=>void logout({redirectTo:"/account/delete"})}>Sign out to verify identity</Button>}
     </>}
     {message && <p role="status">{message}</p>}
