@@ -155,6 +155,7 @@ import {
   observeTimelineContentResize,
   restoreTimelineScrollTop,
   scrollTimelineToBottom,
+  timelineStandsWhereLanded,
   sortProjects,
   threadChannelForMessage,
   timelineBelongsToChannel,
@@ -260,6 +261,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   // Stable timeline handlers so MessageTimeline memo can skip when only draft-unrelated shell state churns.
   const handleTimelineScrollPositionChange = useStableCallback((pinned: boolean, scrollTop: number) => {
     if (!s.timelineActiveRef.current) return;
+    /* A scroll event reports where the timeline is, not who moved it, and it
+       arrives a frame after the scroll it reports. When the timeline stands
+       exactly where its last landing at the newest message left it and that
+       is no longer the end, the content grew in between: new messages came
+       in, or a row finished laying out. The reader did not leave the tail. */
+    if (!pinned && timelineStandsWhereLanded(s.timelineScrollRef.current, scrollTop)) return;
     if (s.pendingChannelScrollRef.current || Date.now() <= s.timelineBottomStickUntilRef.current) {
       // Programmatic bottom-landing ignores onScroll while it owns the tail.
       // A reader who has clearly left the tail (scrollbar, keyboard, trackpad

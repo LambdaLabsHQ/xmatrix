@@ -45,6 +45,17 @@ function captureReadingAnchor(root: HTMLElement): ReadingAnchor | null {
   return null;
 }
 
+/* Everything whose size places the timeline's rows. Border boxes, three levels
+   down: the virtualizer's scroller, its viewport, and the header, list, and
+   footer inside it. A list padding change (rows swapped for spacer) moves the
+   rows without changing any content box. */
+export function observeTimelineBoxes(root: Element, observer: ResizeObserver, depth = 3) {
+  for (const child of root.children) {
+    observer.observe(child, { box: "border-box" });
+    if (depth > 1) observeTimelineBoxes(child, observer, depth - 1);
+  }
+}
+
 /**
  * Keeps the reader's message fixed on screen across a history prepend.
  *
@@ -119,17 +130,7 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
       corrected = true;
       hold(top, offset);
     });
-    /* Border boxes, three levels down: the virtualizer's scroller, its
-       viewport, and the header, list, and footer inside it. A list padding
-       change (rows swapped for spacer) moves the anchor without changing any
-       content box. */
-    const observeLevel = (parent: Element, depth: number) => {
-      for (const child of parent.children) {
-        observer.observe(child, { box: "border-box" });
-        if (depth > 1) observeLevel(child, depth - 1);
-      }
-    };
-    observeLevel(root, 3);
+    observeTimelineBoxes(root, observer);
     const row = root.ownerDocument.getElementById(rowId);
     if (row && root.contains(row)) observer.observe(row, { box: "border-box" });
 
