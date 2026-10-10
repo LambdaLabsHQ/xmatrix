@@ -804,7 +804,7 @@ export function channelWaitsOnReader(channel: SerializedChannel): boolean {
  * who is waiting and on what, rather than whatever was said last.
  */
 function rowPreviewChannel(channel: SerializedChannel): SerializedChannel {
-  const waiting = channel.attentionMessage;
+  const waiting = channel.attention?.lastMessage;
   return channelWaitsOnReader(channel) && waiting && waiting.messageId === channel.attention?.lastMessageId
     ? { ...channel, lastMessage: waiting } : channel;
 }

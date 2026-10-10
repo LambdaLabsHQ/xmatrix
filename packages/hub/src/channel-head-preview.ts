@@ -53,12 +53,13 @@ export function channelHeadPreview(head: ChannelHeadMessage): ChannelReplyContex
  */
 export function withChannelHeadPreview(channel: Record<string, unknown>): Record<string, unknown> {
   const { headMessage, waitingMessage, ...rest } = channel;
+  const attention = rest.attention;
   return {
     ...rest,
     ...(headMessage && typeof headMessage === "object"
       ? { lastMessage: channelHeadPreview(headMessage as ChannelHeadMessage) } : {}),
-    // The message that waits on the reader, in the same shape as the row's preview.
-    ...(waitingMessage && typeof waitingMessage === "object"
-      ? { attentionMessage: channelHeadPreview(waitingMessage as ChannelHeadMessage) } : {}),
+    // The message that waits on the reader rides its attention summary, in the row preview's shape.
+    ...(waitingMessage && typeof waitingMessage === "object" && attention && typeof attention === "object"
+      ? { attention: { ...attention, lastMessage: channelHeadPreview(waitingMessage as ChannelHeadMessage) } } : {}),
   };
 }

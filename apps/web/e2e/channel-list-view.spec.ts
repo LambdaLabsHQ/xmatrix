@@ -211,12 +211,12 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
     attention: {
       channelId: "channel-waiting", unreadAttentionCount: 1, lastMessageId: "waiting-mention", lastMessageSequence: 3,
       primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: pinned.updatedAt,
+      lastMessage: { messageId: "waiting-mention", from: { kind: "agent", label: "claude:3" },
+        bodyPreview: "which one ships?", sentAt: pinned.updatedAt },
     },
     // Something else was said since; the row still says who waits and on what.
     lastMessage: { messageId: "waiting-later", from: { kind: "user", label: "Alex" }, bodyPreview: "unrelated chatter",
       sentAt: pinned.updatedAt },
-    attentionMessage: { messageId: "waiting-mention", from: { kind: "agent", label: "claude:3" },
-      bodyPreview: "which one ships?", sentAt: pinned.updatedAt },
   };
   await openWorkspaceWithStubs(page, {
     spaces: [E2E_SPACE],

@@ -203,8 +203,8 @@ test("family attention targets one Human and clear survives catalog reconciliati
     const waitingList = await requestJson(worker, TARGET, `/api/channels?spaceId=${encodeURIComponent(spaceId)}`);
     assert.equal(waitingList.response.status, 200, JSON.stringify(waitingList.payload));
     const waitingRow = waitingList.payload.channels.find((channel) => channel.id === channelId);
-    assert.equal(waitingRow.attentionMessage?.messageId, waited.messageId);
-    assert.match(waitingRow.attentionMessage.bodyPreview, /which one ships\?/u);
+    assert.equal(waitingRow.attention?.lastMessage?.messageId, waited.messageId);
+    assert.match(waitingRow.attention.lastMessage.bodyPreview, /which one ships\?/u);
     assert.equal(waitingRow.waitingMessage, undefined, "the stored message never leaves the Hub");
     const done = await read({ sequence: waitedSequence, responded: true });
     assert.equal(done.response.status, 200, JSON.stringify(done.payload));
