@@ -277,6 +277,8 @@ export type ChannelNavItemProps = {
   /* The row passes its own Channel, so one stable handler serves every row. */
   onSelect: (channel: SerializedChannel) => void;
   onTogglePinned: (channel: SerializedChannel) => void;
+  /** Present while the conversation waits on the reader: they are done with it. */
+  onMarkDone?: (channel: SerializedChannel) => void;
   onOpenContextMenu: (
     channel: SerializedChannel,
     event: ReactMouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,

@@ -980,6 +980,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   // Hub read authority stays separate from the first-paint device mirror.
   // The hook coalesces viewport signals before they become mutations.
   const {
+    markChannelResponded,
     markChannelReadToSequence,
     observeChannelReadSequence,
     resetChannelReadSync,
@@ -2803,6 +2804,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setPendingExplicitSpaceId,
     isMobileViewportRef,
     toggleChannelPinned,
+    markChannelResponded,
     runMobileScreenTransition,
     setWorkingSpaceId,
     history,
