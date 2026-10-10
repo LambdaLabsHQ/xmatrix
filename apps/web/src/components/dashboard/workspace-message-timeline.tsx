@@ -129,6 +129,7 @@ import ReactMarkdown from "react-markdown";
 
 import { Virtuoso, type Components as VirtuosoComponents, type ListItem, type VirtuosoHandle } from "react-virtuoso";
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
+import { isJustSentRow, playTimelineSendRise } from "./timeline-send-rise";
 import { FoldedActivityRow } from "./conversation-activity-row";
 import {
   buildConversationRows,
@@ -590,6 +591,15 @@ export const MessageTimeline = memo(function MessageTimeline({
     };
   }, [mediaStore]);
 
+  // Stable, so it runs when a row mounts and not on every render: the row a
+  // send just added is marked `sent` on the render that mounts it.
+  const handleTimelineRowMount = useCallback((row: HTMLDivElement | null) => {
+    const scrollRoot = timelineScrollRef.current;
+    if (row && scrollRoot && row.dataset.timelineRiseRow === "sent") {
+      playTimelineSendRise(scrollRoot, row);
+    }
+  }, [timelineScrollRef]);
+
   const stableOnReact = useStableCallback(onReact);
   const stableOnEdit = useStableCallback(onEdit);
   const stableOnRecall = useStableCallback(onRecall);
@@ -882,7 +892,7 @@ export const MessageTimeline = memo(function MessageTimeline({
           // each time the timeline rendered.
           context={{
             header: (
-              <div className="pt-4">
+              <div className="pt-4" data-timeline-rise-row="">
                 {/* The top bar already carries the channel's name, visibility
                     and topic. Repeating them here as an icon, a title and a
                     #name stacked three names above the first message, so the
@@ -966,6 +976,8 @@ export const MessageTimeline = memo(function MessageTimeline({
               <div
                 key={message.id}
                 id={messageAnchorId(message)}
+                ref={handleTimelineRowMount}
+                data-timeline-rise-row={isJustSentRow(message) ? "sent" : ""}
                 data-exposure-channel={message.channelId ?? channel?.id}
                 data-exposure-sequence={
                   typeof message.sequence === "number" && Number.isFinite(message.sequence) && message.sequence > 0
