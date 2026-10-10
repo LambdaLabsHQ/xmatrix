@@ -185,6 +185,13 @@ it belongs in the repository.**
 
 1. **Pages**, at the top. This is the page tree, and the Space root page is the
    landing page.
+   A page row's summary or latest discussion reply renders inline bold,
+   italic, code, and strikethrough using the conversation preview renderer.
+   It stays on one line with an ellipsis; links and images show their labels,
+   and author and activity names remain plain text.
+   Conversation page bookmarks and page-reference hover previews share these
+   inline marks. Extracting a status line removes block markers while keeping
+   leading emphasis delimiters intact.
 2. **Conversations.** A flat list ordered by latest activity, with search and
    unread state. Each row shows the generated title, participants, live
    invocation state and the pages the conversation touches.

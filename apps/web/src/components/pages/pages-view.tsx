@@ -21,6 +21,9 @@ import {
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
 import { CountPill } from "@/components/dashboard/count-pill";
+import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
+import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
 import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
@@ -31,6 +34,7 @@ import { PageMargin } from "./page-margin";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
+import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
 import { discussionDraft, discussionTitle } from "@/components/dashboard/selection-discussion";
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
@@ -129,19 +133,21 @@ function names(agents: readonly PageTreeAgent[]): string {
 
 /**
  * A page row's second line, what is happening on the page: an Agent editing
- * it and where, else the newest reply in its open discussions, else who is
- * reading it, else how the page stands (its summary), else when it last changed.
+ * it and where, else the newest reply in its open discussions, else how the
+ * page stands (its summary), else who is reading it, else when it last
+ * changed. Whoever is on the page is also drawn at the line's end, so a
+ * summary is not given up for "reading".
  */
 export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary">, agents: readonly PageTreeAgent[],
-  latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()) {
+  latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()): ReactNode {
   const editing = agents.filter((agent) => agent.activity === "editing");
   if (editing.length > 0) {
     const sections = [...new Set(editing.map((agent) => agent.section).filter(Boolean))];
     return `${names(editing)} editing${sections.length === 1 ? ` · ${sections[0]}` : ""}`;
   }
-  if (latest) return `${latest.from.label}: ${latest.bodyPreview}`;
+  if (latest) return <>{latest.from.label}: <InlineRowPreview text={latest.bodyPreview} /></>;
+  if (page.summary?.text) return <InlineRowPreview text={page.summary.text} />;
   if (agents.length > 0) return `${names(agents)} reading`;
-  if (page.summary?.text) return page.summary.text;
   const age = formatRelativeAge(page.updatedAt, now);
   return age ? `Edited ${age}` : "";
 }
@@ -157,30 +163,62 @@ function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect,
   const selected = page.pageId === selectedPageId;
   const agents = activity.agents.get(page.pageId) ?? [];
   const discussions = activity.discussions.get(page.pageId);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actions = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const close = () => setActionsOpen(false);
+    return listenForOverlayDismissal((event) => {
+      if (!(event.target instanceof Node && actions.current?.contains(event.target))) close();
+    }, close);
+  }, [actionsOpen]);
+  // Revisions the page has gained since this reader last had it on screen.
+  const unread = typeof page.readRevision === "number" ? Math.max(0, page.headRevision - page.readRevision) : 0;
   return (
     <li>
       <PageTreeRow depth={depth} selected={selected} open={open}
-        onToggle={() => setOpen((value) => !value)} expandHidden={children.length === 0}>
+        onToggle={() => setOpen((value) => !value)} expandHidden={children.length === 0}
+        onLongPress={onCreateChild ? () => setActionsOpen(true) : undefined}>
         <button type="button" className="flex min-w-0 flex-1 flex-col text-left"
           onClick={() => onSelect(page.pageId)} onPointerEnter={() => onPrefetch(page.pageId)}
           onFocus={() => onPrefetch(page.pageId)}>
           <span className="app-page-row-title-line flex min-w-0 items-center gap-2">
             <FileText className="size-4 shrink-0 text-muted-foreground" />
-            <span className="app-page-row-title app-list-row-title truncate">{page.title}</span>
+            <span className="app-page-row-title app-list-row-title min-w-0 truncate">{page.title}</span>
             {page.accessMode === "restricted" && <Lock className="size-3 shrink-0 text-muted-foreground" />}
+            <span className="app-channel-row-time ml-auto shrink-0 pl-2">{mobileChatTimeLabel(page.updatedAt)}</span>
           </span>
-          <span className="app-list-row-meta truncate">{pageRowMeta(page, agents, discussions?.latest)}</span>
+          <span className="app-page-row-meta-line flex min-w-0 items-center gap-1.5">
+            <span className="app-list-row-meta min-w-0 flex-1 truncate">{pageRowMeta(page, agents, discussions?.latest)}</span>
+            {agents.length > 0 && (
+              <span className="app-channel-agent-avatars flex shrink-0 items-center -space-x-1.5 px-0.5" data-testid="page-tree-agents">
+                {[...new Map(agents.map((agent) => [agent.name, agent])).values()].slice(0, 3).map((agent) => (
+                  <IdentityAvatar key={agent.instanceId} kind="agent" label={agent.name} status={agent.status}
+                    imageUrl={agent.avatarUrl} size="sm" showKindBadge={false}
+                    className="app-channel-agent-avatar rounded-full" />
+                ))}
+              </span>
+            )}
+            {unread > 0 && <CountPill count={unread} title="Changes since you read this page" className="shrink-0" />}
+          </span>
         </button>
         {discussions && discussions.open > 0 && <PageDiscussionCount open={discussions.open} unread={discussions.unread} />}
-        {/* Shown while the row is hovered; a touch screen has no hover, so there it stays. */}
+        {/* Shown while the row is hovered; a touch screen has no hover and long-presses the row instead. */}
         {onCreateChild && (
           <button type="button" aria-label="New sub-page" title="New sub-page"
             onClick={() => onCreateChild(page.pageId)}
-            className="app-page-row-create flex size-4 shrink-0 items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100">
+            className="app-page-row-create flex size-4 shrink-0 items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:hidden">
             <Plus className="size-4" />
           </button>
         )}
       </PageTreeRow>
+      {actionsOpen && onCreateChild && (
+        <div ref={actions}>
+          <MobileInlineActions label={`Page actions for ${page.title}`} className="app-mobile-channel-inline-actions"
+            actions={[{ key: "new-sub-page", icon: Plus, label: "New sub-page",
+              onSelect: () => { setActionsOpen(false); onCreateChild(page.pageId); } }]} />
+        </div>
+      )}
       {open && children.length > 0 && (
         <ul>
           {children.map((child) => (

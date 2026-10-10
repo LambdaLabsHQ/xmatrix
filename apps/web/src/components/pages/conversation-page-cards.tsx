@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { pageApi, type PageDocument } from "@/lib/pages/page-client";
 import { pageStatusLine, ReferenceChip } from "@/components/dashboard/page-reference-chip";
+import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 
 const MAX_CARDS = 4;
 
@@ -72,7 +73,7 @@ function sectionText(body: string, blockId: string): string {
 
 /** A diff line as prose: no list, quote or heading marks. */
 function proseLine(line: string): string {
-  return line.trim().replace(/^(?:#{1,6}\s+|[-*>]\s+|\d+\.\s+)/u, "").trim();
+  return line.trim().replace(/^(?:#{1,6}\s+|[-*+]\s+|>\s*|\d+[.)]\s+)/u, "").trim();
 }
 
 type SectionChange = { author: string; at: string; text: string };
@@ -170,10 +171,10 @@ function ConversationPageBookmark({ spaceId, token, entry: { page, section, bloc
             <span className="conversation-page-bookmark-who">{change.author} {formatRelativeAge(change.at) ?? ""}</span>
           )}
         </span>
-        <span className={`conversation-page-bookmark-detail${quote ? " italic" : ""}`}>{detail}</span>
+        <span className={`conversation-page-bookmark-detail${quote ? " italic" : ""}`}><InlineRowPreview text={detail} /></span>
       </>}
       title={heading}
-      preview={quote ? `“${quote}”` : now || "Open this page"}
+      preview={<InlineRowPreview text={quote ? `“${quote}”` : now || "Open this page"} />}
       ariaLabel={`Open page ${heading}`}
       testId="conversation-page"
       data={{ "data-page-id": page.pageId }}

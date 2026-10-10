@@ -21,6 +21,8 @@ export interface PageSummary {
    * It describes the page as it is only while `revision` is `headRevision`.
    */
   summary?: { text: string; revision: number; at: string } | null;
+  /** In the tree: the newest revision this reader has had on screen; null before they first open the page, or for a Run. */
+  readRevision?: number | null;
 }
 
 export interface PageAuthor { kind: "user" | "agent"; id: string; label: string; ownerUserId?: string }

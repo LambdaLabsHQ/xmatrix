@@ -196,6 +196,9 @@ integration("pages: how far a person has read a page is theirs, only moves forwa
       "nor past the page's head");
     assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: null },
       "each person has their own");
+    const readIn = async (principal) => (await call("tree", { principal })).pages[0].readRevision;
+    assert.deepEqual([await readIn(viewer), await readIn(owner), await readIn(agent)], [3, null, null],
+      "the tree carries how far its reader has read each page; a Run has read nothing");
     await assert.rejects(call("readState", { principal: agent, pageId: page.pageId }), code("page_read_state_human_only"));
     await assert.rejects(call("markRead", { principal: agent, pageId: page.pageId, revision: 1 }),
       code("page_read_state_human_only"));

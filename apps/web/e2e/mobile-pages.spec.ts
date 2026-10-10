@@ -123,8 +123,15 @@ for (const entry of ["FAB", "first page", "sub-page"] as const) {
       create = page.getByRole("button", { name: "Create the first page" });
     } else {
       const { list } = await openMobilePages(page);
-      create = entry === "sub-page" ? list.getByRole("button", { name: "New sub-page" })
-        : page.locator(".app-mobile-create-fab");
+      if (entry === "sub-page") {
+        // A touch screen has no hover: resting a finger on the row opens its actions under it.
+        const row = list.locator(".app-page-row").first();
+        const box = (await row.boundingBox())!;
+        await row.dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true, pointerId: 1,
+          clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 });
+        create = list.getByRole("toolbar").getByRole("button", { name: "New sub-page" });
+        await expect(create).toBeVisible();
+      } else create = page.locator(".app-mobile-create-fab");
     }
     await fixtureJson(page, "updated-tree", PAGE_TREE_PATTERN, { pages: [...initial, created] }, { method: "GET" });
     await create.tap();

@@ -7750,23 +7750,19 @@ html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-list
   color: var(--app-panel-ink-muted) !important;
 }
 
-/* Inline marks in a conversation preview. The row's meta weight is 450 on the
+/* Inline marks in page and conversation previews. The row's meta weight is 450 on the
    span; the mark has to set its own, or the bold the body shows never appears. */
-html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-channel-row-preview strong {
+html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-list-row-meta strong {
   font-weight: 650 !important;
 }
 
-.xmatrix-app .app-channel-row-preview strong {
+.xmatrix-app :is(.app-list-row-meta, .conversation-page-bookmark-detail, .app-page-reference-popup-body) strong {
   font-weight: 650;
 }
 
-.xmatrix-app .app-channel-row-preview code {
+.xmatrix-app :is(.app-list-row-meta, .conversation-page-bookmark-detail, .app-page-reference-popup-body) code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-}
-
-.xmatrix-app .app-channel-row-preview .app-channel-preview-strike {
-  text-decoration: line-through;
 }
 
 /* A list's section heading (ListSectionHeading): a tool list's section label
@@ -7933,8 +7929,13 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   padding-left: 15px;
 }
 
-html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) :is(.app-recent-change, .app-page-row) .app-list-row-meta {
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) :is(.app-recent-change > .app-list-row-meta, .app-page-row-meta-line) {
   padding-left: 24px;
+}
+
+/* A page row's second line carries who is on the page and what is unread at its end, as a conversation's does. */
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row-meta-line {
+  height: 18px;
 }
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row span.app-channel-row-hash {
@@ -7948,6 +7949,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row span.app-channel-row-time,
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-recent-change.app-list-row span.app-channel-row-time,
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row span.app-channel-row-time,
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > span.app-page-row-discussions-read {
   font-size: 12px !important;
   font-weight: 500 !important;

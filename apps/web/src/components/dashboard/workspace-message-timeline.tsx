@@ -270,7 +270,9 @@ import { useAndroidBackHandler } from "./use-android-back";
 
 import { cn } from "@/lib/utils";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
-import { SecretRequestCardView, secretRequestMetadata } from "@/components/dashboard/secret-request-card";
+import {
+  SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
+} from "@/components/dashboard/secret-request-card";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
@@ -1695,6 +1697,7 @@ export const MessageRow = memo(function MessageRow({
   const questionnaire = questionnaireMetadata(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
+  const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
   const routingDecision = parsePresentedRoutingDecision(message.metadata?.routingDecision);
   const collapsible = !routingDecision && isLongMessageBody(displayBody);
   /* A thread is its own Channel, so it can be archived while its parent stays
@@ -2467,6 +2470,13 @@ export const MessageRow = memo(function MessageRow({
             ) : secretRequest ? (
               <SecretRequestCardView
                 request={secretRequest}
+                messageId={message.messageId}
+                token={token}
+                userId={currentUserIdentityId.replace(/^user:/, "")}
+              />
+            ) : secretAccessRequest ? (
+              <SecretAccessRequestCardView
+                request={secretAccessRequest}
                 messageId={message.messageId}
                 token={token}
                 userId={currentUserIdentityId.replace(/^user:/, "")}
