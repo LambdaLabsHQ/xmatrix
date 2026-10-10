@@ -7,6 +7,13 @@ import {
 
 import { withPageAgentRun } from "./support/page-agent.mjs";
 
+/** A page with a Search section, and its claims route. */
+async function roadmap(worker, pages, auth) {
+  const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
+    body: JSON.stringify({ title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" }) }))).page;
+  return { page, claims: `${pages}/${encodeURIComponent(page.pageId)}/claims` };
+}
+
 // Claims end to end: a launched Agent Run claims a block as itself, the block
 // is busy for others until an owner opens it for competition, and the Run
 // releases its claim when done.
@@ -15,9 +22,7 @@ test("a launched Agent Run claims a block, holds it against others and releases 
   await withPageAgentRun({ id: userId, email: "page-claims@example.com", name: "Page Claims" },
     { slug: "claims", displayName: "claimer", mention: "@codex take the search section" },
     async ({ worker, auth, asRun, pages, channel }) => {
-    const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
-      body: JSON.stringify({ title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" }) }))).page;
-    const claims = `${pages}/${encodeURIComponent(page.pageId)}/claims`;
+    const { page, claims } = await roadmap(worker, pages, auth);
     const claim = (headers, body) => worker.fetch(claims, { method: "POST", headers, body: JSON.stringify(body) });
 
     const taken = await claim(asRun, { blockId: "search", minutes: 30 });
@@ -52,9 +57,7 @@ test("a Run takes over the claim its Automation occurrence opened for its conver
   await withPageAgentRun({ id: userId, email: "page-claims-occurrence@example.com", name: "Page Claims" },
     { slug: "claims-occurrence", displayName: "auditor", mention: "@codex audit the search section" },
     async ({ worker, auth, asRun, pages, channel }) => {
-    const page = (await json(await worker.fetch(pages, { method: "POST", headers: auth,
-      body: JSON.stringify({ title: "Roadmap", body: "# Roadmap\n\n## Search\n\nNext.\n" }) }))).page;
-    const claims = `${pages}/${encodeURIComponent(page.pageId)}/claims`;
+    const { page, claims } = await roadmap(worker, pages, auth);
     const spaceId = decodeURIComponent(/\/api\/spaces\/([^/]+)\//u.exec(pages)[1]);
     const occurrenceClaimId = randomUUID();
     const client = new Client({ connectionString: worker.postgresUrl });

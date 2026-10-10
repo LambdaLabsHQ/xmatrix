@@ -148,7 +148,7 @@ test("a page's Automation is anchored by its reference and managed by whoever ca
     assert.equal((await call(memberToken, `/api/automations/${hidden.id}`)).status, 404);
 
     // Deleting it takes its reference out of the page.
-    await ok(await call(ownerToken, `${automations}/${replaced.id}?expectedVersion=${retimed.automation.version}`,
+    await ok(await call(ownerToken, `${automations}/${replaced.id}?expectedVersion=${staggered.version}`,
       "DELETE"));
     current = await readBody();
     assert.equal(current.body.includes("xmatrix:automation/"), false);
