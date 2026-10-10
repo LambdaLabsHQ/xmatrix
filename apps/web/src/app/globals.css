@@ -5306,7 +5306,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
        and what a row starts and ends with (its mark, its time, a face in a
        conversation) all keep to it. */
     --mobile-horizontal-padding: 1rem;
-    --mobile-content-inset: var(--mobile-horizontal-padding);
+    /* Inside that gutter, the content line: the signs' glyphs, the bar's
+       search glyph and every list row's content start and end 14px in from
+       the wood's edge, so a row's text sits under the Space's icon, not
+       under the board's rim. */
+    --mobile-content-inset: calc(var(--mobile-horizontal-padding) + 0.875rem);
     --mobile-topbar-safe-top: env(safe-area-inset-top, 0px);
     --mobile-bottom-safe: env(safe-area-inset-bottom, 0px);
     --mobile-dock-float-offset: 1.25rem;
@@ -5697,7 +5701,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-native-dock.xmatrix-app-shell .app-mobile-create-fab.app-mobile-create-fab {
     bottom: var(--app-mobile-dock-band) !important;
     left: auto !important;
-    right: var(--mobile-content-inset) !important;
+    right: var(--mobile-horizontal-padding) !important;
   }
 
   .xmatrix-app.xmatrix-app-shell .app-mobile-tab-button {
@@ -6063,8 +6067,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
      letter). */
   /* The plank is not a card: like the desktop rail it is the board itself,
      edge to edge and up under the status bar, cut straight along the bottom.
-     Its sign starts and its search glyph ends on the content line, where
-     every list row's content starts and ends. An icon button's hit area runs
+     Its sign's glyph starts and its search glyph ends on the content line,
+     where every list row's content starts and ends; the sign's wood reaches
+     out to the gutter. An icon button's hit area runs
      past its glyph, into that inset. A chevron is drawn a third of its box in
      from the side it points to; it moves out by a quarter, so its point sits
      where other icons' ink does. */
@@ -6128,6 +6133,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     width: fit-content;
     max-width: 100%;
     min-height: 3.25rem;
+    margin-left: -0.875rem;
     padding: 0.75rem 1.25rem 0.75rem 0.875rem !important;
     gap: 0.625rem;
     border-radius: 0.875rem;
@@ -6135,7 +6141,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   }
 
   /* A pushed screen's sign carries its back chevron too: one board, chevron
-     then title, its edge on the content line like the Space sign's. */
+     then title, its edge on the gutter like the Space sign's. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar .app-mobile-back-sign {
     @apply app-wood-panel-recipe;
     display: flex;
@@ -6143,6 +6149,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     max-width: 100%;
     min-height: 3.25rem;
     align-items: center;
+    margin-left: -0.875rem;
     padding: 0 1.25rem 0 0.25rem;
     border-radius: 0.875rem;
     box-shadow: var(--app-wood-plank-cast) !important;
@@ -6159,7 +6166,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   /* The conversation bar is inset by the horizontal padding, not the content
      line; start its sign where the list bar's does. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-detail-bar .app-mobile-back-sign {
-    margin-left: calc(var(--mobile-content-inset) - var(--mobile-horizontal-padding));
+    margin-left: calc(var(--mobile-content-inset) - var(--mobile-horizontal-padding) - 0.875rem);
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar .app-mobile-back-sign > .app-mobile-topbar-back {
@@ -7846,9 +7853,11 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
    changed. The chevron, the agents and the row's own + (a page under this
    one, shown while the row is hovered) ride the title line, so a page with
    children and one without line up. Each level steps 14px in. On a phone the
-   chevron starts on the content line. */
+   chevron hangs left of the page's icon, so the icons, not the chevrons,
+   sit on the content line the Space sign's glyph does. */
 .xmatrix-app .app-page-row {
   --page-row-start: 12px;
+  --page-row-hang: 0px;
   --page-row-reach: 0px;
   padding-left: calc(var(--page-row-start) + var(--page-depth, 0) * 14px);
   padding-right: var(--app-list-row-end);
@@ -7857,6 +7866,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 @media (max-width: 767px) {
   .xmatrix-app .app-mobile-chat-pane :is(.app-page-row, .app-page-tree-note) {
     --page-row-start: var(--app-list-row-start);
+    --page-row-hang: -24px;
   }
 }
 
@@ -7874,6 +7884,10 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > .app-page-row-discussions {
   height: 24px;
+}
+
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > button:first-child {
+  margin-left: calc(var(--page-row-hang) - var(--page-row-reach));
 }
 
 /* The chevron's 20px mark and the +'s 16px one, centred on the 24px title line. */
