@@ -9,6 +9,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
     var onOpenURL: ((URL) -> Void)?
     private static let notificationURLKey = "xmatrix.url"
     private static let notificationChannelIDKey = "xmatrix.channelId"
+    private static let pushedChannelIDKey = "channelId"
 
     static let injectionScript = """
     (() => {
@@ -64,6 +65,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         setTitle: (title) => invoke("setTitle", { title }),
         getNotificationSettings: () => invoke("getNotificationSettings"),
         requestNotifications: () => invoke("requestNotifications"),
+        pushDevice: () => invoke("pushDevice"),
         notify: (payload) => invoke("notify", payload),
         openExternal: (url) => invoke("openExternal", { url }),
         getClipboardImages: () => invoke("getClipboardImages"),
@@ -173,6 +175,14 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
 
         case "requestNotifications":
             return try await requestNotifications()
+
+        case "pushDevice":
+            // What the Hub pushes to: asked for only once the person allows notifications.
+            guard try await ensureNotificationAuthorization(options: [.alert, .badge, .sound]),
+                  let token = await PushRegistration.shared.deviceToken() else {
+                return NSNull()
+            }
+            return ["platform": "apns", "token": token]
 
         case "openExternal":
             guard
@@ -398,9 +408,10 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
 
     @MainActor
     private func openNotification(_ userInfo: [AnyHashable: Any]) {
+        // A notification this app posted carries its URL; one the Hub pushed names its conversation.
         guard
-            let value = userInfo[Self.notificationURLKey] as? String,
-            let url = URL(string: value)
+            let url = (userInfo[Self.notificationURLKey] as? String).flatMap({ URL(string: $0) })
+                ?? normalizedNotificationURL(nil, channelId: userInfo[Self.pushedChannelIDKey] as? String)
         else {
             onOpenURL?(AppConfiguration.startURL)
             return
@@ -423,6 +434,10 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
+        // While the app is open the web app posts the same message itself; a pushed copy would show it twice.
+        if notification.request.trigger is UNPushNotificationTrigger {
+            return []
+        }
         return [.banner, .list, .sound, .badge]
     }
 

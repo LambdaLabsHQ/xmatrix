@@ -1,11 +1,14 @@
 import { sha256Hex, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 /** Where this browser stands on push: whether it can, whether it is on, and why not. */
 export type BrowserPushState = "unsupported" | "unavailable" | "blocked" | "off" | "on";
 
 const WORKER_PATH = "/push-sw.js";
+/** The id the Hub knows this phone by, kept so that signing out can forget it. */
+const PHONE_DEVICE_KEY = "xmatrix.push.device";
 
 function supported(): boolean {
   return typeof window !== "undefined" && window.isSecureContext &&
@@ -83,4 +86,27 @@ export async function disableBrowserPush(token: string): Promise<BrowserPushStat
     await subscription.unsubscribe();
   }
   return browserPushState(token);
+}
+
+function phoneStore(): Storage | null {
+  try { return window.localStorage; } catch { return null; }
+}
+
+/**
+ * In a phone app, register the device its system gave it. The app asks for
+ * notification permission the first time; a refusal registers nothing.
+ */
+export async function registerPhonePush(token: string): Promise<void> {
+  const device = await getDesktopBridge()?.pushDevice?.();
+  if (!device) return;
+  const response = await request(token, WEB_PROXY_ROUTES.push_devices, { method: "POST", body: JSON.stringify(device) });
+  if (response.ok) phoneStore()?.setItem(PHONE_DEVICE_KEY, await sha256Hex(`${device.platform}\n${device.token}`));
+}
+
+/** Tell the Hub to forget this phone, as signing out does. */
+export async function forgetPhonePush(token: string): Promise<void> {
+  const deviceId = phoneStore()?.getItem(PHONE_DEVICE_KEY);
+  if (!deviceId) return;
+  await request(token, WEB_PROXY_ROUTES.push_device(deviceId), { method: "DELETE" });
+  phoneStore()?.removeItem(PHONE_DEVICE_KEY);
 }
