@@ -135,7 +135,7 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
           if (query.name === "message_append_idempotency_read_v1" ||
               query.name === "message_append_identity_conflict_v1" ||
               query.name === "message_append_attention_respond_v2" ||
-              query.name === "message_attention_release_waits_v1" ||
+              query.name === "message_attention_release_waits_v2" ||
               query.name === "channel_lifecycle_lock_runtime_new_work_v1") return [];
           if (query.name === "message_append_commit_facts_v5") return [{
             search_rank: "pg:00000000000000000001", content_revision: 0, channel_id: commitChannelId,

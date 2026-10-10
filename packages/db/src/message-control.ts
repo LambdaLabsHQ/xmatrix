@@ -4,7 +4,7 @@ import { lockAgentRunChannels, requireAgentChannelAccess } from "./agent-channel
 import type { QueryResultRow } from "pg";
 import { resolveMessageAgentTargets } from "./message-agent-targets.js";
 import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from "./channel-stop-fence.js";
-import { declaredWaitStandsSql } from "./message-attention-wait.js";
+import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
 import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
@@ -1598,7 +1598,7 @@ export class PostgresMessageRepository {
       });
       // Only a message someone wrote speaks for its sender. A card or notice the Hub writes
       // under a person's identity, or an Agent's activity entry, answers nothing and moves nobody on.
-      const spoke = (senderKind === "user" || senderKind === "agent") && messageKind === "xmatrix.message.text";
+      const spoke = messageIsSpeech(senderKind, messageKind);
       // The sender has responded: no mention in this conversation still waits on them.
       if (spoke) await transaction.query({
         name: "message_append_attention_respond_v2",
