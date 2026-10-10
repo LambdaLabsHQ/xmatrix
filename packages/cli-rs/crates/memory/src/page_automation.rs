@@ -424,6 +424,7 @@ pub async fn cmd_page_automation(
             version,
             name,
             every,
+            next,
             triggers,
             no_triggers,
             instruction,
@@ -432,6 +433,9 @@ pub async fn cmd_page_automation(
             space,
         } => {
             let mut body = Map::new();
+            if let Some(next) = next {
+                body.insert("nextRunAt".into(), json!(next.trim()));
+            }
             if no_triggers || !triggers.is_empty() {
                 let triggers = triggers
                     .iter()
