@@ -8,7 +8,7 @@ function fakeTx(rows) {
   const calls = [];
   return { calls, query: async query => {
     calls.push(query);
-    if (query.name === "run_registration_access_binding_v3") throw reached;
+    if (query.name === "run_registration_access_binding_check_v1") throw reached;
     return rows[query.name] ?? [];
   } };
 }

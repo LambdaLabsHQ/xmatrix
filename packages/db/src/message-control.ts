@@ -1,6 +1,6 @@
 import { recordAboutInput } from "./channel-metadata-revisions.js";
 import { authorizeDingTalkEffect, finishDingTalkEffect, type DingTalkEffectAuthority } from "./dingtalk-effect-authority.js";
-import { requireAgentChannelAccess } from "./agent-channel-access.js";
+import { lockAgentRunChannels, requireAgentChannelAccess } from "./agent-channel-access.js";
 import type { QueryResultRow } from "pg";
 import { resolveMessageAgentTargets } from "./message-agent-targets.js";
 import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from "./channel-stop-fence.js";
@@ -351,7 +351,7 @@ function requireMessageUpdate(rows: readonly QueryResultRow[]): void {
 
 async function activeAppendPrincipal(transaction: DatabaseTransaction,
   input: Parameters<typeof effectiveAppendPrincipal>[1]) {
-  const authorized = await effectiveAppendPrincipal(transaction, input);
+  const authorized = await effectiveAppendPrincipal(transaction, input, "message_active_command_preflight");
   await messageChannelCapability(transaction, { ...input, principal: authorized.principal },
     "message_active_command_preflight");
   return authorized;
@@ -453,7 +453,7 @@ async function effectiveAppendPrincipal(
     runProof?: AppendPostgresMessage["runProof"];
   },
   /** "message_append" when this transaction goes on to write the Channel. */
-  capability: "message_active_command" | "message_append" = "message_active_command",
+  capability: "message_active_command_preflight" | "message_active_command" | "message_append" = "message_active_command",
 ): Promise<{
   principal: MessagePrincipal;
   agentRunIdentity?: PostgresMessageAgentRunIdentity;
@@ -469,14 +469,24 @@ async function effectiveAppendPrincipal(
     executionKey: bounded(input.runProof.executionKey, "runProof.executionKey"),
     instanceId: bounded(input.runProof.instanceId, "runProof.instanceId"),
   };
-  const run = (await transaction.query<AppendRunRow>({
+  const hold = capability !== "message_active_command_preflight";
+  const readRun = (lock = false) => transaction.query<AppendRunRow>({
     name: "message_append_run_proof_v3",
     text: `SELECT r.owner_user_id,r.channel_id,r.status AS run_status,
       r.metadata_json,i.status AS instance_status,i.channel_id AS instance_channel_id,
       i.channel_instance_id,i.presentation_json FROM data.runs r JOIN data.instances i
-        ON i.run_id=r.run_id WHERE r.run_id=$1 AND i.instance_id=$2 LIMIT 1 FOR SHARE OF r`,
+        ON i.run_id=r.run_id WHERE r.run_id=$1 AND i.instance_id=$2 LIMIT 1${lock ? " FOR SHARE OF r" : ""}`,
     values: [proof.runId, proof.instanceId], maxRows: 1,
-  }))[0];
+  });
+  let run = (await readRun())[0];
+  if (hold && run) {
+    await lockAgentRunChannels(transaction, run.channel_id, input.channelId);
+    const locked = (await readRun(true))[0];
+    if (locked?.channel_id !== run.channel_id) throw new MessageAuthorityError(
+      "agent_run_forbidden", 403, "Agent Run Channel changed",
+    );
+    run = locked;
+  }
   const metadata = run?.metadata_json ?? {};
   // A transport disconnect changes presence, not this exact Run's authority.
   // Terminal Runs, replacement bindings and explicit lifecycle fences still deny.
@@ -491,7 +501,7 @@ async function effectiveAppendPrincipal(
   }
   const channelInstanceId = Number(run.channel_instance_id);
   const admission = await requireRunRegistrationAccess(transaction, { runId: proof.runId, channelId: run.channel_id,
-    phase: run.run_status === "starting" ? "admission" : "continuation",
+    phase: run.run_status === "starting" ? "admission" : "continuation", lock: hold ? "hold" : "none",
     error: (code, status) => new MessageAuthorityError(code, status, "Registration no longer authorizes this Run") });
   if (!Number.isSafeInteger(channelInstanceId) || channelInstanceId < 1) {
     throw new MessageAuthorityError(
@@ -1738,7 +1748,8 @@ export class PostgresMessageRepository {
     const placement = await this.placement(requestId, "message.http-append-receipt", spaceId);
     return this.database.transaction({ requestId, operation: "message.http-append-receipt",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } }, async (tx) => {
-      const effective = await effectiveAppendPrincipal(tx, { spaceId, channelId, principal, runProof: input.runProof });
+      const effective = await effectiveAppendPrincipal(tx, { spaceId, channelId, principal, runProof: input.runProof },
+        "message_active_command_preflight");
       await messageChannelCapability(tx, { spaceId, channelId, principal: effective.principal },
         "message_content_read");
       const row = (await tx.query<QueryResultRow>({ name: "message_http_append_receipt_v1", text: `SELECT

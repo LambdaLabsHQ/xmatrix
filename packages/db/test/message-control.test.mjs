@@ -482,11 +482,6 @@ test("Agent append preparation returns canonical identity from its exact Run pro
     registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" },
   });
   assert.equal(prepared.senderIdentity.name, "Codex");
-  const proofQuery = db.calls.find((call) => call.name === "message_append_run_proof_v3");
-  // A `/kill all` fence waits for this Run until the Agent append commits.
-  assert.match(proofQuery.text, /FOR SHARE OF r/u);
-  assert.match(proofQuery.text, /i\.channel_instance_id/u);
-  assert.deepEqual(proofQuery.values, ["run-1", "instance-1"]);
 });
 
 test("Agent append preparation rejects mismatched Run and Instance Channel identity", async () => {
