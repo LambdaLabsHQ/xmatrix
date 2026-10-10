@@ -1,18 +1,19 @@
 import { ControlError, PostgresSpaceSecretRepository, SpaceSecretError, type RunSecretCaller } from "@xmatrix/db";
-import { HUB_ROUTES, parseSecretRequestCard } from "@xmatrix/protocol";
+import { HUB_ROUTES, parseSecretAccessRequestCard, parseSecretRequestCard } from "@xmatrix/protocol";
 import type { Context, Hono } from "hono";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
 import { appendChannelMessage, markCardAnswered } from "./channel-messages";
 import { readBoundedRequestBody, requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { secretRequestAppend } from "./secret-request-card";
+import { secretAccessRequestAppend, secretRequestAppend } from "./secret-request-card";
 import type { Env } from "./types";
 
 /**
  * Secrets belong to a Space. Its admins save them and choose, per secret,
  * whether any live Run in the Space reads it when it asks (`auto`) or a Run
  * asks first, on a card in its Channel (`ask`). A Run starts with none and
- * reads a secret at the moment it needs it.
+ * reads a secret at the moment it needs it. A Run may also ask, on a card,
+ * that secrets become `auto`; only a Space admin's answer changes them.
  */
 
 const NO_STORE = { "cache-control": "private, no-store" };
@@ -85,6 +86,29 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   app.post(HUB_ROUTES.secret_requests, route("agent", async (c, user, run) => {
     const input = await body(c);
     const secrets = repository(c.env);
+    const post = async <T extends { messageId: string }>(append: T) => {
+      await appendChannelMessage(c.env, run.channelId, append).catch((error: unknown) => {
+        if (error instanceof ControlError) {
+          throw new SpaceSecretError("secret_request_failed", error.status, error.message, error.retryable);
+        }
+        throw error;
+      });
+      return append.messageId;
+    };
+    // It asks that secrets be read without asking: the card names those that still ask.
+    if (input.access === "auto") {
+      const held = new Map((await secrets.runList(caller(run))).secrets.map((secret) => [secret.secretRef, secret]));
+      const asked = parseSecretAccessRequestCard({ secretRefs: input.secretRefs, reason: input.reason,
+        agentName: run.agentName, runId: run.runId, channelId: run.channelId });
+      if (!asked) throw new SpaceSecretError("invalid_request", 400, "Name the secrets to read without asking");
+      const missing = asked.secretRefs.find((ref) => !held.has(ref));
+      if (missing) throw new SpaceSecretError("secret_not_found", 404, `Secret ${missing} is not saved in this Space`);
+      const secretRefs = asked.secretRefs.filter((ref) => held.get(ref)!.access !== "auto");
+      if (!secretRefs.length) return { automatic: true, secretRefs: asked.secretRefs };
+      const request = { ...asked, secretRefs };
+      return { automatic: false, request,
+        messageId: await post(await secretAccessRequestAppend(request, { id: run.ownerUserId, email: user.email })) };
+    }
     const current = (await secrets.runList(caller(run))).secrets.find((secret) => secret.secretRef === input.secretRef);
     if (current?.readable) return { readable: true, secretRef: current.secretRef, envName: current.envName };
     const card = parseSecretRequestCard({ ...input, envName: current?.envName ?? input.envName,
@@ -92,20 +116,23 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     if (!card || (!current && !card.envName) || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u.test(card.secretRef)) {
       throw new SpaceSecretError("invalid_request", 400, "Name the secret's alias and environment variable");
     }
-    const append = await secretRequestAppend(card, !!current, { id: run.ownerUserId, email: user.email });
-    const { messageId } = append;
-    await appendChannelMessage(c.env, run.channelId, append).catch((error: unknown) => {
-      if (error instanceof ControlError) {
-        throw new SpaceSecretError("secret_request_failed", error.status, error.message, error.retryable);
-      }
-      throw error;
-    });
+    const messageId = await post(await secretRequestAppend(card, !!current,
+      { id: run.ownerUserId, email: user.email }));
     return { readable: false, messageId, request: card };
   }));
 
   // A Space admin answers the card: saves the value if needed and lets that Run read it.
   app.post(HUB_ROUTES.secret_request_fulfill, route("human", async (c, user) => {
     const input = await body(c);
+    // The secrets the admin chose on a secret access card become `auto`.
+    const access = parseSecretAccessRequestCard(input);
+    if (access) {
+      const changed = await repository(c.env).makeAutomatic({ userId: user.id, ...access });
+      if (typeof input.messageId === "string" && input.messageId.startsWith("secret-access-request:")) {
+        await markCardAnswered(c.env, (task) => c.executionCtx.waitUntil(task), access.channelId, input.messageId, user.id);
+      }
+      return changed;
+    }
     const card = parseSecretRequestCard(input);
     if (!card) throw new SpaceSecretError("invalid_request", 400, "Invalid secret request");
     const approved = await repository(c.env).approve({ userId: user.id, runId: card.runId, channelId: card.channelId,
@@ -118,7 +145,10 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   }));
 
   app.post(HUB_ROUTES.secret_request_status, route("human", async (c, user) => {
-    const card = parseSecretRequestCard(await body(c));
+    const input = await body(c);
+    const access = parseSecretAccessRequestCard(input);
+    if (access) return repository(c.env).accessStatus({ userId: user.id, ...access });
+    const card = parseSecretRequestCard(input);
     if (!card) throw new SpaceSecretError("invalid_request", 400, "Invalid secret request");
     return repository(c.env).requestStatus({ userId: user.id, runId: card.runId, channelId: card.channelId,
       secretRef: card.secretRef });

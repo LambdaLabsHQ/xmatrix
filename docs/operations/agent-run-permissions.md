@@ -70,6 +70,12 @@ delete secrets (Settings -> Secrets, `xmatrix secret set|delete --space`, or
 `PUT|DELETE /api/spaces/:spaceId/secrets`); members and viewers see their
 aliases, never their values.
 
+An Agent Run cannot change a secret, but it can ask that secrets stop asking:
+`xmatrix request secret-access <alias>...` posts a card in its Channel listing
+the named secrets that are still `ask`. A Space owner or admin ticks the ones
+to open up and answers once; each ticked secret becomes `auto`. Nothing else
+about a secret changes that way, and going back to `ask` is done in Settings.
+
 ## Using a Space secret
 
 ```sh
