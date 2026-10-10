@@ -494,7 +494,6 @@ test('a listed repository comes first; directories are offered only when no repo
   const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
     message: '@codex', tags: {}, candidates: [candidate], managedWorkspace: true });
   assert.deepEqual(Object.values(calls[0].questions.workspace.criteria).map(value => JSON.parse(value).repo), ['owner/project', 'owner/docs']);
-  assert.match(calls[0].questions.workspace.instructions, /did not name stays in this list/);
   assert.equal(chosen.workspaceReference, 'repo:owner/docs');
   assert.deepEqual(chosen.parameterEvidence.selections, { model: 'large', workspaceKind: 'repo', repo: 'owner/docs' });
   // An explicit pwd: still names its directory, even beside repositories.

@@ -152,6 +152,20 @@ Jev judges only semantic fit, in one call:
    eight questions; further fit questions go out in parallel calls. With one
    harness there is nothing to compare and no fit is asked.
 
+Repository choices carry their names and optional GitHub project descriptions
+from the Space's installation catalog. The automatic choice keeps at most 100
+recently active repositories; that order bounds discovery, not task relevance.
+Each description contributes at most 256 serialized UTF-8 bytes to the decision
+input, including JSON escapes. Jev matches the current task's product, feature
+and domain against both names and descriptions. For a brief summon it resolves
+the task from the authorized preceding discussion and Channel topic. A mention
+of xMatrix as the communication tool does not by itself identify the target
+repository. Names remain semantic evidence when descriptions are missing.
+Descriptions and history remain background data, never instructions or launch
+authority. Explicit `repo:` constraints still skip catalog discovery and offer
+only the named reference. The launch-target response's optional `description`
+field is additive; existing consumers may omit it.
+
 Jev never sees machine load, provider quota or allocation counts. Explicit
 machine, workspace and parameter constraints still narrow the candidates first,
 and a measured exhausted quota still excludes an environment. When the chosen

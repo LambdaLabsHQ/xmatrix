@@ -20,6 +20,18 @@ The latter uses the existing authorized registration reader; Space admins and
 the owner can inspect configuration/grant references, and the optional connector
 summary contains only identity, status and revision.
 
+For unexpected repository selection, inspect the retained `started` decision
+input, not only the selected answer. `state.channelContext` contains the
+authorized preceding discussion for message summons; `questions.workspace.criteria`
+contains the actual offered repository names and project descriptions. GitHub
+descriptions are optional and bounded to 256 serialized UTF-8 bytes per choice.
+The catalog's recently active order is not a relevance ranking. Jev should match
+the requested work against repository names even when no description exists,
+and use preceding discussion to resolve a summon that names no task. A live
+evaluation with a reconstructed input checks model behavior; it does not prove
+that a real launch received that input. Retain the actual launch's decision
+evidence separately when verifying a deployed fix.
+
 The local/server-only `@xmatrix/decision-model` package provides a general Jev
 evaluation entry point through Vercel AI Gateway. It accepts one shared `state`
 and named Boolean, Choice or Score `questions`. Routing is one possible caller;
