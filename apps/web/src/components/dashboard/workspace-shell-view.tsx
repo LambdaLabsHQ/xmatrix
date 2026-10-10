@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { MessageReferenceCatalogProvider, type MessageReferenceCatalog } from "./message-reference-catalog";
 import { MachineLinkProvider, type MachineLinks } from "./machine-link";
+import { ManageSecretsProvider } from "./secret-request-card";
 import { channelsInSpace, machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useAndroidBackHandler } from "./use-android-back";
@@ -573,6 +574,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         ? [{ machineId: machine.machineId, ownerUserId: machine.daemon?.userId }] : []),
     onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
   }), [channels, currentSpaceId, machines, user?.id]);
+  const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
   const openedPage = phonePageOpen ? pageTree.data?.find((page) => page.pageId === selectedPageId) ?? null : null;
   // A conversation, a new one and an open page are pushed screens: their back bar replaces the dock.
   const nativeMobileTabVisible = !loading && Boolean(user) &&
@@ -1208,6 +1210,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     <AttachmentDropZoneProvider>
     <MessageReferenceCatalogProvider catalog={messageReferenceCatalog}>
     <MachineLinkProvider links={machineLinks}>
+    <ManageSecretsProvider value={manageSecrets}>
       {/* One live root subscription per loaded Space. Renders nothing. */}
       {channelCatalogPaging.roots}
       {children}
@@ -1513,6 +1516,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         }}
       />
     </div>
+    </ManageSecretsProvider>
     </MachineLinkProvider>
     </MessageReferenceCatalogProvider>
     </AttachmentDropZoneProvider>

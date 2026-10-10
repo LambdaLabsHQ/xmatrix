@@ -1,19 +1,18 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { Check, KeyRound, Loader2 } from "lucide-react";
+import { Check, KeyRound, Loader2, Settings2 } from "lucide-react";
 import {
   parseSecretAccessRequestCard, parseSecretRequestCard, WEB_PROXY_ROUTES,
   type SecretAccessRequestCard, type SecretRequestCard,
 } from "@xmatrix/protocol";
 
 import { actionClass } from "@/components/ui/action-tone";
-import { statusChipClass } from "@/components/ui/status-tone";
-import { ErrorNotice } from "@/components/ui/error-notice";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { AskCard, AskError } from "./ask-card";
 
 /**
  * A card an Agent posts when it needs a Space secret it may not read yet. A
@@ -23,6 +22,23 @@ import { userErrorMessage } from "@/lib/user-facing-error";
  */
 export function secretRequestMetadata(metadata: Record<string, unknown> | undefined): SecretRequestCard | null {
   return parseSecretRequestCard(metadata?.secretRequest);
+}
+
+/**
+ * Opens the Space's secrets, where one is edited, rotated, given its access
+ * rule and deleted. A secret card offers it to whoever may answer the card.
+ */
+const ManageSecretsContext = createContext<(() => void) | null>(null);
+export const ManageSecretsProvider = ManageSecretsContext.Provider;
+
+function ManageSecretsButton() {
+  const manageSecrets = useContext(ManageSecretsContext);
+  return manageSecrets && (
+    <button type="button" onClick={manageSecrets} className={actionClass({ variant: "secondary", size: "sm" })}>
+      <Settings2 className="size-3.5" />
+      Manage
+    </button>
+  );
 }
 
 interface SecretRequestStatus {
@@ -95,100 +111,97 @@ export function SecretRequestCardView({ request, messageId, token, userId }: {
 
   const inputId = `secret-request-${request.runId}-${request.secretRef}`;
   const needsValue = !status?.saved;
+  const envName = status?.envName ?? request.envName;
+  const reason = request.reason || request.description;
   return (
-    <SecretCardFrame
-      title={`Secret for ${request.agentName || "an Agent"}`}
-      chip={status && { settled: done, label: done ? "In use" : !canApprove ? "A Space admin answers"
-        : status.saved ? "Waiting for your approval" : "Waiting for the value" }}
-      note={request.reason || request.description}
+    <SecretAsk
+      who={request.agentName}
+      kind="Secret"
+      question={<>
+        {needsValue ? "Give" : "Let"} {request.agentName || "this Agent"} {needsValue ? "the secret" : "use the secret"}{" "}
+        <span className="font-mono text-[0.92em]">{request.secretRef}</span>?
+      </>}
+      detail={<>
+        {envName && <>Set as <span className="font-mono">{envName}</span></>}
+        {envName && reason && " · "}
+        {reason && <>“{reason}”</>}
+      </>}
+      settled={done && "In use"}
+      canApprove={status && canApprove}
       query={statusQuery}
       error={error}
-      adminOnly={Boolean(status) && !done && !canApprove}
-      lead={(
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="font-mono text-foreground">{request.secretRef}</span>
-          {(status?.envName ?? request.envName) && <>
-            <span>as</span>
-            <span className="font-mono text-foreground">{status?.envName ?? request.envName}</span>
-          </>}
-        </div>
-      )}
     >
-      {status && !done && canApprove && (
-        <form
-          className="mt-3 space-y-2"
-          onSubmit={(event) => { event.preventDefault(); void save(); }}
-        >
-          <label htmlFor={inputId} className="block space-y-1 text-xs">
-            <span className="font-bold text-foreground">{needsValue ? "Value" : "New value (optional)"}</span>
-            <input
-              id={inputId}
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              value={value}
-              disabled={busy}
-              onChange={(event) => setValue(event.target.value)}
-              placeholder={needsValue ? "Paste the value here" : "Leave empty to keep the stored value"}
-              className="app-request-broker-control h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs text-foreground"
-              aria-label={`Value for secret ${request.secretRef}`}
-            />
-          </label>
+      <form
+        className="mt-3 space-y-2"
+        onSubmit={(event) => { event.preventDefault(); void save(); }}
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <input
+            id={inputId}
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={value}
+            disabled={busy}
+            onChange={(event) => setValue(event.target.value)}
+            placeholder={needsValue ? "Paste the value here" : "New value (optional)"}
+            className="h-7 min-w-40 flex-1 rounded-md border border-border px-2 font-mono text-xs text-foreground"
+            aria-label={`Value for secret ${request.secretRef}`}
+          />
           <button
             type="submit"
             disabled={busy || (needsValue && !value.trim())}
-            className={actionClass({ variant: "primary", size: "sm" }, "app-request-broker-control")}
+            className={actionClass({ variant: "primary", size: "sm" })}
           >
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
             {needsValue ? "Save" : "Let it use this secret"}
           </button>
-          <p className="text-[11px] text-muted-foreground">
-            Stored encrypted in this Space&apos;s secrets. This Agent uses it right away and never sees it in chat.
-          </p>
-        </form>
-      )}
-    </SecretCardFrame>
+          <ManageSecretsButton />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Stored encrypted in this Space&apos;s secrets. This Agent uses it right away and never sees it in chat.
+        </p>
+      </form>
+    </SecretAsk>
   );
 }
 
-/** What both secret cards share: the key, a title with its state, the Agent's reason and what went wrong. */
-function SecretCardFrame({ title, chip, lead, note, query, error, adminOnly, children }: {
-  title: string;
-  chip?: { settled: boolean; label: string };
-  lead?: ReactNode;
-  note?: string;
+/**
+ * What both secret cards share: the ask, whose answer it is, what went wrong,
+ * and the way on to the Space's secrets. `children` are the answer's controls,
+ * shown to a Space admin while the ask is open; `list` shows in every state.
+ */
+function SecretAsk({ who, kind, question, detail, settled, canApprove, query, error, list, children }: {
+  who?: string;
+  kind: string;
+  question: ReactNode;
+  detail?: ReactNode;
+  /** How it ended, once it has. */
+  settled: string | false;
+  /** Whether this reader may answer it; undefined until the Hub has said. */
+  canApprove: boolean | undefined;
   query: Pick<UseQueryResult<unknown>, "isLoading" | "error" | "refetch">;
   error: string | null;
-  adminOnly: boolean;
+  list?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className="app-request-broker-card mt-2 w-full max-w-2xl rounded-md border border-border bg-muted/35 p-3">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="app-request-broker-icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-background text-muted-foreground">
-          <KeyRound className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-sm font-black">{title}</span>
-            {chip && (
-              <span className={statusChipClass(chip.settled ? "settled" : "attention",
-                "app-request-broker-status px-1.5 py-0.5 text-[11px] font-bold")}>
-                {chip.label}
-              </span>
-            )}
-          </div>
-          {lead}
-          {note && <div className="mt-1 text-xs text-muted-foreground">{note}</div>}
-          {adminOnly && <p className="mt-2 text-xs text-muted-foreground">Only a Space admin can answer this.</p>}
-          {query.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
-          {error ? <div role="alert" className="mt-2 text-xs text-destructive">{error}</div>
-            : <ErrorNotice error={query.error} action="Couldn't load this secret request"
-              className="mt-2 text-xs text-destructive" onRetry={() => void query.refetch()} />}
-          {children}
-        </div>
-      </div>
-    </div>
+    <AskCard
+      who={who || "An Agent"}
+      kind={kind}
+      icon={<KeyRound className="size-3.5" />}
+      open={canApprove === true && !settled}
+      question={question}
+      detail={detail}
+      status={settled ? { tone: "settled", label: settled }
+        : canApprove === false && { tone: "secondary", label: "A Space admin answers" }}
+    >
+      {query.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
+      <AskError error={error} loadError={query.error} action="Couldn't load this secret request"
+        onRetry={() => void query.refetch()} />
+      {list}
+      {canApprove && (settled ? <div className="mt-3"><ManageSecretsButton /></div> : children)}
+    </AskCard>
   );
 }
 
@@ -262,26 +275,29 @@ export function SecretAccessRequestCardView({ request, messageId, token, userId 
     }
   }
 
+  const lone = request.secretRefs.length === 1 ? request.secretRefs[0] : undefined;
   return (
-    <SecretCardFrame
-      title="Secrets Agents read without asking"
-      chip={status && { settled: done, label: done ? "Automatic" : !canApprove ? "A Space admin answers"
-        : "Waiting for your approval" }}
-      note={request.reason}
+    <SecretAsk
+      who={request.agentName}
+      kind="Secret access"
+      question={lone
+        ? <>Let Agents read <span className="font-mono text-[0.92em]">{lone}</span> without asking?</>
+        : `Let Agents read these ${request.secretRefs.length} secrets without asking?`}
+      detail={request.reason && <>“{request.reason}”</>}
+      settled={done && "Automatic"}
+      canApprove={status && canApprove}
       query={statusQuery}
       error={error}
-      adminOnly={Boolean(status) && !done && !canApprove}
-    >
-      {status && (
+      list={status && (
         <ul className="mt-2 space-y-1">
           {request.secretRefs.map((ref) => {
             const held = status.access.get(ref);
             return (
               <li key={ref}>
-                <label className="flex min-w-0 items-center gap-2 text-xs">
+                <label className="flex min-w-0 items-center gap-2 text-[13px]">
                   <input
                     type="checkbox"
-                    className="app-request-broker-control size-3.5 shrink-0"
+                    className="size-3.5 shrink-0"
                     checked={held?.automatic === true || (held !== undefined && !declined.has(ref))}
                     disabled={busy || !canApprove || held?.automatic !== false}
                     onChange={(event) => setDeclined((current) => {
@@ -301,23 +317,25 @@ export function SecretAccessRequestCardView({ request, messageId, token, userId 
           })}
         </ul>
       )}
-      {status && !done && canApprove && (
-        <div className="mt-3 space-y-2">
+    >
+      <div className="mt-3 space-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             type="button"
             disabled={busy || chosen.length === 0}
             onClick={() => void approve()}
-            className={actionClass({ variant: "primary", size: "sm" }, "app-request-broker-control")}
+            className={actionClass({ variant: "primary", size: "sm" })}
           >
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
             {chosen.length === 1 ? "Let Agents read it without asking"
               : `Let Agents read these ${chosen.length} without asking`}
           </button>
-          <p className="text-[11px] text-muted-foreground">
-            Any Agent in this Space then reads a ticked secret when it needs it, with no card. Change it back in Space settings.
-          </p>
+          <ManageSecretsButton />
         </div>
-      )}
-    </SecretCardFrame>
+        <p className="text-xs text-muted-foreground">
+          Any Agent in this Space then reads a ticked secret when it needs it, with no card. Change it back in Space settings.
+        </p>
+      </div>
+    </SecretAsk>
   );
 }
