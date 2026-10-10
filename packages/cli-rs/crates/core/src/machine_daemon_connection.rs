@@ -554,6 +554,17 @@ pub enum MachineDaemonCommand {
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+    /// One bounded piece of text work for a harness: an instruction and the
+    /// text it is about. The daemon starts the harness fresh, with no token,
+    /// no tools and no channel, and reports the one piece of text it answers.
+    MachineTextTask {
+        request_id: String,
+        preset_id: String,
+        instruction: String,
+        input: String,
+        #[serde(default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
     /// The owner lists or reclaims the git worktrees on this Machine. Paths
     /// name trees from a listing; the daemon reclaims only trees it finds
     /// registered with git itself, behind its own gates.
@@ -566,6 +577,19 @@ pub enum MachineDaemonCommand {
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+}
+
+/// What became of a `machine_text_task`: `completed` with the harness's
+/// answer, `unavailable` when this Machine cannot run it, or `failed`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineTextTaskOutcome {
+    pub preset_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -756,6 +780,12 @@ pub enum MachineDaemonReport {
     MachineHarnessActionResult {
         request_id: String,
         result: HarnessActionResult,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
+    MachineTextTaskResult {
+        request_id: String,
+        result: MachineTextTaskOutcome,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -988,6 +1018,7 @@ impl MachineDaemonCommand {
             | Self::MachineWorktreeCleanup { relay_lease, .. }
             | Self::MachineQuotaProbe { relay_lease, .. }
             | Self::MachineHarnessAction { relay_lease, .. }
+            | Self::MachineTextTask { relay_lease, .. }
             | Self::MachineWorktreeAction { relay_lease, .. } => relay_lease.as_ref(),
         }
     }
@@ -2784,6 +2815,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
         | "machine_request_resolve"
         | "machine_quota_probe"
         | "machine_harness_action"
+        | "machine_text_task"
         | "machine_worktree_action"
         | "machine_recover_reply"
         | "machine_worktree_cleanup" => Some(

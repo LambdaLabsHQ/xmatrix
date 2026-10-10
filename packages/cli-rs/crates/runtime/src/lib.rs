@@ -70,6 +70,7 @@ mod runtime_daemon_message_send;
 mod runtime_daemon_quota_probe;
 #[cfg(unix)]
 mod runtime_daemon_socket;
+mod runtime_daemon_text_task;
 mod runtime_execution_outbox;
 mod runtime_private_journal;
 mod runtime_reply_recovery;
