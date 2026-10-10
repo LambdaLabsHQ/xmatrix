@@ -166,7 +166,7 @@ export function StatusView({
           {catalog.isError ? (
             <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()} />
           ) : !catalog.data && ready ? (
-            <ListSkeleton label="Loading agents" rows={1} />
+            <ListSkeleton label="Loading agents" rows={1} className="[--app-list-row-end:0px] [--app-list-row-start:0px]" />
           ) : runtimes.length === 0 ? (
             <p className="text-sm text-muted-foreground">No agents yet.</p>
           ) : (

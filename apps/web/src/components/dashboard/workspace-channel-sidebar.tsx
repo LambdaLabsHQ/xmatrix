@@ -10,8 +10,18 @@ import {
 } from "./workspace-shell-chrome";
 import { CountPill } from "./count-pill";
 import { ListCreate, type CreateAction } from "./list-create";
-import { ListSectionHeading, type ListSectionMark } from "./list-section-heading";
+import { ListSectionHeading, RECENT_SECTION, type ListSectionMark } from "./list-section-heading";
 
+import {
+  CHANNEL_CHAT_ROW_CLASS_NAME,
+  CHANNEL_ROW_HASH_CLASS_NAME,
+  CHANNEL_ROW_NAME_CLASS_NAME,
+  CHANNEL_ROW_PREVIEW_CLASS_NAME,
+  CHANNEL_ROW_PREVIEW_LINE_CLASS_NAME,
+  CHANNEL_ROW_TIME_CLASS_NAME,
+  CHANNEL_ROW_TITLE_CLASS_NAME,
+  CHANNEL_ROW_TITLE_LINE_CLASS_NAME,
+} from "./row-frames";
 import { channelRowIndentPx, SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME } from "./workspace-shell-constants";
 
 import {
@@ -104,7 +114,6 @@ import {
   Check,
   CheckCheck,
   ChevronDown,
-  Clock,
   Copy,
   ExternalLink,
   Inbox,
@@ -832,7 +841,7 @@ export function channelListSections(
   }> = [
     { label: "Needs you", count: needsYou.length, channels: needsYou, mark: { icon: Bell, tone: "attention" } },
     { label: "Pinned", channels: pinned, mark: { icon: Pin, tone: "primary" } },
-    { label: "Recent", channels: recent, mark: { icon: Clock, tone: "plain" } },
+    { ...RECENT_SECTION, channels: recent },
   ];
   return sections.filter((section) => section.channels.length > 0);
 }
@@ -1029,8 +1038,8 @@ function ChannelRowSecondLine({
   trailing?: ReactNode;
 }) {
   return (
-    <span className="app-channel-row-preview-line flex min-w-0 items-center gap-1.5">
-      <span className="app-channel-row-preview app-list-row-meta min-w-0 flex-1 truncate">
+    <span className={CHANNEL_ROW_PREVIEW_LINE_CLASS_NAME}>
+      <span className={CHANNEL_ROW_PREVIEW_CLASS_NAME}>
         <ChannelRowPreview channel={rowPreviewChannel(channel)} />
       </span>
       {(humanMembers.length > 0 || avatarItems.length > 0) && (
@@ -1182,7 +1191,7 @@ export const MobileChannelChatRow = memo(function MobileChannelChatRow({
       role="button"
       tabIndex={0}
       className={cn(
-        "app-mobile-chat-row app-channel-row app-channel-chat-row app-list-row flex w-full text-left",
+        "app-mobile-chat-row flex w-full text-left", CHANNEL_CHAT_ROW_CLASS_NAME,
         active && "app-mobile-chat-row-active app-channel-row-active"
       )}
       style={{ paddingLeft: `${channelRowIndentPx(0)}px` }}
@@ -1241,14 +1250,14 @@ export const MobileChannelChatRow = memo(function MobileChannelChatRow({
     >
       {/* The desktop's conversation row: the name and when on the first
           line, who said what, who is here and what is unread on the second. */}
-      <span className="app-channel-row-title-line flex min-w-0 items-baseline gap-2">
-        <span className="app-channel-row-title flex min-w-0 flex-1 items-baseline">
-          <span className="app-channel-row-hash shrink-0" aria-hidden="true">#</span>
-          <span className="app-mobile-chat-title app-channel-row-name app-list-row-title min-w-0 truncate">
+      <span className={CHANNEL_ROW_TITLE_LINE_CLASS_NAME}>
+        <span className={CHANNEL_ROW_TITLE_CLASS_NAME}>
+          <span className={CHANNEL_ROW_HASH_CLASS_NAME} aria-hidden="true">#</span>
+          <span className={cn("app-mobile-chat-title", CHANNEL_ROW_NAME_CLASS_NAME)}>
             {channelTitle(displayChannel)}
           </span>
         </span>
-        <span className="app-channel-row-time shrink-0 self-center">{timeLabel}</span>
+        <span className={CHANNEL_ROW_TIME_CLASS_NAME}>{timeLabel}</span>
       </span>
       <ChannelRowSecondLine
         channel={displayChannel}
@@ -1547,7 +1556,7 @@ export const ChannelNavItem = memo(function ChannelNavItem({
       data-unread-mention={hasUnreadMention ? "true" : undefined}
       className={cn(
         SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME,
-        "app-channel-chat-row app-list-row",
+        CHANNEL_CHAT_ROW_CLASS_NAME,
         active && "app-channel-row-active text-sidebar-accent-foreground",
       )}
       style={{ paddingLeft: `${channelRowIndentPx(0)}px` }}
@@ -1561,19 +1570,19 @@ export const ChannelNavItem = memo(function ChannelNavItem({
       {/* A chat row: who said what last reads under the title, the way a
           conversation list does, so the list answers "where is something
           happening" without opening each channel. */}
-      <span className="app-channel-row-title-line flex min-w-0 items-baseline gap-2">
+      <span className={CHANNEL_ROW_TITLE_LINE_CLASS_NAME}>
         <button
           type="button"
           onClick={(event) => {
             event.stopPropagation();
             onRowClick();
           }}
-          className="app-channel-row-title flex min-w-0 flex-1 items-baseline text-left"
+          className={cn(CHANNEL_ROW_TITLE_CLASS_NAME, "text-left")}
         >
-          <span className="app-channel-row-hash shrink-0" aria-hidden="true">#</span>
-          <span className="app-channel-row-name app-list-row-title min-w-0 truncate">{channelTitle(channel)}</span>
+          <span className={CHANNEL_ROW_HASH_CLASS_NAME} aria-hidden="true">#</span>
+          <span className={CHANNEL_ROW_NAME_CLASS_NAME}>{channelTitle(channel)}</span>
         </button>
-        <span className="app-channel-row-time shrink-0 self-center">{mobileChatTimeLabel(channelActivityAt(channel))}</span>
+        <span className={CHANNEL_ROW_TIME_CLASS_NAME}>{mobileChatTimeLabel(channelActivityAt(channel))}</span>
       </span>
       <ChannelRowSecondLine
         channel={channel}

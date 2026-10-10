@@ -56,7 +56,12 @@ export type FixtureResponder =
       workspaces: ReadonlyArray<Record<string, unknown>>;
     }
   /** Server-paged Channel catalog plus exact resolution, backed by one fixture list. */
-  | { kind: "channelCatalog"; channels: ReadonlyArray<Record<string, unknown>> }
+  | {
+      kind: "channelCatalog";
+      channels: ReadonlyArray<Record<string, unknown>>;
+      /** Answer only once the spec calls `releaseFixture(page, id)`, as `deferred` does. */
+      held?: boolean;
+    }
   /** One response per call, clamped to the last entry once exhausted. */
   | { kind: "sequence"; responses: ReadonlyArray<{ status?: number; json: unknown }> }
   /** Mirror the Hub-selected scoped upload path from an upload-intent body. */
@@ -447,6 +452,8 @@ function installInterceptor({
             return channelViewPreference(rule, method, body);
           }
           if (rule.responder.kind === "channelCatalog") {
+            const gate = rule.responder.held === true ? store.gateFor(rule.id) : null;
+            if (gate && !gate.released) await gate.promise;
             return channelCatalog(rule, url, method, body);
           }
           if (rule.responder.kind === "launchTargets") {

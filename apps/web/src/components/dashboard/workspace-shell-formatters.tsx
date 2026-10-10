@@ -69,6 +69,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
+import { RICH_MESSAGE_PARAGRAPH_CLASS_NAME } from "./row-frames";
 import { AGENT_PRESETS, agentAvatarUrlFromMetadata } from "@xmatrix/protocol";
 
 import type {
@@ -110,7 +111,7 @@ export function createMessageMarkdownComponents(
   // Mentions carry read state, so body text runs pass through the mention
   // renderer. Code spans keep their children untouched.
   p: ({ children, node }) => (
-    <p className="mt-1 whitespace-pre-wrap first:mt-0">{renderMentionChildren(children, node)}</p>
+    <p className={RICH_MESSAGE_PARAGRAPH_CLASS_NAME}>{renderMentionChildren(children, node)}</p>
   ),
   blockquote: ({ children }) => (
     <blockquote className="mt-2 border-l-2 border-primary/60 pl-3 text-muted-foreground first:mt-0">

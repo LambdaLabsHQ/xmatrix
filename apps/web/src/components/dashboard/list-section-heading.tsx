@@ -1,12 +1,16 @@
 "use client";
 
 import type { ComponentType, SVGProps } from "react";
+import { Clock } from "lucide-react";
 
 import { tagClass } from "./status-tag";
 
 /** A section's ink: brass for what waits on the reader, blue for the list's own main set, plain for the rest. */
 export type ListSectionTone = "attention" | "primary" | "plain";
 export type ListSectionMark = { icon: ComponentType<Pick<SVGProps<SVGSVGElement>, "className">>; tone: ListSectionTone };
+
+/** The conversation list's own section, and what its skeleton stands under. */
+export const RECENT_SECTION: { label: string; mark: ListSectionMark } = { label: "Recent", mark: { icon: Clock, tone: "plain" } };
 
 /**
  * A list's section: its name over its rows, starting where the rows' content

@@ -38,7 +38,7 @@ export function SpaceRegistrationPanel({ spaceId, token }: { spaceId: string; to
             error={userErrorMessage(catalog.error, "Couldn't load registered locations") ?? ""} />
         </div>
       ) : !catalog.data ? (
-        <ListSkeleton label="Loading registered locations" rows={3} className="mt-3" />
+        <ListSkeleton label="Loading registered locations" rows={3} mark={false} className="mt-3 [--app-list-row-end:0px] [--app-list-row-start:0px]" />
       ) : !registrations.length ? (
         <p className="mt-3 text-sm text-muted-foreground">No locations are registered in this Space yet.</p>
       ) : null}

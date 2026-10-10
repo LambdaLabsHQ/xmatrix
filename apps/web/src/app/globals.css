@@ -4537,9 +4537,9 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 }
 
 .app-content-skeleton-line,
-.app-channel-skeleton-title,
-.app-channel-skeleton-preview,
+.app-skeleton-bar,
 .app-list-skeleton-mark,
+.app-message-skeleton-avatar,
 .app-media-skeleton {
   display: block !important;
   border: 0 !important;
@@ -4568,48 +4568,62 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 .app-content-skeleton-line[data-width="medium"] { width: min(72%, 13rem); }
 .app-content-skeleton-line[data-width="short"] { width: min(42%, 8rem); }
 
-.app-list-skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  padding: 0.35rem 0;
-}
-
-.app-list-skeleton-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+/* A skeleton row is the row it stands for: the same elements and classes
+   (row-frames.ts), so its boxes, insets and line heights are the row's own
+   and nothing moves when the content lands. Only the text is replaced, by a
+   bar that sits in the line the text will: inline, so the line keeps the
+   height its font gives it. Nothing here sets a row's size. */
+.app-skeleton-bar {
+  display: inline-block !important;
+  max-width: 100%;
+  height: 0.7em;
+  vertical-align: middle;
 }
 
 .app-list-skeleton-mark {
-  width: 1.75rem;
-  height: 1.75rem;
-  flex: 0 0 1.75rem;
-  border-radius: 8px !important;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px !important;
 }
 
-.app-list-skeleton-copy {
+/* A placeholder row is not a row to point at. */
+.app-list-skeleton,
+.app-message-timeline-skeleton {
+  pointer-events: none;
+}
+
+.xmatrix-app .app-message-skeleton-avatar.app-message-skeleton-avatar {
+  border-radius: 999px !important;
+}
+
+/* A history fills the screen and ends where its last message will, above
+   the composer (the timeline's own end padding), with what does not fit cut
+   off at the top; a history of a few messages starts at the top, as they will. */
+.app-message-timeline-skeleton {
   display: flex;
-  min-width: 0;
-  flex: 1;
+  height: 100%;
   flex-direction: column;
-  gap: 0.4rem;
+  justify-content: flex-end;
+  overflow: hidden;
 }
 
-.app-channel-list-skeleton {
-  display: flex;
-  flex-direction: column;
+.app-message-timeline-skeleton > .app-message-skeleton-row {
+  flex: none;
 }
 
-.app-channel-skeleton-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 18px 11px 20px;
+.app-message-timeline-skeleton-short {
+  justify-content: flex-start;
 }
 
-.app-channel-skeleton-title { height: 14px; }
-.app-channel-skeleton-preview { height: 10px; }
+/* The timeline pads whatever it holds for the phone's title bar; a message
+   row's first line is 16px under the timeline's top either way. */
+.xmatrix-app.xmatrix-app.xmatrix-app .app-message-timeline > .app-message-timeline-skeleton.app-message-timeline-skeleton {
+  padding-top: 0 !important;
+}
+
+.xmatrix-app.xmatrix-app.xmatrix-app .app-message-timeline > .app-message-timeline-skeleton.app-message-timeline-skeleton-short {
+  padding-top: 1rem !important;
+}
 
 .app-media-skeleton {
   width: 100%;
@@ -4696,9 +4710,9 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 
 @media (prefers-reduced-motion: reduce) {
   .app-content-skeleton-line,
-  .app-channel-skeleton-title,
-  .app-channel-skeleton-preview,
+  .app-skeleton-bar,
   .app-list-skeleton-mark,
+  .app-message-skeleton-avatar,
   .app-media-skeleton {
     animation: none;
   }
@@ -5886,66 +5900,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     padding-top: 0.5rem !important;
   }
 
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-message-timeline-skeleton {
-    padding-top: 0.5rem !important;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-timeline-skeleton {
-    gap: 1.25rem;
-    padding-inline: var(--mobile-horizontal-padding) !important;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-row-compact {
-    padding-left: 2.75rem;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-avatar {
-    width: 2rem;
-    height: 2rem;
-    flex: 0 0 2rem;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--muted) 88%, var(--foreground) 12%);
-    animation: xmatrix-message-skeleton-pulse 1.4s ease-in-out infinite;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-row-compact .app-message-skeleton-avatar {
-    display: none;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-copy {
-    display: flex;
-    min-width: 0;
-    flex: 1;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding-top: 0.1875rem;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-line {
-    display: block;
-    height: 0.625rem;
-    max-width: 100%;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 10%);
-    animation: xmatrix-message-skeleton-pulse 1.4s ease-in-out infinite;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-line-name { width: 5rem; height: 0.5rem; }
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-line-long { width: min(17rem, 82%); }
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-line-medium { width: min(13rem, 66%); }
-  .xmatrix-app.xmatrix-app-shell .app-message-skeleton-line-short { width: min(9rem, 48%); }
-
-  @keyframes xmatrix-message-skeleton-pulse {
-    0%, 100% { opacity: 0.46; }
-    50% { opacity: 0.82; }
-  }
-
   /* Topbar, composer, and dock are true overlays; content must continue behind
      them. Keep only transparent scroll-end clearance so the last message settles
      above the floating composer instead of underneath it. */
@@ -6448,13 +6402,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
      geometry reset. Reassert the viewport-safe Instance position last. */
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-agent-work-dock {
     bottom: calc(var(--app-composer-height, 8rem) + var(--mobile-bottom-safe) + 1.625rem) !important;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .xmatrix-app.xmatrix-app-shell .app-message-skeleton-avatar,
-    .xmatrix-app.xmatrix-app-shell .app-message-skeleton-line {
-      animation: none;
-    }
   }
 }
 
