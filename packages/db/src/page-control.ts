@@ -1137,6 +1137,46 @@ export class PostgresPageRepository {
   }
 
   /**
+   * What the Hub hands a page's summary execution: the page's head text as it
+   * stands, read by the Hub itself rather than for a reader.
+   */
+  async summarySource(input: { requestId: string; spaceId: string; pageId: string }):
+    Promise<{ title: string; headRevision: number; summaryRevision: number | null; body: string } | null> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.summary.source", spaceId, async (tx) => {
+      const row = (await tx.query<QueryResultRow & { title: string; head_revision: string; summary_revision: string | null;
+        body: string | null }>({ name: "page_summary_source_v1",
+        text: `SELECT p.title, p.head_revision::text, p.summary_revision::text, r.body
+          FROM data.pages p JOIN data.page_revisions r
+            ON r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision
+          WHERE p.space_id=$1 AND p.page_id=$2`,
+        values: [spaceId, pageId], maxRows: 1 }))[0];
+      return row ? { title: row.title, headRevision: Number(row.head_revision),
+        summaryRevision: row.summary_revision === null ? null : Number(row.summary_revision),
+        body: canonicalPageMarkdown(row.body ?? "") } : null;
+    });
+  }
+
+  /** Writes the line a summary execution answered, if the page is still at the revision it read. */
+  async recordSummary(input: { requestId: string; spaceId: string; pageId: string; revision: number; summary: string }):
+    Promise<{ recorded: boolean }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    const text = typeof input.summary === "string" ? input.summary.replace(/\s+/gu, " ").trim() : "";
+    if (!text || [...text].length > 240 || !Number.isSafeInteger(input.revision) || input.revision < 1) {
+      throw new PageControlError("invalid_request", 400, "summary is invalid");
+    }
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.summary.record", spaceId, async (tx) => {
+      const rows = await tx.query({ name: "page_summary_record_v1",
+        text: `UPDATE data.pages SET summary=$3, summary_revision=$4, summary_at=now()
+          WHERE space_id=$1 AND page_id=$2 AND head_revision=$4 RETURNING page_id`,
+        values: [spaceId, pageId, text, input.revision], maxRows: 1 });
+      return { recorded: rows.length > 0 };
+    });
+  }
+
+  /**
    * The newest revision of a page this person has had on screen, or null before
    * they first read it. It is a person's own: an Agent Run has none.
    */
