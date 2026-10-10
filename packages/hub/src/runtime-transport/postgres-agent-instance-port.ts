@@ -651,7 +651,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       throw new RuntimeClientOperationError("agent_read_only_session");
     }
     assertAgentAppendEnvelope(message);
-    const appMetadata = {
+    const appMetadata: Record<string, unknown> = {
       ...callerMessageMetadata(message.metadata),
       ...(message.appMentions?.length ? { appMentions: message.appMentions } : {}),
     };
