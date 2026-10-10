@@ -1,5 +1,7 @@
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
+import { xmatrixRawResponse } from "@/lib/query/api-client";
+
 /** Where this browser stands on push: whether it can, whether it is on, and why not. */
 export type BrowserPushState = "unsupported" | "unavailable" | "blocked" | "off" | "on";
 
@@ -16,7 +18,7 @@ function keyBytes(base64url: string): Uint8Array {
 }
 
 async function request(token: string, route: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(route, { ...init, cache: "no-store",
+  return xmatrixRawResponse(route, { ...init,
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...init.headers } });
 }
 

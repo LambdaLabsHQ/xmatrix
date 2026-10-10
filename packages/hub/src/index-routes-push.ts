@@ -40,7 +40,7 @@ export function registerIndexRoutesPush(app: Hono<{ Bindings: Env }>): void {
     try {
       const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));
       await pushDevices(c.env).unregister({
-        requestId: crypto.randomUUID(), userId: user.id, deviceId: c.req.param("deviceId"),
+        requestId: crypto.randomUUID(), userId: user.id, deviceId: c.req.param("deviceId") ?? "",
       });
       return c.json({ ok: true }, 200, { "cache-control": "private, no-store" });
     } catch (error) { return requestErrorResponse(c, error); }

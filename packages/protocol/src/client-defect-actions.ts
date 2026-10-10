@@ -16,6 +16,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't attach the file",
   "Couldn't cancel deletion",
   "Couldn't change automatic assignment",
+  "Couldn't change notifications",
   "Couldn't change the GitHub account",
   "Couldn't change these secrets",
   "Couldn't change who can join",

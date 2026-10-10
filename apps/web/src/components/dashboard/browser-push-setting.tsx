@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Bell, BellOff } from "lucide-react";
 
 import { actionClass } from "@/components/ui/action-tone";
+import { userErrorMessage } from "@/lib/user-facing-error";
 import { disableBrowserPush, enableBrowserPush, type BrowserPushState } from "@/lib/push-subscription";
 import { ToolDetailSection, ToolSettingRow } from "./tool-split";
 
@@ -35,7 +36,7 @@ export function BrowserPushSetting({ token, state, onState }: {
     try {
       onState(await next());
     } catch (changeError) {
-      setError(changeError instanceof Error ? changeError.message : "Could not change notifications");
+      setError(userErrorMessage(changeError, "Couldn't change notifications"));
     } finally {
       setBusy(false);
     }
