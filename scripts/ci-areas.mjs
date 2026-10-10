@@ -155,7 +155,7 @@ export function affectedPartitions(changedFiles) {
     setupPnpmAction ||
     hubWorkflow ||
     hubDeployPolicy ||
-    touches(files, "packages/hub", "packages/protocol");
+    touches(files, "packages/hub", "packages/db", "packages/protocol");
   const desktop =
     rootShared ||
     setupPnpmAction ||
