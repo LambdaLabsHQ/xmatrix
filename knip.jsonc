@@ -55,6 +55,8 @@
         "src/lib/relay-v2/*.test.cjs",
         // Playwright's global setup spawns it by path to hold the shared browser.
         "e2e/hold-shared-browser.mjs",
+        // The browser registers it by URL as the push service worker.
+        "public/push-sw.js",
         // Run by hand (`pnpm exec node scripts/...`).
         "scripts/*.mjs",
       ],
