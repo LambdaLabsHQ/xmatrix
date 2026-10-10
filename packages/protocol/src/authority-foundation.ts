@@ -1369,6 +1369,8 @@ export interface LaunchTargetRepo {
   /** The reference a mention carries, e.g. `owner/repo`. */
   value: string;
   private: boolean;
+  /** GitHub project purpose; optional on older Hubs or repositories without one. */
+  description?: string;
 }
 
 /**

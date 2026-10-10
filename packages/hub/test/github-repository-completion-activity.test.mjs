@@ -21,6 +21,7 @@ function repo(fields) {
     full_name: `${fields.owner}/${fields.name}`,
     private: fields.private === true,
     archived: fields.archived === true,
+    description: fields.description,
     pushed_at: fields.pushed_at,
     updated_at: fields.updated_at,
     owner: { login: fields.owner },
@@ -69,6 +70,7 @@ const CATALOG = [
     name: "model-gateway",
     pushed_at: "2026-08-01T00:00:00Z",
     private: true,
+    description: "Routes inference requests across model providers",
   }),
   repo({
     id: 4,
@@ -104,6 +106,8 @@ test("a Space's launch repos are newest-push first, and carry their visibility",
       repos.filter((repository) => repository.private).map((repository) => repository.value),
       ["LambdaLabsHQ/model-gateway"],
     );
+    assert.equal(repos.find(repository => repository.value === "LambdaLabsHQ/model-gateway").description,
+      "Routes inference requests across model providers");
   } finally {
     github.restore();
   }
