@@ -1579,7 +1579,7 @@ export class PostgresMessageRepository {
         maxRows: 0,
       });
       // The sender has responded: no mention in this conversation still waits on them.
-      await transaction.query({
+      if (senderKind === "user" || senderKind === "agent") await transaction.query({
         name: "message_append_attention_respond_v1",
         text: `WITH responded AS (
             UPDATE data.message_attention SET awaiting_response=FALSE
