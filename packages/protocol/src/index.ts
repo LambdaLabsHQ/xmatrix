@@ -25,6 +25,11 @@ export type {
   WorktreeInventory, WorktreeOrigin,
 } from "./worktree-management.js";
 export {
+  MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS, TEXT_TASK_HARNESSES,
+  TEXT_TASK_INPUT_MAX_BYTES, TEXT_TASK_INSTRUCTION_MAX_BYTES, TEXT_TASK_OUTPUT_MAX_BYTES, TEXT_TASK_STATUSES,
+} from "./text-task.js";
+export type { TextTaskRequest, TextTaskResult, TextTaskStatus } from "./text-task.js";
+export {
   APP_CONNECTOR_PROVIDER_MANIFESTS, GITHUB_DEFAULT_REPOSITORY_FEATURES,
   GITHUB_REPOSITORY_FEATURE_LABELS, GITHUB_REPOSITORY_FEATURES, githubRequiredCapabilities,
   SENTRY_PUBLIC_INTEGRATION_SCOPES,
