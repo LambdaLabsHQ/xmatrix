@@ -61,7 +61,12 @@ uncaught failures through it so no route answers a plain-text `500`.
   into an `XMatrixApiError` with status `0`, including a connection that drops
   while reading a successful JSON body (`requireJson` / `requireField` also
   share this classification). Invalid JSON and consumed or locked bodies remain
-  response defects; caller cancellation passes through unchanged. It reads a failed response into an
+  response defects; caller cancellation passes through unchanged. Successful
+  JSON is parsed in JavaScript so WebKit failures keep a reader stack. Invalid
+  JSON reports only HTTP status, empty/nonempty body and a closed media category,
+  never response snippets or arbitrary header values. Transfer proposal reads
+  use this typed transport so a dropped body reaches Query's bounded retries.
+  It reads a failed response into an
   `XMatrixApiError` carrying `retryable` and `retryAfterMs` (`errorFromResponse`).
   ESLint forbids the global `fetch` in client code; only the transport itself
   and server code (route handlers, the Worker's Hub proxy) are exempt.

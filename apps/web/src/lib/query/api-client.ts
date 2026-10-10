@@ -122,13 +122,25 @@ function throwTransportError(cause: unknown, signal: AbortSignal | null | undefi
 /** Receiving headers does not finish the transport: the body can still disconnect.
  * Keep parser defects and consumed/locked bodies distinct from network failure. */
 async function readResponseJson<T>(response: Response, signal?: AbortSignal): Promise<T> {
+  let text: string;
   try {
-    return await response.json() as T;
+    text = await response.text();
   } catch (cause) {
     if (cause instanceof TypeError && isTransientNetworkSessionError(cause)) {
       throwTransportError(cause, signal);
     }
     throw cause;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch (cause) {
+    if (!(cause instanceof SyntaxError)) throw cause;
+    // WebKit's native Response.json rejection can have no JS stack. Capture
+    // the reader's stack and only closed response facts, never parser snippets.
+    const type = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+    const media = !type ? "missing" : type === "application/json" || type.endsWith("+json") ? "json"
+      : type === "text/html" ? "html" : type.startsWith("text/") ? "text" : "other";
+    throw new SyntaxError(`Invalid JSON response (HTTP ${response.status}; ${text.length ? "nonempty" : "empty"}; media=${media})`);
   }
 }
 
