@@ -62,7 +62,6 @@ export type DesktopCliInstallResult =
 
 export type DesktopNotification = {
   title: string;
-  subtitle?: string;
   body?: string;
   url?: string;
   channelId?: string;
