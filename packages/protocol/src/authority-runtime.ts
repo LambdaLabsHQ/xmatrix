@@ -443,6 +443,12 @@ export interface ChannelAttentionSummary {
   lastAttentionAt?: string;
   lastMessageId?: string;
   lastMessageSequence?: number;
+  /**
+   * The message `lastMessageId` names, so a list can say who waits and on what.
+   * Hydrated on catalog reads only; a read acknowledgement or a live
+   * notification carries the summary without it.
+   */
+  lastMessage?: ChannelReplyContext;
   primaryTriggerKind?: ChannelAttentionTriggerKind;
   triggerKinds?: ChannelAttentionTriggerKind[];
   targetKind?: ChannelAttentionTargetKind;

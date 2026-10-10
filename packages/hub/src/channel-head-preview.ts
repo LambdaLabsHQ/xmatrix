@@ -52,7 +52,14 @@ export function channelHeadPreview(head: ChannelHeadMessage): ChannelReplyContex
  * read (`SerializedChannel.lastMessage`).
  */
 export function withChannelHeadPreview(channel: Record<string, unknown>): Record<string, unknown> {
-  const { headMessage, ...rest } = channel;
-  if (!headMessage || typeof headMessage !== "object") return rest;
-  return { ...rest, lastMessage: channelHeadPreview(headMessage as ChannelHeadMessage) };
+  const { headMessage, waitingMessage, ...rest } = channel;
+  const attention = rest.attention;
+  return {
+    ...rest,
+    ...(headMessage && typeof headMessage === "object"
+      ? { lastMessage: channelHeadPreview(headMessage as ChannelHeadMessage) } : {}),
+    // The message that waits on the reader rides its attention summary, in the row preview's shape.
+    ...(waitingMessage && typeof waitingMessage === "object" && attention && typeof attention === "object"
+      ? { attention: { ...attention, lastMessage: channelHeadPreview(waitingMessage as ChannelHeadMessage) } } : {}),
+  };
 }
