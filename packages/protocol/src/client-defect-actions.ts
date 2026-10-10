@@ -17,6 +17,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't cancel deletion",
   "Couldn't change automatic assignment",
   "Couldn't change the GitHub account",
+  "Couldn't change these secrets",
   "Couldn't change who can join",
   "Couldn't change who can read this page",
   "Couldn't change who edits this page",

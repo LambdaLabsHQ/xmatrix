@@ -561,6 +561,11 @@ async fn cmd_request(
     let token = resolve_auth_token(cli_token, hub_url).await?;
     match command {
         RequestCommand::Secrets { json } => cmd_request_secrets(hub_url, &token, json).await,
+        RequestCommand::SecretAccess {
+            secret_refs,
+            reason,
+            json,
+        } => cmd_request_secret_access(hub_url, &token, secret_refs, reason, json).await,
         RequestCommand::SecretAdd {
             secret_ref,
             env,
@@ -718,6 +723,48 @@ async fn request_secret_and_wait(
         }
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     }
+}
+
+/// Posts the card on which a Space admin chooses which of these secrets
+/// Agents read without asking. Only that answer changes a secret.
+async fn cmd_request_secret_access(
+    hub_url: &str,
+    token: &str,
+    secret_refs: Vec<String>,
+    reason: Option<String>,
+    json: bool,
+) -> error::Result<()> {
+    let secret_refs: Vec<String> = secret_refs
+        .iter()
+        .map(|secret_ref| secret_ref.trim().to_string())
+        .collect();
+    for secret_ref in &secret_refs {
+        validate_secret_catalog_args(secret_ref, None)?;
+    }
+    let posted: serde_json::Value = http::request_json(
+        &with_route(hub_url, HubRoutes::SECRET_REQUESTS),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({
+            "access": "auto",
+            "secretRefs": secret_refs,
+            "reason": reason,
+        })),
+    )
+    .await?;
+    if json {
+        println!("{posted}");
+    } else if posted["automatic"].as_bool() == Some(true) {
+        eprintln!("Agents already read these without asking; no card was posted.");
+    } else {
+        let asked = posted["request"]["secretRefs"]
+            .as_array()
+            .map_or(0, Vec::len);
+        eprintln!(
+            "Asked a Space admin, on a card in this Channel, to let Agents read {asked} secret(s) without asking. Nothing changes until it is answered."
+        );
+    }
+    Ok(())
 }
 
 const SECRET_REQUEST_WAIT: std::time::Duration = std::time::Duration::from_secs(600);
