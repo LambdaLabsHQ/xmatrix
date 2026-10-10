@@ -58,7 +58,10 @@ uncaught failures through it so no route answers a plain-text `500`.
 
 - **Transport.** Every client request goes through `src/lib/query/api-client.ts`
   (`xmatrixApiRequest`, `xmatrixRawResponse`). It turns a dropped connection
-  into an `XMatrixApiError` with status `0` and reads a failed response into an
+  into an `XMatrixApiError` with status `0`, including a connection that drops
+  while reading a successful JSON body (`requireJson` / `requireField` also
+  share this classification). Invalid JSON and consumed or locked bodies remain
+  response defects; caller cancellation passes through unchanged. It reads a failed response into an
   `XMatrixApiError` carrying `retryable` and `retryAfterMs` (`errorFromResponse`).
   ESLint forbids the global `fetch` in client code; only the transport itself
   and server code (route handlers, the Worker's Hub proxy) are exempt.
