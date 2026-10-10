@@ -732,6 +732,9 @@ export function appendOutgoingTimelineItems(
       avatarUrl: currentUser?.avatarUrl,
       own: true,
       senderKind: "user",
+      // Who the confirmed message will be from, so the row is grouped and
+      // drawn the same way before and after the server answers.
+      senderId: currentUser ? `user:${currentUser.id}` : undefined,
       senderStatus: "online",
       sendStatus: message.status,
       sendError: message.error,

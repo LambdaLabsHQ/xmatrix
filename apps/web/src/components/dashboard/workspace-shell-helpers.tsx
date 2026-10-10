@@ -492,15 +492,25 @@ export function areChannelNavItemPropsEqual(previous: ChannelNavItemProps, next:
 
 export const productMessageAttachmentMediaClient = new ProductMessageAttachmentMediaClient();
 
+/** Where each timeline stood right after it was last landed on its newest message. */
+const timelineBottomLandings = new WeakMap<HTMLElement, number>();
+
 export function scrollTimelineToBottom(
   scrollContainer: HTMLDivElement | null,
   endMarker: HTMLDivElement | null
 ) {
   if (scrollContainer) {
     scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    timelineBottomLandings.set(scrollContainer, scrollContainer.scrollTop);
     return;
   }
   endMarker?.scrollIntoView({ block: "end" });
+}
+
+/** Whether the timeline is scrolled to where its last landing put it, to the pixel. */
+export function timelineStandsWhereLanded(scrollContainer: HTMLElement | null, scrollTop: number): boolean {
+  const landedAt = scrollContainer ? timelineBottomLandings.get(scrollContainer) : undefined;
+  return landedAt !== undefined && Math.abs(landedAt - scrollTop) <= 1;
 }
 
 /**

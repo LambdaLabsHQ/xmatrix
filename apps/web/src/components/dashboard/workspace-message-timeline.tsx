@@ -677,12 +677,16 @@ export const MessageTimeline = memo(function MessageTimeline({
   const isThread = Boolean(channel && isThreadChannel(channel));
   const readingAnchor = useTimelineReadingAnchor(timelineScrollRoot);
   // A conversation opens on a plain tail of its rows while the virtual list
-  // lands behind it (timeline-opening-tail.tsx). The list is keyed by channel,
-  // so each channel it mounts for opens this way once.
+  // lands behind it and then settles on its own rows (timeline-opening-tail.tsx).
+  // The list is keyed by channel, so each channel it mounts for opens this way once.
   const timelineListKey = channel?.id || "channel";
-  const [landedListKey, setLandedListKey] = useState<string | null>(null);
-  const [openingMeasure, setOpeningMeasure] = useState<TimelineOpeningMeasure | null>(null);
-  const opening = rows.length > 0 && landedListKey !== timelineListKey;
+  const [listProgress, setListProgress] = useState<{ listKey: string; step: "settling" | "open" } | null>(null);
+  const listStep = listProgress?.listKey === timelineListKey ? listProgress.step : "landing";
+  const [openingMeasure, setOpeningMeasure] = useState<OpeningRowMeasure | null>(null);
+  const opening = rows.length > 0 && listStep !== "open";
+  // The list has landed and renders the rows the tail does not hold, unseen,
+  // until their heights are measured.
+  const settling = opening && listStep === "settling";
   // The list adopts the tail's rows in one commit and the emptied tail goes in
   // the next, so each row moves between two nodes that are both in the page.
   const [tailHandedOver, setTailHandedOver] = useState(false);
@@ -707,15 +711,27 @@ export const MessageTimeline = memo(function MessageTimeline({
   }
   const handleOpeningMeasured = useCallback((measure: TimelineOpeningMeasure) => {
     rememberOpeningScreenRows(timelineListKey, measure.screenRows);
-    setOpeningMeasure(measure);
+    // A newer message pushes the oldest row out of the tail; the list still
+    // holds a blank for it, of the height it had there.
+    setOpeningMeasure((previous) => ({
+      listKey: timelineListKey,
+      headerHeight: measure.headerHeight,
+      rowHeights: previous?.listKey === timelineListKey
+        ? new Map([...previous.rowHeights, ...measure.rowHeights])
+        : measure.rowHeights,
+    }));
   }, [timelineListKey]);
   const stableOnJumpCanLand = useStableCallback(() => onJumpCanLand?.());
   /** A jump asked for a row while the conversation was still opening. */
   const jumpAwaitsOpeningRef = useRef(false);
-  const handleOpeningLanded = useCallback(() => {
+  const handleOpeningListLanded = useCallback(() => {
+    // In this task, so the tail sees the list's own rows from the next frame on.
+    flushSync(() => setListProgress({ listKey: timelineListKey, step: "settling" }));
+  }, [timelineListKey]);
+  const handleOpeningSettled = useCallback(() => {
     // Both commits before the next frame: the rows change hands in place.
     flushSync(() => {
-      setLandedListKey(timelineListKey);
+      setListProgress({ listKey: timelineListKey, step: "open" });
       setTailHandedOver(true);
     });
     flushSync(() => {
@@ -730,8 +746,8 @@ export const MessageTimeline = memo(function MessageTimeline({
     // The list unmounts with its content and opens again when it returns.
     if (hasTimelineContent) return;
     openingHostsRef.current.hosts.clear();
-    if (landedListKey !== null) setLandedListKey(null);
-  }, [hasTimelineContent, landedListKey]);
+    if (listProgress !== null) setListProgress(null);
+  }, [hasTimelineContent, listProgress]);
 
   const setTimelineScrollRoot = useCallback((node: HTMLDivElement | null) => {
     timelineScrollRef.current = node;
@@ -814,6 +830,12 @@ export const MessageTimeline = memo(function MessageTimeline({
     // transition to report after the reader starts a wheel/touch gesture.
     // Let that same real gesture start its first bounded keyset read.
     if (timelineScrollRoot && timelineScrollRoot.scrollTop <= 240) stableOnNearTop();
+  });
+
+  // The tail is drawn over the list and does not scroll: a reader who scrolls
+  // gets the list now, settled or not. A touch that only taps moves nothing.
+  const handleTimelineScrollStart = useStableCallback(() => {
+    if (settling) handleOpeningSettled();
   });
 
   const previousTimeline = previousTimelineRef.current;
@@ -1041,7 +1063,8 @@ export const MessageTimeline = memo(function MessageTimeline({
                 )}
               </div>
   );
-  const measuredRowHeights = openingMeasure ? Array.from(openingMeasure.rowHeights.values()) : [];
+  const openingRowHeights = openingMeasure?.listKey === timelineListKey ? openingMeasure.rowHeights : NO_ROW_HEIGHTS;
+  const measuredRowHeights = Array.from(openingRowHeights.values());
   // Rows above the tail have no measured height yet; they land on the average.
   const openingFallbackRowHeight = measuredRowHeights.length > 0
     ? measuredRowHeights.reduce((sum, height) => sum + height, 0) / measuredRowHeights.length
@@ -1057,7 +1080,11 @@ export const MessageTimeline = memo(function MessageTimeline({
          history right after opening a channel must not be undone by the
          landing that is still settling. */
       onTouchStart={handleTimelineScrollGesture}
-      onWheel={handleTimelineScrollGesture}
+      onTouchMove={handleTimelineScrollStart}
+      onWheel={() => {
+        handleTimelineScrollGesture();
+        handleTimelineScrollStart();
+      }}
       onScroll={(event) => {
         const scrollTop = event.currentTarget.scrollTop;
         stableOnScrollPositionChange(
@@ -1067,7 +1094,10 @@ export const MessageTimeline = memo(function MessageTimeline({
       }}
       className={cn(
         "app-message-timeline min-h-0 flex-1 overflow-y-auto bg-card",
-        hasWorkDock && "app-message-timeline-work-dock-offset"
+        hasWorkDock && "app-message-timeline-work-dock-offset",
+        // The list shows itself once it has landed; the tail is still what
+        // the reader sees, and a row the list is measuring moves under it.
+        settling && "[&_[data-testid=virtuoso-item-list]]:invisible",
       )}
     >
       {/* A refresh must not hide already-rendered rows.
@@ -1110,7 +1140,8 @@ export const MessageTimeline = memo(function MessageTimeline({
           header={timelineHeader}
           footerClassName={timelineFooterClassName}
           onMeasured={handleOpeningMeasured}
-          onLanded={handleOpeningLanded}
+          onListLanded={handleOpeningListLanded}
+          onSettled={handleOpeningSettled}
         >
           {openingRows.map((message) => {
             const host = openingHosts.get(message.id);
@@ -1160,7 +1191,7 @@ export const MessageTimeline = memo(function MessageTimeline({
             // the tail shows the header when it shows every row.
             header: opening
               ? openingComplete
-                ? <div style={{ height: openingMeasure?.headerHeight ?? 0 }} />
+                ? <div style={{ height: openingMeasure?.listKey === timelineListKey ? openingMeasure.headerHeight : 0 }} />
                 : <div className="invisible">{timelineHeader}</div>
               : timelineHeader,
             // This footer belongs to Virtuoso's measured content. Its class
@@ -1170,13 +1201,14 @@ export const MessageTimeline = memo(function MessageTimeline({
               <div ref={messagesEndRef} className={timelineFooterClassName} />
             ),
           }}
-          // A blank of the row's measured height until the list has landed;
-          // then the rows the tail drew move in, and the rest render here.
+          // A blank of the row's measured height until the list has landed.
+          // Then the rows the tail does not hold render here, and when their
+          // heights have settled the ones it drew move in.
           itemContent={(index, message) => {
-            if (opening) {
-              return <div style={{ height: openingMeasure?.rowHeights.get(message.id) ?? openingFallbackRowHeight }} />;
-            }
             const host = openingHosts.get(message.id);
+            if (opening && (host || !settling)) {
+              return <div style={{ height: openingRowHeights.get(message.id) ?? openingFallbackRowHeight }} />;
+            }
             return host ? <TimelineRowSlot host={host} /> : renderTimelineRow(index, message);
           }}
         />
@@ -1248,6 +1280,19 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
 
 
 
+/* A send the server answers at once never shows this: a mark that appears and
+   is gone within the same quarter second reads as a flicker, so it waits
+   (.app-message-sending) and only a send that is really taking a while says so. */
+function MessageSendingMark({ label = false }: { label?: boolean }) {
+  return (
+    <span role="status" aria-label="Sending"
+      className="app-message-sending inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+      <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+      {label && "Sending"}
+    </span>
+  );
+}
+
 export function timelineBelongsToChannel(timeline: TimelineItem[], channelId: string): boolean {
   return timeline.every((message) => message.channelId === undefined || message.channelId === channelId);
 }
@@ -1273,6 +1318,14 @@ function rememberOpeningScreenRows(listKey: string, screenRows: number): void {
   }
   openingScreenRows.set(listKey, screenRows + OPENING_SCREEN_ROWS_SPARE);
 }
+
+/** What the opening tail measured for one mount of the list. */
+interface OpeningRowMeasure {
+  listKey: string;
+  rowHeights: ReadonlyMap<string, number>;
+  headerHeight: number;
+}
+const NO_ROW_HEIGHTS: ReadonlyMap<string, number> = new Map();
 
 const EMPTY_FOLDS: ReadonlySet<string> = new Set();
 /* Rows are memoized on identity: a fresh `[]` per render would re-render every
@@ -2026,8 +2079,13 @@ export const MessageRow = memo(function MessageRow({
         // The hidden time is one body line tall and never wraps: wrapped, it
         // stood two lines high and spread one-line messages apart (user 2026-10-06).
         <div className="app-message-continuation-gutter mt-0.5 flex h-5 w-(--app-message-avatar-size) shrink-0 items-center justify-end self-start">
+          {message.sendStatus === "pending" ? (
+            // The row has no header to say it is still on its way.
+            <MessageSendingMark />
+          ) : (
           <MessageTimestamp value={message.sentAt} clock
             className="invisible whitespace-nowrap text-[10px] text-muted-foreground group-hover:visible" />
+          )}
         </div>
       ) : (
       <div
@@ -2150,7 +2208,9 @@ export const MessageRow = memo(function MessageRow({
       <div className="min-w-0 flex-1">
         <MessageHead className={cn(
           "app-message-head flex min-w-0 items-start gap-2",
-          message.continuation && "hidden items-center gap-0.5 p-0.5 md:flex",
+          // As tall as the hover actions a sent message has beside its name,
+          // so a row does not grow when the server confirms it.
+          message.continuation ? "hidden items-center gap-0.5 p-0.5 md:flex" : "md:min-h-7",
         )} {...(message.continuation ? { pinned: reactionPickerOpen } : {})}>
           {/* Sender, then the time, then every tag. The time is a property of the
               message itself, so it stays next to the author instead of being
@@ -2162,12 +2222,7 @@ export const MessageRow = memo(function MessageRow({
           <div className="app-message-meta flex min-h-6 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="app-message-author-name shrink-0 whitespace-nowrap text-[15px] font-black">{message.author}</span>
           <MessageTimestamp value={message.sentAt} className="shrink-0 text-xs text-muted-foreground" />
-          {message.sendStatus === "pending" && (
-            <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-              <Loader2 className="size-3 animate-spin" />
-              Sending
-            </span>
-          )}
+          {message.sendStatus === "pending" && <MessageSendingMark label />}
           {message.sendStatus === "unconfirmed" && (
             // Neither a spinner nor an error: the send passed its deadline and
             // the result is genuinely unknown. No spinner, because nothing is

@@ -7244,6 +7244,14 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-invocation-close { flex-shrink: 0; }
 .app-invocation-spinner { animation: invocation-spin 1.4s linear infinite; }
 @keyframes invocation-spin { to { transform: rotate(360deg); } }
+
+/* "Sending" on a message the server has not confirmed yet. Most sends are
+   confirmed within a few hundred milliseconds; the mark waits that long, so it
+   only appears on a send that is actually taking a while. */
+.xmatrix-app .app-message-sending {
+  animation: app-message-sending-in 160ms ease-out 700ms backwards;
+}
+@keyframes app-message-sending-in { from { opacity: 0; } }
 .app-invocation-positioner { z-index: 80; }
 .app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; color: var(--foreground); font-size: 13px; line-height: 1.5; }
 .app-invocation-heading { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
