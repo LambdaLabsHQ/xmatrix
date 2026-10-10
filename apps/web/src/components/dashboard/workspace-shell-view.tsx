@@ -608,8 +608,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       : spaces.find((space) => space.id === spaceId)?.pendingJoinRequestCount ?? 0;
     return total + count;
   }, 0);
-  // Status pulses while any conversation in this Space has an Agent at work,
-  // the same "in progress" the conversation list shows.
+  // Status pulses while any conversation in this Space has an Agent at work.
   const statusLive = useMemo(
     () => channelsInSpace(channels, currentSpaceId).some((channel) => channelHasWorkInHand(channel, events)),
     [channels, currentSpaceId, events],
