@@ -2359,6 +2359,7 @@ export const MessageRow = memo(function MessageRow({
             ) : secretRequest ? (
               <SecretRequestCardView
                 request={secretRequest}
+                messageId={message.messageId}
                 token={token}
                 userId={currentUserIdentityId.replace(/^user:/, "")}
               />

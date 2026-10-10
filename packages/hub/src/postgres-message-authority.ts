@@ -768,10 +768,12 @@ export async function postgresMessageAcknowledge(
     ...(sequence === undefined ? {} : { sequence }),
     ...(messageId === undefined ? {} : { messageId }),
     ...(input.responded === true ? { responded: true } : {}),
+    ...(typeof input.respondedMessageId === "string" ? { respondedMessageId: input.respondedMessageId } : {}),
   }));
   return messages.acknowledge({
     requestId, commandId, requestDigest, spaceId, channelId, principal: actor, sequence, messageId,
     ...(input.responded === true ? { responded: true } : {}),
+    ...(typeof input.respondedMessageId === "string" ? { respondedMessageId: input.respondedMessageId } : {}),
   });
 }
 
