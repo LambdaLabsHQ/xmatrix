@@ -56,7 +56,8 @@ const secretCard = card(2, {
 });
 
 const accessCard = card(3, {
-  secretAccessRequest: { secretRefs: ["deploy-token"], reason: "Deploys run every hour", agentName: "claude",
+  secretAccessRequest: { secretRefs: ["deploy-token", "CONNECTOR_SENTRY_E2E_WEBHOOK_SIGNING_SECRET"],
+    reason: "Deploys run every hour", agentName: "claude",
     runId: "run-1", channelId: E2E_CHANNEL.id },
 });
 
@@ -65,9 +66,10 @@ const VALUE_ASKED = {
   status: { saved: false, readable: false, canApprove: true } as unknown,
   fulfilled: { saved: true, readable: true, canApprove: true } as unknown,
 };
+const ACCESS_REFS = accessCard.metadata.secretAccessRequest.secretRefs;
 const ACCESS_ASKED = {
-  status: { canApprove: true, secrets: [{ secretRef: "deploy-token", access: "ask", envName: "DEPLOY_TOKEN" }] },
-  fulfilled: { canApprove: true, secrets: [{ secretRef: "deploy-token", access: "auto", envName: "DEPLOY_TOKEN" }] },
+  status: { canApprove: true, secrets: ACCESS_REFS.map((secretRef) => ({ secretRef, access: "ask" })) },
+  fulfilled: { canApprove: true, secrets: ACCESS_REFS.map((secretRef) => ({ secretRef, access: "auto" })) },
 };
 
 /** Opens the Channel on these cards; `pending` is what the Hub lists for the dock. */
@@ -177,18 +179,32 @@ test("a secret card takes the value on the paper, then leads to the Space's secr
 test("a card asking that secrets be read without asking is answered once, for the ticked ones", async ({ page }) => {
   await openCards(page, [accessCard], [], ACCESS_ASKED);
   const approval = page.locator('[data-ask-card="open"]');
-  await expect(approval.getByRole("heading", { name: "Let Agents read deploy-token without asking?" })).toBeVisible();
+  await expect(approval.getByRole("heading", { name: "Let Agents read these 2 secrets without asking?" })).toBeVisible();
   await expect(approval.getByText("claude asks · Secret access")).toBeVisible();
   await expectColourBlock(approval);
-  await expect(approval.getByLabel("Read deploy-token without asking")).toBeChecked();
+  // While it waits, each name is whole, however long, beside its own tick.
+  for (const ref of ACCESS_REFS) await expect(approval.getByLabel(`Read ${ref} without asking`)).toBeChecked();
+  // A tick is the card's ink, not the browser's blue.
+  expect(await approval.getByRole("checkbox").first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return style.accentColor === style.color;
+  })).toBe(true);
+  const longName = approval.getByText(ACCESS_REFS[1], { exact: true });
+  expect(await longName.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await approval.getByLabel(`Read ${ACCESS_REFS[1]} without asking`).uncheck();
 
   await approval.getByRole("button", { name: "Let Agents read it without asking" }).click();
   const settled = page.locator('[data-ask-card="settled"]');
-  await expect(settled.getByText("Automatic", { exact: true }).first()).toBeVisible();
+  await expect(settled.getByText("Automatic", { exact: true })).toBeVisible();
   await expect(settled.getByRole("button", { name: "Manage" })).toBeVisible();
   expect(await fixtureRequestBodies(page, "cards-fulfill")).toEqual([
     { runId: "run-1", channelId: E2E_CHANNEL.id, secretRefs: ["deploy-token"], messageId: accessCard.messageId },
   ]);
+  // Answered, the names fold to one line and open again on request.
+  await expect(settled.getByRole("checkbox")).toHaveCount(0);
+  await expect(settled.getByText(ACCESS_REFS[1], { exact: true })).toBeHidden();
+  await settled.getByText("2 secrets", { exact: true }).click();
+  await expect(settled.getByText(ACCESS_REFS[1], { exact: true })).toBeVisible();
 });
 
 test("the Pending approvals dock is one block of colour, its asks unframed inside it, and folds to a line each", async ({ page }) => {

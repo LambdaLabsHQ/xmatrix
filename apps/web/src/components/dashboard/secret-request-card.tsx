@@ -225,7 +225,9 @@ function accessStatus(payload: Record<string, unknown>): SecretAccessStatus {
 /**
  * A card an Agent posts asking that secrets be read without asking each time.
  * A Space admin ticks the ones to open up and answers once; the Agent changes
- * nothing itself and sees no value.
+ * nothing itself and sees no value. While it waits, every name shows in full
+ * with its tick; one secret is named by the question alone. Once answered the
+ * names fold to a line, so a long list does not stay spread over the stream.
  */
 export function SecretAccessRequestCardView({ request, messageId, token, userId }: {
   request: SecretAccessRequestCard;
@@ -288,16 +290,23 @@ export function SecretAccessRequestCardView({ request, messageId, token, userId 
       canApprove={status && canApprove}
       query={statusQuery}
       error={error}
-      list={status && (
+      list={status && !lone && (done ? (
+        <details className="mt-2 text-[13px]">
+          <summary className="cursor-pointer text-muted-foreground">{request.secretRefs.length} secrets</summary>
+          <ul className="mt-1 space-y-0.5 font-mono [overflow-wrap:anywhere]">
+            {request.secretRefs.map((ref) => <li key={ref}>{ref}</li>)}
+          </ul>
+        </details>
+      ) : (
         <ul className="mt-2 space-y-1">
           {request.secretRefs.map((ref) => {
             const held = status.access.get(ref);
             return (
               <li key={ref}>
-                <label className="flex min-w-0 items-center gap-2 text-[13px]">
+                <label className="flex min-w-0 items-start gap-2 text-[13px]">
                   <input
                     type="checkbox"
-                    className="size-3.5 shrink-0"
+                    className="mt-0.5 size-3.5 shrink-0"
                     checked={held?.automatic === true || (held !== undefined && !declined.has(ref))}
                     disabled={busy || !canApprove || held?.automatic !== false}
                     onChange={(event) => setDeclined((current) => {
@@ -307,16 +316,18 @@ export function SecretAccessRequestCardView({ request, messageId, token, userId 
                     })}
                     aria-label={`Read ${ref} without asking`}
                   />
-                  <span className="min-w-0 truncate font-mono text-foreground">{ref}</span>
-                  <span className="shrink-0 text-muted-foreground">
-                    {!held ? "Not saved in this Space" : held.automatic ? "Automatic" : held.envName}
-                  </span>
+                  <span className="min-w-0 font-mono text-foreground [overflow-wrap:anywhere]">{ref}</span>
+                  {held?.automatic !== false && (
+                    <span className="shrink-0 text-muted-foreground">
+                      {held ? "Already automatic" : "Not saved in this Space"}
+                    </span>
+                  )}
                 </label>
               </li>
             );
           })}
         </ul>
-      )}
+      ))}
     >
       <div className="mt-3 space-y-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
