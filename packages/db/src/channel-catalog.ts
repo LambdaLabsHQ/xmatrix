@@ -11,6 +11,7 @@ import {
   type ChannelCatalogPageView, utf8ByteLength } from "@xmatrix/protocol";
 import { DatabaseContractError } from "./errors.js";
 import { messagePreviewColumnsSql, readMessagePreview, type MessagePreview } from "./message-preview.js";
+import { declaredWaitStandsSql } from "./message-attention-wait.js";
 import { PostgresSpacePlacementDirectory } from "./placement.js";
 import { channelPresentation, channelIdentity, type ChannelPresentationRow } from "./channel-metadata.js";
 
@@ -404,7 +405,7 @@ function catalogIndexCtes(filter: ChannelCatalogPageFilter): string {
       SELECT 1 FROM data.message_attention attention
       WHERE attention.space_id=channel.space_id AND attention.channel_id=channel.channel_id
         AND attention.subject_id=input.principal_kind||':'||input.principal_id
-        AND (attention.awaiting_response OR attention.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
+        AND (${declaredWaitStandsSql("attention")} OR attention.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
     ) THEN 1 ELSE 0 END`;
   return `, pins AS MATERIALIZED (
     SELECT pin_value.channel_id,pin_value.ordinality::int AS pin_rank
@@ -533,7 +534,7 @@ export class PostgresChannelCatalogRepository {
           AND channel_id>(SELECT cursor_channel_id FROM catalog_input))
       )` : "";
       const envelopes = input.countsOnly ? [] : await transaction.query<CatalogPageEnvelope>({
-        name: `channel_catalog_page_${input.view}_${input.filter}_v12`,
+        name: `channel_catalog_page_${input.view}_${input.filter}_v13`,
         text: `WITH RECURSIVE catalog_input AS (
           SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
             $4::text AS search_query,
@@ -596,7 +597,7 @@ export class PostgresChannelCatalogRepository {
             FROM data.message_attention item
             WHERE item.space_id=channel.space_id AND item.channel_id=channel.channel_id
               AND item.subject_id=input.principal_kind||':'||input.principal_id
-              AND (item.awaiting_response OR item.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
+              AND (${declaredWaitStandsSql("item")} OR item.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
           ) attention ON TRUE
           ${WAITING_MESSAGE_JOIN}
         )
@@ -617,7 +618,7 @@ export class PostgresChannelCatalogRepository {
       }
       const statsRows = input.countsOnly || input.includeCounts !== false
         ? await transaction.query<StatsRow>({
-        name: "channel_catalog_counts_v8",
+        name: "channel_catalog_counts_v9",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind
           ), ${PRINCIPAL_CONTEXT_CTE}, ${AUTHORIZED_CHANNELS_CTE}, facts AS (
@@ -627,7 +628,7 @@ export class PostgresChannelCatalogRepository {
                 WHERE attention.space_id=channel.space_id
                   AND attention.channel_id=channel.channel_id
                   AND attention.subject_id=input.principal_kind||':'||input.principal_id
-                  AND (attention.awaiting_response OR attention.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)))
+                  AND (${declaredWaitStandsSql("attention")} OR attention.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)))
                 AS has_attention
             FROM authorized_channels channel CROSS JOIN catalog_input input
             LEFT JOIN data.delivery_cursors cursor_row
@@ -694,7 +695,7 @@ export class PostgresChannelCatalogRepository {
     return this.withPlacedTransaction(
       requestId, "channel-catalog.resolve", spaceId, async (transaction) => {
       const envelopes = await transaction.query<CatalogResolveEnvelope>({
-        name: "channel_catalog_resolve_v14",
+        name: "channel_catalog_resolve_v15",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
               $4::text[] AS requested_channel_ids,$5::text[] AS route_range_lowers,
@@ -769,7 +770,7 @@ export class PostgresChannelCatalogRepository {
               FROM data.message_attention item
               WHERE item.space_id=channel.space_id AND item.channel_id=channel.channel_id
                 AND item.subject_id=input.principal_kind||':'||input.principal_id
-                AND (item.awaiting_response OR item.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
+                AND (${declaredWaitStandsSql("item")} OR item.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
             ) attention ON TRUE
             ${WAITING_MESSAGE_JOIN}
           )

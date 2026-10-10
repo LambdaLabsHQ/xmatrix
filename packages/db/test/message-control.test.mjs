@@ -607,7 +607,7 @@ test("Message live delivery carries the mentioned Human's unread attention summa
         ? [{ user_id: "user-1", recipient_count: "2" }, { user_id: "user-2", recipient_count: "2" }]
         : query.name === "message_live_routing_attention_v1"
           ? [{ subject_id: "user:user-2", kind: "mention" }]
-          : query.name === "message_live_routing_attention_summary_v2"
+          : query.name === "message_live_routing_attention_summary_v3"
             ? [{ subject_id: "user:user-2", unread_count: "2", message_id: "message-1", kind: "mention",
               timeline_sequence: "9", created_at: new Date("2026-09-26T00:00:00.000Z"), kinds: ["mention", "reply"] }]
             : []
@@ -619,7 +619,7 @@ test("Message live delivery carries the mentioned Human's unread attention summa
     attention: { channelId: "channel-1", unreadAttentionCount: 2, lastAttentionAt: "2026-09-26T00:00:00.000Z",
       lastMessageId: "message-1", lastMessageSequence: 9, primaryTriggerKind: "mention",
       triggerKinds: ["mention", "reply"], updatedAt: "2026-09-26T00:00:00.000Z" } } }]);
-  const summary = db.calls.find((call) => call.name === "message_live_routing_attention_summary_v2");
+  const summary = db.calls.find((call) => call.name === "message_live_routing_attention_summary_v3");
   assert.deepEqual(summary.values[2], ["user:user-2"]);
   assert.match(summary.text, /delivery_cursors/u);
 });
