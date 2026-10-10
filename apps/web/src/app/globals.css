@@ -5327,11 +5327,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   }
 
   .xmatrix-app.xmatrix-app-shell {
-    --mobile-horizontal-padding: clamp(0.875rem, 3.6vw, 1.125rem);
-    /* The phone's content line, 16px from the screen's edges as in the
-       system's own lists: the signs' wood, the bar's glyphs and every list
-       row's content start and end on it. */
-    --mobile-content-inset: 1rem;
+    /* The phone's one gutter, 16px from the screen's edges as in the system's
+       own lists. What floats (the signs' wood, the dock, the +, the composer)
+       and what a row starts and ends with (its mark, its time, a face in a
+       conversation) all keep to it. */
+    --mobile-horizontal-padding: 1rem;
+    --mobile-content-inset: var(--mobile-horizontal-padding);
     --mobile-topbar-safe-top: env(safe-area-inset-top, 0px);
     --mobile-bottom-safe: env(safe-area-inset-bottom, 0px);
     --mobile-dock-float-offset: 1.25rem;
@@ -6305,6 +6306,13 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     z-index: 2 !important;
   }
 
+  /* The bar's last glyph ends on the gutter, as a list bar's search glyph
+     does: its 1.25rem mark sits centred in a 2.5rem button and is drawn a
+     sixth of its box in from each side. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-detail-bar .app-mobile-channel-more-button {
+    margin-right: calc((1.25rem - 2.5rem) / 2 - 1.25rem / 6);
+  }
+
   .xmatrix-app.xmatrix-app-shell .app-mobile-channel-detail-bar > .app-mobile-topbar-back:active,
   .xmatrix-app.xmatrix-app-shell .app-mobile-channel-detail-bar .app-mobile-share-button:active,
   .xmatrix-app.xmatrix-app-shell .app-mobile-channel-detail-bar .app-mobile-channel-more-button:active {
@@ -6614,7 +6622,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-send-ready {
     inset-inline: 0 !important;
     bottom: calc(0.875rem + env(safe-area-inset-bottom, 0px)) !important;
     z-index: 20 !important;
-    padding: 0 max(0.625rem, env(safe-area-inset-left, 0px)) 0 max(0.625rem, env(safe-area-inset-right, 0px)) !important;
+    padding: 0 max(var(--mobile-horizontal-padding), env(safe-area-inset-left, 0px)) 0 max(var(--mobile-horizontal-padding), env(safe-area-inset-right, 0px)) !important;
     background: transparent !important;
     transform: translate3d(0, 0, 0);
     -webkit-transform: translate3d(0, 0, 0);
@@ -7909,6 +7917,16 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row-preview-line {
   height: 18px;
+}
+
+/* A row is one column of text: the line under a title starts where the title
+   does, after the # and its gap, or after a page's icon and its gap. */
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row .app-channel-row-preview-line {
+  padding-left: 15px;
+}
+
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) :is(.app-recent-change, .app-page-row) .app-list-row-meta {
+  padding-left: 24px;
 }
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row span.app-channel-row-hash {
