@@ -1,5 +1,8 @@
 import { appCommand, findAppConnection } from "./apps";
-import { githubConnectionInstallationFor, type GitHubCommitCheckVerdict } from "./app-connectors";
+import { ChannelActivityInvalid, normalizeChannelActivity } from "@xmatrix/protocol";
+import {
+  githubConnectionInstallationFor, readGitHubPullRequestOpen, type GitHubCommitCheckVerdict,
+} from "./app-connectors";
 import { record, text, type GitHubRepositoryFeature } from "./github-subscription-domain";
 import type { Env } from "./types";
 
@@ -126,7 +129,38 @@ export function githubPullRequestEventMessage(input: {
 export interface PullRequestSubscriptionDependencies {
   findConnection: typeof findAppConnection;
   installationFor: typeof githubConnectionInstallationFor;
+  pullRequestOpen: typeof readGitHubPullRequestOpen;
   command: typeof appCommand;
+}
+
+interface PullRequestSubscriber {
+  spaceId: string; channelId: string; ownerUserId: string; commandId: string;
+}
+
+/** The Space's GitHub connection, when it reaches the repository. */
+async function connectionReaching(env: Env, input: PullRequestSubscriber, owner: string, repo: string,
+  dependencies: Partial<PullRequestSubscriptionDependencies>) {
+  if (!owner || !repo) return undefined;
+  const connection = await (dependencies.findConnection ?? findAppConnection)(env, { spaceId: input.spaceId,
+    providerId: "github", actorUserId: input.ownerUserId });
+  if (!connection || connection.status !== "configured") return undefined;
+  try {
+    await (dependencies.installationFor ?? githubConnectionInstallationFor)(env, connection, owner, repo);
+  } catch {
+    return undefined;
+  }
+  return connection;
+}
+
+async function subscribe(env: Env, input: PullRequestSubscriber, connectionId: string, repository: string,
+  number: number, dependencies: Partial<PullRequestSubscriptionDependencies>): Promise<void> {
+  await (dependencies.command ?? appCommand)(env, "put-relation", {
+    commandId: `product:github-pull-request:${input.commandId}`.slice(0, 200),
+    connectionId, channelId: input.channelId, sourceKind: "issue",
+    sourceRef: githubIssueSourceRef(repository, number),
+    features: PULL_REQUEST_SUBSCRIPTION_FEATURES,
+    principal: { kind: "user", id: input.ownerUserId },
+  });
 }
 
 /**
@@ -134,28 +168,36 @@ export interface PullRequestSubscriptionDependencies {
  * Run's owner. Only a pull request the Space's GitHub connection reaches can
  * be subscribed; any other is left alone.
  */
-export async function subscribeConversationToPullRequest(env: Env, input: {
-  spaceId: string; channelId: string; ownerUserId: string; repository: string; number: number; commandId: string;
-}, dependencies: Partial<PullRequestSubscriptionDependencies> = {}): Promise<boolean> {
-  const findConnection = dependencies.findConnection ?? findAppConnection;
-  const installationFor = dependencies.installationFor ?? githubConnectionInstallationFor;
-  const command = dependencies.command ?? appCommand;
-  const [owner, repo] = input.repository.split("/");
-  if (!owner || !repo) return false;
-  const connection = await findConnection(env, { spaceId: input.spaceId, providerId: "github",
-    actorUserId: input.ownerUserId });
-  if (!connection || connection.status !== "configured") return false;
-  try {
-    await installationFor(env, connection, owner, repo);
-  } catch {
-    return false;
-  }
-  await command(env, "put-relation", {
-    commandId: `product:github-pull-request:${input.commandId}`.slice(0, 200),
-    connectionId: connection.id, channelId: input.channelId, sourceKind: "issue",
-    sourceRef: githubIssueSourceRef(input.repository, input.number),
-    features: PULL_REQUEST_SUBSCRIPTION_FEATURES,
-    principal: { kind: "user", id: input.ownerUserId },
-  });
+export async function subscribeConversationToPullRequest(env: Env,
+  input: PullRequestSubscriber & { repository: string; number: number },
+  dependencies: Partial<PullRequestSubscriptionDependencies> = {}): Promise<boolean> {
+  const [owner = "", repo = ""] = input.repository.split("/");
+  const connection = await connectionReaching(env, input, owner, repo, dependencies);
+  if (!connection) return false;
+  await subscribe(env, input, connection.id, input.repository, input.number, dependencies);
   return true;
+}
+
+/**
+ * `xmatrix channel subscribe`: an Agent subscribes a conversation to a pull
+ * request itself, as its owner, and is told whether it is subscribed now.
+ * Asking again subscribes again, which is how a pull request that was closed
+ * and reopened gets its subscription back. A closed pull request reports
+ * nothing more and would never be unsubscribed, so it is refused.
+ */
+export async function subscribeRunToPullRequest(env: Env, input: PullRequestSubscriber & { url: unknown },
+  dependencies: Partial<PullRequestSubscriptionDependencies> = {}): Promise<{
+    repository: string; number: number; subscription: "subscribed" | "closed" | "unreachable";
+  }> {
+  const pull = normalizeChannelActivity({ kind: "pull_request", url: input.url });
+  if (pull.kind !== "pull_request") throw new ChannelActivityInvalid("kind");
+  const { repository, number } = pull;
+  const [owner = "", repo = ""] = repository.split("/");
+  const connection = await connectionReaching(env, input, owner, repo, dependencies);
+  const open = connection && await (dependencies.pullRequestOpen ?? readGitHubPullRequestOpen)(
+    env, connection, { owner, repo }, number).catch(() => undefined);
+  if (!connection || open === undefined) return { repository, number, subscription: "unreachable" };
+  if (!open) return { repository, number, subscription: "closed" };
+  await subscribe(env, input, connection.id, repository, number, dependencies);
+  return { repository, number, subscription: "subscribed" };
 }

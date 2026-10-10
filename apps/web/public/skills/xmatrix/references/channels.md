@@ -50,6 +50,18 @@ turn; reply to one with `xmatrix send <channel-id> --reply-to <message-id>`. Edi
 `--permanent` a delete leaves a recalled placeholder. `channel react` toggles
 your reaction on any message in a channel you can act in.
 
+## Pull requests
+
+```sh
+xmatrix channel subscribe <channel-id> https://github.com/<owner>/<repo>/pull/<n>
+```
+
+Subscribes the conversation to a pull request in a repository the Space's
+GitHub connection reaches: its CI verdict, reviews, comments and merge then
+arrive there as messages. A pull request an Agent Run opens with `gh pr create`
+is usually subscribed already; the command answers whether it is, so an Agent
+runs it before it stops watching a pull request. Repeating it is harmless.
+
 ## Cross-Space transfers
 
 `xmatrix channel move <channel-id> --space <target-space-id>` creates a proposal;

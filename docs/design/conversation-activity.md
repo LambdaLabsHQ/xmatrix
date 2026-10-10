@@ -138,6 +138,20 @@ CI never started, and a Run that slept or was restarted lost the watch
 without knowing. Only Claude Code can start a turn by itself when a
 background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 
+- **Report.** GitHub cannot say which Run opened a pull request (every Run
+  acts as its owner's one account), so the Run reports it. Its runtime sees
+  `gh pr create` in the commands Claude Code and Codex run and reports the
+  pull request it printed. That is the only place that sees what the harness
+  ran whatever its shell and PATH are: a login shell reorders PATH, so a
+  `gh` entrypoint placed in front of the real one is bypassed.
+- **An Agent subscribes itself.** `xmatrix channel subscribe <channel>
+  <pull-request-url>` (`POST /api/channels/:channelId/pull-requests`)
+  subscribes the conversation as the Run's owner and answers `subscribed`,
+  `closed` (a closed pull request reports nothing more and would never be
+  unsubscribed) or `unreachable`. Agents run it before they stop watching a
+  pull request, so a report the runtime missed, a pull request opened another
+  way (`gh api`, a connector tool, the website) and one that was closed and
+  reopened are all subscribed, and the Agent knows it.
 - **Subscription.** When the Hub records a `pull_request` entry it subscribes
   the conversation to that pull request, as the Run's owner, through the
   Space's GitHub connection: an ordinary source relation of kind `issue`,

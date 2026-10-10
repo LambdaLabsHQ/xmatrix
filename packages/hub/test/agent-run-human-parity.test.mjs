@@ -15,6 +15,7 @@ test("an Agent Run reaches the Human collaboration routes by default", () => {
   assert.equal(allowed("PATCH", "/api/channels/channel-2/messages/message-1"), true, "edit its message");
   assert.equal(allowed("DELETE", "/api/channels/channel-2/messages/message-1"), true, "delete its message");
   assert.equal(allowed("POST", "/api/channels/channel-2/messages/message-1/reactions"), true, "react to a message");
+  assert.equal(allowed("POST", "/api/channels/channel-2/pull-requests"), true, "report a pull request it opened");
   assert.equal(allowed("GET", "/api/spaces/space-2/launch-targets"), true, "read the launch catalog");
   assert.equal(allowed("GET", "/api/spaces/space-1/agent-registrations"), true, "read its Space's Agents");
   assert.equal(allowed("POST", "/api/spaces/space-1/agent-registrations/commands"), true, "add an Agent for its owner");
