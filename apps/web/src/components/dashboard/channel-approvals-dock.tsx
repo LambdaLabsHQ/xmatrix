@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ListSectionHeading } from "./list-section-heading";
 
 export type ChannelApprovalSummary = { key: string; agent: string; what: string };
 
@@ -24,30 +25,28 @@ export function ChannelApprovalsDock({ summaries, status, children }: {
 
   return (
     <section aria-label="Pending approvals" className={cn(
-      "app-channel-approvals pointer-events-auto overflow-y-auto overscroll-contain rounded-md bg-background p-2 shadow-md",
+      // The heading is a list's; here its rows start at the sheet's own edge.
+      "app-channel-approvals pointer-events-auto overflow-y-auto overscroll-contain px-3 py-2.5",
+      "[--app-list-row-end:0px] [--app-list-row-start:0px]",
       collapsed ? "max-h-[30dvh]" : "max-h-[40dvh]",
     )}>
-      <h2 className="text-xs font-bold">
-        <button
-          type="button"
-          aria-expanded={!collapsed}
-          onClick={() => setCollapsedKeys(collapsed ? null : new Set(summaries.map((summary) => summary.key)))}
-          className="flex w-full items-center gap-1.5 text-left"
-        >
-          <span className="flex-1">
-            Pending approvals{summaries.length > 0 ? ` · ${summaries.length}` : ""}
-          </span>
-          <span className="text-[11px] font-semibold text-muted-foreground">{collapsed ? "Show" : "Hide"}</span>
-          <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !collapsed && "rotate-180")} />
-        </button>
-      </h2>
+      <ListSectionHeading
+        label="Pending approvals"
+        count={summaries.length > 0 ? summaries.length : undefined}
+        mark={{ icon: Bell, tone: "attention" }}
+        action={{
+          label: collapsed ? "Show" : "Hide",
+          expanded: !collapsed,
+          onClick: () => setCollapsedKeys(collapsed ? null : new Set(summaries.map((summary) => summary.key))),
+        }}
+      />
       {status}
       {collapsed ? (
-        <ul className="app-channel-approvals-summary mt-1 space-y-0.5 text-xs">
+        <ul className="app-channel-approvals-summary mt-1.5 space-y-0.5 text-xs">
           {summaries.map((summary) => (
             <li key={summary.key} className="flex min-w-0 gap-1.5">
               <span className="shrink-0 font-semibold">{summary.agent}</span>
-              <span className="min-w-0 truncate font-mono text-muted-foreground">{summary.what}</span>
+              <span className="min-w-0 truncate text-muted-foreground">{summary.what}</span>
             </li>
           ))}
         </ul>

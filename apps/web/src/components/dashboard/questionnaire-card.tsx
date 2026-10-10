@@ -191,7 +191,7 @@ export function QuestionnaireMessage({
   const lone = questionnaire.questions.length === 1 ? questionnaire.questions[0] : undefined;
   const title = [`${questionnaire.harness ?? "Agent"} asks`, lone?.header].filter(Boolean).join(" · ");
   return (
-    <div className="mt-1 max-w-2xl" data-questionnaire-card={answers ? "answered" : "open"}>
+    <div className="app-paper-card mt-1 max-w-2xl" data-questionnaire-card={answers ? "answered" : "open"}>
       <ToolDetailSection
         title={title}
         action={answers ? (
