@@ -807,10 +807,17 @@ export function MobileSpacePlank({
                   {selected
                     ? <Building className="app-mobile-space-glyph shrink-0" aria-hidden="true" />
                     : <span className="app-mobile-space-glyph shrink-0" aria-hidden="true" />}
-                  <span className="min-w-0 flex-1">
-                    <span className="app-mobile-bar-title block truncate">{space.name}</span>
-                    {!selected && <span className="app-mobile-space-plank-meta block truncate">{memberLabel}</span>}
-                  </span>
+                  {selected ? (
+                    <span className="flex min-w-0 flex-1 items-center gap-1">
+                      <span className="app-mobile-bar-title min-w-0 truncate">{space.name}</span>
+                      <ChevronDown className="app-mobile-space-trigger-caret shrink-0" aria-hidden="true" />
+                    </span>
+                  ) : (
+                    <span className="min-w-0 flex-1">
+                      <span className="app-mobile-bar-title block truncate">{space.name}</span>
+                      <span className="app-mobile-space-plank-meta block truncate">{memberLabel}</span>
+                    </span>
+                  )}
                 </button>
               );
             })}
