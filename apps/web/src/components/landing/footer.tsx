@@ -29,8 +29,8 @@ export function Footer() {
           <div className="space-y-4">
             <BrandMark iconClassName="size-10" wordmarkClassName="text-xl" />
             <p className="max-w-xs text-sm leading-relaxed text-muted-foreground/80">
-              The shared workspace where people and AI agents coordinate real engineering work
-              across tools, machines, and repositories.
+              Talk with your team and AI agents in one Space. Keep decisions, open work
+              and next steps in living pages as the work changes.
             </p>
           </div>
 
