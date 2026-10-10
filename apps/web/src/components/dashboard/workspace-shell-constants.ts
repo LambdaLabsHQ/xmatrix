@@ -67,6 +67,13 @@ export const TIMELINE_BOTTOM_STICK_MS = 1200;
 export const TIMELINE_VIRTUAL_VIEWPORT_PRELOAD_PX = 640;
 export const TIMELINE_VIRTUAL_MIN_OVERSCAN_ITEMS = 2;
 
+// A conversation opens on its latest rows before the virtual list takes over,
+// and they render before its first frame. It takes at least a history page of
+// them, and enough to fill the screen if every one were as short as a row gets;
+// a conversation opened before takes what filled its screen then.
+export const TIMELINE_OPENING_TAIL_ROWS = 12;
+export const TIMELINE_OPENING_ROW_MIN_PX = 44;
+
 // How many frames a message jump may spend placing its row before the intent
 // is released. A jump issued on the commit that merged a history page is
 // issued before the virtualizer has ingested that page, and its prepend

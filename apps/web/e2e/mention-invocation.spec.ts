@@ -40,6 +40,13 @@ const handoff = { ...reborn, kind: "handoff", sourceMention: "@Beta:2:handoff:@G
   activity: { ...reborn.activity, phase: "turn_running", startupSteps: [{ phase: "runtime_ready", at: E2E_NOW }] } };
 
 test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
+/* A chip is plain text until its conversation's launches have loaded, and the
+   message is on screen before they have; a reader taps it after. */
+async function openChip(chip: ReturnType<Page["locator"]>) {
+  await expect(chip).toHaveAttribute("aria-haspopup", "dialog");
+  await chip.click();
+}
+
 async function installInvocationFixture(page: Page, launches: unknown[], body = source, continuations: unknown[] = []) {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL, messageCount: 1, historyHeadSequence: 1 }] });
   await fixtureJson(page, "invocation-history", "**/api/xmatrix/channels/channel-general/history**", {
@@ -57,7 +64,7 @@ test("repository baseline remains in finished invocation details with UTC and un
     repositoryBaseline: baseline } };
   await installInvocationFixture(page, [record], codex.sourceMention);
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  await page.locator(".app-mention-invocation").click();
+  await openChip(page.locator(".app-mention-invocation"));
   const dialog = page.getByRole("dialog");
   await dialog.getByText("Details", { exact: true }).click();
   await expect(dialog).toContainText(`origin/main @ ${baseline.baseOid}`);
@@ -86,7 +93,7 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await expect(chips.nth(2).locator(".app-mention-chip-label")).toHaveText("@auto model:reviewer");
   await expect(chips.nth(0).locator(".app-mention-chip-label")).toHaveCSS("text-overflow", "clip");
   await expect(chips.nth(0).locator(".app-mention-chip-label")).toHaveCSS("white-space", "normal");
-  await chips.nth(2).click();
+  await openChip(chips.nth(2));
   await expect(page.getByRole("dialog")).toContainText("No new process was started");
   await expect(page.getByRole("dialog")).toContainText("Choose an absolute working directory");
   await page.keyboard.press("Escape");
@@ -123,7 +130,7 @@ test("each mention has independent live progress and a keyboard-accessible timel
     rejections: [rejection], executions: [initialExecution("running")],
   });
   await expect(chips.nth(0)).toContainText("Started", { timeout: 15000 });
-  await chips.nth(0).click();
+  await openChip(chips.nth(0));
   await expect(page.getByRole("dialog").getByRole("list", { name: "Invocation progress" }).locator("li", { hasText: "Runtime ready" })).toHaveAttribute("data-state", "done");
   await expect(page.getByRole("dialog").locator("li", { hasText: "Reasoning started" })).toHaveAttribute("data-state", "done");
   await page.screenshot({ path: "test-results/mention-invocation-working.png", fullPage: true });
@@ -146,7 +153,7 @@ test("each mention has independent live progress and a keyboard-accessible timel
   await expect(chips.nth(1)).toContainText("Started");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 360, height: 800 });
-  await chips.nth(0).click();
+  await openChip(chips.nth(0));
   const popup = page.getByRole("dialog");
   await expect(popup).toBeVisible();
   // The portal can be visible before Floating UI applies collision positioning
@@ -171,7 +178,7 @@ test("a started summon stays started whatever its Run does next", async ({ page 
   await expect(chip).toContainText("Started");
   await expect(chip).toHaveAttribute("data-tone", "success");
   await expect(chip.locator(".app-invocation-spinner")).toHaveCount(0);
-  await chip.click();
+  await openChip(chip);
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("button", { name: "Retry startup" })).toHaveCount(0);
   // Nothing about the reply or the Run's end: the summon's question is answered.
@@ -321,7 +328,7 @@ test("invalid workspace syntax remains on its own mention beside a valid call to
   await expect(chips.nth(1)).toContainText("Connecting");
   await expect(chips.nth(1)).not.toContainText("Starting");
   await expect(chips.nth(0)).toHaveAttribute("aria-label", /^@codex pwd:workspace:missing:/);
-  await chips.nth(0).click();
+  await openChip(chips.nth(0));
   await expect(page.getByRole("dialog")).toContainText("Use an absolute working directory");
   await expect(page.getByRole("dialog").getByRole("button", { name: "Retry startup" })).toHaveCount(0);
 });
@@ -359,7 +366,7 @@ test("a quoted workspace remains one complete invocation address", async ({ page
   const chip = page.locator(".app-mention-invocation");
   await expect(chip).toHaveCount(1);
   await expect(chip).toHaveAttribute("aria-label", `${address}: Connecting. Show invocation details`);
-  await chip.click();
+  await openChip(chip);
   await page.getByRole("dialog").getByText("Details", { exact: true }).click();
   await expect(page.getByRole("dialog").locator("code")).toContainText(address);
 });
@@ -390,7 +397,7 @@ test("typed startup failures explain their stage and clear after confirmed recov
   const chip = page.locator(".app-mention-invocation");
   await expect(chip).toContainText("Connecting");
   await expect(chip).not.toContainText("Starting");
-  await chip.click();
+  await openChip(chip);
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("Checking credentials: The runtime service is temporarily unavailable.");
   await expect(dialog).toContainText("Origin: Authority request");
@@ -427,7 +434,7 @@ test("inline recovery selects a saved reply and checks its receipt without rerun
   ] } }, { method: "POST", echoRequestId: true });
   await fixtureJson(page, "unexpected-task-post", "**/api/xmatrix/channels/channel-general/messages", {}, { method: "POST" });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  const chip = page.locator(".app-mention-invocation").first(); await chip.click();
+  const chip = page.locator(".app-mention-invocation").first(); await openChip(chip);
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Recover saved reply", exact: true }).click();
   await expect(dialog).toContainText("Choose the saved reply");
@@ -539,7 +546,7 @@ test("tagged preflight rejection shows candidate evidence without a fabricated l
   await expect(chip).toHaveCount(1);
   await expect(chip.locator('.app-mention-chip-label')).toHaveText(expression);
   await expect(chip).toContainText('Failed');
-  await chip.click();
+  await openChip(chip);
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Rejected before launch allocation');
   await expect(dialog).toContainText('No eligible environment matched this summon.');
@@ -594,7 +601,7 @@ test("the summon chip lists every checked environment, including Grok past the o
   await expect(chip.locator('[data-routing="true"]')).toHaveText(["machine:星豆号"]);
   await expect(chip.locator('[data-jev-arriving="true"]')).toHaveCount(0);
   await expect(chip).toHaveAttribute("aria-label", /xMatrix filled model:model-B, effort:high\. Routing filled machine:星豆号/);
-  await chip.click();
+  await openChip(chip);
   const dialog = page.getByRole("dialog");
   await expect(dialog.locator("li", { hasText: "Environment selected" })).toContainText("bobos · Codex · 星豆号 · 8% left · repo LambdaLabsHQ/xmatrix");
   await dialog.getByText("Details", { exact: true }).click();
@@ -674,7 +681,7 @@ for (const denied of [false, true]) test(`the panel ${denied ? 'says Jev decisio
     });
   }
   await page.goto('/app/personal-sspaceperso/channels/general-cchannelgen', { waitUntil: 'domcontentloaded' });
-  await page.locator('.app-mention-invocation').first().click();
+  await openChip(page.locator('.app-mention-invocation').first());
   const dialog = page.getByRole('dialog');
   if (denied) {
     await dialog.getByText('Details', { exact: true }).click();
@@ -719,7 +726,7 @@ test('a historical parameter failure shows its retained cause before raw records
     status: 'failed', invocationId: `auto:${messageId}:0`, reason: 'provider_error', code: 'jev_rate_limited',
   });
   await page.goto('/app/personal-sspaceperso/channels/general-cchannelgen', { waitUntil: 'domcontentloaded' });
-  await page.locator('.app-mention-invocation').first().click();
+  await openChip(page.locator('.app-mention-invocation').first());
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Cause: xMatrix\'s "workspace" answer selected an option that was not offered.');
   await expect(dialog).toContainText('Selected environment: claude · Claude Code · Legend Mac');
@@ -742,7 +749,7 @@ test("a started summon never claims no Agent was started", async ({ page }) => {
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const chip = page.locator(".app-mention-invocation");
   await expect(chip).toContainText("Started");
-  await chip.click();
+  await openChip(chip);
   const dialog = page.getByRole("dialog");
   await dialog.getByText("Details", { exact: true }).click();
   await expect(dialog).not.toContainText("No Agent was started");
@@ -779,7 +786,7 @@ test("a confirmed stop sits on the command instead of another message", async ({
   await expect(chip).toHaveAttribute("data-tone", "success");
   await expect(page.getByText("xMatrix is reading")).toHaveCount(0);
   await expect(page.getByText("Stop requested for")).toHaveCount(0);
-  await chip.click();
+  await openChip(chip);
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("The Workstation confirmed the process tree is terminated.");
   await expect(dialog).toContainText("build-box-1");
@@ -787,7 +794,7 @@ test("a confirmed stop sits on the command instead of another message", async ({
   await page.screenshot({ path: "test-results/mention-stop-confirmed-desktop.png" });
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 360, height: 800 });
-  await chip.click();
+  await openChip(chip);
   await expect(dialog).toBeVisible();
   await expect(async () => {
     const bounds = await dialog.boundingBox();
@@ -813,7 +820,7 @@ test("an accepted stop says Stopping until the Workstation confirms it", async (
   await expect(chip).toContainText("Stopping");
   await expect(chip.locator(".app-invocation-spinner")).toBeVisible();
   await expect(page.getByText("xMatrix is reading")).toHaveCount(0);
-  await chip.click();
+  await openChip(chip);
   await expect(page.getByRole("dialog")).toContainText("Waiting for the Workstation to confirm the process has terminated.");
 });
 
@@ -911,7 +918,7 @@ test("@auto shows the Agent and machine routing chose, and why, in one row", asy
       fit_1: { score: 0.97, probabilities: autoParameters.fit.scores.codex.probabilities },
       fit_2: { score: 0.77, probabilities: autoParameters.fit.scores.opencode.probabilities } } });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  await page.locator(".app-mention-invocation").first().click();
+  await openChip(page.locator(".app-mention-invocation").first());
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("region", { name: /Routing decision/ }).waitFor();
   const jev = dialog.getByRole("region", { name: /Routing decision/ });

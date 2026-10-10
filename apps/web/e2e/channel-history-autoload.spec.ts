@@ -90,7 +90,8 @@ test("a slow desktop history load shows animated progress and the channel messag
   expect(await skeletonLine.evaluate((element) => getComputedStyle(element).animationName)).not.toBe("none");
 
   await releaseFixture(page, SLOW_HISTORY_RULE);
-  await expect(page.getByText("The slow history request completed.")).toBeVisible();
+  // In the timeline: the conversation list shows the same text as its preview.
+  await expect(page.locator(".app-message-timeline").getByText("The slow history request completed.")).toBeVisible();
   await expect(loadingStatus).toHaveCount(0);
 });
 

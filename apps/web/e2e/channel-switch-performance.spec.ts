@@ -141,7 +141,7 @@ test("an uncached channel paints its fetched history from the open socket", asyn
   // remounts the row; locator actionability then retries a second press on the
   // new node, which is not a Human gesture.
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await expect(page.getByText(historyMessage.body)).toBeVisible();
+  await expect(page.locator(".app-message-timeline").getByText(historyMessage.body)).toBeVisible();
 
   expect(await fixtureRequests(page, PERFORMANCE_HISTORY_RULE)).toEqual([]);
   expect(targetSocketHistoryReads.count).toBe(1);
@@ -158,7 +158,7 @@ test("keyboard activation of an uncached channel keeps the socket history page",
   });
   await title.focus();
   await title.press("Enter");
-  await expect(page.getByText(historyMessage.body)).toBeVisible();
+  await expect(page.locator(".app-message-timeline").getByText(historyMessage.body)).toBeVisible();
   expect(await fixtureRequests(page, PERFORMANCE_HISTORY_RULE)).toEqual([]);
   expect(targetSocketHistoryReads.count).toBe(1);
 });
@@ -169,7 +169,7 @@ test.describe("touch channel switch", () => {
   test("a touch tap on an uncached channel keeps the socket history page", async ({ page }) => {
     const { targetSocketHistoryReads } = await openUncachedChannelWorkspace(page);
     await page.locator(`[data-channel-row-id="${targetChannel.id}"]`).tap();
-    await expect(page.getByText(historyMessage.body)).toBeVisible();
+    await expect(page.locator(".app-message-timeline").getByText(historyMessage.body)).toBeVisible();
     expect(await fixtureRequests(page, PERFORMANCE_HISTORY_RULE)).toEqual([]);
     expect(targetSocketHistoryReads.count).toBe(1);
   });
