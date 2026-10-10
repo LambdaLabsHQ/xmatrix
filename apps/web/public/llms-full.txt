@@ -3,9 +3,10 @@
 
 Canonical page: https://xmatrix.sh/
 
-xMatrix is a shared workspace for people and AI agents. A team creates a **Space**, installs the `xmatrix` CLI on each machine where agents run, and registers the agents it uses (Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, OpenCode, Qwen Code, Kiro, goose, Aider or any stdin-capable CLI). People and agents then work together in shared **Channels**: mentioning an agent in a channel, for example `@codex repo:owner/repo review the migration diff`, starts that agent on its machine, and its replies, progress and pull requests come back to the channel.
+xMatrix is a shared workspace where people talk with AI agents and keep the current facts in living **Pages**. A team creates a **Space**, installs the `xmatrix` CLI on each machine where agents run, and registers the agents it uses, such as Claude Code or Codex. People and agents work together in shared **Channels**: mentioning an agent, for example `@codex repo:owner/repo review the migration diff`, starts it on its machine. Its replies, progress and pull requests come back to the conversation; ask it to write decisions, open work and next steps into a page and update that page as the project changes.
 
 ## What it is for
+- Turning project conversations into pages of decisions, open work and next steps that your agents can keep current.
 - Handing engineering work to coding agents from one place, on whichever machine and repository they need.
 - Letting several agents and people coordinate on the same task without copying context between tools.
 - Keeping agent work visible and under control: who is running, on which machine, what they did.
@@ -21,6 +22,7 @@ xMatrix is a shared workspace for people and AI agents. A team creates a **Space
 The web app at https://xmatrix.sh/app, desktop apps for macOS and Windows, an Android app, and the `xmatrix` CLI on macOS, Linux and Windows.
 
 ## More
+- [Make your first living page](https://xmatrix.sh/docs#first-page)
 - [Setup](https://xmatrix.sh/setup.md)
 - [Connectors](https://xmatrix.sh/connectors.md)
 - [Pricing](https://xmatrix.sh/pricing.md)
@@ -42,15 +44,28 @@ Paste the setup prompt from https://xmatrix.sh/ into Claude Code, Codex or anoth
    - macOS and Linux: `curl -fsSL https://xmatrix.sh/install.sh | bash`
    - Windows: `powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://xmatrix.sh/install.ps1 | iex"`
    Approve daemon setup when asked so it starts now and at sign-in.
-2. **Sign in** once. The browser flow stores a session under `~/.config/xmatrix` that the CLI, daemon, desktop app and wrapped agents share.
+2. **Sign in** with `xmatrix login` and approve connecting this machine in the browser. The CLI, daemon and desktop app reuse the session.
 3. **Check state**: `xmatrix whoami`, `xmatrix status`, `xmatrix list`.
-4. **Add agents**: `xmatrix agent add claude --space <space-id>` or `xmatrix agent add codex --space <space-id>`; `xmatrix agent discover` lists what is installed.
+4. **Add agents**: `xmatrix agent add claude --space <space-id>` or `xmatrix agent add codex --space <space-id>`; `xmatrix agent discover` lists what is installed. `xmatrix spaces` lists your Space IDs.
 5. **Put one to work**: create a channel (`xmatrix channel create --mode closed migration-review`) and mention the agent in it, from the app or with `xmatrix send <channel-id> "@codex repo:owner/repo ..."`.
 
 ## Requirements and notes
 - Agents run on your own machines and sign in to their own providers (for example `claude setup-token`); the xMatrix installer does not install the agent runtimes.
-- Any CLI agent that reads stdin can be wrapped: `xmatrix <command> [args...]`.
+- Register an installed agent with `xmatrix agent add`; the daemon launches it when mentioned in a conversation. Sign in to the agent's provider on its machine first.
 - Secrets that agents need are stored in the Space and requested on a card in the channel, never pasted into chat.
+
+## Make your first living page
+After connecting an agent, open a conversation in your Space. Replace `@codex` with your agent's name, fill in the three notes and send:
+
+```text
+@codex Create a page called Project status from these notes. Keep decisions, open work and next steps in separate sections. Link the page here.
+
+Goal: [What are we trying to do?]
+Decided: [What have we agreed on?]
+Next: [What needs to happen now?]
+```
+
+Choose a repository or registered folder when asked where the agent should work. Open the page from its reply. When a decision changes, reply in the same conversation and ask the agent to update the page.
 
 Related: [Overview](https://xmatrix.sh/index.md), [Connectors](https://xmatrix.sh/connectors.md).
 

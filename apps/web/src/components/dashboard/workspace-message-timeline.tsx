@@ -77,6 +77,7 @@ import {
   productMessageAttachmentMediaClient,
   relayV2AttachmentMediaIdentity,
   resolveTimelineAnchor,
+  timelineRowIsInFullView,
   timelineRowIsOnScreen,
   timelineRowIsSettled,
   useStableCallback,
@@ -312,6 +313,8 @@ export type TimelineJumpOutcome =
   | "landed"
   /** The row exists in the data but the virtualizer has not placed it yet. */
   | "settling"
+  /** The conversation is still opening; `onJumpCanLand` says when to ask again. */
+  | "opening"
   /** The message is not in the loaded window at all. */
   | "unavailable";
 
@@ -415,6 +418,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   error,
   timelineScrollRef,
   timelineJumpRef,
+  onJumpCanLand,
   messagesEndRef,
   onScrollPositionChange,
   onScrollGesture,
@@ -454,6 +458,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   error: string | null;
   timelineScrollRef: React.RefObject<HTMLDivElement | null>;
   timelineJumpRef: React.RefObject<TimelineJumpHandle | null>;
+  /** A jump answered "opening" can be landed now. */
+  onJumpCanLand?: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   onScrollPositionChange: (pinned: boolean, scrollTop: number) => void;
   onScrollGesture: () => void;
@@ -703,6 +709,9 @@ export const MessageTimeline = memo(function MessageTimeline({
     rememberOpeningScreenRows(timelineListKey, measure.screenRows);
     setOpeningMeasure(measure);
   }, [timelineListKey]);
+  const stableOnJumpCanLand = useStableCallback(() => onJumpCanLand?.());
+  /** A jump asked for a row while the conversation was still opening. */
+  const jumpAwaitsOpeningRef = useRef(false);
   const handleOpeningLanded = useCallback(() => {
     // Both commits before the next frame: the rows change hands in place.
     flushSync(() => {
@@ -713,7 +722,10 @@ export const MessageTimeline = memo(function MessageTimeline({
       setTailHandedOver(false);
       setOpeningMeasure(null);
     });
-  }, [timelineListKey]);
+    if (!jumpAwaitsOpeningRef.current) return;
+    jumpAwaitsOpeningRef.current = false;
+    stableOnJumpCanLand();
+  }, [stableOnJumpCanLand, timelineListKey]);
   useLayoutEffect(() => {
     // The list unmounts with its content and opens again when it returns.
     if (hasTimelineContent) return;
@@ -743,10 +755,14 @@ export const MessageTimeline = memo(function MessageTimeline({
     const fold = rows[index]?.folded ? rows[index] : undefined;
     if (fold && !openFolds.has(fold.id)) toggleFold(fold.id);
     readingAnchor.release();
-    // A jump leaves the bottom, so the list shows its own rows from here on.
+    // The list is still landing on its last row and undoes a scroll made now.
+    // What the tail shows keeps its place through the handover, so a row in
+    // full view there has landed; any other jump goes on once the list has
+    // taken over.
     if (opening) {
-      setLandedListKey(timelineListKey);
-      setOpeningMeasure(null);
+      if (timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container)) return "landed";
+      jumpAwaitsOpeningRef.current = true;
+      return "opening";
     }
     const list = timelineVirtuosoRef.current;
     if (!list) {
@@ -758,10 +774,12 @@ export const MessageTimeline = memo(function MessageTimeline({
       return timelineRowIsOnScreen(element, container) ? "landed" : "settling";
     }
     const row = resolveTimelineAnchor(anchorHash, container);
-    // A visible row is not moved, unless this jump scrolled it there (to
-    // estimated heights): then it lands only once centred.
-    if (timelineRowIsOnScreen(row, container) &&
-      (jumpScrollTargetRef.current !== messageId || timelineRowIsSettled(row, container))) {
+    // A row in full view is not moved, unless this jump scrolled it there (to
+    // estimated heights): then it lands only once centred. A row cut off by
+    // the timeline's edge is not one the reader can see, so it is centred too.
+    if (jumpScrollTargetRef.current === messageId
+      ? timelineRowIsOnScreen(row, container) && timelineRowIsSettled(row, container)
+      : timelineRowIsInFullView(row, container)) {
       jumpScrollTargetRef.current = null;
       return "landed";
     }

@@ -116,6 +116,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     channelsRef,
     timelineScrollRef,
     timelineJumpRef,
+    bumpMessageJumpRevision,
     messagesEndRef,
     channelComposerDraftsRef,
     draftChannelIdRef,
@@ -922,6 +923,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         error={historyError}
         timelineScrollRef={timelineScrollRef}
         timelineJumpRef={timelineJumpRef}
+        onJumpCanLand={bumpMessageJumpRevision}
         messagesEndRef={messagesEndRef}
         onScrollPositionChange={handleTimelineScrollPositionChange}
         onScrollGesture={handleTimelineScrollGesture}

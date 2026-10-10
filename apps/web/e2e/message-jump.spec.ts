@@ -86,6 +86,27 @@ async function expectLandedOn(page: Page, sequence: number) {
   expect(inViewport).toBe(true);
 }
 
+/* Virtuoso's imperative index space is the data index. Passing an index from
+   the wrong space is clamped into range rather than rejected, so a target near
+   either end of the window cannot tell a correct landing from a clamped one.
+   The mid target is deep inside the window and the landing is centred, so an
+   off-by-firstItemIndex jump lands somewhere provably else. */
+async function expectCentred(page: Page, sequence: number) {
+  const placement = await messageRow(page, sequence).evaluate((element) => {
+    const container = element.closest(".app-message-timeline");
+    if (!(container instanceof HTMLElement)) throw new Error("timeline scroll container not found");
+    const containerRect = container.getBoundingClientRect();
+    const rect = element.getBoundingClientRect();
+    return {
+      offsetFromCentre: Math.abs(
+        (rect.top + rect.bottom) / 2 - (containerRect.top + containerRect.bottom) / 2
+      ),
+      containerHeight: containerRect.height,
+    };
+  });
+  expect(placement.offsetFromCentre).toBeLessThan(placement.containerHeight * 0.3);
+}
+
 test("clicking a quoted message seeks to it by sequence and lands on the row", async ({ page }) => {
   const history = historyFixture({
     quotedSequence: HEAD_QUOTED_SEQUENCE,
@@ -116,29 +137,39 @@ test("a quote in the middle of the loaded window is centred, not clamped", async
   await replyPreview(page, MID_QUOTED_SEQUENCE).click();
   await expectLandedOn(page, MID_QUOTED_SEQUENCE);
 
-  // Virtuoso's imperative index space is the data index. Passing an index from
-  // the wrong space is clamped into range rather than rejected, so a target
-  // near either end of the window cannot tell a correct landing from a clamped
-  // one. This target is deep inside the window and the landing is centred, so
-  // an off-by-firstItemIndex jump lands somewhere provably else.
-  const placement = await messageRow(page, MID_QUOTED_SEQUENCE).evaluate((element) => {
-    const container = element.closest(".app-message-timeline");
-    if (!(container instanceof HTMLElement)) throw new Error("timeline scroll container not found");
-    const containerRect = container.getBoundingClientRect();
-    const rect = element.getBoundingClientRect();
-    return {
-      offsetFromCentre: Math.abs(
-        (rect.top + rect.bottom) / 2 - (containerRect.top + containerRect.bottom) / 2
-      ),
-      containerHeight: containerRect.height,
-    };
-  });
-  expect(placement.offsetFromCentre).toBeLessThan(placement.containerHeight * 0.3);
+  await expectCentred(page, MID_QUOTED_SEQUENCE);
 
   // A landing that never moved would have left the tail on screen.
   await expect(page.locator(".app-message-timeline").getByText(NEWEST_BODY)).not.toBeInViewport();
   // A landing clamped to index 0 would have put the oldest loaded row on screen.
   await expect(messageRow(page, 1)).not.toBeInViewport();
+});
+
+test("a quote clicked while the conversation is still opening is centred", async ({ page }) => {
+  const history = historyFixture({
+    quotedSequence: MID_QUOTED_SEQUENCE,
+    previewCarriesSequence: true,
+  });
+  // The conversation opens on a plain tail of its rows while the list lands
+  // behind it. Clicking in the frame the quote first exists is the only way to
+  // be inside that window on every run: the seek page then merges before the
+  // list has landed, and the tail draws the quoted row cut off at its top edge.
+  // That row is not a landing.
+  await page.addInitScript((href) => {
+    const observer = new MutationObserver(() => {
+      const link = document.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
+      if (!link) return;
+      observer.disconnect();
+      link.click();
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  }, `#message:${messageIdFor(MID_QUOTED_SEQUENCE)}`);
+  // Not openChannel: the jump may leave the newest message before it is seen.
+  await openGeneralChannelWithPagedHistory(page, history);
+
+  await expectLandedOn(page, MID_QUOTED_SEQUENCE);
+  await expectCentred(page, MID_QUOTED_SEQUENCE);
+  await expect(page.locator(".app-message-timeline").getByText(NEWEST_BODY)).not.toBeInViewport();
 });
 
 test("clicking the same quote again mid-landing still lands", async ({ page }) => {
