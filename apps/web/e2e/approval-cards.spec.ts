@@ -102,11 +102,15 @@ function frame(locator: Locator) {
   });
 }
 
-/** A card on the paper is one flat block of colour: square corners, no edge, no shadow, no glass. */
-async function expectColourBlock(card: Locator) {
+/**
+ * A card on the paper is one flat block of colour with a notice's corners: no edge, no shadow, no glass.
+ * Its first line is its heading, the question, so the largest type is where reading starts.
+ */
+async function expectColourBlock(card: Locator, firstLine = "H3") {
   const drawn = await frame(card);
-  expect(drawn).toMatchObject({ shadow: "none", border: "0px", blur: "none", radius: "0px" });
+  expect(drawn).toMatchObject({ shadow: "none", border: "0px", blur: "none", radius: "10px" });
   expect(drawn.background).not.toBe(UNFRAMED.background);
+  expect(await card.evaluate((element) => element.firstElementChild?.tagName)).toBe(firstLine);
   return drawn.background;
 }
 
@@ -195,7 +199,9 @@ test("the Pending approvals dock is one block of colour, its asks unframed insid
   expect(await frame(docked)).toMatchObject(UNFRAMED);
   // The dock is the block here, in the colour an ask has in the stream, with the asks as its lines.
   const inStream = page.locator('[data-ask-card="open"]:not(.app-channel-approvals *)');
-  expect(await expectColourBlock(dock)).toBe(await expectColourBlock(inStream));
+  // The dock's own first line is its section label; each ask under it still starts with its question.
+  expect(await expectColourBlock(dock, "DIV")).toBe(await expectColourBlock(inStream));
+  expect(await docked.evaluate((element) => element.firstElementChild?.tagName)).toBe("H3");
 
   const fold = dock.getByRole("button", { name: "Hide" });
   await expect(fold).toHaveAttribute("aria-expanded", "true");
