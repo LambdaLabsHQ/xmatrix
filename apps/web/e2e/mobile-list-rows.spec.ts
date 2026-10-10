@@ -4,8 +4,8 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPAC
 
 /* A phone's lists are a desktop's lists: the same 56px row, its title and
    the line under it in the same type, on the same tone. The plank and the
-   rows run edge to edge; their content keeps to one content line, 1.25rem
-   inside the dock's edges: the plank's name and a row's leading mark start
+   rows run edge to edge; their content keeps to one content line, 16px
+   from the screen's edges: the plank's sign and a row's leading mark start
    on it, the plank's search glyph and a row's trailing time or + end on it. */
 
 const REGISTRATIONS = [{ key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness: "codex" },
@@ -39,24 +39,23 @@ function edges(locator: Locator, { text = false } = {}): Promise<Edges> {
   }, text);
 }
 
-/** The dock's edges, which the content line keeps 1.25rem inside. */
-function dockEdges(page: Page) {
-  return edges(page.getByRole("navigation", { name: "Primary" }));
-}
+/** The content line's inset from the screen's edges, and the sign's own padding before its glyph. */
+const CONTENT_INSET = 16;
+const SIGN_PADDING = 14;
 
-/** The bar's content line: where the Space sign's glyph starts and its trailing search glyph ends. */
+/** The bar's content line: where the Space sign's wood starts and its trailing search glyph ends. */
 async function contentLine(page: Page) {
   await settled(page);
   const bar = page.locator(".app-topbar");
-  const [plank, name, search, dock, width] = await Promise.all([edges(bar),
+  const [plank, name, search, width] = await Promise.all([edges(bar),
     edges(bar.locator("svg.app-mobile-space-glyph")), edges(bar.locator(".app-mobile-search-icon svg")),
-    dockEdges(page), page.evaluate(() => window.innerWidth)]);
-  // The bar spans the screen; its wood is only the Space sign, whose glyph sits on the line.
+    page.evaluate(() => window.innerWidth)]);
+  // The bar spans the screen; its wood is only the Space sign, whose edge sits on the line.
   expect(plank.left).toBe(0);
   expect(plank.right).toBe(width);
-  expect(name.left - dock.left).toBeCloseTo(20, 0);
-  expect(dock.right - search.right).toBeCloseTo(20, 0);
-  return { plank, start: name.left, end: search.right };
+  expect(name.left).toBeCloseTo(CONTENT_INSET + SIGN_PADDING, 0);
+  expect(width - search.right).toBeCloseTo(CONTENT_INSET, 0);
+  return { plank, start: name.left - SIGN_PADDING, end: search.right };
 }
 
 type RowMeasure = { height: number; inset: number; title: string[]; meta: string[]; listTone: string };
@@ -154,13 +153,15 @@ test.describe("a phone's list rows", () => {
     expect(pageMeasure.title).toEqual(phone.title);
     expect(pageMeasure.meta).toEqual(phone.meta);
     await expect(pageRow.locator(".app-list-row-meta")).toHaveText(/^Edited /u);
-    // The page's icon on the line, the chevron hanging left of it; the row's own +,
+    // The chevron on the line, the page's icon after it; the row's own +,
     // shown on a touch screen that has no hover, at the line's end.
     const create = pageRow.getByRole("button", { name: "New sub-page" });
     await expect(create).toHaveCSS("opacity", "1");
-    expect((await edges(pageRow.locator(".app-page-row-title-line svg").first())).left).toBeCloseTo(line.start, 0);
+    const chevron = await edges(pageRow.locator(":scope > button svg").first());
+    expect(chevron.left).toBeGreaterThanOrEqual(line.start - 0.5);
+    expect(chevron.left).toBeLessThan(line.start + 10);
+    expect((await edges(pageRow.locator(".app-page-row-title-line svg").first())).left).toBeGreaterThanOrEqual(chevron.right);
     expect((await edges(create.locator("svg"))).right).toBeCloseTo(line.end, 0);
-    expect((await edges(pageRow.locator(":scope > button svg").first())).right).toBeLessThanOrEqual(line.start);
 
     await dock.getByRole("button", { name: "More" }).tap();
     await page.getByRole("button", { name: /^Agents/u }).first().tap();
@@ -201,17 +202,17 @@ test.describe("a phone's list rows", () => {
     await expect(back).toBeVisible();
     await expect(page.locator(".app-tool-list-row").first()).toBeVisible();
     await settled(page);
-    const [plank, sign, search, dock] = await Promise.all([edges(bar), edges(bar.locator(".app-mobile-back-sign")),
-      edges(bar.locator(".app-mobile-search-icon svg")), dockEdges(page)]);
+    const [plank, sign, search, width] = await Promise.all([edges(bar), edges(bar.locator(".app-mobile-back-sign")),
+      edges(bar.locator(".app-mobile-search-icon svg")), page.evaluate(() => window.innerWidth)]);
     // The chevron is cut into the title's sign, which starts where the Space sign does.
     await expect(bar.locator(".app-mobile-back-sign").getByRole("button", { name: "Back to More" })).toBeVisible();
-    expect(sign.left - dock.left).toBeCloseTo(6, 0);
-    expect(dock.right - search.right).toBeCloseTo(20, 0);
+    expect(sign.left).toBeCloseTo(line.start, 0);
+    expect(width - search.right).toBeCloseTo(CONTENT_INSET, 0);
     const setting = page.locator(".app-tool-list-row").first();
     await expect(setting).toBeVisible();
     // The pushed screen slides in under the bar; read it where it comes to rest.
     await expect.poll(async () => Math.round((await edges(setting)).left - plank.left)).toBe(0);
-    expect((await edges(setting.locator("svg").first())).left).toBeCloseTo(dock.left + 20, 0);
+    expect((await edges(setting.locator("svg").first())).left).toBeCloseTo(line.start, 0);
   });
   test("carry who is here as 20px faces on the second line, under a time centred on the title line", async ({ page }) => {
     const presence = Object.fromEntries([0, 1, 2, 3].map((index) => [`agent:codex-${index}`, { kind: "agent", status: "busy",
