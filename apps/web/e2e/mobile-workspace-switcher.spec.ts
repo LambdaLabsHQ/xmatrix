@@ -8,13 +8,11 @@ import {
   openWorkspaceWithStubs,
 } from "./workspace-fixtures";
 
-/* End-to-end coverage for the mobile workspace switcher (redesigned in
-   a5c909c1). These tests exist because the previous implementation had a
-   pure-CSS failure mode no source-level test could catch: the sheet was
-   rendered inside the topbar, whose backdrop-filter creates a containing
-   block, so the fixed-position sheet never reached the viewport and the
-   backdrop collapsed into a small square. The geometry assertions below
-   fail on that implementation and pass on the portal-based one. */
+/* End-to-end coverage for the mobile workspace switcher: the Space sign
+   unfolds into a plank of Spaces. The plank is portaled out of the topbar
+   (whose backdrop-filter would make it a containing block and trap a fixed
+   layer) and laid over the sign, so the geometry assertions below check it
+   starts exactly where the sign is and its scrim covers the screen. */
 
 const VIEWPORT = { width: 393, height: 852 };
 const NOW = "2026-07-01T00:00:00.000Z";
@@ -51,8 +49,8 @@ const openWorkspace = (page: Page) =>
   openWorkspaceWithStubs(page, { spaces: [PERSONAL_SPACE, TEAM_SPACE] });
 
 const trigger = (page: Page) => page.getByRole("button", { name: "Switch workspace" });
-const sheet = (page: Page) => page.locator('[data-slot="sheet-content"]');
-const overlay = (page: Page) => page.locator('[data-slot="sheet-overlay"]');
+const plank = (page: Page) => page.locator(".app-mobile-space-plank");
+const scrim = (page: Page) => page.locator(".app-mobile-space-plank-scrim");
 
 test.describe("mobile workspace switcher", () => {
   test("topbar entry shows the current workspace and is tappable", async ({ page }) => {
@@ -73,37 +71,34 @@ test.describe("mobile workspace switcher", () => {
     expect(box!.width).toBeGreaterThanOrEqual(120);
   });
 
-  test("tapping the entry opens a true bottom sheet, not a layer trapped in the topbar", async ({
-    page,
-  }) => {
+  test("tapping the sign unfolds a plank from the sign itself", async ({ page }) => {
     await openWorkspace(page);
-    await trigger(page).tap();
+    const entry = trigger(page);
+    const sign = await entry.boundingBox();
+    await entry.tap();
 
-    const content = sheet(page);
+    const content = plank(page);
     await expect(content).toBeVisible();
-    await expect(content.getByRole("heading", { name: "Switch workspace" })).toBeVisible();
+    await expect(content).toHaveAttribute("aria-label", "Switch workspace");
+    await expect(page.locator(".app-topbar .app-mobile-space-plank")).toHaveCount(0);
 
-    /* Regression guard for the backdrop-filter containing-block bug: the
-       sheet must be portaled out of the topbar... */
-    await expect(page.locator('header.app-topbar [data-slot="sheet-content"]')).toHaveCount(0);
+    /* The board starts on the sign (the current Space stays on the sign's
+       line) and opens down and out from it. */
+    await expect.poll(async () => {
+      const box = await content.boundingBox();
+      return box && sign ? [Math.round(box.x - sign.x), Math.round(box.y - sign.y),
+        box.width >= sign.width, box.height > sign.height * 2] : null;
+    }).toEqual([0, 0, true, true]);
+    const current = content.locator('[role="option"][aria-selected="true"]');
+    const row = await current.boundingBox();
+    expect(Math.abs(row!.y - sign!.y)).toBeLessThanOrEqual(1);
 
-    /* ...and must be anchored to the bottom edge of the real viewport,
-       clear of the Dynamic Island / status bar at the top. */
-    const box = await content.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.y + box!.height).toBeGreaterThanOrEqual(VIEWPORT.height - 2);
-    expect(box!.y).toBeGreaterThan(VIEWPORT.height / 3);
-    expect(box!.width).toBeGreaterThanOrEqual(VIEWPORT.width - 8);
-
-    /* The scrim covers the screen instead of collapsing into a small square
-       (the first screenshot regression). */
-    const scrim = await overlay(page).boundingBox();
-    expect(scrim).not.toBeNull();
-    expect(scrim!.width).toBeGreaterThanOrEqual(VIEWPORT.width - 2);
-    expect(scrim!.height).toBeGreaterThanOrEqual(VIEWPORT.height - 2);
+    const cover = await scrim(page).boundingBox();
+    expect(cover!.width).toBeGreaterThanOrEqual(VIEWPORT.width - 2);
+    expect(cover!.height).toBeGreaterThanOrEqual(VIEWPORT.height - 2);
   });
 
-  test("sheet lists every Space in one list with member counts and the active space", async ({
+  test("plank lists every Space, the current one first on the sign's line", async ({
     page,
   }) => {
     await openWorkspace(page);
@@ -114,16 +109,15 @@ test.describe("mobile workspace switcher", () => {
 
     const options = list.getByRole("option");
     await expect(options).toHaveCount(2);
+    /* Spaces are listed by name, so the app opens in Lambda Labs. */
+    await expect(options.first()).toHaveAttribute("aria-selected", "true");
+    await expect(options.first()).toContainText("Lambda Labs");
+    await expect(options.first().locator("svg.lucide-building")).toBeVisible();
     await expect(options.filter({ hasText: "Personal" })).toContainText("1 member");
-    await expect(options.filter({ hasText: "Lambda Labs" })).toContainText("3 members");
-
-    /* Exactly one space is marked current, with the check indicator. */
-    const active = list.locator('[role="option"][aria-selected="true"]');
-    await expect(active).toHaveCount(1);
-    await expect(active.locator("svg.lucide-check")).toBeVisible();
+    await expect(list.locator('[role="option"][aria-selected="true"]')).toHaveCount(1);
   });
 
-  test("selecting another space switches to it and closes the sheet", async ({ page }) => {
+  test("selecting another space switches to it and folds the plank", async ({ page }) => {
     await openWorkspace(page);
 
     const entry = trigger(page);
@@ -135,7 +129,7 @@ test.describe("mobile workspace switcher", () => {
     const target = list.getByRole("option", { name: targetName });
     await target.tap();
 
-    await expect(sheet(page)).toBeHidden();
+    await expect(plank(page)).toBeHidden();
     /* Switching lands on the target space's channel list and the entry now
        names the newly selected space. */
     await expect(entry).toContainText(targetName);
@@ -151,17 +145,23 @@ test.describe("mobile workspace switcher", () => {
     await expect(active).toContainText(targetName);
   });
 
-  test("tapping the scrim dismisses the sheet without switching", async ({ page }) => {
+  test("tapping the paper or the sign folds the plank without switching", async ({ page }) => {
     await openWorkspace(page);
 
     const entry = trigger(page);
     const before = (await entry.textContent()) ?? "";
     await entry.tap();
-    await expect(sheet(page)).toBeVisible();
+    await expect(plank(page)).toBeVisible();
 
-    /* Tap the top of the screen (over the scrim, far from the sheet). */
-    await overlay(page).tap({ position: { x: 196, y: 80 } });
-    await expect(sheet(page)).toBeHidden();
+    /* Tap the paper below the plank. */
+    await scrim(page).tap({ position: { x: 196, y: 600 } });
+    await expect(plank(page)).toBeHidden();
+    await expect(entry).toHaveText(before);
+
+    /* The current Space on the sign's line folds it too. */
+    await entry.tap();
+    await plank(page).locator('[role="option"][aria-selected="true"]').tap();
+    await expect(plank(page)).toBeHidden();
     await expect(entry).toHaveText(before);
   });
 
