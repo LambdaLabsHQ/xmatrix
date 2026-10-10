@@ -293,8 +293,9 @@ pub(crate) fn pull_request_urls(output: &str) -> Vec<String> {
     urls
 }
 
-/// Report one activity entry; best effort, like traces. A Hub that does not
-/// list `channel_activity` would close the socket on it, so nothing is sent.
+/// Report one activity entry. A plan entry is best effort, like traces; a pull
+/// request's is kept until the Hub answers it. A Hub that does not list
+/// `channel_activity` would close the socket on it, so nothing is sent.
 pub(crate) fn publish_channel_activity(
     relay: &AgentInstanceConnectionClient,
     channel_id: &str,
@@ -303,11 +304,18 @@ pub(crate) fn publish_channel_activity(
     if !relay.hub_accepts("channel_activity") {
         return;
     }
-    if let Err(err) = relay.send_message(AgentInstanceClientMessage::ChannelActivity {
-        request_id: Some(uuid::Uuid::new_v4().to_string()),
+    let request_id = uuid::Uuid::new_v4().to_string();
+    // The next plan entry supersedes a lost one. A pull request is reported
+    // once, and the report is what subscribes its conversation.
+    let reported_once = matches!(activity, ChannelActivity::PullRequest { .. });
+    let report = AgentInstanceClientMessage::ChannelActivity {
+        request_id: Some(request_id.clone()),
         channel_id: channel_id.to_string(),
         activity,
-    }) {
+    };
+    if reported_once {
+        relay.send_report(request_id, report);
+    } else if let Err(err) = relay.send_message(report) {
         eprintln!("failed to publish channel activity: {err}");
     }
 }
