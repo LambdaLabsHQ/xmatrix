@@ -199,6 +199,13 @@ test("family attention targets one Human and clear survives catalog reconciliati
     assert.equal(readWait.response.status, 200, JSON.stringify(readWait.payload));
     assert.equal(readWait.payload.attention?.unreadAttentionCount, 1, "reading a declared wait does not answer it");
     assert.equal(readWait.payload.attention.lastMessageId, waited.messageId);
+    // The catalog row carries the message that waits, so a list can say who waits and on what.
+    const waitingList = await requestJson(worker, TARGET, `/api/channels?spaceId=${encodeURIComponent(spaceId)}`);
+    assert.equal(waitingList.response.status, 200, JSON.stringify(waitingList.payload));
+    const waitingRow = waitingList.payload.channels.find((channel) => channel.id === channelId);
+    assert.equal(waitingRow.attention?.lastMessage?.messageId, waited.messageId);
+    assert.match(waitingRow.attention.lastMessage.bodyPreview, /which one ships\?/u);
+    assert.equal(waitingRow.waitingMessage, undefined, "the stored message never leaves the Hub");
     const done = await read({ sequence: waitedSequence, responded: true });
     assert.equal(done.response.status, 200, JSON.stringify(done.payload));
     assert.equal(done.payload.attention, undefined, "Done answers it without a reply");
