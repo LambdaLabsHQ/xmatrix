@@ -4,6 +4,7 @@ import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
   E2E_NOW,
+  E2E_USER_SENDER,
   channelHistoryFixture,
   openGeneralChannelWithHistory,
 } from "./workspace-fixtures";
@@ -40,7 +41,10 @@ async function openChannelRecordingRises(page: Page) {
   const channel = { ...E2E_CHANNEL, updatedAt: E2E_NOW, messageCount: HISTORY_LENGTH, lastMessageSequence: HISTORY_LENGTH };
   await openGeneralChannelWithHistory(page, channel, channelHistoryFixture(HISTORY_LENGTH, "rise"));
   await fixtureJson(page, "send-rise", "**/api/xmatrix/channels/channel-general/messages",
-    { message: { id: "sent-rise" } }, { method: "POST" });
+    { message: {
+      messageId: "sent-rise", channelId: E2E_CHANNEL.id, sequence: HISTORY_LENGTH + 1, body: SENT_BODY,
+      sentAt: new Date().toISOString(), from: { ...E2E_USER_SENDER, identityId: "user:e2e-user" },
+    } }, { method: "POST" });
   await expect(page.locator(".app-message-row").filter({ hasText: `Message ${HISTORY_LENGTH}.` })).toBeVisible();
 }
 
