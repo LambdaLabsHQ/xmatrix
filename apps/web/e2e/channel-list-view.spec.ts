@@ -4,6 +4,8 @@ import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
   E2E_SPACE,
+  fixtureJson,
+  fixtureRequestBodies,
   fixtureRule,
   openGeneralChannelWithHistory,
   openWorkspaceWithStubs,
@@ -229,6 +231,15 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
   expect(labels.map((label) => label.tone)).toEqual(["attention", "primary", "plain"]);
   expect(new Set(labels.map((label) => label.ink)).size).toBe(3);
   for (const label of labels) expect([label.shadow, label.backdrop]).toEqual(["none", "none"]);
+
+  // Done says the reader has dealt with it: the Hub clears what waited, and the row leaves Needs you.
+  await fixtureJson(page, "channel-done", "**/api/xmatrix/channels/channel-waiting/read", { ok: true, readSequence: 5 });
+  const row = sidebar.locator(`[data-channel-row-id="${waiting.id}"]`);
+  await row.hover();
+  await row.getByRole("button", { name: "Done with #design" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "channel-done")).toEqual([{ sequence: 5, responded: true }]);
+  await expect(sidebar.getByText("Needs you", { exact: true })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Done with #design" })).toHaveCount(0);
 });
 
 test("unpinning the last conversation removes Pinned and saves an empty list", async ({ page }) => {

@@ -1942,7 +1942,9 @@ export function normalizeChannelMessageAttachments(
 export async function syncChannelReadCursor(
   token: string,
   channelId: string,
-  sequence: number
+  sequence: number,
+  /** The reader has dealt with the mentions waiting on them here without replying. */
+  responded = false,
 ): Promise<ChannelReadStateUpdate | undefined> {
   const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_read(channelId), {
     method: "POST",
@@ -1950,7 +1952,7 @@ export async function syncChannelReadCursor(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ sequence }),
+    body: JSON.stringify(responded ? { sequence, responded } : { sequence }),
     cache: "no-store",
   });
 

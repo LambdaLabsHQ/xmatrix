@@ -206,6 +206,7 @@ export function AppWindowPreview() {
             onRenameSpace={noop}
             onManageSpaces={noop}
             onTogglePinned={noop}
+            onMarkDone={noop}
             onCopyChannelLink={async () => undefined}
             onSelectSpace={noop}
             onSelect={noop}

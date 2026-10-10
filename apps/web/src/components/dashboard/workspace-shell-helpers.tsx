@@ -485,6 +485,7 @@ export function areChannelNavItemPropsEqual(previous: ChannelNavItemProps, next:
     previous.isPinnedRoot === next.isPinnedRoot &&
     previous.onSelect === next.onSelect &&
     previous.onTogglePinned === next.onTogglePinned &&
+    previous.onMarkDone === next.onMarkDone &&
     previous.onOpenContextMenu === next.onOpenContextMenu
   );
 }

@@ -142,6 +142,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     setSelectedChannelId,
     selectedPageId,
     toggleChannelPinned,
+    markChannelResponded,
     historyRevision,
     loadingWorkspace,
     startupBackgroundReady,
@@ -791,6 +792,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             events={events}
             canCreateChannel={canCreateChannel}
             onTogglePinned={(channelId) => toggleChannelPinned(channelId)}
+            onMarkDone={(channelId) => void markChannelResponded(channelId)}
             onCopyChannelLink={(channel) => copyChannelLink(channel)}
             pendingChannelId={pendingChannelNavigationId}
             onSelect={(channelId, messageId) => requestChannelNavigation(channelId, messageId)}
@@ -1348,6 +1350,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             onRenameSpace={(spaceId, name) => void renameSpace(spaceId, name)}
             onManageSpaces={() => changeAppView("team")}
             onTogglePinned={(channelId) => toggleChannelPinned(channelId)}
+            onMarkDone={(channelId) => void markChannelResponded(channelId)}
             onSelectSpace={selectSpace}
             onCopyChannelLink={(channel) => copyChannelLink(channel)}
             onSelect={(channelId, messageId) => requestChannelNavigation(channelId, messageId)}
