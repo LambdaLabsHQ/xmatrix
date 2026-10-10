@@ -4,6 +4,7 @@ import { requireAgentChannelAccess } from "./agent-channel-access.js";
 import type { QueryResultRow } from "pg";
 import { resolveMessageAgentTargets } from "./message-agent-targets.js";
 import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from "./channel-stop-fence.js";
+import { declaredWaitStandsSql } from "./message-attention-wait.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
 import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
@@ -285,15 +286,15 @@ async function remainingAttention(
     unread_count: string | number; message_id: string | null; kind: string | null;
     timeline_sequence: string | number | null; created_at: Date | string | null; kinds: string[] | null;
   }>({
-    name: "message_ack_attention_summary_v1",
+    name: "message_ack_attention_summary_v2",
     text: `SELECT COUNT(*) AS unread_count,
         (ARRAY_AGG(message_id ORDER BY timeline_sequence DESC))[1] AS message_id,
         (ARRAY_AGG(kind ORDER BY timeline_sequence DESC))[1] AS kind,
         MAX(timeline_sequence) AS timeline_sequence,
         (ARRAY_AGG(created_at ORDER BY timeline_sequence DESC))[1] AS created_at,
         ARRAY_AGG(DISTINCT kind) AS kinds
-      FROM data.message_attention WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3
-        AND (awaiting_response OR timeline_sequence>$4)`,
+      FROM data.message_attention item WHERE item.space_id=$1 AND item.subject_id=$2 AND item.channel_id=$3
+        AND (${declaredWaitStandsSql("item")} OR item.timeline_sequence>$4)`,
     values: [spaceId, subjectId, channelId, ackedSequence], maxRows: 1,
   }))[0];
   if (!waiting || Number(waiting.unread_count) <= 0 || !waiting.message_id || !waiting.created_at) return undefined;
@@ -2663,7 +2664,7 @@ export class PostgresMessageRepository {
         subject_id: string; unread_count: string | number; message_id: string; kind: string;
         timeline_sequence: string | number; created_at: Date | string; kinds: string[];
       }>({
-        name: "message_live_routing_attention_summary_v2",
+        name: "message_live_routing_attention_summary_v3",
         text: `SELECT subject.subject_id,COUNT(*) AS unread_count,
             (ARRAY_AGG(a.message_id ORDER BY a.timeline_sequence DESC))[1] AS message_id,
             (ARRAY_AGG(a.kind ORDER BY a.timeline_sequence DESC))[1] AS kind,
@@ -2672,7 +2673,7 @@ export class PostgresMessageRepository {
             ARRAY_AGG(DISTINCT a.kind) AS kinds
           FROM unnest($3::text[]) subject(subject_id)
           JOIN data.message_attention a ON a.space_id=$1 AND a.channel_id=$2 AND a.subject_id=subject.subject_id
-          WHERE (a.awaiting_response OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
+          WHERE (${declaredWaitStandsSql("a")} OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
             WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0))
           GROUP BY subject.subject_id`,
         values: [spaceId, channelId, notified.map(row => row.subject_id)], maxRows: notified.length,
