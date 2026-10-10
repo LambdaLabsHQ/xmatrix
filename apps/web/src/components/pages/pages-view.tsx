@@ -8,7 +8,7 @@ import {
   isLiveAgentStatus, pageAuthorColor, type SerializedAutomation, type SerializedChannel,
 } from "@xmatrix/protocol";
 import {
-  FileText, History, Lock, MessageSquare, Plus, Share2, Trash2,
+  Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -305,7 +305,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
         )}
         {changes.length > 0 && (
           <section data-testid="page-recent-changes">
-            <ListSectionHeading label="Recent changes"
+            <ListSectionHeading label="Recent changes" mark={{ icon: Clock, tone: "plain" }}
               action={moreChanges ? { label: "Less", onClick: () => setMoreChanges(false) }
                 : changes.length >= RECENT_CHANGES ? { label: "More", onClick: () => setMoreChanges(true) } : undefined} />
             <ul>{changes.map((change) => (
@@ -315,7 +315,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
           </section>
         )}
         {/* The list always meets the plank with a section's name, never a bare row. */}
-        {roots.length > 0 && <ListSectionHeading label="All pages" />}
+        {roots.length > 0 && <ListSectionHeading label="All pages" mark={{ icon: Files, tone: "primary" }} />}
         <ul>{roots.map((page) => (
           <TreeNode key={page.pageId} page={page} childrenOf={childrenOf} activity={activity} depth={0}
             selectedPageId={selectedPageId} onSelect={onSelectPage} onPrefetch={prefetch}
