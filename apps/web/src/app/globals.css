@@ -7929,8 +7929,13 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   padding-left: 15px;
 }
 
-html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) :is(.app-recent-change, .app-page-row) .app-list-row-meta {
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) :is(.app-recent-change > .app-list-row-meta, .app-page-row-meta-line) {
   padding-left: 24px;
+}
+
+/* A page row's second line carries who is on the page and what is unread at its end, as a conversation's does. */
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row-meta-line {
+  height: 18px;
 }
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row span.app-channel-row-hash {
@@ -7944,6 +7949,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row span.app-channel-row-time,
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-recent-change.app-list-row span.app-channel-row-time,
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row span.app-channel-row-time,
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > span.app-page-row-discussions-read {
   font-size: 12px !important;
   font-weight: 500 !important;
