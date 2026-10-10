@@ -87,13 +87,15 @@ struct InboundChannelMessage {
 }
 
 impl InboundChannelMessage {
-    /// This message as `agent` reads it in a turn prompt.
+    /// This message as `agent` reads it in a turn prompt. The first message
+    /// of a turn also carries what its channel saw as context since the last
+    /// one, which is taken here so the run reads it once.
     fn prompt_text(
         &self,
         agent: &protocol::SerializedAgent,
         local_files: Option<&LocalImageFiles>,
     ) -> String {
-        format_incoming_channel_message_with_context(
+        let text = format_incoming_channel_message_with_context(
             &self.channel_id,
             Some(&self.message_id),
             self.reply_to_message_id.as_deref(),
@@ -104,7 +106,16 @@ impl InboundChannelMessage {
             &self.body,
             self.attachments.as_deref(),
             local_files,
-        )
+        );
+        let context = agent_instance_connection::take_context_for_next_turn(&self.channel_id);
+        match runtime_channel_history_bootstrap::render_channel_context_block(
+            &self.channel_id,
+            &context,
+            xmatrix_cli_core::instant::now_utc_rfc3339().as_deref(),
+        ) {
+            Some(context) => format!("{context}\n\n{text}"),
+            None => text,
+        }
     }
 }
 

@@ -170,6 +170,11 @@ Effort travels in typed spawn context. Daemons advertise
 requested. Codex validates against its model catalog, Claude applies its validated
 effort setting, and ACP requires an accepted effort change before message execution.
 Deploy supporting CLI daemons before offering explicit effort on those machines.
+A registration with no declared models runs the runtime's own default model; an
+explicit effort applies to that model. Its daemon advertises
+`registration_default_effort_v1`, and older daemons, which drop an effort that
+comes without a model, are excluded when one is requested. No model is named or
+chosen for such a launch.
 No schema migration or production deployment is implied by this implementation.
 
 ## Verification

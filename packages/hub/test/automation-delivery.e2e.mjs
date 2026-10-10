@@ -19,6 +19,12 @@ import {
   waitForTask,
 } from "./automation-api.fixture.mjs";
 
+async function sectionClaims(worker, spaceId, pageId) {
+  return (await json(await worker.fetch(
+    `/api/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pageId)}/claims`,
+    { headers: authHeaders }))).claims;
+}
+
 test("due Automation commits one canonical message with App metadata and no duplicate", async () => {
   const unique = randomUUID();
   const worker = await startPgHubWorker({
@@ -60,6 +66,9 @@ test("due Automation commits one canonical message with App metadata and no dupl
     assert.equal(Date.parse(persisted.nextRunAt) > Date.now(), true);
     assert.equal((await channelHistory(worker, task.channelId))
       .some((message) => message.body.includes(`scheduled-${unique}`)), false);
+
+    // It starts no Agent, so nobody is expected to write its section back.
+    assert.deepEqual(await sectionClaims(worker, space.id, persisted.pageId), []);
 
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     const matching = (await channelHistory(worker, channel.id))
@@ -125,7 +134,31 @@ test("scheduled tagged Auto uses the shared post-commit dispatcher without a lau
     // The occurrence's Run works in the occurrence's own conversation.
     assert.equal(spawn.channelId, persisted.lastChannelId);
     assert.notEqual(spawn.channelId, task.channelId);
+    // Its section is held for that conversation from the start, so a Run that never writes it leaves it owed.
+    const [held] = await sectionClaims(worker, space.id, persisted.pageId);
+    assert.equal(held.blockId, "schedules");
+    assert.equal(held.conversationId, spawn.channelId);
+    assert.deepEqual(held.holder, { kind: "user", id: userId, label: "One-shot from scheduled message" });
     sendSpawnResult(daemon, spawn, { channelId: spawn.channelId, ok: false, error: "test completed before provider launch" });
+
+    // That Run never came. The next occurrence takes the same claim into its own conversation,
+    // so its Run is not turned away by a claim nobody is working under.
+    const nextSpawn = daemon.inbox.waitFor(
+      (message) => message.type === "machine_spawn_agent" && isSpawnOf(message, registration) &&
+        message.channelId !== spawn.channelId,
+      "the next occurrence's spawn",
+      20_000,
+    );
+    void nextSpawn.catch(() => {});
+    const current = (await listTasks(worker)).automations.find((candidate) => candidate.id === task.id);
+    const ranNow = await worker.fetch(`/api/spaces/${encodeURIComponent(space.id)}/pages/${
+      encodeURIComponent(persisted.pageId)}/automations/${encodeURIComponent(task.id)}/run`,
+    { method: "POST", headers: authHeaders, body: JSON.stringify({ expectedVersion: current.version }) });
+    assert.equal(ranNow.status, 200, await ranNow.clone().text());
+    const second = await nextSpawn;
+    assert.deepEqual((await sectionClaims(worker, space.id, persisted.pageId))
+      .map((claim) => [claim.claimId, claim.conversationId]), [[held.claimId, second.channelId]]);
+    sendSpawnResult(daemon, second, { channelId: second.channelId, ok: false, error: "test completed before provider launch" });
   } finally {
     if (daemon) daemon.ws.close();
     await worker.stop();

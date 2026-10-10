@@ -318,6 +318,46 @@ fn render_channel_history_block(
     ))
 }
 
+/// What a channel saw since this run's last turn that xMatrix did not hand it
+/// as work, rendered to go in front of the turn that does run.
+///
+/// A stop, reborn or handoff, a model switch, a summon for another Agent and
+/// the Hub's own notices start no turn here, and a run that never read them
+/// kept addressing an Instance that was gone. Each body is cut short: the run
+/// needs to know it happened, and `xmatrix channel history` has the rest.
+pub(crate) fn render_channel_context_block(
+    channel_id: &str,
+    messages: &[ChannelMessage],
+    read_at: Option<&str>,
+) -> Option<String> {
+    if messages.is_empty() {
+        return None;
+    }
+    let entries: String = messages
+        .iter()
+        .map(|message| {
+            let mut brief = message.clone();
+            if brief.body.chars().count() > CONTEXT_ENTRY_MAX_CHARS {
+                brief.body = brief.body.chars().take(CONTEXT_ENTRY_MAX_CHARS).collect();
+                brief.body.push('…');
+            }
+            render_history_entry(&brief, read_at, &[])
+        })
+        .collect();
+    Some(format!(
+        "Also in channel {channel_id} since your last turn — {} message(s) xMatrix did not hand \
+         you as work: lifecycle and control commands it carries out itself (stop, reborn, \
+         handoff, model), summons addressed to other Agents, and its own notices. Know them; do \
+         not reply to them or carry them out. `xmatrix list` shows who is live now.\n\
+         \n\
+         {entries}\
+         End of channel context.",
+        messages.len()
+    ))
+}
+
+const CONTEXT_ENTRY_MAX_CHARS: usize = 600;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,6 +380,39 @@ mod tests {
             "sentAt": format!("2026-08-10T17:0{sequence}:00.000Z"),
         }))
         .expect("channel message fixture")
+    }
+
+    /// A peer never got a turn for a stop, so its next turn has to say it.
+    #[test]
+    fn context_since_the_last_turn_names_the_stop_and_is_not_an_assignment() {
+        assert_eq!(render_channel_context_block("channel-1", &[], None), None);
+        let stop = message("m-7", 7, "Yiming Hu", "@codex:2:stop wrong branch");
+        let notice = message("m-8", 8, "xMatrix", &"x".repeat(700));
+        let block = render_channel_context_block(
+            "channel-1",
+            &[stop, notice],
+            Some("2026-08-10T17:09:00.000Z"),
+        )
+        .expect("context block");
+        assert!(
+            block.starts_with("Also in channel channel-1 since your last turn — 2 message(s)"),
+            "{block}"
+        );
+        assert!(
+            block.contains("do not reply to them or carry them out"),
+            "{block}"
+        );
+        assert!(
+            block.contains(
+                "(2m ago) #7 Yiming Hu [user] [messageId=m-7]:\n  @codex:2:stop wrong branch\n"
+            ),
+            "{block}"
+        );
+        assert!(
+            block.contains(&format!("  {}…\n", "x".repeat(600))),
+            "{block}"
+        );
+        assert!(block.ends_with("End of channel context."), "{block}");
     }
 
     #[test]

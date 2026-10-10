@@ -1012,9 +1012,14 @@ export class PostgresPageRepository {
   /**
    * Claims a block for the caller, or renews the caller's own claim on it.
    * A block has one active claim at a time unless it is open for competition.
+   * A claim a person holds for a conversation is the one an Automation
+   * occurrence opened for its Run (§6.1): the Agent that claims from that
+   * conversation takes it over, so a Run that never comes leaves it to lapse.
    */
   async claim(input: { requestId: string; spaceId: string; pageId: string; blockId?: string;
-    principal: PagePrincipal; minutes?: number; conversationId?: string }): Promise<{ claim: PageClaim }> {
+    principal: PagePrincipal; minutes?: number; conversationId?: string;
+    /** Whose work the claim is shown as, when not the caller's own name: an Automation's. */
+    holderLabel?: string }): Promise<{ claim: PageClaim }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     const block = blockId(input.blockId);
@@ -1028,13 +1033,25 @@ export class PostgresPageRepository {
       await tx.query({ name: "page_claim_lock_v1", text: "SELECT 1 FROM data.pages WHERE space_id=$1 AND page_id=$2 FOR UPDATE",
         values: [spaceId, pageId], maxRows: 1 });
       const active = await this.activeClaims(tx, spaceId, pageId, block);
-      const mine = active.find((claim) => claim.holder.kind === actor.author.kind && claim.holder.id === actor.author.id);
+      const holder = { kind: actor.author.kind, id: actor.author.id,
+        label: input.holderLabel ? bounded(input.holderLabel, "holderLabel").slice(0, 200) : actor.author.label };
+      const mine = active.find((claim) => claim.holder.kind === holder.kind && claim.holder.id === holder.id)
+        ?? (actor.isAgent && input.conversationId ? active.find((claim) => claim.holder.kind === "user"
+          && claim.conversationId === input.conversationId) : undefined);
       const expiresAt = new Date(Date.now() + minutes * 60_000).toISOString();
       if (mine) {
-        await tx.query({ name: "page_claim_renew_v1",
-          text: "UPDATE data.page_claims SET expires_at=$3, updated_at=now() WHERE space_id=$1 AND claim_id=$2",
-          values: [spaceId, mine.claimId, expiresAt], maxRows: 0 });
-        return { claim: { ...mine, expiresAt } };
+        // A person's own claim is theirs: an occurrence of their Automation leaves the section to them.
+        if (input.holderLabel && !mine.conversationId) {
+          throw new PageControlError("page_block_claimed", 409, `${mine.holder.label} is on this`, { claim: mine });
+        }
+        // An occurrence whose Run never came hands its claim to the next occurrence's conversation.
+        const conversationId = input.conversationId ?? mine.conversationId;
+        await tx.query({ name: "page_claim_renew_v3",
+          text: `UPDATE data.page_claims SET expires_at=$3, holder_kind=$4, holder_id=$5, holder_label=$6,
+              owner_user_id=$7, conversation_id=$8, updated_at=now() WHERE space_id=$1 AND claim_id=$2`,
+          values: [spaceId, mine.claimId, expiresAt, holder.kind, holder.id, holder.label, actor.userId,
+            conversationId], maxRows: 0 });
+        return { claim: { ...mine, holder, ownerUserId: actor.userId, conversationId, expiresAt } };
       }
       if (active.length) {
         const competitive = await tx.query({ name: "page_block_competitive_v1",
@@ -1047,8 +1064,7 @@ export class PostgresPageRepository {
       }
       const claim: PageClaim = {
         claimId: crypto.randomUUID(), pageId, blockId: block,
-        holder: { kind: actor.author.kind, id: actor.author.id, label: actor.author.label },
-        ownerUserId: actor.userId, conversationId: input.conversationId ?? null, pullRequestUrl: null, expiresAt,
+        holder, ownerUserId: actor.userId, conversationId: input.conversationId ?? null, pullRequestUrl: null, expiresAt,
         createdAt: new Date().toISOString(),
       };
       await tx.query({ name: "page_claim_create_v1",

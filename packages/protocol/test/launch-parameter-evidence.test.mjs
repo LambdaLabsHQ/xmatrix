@@ -31,8 +31,11 @@ test('v9 records a skipped model decision without inventing a selection', () => 
   input.choices.shift();
   assert.deepEqual(parseLaunchParameterEvidence(input).selections, { workspaceKind: 'local-path' });
   assert.deepEqual(parsePresentedRoutingDecision({ source: 'jev', rows: [], parameters: input }).parameters.choices, input.choices);
+  // The effort the author asked for stands on the runtime's default model.
+  assert.deepEqual(parseLaunchParameterEvidence({ ...input, selections: { ...input.selections, effort: 'high' } }).selections,
+    { effort: 'high', workspaceKind: 'local-path' });
   for (const change of [e => e.rubricVersion = 'registration-parameters-v8',
-    e => e.selections.model = '', e => e.selections.model = 'claimed', e => e.selections.effort = 'high',
+    e => e.selections.model = '', e => e.selections.model = 'claimed', e => e.selections.effort = '',
     e => e.choices.unshift(evidence().choices[0]), e => e.choices = []]) {
     const malformed = structuredClone(input); change(malformed);
     assert.equal(parseLaunchParameterEvidence(malformed), undefined);

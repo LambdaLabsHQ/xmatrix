@@ -13,9 +13,12 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::agent_instance_delivery::{
     PROMPT_CARRIED_HISTORY, RegisteredAuthor, delivery_is_acknowledged_and_dropped,
-    join_after_sequence, registered_author_from, spawn_initial_message_id,
+    join_after_sequence, keep_context_for_next_turn, registered_author_from,
+    spawn_initial_message_id,
 };
-pub use crate::agent_instance_delivery::{PromptCarriedHistory, record_prompt_carried_history};
+pub use crate::agent_instance_delivery::{
+    PromptCarriedHistory, record_prompt_carried_history, take_context_for_next_turn,
+};
 use crate::agent_runtime_issue::RuntimeIssueTracker;
 use crate::agent_trace_read::{
     TRACE_HISTORY_MAX_WAIT_MS, TraceHistoryRead, read_trace_history, try_start_trace_wait,
@@ -2374,6 +2377,17 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
                     own_author.as_ref(),
                     ctx.spawn_initial_message_id.as_deref(),
                 ) {
+                    let waterline = ctx
+                        .channel_waterlines
+                        .lock()
+                        .ok()
+                        .and_then(|waterlines| waterlines.get(channel_id).copied());
+                    keep_context_for_next_turn(
+                        &server_msg,
+                        own_author.as_ref(),
+                        ctx.spawn_initial_message_id.as_deref(),
+                        waterline,
+                    );
                     // Ack it so the hub's durable cursor still advances;
                     // otherwise reconnect replay would resurrect it forever.
                     let ack = AgentInstanceClientMessage::ChannelMessageAck {

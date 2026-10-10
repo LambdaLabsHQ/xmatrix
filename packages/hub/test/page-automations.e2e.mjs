@@ -125,6 +125,17 @@ test("a page's Automation is anchored by its reference and managed by whoever ca
     assert.equal(retimed.automation.intervalMinutes, 60);
     assert.equal(retimed.automation.id, replaced.id, "its author edits it in place");
 
+    // An edit can say when the next occurrence is; a time already past is refused.
+    const nextRunAt = new Date(Date.now() + 7 * 3_600_000).toISOString();
+    const staggered = (await ok(await call(memberToken, `${automations}/${replaced.id}`, "PATCH",
+      { expectedVersion: retimed.automation.version, nextRunAt }))).automation;
+    assert.equal(staggered.nextRunAt, nextRunAt);
+    assert.equal(staggered.intervalMinutes, 60, "its cadence is unchanged");
+    const past = await call(memberToken, `${automations}/${replaced.id}`, "PATCH",
+      { expectedVersion: staggered.version, nextRunAt: new Date(Date.now() - 1_000).toISOString() });
+    assert.equal(past.status, 400);
+    assert.equal((await past.json()).code, "invalid_next_run");
+
     // A restricted page's Automations are read through that page only.
     const secret = (await ok(await call(ownerToken, pages, "POST", { title: "Private", accessMode: "restricted",
       body: "# Private\n\n## Plans\n" }))).page;
@@ -137,7 +148,7 @@ test("a page's Automation is anchored by its reference and managed by whoever ca
     assert.equal((await call(memberToken, `/api/automations/${hidden.id}`)).status, 404);
 
     // Deleting it takes its reference out of the page.
-    await ok(await call(ownerToken, `${automations}/${replaced.id}?expectedVersion=${retimed.automation.version}`,
+    await ok(await call(ownerToken, `${automations}/${replaced.id}?expectedVersion=${staggered.version}`,
       "DELETE"));
     current = await readBody();
     assert.equal(current.body.includes("xmatrix:automation/"), false);

@@ -521,6 +521,55 @@ integration("a released claim owes an update unless its conversation wrote the s
   }
 });
 
+integration("an Automation occurrence's claim passes to the Run in its conversation, and lapses into an owed update without one", async () => {
+  const t = await pageTest("claims-occurrence");
+  const { ids, pages } = t;
+  try {
+    const at = { spaceId: ids.space, pageId: (await pages.create({ requestId: crypto.randomUUID(), spaceId: ids.space,
+      principal: t.owner, title: "Goals", body: "# Goals\n\n## Search\n\nNext.\n\n## Billing\n\nLater.\n" })).page.pageId };
+    const call = (extra) => ({ requestId: crypto.randomUUID(), ...at, ...extra });
+    const owed = async () => (await pages.blockUpdates(call({ principal: t.owner }))).owed;
+    const opened = (blockId) => pages.claim(call({ principal: t.owner, blockId, conversationId: ids.open,
+      holderLabel: "Daily audit" }));
+
+    const held = (await opened("search")).claim;
+    assert.deepEqual(held.holder, { kind: "user", id: ids.owner, label: "Daily audit" });
+    await assert.rejects(pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.closed })),
+      (error) => error.code === "page_block_claimed" && error.message === "Daily audit is on this",
+      "a Run elsewhere stands down for it");
+    const taken = (await pages.claim(call({ principal: t.agent, blockId: "search", conversationId: ids.open }))).claim;
+    assert.equal(taken.claimId, held.claimId, "the Run in its conversation takes the same claim over");
+    assert.deepEqual(taken.holder, { kind: "agent", id: ids.instance, label: "claude:1" });
+    assert.equal(taken.ownerUserId, ids.member);
+    assert.deepEqual((await pages.claims(call({ principal: t.owner }))).claims.map((c) => c.holder.label), ["claude:1"]);
+    await pages.edit(call({ principal: t.agent, baseRevision: 1, conversationIds: [ids.open],
+      body: "# Goals\n\n## Search\n\nShipped.\n\n## Billing\n\nLater.\n" }));
+    await pages.releaseClaim(call({ principal: t.agent, claimId: taken.claimId }));
+    assert.deepEqual([...(await owed()).keys()], [], "the Run wrote its section: nothing is owed");
+
+    // No Run ever comes: the occurrence's claim runs out and its section owes an update.
+    const abandoned = (await opened("billing")).claim;
+    assert.deepEqual([...(await owed()).keys()], [], "nothing is owed while the occurrence holds it");
+    await t.client.query("UPDATE data.page_claims SET expires_at=now() - interval '1 minute' WHERE claim_id=$1",
+      [abandoned.claimId]);
+    // The next occurrence, in another conversation, inherits a claim no Run took; a person's own claim it leaves alone.
+    const first = (await opened("search")).claim;
+    const next = (await pages.claim(call({ principal: t.owner, blockId: "search", conversationId: ids.closed,
+      holderLabel: "Daily audit" }))).claim;
+    assert.deepEqual([next.claimId, next.conversationId], [first.claimId, ids.closed]);
+    await pages.claim(call({ principal: t.owner, blockId: "" }));
+    await assert.rejects(pages.claim(call({ principal: t.owner, blockId: "", conversationId: ids.open,
+      holderLabel: "Daily audit" })), (error) => error.code === "page_block_claimed");
+    const lapsed = (await owed()).get("billing");
+    assert.equal(lapsed?.reason, "lapsed");
+    assert.equal(lapsed?.holder, "Daily audit");
+    assert.equal(lapsed?.conversationId, ids.open, "it names the occurrence's conversation");
+  } finally {
+    await cleanup(t.client, ids);
+    await t.client.end();
+  }
+});
+
 integration("a page's conversations are described to readers only, with their newest message and live Agents", async () => {
   const { client, ids } = await pageTest("page-conversations");
   try {

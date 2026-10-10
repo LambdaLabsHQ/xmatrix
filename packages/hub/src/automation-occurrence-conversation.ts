@@ -1,5 +1,5 @@
 import { PostgresPageRepository } from "@xmatrix/db";
-import { automationReferences } from "@xmatrix/protocol";
+import { automationReferences, parseAutoLaunchMentions } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { deterministicConversationId, openConversation } from "./system-conversation";
 import type { Env } from "./types";
@@ -37,10 +37,16 @@ export function occurrenceConversationName(name: string, scheduledFor: string): 
  * occurrence starts clean: what carries over lives on the page, not in an
  * earlier occurrence's conversation. Idempotent per occurrence, so a retried
  * dispatch reopens the same conversation.
+ *
+ * An occurrence that starts an Agent also claims the section for its
+ * conversation, as the Automation. The Run takes that claim over when it
+ * claims the section, and writing the section settles it; a Run that never
+ * starts, or ends without writing, leaves the claim to lapse, and the section
+ * then owes an update like any other abandoned work (§5.2).
  */
 export async function openOccurrenceConversation(env: Env, input: {
   spaceId: string; pageId: string; automationId: string; occurrenceId: string; name: string;
-  scheduledFor: string; userId: string;
+  scheduledFor: string; userId: string; body: string;
 }): Promise<string> {
   const principal = { kind: "user" as const, id: input.userId };
   const channelId = await deterministicConversationId("automation-occurrence", input.occurrenceId);
@@ -56,5 +62,13 @@ export async function openOccurrenceConversation(env: Env, input: {
   const blockId = automationReferences(page.body).get(input.automationId);
   await repository.link({ requestId: crypto.randomUUID(), spaceId: input.spaceId, principal,
     conversationId: channelId, pageId: input.pageId, ...(blockId ? { blockId } : {}), source: "reference" });
+  if (blockId && parseAutoLaunchMentions(input.body).length > 0) {
+    // Someone already on the section keeps it: the instruction has the Run stand down for them.
+    await repository.claim({ requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId,
+      principal, blockId, conversationId: channelId, holderLabel: input.name.trim().slice(0, 200) || "Automation" })
+      .catch((error: unknown) => {
+        if ((error as { code?: unknown }).code !== "page_block_claimed") throw error;
+      });
+  }
   return channelId;
 }

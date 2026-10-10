@@ -66,6 +66,18 @@ minute means the origin connections are held too long; compare with the
 `session` points in the substrate observability dataset
 ([connectivity breaker](postgres-connectivity-breaker.md)).
 
+## Agent lifecycle locks
+
+Agent message preparation, observed-head and receipt reads, content reads and
+Channel access checks validate current Run and registration snapshots without
+holding lifecycle rows. Preparation never authorizes a later send. Commands
+that write acquire the Run's source and target Channel lifecycle locks in
+Channel-id order before locking the Run, then re-read its credential and
+registration authority. This matches Human stop messages (Channel before Run),
+avoids shared-lock upgrades, and prevents reciprocal cross-Channel writes from
+locking the same Channels in opposite orders. Stops and revocations committed
+after preparation still refuse publication.
+
 ## Failover and restarts
 
 On a single-node cluster a provider restart or maintenance drops every origin
