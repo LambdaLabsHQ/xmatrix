@@ -522,6 +522,7 @@ export async function postgresMessageAppend(
       // history replays what was said elsewhere: neither mentions nor commands.
       attentionBody: messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND || imported ? "" : command.body,
       ...(command.awaitsResponse === true ? { awaitsResponse: true } : {}),
+      ...(command.waitsOnUserIds?.length ? { waitsOnUserIds: command.waitsOnUserIds } : {}),
       invocationSelections: command.invocationSelections,
       runProof,
       attachments: command.sealedAttachments,

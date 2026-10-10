@@ -89,6 +89,9 @@ type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServer
  */
 export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity"] as const;
 
+/** The card a Run posts when its harness asks its own question (runtime_harness_questions.rs). */
+const HARNESS_QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
+
 /** Channel history for an Agent Instance socket: join, leave, catch-up replay and paged reads. */
 export interface AgentChannelHistoryPort {
   join(session: Readonly<AgentInstanceRuntimeSession>, message: Message<"join_channel">): Promise<AuthorityOutput>;
@@ -648,7 +651,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       throw new RuntimeClientOperationError("agent_read_only_session");
     }
     assertAgentAppendEnvelope(message);
-    const appMetadata = {
+    const appMetadata: Record<string, unknown> = {
       ...callerMessageMetadata(message.metadata),
       ...(message.appMentions?.length ? { appMentions: message.appMentions } : {}),
     };
@@ -662,6 +665,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       channelId: message.channelId,
       body: message.body,
       ...(Object.keys(residual).length > 0 ? { residual } : {}),
+      // A harness question parks the Run's turn until its owner answers the card.
+      ...(appMetadata.kind === HARNESS_QUESTIONNAIRE_KIND ? { waitsOnUserIds: [session.principal.ownerUserId] } : {}),
     });
   }
 
@@ -728,6 +733,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       body: string;
       messageKind?: string;
       residual?: Record<string, unknown>;
+      waitsOnUserIds?: string[];
     },
   ): Promise<AgentInstanceServerMessage> {
     // Only reviewed runtime-presentation fields cross this boundary. The
@@ -748,6 +754,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       },
       senderSnapshot,
       ...(input.residual ? { residual: input.residual } : {}),
+      ...(input.waitsOnUserIds ? { waitsOnUserIds: input.waitsOnUserIds } : {}),
     }, { actorUserId: session.principal.ownerUserId, senderRunId: session.principal.runId });
     requiredNonnegativeInteger(result.sequence, "append-message.sequence");
     return {
