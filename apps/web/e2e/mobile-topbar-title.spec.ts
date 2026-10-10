@@ -145,7 +145,7 @@ test("create button clears native dock height and safe area, including older she
   }
 });
 
-test("the bar's and the lists' content line and the + follow the native dock's measured edge", async ({ page }) => {
+test("the + follows the native dock's measured edge and the content line keeps its own inset", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   await page.locator(".xmatrix-app-shell").evaluate((shell) => {
     shell.classList.add("xmatrix-app-native-dock");
@@ -153,7 +153,7 @@ test("the bar's and the lists' content line and the + follow the native dock's m
   const fab = page.locator(".app-mobile-create-fab");
   const search = page.locator(".app-topbar .app-mobile-search-icon svg");
   const time = page.locator(".app-mobile-chat-row .app-channel-row-time").first();
-  // Before the shell reports its dock, everything keeps the web dock's edge; after, the native one's.
+  // Before the shell reports its dock, the + keeps the web dock's edge; after, the native one's.
   for (const [width, inset] of [[390, null], [390, 28], [430, 21], [360, 12]] as const) {
     await page.setViewportSize({ width, height: 844 });
     await page.evaluate((inset) => {
@@ -161,7 +161,9 @@ test("the bar's and the lists' content line and the + follow the native dock's m
       else document.documentElement.style.setProperty("--app-native-dock-inset", `${inset}px`);
     }, inset);
     // The web dock's side gap: clamp(0.875rem, 3.6vw, 1.125rem).
-    const edge = width - (inset ?? Math.min(18, Math.max(14, width * 0.036)));
+    const webGap = Math.min(18, Math.max(14, width * 0.036));
+    const edge = width - (inset ?? webGap);
+    const contentEdge = width - webGap - 20;
     await expect.poll(async () => {
       const [fabBox, searchBox, timeRight] = await Promise.all([fab.boundingBox(), search.boundingBox(),
         time.evaluate((element) => {
@@ -170,8 +172,8 @@ test("the bar's and the lists' content line and the + follow the native dock's m
           return range.getBoundingClientRect().right;
         })]);
       if (!fabBox || !searchBox) return Infinity;
-      return Math.max(Math.abs(fabBox.x + fabBox.width - edge), Math.abs(searchBox.x + searchBox.width + 20 - edge),
-        Math.abs(timeRight + 20 - edge));
+      return Math.max(Math.abs(fabBox.x + fabBox.width - edge), Math.abs(searchBox.x + searchBox.width - contentEdge),
+        Math.abs(timeRight - contentEdge));
     }).toBeLessThan(0.5);
   }
 });
