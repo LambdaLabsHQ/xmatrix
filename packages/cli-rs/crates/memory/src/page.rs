@@ -959,6 +959,32 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             );
             Ok(())
         }
+        PageCommand::Summary {
+            page,
+            base,
+            space,
+            body,
+            stdin,
+        } => {
+            let space = resolve_space(hub_url, token, space).await?;
+            let text = read_body(body, None, stdin)?;
+            let url = with_route(hub_url, &format!("{}/summary", page_route(&space, &page)));
+            let response: serde_json::Value = http::request_json(
+                &url,
+                "PUT",
+                Some(token),
+                Some(json!({ "baseRevision": base, "summary": text })),
+            )
+            .await?;
+            println!(
+                "{} Summary of {} at r{}: {}",
+                "✓".green().bold(),
+                page,
+                base,
+                response["summary"]["text"].as_str().unwrap_or_default()
+            );
+            Ok(())
+        }
         PageCommand::Release { page, claim, space } => {
             let space = resolve_space(hub_url, token, space).await?;
             let url = with_route(
