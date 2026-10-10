@@ -10,7 +10,7 @@ import {
 } from "./workspace-shell-chrome";
 import { CountPill } from "./count-pill";
 import { ListCreate, type CreateAction } from "./list-create";
-import { ListSectionHeading } from "./list-section-heading";
+import { ListSectionHeading, type ListSectionTone } from "./list-section-heading";
 
 import { channelRowIndentPx, SIDEBAR_CHANNEL_HIGHLIGHT_ROW_CLASS_NAME } from "./workspace-shell-constants";
 
@@ -99,9 +99,11 @@ import { createPortal } from "react-dom";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 import {
+  Bell,
   Building,
   Check,
   ChevronDown,
+  Clock,
   Copy,
   ExternalLink,
   Loader2,
@@ -771,21 +773,31 @@ export { SpaceAvatar, spaceAvatarStyle, spaceDisambiguatorId } from "./workspace
 import { SpaceAvatar, spaceDisambiguatorId } from "./workspace-shell-chrome";
 
 /**
- * A conversation list's sections: the reader's pins, then the rest, each in
- * the list's own order (newest activity first) and each conversation once. A
- * section with no conversations is not shown.
+ * A conversation list's sections: the conversations waiting on the reader
+ * (an unread mention, reply or broadcast addressed to them), then their pins,
+ * then the rest, each in the list's own order (newest activity first) and each
+ * conversation once. A section with no conversations is not shown.
  */
 export function channelListSections(
   channels: readonly SerializedChannel[],
   pinnedChannelIds: ReadonlySet<string>,
 ) {
+  const needsYou: SerializedChannel[] = [];
   const pinned: SerializedChannel[] = [];
   const recent: SerializedChannel[] = [];
-  for (const channel of channels) (pinnedChannelIds.has(channel.id) ? pinned : recent).push(channel);
-  return [
-    { label: "Pinned", channels: pinned },
-    { label: "Recent", channels: recent },
-  ].filter((section) => section.channels.length > 0);
+  for (const channel of channels) {
+    if ((channel.attention?.unreadAttentionCount ?? 0) > 0) needsYou.push(channel);
+    else (pinnedChannelIds.has(channel.id) ? pinned : recent).push(channel);
+  }
+  const sections: Array<{
+    label: string; count?: number; channels: SerializedChannel[];
+    mark: { icon: typeof Bell; tone: ListSectionTone };
+  }> = [
+    { label: "Needs you", count: needsYou.length, channels: needsYou, mark: { icon: Bell, tone: "attention" } },
+    { label: "Pinned", channels: pinned, mark: { icon: Pin, tone: "pinned" } },
+    { label: "Recent", channels: recent, mark: { icon: Clock, tone: "recent" } },
+  ];
+  return sections.filter((section) => section.channels.length > 0);
 }
 
 /** A conversation list as its sections: each one's heading, then its rows. */
@@ -796,14 +808,14 @@ function ChannelSectionRows({ channels, row }: {
   // The cold-start paint has no pins yet; they arrive with the signed-in shell.
   return channelListSections(channels, NO_PINNED_CHANNEL_IDS).map((section) => (
     <Fragment key={section.label}>
-      <ListSectionHeading label={section.label} />
+      <ListSectionHeading label={section.label} count={section.count} mark={section.mark} />
       {section.channels.map(row)}
     </Fragment>
   ));
 }
 
 type ChannelSectionItem =
-  | { kind: "heading"; label: string }
+  | { kind: "heading"; label: string; count?: number; mark: { icon: typeof Bell; tone: ListSectionTone } }
   | { kind: "row"; channel: SerializedChannel };
 
 /**
@@ -820,7 +832,7 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinn
   row: (channel: SerializedChannel) => ReactNode;
 }) {
   const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, pinnedChannelIds).flatMap((section) => [
-    { kind: "heading" as const, label: section.label },
+    { kind: "heading" as const, label: section.label, count: section.count, mark: section.mark },
     ...section.channels.map((channel) => ({ kind: "row" as const, channel })),
   ]), [channels, pinnedChannelIds]);
   const listRef = useRef<VirtuosoHandle | null>(null);
@@ -844,7 +856,7 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinn
       increaseViewportBy={CONVERSATION_LIST_PRELOAD_PX}
       itemContent={(_index, item) => (item.kind === "row"
         ? row(item.channel)
-        : <ListSectionHeading label={item.label} />)}
+        : <ListSectionHeading label={item.label} count={item.count} mark={item.mark} />)}
     />
   );
 }
