@@ -5,6 +5,7 @@ import {
   ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
+  MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS,
   stableMachineDaemonId,
   sha256Hex } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
@@ -26,13 +27,14 @@ const ACTIONS = new Set(["enroll", "connect", "report", "unregister", "issue", "
   "renew", "complete", "retry", "failed-deliver", "migration_preflight", "migration_fence", "recover_connect",
   "activation_begin", "activation_prepare", "activation_advance"]);
 const COMMAND_TYPES = new Set(["spawn", "stop", "cleanup", "request_resolve", "recover_reply", "quota_probe",
-  "harness_action", "worktree_action"]);
+  "harness_action", "worktree_action", "text_task"]);
 const RESULT_TYPES: Record<string, string> = {
   spawn: "machine_spawn_result", stop: "machine_stop_result",
   recover_reply: "machine_recover_reply_result",
   quota_probe: "machine_quota_probe_result",
   harness_action: "machine_harness_action_result",
   worktree_action: "machine_worktree_action_result",
+  text_task: "machine_text_task_result",
   cleanup: "machine_worktree_cleanup_result", request_resolve: "machine_request_resolve_result",
 };
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -283,6 +285,16 @@ function exactResult(commandType: string, issued: Record<string, unknown>, event
       }
     } catch {
       throw new MachineControlError("machine_command_result_mismatch", 409, "Worktree result differs from the issued action");
+    }
+  }
+  if (commandType === "text_task") {
+    try {
+      parseTextTaskResult(payload.result, parseTextTaskRequest(issued));
+      if (Object.keys(payload).some(key => !["type", "requestId", "result", "relayLease"].includes(key))) {
+        throw new Error("Unexpected text task result field");
+      }
+    } catch {
+      throw new MachineControlError("machine_command_result_mismatch", 409, "Text task result differs from the issued task");
     }
   }
   const identityFields = commandType === "spawn"
@@ -1019,6 +1031,23 @@ export class PostgresMachineControlRepository {
       if (!current[0]) throw new MachineControlError("harness_action_unavailable", 409,
         "The Machine is offline or its xMatrix daemon cannot manage harnesses yet");
     }
+    if (commandType === "text_task") {
+      try {
+        const task = parseTextTaskRequest(payload);
+        if (payload.type !== "machine_text_task" || task.requestId !== controlId ||
+            Object.keys(payload).some(key => !["type", "requestId", "presetId", "instruction", "input"].includes(key))) {
+          throw new Error("Invalid text task envelope");
+        }
+      } catch {
+        throw new MachineControlError("invalid_text_task", 400, "Text task is invalid");
+      }
+      const capable = await tx.query({ name: "machine_text_task_daemon_v1", text: `SELECT 1
+        FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
+          AND status='online' AND capabilities_json ? $3 FOR SHARE`,
+      values: [ownerUserId, machineId, MACHINE_TEXT_TASK_CAPABILITY], maxRows: 1 });
+      if (!capable[0]) throw new MachineControlError("text_task_unavailable", 409,
+        "The Machine is offline or its xMatrix daemon cannot take text tasks yet");
+    }
     if (commandType === "worktree_action") {
       try {
         const action = parseWorktreeActionRequest(payload);
@@ -1060,7 +1089,8 @@ export class PostgresMachineControlRepository {
       machineId, hostId, commandType, JSON.stringify(payload), at,
       new Date(Date.parse(at) + (commandType === "quota_probe" ? 15_000
         : commandType === "harness_action" ? HARNESS_ACTION_CLAIM_TTL_MS
-          : commandType === "worktree_action" ? WORKTREE_ACTION_CLAIM_TTL_MS : COMMAND_TTL_MS)).toISOString()], maxRows: 1 });
+          : commandType === "worktree_action" ? WORKTREE_ACTION_CLAIM_TTL_MS
+            : commandType === "text_task" ? TEXT_TASK_CLAIM_TTL_MS : COMMAND_TTL_MS)).toISOString()], maxRows: 1 });
     if (!rows[0]) throw new MachineControlError("machine_command_exists", 409,
       "Machine command already exists");
     if (commandType === "spawn" || commandType === "stop" &&
@@ -1217,8 +1247,9 @@ export class PostgresMachineControlRepository {
           (command.payload_json->>'action'<>'release' OR $9::boolean) AND
           (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean)))
         AND (command.command_type<>'worktree_action' OR $11::boolean)
+        AND (command.command_type<>'text_task' OR $12::boolean)
       ORDER BY command.created_at,command.command_id LIMIT 5
-      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)],
+      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY)],
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {
