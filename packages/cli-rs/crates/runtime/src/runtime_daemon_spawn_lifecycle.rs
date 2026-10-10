@@ -1023,14 +1023,26 @@ async fn record_daemon_spawn_result(
                 );
             }
             let metadata = (!metadata.is_empty()).then_some(Value::Object(metadata));
-            let warning_receipt = child.repo_pool_binding.as_ref()
-                .filter(|binding| binding.baseline.as_ref().is_some_and(|baseline| baseline.warn_agent))
-                .and_then(|binding| Some((binding.repo_key_id.clone(), repo_pool::LeaseRequest {
-                    session_key: child.resume_session_key.clone()?,
-                    instance_id: child.instance_id.clone()?,
-                    run_id: child.run_id.clone()?,
-                    execution_key: child.execution_key.clone()?,
-                })));
+            let warning_receipt = child
+                .repo_pool_binding
+                .as_ref()
+                .filter(|binding| {
+                    binding
+                        .baseline
+                        .as_ref()
+                        .is_some_and(|baseline| baseline.warn_agent)
+                })
+                .and_then(|binding| {
+                    Some((
+                        binding.repo_key_id.clone(),
+                        repo_pool::LeaseRequest {
+                            session_key: child.resume_session_key.clone()?,
+                            instance_id: child.instance_id.clone()?,
+                            run_id: child.run_id.clone()?,
+                            execution_key: child.execution_key.clone()?,
+                        },
+                    ))
+                });
             if let Err(error) = register_daemon_child(run_registry, child, identity_id, None).await
             {
                 return DaemonSpawnResultParts {
@@ -1052,7 +1064,8 @@ async fn record_daemon_spawn_result(
                     let pools_root = repo_pool::default_repo_pools_root()?;
                     let layout = repo_pool::RepoPoolLayout::from_persisted(&pools_root, &repo_key)?;
                     repo_pool::acknowledge_baseline_warning_at(&layout, &request).await
-                }.await;
+                }
+                .await;
                 if let Err(error) = receipt {
                     eprintln!("repo pool: warning receipt unavailable ({error})");
                 }
@@ -2337,9 +2350,10 @@ async fn spawn_headless_agent(
         command.env("XMATRIX_RESUME_SESSION_KEY", resume_session_key);
     }
     if let Some(source_session_key) = handoff_source_resume_session_key
-        && let Some(dir) = materialize_handoff_session_snapshot(source_session_key) {
-            command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
-        }
+        && let Some(dir) = materialize_handoff_session_snapshot(source_session_key)
+    {
+        command.env("XMATRIX_HANDOFF_SESSION_DIR", dir.display().to_string());
+    }
     if goal.is_some()
         || initial_message_source.is_some()
         || requested_model.is_some()
@@ -2380,10 +2394,7 @@ async fn spawn_headless_agent(
     }
     command.envs(&local_env);
     command.env_remove("XMATRIX_TOKEN");
-    command.env(
-        "XMATRIX_OWNER_USER_ID",
-        &registration.key.owner_user_id,
-    );
+    command.env("XMATRIX_OWNER_USER_ID", &registration.key.owner_user_id);
     if let Some(grant) = auth_grant.as_ref() {
         command
             .env(DAEMON_AUTH_URL_ENV, &grant.url)
@@ -2420,6 +2431,7 @@ async fn spawn_headless_agent(
     apply_agent_spawn_path(&mut command, &local_env);
     apply_windows_utf8_env(&mut command)?;
     xmatrix_cli_agent::apply_agent_cli_binary(&mut command, &exe);
+    crate::runtime_gh_entrypoint::apply_gh_entrypoint(&mut command, &exe);
     match local_env.get("XMATRIX_AGENT_BACKEND").map(String::as_str) {
         Some("codex-app") => {
             command.env("XMATRIX_CODEX_APP", "1");

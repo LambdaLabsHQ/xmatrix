@@ -1813,6 +1813,14 @@ pub enum ChannelCommand {
         /// Emoji to toggle, for example 👍
         emoji: String,
     },
+    /// Subscribe a conversation to a pull request you opened: its CI verdict,
+    /// reviews, comments and merge then arrive there as messages
+    Subscribe {
+        /// Channel ID or xmatrix.sh channel URL
+        channel_id: String,
+        /// The pull request's URL, https://github.com/<owner>/<repo>/pull/<n>
+        pull_request: String,
+    },
     /// Delete (recall) a message you sent
     DeleteMessage {
         /// Channel ID or xmatrix.sh channel URL
