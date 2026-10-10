@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, XMatrixApiError } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DeletionConfirmationFields } from "./confirmation-fields";
 import { CloseOwnedSpace } from "./close-owned-space";
 
 const RECEIPT_KEY = "xmatrix.account-deletion.receipt";
@@ -121,9 +121,9 @@ export default function AccountDeletionPage() {
       <Button variant="secondary" size="default" onClick={() => void checkReceipt()}>Check status</Button>
       {state === null && user && <form className="space-y-3" onSubmit={event=>{event.preventDefault();void submit();}}>
         <p>If delivery failed, confirm again to retry the same request. This retains your existing receipt.</p>
-        <label className="block">Account email<Input className="mt-1" type="email" value={email} onChange={e=>setEmail(e.target.value)} /></label>
-        <label className="block">Type DELETE<Input className="mt-1" value={confirmation} onChange={e=>setConfirmation(e.target.value)} /></label>
-        <label className="block"><input type="checkbox" checked={acknowledge} onChange={e=>setAcknowledge(e.target.checked)} /> I confirm permanent account deletion.</label>
+        <DeletionConfirmationFields email={email} confirmation={confirmation} acknowledge={acknowledge}
+          onEmailChange={setEmail} onConfirmationChange={setConfirmation} onAcknowledgeChange={setAcknowledge}
+          acknowledgement="I confirm permanent account deletion." />
         <Button type="submit" disabled={busy || !acknowledge || confirmation!=="DELETE" || email.trim().toLowerCase()!==user.email.toLowerCase()} variant="destructive" size="default">Retry same deletion request</Button>
       </form>}
       {state === "preparing" && user && <Button disabled={busy} variant="secondary" size="default" onClick={()=>void cancel()}>Cancel deletion request</Button>}
@@ -149,9 +149,9 @@ export default function AccountDeletionPage() {
         </div>)}
         <Button variant="secondary" size="default" onClick={()=>void loadPreview()}>Check again</Button>
       </section> : <form className="space-y-4" onSubmit={event=>{event.preventDefault();void submit();}}>
-        <label className="block">Account email<Input className="mt-1" type="email" autoComplete="off" value={email} onChange={e=>setEmail(e.target.value)} /></label>
-        <label className="block">Type DELETE<Input className="mt-1" autoComplete="off" value={confirmation} onChange={e=>setConfirmation(e.target.value)} /></label>
-        <label className="flex items-start gap-3"><input type="checkbox" checked={acknowledge} onChange={e=>setAcknowledge(e.target.checked)} /><span>I understand this is permanent and does not cancel subscription renewal. I will lose access on every device and cannot restore scheduled Spaces or move a subscription by creating another account.</span></label>
+        <DeletionConfirmationFields email={email} confirmation={confirmation} acknowledge={acknowledge}
+          onEmailChange={setEmail} onConfirmationChange={setConfirmation} onAcknowledgeChange={setAcknowledge}
+          acknowledgement="I understand this is permanent and does not cancel subscription renewal. I will lose access on every device and cannot restore scheduled Spaces or move a subscription by creating another account." />
         <Button variant="destructive" size="default" disabled={busy || !acknowledge || confirmation!=="DELETE" || email.trim().toLowerCase()!==user.email.toLowerCase()} type="submit">{busy ? "Submitting…" : "Permanently delete account"}</Button>
       </form>}
       {reauthenticate && <Button variant="secondary" size="default" onClick={()=>void logout({redirectTo:"/account/delete"})}>Sign out to verify identity</Button>}
