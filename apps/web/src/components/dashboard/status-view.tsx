@@ -95,7 +95,7 @@ export function StatusView({
 
   const registrations: Array<AgentRegistrationSummary & { harness: string }> = (catalog.data?.capabilities ?? [])
     .flatMap((group) => group.locations.filter(registrationListed).map((registration) => ({ ...registration, harness: group.harness })));
-  // Working is what the conversation list shows as in progress: a live
+  // Working is an Instance with work in hand in some conversation: a live
   // process waiting for its next message runs but does not work.
   const working = useMemo(() => new Set(channels.flatMap((channel) => channelWorkInHand(channel, events)
     .map((work) => work.instance.id))), [channels, events]);
