@@ -1040,12 +1040,18 @@ export class PostgresPageRepository {
           && claim.conversationId === input.conversationId) : undefined);
       const expiresAt = new Date(Date.now() + minutes * 60_000).toISOString();
       if (mine) {
-        await tx.query({ name: "page_claim_renew_v2",
+        // A person's own claim is theirs: an occurrence of their Automation leaves the section to them.
+        if (input.holderLabel && !mine.conversationId) {
+          throw new PageControlError("page_block_claimed", 409, `${mine.holder.label} is on this`, { claim: mine });
+        }
+        // An occurrence whose Run never came hands its claim to the next occurrence's conversation.
+        const conversationId = input.conversationId ?? mine.conversationId;
+        await tx.query({ name: "page_claim_renew_v3",
           text: `UPDATE data.page_claims SET expires_at=$3, holder_kind=$4, holder_id=$5, holder_label=$6,
-              owner_user_id=$7, updated_at=now() WHERE space_id=$1 AND claim_id=$2`,
-          values: [spaceId, mine.claimId, expiresAt, holder.kind, holder.id, holder.label, actor.userId],
-          maxRows: 0 });
-        return { claim: { ...mine, holder, ownerUserId: actor.userId, expiresAt } };
+              owner_user_id=$7, conversation_id=$8, updated_at=now() WHERE space_id=$1 AND claim_id=$2`,
+          values: [spaceId, mine.claimId, expiresAt, holder.kind, holder.id, holder.label, actor.userId,
+            conversationId], maxRows: 0 });
+        return { claim: { ...mine, holder, ownerUserId: actor.userId, conversationId, expiresAt } };
       }
       if (active.length) {
         const competitive = await tx.query({ name: "page_block_competitive_v1",
