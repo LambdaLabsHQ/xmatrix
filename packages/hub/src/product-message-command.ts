@@ -28,6 +28,8 @@ export interface AppendMessageCommand {
   finalReplyExecutionId?: string;
   /** The sender declares it is waiting on the people and Agents this message mentions. */
   awaitsResponse?: boolean;
+  /** People a Hub-written card waits on though it mentions nobody. Public HTTP parsing omits this field. */
+  waitsOnUserIds?: string[];
   principal: AuthorityPrincipal;
   /**
    * Trusted scheduled-evaluation sponsor, revalidated atomically with append.

@@ -297,6 +297,36 @@ export async function publishChannelMemberRead(
   return true;
 }
 
+/**
+ * A person acted on a card in a conversation (approved a secret, decided an
+ * access request): that answers what waited on them there, as a reply would.
+ * Best effort: the decision already stands, and Done remains.
+ */
+export async function markChannelResponded(
+  env: Env,
+  waitUntil: (task: Promise<unknown>) => void,
+  channelId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const result = await acknowledgeChannelMessage(env, channelId, {
+      commandId: `product:acknowledge-message:${channelId}:${userId}:responded:${crypto.randomUUID()}`.slice(0, 200),
+      channelId, principal: { kind: "user", id: userId }, responded: true,
+    });
+    if (result.advanced !== true && result.responded !== true) return;
+    const attention = result.attention && typeof result.attention === "object" && !Array.isArray(result.attention)
+      ? result.attention as import("@xmatrix/protocol").ChannelAttentionSummary : undefined;
+    await publishChannelMemberRead(env, waitUntil, {
+      channelId, subjectId: `user:${userId}`, readSequence: Number(result.ackedSequence), actorUserId: userId,
+      ...(attention ? { attention } : {}),
+    });
+  } catch (error) {
+    console.error("Channel responded mark failed", {
+      channelId, error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export function scheduleChannelLiveDelivery(
   env: Env,
   waitUntil: (task: Promise<unknown>) => void,

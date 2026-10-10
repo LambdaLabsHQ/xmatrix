@@ -19,6 +19,8 @@ export async function secretRequestAppend(card: SecretRequestCard, saved: boolea
     channelId: metadata.channelId, body,
     principal: { kind: "user", id: owner.id },
     messageKind: SECRET_REQUEST_MESSAGE_KIND,
+    // The Run cannot go on until it is answered: it waits on its owner.
+    waitsOnUserIds: [owner.id],
     senderSnapshot: { identityId: `user:${owner.id}`, kind: "user", userId: owner.id,
       email: owner.email, label: "xMatrix secret request", name: "xMatrix secret request",
       avatarUrl: XMATRIX_SYSTEM_AVATAR_URL },

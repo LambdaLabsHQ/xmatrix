@@ -2,7 +2,7 @@ import { ControlError, PostgresSpaceSecretRepository, SpaceSecretError, type Run
 import { HUB_ROUTES, parseSecretRequestCard } from "@xmatrix/protocol";
 import type { Context, Hono } from "hono";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
-import { appendChannelMessage } from "./channel-messages";
+import { appendChannelMessage, markChannelResponded } from "./channel-messages";
 import { readBoundedRequestBody, requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { secretRequestAppend } from "./secret-request-card";
@@ -108,8 +108,10 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     const input = await body(c);
     const card = parseSecretRequestCard(input);
     if (!card) throw new SpaceSecretError("invalid_request", 400, "Invalid secret request");
-    return repository(c.env).approve({ userId: user.id, runId: card.runId, channelId: card.channelId,
+    const approved = await repository(c.env).approve({ userId: user.id, runId: card.runId, channelId: card.channelId,
       secretRef: card.secretRef, ...change({ ...input, envName: input.envName ?? card.envName }) });
+    await markChannelResponded(c.env, (task) => c.executionCtx.waitUntil(task), card.channelId, user.id);
+    return approved;
   }));
 
   app.post(HUB_ROUTES.secret_request_status, route("human", async (c, user) => {
