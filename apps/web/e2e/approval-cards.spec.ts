@@ -55,8 +55,23 @@ const secretCard = card(2, {
     runId: "run-1", channelId: E2E_CHANNEL.id },
 });
 
+const accessCard = card(3, {
+  secretAccessRequest: { secretRefs: ["deploy-token"], reason: "Deploys run every hour", agentName: "claude",
+    runId: "run-1", channelId: E2E_CHANNEL.id },
+});
+
+/** What the Hub says of a secret card before and after it is answered. */
+const VALUE_ASKED = {
+  status: { saved: false, readable: false, canApprove: true } as unknown,
+  fulfilled: { saved: true, readable: true, canApprove: true } as unknown,
+};
+const ACCESS_ASKED = {
+  status: { canApprove: true, secrets: [{ secretRef: "deploy-token", access: "ask", envName: "DEPLOY_TOKEN" }] },
+  fulfilled: { canApprove: true, secrets: [{ secretRef: "deploy-token", access: "auto", envName: "DEPLOY_TOKEN" }] },
+};
+
 /** Opens the Channel on these cards; `pending` is what the Hub lists for the dock. */
-async function openCards(page: Page, messages: unknown[], pending: unknown[]) {
+async function openCards(page: Page, messages: unknown[], pending: unknown[], secret = VALUE_ASKED) {
   await installWorkspaceStubs(page, {
     spaces: [E2E_SPACE],
     channels: [{ ...E2E_CHANNEL, messageCount: messages.length, lastMessageSequence: messages.length }],
@@ -66,8 +81,8 @@ async function openCards(page: Page, messages: unknown[], pending: unknown[]) {
     ["cards-pending", "**/api/xmatrix/channels/channel-general/cross-space-read-grants/pending**", { grants: pending }],
     ["cards-grant", GRANT_URL, { grant }],
     ["cards-decision", `${GRANT_URL}/decision`, { grant: { ...grant, status: "approved" } }, "POST"],
-    ["cards-secret", "**/api/secret-requests/status", { saved: false, readable: false, canApprove: true }, "POST"],
-    ["cards-fulfill", "**/api/secret-requests/fulfill", { saved: true, readable: true, canApprove: true }, "POST"],
+    ["cards-secret", "**/api/secret-requests/status", secret.status, "POST"],
+    ["cards-fulfill", "**/api/secret-requests/fulfill", secret.fulfilled, "POST"],
   ];
   for (const [id, pattern, json, method] of stubs) await fixtureJson(page, id, pattern, json, { method });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
@@ -153,6 +168,23 @@ test("a secret card takes the value on the paper, then leads to the Space's secr
   await page.locator('[data-ask-card="settled"]').getByRole("button", { name: "Manage" }).click();
   await expect(page).toHaveURL(/\/settings\?item=secrets$/);
   await expect(page.getByRole("heading", { name: "Secrets", level: 2 })).toBeVisible();
+});
+
+test("a card asking that secrets be read without asking is answered once, for the ticked ones", async ({ page }) => {
+  await openCards(page, [accessCard], [], ACCESS_ASKED);
+  const approval = page.locator('[data-ask-card="open"]');
+  await expect(approval.getByRole("heading", { name: "Let Agents read deploy-token without asking?" })).toBeVisible();
+  await expect(approval.getByText("claude asks · Secret access")).toBeVisible();
+  await expectColourBlock(approval);
+  await expect(approval.getByLabel("Read deploy-token without asking")).toBeChecked();
+
+  await approval.getByRole("button", { name: "Let Agents read it without asking" }).click();
+  const settled = page.locator('[data-ask-card="settled"]');
+  await expect(settled.getByText("Automatic", { exact: true }).first()).toBeVisible();
+  await expect(settled.getByRole("button", { name: "Manage" })).toBeVisible();
+  expect(await fixtureRequestBodies(page, "cards-fulfill")).toEqual([
+    { runId: "run-1", channelId: E2E_CHANNEL.id, secretRefs: ["deploy-token"], messageId: accessCard.messageId },
+  ]);
 });
 
 test("the Pending approvals dock is one block of colour, its asks unframed inside it, and folds to a line each", async ({ page }) => {

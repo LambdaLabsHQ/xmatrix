@@ -114,6 +114,7 @@ try {
     "packages/db/test/app-credential-postgres.test.mjs",
     "packages/db/test/discord-lifecycle-postgres.test.mjs",
     "packages/db/test/sentry-event-postgres.test.mjs",
+    "packages/db/test/message-attention-wait-postgres.test.mjs",
     "packages/db/test/github-write-policy-migration-postgres.test.mjs",
     "packages/db/test/message-history-tombstone-senders-postgres.test.mjs",
     // A history page is one fenced statement, and a placed single read must

@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, installPageTreeStubs } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, fixtureJson, installPageTreeStubs } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -58,3 +58,51 @@ test("page list titles use the same 16px inscription as channel rows", async ({ 
   expect(channelSize).toBe("16px");
   expect(pageSize).toBe(channelSize);
 });
+
+// The parser's unit tests cover syntax; this regression protects the Pages
+// list actually using it, including the mobile list and its ellipsis layout.
+for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2E_MOBILE_CONTEXT]] as const) {
+  test.describe(device, () => {
+    test.use(context);
+
+    test("page summaries and discussion replies render inline rich text in one line", async ({ page }) => {
+      await installPageTreeStubs(page, ["Summary", "Discussion"]);
+      await fixtureJson(page, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, {
+        pages: ["Summary", "Discussion"].map((title, index) => ({
+          pageId: `p-${title.toLowerCase()}`, parentPageId: null, title, position: String.fromCharCode(86 + index),
+          accessMode: "open", headRevision: 1, agentSuggestOnly: false, canEdit: true, updatedAt: E2E_NOW,
+          summary: { text: "**状态**：已上线。 *shared* `syntax` ~~old~~ [notes](https://example.test) "
+            + "![image](https://example.test/image.png) <b>literal</b> " + "Long summary. ".repeat(30) },
+        })),
+      });
+      await fixtureJson(page, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+        pages: [{ pageId: "p-discussion", agents: [], discussions: { open: 1, unread: 0,
+          latest: { from: { kind: "user", label: "**Ada**" }, bodyPreview: "**Ship it** *Friday*?", sentAt: E2E_NOW } } }],
+      });
+
+      await page.goto("/app", { waitUntil: "domcontentloaded" });
+      await page.getByRole("button", { name: "Pages", exact: true }).first().click();
+      const summary = page.locator(".app-page-row:visible", { hasText: "Summary" }).locator(".app-list-row-meta");
+      await expect(summary.locator("strong")).toHaveText("状态");
+      await expect(summary.locator("em")).toHaveText("shared");
+      await expect(summary.locator("code")).toHaveText("syntax");
+      await expect(summary.locator("s")).toHaveText("old");
+      await expect(summary).toContainText("notes image <b>literal</b>");
+      await expect(summary.locator("a, img, b")).toHaveCount(0);
+      const presentation = await summary.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const strong = getComputedStyle(element.querySelector("strong")!);
+        return { ellipsis: style.textOverflow, whiteSpace: style.whiteSpace,
+          clipped: element.scrollWidth > element.clientWidth, height: element.getBoundingClientRect().height,
+          bold: Number(strong.fontWeight) > Number(style.fontWeight) };
+      });
+      expect(presentation).toMatchObject({ ellipsis: "ellipsis", whiteSpace: "nowrap", clipped: true, bold: true });
+      expect(presentation.height).toBeLessThanOrEqual(24);
+
+      const discussion = page.locator(".app-page-row:visible", { hasText: "Discussion" }).locator(".app-list-row-meta");
+      await expect(discussion).toHaveText("**Ada**: Ship it Friday?");
+      await expect(discussion.locator("strong")).toHaveText("Ship it");
+      await expect(discussion.locator("em")).toHaveText("Friday");
+    });
+  });
+}

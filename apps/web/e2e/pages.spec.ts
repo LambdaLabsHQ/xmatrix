@@ -174,14 +174,14 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await expect(tree).toContainText("Company");
   await expect(tree).toContainText("Relay");
   // A page's row counts its open discussions, in the count chip while one has replies not yet read;
-  // its second line says what is happening there, not a row of faces.
+  // its second line says what is happening there, and ends with the faces of the Agents on the page.
   const counts = tree.getByTestId("page-tree-discussions");
   await expect(counts.filter({ has: browser.locator(".app-count-pill") }))
     .toHaveAccessibleName("2 open discussions, 1 with unread replies");
   await expect(counts.filter({ hasNot: browser.locator(".app-count-pill") })).toHaveAccessibleName("1 open discussion");
-  await expect(tree.locator(".identity-avatar-face")).toHaveCount(0);
-  await expect(tree.getByRole("button", { name: "Relay claude:2 editing · Status" })).toBeVisible();
-  await expect(tree.getByRole("button", { name: "Company Ada: Ship it Friday?" })).toBeVisible();
+  await expect(tree.getByTestId("page-tree-agents").locator(".identity-avatar-face")).not.toHaveCount(0);
+  await expect(tree.getByRole("button", { name: /^Relay .*claude:2 editing · Status/u })).toBeVisible();
+  await expect(tree.getByRole("button", { name: /^Company .*Ada: Ship it Friday\?/u })).toBeVisible();
   // The first page opens by default; count the sessions of the page we switch to.
   await expect.poll(() => connections).toBeGreaterThan(0);
   connections = 0;
@@ -280,6 +280,24 @@ test("a conversation bookmarks the pages it touches, previewing them on hover", 
   await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
 });
 
+test("a page bookmark preserves and renders leading bold in its status and hover preview", async ({ page: browser }) => {
+  await openChannelTouchingRelay(browser, undefined, async () => {
+    const doc = editedPageDocument(page("p-relay", null, "Relay", "V"), 3);
+    doc.page.body = BODY.replace("In progress", "**状态**：已上线。 *shared* `syntax` ~~old~~ [notes](https://example.test)");
+    await fixtureJson(browser, "page-relay", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, doc);
+  });
+  const detail = browser.getByTestId("conversation-page-cards").locator(".conversation-page-bookmark-detail");
+  await expect(detail.locator("strong")).toHaveText("状态");
+  await expect(detail.locator("em")).toHaveText("shared");
+  await expect(detail.locator("code")).toHaveText("syntax");
+  await expect(detail.locator("s")).toHaveText("old");
+  await expect(detail).toHaveText("状态：已上线。 shared syntax old notes");
+  await expect(detail.locator("a")).toHaveCount(0);
+  await browser.getByTestId("conversation-page-chip").hover();
+  const preview = browser.getByTestId("conversation-page-preview");
+  await expect(preview.locator("strong")).toHaveText("状态");
+});
+
 test("a bookmark says in small type what the last change to its section did", async ({ page: browser }) => {
   await openChannelTouchingRelay(browser, undefined, async () => {
     // claude's revision 3 turned the section's "Planned" into "In progress".
@@ -291,10 +309,14 @@ test("a bookmark says in small type what the last change to its section did", as
     await fixtureJson(browser, "page-relay-revision-2", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\?revision=2$/u,
       { page: { ...page("p-relay", null, "Relay", "V"), body: BODY.replace("In progress", "Planned"),
         revisionInfo: { revision: 2, kind: "edit", authors: [], conversationIds: [], basedOnRevision: 1, createdAt: NOW } } });
+    const doc = editedPageDocument(page("p-relay", null, "Relay", "V"), 3);
+    doc.page.body = BODY.replace("In progress", "**In progress**");
+    await fixtureJson(browser, "page-relay", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay$/u, doc);
   });
   const card = browser.getByTestId("conversation-page-cards").getByRole("button", { name: /Relay › Status/u });
   await expect(card).toContainText("claude 2h ago");
   await expect(card).toContainText("In progress");
+  await expect(card.locator(".conversation-page-bookmark-detail strong")).toHaveText("In progress");
   await expect(card).not.toContainText("Planned");
 });
 

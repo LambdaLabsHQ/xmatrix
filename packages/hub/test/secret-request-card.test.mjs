@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseSecretRequestCard } from "@xmatrix/protocol";
-import { secretRequestAppend } from "../src/secret-request-card.ts";
+import { parseSecretAccessRequestCard, parseSecretRequestCard } from "@xmatrix/protocol";
+import { secretAccessRequestAppend, secretRequestAppend } from "../src/secret-request-card.ts";
 
 const owner = { id: "owner", email: "owner@example.com" };
 const card = { secretRef: "inventory", envName: "READ_ONLY_TOKEN", runId: "run", channelId: "channel",
@@ -40,4 +40,26 @@ test("only allowlisted card metadata enters the append or its identity", async (
   assert.deepEqual(await secretRequestAppend(parsed, true, owner), clean);
   assert.deepEqual(await secretRequestAppend(noisy, true, owner), clean);
   assert.doesNotMatch(JSON.stringify(clean), /must-never-be-carried|caller metadata|"access"/u);
+});
+
+test("a secret access card names each secret once and carries nothing a caller added", async () => {
+  const asked = { secretRefs: ["metrics", "billing"], runId: "run", channelId: "channel", agentName: "codex",
+    reason: "Daily reports read them", access: "auto", value: "must-never-be-carried" };
+  const parsed = parseSecretAccessRequestCard(asked);
+  assert.deepEqual(parsed, { secretRefs: ["metrics", "billing"], reason: "Daily reports read them",
+    agentName: "codex", runId: "run", channelId: "channel" });
+  for (const secretRefs of [[], ["metrics", "metrics"], ["metrics", 7], ["s".repeat(161)],
+    Array.from({ length: 101 }, (_, index) => `secret-${index}`), "metrics"]) {
+    assert.equal(parseSecretAccessRequestCard({ ...asked, secretRefs }), null);
+  }
+  assert.equal(parseSecretAccessRequestCard(card), null, "a card for one secret's value is not this card");
+  const append = await secretAccessRequestAppend(asked, owner);
+  assert.deepEqual(await secretAccessRequestAppend(parsed, owner), append);
+  assert.match(append.messageId, /^secret-access-request:[a-f0-9]{64}$/u);
+  assert.match(append.body, /read 2 secrets without asking: Daily reports read them/u);
+  assert.deepEqual(append.waitsOnUserIds, [owner.id], "it waits on the Run's owner like any card");
+  assert.deepEqual(append.residual.appMetadata.secretAccessRequest, parsed);
+  assert.doesNotMatch(JSON.stringify(append), /must-never-be-carried|"access"/u);
+  assert.notEqual((await secretAccessRequestAppend({ ...parsed, secretRefs: ["metrics"] }, owner)).messageId,
+    append.messageId);
 });

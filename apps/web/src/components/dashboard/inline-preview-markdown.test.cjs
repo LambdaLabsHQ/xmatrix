@@ -51,42 +51,33 @@ test("a conversation preview renders inline marks and leaves the rest as text", 
 });
 
 function renderPreview(channel) {
-  const source = fs.readFileSync(path.join(__dirname, "channel-row-preview.tsx"), "utf8");
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
-    fileName: "channel-row-preview.tsx",
-  }).outputText;
-  const nodes = [];
-  const jsx = (type, props, key) => {
-    if (typeof type === "function") return type(props);
-    const node = { type, props, key };
-    nodes.push(node);
-    return node;
-  };
-  const runtime = { jsx, jsxs: jsx, Fragment: "fragment" };
-  const react = { Fragment: "fragment" };
-  const mod = { exports: {} };
-  new Function("exports", "require", "module", compiled)(mod.exports, (id) => {
-    if (id === "react/jsx-runtime") return runtime;
-    if (id === "react") return react;
-    if (id === "./inline-preview-markdown") return loaded.exports;
-    throw new Error(`unexpected import ${id}`);
-  }, mod);
-  mod.exports.ChannelRowPreview({ channel });
-  return nodes;
+  function loadComponent(file) {
+    const compiled = ts.transpileModule(fs.readFileSync(path.join(__dirname, file), "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+      fileName: file,
+    }).outputText;
+    const mod = { exports: {} };
+    new Function("exports", "require", "module", compiled)(mod.exports, (id) => {
+      if (id === "./inline-preview-markdown") return loaded.exports;
+      if (id === "./inline-row-preview") return loadComponent("inline-row-preview.tsx");
+      return require(id);
+    }, mod);
+    return mod.exports;
+  }
+  const { ChannelRowPreview } = loadComponent("channel-row-preview.tsx");
+  return require("react-dom/server").renderToStaticMarkup(
+    require("react").createElement(ChannelRowPreview, { channel }),
+  );
 }
 
-test("the row renders the author's text plain and the body's bold as strong", () => {
-  const nodes = renderPreview({
+test("the row renders the author's text plain and the body's inline marks", () => {
+  const html = renderPreview({
     lastMessage: {
-      from: { label: "claude:3" },
-      bodyPreview: "新进展： - **新发现 (A 线)**: 用...",
+      from: { label: "**claude:3**" },
+      bodyPreview: "新进展： - **新发现 (A 线)**: *notes* `code` ~~old~~",
     },
   });
-  const strong = nodes.find((node) => node.type === "strong");
-  assert.equal(strong.props.children, "新发现 (A 线)");
-  const root = nodes.find((node) => node.type === "fragment" && Array.isArray(node.props.children));
-  assert.deepEqual(root.props.children.slice(0, 2), ["claude:3", ": "]);
+  assert.equal(html, "**claude:3**: 新进展： - <strong>新发现 (A 线)</strong>: <em>notes</em> <code>code</code> <s>old</s>");
 });
 
 test("the preview line keeps the author in front of the body", () => {
