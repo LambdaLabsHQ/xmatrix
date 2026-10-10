@@ -120,6 +120,8 @@ export interface AppendPostgresMessage {
   /** Legacy trusted resolver input. New PostgreSQL writes resolve attention atomically from attentionBody. */
   attentionTargets?: Array<{ subjectId: string; kind: "mention" | "broadcast" }>;
   attentionBody?: string;
+  /** The sender declares it is waiting on the people and Agents this message mentions. */
+  awaitsResponse?: boolean;
   /** Untrusted picker intent, validated against the canonical body and current grants. */
   invocationSelections?: unknown;
   runProof?: {
@@ -1556,14 +1558,14 @@ export class PostgresMessageRepository {
             attachmentOwnerUserId, sentAt], maxRows: 0,
         });
       if (targets.size > 0) await transaction.query({
-        name: "message_append_attention_batch_v3",
+        name: "message_append_attention_batch_v4",
         text: `WITH incoming AS MATERIALIZED (
             SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(subject_id text,kind text)
           ), attention_rows AS (
             INSERT INTO data.message_attention
               (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
             SELECT $2,incoming.subject_id,$3,$4,incoming.kind,$5,$6,
-              CASE WHEN incoming.kind='mention' THEN TRUE END FROM incoming
+              CASE WHEN $7::boolean AND incoming.kind='mention' THEN TRUE END FROM incoming
             ON CONFLICT DO NOTHING RETURNING subject_id
           ) INSERT INTO data.message_attention_revisions
             (space_id,subject_id,channel_id,revision,updated_at)
@@ -1575,7 +1577,7 @@ export class PostgresMessageRepository {
             updated_at=EXCLUDED.updated_at`,
         values: [JSON.stringify([...targets].map(([subjectId, kind]) => ({
           subject_id: subjectId, kind,
-        }))), spaceId, channelId, messageId, sequence, sentAt],
+        }))), spaceId, channelId, messageId, sequence, sentAt, input.awaitsResponse === true],
         maxRows: 0,
       });
       // The sender has responded: no mention in this conversation still waits on them.
