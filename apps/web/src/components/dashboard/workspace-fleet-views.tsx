@@ -2,6 +2,7 @@
 
 import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentAvatarUrlFromMetadata, agentLaunchExecutable } from "@xmatrix/protocol";
 import Image from "next/image";
+import { openRepositoryToStar } from "./star-prompt";
 import { registrationStatus } from "./my-agents-registrations";
 import {
   DetailRow,
@@ -97,6 +98,7 @@ import {
   Rocket,
   Settings,
   Shield,
+  Star,
   Siren,
   Terminal,
   Bot,
@@ -235,21 +237,26 @@ export function MoreView({
     },
   );
 
-  /* The desktop rail's Help menu carries this; on a phone it lives here. */
-  if (onReportIssue) {
-    groups.push({
-      label: "Support",
-      items: [
-        {
-          key: "report-issue",
-          label: "Report an issue",
-          description: "Tell us what is broken or missing on GitHub",
-          icon: MessageSquareText,
-          onSelect: onReportIssue,
-        },
-      ],
-    });
-  }
+  /* The desktop rail's Help menu carries these; on a phone they live here. */
+  groups.push({
+    label: "Support",
+    items: [
+      ...(onReportIssue ? [{
+        key: "report-issue",
+        label: "Report an issue",
+        description: "Tell us what is broken or missing on GitHub",
+        icon: MessageSquareText,
+        onSelect: onReportIssue,
+      }] : []),
+      {
+        key: "star",
+        label: "Star on GitHub",
+        description: "Help other developers find xMatrix",
+        icon: Star,
+        onSelect: openRepositoryToStar,
+      },
+    ],
+  });
 
   if (platformAdmin) {
     groups.push({

@@ -78,6 +78,7 @@ import { searchWorkspaceMessages } from "./workspace-message-search";
 import { useWorkspaceShellTailCache } from "./use-workspace-shell-tail-cache";
 import { removeRetiredBrowserReplica } from "@/lib/retired-browser-replica";
 import { maybePushRecipientScopedNativeMessageNotification } from "./recipient-scoped-native-message-notification";
+import { noteAgentAnswered } from "@/lib/star-prompt";
 import { useHumanFocusHistoryHttpFallback } from "./use-human-focus-history-http-fallback";
 import { invalidateWorkspaceResources, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
@@ -1834,6 +1835,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             routeSpaceId: routeSpaceIdRef.current,
             markNotified: markNativeMessageNotified,
           });
+          // An Agent's message that notified this person is the product having
+          // done something for them, which is what the star ask counts.
+          if (!alreadyCached && message.notification && entry.from.kind === "agent") noteAgentAnswered();
           if (selectedChannelIdRef.current === entry.channelId) {
             // Already visible as a pending row at the bottom — do not force a scroll jump.
             if (isOwnChannelMessage(entry, userId) && !claimedOutboundClientId) {
