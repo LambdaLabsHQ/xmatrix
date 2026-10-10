@@ -56,6 +56,8 @@ function changedTags(previous: TimelineItem, next: TimelineItem): string[] {
 /** Same sender moments later on the same day: everything continuation asks but the tags. */
 function sameTurn(previous: TimelineItem, item: TimelineItem): boolean {
   if (previous.isEvent || item.isEvent) return false;
+  // A send that failed, or whose result is unknown, says so in its header.
+  if (item.sendStatus === "unconfirmed" || item.sendStatus === "failed") return false;
   // A provenance badge or a link origin is part of what the reader must see.
   if (item.provenance || item.linkOrigin || item.reservedSystemAgent || previous.reservedSystemAgent) {
     return false;

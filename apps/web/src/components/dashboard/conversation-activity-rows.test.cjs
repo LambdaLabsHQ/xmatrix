@@ -149,3 +149,18 @@ test("a header back within a turn names the changed tags, across the sender's ow
   ]);
   assert.equal(afterOther.retagged, undefined, "someone else in between starts a fresh header");
 });
+
+test("a message on its way is grouped the way it will be once the server confirms it", () => {
+  const first = said(yiming, "first", 0);
+  // What the composer adds the moment the reader sends: no id from the server yet.
+  const onItsWay = { id: "client:c-1", clientMessageId: "c-1", body: "second", sentAt: at(1),
+    author: "Yiming Hu", own: true, senderKind: "user", senderId: "user:yiming", sendStatus: "pending" };
+  const [, pending] = buildConversationRows([first, onItsWay]);
+  assert.equal(pending.continuation, true, "under the sender's own message, without a second header");
+  const [, confirmed] = buildConversationRows([first, { ...onItsWay, messageId: "m-confirmed", sendStatus: undefined }]);
+  assert.equal(confirmed.continuation, true, "and the same once confirmed, so the row does not change shape");
+  for (const sendStatus of ["unconfirmed", "failed"]) {
+    const [, stalled] = buildConversationRows([first, { ...onItsWay, sendStatus }]);
+    assert.equal(stalled.continuation, undefined, `${sendStatus}: the header is where the row says so`);
+  }
+});

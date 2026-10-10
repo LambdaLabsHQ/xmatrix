@@ -1,3 +1,5 @@
+import { observeTimelineBoxes } from "./timeline-reading-anchor";
+
 /* Sending a message moves the timeline the way a chat app does: the new row
    rises out of the composer and the rows above it rise by the room it takes,
    instead of the whole list jumping in one frame. The scroll itself still
@@ -50,4 +52,62 @@ export function playTimelineSendRise(scrollRoot: HTMLElement, sentRow: HTMLEleme
     ],
     timing,
   );
+  followLaterMoves(scrollRoot, sentRow, timing);
+}
+
+/** One send is followed per timeline; the next one takes over. */
+const followedSends = new WeakMap<HTMLElement, () => void>();
+
+/* The row above is where the rise starts from, but the layout is not done
+   moving when the row mounts. The composer gives back the lines of the draft
+   a moment later and the timeline's end comes down with it, the list's height
+   follows its rows by a frame, and the server's copy of the message can be
+   laid out a little differently. Each of these moves every row at once, in
+   one frame, in the middle of the rise.
+
+   While the send is fresh, such a move is drawn as well: the rows go on from
+   where they were to where they now belong. What is followed is how far the
+   new row sits from the end of the timeline, which is where it stands on
+   screen for a reader held at the newest message, and which the reader's own
+   scrolling does not change. */
+function followLaterMoves(scrollRoot: HTMLElement, sentRow: HTMLElement, timing: KeyframeAnimationOptions) {
+  followedSends.get(scrollRoot)?.();
+  // The row's place in the list: its own node is the one being drawn elsewhere.
+  const place = sentRow.parentElement;
+  if (!place || typeof KeyframeEffect === "undefined" || !("composite" in KeyframeEffect.prototype)) return;
+
+  const fromEnd = () =>
+    place.getBoundingClientRect().top - (scrollRoot.scrollHeight - scrollRoot.clientHeight - scrollRoot.scrollTop);
+  let drawn = fromEnd();
+  const follow = () => {
+    if (!place.isConnected) {
+      stop();
+      return;
+    }
+    const now = fromEnd();
+    const moved = now - drawn;
+    if (Math.abs(moved) < 0.5) return;
+    drawn = now;
+    for (const row of scrollRoot.querySelectorAll<HTMLElement>("[data-timeline-rise-row]")) {
+      // On top of the rise that is playing, from where the row was a moment ago.
+      row.animate([{ transform: `translateY(${-moved}px)` }, { transform: "none" }], { ...timing, composite: "add" });
+    }
+  };
+
+  /* A move reaches the page either in a task between two frames or while a
+     frame lays out; it is followed before that frame is painted in both. */
+  const until = performance.now() + SEND_RISE_FRESH_MS;
+  let frame = requestAnimationFrame(function eachFrame() {
+    follow();
+    if (performance.now() > until) stop();
+    else frame = requestAnimationFrame(eachFrame);
+  });
+  const sizes = new ResizeObserver(follow);
+  observeTimelineBoxes(scrollRoot, sizes);
+  function stop() {
+    cancelAnimationFrame(frame);
+    sizes.disconnect();
+    if (followedSends.get(scrollRoot) === stop) followedSends.delete(scrollRoot);
+  }
+  followedSends.set(scrollRoot, stop);
 }
