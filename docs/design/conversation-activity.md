@@ -152,10 +152,16 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 - **What is said.** Others' merge or close, others' submitted reviews and
   new comments, and one CI verdict per settling of the head commit: when a
   check suite completes and every suite with check runs has finished, the
-  Hub reads the commit's checks once and posts `CI passed` or `CI failed`
+  Hub verifies that this is still each subscribed pull request's head, then reads
+  its checks and posts `CI passed` or `CI failed`
   with the failed checks. Two suites reporting the same settling post one
   message; a rerun that settles again posts a new one. The author's own
   pushes, comments, reviews and merge are not said: the Agent did them.
+  Queued GitHub Actions suites hold the verdict before their first job exists;
+  empty suites for other installed apps remain placeholders. Reads are shared
+  across routes for each pull request. Incomplete inventories or unknown check
+  conclusions stay pending; the inventory is bounded to 100 suites and 100
+  latest check runs.
 - **Delivery.** These are GitHub's posts in the conversation, delivered like
   any other message: live Instances receive them, and resting Instances
   wake ([`instance-sleep.md`](../instance-sleep.md) §3). An Agent may therefore end

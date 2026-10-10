@@ -1,5 +1,5 @@
 import { plainRecord } from "@xmatrix/protocol";
-import { githubCommitCheckVerdict } from "./app-connectors";
+import { githubCommitCheckVerdict, type GitHubCommitCheckVerdict } from "./app-connectors";
 import { resolveGitHubSubscriptionRoutes } from "./github-subscription-route-directory";
 import {
   githubIssueSourceRef,
@@ -73,16 +73,9 @@ export async function dispatchProductGitHubWebhook(input: {
     .map((number) => [githubIssueSourceRef(repositoryName, number), number]));
   const routes = await resolveRoutes(input.env, installationId, [repository.sourceRef, ...issues.keys()], feature);
   const repositoryBody = githubWebhookMessageBody(input.event, input.payload, repository);
-  /* One settled verdict per commit, read once for every subscribed pull request. */
+  /* Each pull request must still have this head; share reads across its routes. */
   const settledSha = githubSettledCheckSuiteSha(input.event, input.payload);
-  const verdict = settledSha && routes.some((route) => route.sourceKind === "issue")
-    ? await checkVerdict(input.env, installationId, repository.owner, repository.repo, settledSha)
-      .catch((error: unknown) => {
-        console.error("GitHub check verdict failed", { delivery: input.delivery,
-          error: error instanceof Error ? error.message : String(error) });
-        return undefined;
-      })
-    : undefined;
+  const verdicts = new Map<number, Promise<GitHubCommitCheckVerdict | undefined>>();
   const closed = githubPullRequestClosed(input.event, input.payload);
   let delivered = 0;
   for (let offset = 0; offset < routes.length; offset += 8) {
@@ -92,6 +85,15 @@ export async function dispatchProductGitHubWebhook(input: {
       const number = route.sourceKind === "issue" ? issues.get(route.sourceRef) : undefined;
       if (route.sourceKind === "issue" &&
           (number === undefined || !githubIssueSubscriptionCurrent(input.event, input.payload, route.createdAt))) return 0;
+      if (settledSha && number !== undefined && !verdicts.has(number)) {
+        verdicts.set(number, checkVerdict(input.env, installationId, repository.owner, repository.repo, settledSha, number)
+          .catch((error: unknown) => {
+            console.error("GitHub check verdict failed", { delivery: input.delivery,
+              error: error instanceof Error ? error.message : String(error) });
+            return undefined;
+          }));
+      }
+      const verdict = number === undefined ? undefined : await verdicts.get(number);
       const body = number === undefined ? repositoryBody : githubPullRequestEventMessage({
         event: input.event, payload: input.payload, repository, number,
         ...(verdict ? { verdict } : {}) });
