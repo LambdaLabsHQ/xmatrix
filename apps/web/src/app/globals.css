@@ -7773,6 +7773,32 @@ html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-chan
   font: inherit;
 }
 
+/* A marked section's name is a paper label in its tone: brass for what waits
+   on the reader, blue for their pins, plain ink for the rest (user 2026-10-10:
+   全黑白有点太单调了). The tint is the label's own ink at the labels' strength;
+   the repeated class outranks "Labels take the material they sit on". */
+.xmatrix-app .app-list-section-label {
+  --app-list-section-ink: var(--m-ink-settled, var(--muted-foreground));
+}
+
+/* The sidebar's own ink rules are !important; a label's tone has to outrank them. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-heading .app-list-section-label.app-list-section-label,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-heading .app-list-section-label.app-list-section-label * {
+  color: var(--app-list-section-ink) !important;
+}
+
+.xmatrix-app .app-list-section-label[data-tone="attention"] {
+  --app-list-section-ink: var(--m-ink-attention, var(--accent));
+}
+
+.xmatrix-app .app-list-section-label[data-tone="pinned"] {
+  --app-list-section-ink: oklch(45% 0.11 255);
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-label.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip {
+  background: color-mix(in oklch, var(--app-list-section-ink) 12%, transparent) !important;
+}
+
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-heading .app-list-section-action {
   height: auto;
   min-height: 0;
