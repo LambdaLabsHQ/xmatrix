@@ -47,6 +47,8 @@ import {
   COUNT_CHIP_MATERIAL_CLASS,
   EVENT_ICONS,
   QUICK_REACTION_EMOJIS,
+  TIMELINE_OPENING_ROW_MIN_PX,
+  TIMELINE_OPENING_TAIL_ROWS,
   TIMELINE_VIRTUAL_MIN_OVERSCAN_ITEMS,
   TIMELINE_VIRTUAL_VIEWPORT_PRELOAD_PX,
 } from "./workspace-shell-constants";
@@ -57,7 +59,7 @@ import {
 } from "./workspace-shell-formatters";
 
 import {
-  areMessageRowPropsEqual, type MessageRowComparableProps,
+  areMessageRowPropsEqual, type MessageRowChannel, type MessageRowComparableProps,
   attachmentDownloadHref,
   attachmentDownloadName,
   attachmentFetchHref,
@@ -128,6 +130,13 @@ import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 
 import { Virtuoso, type Components as VirtuosoComponents, type ListItem, type VirtuosoHandle } from "react-virtuoso";
+import { flushSync } from "react-dom";
+import {
+  TIMELINE_OPENING_ROW_ATTRIBUTE,
+  TimelineOpeningTail,
+  TimelineRowSlot,
+  type TimelineOpeningMeasure,
+} from "./timeline-opening-tail";
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
 import { isJustSentRow, playTimelineSendRise } from "./timeline-send-rise";
 import { FoldedActivityRow } from "./conversation-activity-row";
@@ -518,9 +527,18 @@ export const MessageTimeline = memo(function MessageTimeline({
   const launchWindowsByMessage = useMemo(() => new Map([...launchChoicesByMessage]
     .map(([messageId, choice]) => [messageId, firstMessageDecisionWindow(choice, launchOptions)] as const)),
   [launchChoicesByMessage, launchOptions]);
+  // What a row needs of its conversation. The catalog replaces the channel
+  // object on every read receipt and presence change; a row keyed on that
+  // object would render again each time, Markdown included.
+  const channelId = channel?.id;
+  const channelSpaceId = channel?.spaceId;
+  const rowChannel = useMemo<MessageRowChannel | null>(
+    () => (channelId && channelSpaceId ? { id: channelId, spaceId: channelSpaceId } : null),
+    [channelId, channelSpaceId],
+  );
   const chooseFirstLaunch = useCallback(async (messageId: string, body: string, harness: string | null | "shown") => {
-    if (!token || !channel) return;
-    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_choice(channel.id, messageId), {
+    if (!token || !channelId) return;
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_choice(channelId, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, ...(harness === "shown" ? { shown: true } : harness ? { harness } : {}) }),
@@ -528,7 +546,7 @@ export const MessageTimeline = memo(function MessageTimeline({
     // Someone already decided: the refreshed record says what.
     if (!response.ok && response.status !== 409) throw await errorFromResponse(response);
     await refetchAgentLaunches();
-  }, [channel, refetchAgentLaunches, token]);
+  }, [channelId, refetchAgentLaunches, token]);
   const messageTargetEvidence = useMemo(() => {
     const grouped = new Map<string, { executions: NonNullable<AgentInvocationQueryPage["executions"]> }>();
     for (const execution of invocationQueryData?.executions ?? []) {
@@ -538,27 +556,27 @@ export const MessageTimeline = memo(function MessageTimeline({
     return grouped;
   }, [invocationQueryData]);
   const retryAgentLaunch = useCallback(async (launch: SerializedAgentLaunch) => {
-    if (!token || !channel) return;
+    if (!token || !channelId) return;
     const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.agent_launch_retry(launch.launchId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ channelId: channel.id }),
+      body: JSON.stringify({ channelId }),
     });
     if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
-  }, [channel, refetchAgentLaunches, token]);
+  }, [channelId, refetchAgentLaunches, token]);
   // The author answers Jev's intent question for one declined summon; the Hub
   // rechecks the body against the stored message and the caller's authorship.
   const launchAnyway = useCallback(async (messageId: string, body: string, sourceMention: string) => {
-    if (!token || !channel) return;
-    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_anyway(channel.id, messageId), {
+    if (!token || !channelId) return;
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_anyway(channelId, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, sourceMention }),
     });
     if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
-  }, [channel, refetchAgentLaunches, token]);
+  }, [channelId, refetchAgentLaunches, token]);
   // One media store per channel view. A new one is built — and the previous
   // one released — whenever the channel, the viewer, or the session changes. Ordinary message progress is excluded
   // from the dependency list so it does not evict already-authorized media.
@@ -652,6 +670,56 @@ export const MessageTimeline = memo(function MessageTimeline({
   const sinceRowId = since ? rows[since.index]?.id : undefined;
   const isThread = Boolean(channel && isThreadChannel(channel));
   const readingAnchor = useTimelineReadingAnchor(timelineScrollRoot);
+  // A conversation opens on a plain tail of its rows while the virtual list
+  // lands behind it (timeline-opening-tail.tsx). The list is keyed by channel,
+  // so each channel it mounts for opens this way once.
+  const timelineListKey = channel?.id || "channel";
+  const [landedListKey, setLandedListKey] = useState<string | null>(null);
+  const [openingMeasure, setOpeningMeasure] = useState<TimelineOpeningMeasure | null>(null);
+  const opening = rows.length > 0 && landedListKey !== timelineListKey;
+  // The list adopts the tail's rows in one commit and the emptied tail goes in
+  // the next, so each row moves between two nodes that are both in the page.
+  const [tailHandedOver, setTailHandedOver] = useState(false);
+  const tailMounted = opening || tailHandedOver;
+  const openingRows = tailMounted
+    ? rows.slice(-(openingScreenRows.get(timelineListKey) ?? Math.max(
+      TIMELINE_OPENING_TAIL_ROWS,
+      Math.ceil((timelineScrollRoot?.clientHeight ?? 0) / TIMELINE_OPENING_ROW_MIN_PX),
+    )))
+    : rows;
+  const openingComplete = openingRows.length === rows.length;
+  // The tail's rows render once, each into a host the list adopts afterwards.
+  const openingHostsRef = useRef<{ key: string; hosts: Map<string, HTMLDivElement> }>({ key: "", hosts: new Map() });
+  if (openingHostsRef.current.key !== timelineListKey) {
+    openingHostsRef.current = { key: timelineListKey, hosts: new Map() };
+  }
+  const openingHosts = openingHostsRef.current.hosts;
+  if (opening && typeof document !== "undefined") {
+    for (const row of openingRows) {
+      if (!openingHosts.has(row.id)) openingHosts.set(row.id, document.createElement("div"));
+    }
+  }
+  const handleOpeningMeasured = useCallback((measure: TimelineOpeningMeasure) => {
+    rememberOpeningScreenRows(timelineListKey, measure.screenRows);
+    setOpeningMeasure(measure);
+  }, [timelineListKey]);
+  const handleOpeningLanded = useCallback(() => {
+    // Both commits before the next frame: the rows change hands in place.
+    flushSync(() => {
+      setLandedListKey(timelineListKey);
+      setTailHandedOver(true);
+    });
+    flushSync(() => {
+      setTailHandedOver(false);
+      setOpeningMeasure(null);
+    });
+  }, [timelineListKey]);
+  useLayoutEffect(() => {
+    // The list unmounts with its content and opens again when it returns.
+    if (hasTimelineContent) return;
+    openingHostsRef.current.hosts.clear();
+    if (landedListKey !== null) setLandedListKey(null);
+  }, [hasTimelineContent, landedListKey]);
 
   const setTimelineScrollRoot = useCallback((node: HTMLDivElement | null) => {
     timelineScrollRef.current = node;
@@ -675,6 +743,11 @@ export const MessageTimeline = memo(function MessageTimeline({
     const fold = rows[index]?.folded ? rows[index] : undefined;
     if (fold && !openFolds.has(fold.id)) toggleFold(fold.id);
     readingAnchor.release();
+    // A jump leaves the bottom, so the list shows its own rows from here on.
+    if (opening) {
+      setLandedListKey(timelineListKey);
+      setOpeningMeasure(null);
+    }
     const list = timelineVirtuosoRef.current;
     if (!list) {
       // The list has not mounted yet, so the row - if it is on the page at all
@@ -806,92 +879,11 @@ export const MessageTimeline = memo(function MessageTimeline({
     return { spaceId, token, onOpenPage };
   }, [space?.id, channel?.spaceId, token, onOpenPage]);
 
-  return (
-    <PageReferenceScopeProvider scope={pageReferenceScope}>
-    <AnsweredQuestionnairesProvider timeline={timeline}>
-    <MentionReadChannelScopeProvider scope={mentionReadScope}>
-    <div
-      ref={setTimelineScrollRoot}
-      /* A real gesture always beats an automatic scroll: reading back through
-         history right after opening a channel must not be undone by the
-         landing that is still settling. */
-      onTouchStart={handleTimelineScrollGesture}
-      onWheel={handleTimelineScrollGesture}
-      onScroll={(event) => {
-        const scrollTop = event.currentTarget.scrollTop;
-        stableOnScrollPositionChange(
-          isTimelineNearBottom(event.currentTarget),
-          scrollTop
-        );
-      }}
-      className={cn(
-        "app-message-timeline min-h-0 flex-1 overflow-y-auto bg-card",
-        hasWorkDock && "app-message-timeline-work-dock-offset"
-      )}
-    >
-      {/* A refresh must not hide already-rendered rows.
-          Skeleton only when there is nothing to show yet. */}
-      {loading && !hasTimelineContent && (
-        <MessageTimelineSkeleton messageCount={channel?.messageCount} />
-      )}
-
-      {!loading && !hasChannels && (
-        <EmptyConversation
-          title="No channels"
-          body="Mention an agent to create an instance."
-        />
-      )}
-
-      {!loading && hasChannels && !channel && (
-        <EmptyConversation
-          title="No conversation open"
-          body="Pick one from the list, or start a new one."
-        />
-      )}
-
-      {!loading && hasChannels && channel && !hasTimelineContent && (
-        <EmptyConversation
-          title={`#${channelTitle(channel)}`}
-          body={
-            error
-              ? error
-              : "No messages yet."
-          }
-        />
-      )}
-
-      {hasTimelineContent && timelineScrollRoot && (
-        <Virtuoso
-          key={channel?.id || "channel"}
-          ref={timelineVirtuosoRef}
-          customScrollParent={timelineScrollRoot}
-          // Measure in this layout pass so delayed virtualizer compensation
-          // cannot be mistaken for a new reader scroll by the prepend anchor.
-          skipAnimationFrameInResizeObserver
-          data={rows}
-          firstItemIndex={nextTimelineFirstItemIndex}
-          initialTopMostItemIndex={{ index: "LAST", align: "end" }}
-          // Render a bounded buffer beyond the viewport. Without it, a quick
-          // upward scroll can outrun dynamic row measurement and briefly show
-          // the timeline surface before the next messages mount.
-          increaseViewportBy={TIMELINE_VIRTUAL_VIEWPORT_PRELOAD_PX}
-          minOverscanItemCount={TIMELINE_VIRTUAL_MIN_OVERSCAN_ITEMS}
-          // `startReached` is tied to the absolute list index and misses this
-          // inverse timeline because its first item index intentionally stays
-          // positive for prepend anchoring. The virtualizer's top-state API is
-          // scroll-position based, so it reliably requests the next keyset
-          // page before a reader reaches the visible boundary.
-          atTopThreshold={240}
-          atTopStateChange={handleTimelineAtTopStateChange}
-          computeItemKey={(_index, message) => message.id}
-          itemsRendered={handleTimelineItemsRendered}
-          components={TIMELINE_VIRTUOSO_COMPONENTS}
-          // Header and Footer are stable components that render this
-          // context. An inline component is a new type on every render, so
-          // React remounted the whole header - intro, loader, thread root -
-          // each time the timeline rendered.
-          context={{
-            header: (
+  const timelineFooterClassName = cn(
+    "app-message-timeline-scroll-end pb-4",
+    hasWorkDock && "app-message-timeline-scroll-end-work-dock",
+  );
+  const timelineHeader = (
               <div className="pt-4" data-timeline-rise-row="">
                 {/* The top bar already carries the channel's name, visibility
                     and topic. Repeating them here as an icon, a title and a
@@ -957,22 +949,8 @@ export const MessageTimeline = memo(function MessageTimeline({
           )}
 
               </div>
-            ),
-            // This footer belongs to Virtuoso's measured content. Its class
-            // receives the same composer and dock clearance that the
-            // non-virtualized timeline's content wrapper used to receive.
-            footer: (
-              <div
-                ref={messagesEndRef}
-                className={cn(
-                  "app-message-timeline-scroll-end pb-4",
-                  hasWorkDock && "app-message-timeline-scroll-end-work-dock",
-                )}
-              />
-            ),
-          }}
-          itemContent={(_index, message) => {
-            return (
+  );
+  const renderTimelineRow = (_index: number, message: TimelineItem) => (
               <div
                 key={message.id}
                 id={messageAnchorId(message)}
@@ -1018,7 +996,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
                   currentUserIdentityId={currentUserIdentityId}
-                  channel={channel}
+                  channel={rowChannel}
                   token={token}
                     mediaStore={mediaStore}
                   isJoined={isJoined}
@@ -1044,7 +1022,144 @@ export const MessageTimeline = memo(function MessageTimeline({
                 />
                 )}
               </div>
+  );
+  const measuredRowHeights = openingMeasure ? Array.from(openingMeasure.rowHeights.values()) : [];
+  // Rows above the tail have no measured height yet; they land on the average.
+  const openingFallbackRowHeight = measuredRowHeights.length > 0
+    ? measuredRowHeights.reduce((sum, height) => sum + height, 0) / measuredRowHeights.length
+    : 64;
+
+  return (
+    <PageReferenceScopeProvider scope={pageReferenceScope}>
+    <AnsweredQuestionnairesProvider timeline={timeline}>
+    <MentionReadChannelScopeProvider scope={mentionReadScope}>
+    <div
+      ref={setTimelineScrollRoot}
+      /* A real gesture always beats an automatic scroll: reading back through
+         history right after opening a channel must not be undone by the
+         landing that is still settling. */
+      onTouchStart={handleTimelineScrollGesture}
+      onWheel={handleTimelineScrollGesture}
+      onScroll={(event) => {
+        const scrollTop = event.currentTarget.scrollTop;
+        stableOnScrollPositionChange(
+          isTimelineNearBottom(event.currentTarget),
+          scrollTop
+        );
+      }}
+      className={cn(
+        "app-message-timeline min-h-0 flex-1 overflow-y-auto bg-card",
+        hasWorkDock && "app-message-timeline-work-dock-offset"
+      )}
+    >
+      {/* A refresh must not hide already-rendered rows.
+          Skeleton only when there is nothing to show yet. */}
+      {loading && !hasTimelineContent && (
+        <MessageTimelineSkeleton messageCount={channel?.messageCount} />
+      )}
+
+      {!loading && !hasChannels && (
+        <EmptyConversation
+          title="No channels"
+          body="Mention an agent to create an instance."
+        />
+      )}
+
+      {!loading && hasChannels && !channel && (
+        <EmptyConversation
+          title="No conversation open"
+          body="Pick one from the list, or start a new one."
+        />
+      )}
+
+      {!loading && hasChannels && channel && !hasTimelineContent && (
+        <EmptyConversation
+          title={`#${channelTitle(channel)}`}
+          body={
+            error
+              ? error
+              : "No messages yet."
+          }
+        />
+      )}
+
+      {tailMounted && timelineScrollRoot && (
+        <TimelineOpeningTail
+          // Its own key: the list beside it is keyed by the channel alone.
+          key={`opening:${timelineListKey}`}
+          scrollRoot={timelineScrollRoot}
+          complete={openingComplete}
+          header={timelineHeader}
+          footerClassName={timelineFooterClassName}
+          onMeasured={handleOpeningMeasured}
+          onLanded={handleOpeningLanded}
+        >
+          {openingRows.map((message) => {
+            const host = openingHosts.get(message.id);
+            return host && (
+              <TimelineRowSlot key={message.id} host={host} {...{ [TIMELINE_OPENING_ROW_ATTRIBUTE]: message.id }} />
             );
+          })}
+        </TimelineOpeningTail>
+      )}
+      {openingHosts.size > 0 && rows.map((message, index) => {
+        const host = openingHosts.get(message.id);
+        return host ? createPortal(renderTimelineRow(nextTimelineFirstItemIndex + index, message), host, message.id) : null;
+      })}
+
+      {hasTimelineContent && timelineScrollRoot && (
+        <Virtuoso
+          key={timelineListKey}
+          ref={timelineVirtuosoRef}
+          customScrollParent={timelineScrollRoot}
+          // Measure in this layout pass so delayed virtualizer compensation
+          // cannot be mistaken for a new reader scroll by the prepend anchor.
+          skipAnimationFrameInResizeObserver
+          data={rows}
+          firstItemIndex={nextTimelineFirstItemIndex}
+          initialTopMostItemIndex={{ index: "LAST", align: "end" }}
+          // Render a bounded buffer beyond the viewport. Without it, a quick
+          // upward scroll can outrun dynamic row measurement and briefly show
+          // the timeline surface before the next messages mount.
+          increaseViewportBy={TIMELINE_VIRTUAL_VIEWPORT_PRELOAD_PX}
+          minOverscanItemCount={TIMELINE_VIRTUAL_MIN_OVERSCAN_ITEMS}
+          // `startReached` is tied to the absolute list index and misses this
+          // inverse timeline because its first item index intentionally stays
+          // positive for prepend anchoring. The virtualizer's top-state API is
+          // scroll-position based, so it reliably requests the next keyset
+          // page before a reader reaches the visible boundary.
+          atTopThreshold={240}
+          atTopStateChange={handleTimelineAtTopStateChange}
+          computeItemKey={(_index, message) => message.id}
+          itemsRendered={handleTimelineItemsRendered}
+          components={TIMELINE_VIRTUOSO_COMPONENTS}
+          // Header and Footer are stable components that render this
+          // context. An inline component is a new type on every render, so
+          // React remounted the whole header - intro, loader, thread root -
+          // each time the timeline rendered.
+          context={{
+            // While the tail is up the list holds its place and draws nothing:
+            // the tail shows the header when it shows every row.
+            header: opening
+              ? openingComplete
+                ? <div style={{ height: openingMeasure?.headerHeight ?? 0 }} />
+                : <div className="invisible">{timelineHeader}</div>
+              : timelineHeader,
+            // This footer belongs to Virtuoso's measured content. Its class
+            // receives the same composer and dock clearance that the
+            // non-virtualized timeline's content wrapper used to receive.
+            footer: (
+              <div ref={messagesEndRef} className={timelineFooterClassName} />
+            ),
+          }}
+          // A blank of the row's measured height until the list has landed;
+          // then the rows the tail drew move in, and the rest render here.
+          itemContent={(index, message) => {
+            if (opening) {
+              return <div style={{ height: openingMeasure?.rowHeights.get(message.id) ?? openingFallbackRowHeight }} />;
+            }
+            const host = openingHosts.get(message.id);
+            return host ? <TimelineRowSlot host={host} /> : renderTimelineRow(index, message);
           }}
         />
       )}
@@ -1126,6 +1241,20 @@ export function messageAnchorId(message: TimelineItem): string | undefined {
 }
 
 
+
+/* How many rows filled each conversation's screen when it last opened. It
+   opens on that many again, plus the ones a taller screen or shorter messages
+   may need, so reopening one renders no more than it shows. */
+const OPENING_SCREEN_ROWS_LIMIT = 200;
+const OPENING_SCREEN_ROWS_SPARE = 2;
+const openingScreenRows = new Map<string, number>();
+function rememberOpeningScreenRows(listKey: string, screenRows: number): void {
+  openingScreenRows.delete(listKey);
+  if (openingScreenRows.size >= OPENING_SCREEN_ROWS_LIMIT) {
+    openingScreenRows.delete(openingScreenRows.keys().next().value!);
+  }
+  openingScreenRows.set(listKey, screenRows + OPENING_SCREEN_ROWS_SPARE);
+}
 
 const EMPTY_FOLDS: ReadonlySet<string> = new Set();
 /* Rows are memoized on identity: a fresh `[]` per render would re-render every

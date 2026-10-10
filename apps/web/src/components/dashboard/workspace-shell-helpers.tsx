@@ -630,11 +630,14 @@ export function pointerMidpoint(first: { x: number; y: number }, second: { x: nu
   return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
 }
 
+/** What a message row reads of its conversation: never the catalog's whole, ever-changing record. */
+export type MessageRowChannel = Pick<SerializedChannel, "id" | "spaceId">;
+
 export type MessageRowComparableProps = {
   message: TimelineItem;
   contextOnly?: boolean;
   currentUserIdentityId: string;
-  channel: SerializedChannel | null;
+  channel: MessageRowChannel | null;
   token: string | null;
   mediaStore: MessageAttachmentMediaStore;
   isJoined: boolean;

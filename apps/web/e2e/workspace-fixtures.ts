@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 import {
   fixtureChannelCatalog,
@@ -360,6 +360,14 @@ export async function openGeneralChannelWithHistory(
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", {
     waitUntil: "domcontentloaded",
   });
+}
+
+/* A conversation opens on a plain tail of its rows and the virtual list takes
+   over a moment later. A spec that sends, or counts renders, from the first
+   quarter second waits for that, as a reader's hands do. Call it once the
+   conversation's rows are on screen. */
+export async function conversationOpened(page: Page): Promise<void> {
+  await expect(page.locator(".app-message-timeline-opening-tail")).toHaveCount(0);
 }
 
 /* Keyset history stub shared by every spec that needs more than one page:
