@@ -63,6 +63,26 @@ test("JSON body classification preserves malformed JSON, locked bodies and calle
   await assert.rejects(xmatrixApiRequest({ url: "/spaces", signal: controller.signal }), (error) => error === cancellation);
 });
 
+test("invalid successful JSON reports a safe parser stack and bounded response facts", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  for (const [body, media, expected] of [
+    [null, undefined, "empty; media=missing"],
+    ["<html>private-account-token</html>", "text/html", "nonempty; media=html"],
+    ['{"private-account-token":', "application/json", "nonempty; media=json"],
+  ]) {
+    globalThis.fetch = async () => new Response(body, { headers: media ? { "content-type": media } : {} });
+    await assert.rejects(xmatrixApiRequest({ url: "/transfers" }), (error) => {
+      assert.ok(error instanceof SyntaxError);
+      assert.equal(error.message, `Invalid JSON response (HTTP 200; ${expected})`);
+      assert.match(error.stack, /\n\s+at /);
+      assert.doesNotMatch(error.stack, /private-account-token/);
+      assert.equal(shouldRetryXMatrixQuery(0, error), false, "malformed JSON is still a defect");
+      return true;
+    });
+  }
+});
+
 test("same-key subscribers share one in-flight query", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let calls = 0;
