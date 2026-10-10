@@ -22,6 +22,7 @@ import {
   shouldRefreshAuthSessionState,
 } from "./auth-session-policy";
 import { getDesktopBridge } from "./desktop/bridge";
+import { disableBrowserPush } from "./push-subscription";
 import { XMatrixQueryProvider } from "./query/query-provider";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 
@@ -289,6 +290,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setState((prev) => ({ ...prev, loading: true }));
+    // A signed-out browser is told nothing: forget its push subscription while the session can still say so.
+    const accessToken = state.session?.access_token;
+    if (accessToken) await disableBrowserPush(accessToken).catch(() => undefined);
     await Promise.allSettled([clearNativeSession(), signOutBetterAuth()]);
     setState({ session: null, user: null, loading: false });
     router.push(options?.redirectTo === "/account/delete" ? "/account/delete" : "/login");
