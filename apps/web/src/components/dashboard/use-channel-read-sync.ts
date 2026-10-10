@@ -51,6 +51,31 @@ export function useChannelReadSync({
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
 
+  const applyReadState = useCallback((channelId: string, readState: ChannelReadStateUpdate) => {
+    const readSequence = Math.max(
+      lastSyncedReadSequenceRef.current[channelId] || 0,
+      readState.readSequence || 0,
+    );
+    lastSyncedReadSequenceRef.current[channelId] = readSequence;
+    setChannels((current) => updateChannelReadState(current, channelId, {
+      ...readState,
+      readSequence,
+    }));
+    // The sidebar badge is rendered from the paged catalog, which no
+    // realtime read update reaches. Without this the channel stays lit
+    // after it has been read, until the catalog happens to refetch.
+    const currentUserId = userIdRef.current;
+    if (currentUserId) {
+      applyChannelReadStateToCatalog({
+        client: queryClient,
+        prefix: xmatrixQueryKeys.all({ userId: currentUserId }),
+        readStates: new Map([[channelId, { ...readState, readSequence }]]),
+      });
+    }
+  }, [queryClient, setChannels]);
+  const applyReadStateRef = useRef(applyReadState);
+  applyReadStateRef.current = applyReadState;
+
   if (!coordinatorRef.current) {
     coordinatorRef.current = new ChannelReadSyncCoordinator({
       send: (channelId, sequence) => {
@@ -59,30 +84,23 @@ export function useChannelReadSync({
           ? syncChannelReadCursor(accessToken, channelId, sequence)
           : Promise.resolve(undefined);
       },
-      onSuccess: (channelId, readState) => {
-        const readSequence = Math.max(
-          lastSyncedReadSequenceRef.current[channelId] || 0,
-          readState.readSequence || 0,
-        );
-        lastSyncedReadSequenceRef.current[channelId] = readSequence;
-        setChannels((current) => updateChannelReadState(current, channelId, {
-          ...readState,
-          readSequence,
-        }));
-        // The sidebar badge is rendered from the paged catalog, which no
-        // realtime read update reaches. Without this the channel stays lit
-        // after it has been read, until the catalog happens to refetch.
-        const currentUserId = userIdRef.current;
-        if (currentUserId) {
-          applyChannelReadStateToCatalog({
-            client: queryClient,
-            prefix: xmatrixQueryKeys.all({ userId: currentUserId }),
-            readStates: new Map([[channelId, { ...readState, readSequence }]]),
-          });
-        }
-      },
+      onSuccess: (channelId, readState) => applyReadStateRef.current(channelId, readState),
     });
   }
+
+  /** The reader is done with what waits on them in a conversation: read to its head, mentions answered. */
+  const markChannelResponded = useCallback(async (channelId: string) => {
+    const accessToken = accessTokenRef.current;
+    const channel = channelsRef.current.find((candidate) => candidate.id === channelId);
+    const sequence = Math.max(channel?.historyHeadSequence ?? 0, channel?.messageCount ?? 0,
+      channel?.attention?.lastMessageSequence ?? 0);
+    if (!accessToken || sequence <= 0) return;
+    const readState = await syncChannelReadCursor(accessToken, channelId, sequence, true);
+    // The Hub omits a cleared attention summary, and that absence is the answer.
+    if (readState) applyReadState(channelId, { attention: readState.attention, readSequence: readState.readSequence });
+    updateChannelReadCounts((current) => (current[channelId] || 0) >= sequence
+      ? current : { ...current, [channelId]: sequence });
+  }, [accessTokenRef, applyReadState, channelsRef, updateChannelReadCounts]);
 
   useEffect(() => () => coordinatorRef.current?.reset(), []);
 
@@ -133,6 +151,7 @@ export function useChannelReadSync({
   }, []);
 
   return {
+    markChannelResponded,
     markChannelReadToSequence,
     observeChannelReadSequence,
     resetChannelReadSync,

@@ -102,6 +102,7 @@ import {
   Bell,
   Building,
   Check,
+  CheckCheck,
   ChevronDown,
   Clock,
   Copy,
@@ -161,6 +162,8 @@ export type ChannelSidebarProps = {
   /** Opens Team → All, where every workspace is created, deleted, or restored. */
   onManageSpaces: () => void;
   onTogglePinned: (channelId: string) => void;
+  /** The reader is done with what waits on them in this conversation. */
+  onMarkDone: (channelId: string) => void;
   onCopyChannelLink: (channel: SerializedChannel) => Promise<void>;
   onSelectSpace: (spaceId: string) => void;
   onSelect: (channelId: string, messageId?: string) => void;
@@ -189,6 +192,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   onRenameSpace,
   onManageSpaces,
   onTogglePinned,
+  onMarkDone,
   onCopyChannelLink,
   onSelectSpace,
   onSelect,
@@ -315,6 +319,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
   });
   const selectIntakeRow = useStableCallback((channel: SerializedChannel) => onSelect(channel.id));
   const togglePinnedRow = useStableCallback((channel: SerializedChannel) => onTogglePinned(channel.id));
+  const markDoneRow = useStableCallback((channel: SerializedChannel) => onMarkDone(channel.id));
   const channelEventsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
   const channelEvents = useMemo(() => {
     const views = channelEventViews(
@@ -398,6 +403,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
                   isPinnedRoot={false}
                   onSelect={selectIntakeRow}
                   onTogglePinned={togglePinnedRow}
+                  onMarkDone={channelWaitsOnReader(channel) ? markDoneRow : undefined}
                   onOpenContextMenu={openChannelContextMenu}
                 />
               ))}
@@ -426,6 +432,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
                   isPinnedRoot={channelPinLookup.pinnedChannelIds.has(channel.id)}
                   onSelect={selectConversationRow}
                   onTogglePinned={togglePinnedRow}
+                  onMarkDone={channelWaitsOnReader(channel) ? markDoneRow : undefined}
                   onOpenContextMenu={openChannelContextMenu}
                 />
               );
@@ -447,6 +454,20 @@ export const ChannelSidebar = memo(function ChannelSidebar({
           role="menu"
           aria-label={`Channel actions for ${channelTitle(channelContextMenu.channel)}`}
         >
+          {channelWaitsOnReader(channelContextMenu.channel) && (
+            <button
+              type="button"
+              role="menuitem"
+              className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-sm font-semibold hover:bg-muted"
+              onClick={() => {
+                onMarkDone(channelContextMenu.channel.id);
+                setChannelContextMenu(null);
+              }}
+            >
+              <CheckCheck className="size-4" />
+              <span>Done</span>
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -773,6 +794,11 @@ export function SidebarSpaceHeader({
 export { SpaceAvatar, spaceAvatarStyle, spaceDisambiguatorId } from "./workspace-shell-chrome";
 import { SpaceAvatar, spaceDisambiguatorId } from "./workspace-shell-chrome";
 
+/** The conversation holds a mention, reply or broadcast its reader has not dealt with. */
+export function channelWaitsOnReader(channel: SerializedChannel): boolean {
+  return (channel.attention?.unreadAttentionCount ?? 0) > 0;
+}
+
 /**
  * A conversation list's sections: the conversations waiting on the reader
  * (an unread mention, reply or broadcast addressed to them), then their pins,
@@ -787,7 +813,7 @@ export function channelListSections(
   const pinned: SerializedChannel[] = [];
   const recent: SerializedChannel[] = [];
   for (const channel of channels) {
-    if ((channel.attention?.unreadAttentionCount ?? 0) > 0) needsYou.push(channel);
+    if (channelWaitsOnReader(channel)) needsYou.push(channel);
     else (pinnedChannelIds.has(channel.id) ? pinned : recent).push(channel);
   }
   const sections: Array<{
@@ -1235,12 +1261,14 @@ export function MobileChannelInlineActions({
   pinned,
   onClose,
   onTogglePinned,
+  onMarkDone,
   onCopyChannelLink,
 }: {
   channel: SerializedChannel;
   pinned: boolean;
   onClose: () => void;
   onTogglePinned: () => void;
+  onMarkDone?: () => void;
   onCopyChannelLink: () => Promise<void>;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -1271,6 +1299,7 @@ export function MobileChannelInlineActions({
         label={`Channel actions for ${channelTitle(channel)}`}
         className="app-mobile-channel-inline-actions"
         actions={[
+          ...(onMarkDone ? [{ key: "done", icon: CheckCheck, label: "Done", onSelect: onMarkDone }] : []),
           {
             key: "pin",
             icon: pinned ? PinOff : Pin,
@@ -1307,6 +1336,7 @@ export function MobileChannelChatList({
   events,
   canCreateChannel,
   onTogglePinned,
+  onMarkDone,
   onCopyChannelLink,
   onSelect,
 }: {
@@ -1326,6 +1356,8 @@ export function MobileChannelChatList({
   /** False until the signed-in person and their Space have loaded. */
   canCreateChannel: boolean;
   onTogglePinned: (channelId: string) => void;
+  /** The reader is done with what waits on them in this conversation. */
+  onMarkDone: (channelId: string) => void;
   onCopyChannelLink: (channel: SerializedChannel) => Promise<void>;
   onSelect: (channelId: string, messageId?: string) => void;
 }) {
@@ -1418,6 +1450,10 @@ export function MobileChannelChatList({
                           onTogglePinned(channel.id);
                           setActionChannelId(null);
                         }}
+                        onMarkDone={channelWaitsOnReader(channel) ? () => {
+                          onMarkDone(channel.id);
+                          setActionChannelId(null);
+                        } : undefined}
                         onCopyChannelLink={() => onCopyChannelLink(channel)}
                       />
                     )}
@@ -1482,6 +1518,7 @@ export const ChannelNavItem = memo(function ChannelNavItem({
   isPinnedRoot,
   onSelect,
   onTogglePinned,
+  onMarkDone,
   onOpenContextMenu,
 }: ChannelNavItemProps) {
   const { onRowPointerDown, onRowClick } = usePointerFirstSelect(() => onSelect(channel));
@@ -1540,7 +1577,19 @@ export const ChannelNavItem = memo(function ChannelNavItem({
             ? `Unread mention in #${channelTitle(channel)}`
             : `Unread messages in #${channelTitle(channel)}`
         }
-        trailing={<button
+        trailing={<>{onMarkDone && <button
+          type="button"
+          data-channel-row-action="true"
+          aria-label={`Done with #${channelTitle(channel)}`}
+          title="Done"
+          onClick={(event) => {
+            event.stopPropagation();
+            onMarkDone(channel);
+          }}
+          className="flex size-5 shrink-0 items-center justify-center rounded text-sidebar-foreground/55 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [@media(hover:hover)_and_(pointer:fine)]:pointer-events-none [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/channel-row:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/channel-row:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover/channel-row:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover/channel-row:opacity-100"
+        >
+          <CheckCheck className="size-3.5" />
+        </button>}<button
           type="button"
           data-channel-row-action="true"
           aria-label={pinActionLabel}
@@ -1565,7 +1614,7 @@ export const ChannelNavItem = memo(function ChannelNavItem({
           {isPinnedRoot && (
             <PinOff className="absolute size-3.5 opacity-0 transition-opacity group-focus-visible/pin-toggle:opacity-100 group-hover/pin-toggle:opacity-100" />
           )}
-        </button>}
+        </button></>}
       />
     </LiquidGlassPill>
   );
