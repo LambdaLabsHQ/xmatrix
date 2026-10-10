@@ -10,7 +10,7 @@ const RELEASE = { ...E2E_CHANNEL, id: "5f0c2d4e-8a1b-4c3d-9e2f-1a2b3c4d5e6f", na
 const PAGE_ID = "0b7c2a1e-4f3d-4c2b-9a8e-1d2c3b4a5f6e";
 const RELAY = { pageId: PAGE_ID, parentPageId: null, title: "Relay", position: "V", accessMode: "open",
   headRevision: 6, agentSuggestOnly: false, canEdit: true, updatedAt: NOW };
-const BODY = "# Relay\n\n## Status\n\nIn progress\n\n## Notes\n\nnone\n";
+const BODY = "# Relay\n\n## Status\n\nIn progress\n\n## Notes\n\n**none**\n";
 
 type Page = Parameters<Parameters<typeof test>[2]>[0]["page"];
 
@@ -83,6 +83,7 @@ test("channel: and page: references render as chips that open their targets", as
   await expect(section).toContainText("Relay › Notes");
   await section.hover();
   await expect(browser.getByTestId("page-reference-preview")).toContainText("none");
+  await expect(browser.getByTestId("page-reference-preview").locator("strong")).toHaveText("none");
 
   await channels.nth(0).hover();
   await expect(browser.getByTestId("channel-reference-preview")).toContainText("Where trains ship");
