@@ -5,8 +5,6 @@
 include!("runtime_process_utf8.rs");
 mod runtime_utf8_shell;
 pub use runtime_utf8_shell::maybe_run_utf8_shell;
-mod runtime_gh_entrypoint;
-pub use runtime_gh_entrypoint::maybe_run_gh;
 include!("runtime_harness_cli.rs");
 include!("runtime_agent_cli_admission.rs");
 mod automation;

@@ -1,4 +1,4 @@
-import { pullRequestActivityMessageId, subscribeConversationToPullRequest } from "../github-pull-request-subscription";
+import { subscribeConversationToPullRequest } from "../github-pull-request-subscription";
 import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
 import type {
   AgentInstanceClientMessage,
@@ -691,9 +691,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       }
       throw error;
     }
-    const messageId = activity.kind === "pull_request"
-      ? pullRequestActivityMessageId(session.run.instanceId, activity)
-      : runtimeCommandId("activity", message.requestId);
+    const messageId = runtimeCommandId("activity", message.requestId);
     const appended = await this.appendAsRun(session, message.requestId, {
       messageId,
       commandPrefix: "agent-activity",

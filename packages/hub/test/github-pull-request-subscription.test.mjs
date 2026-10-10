@@ -5,8 +5,8 @@ import {
   githubIssueSourceRef,
   githubPullRequestEventMessage,
   githubWebhookIssueNumbers,
-  reportRunPullRequest,
   subscribeConversationToPullRequest,
+  subscribeRunToPullRequest,
 } from "../src/github-pull-request-subscription.ts";
 import { dispatchProductGitHubWebhook } from "../src/product-github-webhook-authority-adapter.ts";
 
@@ -206,27 +206,25 @@ test("two pull requests sharing a commit retain separate head checks and share e
   assert.deepEqual(h.appended.map(entry=>entry.channelId).sort(), ["channel-1", "channel-2", "channel-3"]);
 });
 
-test("a Run reporting its pull request records the entry and subscribes before it is answered", async () => {
-  const run = { agentId: "instance-1", agentName: "claude", runId: "run-1", executionKey: "execution-1",
-    instanceId: "instance-1", ownerUserId: "user-1", spaceId: "space-1" };
-  const appended = [];
-  const subscribed = [];
-  const report = (url) => reportRunPullRequest({ run, channelId: "channel-1", url,
-    append: async (command, context) => { appended.push({ command, context }); },
-    subscribe: async (opened) => { subscribed.push(opened); return true; } });
-  const first = await report("https://github.com/Acme/App/pull/7");
-  assert.deepEqual(first, { messageId: "activity:pull-request:instance-1:acme/app#7", repository: "Acme/App",
-    number: 7, subscribed: true });
-  assert.equal(appended[0].command.body, "↗ Opened pull request Acme/App#7");
-  assert.equal(appended[0].command.messageKind, "xmatrix.activity");
-  assert.deepEqual(appended[0].command.agentRunProof,
-    { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" });
-  assert.deepEqual(appended[0].context, { actorUserId: "user-1", senderRunId: "run-1" });
-  assert.deepEqual(subscribed[0], { spaceId: "space-1", channelId: "channel-1", ownerUserId: "user-1",
-    repository: "Acme/App", number: 7, commandId: first.messageId });
-  // The same Instance reporting it again repeats the same command, so nothing new is written.
-  await report("https://github.com/Acme/App/pull/7");
-  assert.equal(appended[1].command.commandId, appended[0].command.commandId);
-  await assert.rejects(report("https://github.com/Acme/App/issues/7"), /pull_request_url/u);
-  assert.equal(appended.length, 2);
+test("an Agent asking for a pull request's subscription is told whether it is subscribed now", async () => {
+  const commands = [];
+  const input = { spaceId: "space-1", channelId: "channel-1", ownerUserId: "user-1",
+    url: "https://github.com/Acme/App/pull/7", commandId: "product:pull-request-subscribe:r-1" };
+  const connection = { id: "space-1:github", status: "configured" };
+  const deps = (overrides) => ({ findConnection: async () => connection, installationFor: async () => "42",
+    pullRequestOpen: async () => true,
+    command: async (_env, kind, value) => { commands.push({ kind, value }); }, ...overrides });
+  const subscription = async (overrides, url = input.url) =>
+    (await subscribeRunToPullRequest({}, { ...input, url }, deps(overrides))).subscription;
+  assert.deepEqual(await subscribeRunToPullRequest({}, input, deps()),
+    { repository: "Acme/App", number: 7, subscription: "subscribed" });
+  assert.equal(commands[0].value.sourceRef, "github:issue:acme/app#7");
+  assert.deepEqual(commands[0].value.principal, { kind: "user", id: "user-1" });
+  // A closed pull request would never be unsubscribed, and one that cannot be read is not reached.
+  assert.equal(await subscription({ pullRequestOpen: async () => false }), "closed");
+  assert.equal(await subscription({ pullRequestOpen: async () => { throw new Error("github_not_found"); } }),
+    "unreachable");
+  assert.equal(await subscription({ findConnection: async () => null }), "unreachable");
+  assert.equal(commands.length, 1);
+  await assert.rejects(subscription({}, "https://github.com/Acme/App/issues/7"), /pull_request_url/u);
 });

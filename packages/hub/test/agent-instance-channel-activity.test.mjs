@@ -52,8 +52,7 @@ test("an opened pull request subscribes the conversation it was opened in, as th
   });
   assert.equal(commands[0].input.body, "↗ Opened pull request LambdaLabsHQ/xmatrix#189");
   assert.deepEqual(opened, [{ spaceId: "space", channelId: "channel", ownerUserId: "owner",
-    repository: "LambdaLabsHQ/xmatrix", number: 189,
-    commandId: "activity:pull-request:instance-1:lambdalabshq/xmatrix#189" }]);
+    repository: "LambdaLabsHQ/xmatrix", number: 189, commandId: "activity:r-3" }]);
   await port.execute(session, {
     type: "channel_activity", requestId: "r-4", channelId: "channel",
     activity: { kind: "plan", completed: ["Open the pull request"], steps: [] },

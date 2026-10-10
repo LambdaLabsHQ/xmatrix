@@ -807,19 +807,31 @@ export async function readGitHubPullRequestForReview(
   };
 }
 
-/** The commit a pull request's head is at now. */
-export async function readGitHubPullRequestHead(
+async function readGitHubPullRequest(
   env: AppConnectorEnv,
   connection: AppConnectorConnectionView,
   repository: { owner: string; repo: string },
   number: number
-): Promise<string> {
+) {
   const auth = await githubInstallationAuthWithCapability(env, connection, "github.pull_requests.read", repository);
-  const pull = githubObject(await fetchGitHubJson(env,
+  return githubObject(await fetchGitHubJson(env,
     `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}/pulls/${number}`, auth.token));
-  const sha = githubString(githubObject(pull.head).sha);
+}
+
+/** The commit a pull request's head is at now. */
+export async function readGitHubPullRequestHead(
+  ...pull: Parameters<typeof readGitHubPullRequest>
+): Promise<string> {
+  const sha = githubString(githubObject((await readGitHubPullRequest(...pull)).head).sha);
   if (!sha) throw new Error("github_pull_request_head_missing");
   return sha;
+}
+
+/** Whether a pull request is open now. */
+export async function readGitHubPullRequestOpen(
+  ...pull: Parameters<typeof readGitHubPullRequest>
+): Promise<boolean> {
+  return githubString((await readGitHubPullRequest(...pull)).state) === "open";
 }
 
 export async function checkAppConnectorProviderConnection(

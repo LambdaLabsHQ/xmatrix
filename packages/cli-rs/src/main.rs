@@ -5,9 +5,6 @@ use colored::Colorize;
 use xmatrix_cli_args::Cli;
 
 fn main() {
-    if let Some(code) = xmatrix_cli_runtime::maybe_run_gh() {
-        std::process::exit(code);
-    }
     if let Some(result) = xmatrix_cli_runtime::maybe_run_utf8_shell() {
         match result {
             Ok(code) => std::process::exit(code),

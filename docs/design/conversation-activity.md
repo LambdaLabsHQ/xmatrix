@@ -69,7 +69,7 @@ by supplying metadata (§6).
 | Kind | Reported by | Carries |
 |---|---|---|
 | `plan` | The Run's runtime, when its plan tool (Claude Code `TodoWrite`, Codex `turn/plan/updated`, ACP `plan`) completes steps or replaces the plan | Newly completed steps, the step now in progress, and the plan snapshot (at most 30 steps) |
-| `pull_request` | The Run, when it opened a pull request (§3.6) | Repository, number, URL |
+| `pull_request` | The Run's runtime, when a command it ran created a pull request | Repository, number, URL |
 
 - **Sender.** The entry is authored by the reporting Run's Agent Instance
   under its Run proof, like a message it sends, so attribution and ordering
@@ -138,20 +138,20 @@ CI never started, and a Run that slept or was restarted lost the watch
 without knowing. Only Claude Code can start a turn by itself when a
 background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 
-- **Report.** The Run says it opened a pull request; nothing is inferred
-  from GitHub. The daemon puts an `xmatrix` entrypoint named `gh` first on
-  every Run's PATH. It runs the real `gh` unchanged and, after a
-  `gh pr create` that succeeds, runs
-  `xmatrix channel subscribe <channel> <pull-request-url>`
-  (`POST /api/channels/:channelId/pull-requests`), which answers once the
-  entry is recorded and the subscription made; the outcome is printed in the
-  command's own output, where the Agent reads it. This holds for every
-  harness. A login shell can put another `gh` ahead of the entrypoint, so the
-  Claude Code and Codex runtimes still report the pull requests they see in
-  command output; the entry is named by Instance and pull request, so two
-  reports are one entry. A pull request opened any other way (`gh api`, a
-  connector tool, the website) is subscribed by the Agent with the same
-  command.
+- **Report.** GitHub cannot say which Run opened a pull request (every Run
+  acts as its owner's one account), so the Run reports it. Its runtime sees
+  `gh pr create` in the commands Claude Code and Codex run and reports the
+  pull request it printed. That is the only place that sees what the harness
+  ran whatever its shell and PATH are: a login shell reorders PATH, so a
+  `gh` entrypoint placed in front of the real one is bypassed.
+- **An Agent subscribes itself.** `xmatrix channel subscribe <channel>
+  <pull-request-url>` (`POST /api/channels/:channelId/pull-requests`)
+  subscribes the conversation as the Run's owner and answers `subscribed`,
+  `closed` (a closed pull request reports nothing more and would never be
+  unsubscribed) or `unreachable`. Agents run it before they stop watching a
+  pull request, so a report the runtime missed, a pull request opened another
+  way (`gh api`, a connector tool, the website) and one that was closed and
+  reopened are all subscribed, and the Agent knows it.
 - **Subscription.** When the Hub records a `pull_request` entry it subscribes
   the conversation to that pull request, as the Run's owner, through the
   Space's GitHub connection: an ordinary source relation of kind `issue`,

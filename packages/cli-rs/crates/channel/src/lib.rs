@@ -1770,15 +1770,15 @@ async fn cmd_channel_react(
     Ok(())
 }
 
-/// Only an Agent Run reports a pull request; the Hub answers once the entry
-/// is recorded and says whether the Space's GitHub connection reaches it.
+/// The Hub answers once it is decided, so the caller knows whether the pull
+/// request will report to the conversation before it stops watching it.
 async fn cmd_channel_subscribe(
     hub_url: &str,
     token: &str,
     channel_id: &str,
     pull_request: &str,
 ) -> error::Result<()> {
-    let reported: serde_json::Value = http::request_json(
+    let answer: serde_json::Value = http::request_json(
         &with_route(
             hub_url,
             &format!(
@@ -1793,19 +1793,24 @@ async fn cmd_channel_subscribe(
     .await?;
     let name = format!(
         "{}#{}",
-        reported["repository"].as_str().unwrap_or_default(),
-        reported["number"]
+        answer["repository"].as_str().unwrap_or_default(),
+        answer["number"]
     );
-    if reported["subscribed"].as_bool() == Some(true) {
-        println!(
-            "{} Subscribed to {name}: its CI verdict, reviews, comments and merge arrive in this conversation",
-            "✓".green().bold()
-        );
-        return Ok(());
+    match answer["subscription"].as_str() {
+        Some("subscribed") => {
+            println!(
+                "{} Subscribed to {name}: its CI verdict, reviews, comments and merge arrive in this conversation",
+                "✓".green().bold()
+            );
+            Ok(())
+        }
+        Some("closed") => Err(CliError::Launch(format!(
+            "{name} is closed, so it reports nothing more and is not subscribed."
+        ))),
+        _ => Err(CliError::Launch(format!(
+            "This Space's GitHub connection does not reach {name}, so nothing about it will arrive in this conversation. Watch it yourself."
+        ))),
     }
-    Err(CliError::Launch(format!(
-        "{name} is recorded as opened, but this Space's GitHub connection does not reach it, so nothing about it will arrive here. Watch it yourself."
-    )))
 }
 
 async fn cmd_channel_delete_message(

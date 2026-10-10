@@ -1813,8 +1813,8 @@ pub enum ChannelCommand {
         /// Emoji to toggle, for example 👍
         emoji: String,
     },
-    /// Subscribe a conversation to a pull request you opened: its CI verdict,
-    /// reviews, comments and merge then arrive there as messages
+    /// Subscribe a conversation to a pull request: its CI verdict, reviews,
+    /// comments and merge then arrive there as messages
     Subscribe {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
