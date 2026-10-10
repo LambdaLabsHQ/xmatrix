@@ -130,9 +130,9 @@ function names(agents: readonly PageTreeAgent[]): string {
 /**
  * A page row's second line, what is happening on the page: an Agent editing
  * it and where, else the newest reply in its open discussions, else who is
- * reading it, else when it last changed.
+ * reading it, else how the page stands (its summary), else when it last changed.
  */
-export function pageRowMeta(page: Pick<PageSummary, "updatedAt">, agents: readonly PageTreeAgent[],
+export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary">, agents: readonly PageTreeAgent[],
   latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()) {
   const editing = agents.filter((agent) => agent.activity === "editing");
   if (editing.length > 0) {
@@ -141,6 +141,7 @@ export function pageRowMeta(page: Pick<PageSummary, "updatedAt">, agents: readon
   }
   if (latest) return `${latest.from.label}: ${latest.bodyPreview}`;
   if (agents.length > 0) return `${names(agents)} reading`;
+  if (page.summary?.text) return page.summary.text;
   const age = formatRelativeAge(page.updatedAt, now);
   return age ? `Edited ${age}` : "";
 }

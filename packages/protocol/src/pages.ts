@@ -16,6 +16,11 @@ export interface PageSummary {
   publishedAt: string | null;
   /** The page that states how the Space is run (docs/design/open-project-governance.md §4). */
   governance: boolean;
+  /**
+   * One line saying how the page stands, and the revision it was written for.
+   * It describes the page as it is only while `revision` is `headRevision`.
+   */
+  summary?: { text: string; revision: number; at: string } | null;
 }
 
 export interface PageAuthor { kind: "user" | "agent"; id: string; label: string; ownerUserId?: string }

@@ -301,6 +301,14 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision) });
   }));
 
+  // A page's summary, written for the revision its writer read.
+  app.put(`${base}/:pageId/summary`, async (c) => run(c, async () => {
+    const body = await json(c);
+    return repository(c.env).setSummary({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      pageId: c.req.param("pageId"), principal: await principal(c), baseRevision: integer(body.baseRevision),
+      summary: body.summary as string });
+  }));
+
   // Claims: a lease on a block, so the Space sees who is on what. Anyone who
   // edits the page claims; an owner or admin opens a block for competition.
   app.get(`${base}/:pageId/claims`, async (c) => run(c, async () => repository(c.env).claims({
