@@ -149,8 +149,15 @@ test("append commits structured invocation intent with its source and excludes o
   await new PostgresMessageRepository(db).append(input);
   const stored = JSON.parse(db.calls.find(call => call.name === "message_agent_targets_commit_v1").values[3]);
   assert.deepEqual(stored, { entityVersion: 1, bodyHash, targets: [], selections: invocationSelections });
-  assert.deepEqual(JSON.parse(db.calls.find(call => call.name === "message_append_attention_batch_v4").values[0]),
+  assert.deepEqual(JSON.parse(db.calls.find(call => call.name === "message_append_attention_batch_v5").values[0]),
     [{ subject_id: "user:alice", kind: "mention" }]);
+  // A Hub-written card waits on a person it does not mention; only that row is marked.
+  await new PostgresMessageRepository(db).append({ ...input, commandId: "command-card-wait",
+    messageId: "message-card-wait", waitsOnUserIds: ["bob"] });
+  const cardWait = db.calls.filter(call => call.name === "message_append_attention_batch_v5").at(-1);
+  assert.deepEqual(JSON.parse(cardWait.values[0]), [{ subject_id: "user:alice", kind: "mention" },
+    { subject_id: "user:bob", kind: "mention", waits: true }]);
+  assert.equal(cardWait.values[6], false);
   await assert.rejects(() => new PostgresMessageRepository(db).append({ ...input,
     invocationSelections: { ...invocationSelections, sourceRevision: 2 } }), error => error.code === "invocation_selection_stale");
 });
@@ -675,7 +682,7 @@ test("Message append reauthorizes and commits every relational fact with one out
   for (const queryName of [
     "message_append_preflight_v4",
     "message_append_commit_facts_v5",
-    "message_append_attention_batch_v4",
+    "message_append_attention_batch_v5",
     "message_append_publish_unmetered_v1",
   ]) assert.equal(db.calls.some((call) => call.name === queryName), true, queryName);
   const billingAdvance = db.calls.find(
@@ -860,7 +867,7 @@ for (const [body, ambiguous, broadcast] of [
   }
   await append();
 
-  const attentionWrite = db.calls.find((call) => call.name === "message_append_attention_batch_v4");
+  const attentionWrite = db.calls.find((call) => call.name === "message_append_attention_batch_v5");
   assert.deepEqual(JSON.parse(attentionWrite.values[0]), broadcast ? [
     { subject_id: "user:user-2", kind: "broadcast" },
     { subject_id: "user:user-3", kind: "broadcast" },
@@ -878,7 +885,7 @@ for (const [body, ambiguous, broadcast] of [
   assert.equal(db.calls.some((call) => call.name === "message_attention_authorize_v3"), true);
   await new PostgresMessageRepository(db).append({ ...request, commandId: "command-literal-attention",
     messageId: "message-literal-attention", attentionBody: "`@everyone`\n\n> @everyone\n\n@alice inspect" });
-  const literalWrite = db.calls.filter(call => call.name === "message_append_attention_batch_v4").at(-1);
+  const literalWrite = db.calls.filter(call => call.name === "message_append_attention_batch_v5").at(-1);
   assert.deepEqual(JSON.parse(literalWrite.values[0]), [{ subject_id: "user:user-2", kind: "mention" }]);
 
 });
