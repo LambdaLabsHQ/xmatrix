@@ -160,7 +160,6 @@ test("the + and the content line keep their 16px inset whatever side gap the nat
       if (inset === null) document.documentElement.style.removeProperty("--app-native-dock-inset");
       else document.documentElement.style.setProperty("--app-native-dock-inset", `${inset}px`);
     }, inset);
-    // The web dock's side gap: clamp(0.875rem, 3.6vw, 1.125rem).
     const contentEdge = width - 16;
     await expect.poll(async () => {
       const [fabBox, searchBox, timeRight] = await Promise.all([fab.boundingBox(), search.boundingBox(),
