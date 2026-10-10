@@ -2,7 +2,7 @@
 import { actionClass } from "@/components/ui/action-tone";
 import { useState } from "react";
 import { ErrorNotice } from "@/components/ui/error-notice";
-import { errorFromResponse, isTransientFailure } from "@/lib/query/api-client";
+import { errorFromResponse, isTransientFailure, unexpectedResponse, xmatrixApiRequest } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,12 +27,13 @@ export function ChannelTransferQueue({ token, userId, spaceId, channelId, enable
   const query = useQuery({ queryKey: ["channel-transfers", userId, spaceId, channelId ?? ""],
     enabled: Boolean(enabled && token && spaceId), refetchInterval: () => refetchUnlessHumanPush(15_000),
     queryFn: async ({ signal }) => {
-      const response = await fetch(WEB_PROXY_ROUTES.space_channel_transfers(spaceId) +
-        (channelId ? `?channelId=${encodeURIComponent(channelId)}` : ""), {
-        headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal,
+      const response = await xmatrixApiRequest<{ proposals: Proposal[] }>({
+        url: WEB_PROXY_ROUTES.space_channel_transfers(spaceId) +
+          (channelId ? `?channelId=${encodeURIComponent(channelId)}` : ""),
+        token: token ?? undefined, signal,
       });
-      if (!response.ok) throw await errorFromResponse(response);
-      return (await response.json()).proposals as Proposal[];
+      if (!response || !Array.isArray(response.proposals)) throw unexpectedResponse("Transfer proposals");
+      return response.proposals;
     },
   });
   async function acknowledge(proposal: Proposal, role: "outbound" | "inbound") {
