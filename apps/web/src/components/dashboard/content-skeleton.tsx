@@ -2,16 +2,35 @@
 
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { ListSectionHeading, RECENT_SECTION } from "./list-section-heading";
+import {
+  CHANNEL_CHAT_ROW_CLASS_NAME,
+  CHANNEL_ROW_HASH_CLASS_NAME,
+  CHANNEL_ROW_NAME_CLASS_NAME,
+  CHANNEL_ROW_PREVIEW_CLASS_NAME,
+  CHANNEL_ROW_PREVIEW_LINE_CLASS_NAME,
+  CHANNEL_ROW_TIME_CLASS_NAME,
+  CHANNEL_ROW_TITLE_CLASS_NAME,
+  CHANNEL_ROW_TITLE_LINE_CLASS_NAME,
+  LIST_ROW_CLASS_NAME,
+  LIST_ROW_COPY_CLASS_NAME,
+  LIST_ROW_LEADING_CLASS_NAME,
+  LIST_ROW_LEADING_TWO_LINE_CLASS_NAME,
+  LIST_ROW_META_CLASS_NAME,
+  LIST_ROW_TITLE_CLASS_NAME,
+  LIST_ROW_TITLE_LINE_CLASS_NAME,
+} from "./row-frames";
 
 const LINE_WIDTHS = ["long", "medium"] as const;
-const LIST_WIDTHS = ["long", "medium", "long", "short"] as const;
-const CHANNEL_SKELETON_ROWS = [
-  ["72%", "48%"],
-  ["56%", "64%"],
-  ["80%", "40%"],
-  ["48%", "58%"],
-  ["68%", "36%"],
-  ["60%", "52%"],
+const LIST_SKELETON_ROWS = [
+  ["9rem", "62%"],
+  ["6.5rem", "44%"],
+  ["10.5rem", "70%"],
+  ["7.5rem", "38%"],
+  ["8.5rem", "56%"],
+  ["6rem", "48%"],
+  ["9.5rem", "66%"],
+  ["7rem", "40%"],
 ] as const;
 
 /** Stacked text bars for a panel that has nothing to show yet. */
@@ -38,27 +57,40 @@ export function ContentSkeleton({
   );
 }
 
-/** Rows shaped like a list entry: a mark, a title, and a second line. */
+/** Placeholder rows inside a list row's own boxes (row-frames): only the
+ *  mark, the title and the line under it are bars. `mark={false}` for rows
+ *  that are text alone. Outside a list column, zero the row's insets. */
 export function ListSkeleton({
   label,
   rows = 4,
+  mark = true,
   className,
 }: {
   label: string;
   rows?: number;
+  mark?: boolean;
   className?: string;
 }) {
   return (
     <div className={cn("app-list-skeleton", className)} role="status" aria-label={label}>
-      {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className="app-list-skeleton-row" aria-hidden="true">
-          <span className="app-list-skeleton-mark" />
-          <span className="app-list-skeleton-copy">
-            <span className="app-content-skeleton-line" data-width={LIST_WIDTHS[index % LIST_WIDTHS.length]} />
-            <span className="app-content-skeleton-line" data-width="short" />
-          </span>
-        </div>
-      ))}
+      {Array.from({ length: rows }, (_, index) => {
+        const [title, meta] = LIST_SKELETON_ROWS[index % LIST_SKELETON_ROWS.length];
+        return (
+          <div key={index} className={LIST_ROW_CLASS_NAME} aria-hidden="true">
+            {mark && (
+              <span className={cn(LIST_ROW_LEADING_CLASS_NAME, LIST_ROW_LEADING_TWO_LINE_CLASS_NAME)}>
+                <span className="app-list-skeleton-mark" />
+              </span>
+            )}
+            <span className={LIST_ROW_COPY_CLASS_NAME}>
+              <span className={LIST_ROW_TITLE_LINE_CLASS_NAME}>
+                <span className={LIST_ROW_TITLE_CLASS_NAME}><span className="app-skeleton-bar" style={{ width: title }} /></span>
+              </span>
+              <span className={LIST_ROW_META_CLASS_NAME}><span className="app-skeleton-bar" style={{ width: meta }} /></span>
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -87,22 +119,35 @@ export function useEmptySurfaceSkeleton(
   return show;
 }
 
-/** Conversation rows for the channel list while the catalog is still arriving. */
+/** The conversation list while its catalog is still arriving: its section
+ *  heading, then placeholder rows inside a conversation row's own boxes
+ *  (row-frames). Only the name, the time and the preview are bars. */
 export function ChannelListSkeleton({
   label = "Loading channels",
-  rows = 6,
+  rows = LIST_SKELETON_ROWS.length,
 }: {
   label?: string;
   rows?: number;
 }) {
   return (
-    <div className="app-channel-list-skeleton" role="status" aria-label={label}>
-      {CHANNEL_SKELETON_ROWS.slice(0, rows).map(([title, preview], index) => (
-        <div key={index} className="app-channel-skeleton-row" aria-hidden="true">
-          <span className="app-channel-skeleton-title" style={{ width: title }} />
-          <span className="app-channel-skeleton-preview" style={{ width: preview }} />
-        </div>
-      ))}
+    <div className="app-list-skeleton" role="status" aria-label={label}>
+      <div aria-hidden="true">
+        <ListSectionHeading {...RECENT_SECTION} />
+        {LIST_SKELETON_ROWS.slice(0, rows).map(([title, preview], index) => (
+          <div key={index} className={cn(CHANNEL_CHAT_ROW_CLASS_NAME, "flex w-full")}>
+            <span className={CHANNEL_ROW_TITLE_LINE_CLASS_NAME}>
+              <span className={CHANNEL_ROW_TITLE_CLASS_NAME}>
+                <span className={CHANNEL_ROW_HASH_CLASS_NAME}>#</span>
+                <span className={CHANNEL_ROW_NAME_CLASS_NAME}><span className="app-skeleton-bar" style={{ width: title }} /></span>
+              </span>
+              <span className={CHANNEL_ROW_TIME_CLASS_NAME}><span className="app-skeleton-bar" style={{ width: "1.25rem" }} /></span>
+            </span>
+            <span className={CHANNEL_ROW_PREVIEW_LINE_CLASS_NAME}>
+              <span className={CHANNEL_ROW_PREVIEW_CLASS_NAME}><span className="app-skeleton-bar" style={{ width: preview }} /></span>
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

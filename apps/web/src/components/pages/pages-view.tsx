@@ -332,7 +332,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
     <>
       {creation.error && <p className={`${inset} pb-2 text-xs text-destructive`}>{creation.error}</p>}
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        {tree.isLoading && <ListSkeleton label="Loading pages" rows={6} className={inset} />}
+        {tree.isLoading && <ListSkeleton label="Loading pages" rows={6} />}
         {tree.isError && <p className={`${inset} text-sm text-destructive`}>Pages are unavailable.</p>}
         {tree.data && roots.length === 0 && (
           <div className={`${inset} py-4 text-sm text-muted-foreground`}>
