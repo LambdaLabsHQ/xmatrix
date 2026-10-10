@@ -135,11 +135,30 @@ test("scheduled tagged Auto uses the shared post-commit dispatcher without a lau
     assert.equal(spawn.channelId, persisted.lastChannelId);
     assert.notEqual(spawn.channelId, task.channelId);
     // Its section is held for that conversation from the start, so a Run that never writes it leaves it owed.
-    const [held] = await sectionClaims(worker, await channelSpaceId(channel.id), persisted.pageId);
+    const [held] = await sectionClaims(worker, space.id, persisted.pageId);
     assert.equal(held.blockId, "schedules");
     assert.equal(held.conversationId, spawn.channelId);
     assert.deepEqual(held.holder, { kind: "user", id: userId, label: "One-shot from scheduled message" });
     sendSpawnResult(daemon, spawn, { channelId: spawn.channelId, ok: false, error: "test completed before provider launch" });
+
+    // That Run never came. The next occurrence takes the same claim into its own conversation,
+    // so its Run is not turned away by a claim nobody is working under.
+    const nextSpawn = daemon.inbox.waitFor(
+      (message) => message.type === "machine_spawn_agent" && isSpawnOf(message, registration) &&
+        message.channelId !== spawn.channelId,
+      "the next occurrence's spawn",
+      20_000,
+    );
+    void nextSpawn.catch(() => {});
+    const current = (await listTasks(worker)).automations.find((candidate) => candidate.id === task.id);
+    const ranNow = await worker.fetch(`/api/spaces/${encodeURIComponent(space.id)}/pages/${
+      encodeURIComponent(persisted.pageId)}/automations/${encodeURIComponent(task.id)}/run`,
+    { method: "POST", headers: authHeaders, body: JSON.stringify({ expectedVersion: current.version }) });
+    assert.equal(ranNow.status, 200, await ranNow.clone().text());
+    const second = await nextSpawn;
+    assert.deepEqual((await sectionClaims(worker, space.id, persisted.pageId))
+      .map((claim) => [claim.claimId, claim.conversationId]), [[held.claimId, second.channelId]]);
+    sendSpawnResult(daemon, second, { channelId: second.channelId, ok: false, error: "test completed before provider launch" });
   } finally {
     if (daemon) daemon.ws.close();
     await worker.stop();

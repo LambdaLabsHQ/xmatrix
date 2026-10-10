@@ -552,6 +552,14 @@ integration("an Automation occurrence's claim passes to the Run in its conversat
     assert.deepEqual([...(await owed()).keys()], [], "nothing is owed while the occurrence holds it");
     await t.client.query("UPDATE data.page_claims SET expires_at=now() - interval '1 minute' WHERE claim_id=$1",
       [abandoned.claimId]);
+    // The next occurrence, in another conversation, inherits a claim no Run took; a person's own claim it leaves alone.
+    const first = (await opened("search")).claim;
+    const next = (await pages.claim(call({ principal: t.owner, blockId: "search", conversationId: ids.closed,
+      holderLabel: "Daily audit" }))).claim;
+    assert.deepEqual([next.claimId, next.conversationId], [first.claimId, ids.closed]);
+    await pages.claim(call({ principal: t.owner, blockId: "" }));
+    await assert.rejects(pages.claim(call({ principal: t.owner, blockId: "", conversationId: ids.open,
+      holderLabel: "Daily audit" })), (error) => error.code === "page_block_claimed");
     const lapsed = (await owed()).get("billing");
     assert.equal(lapsed?.reason, "lapsed");
     assert.equal(lapsed?.holder, "Daily audit");
