@@ -189,7 +189,7 @@ export class RelayPageSession extends DurableObject<Env> {
         try {
           const result = await this.session.submitEdit(body.principal, body);
           await this.settle();
-          this.ctx.waitUntil(this.summaryDue());
+          this.later(this.summaryDue());
           return Response.json(result);
         } catch (error) {
           if (error instanceof PageSessionConflict) {
@@ -205,7 +205,7 @@ export class RelayPageSession extends DurableObject<Env> {
         const running = await this.ctx.storage.get<SummaryExecution>("summary");
         if (running?.requestId === body.requestId) await this.ctx.storage.put("summary", { ...running, ended: true });
         // The page may have moved on while that one ran: the next one reads the new head.
-        this.ctx.waitUntil(this.summaryDue());
+        this.later(this.summaryDue());
         return Response.json({ ok: true });
       }
       if (request.method === "POST" && url.pathname === "/internal/view") {
@@ -296,7 +296,7 @@ export class RelayPageSession extends DurableObject<Env> {
     if (attachment) this.session.disconnect(attachment.connectionId);
     await this.settle();
     // The last person leaving is when a page they edited gets its summary.
-    this.ctx.waitUntil(this.summaryDue(socket));
+    this.later(this.summaryDue(socket));
   }
 
   /**
@@ -306,6 +306,11 @@ export class RelayPageSession extends DurableObject<Env> {
    * last of them leaves; an Agent's edit is summarised at once. One at a time:
    * a change during a summary is picked up when that summary ends.
    */
+  /** Work that outlives the call that started it; a test's context may not retain it. */
+  private later(task: Promise<unknown>): void {
+    try { this.ctx.waitUntil(task); } catch { void task; }
+  }
+
   private async summaryDue(leaving?: WebSocket): Promise<void> {
     try {
       if (!this.spaceId || !this.pageId) return;
