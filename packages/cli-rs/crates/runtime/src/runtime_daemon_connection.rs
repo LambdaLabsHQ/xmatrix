@@ -115,6 +115,7 @@ fn replay_result_matches_command(
         ),
         Some("machine_quota_probe") => ("machine_quota_probe_result", &["requestId"]),
         Some("machine_harness_action") => ("machine_harness_action_result", &["requestId"]),
+        Some("machine_text_task") => ("machine_text_task_result", &["requestId"]),
         Some("machine_worktree_action") => ("machine_worktree_action_result", &["requestId"]),
         _ => return Ok(false),
     };
@@ -176,6 +177,7 @@ fn command_admission_report(command: &MachineDaemonCommand) -> error::Result<Mac
         } => (request_id.clone(), None, Some(channel_id.clone())),
         MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
         | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
+        | MachineDaemonCommand::MachineTextTask { request_id, .. }
         | MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id.clone(), None, None)
         }
@@ -247,6 +249,7 @@ fn prepare_command_effect(
         MachineDaemonCommand::MachineHarnessAction { request_id, .. } => {
             (request_id, "harness_action")
         }
+        MachineDaemonCommand::MachineTextTask { request_id, .. } => (request_id, "text_task"),
         MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id, "worktree_action")
         }
@@ -543,6 +546,36 @@ async fn execute_leased_harness_action(
             eprintln!("Harness inventory report deferred: {error}");
         }
     Some(MachineDaemonReport::MachineHarnessActionResult {
+        request_id,
+        result,
+        relay_lease,
+    })
+}
+
+/// A text task answers once: its lease is held while the harness works, and a
+/// redelivery while the same request is still running is ignored. Running it
+/// again after a lost answer costs one more answer and changes nothing here.
+async fn execute_leased_text_task(
+    hub_url: &str,
+    relay: &SharedMachineDaemonConnection,
+    command: MachineDaemonCommand,
+) -> Option<MachineDaemonReport> {
+    let MachineDaemonCommand::MachineTextTask {
+        request_id,
+        preset_id,
+        instruction,
+        input,
+        relay_lease,
+    } = command
+    else {
+        return None;
+    };
+    let _in_flight = runtime_daemon_harness_action::claim_request(&request_id)?;
+    let lease = relay_lease.as_ref()?;
+    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "text task").await?;
+    let result =
+        crate::runtime_daemon_text_task::execute(&request_id, &preset_id, &instruction, &input).await;
+    Some(MachineDaemonReport::MachineTextTaskResult {
         request_id,
         result,
         relay_lease,
@@ -2089,6 +2122,8 @@ async fn cmd_daemon_connected(
             "machine_quota_probe_v2",
             "machine_harness_inventory_v1",
             "machine_harness_action_v1",
+            // The daemon answers one bounded text task with a fresh, tool-less harness process.
+            "machine_text_task_v1",
             "machine_harness_cursor_launcher_v1",
             // The daemon parses and runs the `uninstall` harness action.
             "machine_harness_uninstall_v1",
@@ -2141,6 +2176,7 @@ async fn cmd_daemon_connected(
             "machine_quota_probe_v2".to_string(),
             "machine_harness_inventory_v1".to_string(),
             "machine_harness_action_v1".to_string(),
+            "machine_text_task_v1".to_string(),
             "machine_harness_cursor_launcher_v1".to_string(),
             "machine_harness_uninstall_v1".to_string(),
             "machine_harness_release_v1".to_string(),
@@ -2675,6 +2711,18 @@ async fn cmd_daemon_connected(
                             };
                             if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
                                 eprintln!("{} failed to report harness action result: {error}", "⚠".yellow().bold());
+                            }
+                        });
+                    }
+                    MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineTextTask { .. }) => {
+                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { hub_url, relay, effect_journal, effect_id } = context;
+                            let Some(report) = execute_leased_text_task(&hub_url, &relay, command).await else {
+                                return;
+                            };
+                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                                eprintln!("{} failed to report text task result: {error}", "⚠".yellow().bold());
                             }
                         });
                     }
