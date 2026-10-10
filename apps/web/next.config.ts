@@ -16,7 +16,13 @@ const skipBuildChecks = process.env.XMATRIX_NEXT_BUILD_SKIP_CHECKS === "1";
 // Error reports go to the ingest origin of the build's DSN, when it has one.
 const sentryDsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
+// `next dev` runs modules through eval and serves plain http on localhost.
+const development = process.env.NODE_ENV === "development";
+
 const nextConfig: NextConfig = {
+  // A dev server beside a built tree keeps its own output, so the build the
+  // browser specs start from is not overwritten.
+  ...(process.env.XMATRIX_NEXT_DIST_DIR ? { distDir: process.env.XMATRIX_NEXT_DIST_DIR } : {}),
   outputFileTracingRoot: join(__dirname, "../.."),
   ...(skipBuildChecks
     ? { eslint: { ignoreDuringBuilds: true }, typescript: { ignoreBuildErrors: true } }
@@ -44,7 +50,7 @@ const nextConfig: NextConfig = {
       "object-src 'none'",
       "frame-ancestors 'none'",
       "form-action 'self'",
-      "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://accounts.google.com/gsi/client https://apis.google.com",
+      `script-src 'self' 'unsafe-inline'${development ? " 'unsafe-eval'" : ""} https://static.cloudflareinsights.com https://accounts.google.com/gsi/client https://apis.google.com`,
       "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
       // Google Identity Services and the Docs Picker use their official provider frames.
       "frame-src 'self' https://accounts.google.com/gsi/ https://docs.google.com",
@@ -55,8 +61,7 @@ const nextConfig: NextConfig = {
       "font-src 'self' data:",
       `connect-src ${Array.from(new Set(connectSources)).join(" ")}`,
       // `next dev` serves Web Workers from blob: URLs; built apps load them from 'self'.
-      ...(process.env.NODE_ENV === "development" ? ["worker-src 'self' blob:"] : []),
-      "upgrade-insecure-requests",
+      ...(development ? ["worker-src 'self' blob:"] : ["upgrade-insecure-requests"]),
     ].join("; ");
 
     return [
