@@ -74,7 +74,7 @@ function agentPresence(label: string, iso: (minutesAgo: number) => string, statu
 
 function sample(now: number) {
   const iso = (minutesAgo: number) => new Date(now - minutesAgo * MINUTE).toISOString();
-  // Only the open conversation has an agent at work, so it alone is In progress.
+  // Only the open conversation has an agent at work.
   const channel = (id: string, name: string, from: MessageSender, preview: string, minutesAgo: number): SerializedChannel => ({
     id,
     spaceId: space.id,

@@ -6,7 +6,6 @@ import { useAndroidBackDismiss } from "./use-android-back";
 
 import {
   ChannelPresenceAvatars,
-  channelHasWorkInHand,
   MobileTabDock,
 } from "./workspace-shell-chrome";
 import { CountPill } from "./count-pill";
@@ -401,14 +400,13 @@ export const ChannelSidebar = memo(function ChannelSidebar({
               ))}
             </div>
           )}
-          {/* Conversations are flat and ordered by activity, those with work in
-              hand first; how the work is organized lives in Pages. A Space can
+          {/* Conversations are flat and ordered by activity; how the work is
+              organized lives in Pages. A Space can
               hold a thousand: only the rows near the viewport are mounted. */}
           <VirtualChannelSections
             scrollRoot={listScrollRoot}
             scrollToChannelRef={scrollToConversationRef}
             channels={visibleChannels}
-            events={events}
             pinnedChannelIds={channelPinLookup.pinnedChannelIds}
             row={(channel) => {
               const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
@@ -773,46 +771,39 @@ export { SpaceAvatar, spaceAvatarStyle, spaceDisambiguatorId } from "./workspace
 import { SpaceAvatar, spaceDisambiguatorId } from "./workspace-shell-chrome";
 
 /**
- * A conversation list's sections: the reader's pins, then those whose Agents
- * have work in hand, then the rest, each in the list's own order and each
- * conversation once. A section with no conversations is not shown.
+ * A conversation list's sections: the reader's pins, then the rest, each in
+ * the list's own order (newest activity first) and each conversation once. A
+ * section with no conversations is not shown.
  */
 export function channelListSections(
   channels: readonly SerializedChannel[],
-  events: ObservabilityEvent[],
   pinnedChannelIds: ReadonlySet<string>,
 ) {
   const pinned: SerializedChannel[] = [];
-  const inProgress: SerializedChannel[] = [];
   const recent: SerializedChannel[] = [];
-  for (const channel of channels) {
-    if (pinnedChannelIds.has(channel.id)) pinned.push(channel);
-    else (channelHasWorkInHand(channel, events) ? inProgress : recent).push(channel);
-  }
+  for (const channel of channels) (pinnedChannelIds.has(channel.id) ? pinned : recent).push(channel);
   return [
-    { label: "Pinned", count: undefined, channels: pinned },
-    { label: "In progress", count: inProgress.length as number | undefined, channels: inProgress },
-    { label: "Recent", count: undefined, channels: recent },
+    { label: "Pinned", channels: pinned },
+    { label: "Recent", channels: recent },
   ].filter((section) => section.channels.length > 0);
 }
 
 /** A conversation list as its sections: each one's heading, then its rows. */
-function ChannelSectionRows({ channels, events, row }: {
+function ChannelSectionRows({ channels, row }: {
   channels: readonly SerializedChannel[];
-  events: ObservabilityEvent[];
   row: (channel: SerializedChannel) => ReactNode;
 }) {
   // The cold-start paint has no pins yet; they arrive with the signed-in shell.
-  return channelListSections(channels, events, NO_PINNED_CHANNEL_IDS).map((section) => (
+  return channelListSections(channels, NO_PINNED_CHANNEL_IDS).map((section) => (
     <Fragment key={section.label}>
-      <ListSectionHeading label={section.label} count={section.count} />
+      <ListSectionHeading label={section.label} />
       {section.channels.map(row)}
     </Fragment>
   ));
 }
 
 type ChannelSectionItem =
-  | { kind: "heading"; label: string; count?: number }
+  | { kind: "heading"; label: string }
   | { kind: "row"; channel: SerializedChannel };
 
 /**
@@ -820,19 +811,18 @@ type ChannelSectionItem =
  * and rows are items, and only those near the viewport are mounted, scrolled
  * by the list's own material sheet (`scrollRoot`).
  */
-function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, events, pinnedChannelIds, row }: {
+function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinnedChannelIds, row }: {
   scrollRoot: HTMLElement | null;
   /** Receives a function that brings a conversation's row into view. */
   scrollToChannelRef?: MutableRefObject<((channelId: string) => void) | null>;
   channels: readonly SerializedChannel[];
-  events: ObservabilityEvent[];
   pinnedChannelIds: ReadonlySet<string>;
   row: (channel: SerializedChannel) => ReactNode;
 }) {
-  const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, events, pinnedChannelIds).flatMap((section) => [
-    { kind: "heading" as const, label: section.label, count: section.count },
+  const items = useMemo<ChannelSectionItem[]>(() => channelListSections(channels, pinnedChannelIds).flatMap((section) => [
+    { kind: "heading" as const, label: section.label },
     ...section.channels.map((channel) => ({ kind: "row" as const, channel })),
-  ]), [channels, events, pinnedChannelIds]);
+  ]), [channels, pinnedChannelIds]);
   const listRef = useRef<VirtuosoHandle | null>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -854,7 +844,7 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, even
       increaseViewportBy={CONVERSATION_LIST_PRELOAD_PX}
       itemContent={(_index, item) => (item.kind === "row"
         ? row(item.channel)
-        : <ListSectionHeading label={item.label} count={item.count} />)}
+        : <ListSectionHeading label={item.label} />)}
     />
   );
 }
@@ -915,7 +905,7 @@ export function ColdStartChannelCatalog({
         >
           <div className="app-material-scroll-viewport min-h-0 flex-1 overflow-y-auto">
             <div className="app-material-scroll-content pointer-events-none min-h-full py-2 text-[15px] md:pt-0">
-              <ChannelSectionRows channels={channels} events={[]} row={(channel) => (
+              <ChannelSectionRows channels={channels} row={(channel) => (
                 <ChannelNavItem
                   key={channel.id}
                   channel={channel}
@@ -942,7 +932,7 @@ export function ColdStartChannelCatalog({
             <div className="app-material-scroll-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
               <div className="app-material-scroll-content min-h-full shrink-0">
                 <div className="app-mobile-chat-list pointer-events-none">
-                  <ChannelSectionRows channels={channels} events={[]} row={(channel) => (
+                  <ChannelSectionRows channels={channels} row={(channel) => (
                     <MobileChannelChatRow
                       key={channel.id}
                       displayChannel={channel}
@@ -1387,7 +1377,6 @@ export function MobileChannelChatList({
             <VirtualChannelSections
               scrollRoot={listScrollRoot}
               channels={conversations}
-              events={events}
               pinnedChannelIds={pinnedChannelIds}
               row={(channel) => {
                 const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
