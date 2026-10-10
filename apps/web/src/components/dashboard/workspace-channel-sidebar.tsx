@@ -1377,7 +1377,6 @@ export function MobileChannelChatList({
             <VirtualChannelSections
               scrollRoot={listScrollRoot}
               channels={conversations}
-              events={events}
               pinnedChannelIds={pinnedChannelIds}
               row={(channel) => {
                 const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
