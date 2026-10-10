@@ -80,6 +80,7 @@ mod runtime_send_journal;
 mod runtime_send_recovery;
 mod runtime_send_submission;
 mod runtime_session_commands;
+mod runtime_star;
 #[cfg(windows)]
 mod windows_acl;
 include!("runtime_management_trust.rs");

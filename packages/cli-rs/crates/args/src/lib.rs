@@ -218,6 +218,8 @@ pub enum Commands {
     },
     /// Show current user
     Whoami,
+    /// Star xMatrix on GitHub; only a person at a terminal can, never an Agent run
+    Star,
     /// Inspect billing without purchasing or changing subscriptions
     Billing {
         #[command(subcommand)]
