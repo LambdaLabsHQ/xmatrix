@@ -587,3 +587,50 @@ test("pages written by hand and Agent edits in any markdown style merge as the s
   assert.equal(h.session.markdown(), "# Project\n\n- zero\n- one\n- two and a half\n");
 });
 
+
+function summaryGateFixture({ sockets, stored } = {}) {
+  const data = new Map(stored ? [["summary", stored]] : []);
+  const reads = [];
+  const original = PostgresPageRepository.prototype.summarySource;
+  // A read of the page's head is the first thing a summary does: counting them counts starts.
+  PostgresPageRepository.prototype.summarySource = async (input) => { reads.push(input.pageId); return null; };
+  const socket = (kind) => ({ deserializeAttachment: () => ({ principal: { kind, id: kind, label: kind } }) });
+  const connected = (sockets ?? []).map(socket);
+  const object = Object.create(RelayPageSession.prototype);
+  Object.assign(object, { spaceId: "space", pageId: "page",
+    env: { RELAY_POSTGRES_SHARD_ID: "test", RELAY_POSTGRES: { connectionString: "postgresql://localhost/unused" } },
+    ctx: { getWebSockets: () => connected, storage: { get: async (key) => data.get(key),
+      put: async (key, value) => { data.set(key, value); }, delete: async (key) => data.delete(key) } } });
+  return { object, connected, reads, restore: () => { PostgresPageRepository.prototype.summarySource = original; } };
+}
+
+test("summary: nothing starts while a person is in the editor; it starts when the last one leaves", async () => {
+  const f = summaryGateFixture({ sockets: ["user", "user", "agent"] });
+  try {
+    await f.object.summaryDue();
+    assert.deepEqual(f.reads, [], "two people are editing");
+    await f.object.summaryDue(f.connected[0]);
+    assert.deepEqual(f.reads, [], "one of them left, the other is still there");
+    f.connected.splice(0, 1);
+    await f.object.summaryDue(f.connected[0]);
+    assert.deepEqual(f.reads, ["page"], "the last person left; an Agent's connection does not hold it back");
+  } finally { f.restore(); }
+});
+
+test("summary: an Agent's edit starts one at once, and a second does not start beside one that is running", async () => {
+  const idle = summaryGateFixture({ sockets: ["agent"] });
+  try {
+    await idle.object.summaryDue();
+    assert.deepEqual(idle.reads, ["page"]);
+  } finally { idle.restore(); }
+  const running = summaryGateFixture({ stored: { requestId: "r", revision: 3, startedAt: Date.now() } });
+  try {
+    await running.object.summaryDue();
+    assert.deepEqual(running.reads, [], "one is being written");
+  } finally { running.restore(); }
+  const ended = summaryGateFixture({ stored: { requestId: "r", revision: 3, startedAt: Date.now(), ended: true } });
+  try {
+    await ended.object.summaryDue();
+    assert.deepEqual(ended.reads, ["page"], "that one ended: the page is looked at again");
+  } finally { ended.restore(); }
+});
