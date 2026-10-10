@@ -133,6 +133,8 @@ export interface RegistrationLaunchCandidate {
   parameters?: HarnessParameter[];
   parameterModel?: string;
   supportsRequestedEffort?: boolean;
+  /** Its daemon applies a requested effort to the runtime's own default model. */
+  supportsDefaultModelEffort?: boolean;
   supportsRequestedParameters?: boolean;
   modelAliases?: Record<string, string>;
   observations?: {
@@ -250,7 +252,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       !Number.isSafeInteger(raw.selectionIndex) || raw.selectionIndex < 0 || raw.selectionIndex >= 32) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
-    if (raw.useRuntimeDefaultModel !== undefined && (raw.useRuntimeDefaultModel !== true || requirements.effort)) {
+    if (raw.useRuntimeDefaultModel !== undefined && raw.useRuntimeDefaultModel !== true) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
     if (!requirements.model && !raw.useRuntimeDefaultModel || raw.useRuntimeDefaultModel && (requirements.model || raw.modelResource)) {
@@ -396,7 +398,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const options = selectionLaunchConditions(input.body, selection);
     const tags = options.tags;
     const machineOk = !tags.machine || await this.machineKnownAs(input.key.ownerUserId, input.key.machineId, tags.machine);
-    if (options.error || (input.useRuntimeDefaultModel && (tags.model || tags.effort)) || (tags.repo && input.workspaceReference !== `repo:${repoSummonReference(tags.repo)}`) ||
+    if (options.error || (input.useRuntimeDefaultModel && tags.model) || (tags.repo && input.workspaceReference !== `repo:${repoSummonReference(tags.repo)}`) ||
         (tags.pwd && input.workspaceReference === undefined) ||
         (tags.machine && !machineOk) ||
         (tags.harness && canonicalRegistrationHarness(tags.harness) !== input.key.harness) ||
@@ -430,6 +432,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   // still requires a local installation record, so it cannot be routed here.
   private async workspace(input: LaunchRequest) {
     const required = input.requiredHostCapabilities ?? [];
+    // An effort on the runtime default model needs a daemon that carries it there.
+    const defaultModelEffort = input.useRuntimeDefaultModel === true && Boolean(input.requirements.effort);
     return this.directory.transaction({ requestId: input.commandId, operation: "registration.launch.workspace" }, async tx => {
       const reference = input.workspaceReference;
       // A route that exists but cannot show the required host abilities is a
@@ -444,15 +448,17 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         }
         // A daemon runs a registered launch with no workspace reference only
         // once it declares the managed-directory capability.
-        const repoRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_repo_route_v5",
+        const repoRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_repo_route_v6",
           text: `SELECT hostname FROM data.machine_daemons
           WHERE owner_user_id=$1 AND machine_id=$2 AND status='online' AND capabilities_json ? 'registration_launch_v3'
             AND ($3::text IS NULL OR capabilities_json ? $3)
             AND (NOT $4::boolean OR capabilities_json ? 'registration_optional_model_v1')
             AND (NOT $6::boolean OR capabilities_json ? 'machine_routing_parameters_v1')
+            AND (NOT $7::boolean OR capabilities_json ? 'registration_default_effort_v1')
             AND ${HOST_CAPABILITY_ROUTE_SQL("$5")} LIMIT 2 FOR SHARE`,
           values: [input.key.ownerUserId,input.key.machineId,reference === undefined ? "registration_managed_v1" : null,
-            input.useRuntimeDefaultModel === true, capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0], maxRows: 2 });
+            input.useRuntimeDefaultModel === true, capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0,
+            defaultModelEffort], maxRows: 2 });
         const routes = await repoRoutes(required);
         const unrouted = reference === undefined ? "registration_managed_route_unavailable" : "registration_repo_route_unavailable";
         if (!routes.length) throw await refuse(unrouted, () => repoRoutes([]), input.key);
@@ -468,16 +474,17 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(repo ? { remote_repo: repo } : {}), metadata_json: { displayName: repo ?? "xMatrix", managedWorkspaceKey: managedKey,
             ...flags, ...(repo ? { remoteRepo: repo } : {}) } };
       }
-      const workspaceRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_workspace_v4",
+      const workspaceRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_workspace_v5",
         text: `SELECT w.canonical_cwd,w.metadata_json,d.hostname
         FROM data.workspaces w JOIN data.machine_daemons d ON d.owner_user_id=w.owner_user_id AND d.machine_id=w.machine_id
         WHERE w.workspace_id=$1 AND w.owner_user_id=$2 AND w.machine_id=$3 AND d.status='online'
           AND d.capabilities_json ? 'registration_launch_v3'
           AND (NOT $4::boolean OR d.capabilities_json ? 'registration_optional_model_v1')
           AND (NOT $6::boolean OR d.capabilities_json ? 'machine_routing_parameters_v1')
+          AND (NOT $7::boolean OR d.capabilities_json ? 'registration_default_effort_v1')
           AND ${HOST_CAPABILITY_ROUTE_SQL("$5", "d.")} LIMIT 1 FOR SHARE OF w,d`,
         values: [input.workspaceReference,input.key.ownerUserId,input.key.machineId,input.useRuntimeDefaultModel === true,
-          capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0], maxRows: 1 });
+          capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0, defaultModelEffort], maxRows: 1 });
       const rows = await workspaceRoutes(required);
       if (!rows[0]) throw await refuse("registration_workspace_or_daemon_unavailable", () => workspaceRoutes([]),
         { ...input.key, workspaceId: reference });
@@ -1072,7 +1079,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
               ...(quotaWindows.length ? { windows: quotaWindows } : {}) }
               : { remainingPercent: 100, assumed: true } } } : {}),
           supportsRequestedParameters: daemonCapable(daemon, "machine_routing_parameters_v1"),
-          supportsRequestedEffort: daemonCapable(daemon, "machine_routing_effort_v1"), workspaces: [...workspaceReferences.flatMap(reference => {
+          supportsRequestedEffort: daemonCapable(daemon, "machine_routing_effort_v1"),
+          supportsDefaultModelEffort: daemonCapable(daemon, "machine_routing_effort_v1") &&
+            daemonCapable(daemon, "registration_default_effort_v1"), workspaces: [...workspaceReferences.flatMap(reference => {
             const repo = reference.startsWith("repo:") ? reference.slice(5) : undefined;
             return repo && repoSummonReference(repo) === repo ? [{ reference, repo,
               description: "Authorized registered repository", machineId: candidate.key.machineId }] : [];

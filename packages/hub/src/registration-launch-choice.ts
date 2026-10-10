@@ -33,9 +33,18 @@ function modelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags
     effortDescription: tags.effort ? "Requested effort" : "Runtime default effort" }));
 }
 
-/** No declared models means no override; explicit model or effort still refuses. */
+/**
+ * No declared models means the runtime's own default model, and a named model
+ * still refuses. A requested effort applies to that default model when the
+ * daemon carries it there and the runtime's report of the model, when there
+ * is one, lists it; the runtime refuses an effort its model does not have.
+ */
 function usesRuntimeDefaults(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags): boolean {
-  return !candidate.models.length && !tags.model && !tags.effort;
+  if (candidate.models.length || tags.model) return false;
+  if (!tags.effort) return true;
+  if (!candidate.supportsDefaultModelEffort) return false;
+  const reported = candidate.modelCatalog?.find(observed => observed.model === candidate.parameterModel);
+  return !reported?.efforts.length || reported.efforts.some(effort => effort.value === tags.effort);
 }
 
 function selectionFailure(phase: "environment" | "parameter", error: unknown): RegistrationAccessError {
@@ -317,10 +326,12 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     const candidate = offered.find(item => !providerQuotaExhaustedForModel(item, model?.model ?? "default", Date.now()));
     if (!candidate) throw new RegistrationAccessError(offered.length ? "registration_quota_exhausted" : "registration_selection_invalid", 409);
     await told;
+    // On the runtime's default model the only effort is the one the author asked for.
+    const effort = model ? model.effort : tags.effort;
     const round = (value: number) => Math.round(value * 1000) / 1000;
     return { key: candidate.key, model: model?.model ?? "",
       ...(tags.parameters ? { parameters: launchHarnessParameters(tags) } : {}),
-      ...(!model ? { useRuntimeDefaultModel: true } : {}), ...(model?.effort ? { effort: model.effort } : {}),
+      ...(!model ? { useRuntimeDefaultModel: true } : {}), ...(effort ? { effort } : {}),
       ...(workspaceReference !== undefined ? { workspaceReference } : {}), parameterEvidence: {
       rubricVersion: "registration-parameters-v10", evaluatedAt: new Date().toISOString(),
       // The calls share one state; a digest reads each as the copy Jev received.
@@ -334,7 +345,7 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       ...(intent ? { intent: { source: "jev" as const, selected: "summon" as const, probabilities: intent.probabilities } }
         : summon?.readInDraft && tags.launch !== "force" ? { intent: { source: "draft" as const } }
         : summon ? { intent: { source: "author" as const } } : {}),
-      selections: { ...(model ? { model: model.model } : {}), ...(model?.effort ? { effort: model.effort } : {}),
+      selections: { ...(model ? { model: model.model } : {}), ...(effort ? { effort } : {}),
         workspaceKind: workspace.repo ? "repo" : workspace.reference === undefined ? "managed" : "local-path",
         ...(workspace.repo ? { repo: workspace.repo } : {}) },
       choices: [...(modelAnswer ? [{ key: "modelEffort" as const, selected: modelAnswer.choice, probabilities: modelAnswer.probabilities }] : []),

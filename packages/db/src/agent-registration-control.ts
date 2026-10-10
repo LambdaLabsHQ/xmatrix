@@ -404,7 +404,9 @@ export class PostgresAgentRegistrationRepository {
       const environment = label?.declaration_json ? parseAgentRegistrationEnvironment(label.declaration_json) : null;
       // The physical environment bounds the Space's models exactly as a launch does.
       const models = row.models.filter(model => environment?.models.includes(model));
-      const reported = row.modelCatalog?.filter(model => models.includes(model.model));
+      // With no declared models the runtime's default model is the one that runs; its efforts stay selectable.
+      const reported = row.modelCatalog?.filter(model => row.models.length ? models.includes(model.model)
+        : model.model === row.parameterModel);
       const blocker: AgentRegistrationSummary["routingBlocker"] = !environment ? "owner_environment_missing"
         : !environment.enabled ? "owner_environment_disabled" : !row.routingReady ? "space_setup"
           : row.models.length && !models.length ? "model_unavailable" : undefined;

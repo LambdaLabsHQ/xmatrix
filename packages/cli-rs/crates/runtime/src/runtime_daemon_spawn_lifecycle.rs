@@ -99,9 +99,6 @@ fn resolve_registration_spawn(
         .requested_model
         .as_ref()
         .and_then(|_| binding.runtime_model.clone());
-    if resolved.requested_model.is_none() {
-        resolved.requested_effort = None;
-    }
     if resolved.agent_acp_args.is_empty() {
         resolved.agent_acp_args = harness.acp_args.clone().unwrap_or_default();
     }
