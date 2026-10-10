@@ -1,5 +1,22 @@
 import { expect, test } from "@playwright/test";
 
+test("public guides show connectors with loaded icons and no nested glass", async ({ page }) => {
+  for (const route of ["/", "/docs"]) {
+    await page.goto(route);
+    const list = page.getByRole("list", { name: "Connectors", exact: true });
+    await list.scrollIntoViewIfNeeded();
+    await expect(list).toBeVisible();
+    expect(await list.getByRole("listitem").count()).toBeGreaterThan(0);
+    for (const item of await list.getByRole("listitem").all()) {
+      const icon = item.locator("img");
+      await expect(icon).toBeVisible();
+      await expect.poll(() => icon.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+      expect(await item.evaluate((element) =>
+        element.parentElement?.closest(".app-liquid-glass-surface") !== null)).toBe(false);
+    }
+  }
+});
+
 for (const width of [393, 820, 1440]) {
   test(`navigation logo glass follows scrolling at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
