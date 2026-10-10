@@ -28,6 +28,10 @@ select compute only; they do not change the tests or release authorization.
 Hosted jobs use the same content-addressed CI ledger as release gates; a
 missing or unreachable ledger runs the complete selected checks.
 
+Changes to `packages/db` select Node, Web/browser and Hub validation because
+both products consume the shared database package. Database unit tests alone
+do not validate the Hub's message coordination and authority fixtures.
+
 `public-ci.yml` runs the full shared matrix on a public snapshot's `main` push.
 Its manual dispatch also verifies that path in the private repository. A
 private `main` push skips this workflow's only job. Public PRs use `ci.yml` and

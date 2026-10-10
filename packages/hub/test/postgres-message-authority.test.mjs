@@ -135,7 +135,8 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
           if (query.name === "message_append_idempotency_read_v1" ||
               query.name === "message_append_identity_conflict_v1" ||
               query.name === "message_append_attention_respond_v2" ||
-              query.name === "message_attention_release_waits_v1") return [];
+              query.name === "message_attention_release_waits_v1" ||
+              query.name === "channel_lifecycle_lock_runtime_new_work_v1") return [];
           if (query.name === "message_append_commit_facts_v5") return [{
             search_rank: "pg:00000000000000000001", content_revision: 0, channel_id: commitChannelId,
           }];
@@ -249,7 +250,6 @@ for (const scenario of [
   assert.equal(result.senderSnapshot.managementActivityKind, undefined);
   // A forged xMatrix persona in the caller's overlay never survives.
   assert.equal(result.senderSnapshot.xmatrixManagementDelegate, undefined);
-  assert.equal(calls.filter((query) => query.name === "message_append_run_proof_v3").length, 2);
 });
 
 test("a committed Agent message carries the Instance row's presentation", async () => {

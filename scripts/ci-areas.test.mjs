@@ -22,11 +22,14 @@ test("web changes select unit, build, and browser partitions for CI", () => {
   assert.deepEqual(affectedPartitions(["apps/web/src/app.tsx"]), ["node-checks", "web", "web-browser", "duplicates"]);
 });
 
-test("protocol source, manifest, and tests run every dependent Node partition", () => {
+test("shared database and protocol source, manifests, and tests run every dependent Node partition", () => {
   for (const file of [
     "packages\\protocol\\src\\index.ts",
     "packages/protocol/package.json",
-    "packages/protocol/test/agent-mention.test.mjs"]) {
+    "packages/protocol/test/agent-mention.test.mjs",
+    "packages/db/src/message-control.ts",
+    "packages/db/package.json",
+    "packages/db/test/message-run-locks-postgres.test.mjs"]) {
     assert.deepEqual(affectedPartitions([file]), ["node-checks", "web", "web-browser", "hub", "duplicates"], file);
   }
 });
