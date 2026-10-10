@@ -1585,8 +1585,11 @@ export class PostgresMessageRepository {
         }))), spaceId, channelId, messageId, sequence, sentAt, input.awaitsResponse === true],
         maxRows: 0,
       });
+      // Only a message someone wrote speaks for its sender. A card or notice the Hub writes
+      // under a person's identity, or an Agent's activity entry, answers nothing and moves nobody on.
+      const spoke = (senderKind === "user" || senderKind === "agent") && messageKind === "xmatrix.message.text";
       // The sender has responded: no mention in this conversation still waits on them.
-      if (senderKind === "user" || senderKind === "agent") await transaction.query({
+      if (spoke) await transaction.query({
         name: "message_append_attention_respond_v2",
         text: `WITH responded AS (
             UPDATE data.message_attention SET awaiting_response=FALSE
@@ -1601,7 +1604,7 @@ export class PostgresMessageRepository {
         values: [spaceId, `${senderKind}:${senderId}`, channelId, sentAt, messageId], maxRows: 0,
       });
       // The sender went on after someone else spoke: the waits it declared before that are over.
-      if (senderKind === "user" || senderKind === "agent") await releaseDeclaredWaits(transaction, {
+      if (spoke) await releaseDeclaredWaits(transaction, {
         spaceId, channelId, authorKind: senderKind, authorIds: [senderId], at: sentAt, movedOnAt: sequence });
       const result = {
         messageId, channelId, spaceId, sequence, entityVersion: 1,
