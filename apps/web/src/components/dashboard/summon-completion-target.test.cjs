@@ -213,7 +213,7 @@ test("an offline machine stays listed and cannot be chosen", () => {
   assert.equal(directory.unavailable, "Offline");
 });
 
-test("an empty model list offers no model or effort; the harness is never a model", () => {
+test("an empty model list offers no model, only the default model's efforts; the harness is never a model", () => {
   const registration = { key: { machineId: "mac", harness: "claude" }, machineName: "Mac",
     models: [], state: "enabled", routingReady: true,
     modelCatalog: [{ model: "claude-opus-4-6", efforts: [{ value: "high" }] }] };
@@ -222,6 +222,9 @@ test("an empty model list offers no model or effort; the harness is never a mode
   assert.deepEqual(tags(rows, "model"), []);
   assert.deepEqual(tags(rows, "effort"), []);
   assert.deepEqual(tags(rows, "harness"), ["claude"]);
+  const onDefault = autoLaunchCandidates(undefined, {}, [{ ...registration, parameterModel: "claude-opus-4-6" }]);
+  assert.deepEqual(tags(onDefault, "model"), [], "the runtime default model is not a choice");
+  assert.deepEqual(tags(onDefault, "effort"), ["high"], "its efforts are");
   assert.deepEqual(tags(autoLaunchCandidates(undefined, { model: "claude" }, [registration]), "machine"), [],
     "a registration with no allowed model cannot satisfy a model constraint");
 });

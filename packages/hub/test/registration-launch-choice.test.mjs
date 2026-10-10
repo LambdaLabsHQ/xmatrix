@@ -388,14 +388,34 @@ test('an empty model list skips model selection, even beside an observed catalog
     assert.deepEqual(chosen.parameterEvidence.choices.map(choice => choice.key), ['workspace']);
     const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
     assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
-    // No model override is allowed, so any explicit model or effort is unavailable,
-    // including one spelled like the harness.
+    // No model override is allowed, so any explicit model is unavailable, including one
+    // spelled like the harness; so is an effort while the daemon cannot carry it to the default model.
     for (const tags of [{ model: harness }, { model: 'gpt-5.4' }, { effort: 'medium' }]) {
       await assert.rejects(registrationLaunchChooser(async input => answer(input))({
         message: `@${harness}`, tags, candidates: [candidate] }), error => error.code === (tags.effort
         ? 'registration_effort_unavailable' : 'registration_model_unavailable'));
     }
   }
+});
+
+test('a requested effort applies to the runtime default model without a model choice', async () => {
+  const candidate = { ...candidates[0], models: [], supportsRequestedEffort: true, supportsDefaultModelEffort: true,
+    parameterModel: 'gpt-5.4',
+    modelCatalog: [{ model: 'gpt-5.4', description: 'Reported', efforts: [{ value: 'high', description: 'Thorough' }] }] };
+  const calls = [];
+  const choose = (tags, from = candidate) => registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: `@codex effort:${tags.effort}`, tags, candidates: [from] });
+  const chosen = await choose({ effort: 'high' });
+  assert.deepEqual(Object.keys(calls.at(-1).questions), ['workspace'], 'the effort is the author\'s, not a choice');
+  assert.deepEqual([chosen.useRuntimeDefaultModel, chosen.model, chosen.effort], [true, '', 'high']);
+  assert.deepEqual(chosen.parameterEvidence.selections.effort, 'high');
+  assert.equal(Object.hasOwn(chosen.parameterEvidence.selections, 'model'), false);
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
+  // The runtime's own report of its default model bounds the effort; without a report the runtime decides at launch.
+  await assert.rejects(choose({ effort: 'medium' }), error => error.code === 'registration_effort_unavailable');
+  assert.equal((await choose({ effort: 'medium' }, { ...candidate, modelCatalog: undefined })).effort, 'medium');
+  await assert.rejects(choose({ effort: 'high', model: 'gpt-5.4' }), error => error.code === 'registration_effort_unavailable');
 });
 
 test('default-only harnesses read intent, location and fit in one call, then weigh machine load', async () => {

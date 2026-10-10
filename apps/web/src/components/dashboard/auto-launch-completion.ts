@@ -121,10 +121,11 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
         selected.machine && !machineTagSelects(selected.machine, machineId, registration.machineName) ||
         selected.harness && selected.harness !== harness) continue;
     // Allowed models are the complete list; an empty list allows only the
-    // runtime default, so no model or effort is offered for it.
+    // runtime default, so no model is offered for it, only that model's efforts.
     const allowed = registration.models;
-    const observed = (registration.modelCatalog ?? []).filter(model => model.model && allowed.includes(model.model));
-    const reported = observed.map(model => model.model);
+    const observed = (registration.modelCatalog ?? []).filter(model => model.model && (allowed.length
+      ? allowed.includes(model.model) : model.model === registration.parameterModel));
+    const reported = allowed.length ? observed.map(model => model.model) : [];
     if (selected.model && !allowed.includes(selected.model)) continue;
     const spoken = machineMentionValue(machineId, registration.machineName);
     add("machine", spoken, spoken === machineId ? machineLaunchTagValue(machineId) : registration.machineName,
