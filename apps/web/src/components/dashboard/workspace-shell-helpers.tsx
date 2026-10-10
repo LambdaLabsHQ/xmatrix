@@ -580,6 +580,17 @@ export function timelineRowIsOnScreen(
   return rowBox.bottom > containerBox.top && rowBox.top < containerBox.bottom;
 }
 
+/** Whether the whole row is inside the timeline's box, not cut off by an edge. */
+export function timelineRowIsInFullView(
+  element: HTMLElement | null,
+  scrollContainer: HTMLElement | null,
+): boolean {
+  if (!element || !scrollContainer || !scrollContainer.contains(element)) return false;
+  const containerBox = scrollContainer.getBoundingClientRect();
+  const rowBox = element.getBoundingClientRect();
+  return rowBox.top >= containerBox.top && rowBox.bottom <= containerBox.bottom;
+}
+
 /** A row a jump scrolled to has landed when its centre is in the middle
  * half of the timeline, or when the timeline cannot scroll any closer to
  * centring it (the row is near either end of what is loaded). */

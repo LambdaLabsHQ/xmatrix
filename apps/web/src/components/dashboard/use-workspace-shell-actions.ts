@@ -558,6 +558,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const jumpTargetMessageId =
       pendingJumpForChannel?.messageId || appLinkMessageIdFromHash(jumpHash);
     const jumpOutcome = landMessageJump(jumpHash, jumpTargetMessageId);
+    // The timeline is still opening; it bumps the jump revision when the
+    // landing can go on, so the jump stays armed without counting frames.
+    if (jumpOutcome === "opening") return;
     if (jumpOutcome === "settling") {
       // The row is in the data but not yet placed. Keep the jump armed - and
       // keep the scroll - until the landing is observed.
