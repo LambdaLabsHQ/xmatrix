@@ -7,6 +7,7 @@ import { BrandMark } from "@/components/shared/brand-mark";
 import { Button } from "@/components/ui/button";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 const navLinks = [
   { href: "/download", label: "Download" },
@@ -84,6 +85,14 @@ export function Navbar() {
             </nav>
 
             <div className="hidden items-center gap-3 lg:flex">
+              <a
+                href={REPOSITORY_URL}
+                target="_blank"
+                rel="noopener"
+                className="text-[13px] font-medium tracking-[-0.015em] text-foreground/65 transition-colors hover:text-foreground"
+              >
+                GitHub
+              </a>
               <Link
                 href="/docs"
                 className="text-[13px] font-medium tracking-[-0.015em] text-foreground/65 transition-colors hover:text-foreground"
@@ -131,6 +140,14 @@ export function Navbar() {
                   {link.label}
                 </LiquidGlassPill>
               ))}
+              <LiquidGlassPill
+                as="a"
+                href={REPOSITORY_URL}
+                onClick={() => setMenuOpen(false)}
+                className="inline-flex h-10 w-full items-center px-3 text-sm font-medium"
+              >
+                GitHub
+              </LiquidGlassPill>
               <LiquidGlassPill
                 as={Link}
                 href="/docs"
