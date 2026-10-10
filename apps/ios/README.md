@@ -54,6 +54,7 @@ Set `SKIP_TESTFLIGHT_UPLOAD=1` to stop after exporting the IPA.
 The injected bridge mirrors the Electron preload API used by `apps/web/src/lib/desktop/bridge.ts`:
 
 - `getContext`, `setBadge`, `notify`, and `openExternal` map to native iOS APIs.
+- `pushDevice` asks for notification permission and returns the device's APNs token, which the web app registers with the Hub; the app carries the `aps-environment` entitlement for it.
 - `checkCliInstalled` always returns `{ "installed": false }`.
 - Desktop auto-update methods return a disabled status because iOS updates are handled by the App Store or TestFlight.
 - `xmatrix://channel/:id` and `xmatrix://login?...` deep links are mapped to the same web routes as the Electron app.

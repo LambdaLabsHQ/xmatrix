@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct XMatrixApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var router = AppRouter()
     @State private var mobileTabState = MobileTabState()
 

@@ -81,6 +81,11 @@ export type DesktopBridge = {
   openWindow?: (path?: string) => Promise<boolean>;
   getNotificationSettings?: () => Promise<DesktopNotificationStatus>;
   requestNotifications?: () => Promise<DesktopNotificationStatus>;
+  /**
+   * What the Hub pushes to on this device, once the person allows
+   * notifications; null when they do not. Only phone shells have one.
+   */
+  pushDevice?: () => Promise<{ platform: "apns" | "fcm"; token: string } | null>;
   notify: (payload: DesktopNotification) => Promise<boolean | void>;
   openExternal: (url: string) => Promise<void>;
   getClipboardImages?: () => Promise<DesktopClipboardImage[]>;
