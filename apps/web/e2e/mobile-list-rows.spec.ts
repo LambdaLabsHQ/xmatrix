@@ -153,15 +153,15 @@ test.describe("a phone's list rows", () => {
     expect(pageMeasure.title).toEqual(phone.title);
     expect(pageMeasure.meta).toEqual(phone.meta);
     await expect(pageRow.locator(".app-list-row-meta")).toHaveText(/^Edited /u);
-    // The chevron on the line, the page's icon after it; the row's own +,
-    // shown on a touch screen that has no hover, at the line's end.
-    const create = pageRow.getByRole("button", { name: "New sub-page" });
-    await expect(create).toHaveCSS("opacity", "1");
+    // The chevron on the line, the page's icon after it; when the page last
+    // changed at the line's end. A touch screen has no hover, so the row's own
+    // + is not drawn there: a long press on the row offers it instead.
+    await expect(pageRow.getByRole("button", { name: "New sub-page" })).toBeHidden();
     const chevron = await edges(pageRow.locator(":scope > button svg").first());
     expect(chevron.left).toBeGreaterThanOrEqual(line.start - 0.5);
     expect(chevron.left).toBeLessThan(line.start + 10);
     expect((await edges(pageRow.locator(".app-page-row-title-line svg").first())).left).toBeGreaterThanOrEqual(chevron.right);
-    expect((await edges(create.locator("svg"))).right).toBeCloseTo(line.end, 0);
+    expect((await edges(pageRow.locator(".app-channel-row-time"), { text: true })).right).toBeCloseTo(line.end, 0);
 
     await dock.getByRole("button", { name: "More" }).tap();
     await page.getByRole("button", { name: /^Agents/u }).first().tap();

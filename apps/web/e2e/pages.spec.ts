@@ -174,14 +174,14 @@ test("a page is co-edited live and shows an Agent working on a section it claime
   await expect(tree).toContainText("Company");
   await expect(tree).toContainText("Relay");
   // A page's row counts its open discussions, in the count chip while one has replies not yet read;
-  // its second line says what is happening there, not a row of faces.
+  // its second line says what is happening there, and ends with the faces of the Agents on the page.
   const counts = tree.getByTestId("page-tree-discussions");
   await expect(counts.filter({ has: browser.locator(".app-count-pill") }))
     .toHaveAccessibleName("2 open discussions, 1 with unread replies");
   await expect(counts.filter({ hasNot: browser.locator(".app-count-pill") })).toHaveAccessibleName("1 open discussion");
-  await expect(tree.locator(".identity-avatar-face")).toHaveCount(0);
-  await expect(tree.getByRole("button", { name: "Relay claude:2 editing · Status" })).toBeVisible();
-  await expect(tree.getByRole("button", { name: "Company Ada: Ship it Friday?" })).toBeVisible();
+  await expect(tree.getByTestId("page-tree-agents").locator(".identity-avatar-face")).not.toHaveCount(0);
+  await expect(tree.getByRole("button", { name: /^Relay .*claude:2 editing · Status/u })).toBeVisible();
+  await expect(tree.getByRole("button", { name: /^Company .*Ada: Ship it Friday\?/u })).toBeVisible();
   // The first page opens by default; count the sessions of the page we switch to.
   await expect.poll(() => connections).toBeGreaterThan(0);
   connections = 0;

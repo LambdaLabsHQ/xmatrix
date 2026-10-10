@@ -449,7 +449,13 @@ export class PostgresPageRepository {
     return this.inSpace(bounded(input.requestId, "requestId"), "page.tree", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const tree = await this.accessibleTree(tx, spaceId, actor);
-      return { pages: tree.map((row) => this.summary(row)) };
+      // How far a person has read each page is theirs: an Agent Run has none.
+      const reads = input.principal.kind !== "user" ? [] : await tx.query<QueryResultRow & { page_id: string; revision: string }>({
+        name: "page_tree_reads_v1",
+        text: `SELECT page_id, revision::text FROM data.page_reads WHERE space_id=$1 AND user_id=$2 LIMIT ${MAX_PAGES}`,
+        values: [spaceId, actor.userId], maxRows: MAX_PAGES });
+      const read = new Map(reads.map((row) => [row.page_id, Number(row.revision)]));
+      return { pages: tree.map((row) => ({ ...this.summary(row), readRevision: read.get(row.page_id) ?? null })) };
     });
   }
 
