@@ -800,6 +800,16 @@ export function channelWaitsOnReader(channel: SerializedChannel): boolean {
 }
 
 /**
+ * A conversation that waits on the reader previews the message that waits,
+ * who is waiting and on what, rather than whatever was said last.
+ */
+function rowPreviewChannel(channel: SerializedChannel): SerializedChannel {
+  const waiting = channel.attentionMessage;
+  return channelWaitsOnReader(channel) && waiting && waiting.messageId === channel.attention?.lastMessageId
+    ? { ...channel, lastMessage: waiting } : channel;
+}
+
+/**
  * A conversation list's sections: the conversations waiting on the reader
  * (an unread mention, reply or broadcast addressed to them), then their pins,
  * then the rest, each in the list's own order (newest activity first) and each
@@ -1021,7 +1031,7 @@ function ChannelRowSecondLine({
   return (
     <span className="app-channel-row-preview-line flex min-w-0 items-center gap-1.5">
       <span className="app-channel-row-preview app-list-row-meta min-w-0 flex-1 truncate">
-        <ChannelRowPreview channel={channel} />
+        <ChannelRowPreview channel={rowPreviewChannel(channel)} />
       </span>
       {(humanMembers.length > 0 || avatarItems.length > 0) && (
         <ChannelPresenceAvatars

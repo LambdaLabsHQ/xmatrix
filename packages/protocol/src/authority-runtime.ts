@@ -357,6 +357,12 @@ export interface SerializedChannel {
   lastMessage?: ChannelReplyContext;
   attention?: ChannelAttentionSummary;
   /**
+   * The newest message that holds the reader's attention (`attention.lastMessageId`),
+   * so a list can say who waits and on what. Hydrated on catalog reads only; a
+   * client shows it while its id still matches the summary's.
+   */
+  attentionMessage?: ChannelReplyContext;
+  /**
    * Stable Human member identities authorized to read a closed Channel.
    * Open Channels inherit `SerializedSpace.members` and omit this projection.
    * Values use the channel identity form `user:<userId>`; live presence is
