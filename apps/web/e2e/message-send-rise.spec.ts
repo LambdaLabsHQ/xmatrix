@@ -6,6 +6,7 @@ import {
   E2E_NOW,
   E2E_USER_SENDER,
   channelHistoryFixture,
+  conversationOpened,
   openGeneralChannelWithHistory,
 } from "./workspace-fixtures";
 
@@ -46,6 +47,7 @@ async function openChannelRecordingRises(page: Page) {
       sentAt: new Date().toISOString(), from: { ...E2E_USER_SENDER, identityId: "user:e2e-user" },
     } }, { method: "POST" });
   await expect(page.locator(".app-message-row").filter({ hasText: `Message ${HISTORY_LENGTH}.` })).toBeVisible();
+  await conversationOpened(page);
 }
 
 async function sendAndReadRises(page: Page): Promise<Rise[]> {

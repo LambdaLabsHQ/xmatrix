@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, conversationOpened } from "./workspace-fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -60,6 +60,7 @@ test("Agents working in other conversations re-render only their own rows", asyn
   const send = await openWorkingAgentsSpace(page, space, messages, "Load row 40:");
   // The last conversation is below the fold: the list only mounts rows near the viewport.
   await expect(page.locator(`[data-channel-row-id="${space.channelId(1)}"]`)).toBeVisible();
+  await conversationOpened(page);
 
   await page.evaluate(() => {
     (window as unknown as { __renderCounts: { counting: boolean } }).__renderCounts.counting = true;
