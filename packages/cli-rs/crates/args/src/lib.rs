@@ -2198,6 +2198,23 @@ pub enum PageCommand {
         #[arg(long)]
         conversation: Option<String>,
     },
+    /// Write a page's one-line summary for the revision you read
+    Summary {
+        /// Page ID
+        page: String,
+        /// The revision the summary describes (from `xmatrix page read`); it must still be the page's head
+        #[arg(long = "base")]
+        base: u64,
+        /// Space ID (defaults to this Run's conversation's Space)
+        #[arg(long)]
+        space: Option<String>,
+        /// The summary: one line, at most 240 characters, saying how the page stands
+        #[arg(long = "message", short = 'm')]
+        body: Option<String>,
+        /// Read the summary from stdin
+        #[arg(long = "stdin")]
+        stdin: bool,
+    },
     /// Create a page (below another page with --under)
     Create {
         /// Title
