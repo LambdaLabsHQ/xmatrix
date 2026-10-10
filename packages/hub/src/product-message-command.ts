@@ -26,6 +26,8 @@ export interface AppendMessageCommand {
   body: string;
   /** Final intent is only valid with the exact authenticated Agent Run proof. */
   finalReplyExecutionId?: string;
+  /** The sender declares it is waiting on the people and Agents this message mentions. */
+  awaitsResponse?: boolean;
   principal: AuthorityPrincipal;
   /**
    * Trusted scheduled-evaluation sponsor, revalidated atomically with append.

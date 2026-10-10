@@ -521,6 +521,7 @@ export async function postgresMessageAppend(
       // An activity entry carries the Agent's own step titles, and imported
       // history replays what was said elsewhere: neither mentions nor commands.
       attentionBody: messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND || imported ? "" : command.body,
+      ...(command.awaitsResponse === true ? { awaitsResponse: true } : {}),
       invocationSelections: command.invocationSelections,
       runProof,
       attachments: command.sealedAttachments,

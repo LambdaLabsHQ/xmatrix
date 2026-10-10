@@ -69,6 +69,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         return c.json({ error: "Message request must be a JSON object" }, 400);
       }
       const allowedMessageFields = new Set([
+        "awaitsResponse",
         "invocationSelections",
         "finalReplyExecutionId",
         "appMentions",
@@ -94,6 +95,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         );
       }
       const body = rawBody as {
+        awaitsResponse?: unknown;
         invocationSelections?: unknown;
         finalReplyExecutionId?: string;
         body?: string;
@@ -125,6 +127,9 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         }, 403);
         try { draftIntents = parseDraftSummonIntents(body.summonIntents, typeof body.body === "string" ? body.body : ""); }
         catch (error) { return c.json({ error: error instanceof Error ? error.message : "Invalid draft summon intents" }, 400); }
+      }
+      if (body.awaitsResponse !== undefined && typeof body.awaitsResponse !== "boolean") {
+        return c.json({ error: "awaitsResponse must be a boolean" }, 400);
       }
       if (body.finalReplyExecutionId !== undefined) {
         if (!principal) return c.json({ error: "Final reply requires an authenticated Agent Run" }, 403);
@@ -293,6 +298,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           body: message.body,
           ...(body.invocationSelections === undefined ? {} : { invocationSelections: body.invocationSelections }),
           ...(body.finalReplyExecutionId === undefined ? {} : { finalReplyExecutionId: body.finalReplyExecutionId }),
+          ...(body.awaitsResponse === true ? { awaitsResponse: true } : {}),
           principal: appendPrincipal,
           senderSnapshot: principal
             ? trustedAgentSenderPresentation
