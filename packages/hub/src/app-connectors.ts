@@ -475,32 +475,46 @@ export type GitHubCommitCheckVerdict =
   | { state: "passed" | "failed"; failed: Array<{ name: string; url?: string }>; settledAt: string };
 
 const FAILED_CHECK_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure"]);
+const PASSED_CHECK_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 
 /**
  * A commit's checks as one verdict, read with one installation's token. A
- * suite with no check runs is an app that never ran here (GitHub opens a
- * suite for every app with checks access); it neither holds nor fails the
- * verdict. `settledAt` is when the last suite finished, so a rerun that
+ * Empty non-Actions suites are placeholders for installed check apps. An
+ * empty GitHub Actions suite can be a queued workflow and still holds the
+ * verdict. Only the pull request's current head can settle. `settledAt` is
+ * when the last suite finished, so a rerun that
  * settles again reads as a new verdict.
  */
 export async function githubCommitCheckVerdict(env: AppConnectorEnv, installationId: string, owner: string,
-  repo: string, sha: string): Promise<GitHubCommitCheckVerdict> {
+  repo: string, sha: string, number: number): Promise<GitHubCommitCheckVerdict> {
   const auth = await githubInstallationAuthForId(env, installationId, { repositories: [repo] });
-  const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(sha)}`;
-  const suites = githubObject(await fetchGitHubJson(env, `${path}/check-suites?per_page=100`, auth.token)).check_suites;
+  const repositoryPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const pull = githubObject(await fetchGitHubJson(env, `${repositoryPath}/pulls/${number}`, auth.token));
+  if (githubObject(pull.head).sha !== sha) return { state: "pending" };
+  const path = `${repositoryPath}/commits/${encodeURIComponent(sha)}`;
+  const suiteResponse = githubObject(await fetchGitHubJson(env, `${path}/check-suites?per_page=100`, auth.token));
+  const suites = suiteResponse.check_suites;
+  if (!Array.isArray(suites) || suiteResponse.total_count !== suites.length) return { state: "pending" };
   let settledAt = "";
-  for (const suite of Array.isArray(suites) ? suites.map(githubObject) : []) {
-    if (Number(suite.latest_check_runs_count) === 0) continue;
+  const failed: Array<{ name: string; url?: string }> = [];
+  for (const suite of suites.map(githubObject)) {
+    if (Number(suite.latest_check_runs_count) === 0 && githubObject(suite.app).slug !== "github-actions") continue;
     if (suite.status !== "completed") return { state: "pending" };
+    if (Number(suite.latest_check_runs_count) === 0 && FAILED_CHECK_CONCLUSIONS.has(githubString(suite.conclusion) ?? "")) {
+      const url = githubString(suite.html_url);
+      failed.push({ name: "GitHub Actions", ...(url ? { url } : {}) });
+    }
     const updated = githubString(suite.updated_at) ?? "";
     if (updated > settledAt) settledAt = updated;
   }
-  const runs = githubObject(await fetchGitHubJson(env, `${path}/check-runs?filter=latest&per_page=100`,
-    auth.token)).check_runs;
-  const failed: Array<{ name: string; url?: string }> = [];
+  const runResponse = githubObject(await fetchGitHubJson(env, `${path}/check-runs?filter=latest&per_page=100`, auth.token));
+  const runs = runResponse.check_runs;
+  if (!Array.isArray(runs) || runResponse.total_count !== runs.length || !runs.length || !settledAt) return { state: "pending" };
   for (const run of Array.isArray(runs) ? runs.map(githubObject) : []) {
     if (run.status !== "completed") return { state: "pending" };
-    if (!FAILED_CHECK_CONCLUSIONS.has(githubString(run.conclusion) ?? "")) continue;
+    const conclusion = githubString(run.conclusion) ?? "";
+    if (PASSED_CHECK_CONCLUSIONS.has(conclusion)) continue;
+    if (!FAILED_CHECK_CONCLUSIONS.has(conclusion)) return { state: "pending" };
     const url = githubString(run.html_url);
     failed.push({ name: githubString(run.name) ?? "check", ...(url ? { url } : {}) });
   }

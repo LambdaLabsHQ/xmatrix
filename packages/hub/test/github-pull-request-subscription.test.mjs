@@ -111,7 +111,7 @@ test("a settled verdict reaches the pull request's conversation once and wakes i
     h.dependencies);
   await dispatchProductGitHubWebhook({ env: {}, event: "check_suite", delivery: "d-2", payload }, h.dependencies);
   assert.equal(first.delivered, 1);
-  assert.deepEqual(h.verdicts[0], ["42", "acme", "app", "abcdef1234567"]);
+  assert.deepEqual(h.verdicts[0], ["42", "acme", "app", "abcdef1234567", 7]);
   assert.equal(h.appended[0].body, "CI passed on [acme/app#7](https://github.com/acme/app/pull/7) at abcdef1.");
   assert.equal(h.appended[0].appAuthorId, "github");
   assert.equal(h.appended[0].messageId, h.appended[1].messageId,
@@ -193,4 +193,14 @@ test("a subscription made before its issue existed named an earlier issue and he
   await dispatchProductGitHubWebhook({ env: {}, event: "issue_comment", delivery: "d-5", payload },
     current.dependencies);
   assert.equal(current.appended.length, 1);
+});
+
+test("two pull requests sharing a commit retain separate head checks and share each read across Channels", async () => {
+  const h = harness({ routes: [issueRoute, { ...issueRoute, channelId: "channel-2" },
+    { ...issueRoute, sourceRef: "github:issue:acme/app#8", channelId: "channel-3" }] });
+  await dispatchProductGitHubWebhook({ env: {}, event: "check_suite", delivery: "d-shared", payload: {
+    ...base, action: "completed", check_suite: { head_sha: "abcdef1234567", pull_requests: [{number:7},{number:8}] },
+  } }, h.dependencies);
+  assert.deepEqual(h.verdicts.map(args=>args.at(-1)).sort(), [7, 8]);
+  assert.deepEqual(h.appended.map(entry=>entry.channelId).sort(), ["channel-1", "channel-2", "channel-3"]);
 });
