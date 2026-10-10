@@ -11,12 +11,14 @@ import type {
   MachineDaemonQuotaProbeCommand,
   MachineDaemonHarnessActionCommand,
   MachineDaemonStopCommand,
+  MachineDaemonTextTaskCommand,
   MachineDaemonWorktreeActionCommand,
   MachineDaemonWorktreeCleanupCommand,
 } from "@xmatrix/protocol/connections/machine-daemon";
 import type { SerializedMachineDaemon } from "@xmatrix/protocol";
-import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_WORKTREE_ACTION_CAPABILITY, parseHarnessActionRequest,
-  parseRoutingQuotaProbeRequest, parseWorktreeActionRequest,
+import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_TEXT_TASK_CAPABILITY, MACHINE_WORKTREE_ACTION_CAPABILITY,
+  parseHarnessActionRequest, parseRoutingQuotaProbeRequest, parseTextTaskRequest, parseWorktreeActionRequest,
+  type TextTaskResult,
   withMachineSpawnHarness, sha256Hex } from "@xmatrix/protocol";
 
 import {
@@ -62,6 +64,7 @@ const COMPLETION_EVENTS = new Set([
   "machine_quota_probe_result",
   "machine_harness_action_result",
   "machine_worktree_action_result",
+  "machine_text_task_result",
 ]);
 const PRIVATE_AUDIT_FIELDS = new Set([
   "token",
@@ -98,6 +101,8 @@ export interface PostgresMachineDaemonPortDependencies {
   /** Retain work that outlives the frame that started it. */
   keepAlive?(task: Promise<unknown>): void;
   quotaChanged?(route: { ownerUserId: string; machineId: string }): Promise<void>;
+  /** A Machine answered a text task; whoever issued it decides what the answer is for. */
+  textTaskAnswered?(task: { requestId: string; result: TextTaskResult }): Promise<void>;
   /** The daemon connected: wake the Channels whose work waits on this Machine. */
   machineConnected?(route: { ownerUserId: string; machineId: string }): Promise<unknown>;
 }
@@ -240,6 +245,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         !session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) {
       throw new Error("Harness action result does not come from a capable connection");
     }
+    if (message.type === "machine_text_task_result" && !session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) {
+      throw new Error("Text task result does not come from a capable connection");
+    }
     if (message.type === "machine_worktree_action_result" &&
         !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
       throw new Error("Worktree action result does not come from a capable connection");
@@ -271,6 +279,12 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     const result = await this.dependencies.daemonCommand(machineControlInput);
     if (message.type === "machine_quota_probe_result") {
       await this.dependencies.quotaChanged?.({ ownerUserId: session.principal.ownerUserId, machineId: session.principal.machineId });
+    }
+    if (message.type === "machine_text_task_result") {
+      // The command is complete either way; what the answer is for must not fail the Machine's report.
+      await this.dependencies.textTaskAnswered?.({ requestId: message.requestId, result: message.result })
+        .catch((error: unknown) => console.error("Text task answer was not applied", {
+          requestId: message.requestId, error: error instanceof Error ? error.message : String(error) }));
     }
     if (message.type === "machine_spawn_result" && message.launchId && message.channelId) {
       const spawnStarted = performance.now();
@@ -530,7 +544,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
   async claimCommands(
     session: Readonly<MachineDaemonRuntimeSession>,
     commandTypes: readonly ("spawn" | "stop" | "cleanup" | "request_resolve" | "recover_reply" | "quota_probe" |
-      "harness_action" | "worktree_action")[] = [
+      "harness_action" | "worktree_action" | "text_task")[] = [
       "spawn", "stop", "cleanup", "request_resolve",
     ],
   ): Promise<readonly MachineDaemonServerMessage[]> {
@@ -544,13 +558,16 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         eventType: undefined,
         commandTypes: [...commandTypes.filter(type => (type !== "quota_probe" || session.capabilities.includes("machine_quota_probe_v2")) &&
             (type !== "harness_action" || session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) &&
-            (type !== "worktree_action" || session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY))),
+            (type !== "worktree_action" || session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) &&
+            (type !== "text_task" || session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY))),
           ...(session.capabilities.includes("reply_recovery_v1") && !commandTypes.includes("recover_reply") ? ["recover_reply"] : []),
           ...(session.capabilities.includes("machine_quota_probe_v2") && !commandTypes.includes("quota_probe") ? ["quota_probe"] : []),
           ...(session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY) && !commandTypes.includes("harness_action")
             ? ["harness_action"] : []),
           ...(session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY) && !commandTypes.includes("worktree_action")
-            ? ["worktree_action"] : [])],
+            ? ["worktree_action"] : []),
+          ...(session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY) && !commandTypes.includes("text_task")
+            ? ["text_task"] : [])],
         // Reverse push is primary; lease covers in-flight host execution until
         // complete. Delivery failure must release (see deliverPendingOnce), not rely on
         // shortening this window for bounded HTTP recovery.
@@ -575,6 +592,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       }
       if (command.type === "machine_harness_action" && !session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) {
         throw new Error("Harness action command does not match a capable connection");
+      }
+      if (command.type === "machine_text_task" && !session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) {
+        throw new Error("Text task command does not match a capable connection");
       }
       if (command.type === "machine_worktree_action" && !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
         throw new Error("Worktree action command does not match a capable connection");
@@ -651,6 +671,7 @@ type MachineCommandLease = MachineDaemonCommandLease;
 type MachineDaemonLeasedCommand =
   | MachineDaemonHarnessActionCommand
   | MachineDaemonWorktreeActionCommand
+  | MachineDaemonTextTaskCommand
   | MachineDaemonQuotaProbeCommand
   | MachineDaemonRecoverReplyCommand
   | MachineDaemonSpawnCommand
@@ -862,6 +883,14 @@ function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
     }
     return { type, requestId, presetId: action.presetId, action: action.action,
       ...(action.code === undefined ? {} : { code: action.code }) };
+  }
+  if (type === "machine_text_task") {
+    const task = parseTextTaskRequest(payload);
+    if (task.requestId !== requestId || Object.keys(payload).some(key =>
+        !["type", "requestId", "presetId", "instruction", "input", "relayLease"].includes(key))) {
+      throw new Error("PostgreSQL returned an invalid text task command");
+    }
+    return { type, requestId, presetId: task.presetId, instruction: task.instruction, input: task.input };
   }
   if (type === "machine_worktree_action") {
     const action = parseWorktreeActionRequest(payload);
