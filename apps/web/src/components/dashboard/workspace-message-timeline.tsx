@@ -59,7 +59,7 @@ import {
 } from "./workspace-shell-formatters";
 
 import {
-  areMessageRowPropsEqual, type MessageRowComparableProps,
+  areMessageRowPropsEqual, type MessageRowChannel, type MessageRowComparableProps,
   attachmentDownloadHref,
   attachmentDownloadName,
   attachmentFetchHref,
@@ -527,9 +527,18 @@ export const MessageTimeline = memo(function MessageTimeline({
   const launchWindowsByMessage = useMemo(() => new Map([...launchChoicesByMessage]
     .map(([messageId, choice]) => [messageId, firstMessageDecisionWindow(choice, launchOptions)] as const)),
   [launchChoicesByMessage, launchOptions]);
+  // What a row needs of its conversation. The catalog replaces the channel
+  // object on every read receipt and presence change; a row keyed on that
+  // object would render again each time, Markdown included.
+  const channelId = channel?.id;
+  const channelSpaceId = channel?.spaceId;
+  const rowChannel = useMemo<MessageRowChannel | null>(
+    () => (channelId && channelSpaceId ? { id: channelId, spaceId: channelSpaceId } : null),
+    [channelId, channelSpaceId],
+  );
   const chooseFirstLaunch = useCallback(async (messageId: string, body: string, harness: string | null | "shown") => {
-    if (!token || !channel) return;
-    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_choice(channel.id, messageId), {
+    if (!token || !channelId) return;
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_choice(channelId, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, ...(harness === "shown" ? { shown: true } : harness ? { harness } : {}) }),
@@ -537,7 +546,7 @@ export const MessageTimeline = memo(function MessageTimeline({
     // Someone already decided: the refreshed record says what.
     if (!response.ok && response.status !== 409) throw await errorFromResponse(response);
     await refetchAgentLaunches();
-  }, [channel, refetchAgentLaunches, token]);
+  }, [channelId, refetchAgentLaunches, token]);
   const messageTargetEvidence = useMemo(() => {
     const grouped = new Map<string, { executions: NonNullable<AgentInvocationQueryPage["executions"]> }>();
     for (const execution of invocationQueryData?.executions ?? []) {
@@ -547,27 +556,27 @@ export const MessageTimeline = memo(function MessageTimeline({
     return grouped;
   }, [invocationQueryData]);
   const retryAgentLaunch = useCallback(async (launch: SerializedAgentLaunch) => {
-    if (!token || !channel) return;
+    if (!token || !channelId) return;
     const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.agent_launch_retry(launch.launchId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ channelId: channel.id }),
+      body: JSON.stringify({ channelId }),
     });
     if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
-  }, [channel, refetchAgentLaunches, token]);
+  }, [channelId, refetchAgentLaunches, token]);
   // The author answers Jev's intent question for one declined summon; the Hub
   // rechecks the body against the stored message and the caller's authorship.
   const launchAnyway = useCallback(async (messageId: string, body: string, sourceMention: string) => {
-    if (!token || !channel) return;
-    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_anyway(channel.id, messageId), {
+    if (!token || !channelId) return;
+    const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_message_launch_anyway(channelId, messageId), {
       method: "POST", cache: "no-store",
       headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ body, sourceMention }),
     });
     if (!response.ok) throw await errorFromResponse(response);
     await refetchAgentLaunches();
-  }, [channel, refetchAgentLaunches, token]);
+  }, [channelId, refetchAgentLaunches, token]);
   // One media store per channel view. A new one is built — and the previous
   // one released — whenever the channel, the viewer, or the session changes. Ordinary message progress is excluded
   // from the dependency list so it does not evict already-authorized media.
@@ -987,7 +996,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
                   currentUserIdentityId={currentUserIdentityId}
-                  channel={channel}
+                  channel={rowChannel}
                   token={token}
                     mediaStore={mediaStore}
                   isJoined={isJoined}
