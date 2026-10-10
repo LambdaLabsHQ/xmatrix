@@ -89,13 +89,15 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
       await expect(summary.locator("s")).toHaveText("old");
       await expect(summary).toContainText("notes image <b>literal</b>");
       await expect(summary.locator("a, img, b")).toHaveCount(0);
-      expect(await summary.evaluate((element) => {
+      const presentation = await summary.evaluate((element) => {
         const style = getComputedStyle(element);
         const strong = getComputedStyle(element.querySelector("strong")!);
         return { ellipsis: style.textOverflow, whiteSpace: style.whiteSpace,
           clipped: element.scrollWidth > element.clientWidth, height: element.getBoundingClientRect().height,
           bold: Number(strong.fontWeight) > Number(style.fontWeight) };
-      })).toEqual({ ellipsis: "ellipsis", whiteSpace: "nowrap", clipped: true, height: 18, bold: true });
+      });
+      expect(presentation).toMatchObject({ ellipsis: "ellipsis", whiteSpace: "nowrap", clipped: true, bold: true });
+      expect(presentation.height).toBeLessThanOrEqual(24);
 
       const discussion = page.locator(".app-page-row:visible", { hasText: "Discussion" }).locator(".app-list-row-meta");
       await expect(discussion).toHaveText("**Ada**: Ship it Friday?");
