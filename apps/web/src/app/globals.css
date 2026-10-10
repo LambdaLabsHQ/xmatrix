@@ -8236,6 +8236,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app :is(.app-tool-detail, 
   color: var(--app-ask-ink);
 }
 
+/* A tick or a choice on an ask is drawn in the card's ink, like the
+   connector settings' own, not in the browser's blue. */
+.xmatrix-app .app-ask-card input:is([type="radio"], [type="checkbox"]) {
+  accent-color: currentColor;
+}
+
 /* The Pending approvals dock is one such block, and the asks inside it are
    its lines, not blocks of their own. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-dock .app-channel-approvals {
