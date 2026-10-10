@@ -25,8 +25,8 @@ In public repositories it defaults to `ubuntu-24.04` and `windows-2025`.
 Reusable callers can set `linux_runner`, `offload_runner`, and `windows_runner`
 to a JSON runner label or array, for example `'"ubuntu-24.04"'`. These inputs
 select compute only; they do not change the tests or release authorization.
-Hosted jobs always execute their checks rather than reusing the private CI
-ledger.
+Hosted jobs use the same content-addressed CI ledger as release gates; a
+missing or unreachable ledger runs the complete selected checks.
 
 `public-ci.yml` runs the full shared matrix on a public snapshot's `main` push.
 Its manual dispatch also verifies that path in the private repository. A
@@ -49,6 +49,22 @@ The root `db:generate`, `db:migrate` and `db:studio` Drizzle commands were
 removed because `@xmatrix/db` no longer uses Drizzle. Use its `check` command
 for migration validation and the documented PostgreSQL release path for
 applying migrations.
+
+## Windows compile cache
+
+Native Windows CI archives kache's artifact store and SQLite index after
+trimming the store to 640 MiB, stopping its job-local writer, and waiting up to
+45 seconds for that process to exit. Cargo finishing alone does not stop the
+writer: archiving its live root previously failed with tar's "file changed as
+we read it" error while the test job still succeeded. Coordination files,
+locks and logs are excluded. Restore and save use identical payload paths.
+
+The `kache-Windows-test-v2-` namespace starts this payload format with a cold
+build; it does not restore the old live-root archives. Main refreshes the
+cache, and a PR seeds it when no cache for its lockfile was restored, including
+when it only found a different lockfile's fallback. Existing pruning retains
+one entry per ref and lockfile and removes closed PR caches. These caches save
+compilation work; the required native suite still runs on the selected content.
 
 ## Deny scan
 
