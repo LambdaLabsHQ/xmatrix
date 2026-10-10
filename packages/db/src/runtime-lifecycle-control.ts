@@ -23,6 +23,7 @@ import {
 import { invocationProgress, readInvocationProgress } from "./runtime-invocation-progress.js";
 import { commitRuntime, RuntimeControlError } from "./runtime-control.js";
 import { resumableChannelRun, runEndRestState, type InstanceRestState } from "./instance-rest-state.js";
+import { releaseDeclaredWaits } from "./channel-stop-fence.js";
 import { commandFields } from "./command-fields.js";
 
 /** A Run's name is its Space registration's display name. */
@@ -524,6 +525,14 @@ export class PostgresMachineLifecycleRepository {
     const restChanged = run.instance_id && !deletionPending
       ? await this.recordRestState(tx, input, runId, body, String(run.status), String(run.instance_id), status)
       : false;
+    // A Run that ended for good waits on nobody. An Instance a message can still
+    // wake (sleeping, interrupted) keeps its waits: the answer is what wakes it.
+    if (run.instance_id && input.eventType === "machine_run_exited" && status &&
+        !["sleeping", "interrupted"].includes(String(runEndRestState({ metadata: body,
+          previousRunStatus: String(run.status), nextRunStatus: status, restReason: input.payload.restReason })))) {
+      await releaseDeclaredWaits(tx, { spaceId: input.spaceId, channelId: input.channelId, authorKind: "agent",
+        authorIds: [String(run.instance_id)], at: input.at });
+    }
     // A stopped reborn predecessor makes its waiting successor due now, so the
     // coordinator wake that follows the stop does not wait out the retry delay.
     if (run.instance_id && input.preserveInstanceForReborn === true &&
@@ -704,6 +713,10 @@ export class PostgresMachineLifecycleRepository {
         data.instances SET rest_state=$1,version=version+1,updated_at=GREATEST(updated_at,$2)
         WHERE instance_id=$3 AND run_id=$4 AND status='offline' AND rest_state IS NULL
         RETURNING instance_id`, values: [rest, input.at, row.instance_id, row.run_id], maxRows: 1 });
+      // Gone for good rather than resting: nobody is waiting any more.
+      if (row.instance_id && rest !== "sleeping" && rest !== "interrupted") await releaseDeclaredWaits(tx, {
+        spaceId: input.spaceId, channelId: input.channelId, authorKind: "agent",
+        authorIds: [String(row.instance_id)], at: input.at });
       changed.push(String(row.run_id));
     }
     return changed;
