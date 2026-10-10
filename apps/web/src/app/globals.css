@@ -5328,10 +5328,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
 
   .xmatrix-app.xmatrix-app-shell {
     --mobile-horizontal-padding: clamp(0.875rem, 3.6vw, 1.125rem);
-    /* The phone's content line, 1.25rem inside the floating dock's edges
-       (--mobile-horizontal-padding): the plank's name and its icons start
-       and end on it, and so does every list row's content. */
-    --mobile-content-inset: calc(var(--mobile-horizontal-padding) + 1.25rem);
+    /* The phone's content line: the plank's name and its icons start and end
+       on it, and so does every list row's content. It is 1.25rem inside the
+       web dock's edges and stays there under a native dock, whose side gap
+       grows with the device corner and would squeeze the rows. */
+    --mobile-content-inset: calc(clamp(0.875rem, 3.6vw, 1.125rem) + 1.25rem);
     --mobile-topbar-safe-top: env(safe-area-inset-top, 0px);
     --mobile-bottom-safe: env(safe-area-inset-bottom, 0px);
     --mobile-dock-float-offset: 1.25rem;
@@ -5379,8 +5380,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
       var(--app-native-tab-bar-height, 49px) + var(--mobile-bottom-safe) + 0.75rem
     );
     /* The native dock sits concentric with the device corners. Its side gap
-       determines the content inset and the floating create button's edge;
-       the navigation board and list rows themselves span the screen. */
+       is the floating create button's edge; the content line keeps its own
+       inset, and the navigation board and list rows span the screen. */
     --mobile-horizontal-padding: var(--app-native-dock-inset, clamp(0.875rem, 3.6vw, 1.125rem));
   }
 
