@@ -572,7 +572,8 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
   app.post("/api/channels/:channelId/read", (c) => jsonErrors(c, async () => {
     const authUser = await requireAuth(c.req.raw, c.env);
     const channelId = c.req.param("channelId");
-    const body = (await c.req.json().catch(() => ({}))) as { sequence?: number };
+    // `responded`: the reader has dealt with the mentions waiting on them here without replying.
+    const body = (await c.req.json().catch(() => ({}))) as { sequence?: number; responded?: boolean };
     if (body.sequence !== undefined && (!Number.isSafeInteger(body.sequence) || body.sequence < 0)) {
       return c.json({ error: "sequence must be a non-negative safe integer" }, 400);
     }
@@ -580,11 +581,14 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
         commandId: productCommandId(
           c.req.raw,
           "acknowledge-message",
-          `${channelId}:${authUser.id}:${body.sequence ?? "tail"}`,
+          body.responded === true
+            ? `${channelId}:${authUser.id}:responded:${crypto.randomUUID()}`
+            : `${channelId}:${authUser.id}:${body.sequence ?? "tail"}`,
         ),
         channelId,
         sequence: body.sequence,
         principal: { kind: "user", id: authUser.id },
+        ...(body.responded === true ? { responded: true } : {}),
       };
     const result = await channelMessageResult(() => acknowledgeChannelMessage(c.env, channelId, acknowledgeCommand));
     if (!result.ok) return result.response;
@@ -595,7 +599,7 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
         !Array.isArray(result.payload.attention)
       ? result.payload.attention as import("@xmatrix/protocol").ChannelAttentionSummary
       : undefined;
-    if (result.payload.advanced === true) {
+    if (result.payload.advanced === true || result.payload.responded === true) {
       const memberRead = {
         channelId,
         subjectId: `user:${authUser.id}`,
