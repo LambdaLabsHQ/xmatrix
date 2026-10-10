@@ -1,6 +1,7 @@
 import { DEFAULT_HUB_URL, normalizeHubUrl } from "@xmatrix/protocol";
 
 import { noteRejectedToken } from "../auth-events";
+import { isTransientNetworkSessionError } from "../auth-session-policy";
 
 export interface XMatrixErrorPayload {
   error?: string;
@@ -118,6 +119,19 @@ function throwTransportError(cause: unknown, signal: AbortSignal | null | undefi
   });
 }
 
+/** Receiving headers does not finish the transport: the body can still disconnect.
+ * Keep parser defects and consumed/locked bodies distinct from network failure. */
+async function readResponseJson<T>(response: Response, signal?: AbortSignal): Promise<T> {
+  try {
+    return await response.json() as T;
+  } catch (cause) {
+    if (cause instanceof TypeError && isTransientNetworkSessionError(cause)) {
+      throwTransportError(cause, signal);
+    }
+    throw cause;
+  }
+}
+
 export async function xmatrixApiRequest<T>(input: {
   url: string;
   token?: string;
@@ -151,7 +165,7 @@ export async function xmatrixApiRequest<T>(input: {
   noteRejectedToken(response.status, Boolean(input.token));
   if (!response.ok) throw await errorFromResponse(response);
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  return readResponseJson<T>(response, input.signal);
 }
 
 /** Raw-response transport for compatibility call sites while they move their
@@ -225,13 +239,16 @@ export function unexpectedResponse(what: string): XMatrixApiError {
 /** A successful response's JSON; a failed one throws the classified error before its body is read. */
 export async function requireJson<T>(response: Response): Promise<T> {
   if (!response.ok) throw await errorFromResponse(response);
-  return await response.json() as T;
+  return readResponseJson<T>(response);
 }
 
 /** The record a successful response promised under `field`; `what` names it if it is missing. */
 export async function requireField<T>(response: Response, field: string, what: string): Promise<T> {
   if (!response.ok) throw await errorFromResponse(response);
-  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  const payload = await readResponseJson<Record<string, unknown>>(response).catch((cause: unknown): Record<string, unknown> => {
+    if (cause instanceof SyntaxError) return {};
+    throw cause;
+  });
   const value = payload[field];
   if (value === undefined || value === null) throw unexpectedResponse(what);
   return value as T;
