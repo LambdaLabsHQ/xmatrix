@@ -15,6 +15,7 @@ pub(super) fn submission_fingerprint(scope: &SendScope, payload: &Value) -> Opti
             "senderExecutionKey",
             "attachments",
             "finalReplyExecutionId",
+            "awaitsResponse",
         ]
         .contains(&key.as_str())
     }) {
