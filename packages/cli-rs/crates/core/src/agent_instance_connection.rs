@@ -448,6 +448,12 @@ pub struct AgentInstanceConnectionClient {
     /// cursor parked and the next catch-up replays work this instance already
     /// finished. Replaying them on reconnect converges the cursor instead.
     pending_acks: Arc<Mutex<VecDeque<AgentInstanceClientMessage>>>,
+    /// Reports the Hub has not answered yet, by request id. The Hub acts on a
+    /// report once (a pull request's is what subscribes its conversation), so
+    /// one produced while the socket was down, or handed to a socket that
+    /// died with it, is sent again on reconnect. The Hub names the entry by
+    /// the request id, so a report it already recorded is a replay.
+    unanswered_reports: UnansweredReports,
     /// Highest ack this process handed to a writer, per channel.
     ///
     /// `pending_acks` only catches acks that never reached a writer at all.
@@ -511,6 +517,7 @@ impl AgentInstanceConnectionClient {
             hub_capabilities: Arc::new(RwLock::new(Vec::new())),
             registered_author: Arc::new(Mutex::new(None)),
             pending_acks: Arc::new(Mutex::new(VecDeque::new())),
+            unanswered_reports: Arc::default(),
             last_channel_acks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -704,6 +711,7 @@ impl AgentInstanceConnectionClient {
                     signals: signals.clone(),
                     channel_waterlines: self.channel_waterlines.clone(),
                     last_channel_acks: self.last_channel_acks.clone(),
+                    unanswered_reports: self.unanswered_reports.clone(),
                     instance_resume_key: self.instance_resume_key.clone(),
                     trace_store: self.trace_store.clone(),
                     trace_waits: Arc::default(),
@@ -779,6 +787,7 @@ impl AgentInstanceConnectionClient {
         let channel_waterlines = self.channel_waterlines.clone();
         let pending_acks = self.pending_acks.clone();
         let last_channel_acks = self.last_channel_acks.clone();
+        let unanswered_reports = self.unanswered_reports.clone();
         let latest_presence = self.latest_presence.clone();
         let instance_resume_key = self.instance_resume_key.clone();
         let trace_store = self.trace_store.clone();
@@ -1124,6 +1133,7 @@ impl AgentInstanceConnectionClient {
                                 signals: signals.clone(),
                                 channel_waterlines: channel_waterlines.clone(),
                                 last_channel_acks: last_channel_acks.clone(),
+                                unanswered_reports: unanswered_reports.clone(),
                                 instance_resume_key: instance_resume_key.clone(),
                                 trace_store: trace_store.clone(),
                                 trace_waits: Arc::default(),
@@ -1168,6 +1178,7 @@ impl AgentInstanceConnectionClient {
                     // with it, so replay the newest per channel; Authority keeps the
                     // greater sequence, making a redundant one a no-op.
                     replay_last_channel_acks(&last_channel_acks, &new_write_tx);
+                    replay_unanswered_reports(&unanswered_reports, &new_write_tx);
 
                     let channels_for_catchup: Vec<String> = match history_channels.lock() {
                         Ok(set) => set.iter().cloned().collect(),
@@ -1601,6 +1612,14 @@ impl AgentInstanceConnectionClient {
 
     pub fn send_message(&self, message: AgentInstanceClientMessage) -> Result<()> {
         self.send(message)
+    }
+
+    /// Send a report the Hub answers under `request_id`, and keep it until it
+    /// does; see `unanswered_reports`.
+    pub fn send_report(&self, request_id: String, report: AgentInstanceClientMessage) {
+        remember_unanswered_report(&self.unanswered_reports, request_id, report.clone());
+        // A report that could not be sent now is sent on reconnect.
+        let _ = self.send(report);
     }
 
     /// A correlated ping on the same writer fences the Hub's ordered dispatch:
@@ -2152,6 +2171,7 @@ struct ReaderContext {
     signals: ConnectionSignals,
     channel_waterlines: Arc<Mutex<HashMap<String, u64>>>,
     last_channel_acks: Arc<Mutex<HashMap<String, AgentInstanceClientMessage>>>,
+    unanswered_reports: UnansweredReports,
     instance_resume_key: Option<String>,
     trace_store: Arc<Mutex<AgentHostTraceStore>>,
     /// Trace reads currently waiting for a newer event on this reader.
@@ -2374,6 +2394,7 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
                 }
             }
             remember_channel_waterline(&ctx.channel_waterlines, &server_msg);
+            settle_unanswered_report(&ctx.unanswered_reports, &server_msg);
 
             let request_id = server_message_request_id(&server_msg);
             if let Some(rid) = request_id {
@@ -2545,6 +2566,58 @@ fn queue_pending_ack(
         queue.pop_front();
     }
     queue.push_back(ack);
+}
+
+type UnansweredReports = Arc<Mutex<VecDeque<(String, AgentInstanceClientMessage)>>>;
+
+/// A Run reports rarely; a Hub that never answers must not grow this.
+const UNANSWERED_REPORT_LIMIT: usize = 64;
+
+fn remember_unanswered_report(
+    reports: &UnansweredReports,
+    request_id: String,
+    report: AgentInstanceClientMessage,
+) {
+    let Ok(mut queue) = reports.lock() else {
+        return;
+    };
+    if queue.len() >= UNANSWERED_REPORT_LIMIT {
+        queue.pop_front();
+    }
+    queue.push_back((request_id, report));
+}
+
+/// The Hub answered a report: it is settled, unless the Hub failed in a way it
+/// says to try again, which the next connection does.
+fn settle_unanswered_report(reports: &UnansweredReports, answer: &AgentInstanceServerMessage) {
+    let Some(request_id) = server_message_request_id(answer) else {
+        return;
+    };
+    if matches!(
+        answer,
+        AgentInstanceServerMessage::Error { failure: Some(failure), .. } if failure.retryable
+    ) {
+        return;
+    }
+    if let Ok(mut queue) = reports.lock() {
+        queue.retain(|(unanswered, _)| *unanswered != request_id);
+    }
+}
+
+/// Sends every unanswered report again on a freshly connected writer.
+fn replay_unanswered_reports(
+    reports: &UnansweredReports,
+    write_tx: &mpsc::Sender<String>,
+) -> usize {
+    let unanswered: Vec<AgentInstanceClientMessage> = match reports.lock() {
+        Ok(queue) => queue.iter().map(|(_, report)| report.clone()).collect(),
+        Err(_) => return 0,
+    };
+    unanswered
+        .iter()
+        .filter_map(|report| serde_json::to_string(report).ok())
+        .filter(|json| write_tx.try_send(json.clone()).is_ok())
+        .count()
 }
 
 /// Replays queued acks onto a freshly connected writer, oldest first, so the
@@ -2923,8 +2996,9 @@ pub(crate) mod tests {
         AgentHostTraceAvailability, AgentHostTraceStore, HOST_TRACE_MAX_AGE_MS,
     };
     use crate::protocol::{
-        AgentGoalStatus, AgentInstanceClientMessage, AgentInstanceServerMessage, AgentRuntimeState,
-        LlmQuotaUsage, LlmUsage, SerializedAgent,
+        AgentGoalStatus, AgentInstanceClientMessage, AgentInstanceServerMessage,
+        AgentOperationFailure, AgentRuntimeState, ChannelActivity, LlmQuotaUsage, LlmUsage,
+        SerializedAgent,
     };
 
     use crate::agent_instance_delivery::tests::{replay_frame, test_channel_message};
@@ -2935,9 +3009,10 @@ pub(crate) mod tests {
         flush_pending_acks, install_connected_writer, instance_resume_key_with_headless,
         is_remote_shutdown_close_reason, metadata_with_previous_instance_id_value, now_ms,
         queue_pending_ack, reconnect_channel_catchup_message, remember_channel_waterline,
-        remember_last_channel_ack, replay_last_channel_acks, send_trace_history_response,
-        server_message_request_id, should_log_client_network_sample_failure, signal_disconnect,
-        spawn_trace_reaper, terminal_reconnect_rejection,
+        remember_last_channel_ack, replay_last_channel_acks, replay_unanswered_reports,
+        send_trace_history_response, server_message_request_id, settle_unanswered_report,
+        should_log_client_network_sample_failure, signal_disconnect, spawn_trace_reaper,
+        terminal_reconnect_rejection,
     };
     use std::time::Duration;
 
@@ -3614,6 +3689,80 @@ pub(crate) mod tests {
         assert!(client.pending_acks.lock().unwrap().is_empty());
         // A second reconnect must not resend an ack the hub already has.
         assert_eq!(flush_pending_acks(&client.pending_acks, &writer), 0);
+    }
+
+    #[test]
+    fn a_report_is_sent_again_on_every_new_writer_until_the_hub_answers_it() {
+        let client = AgentInstanceConnectionClient::new(
+            "ws://localhost/ws/agent-instances".into(),
+            "token".into(),
+            "reporter".into(),
+            "claude".into(),
+            None,
+        );
+        let report = |request_id: &str| AgentInstanceClientMessage::ChannelActivity {
+            request_id: Some(request_id.into()),
+            channel_id: "ch-1".into(),
+            activity: ChannelActivity::PullRequest {
+                url: "https://github.com/acme/app/pull/7".into(),
+                repository: None,
+                number: None,
+            },
+        };
+        let answer = |request_id: &str, retryable: Option<bool>| match retryable {
+            None => AgentInstanceServerMessage::ChannelMessageDispatched {
+                request_id: Some(request_id.into()),
+                message_id: format!("activity:{request_id}"),
+                channel_id: "ch-1".into(),
+                recipients: Vec::new(),
+            },
+            Some(retryable) => AgentInstanceServerMessage::Error {
+                request_id: Some(request_id.into()),
+                message: "rejected".into(),
+                failure: Some(AgentOperationFailure {
+                    code: "runtime.authority_rejected".into(),
+                    diagnostic_id: "diag_1".into(),
+                    retryable,
+                    stage: "authority.request".into(),
+                    origin_stage: None,
+                }),
+            },
+        };
+
+        // Disconnected, as when the pull request's URL came back: the report is kept.
+        client.send_report("r-1".into(), report("r-1"));
+        client.send_report("r-2".into(), report("r-2"));
+        client.send_report("r-3".into(), report("r-3"));
+        let (writer, mut receiver) = mpsc::channel(8);
+        assert_eq!(
+            replay_unanswered_reports(&client.unanswered_reports, &writer),
+            3
+        );
+        let replayed: serde_json::Value =
+            serde_json::from_str(&receiver.try_recv().unwrap()).unwrap();
+        assert_eq!(replayed["type"], "channel_activity");
+        assert_eq!(replayed["requestId"], "r-1");
+        assert_eq!(replayed["activity"]["kind"], "pull_request");
+
+        // That socket died before any answer: the next one gets them all again.
+        let (writer, _receiver) = mpsc::channel(8);
+        assert_eq!(
+            replay_unanswered_reports(&client.unanswered_reports, &writer),
+            3
+        );
+
+        // Recorded, refused, and failed in a way the Hub says to try again.
+        settle_unanswered_report(&client.unanswered_reports, &answer("r-1", None));
+        settle_unanswered_report(&client.unanswered_reports, &answer("r-2", Some(false)));
+        settle_unanswered_report(&client.unanswered_reports, &answer("r-3", Some(true)));
+        let (writer, mut receiver) = mpsc::channel(8);
+        assert_eq!(
+            replay_unanswered_reports(&client.unanswered_reports, &writer),
+            1
+        );
+        let retried: serde_json::Value =
+            serde_json::from_str(&receiver.try_recv().unwrap()).unwrap();
+        assert_eq!(retried["requestId"], "r-3");
     }
 
     #[test]

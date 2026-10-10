@@ -144,6 +144,10 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   pull request it printed. That is the only place that sees what the harness
   ran whatever its shell and PATH are: a login shell reorders PATH, so a
   `gh` entrypoint placed in front of the real one is bypassed.
+  The runtime keeps the report until the Hub answers it and sends it again
+  on every reconnect, so a pull request opened while the Run's socket is down
+  is still reported; the Hub names the entry by the report's request id, so
+  a report it already recorded is not recorded twice.
 - **An Agent subscribes itself.** `xmatrix channel subscribe <channel>
   <pull-request-url>` (`POST /api/channels/:channelId/pull-requests`)
   subscribes the conversation as the Run's owner and answers `subscribed`,
