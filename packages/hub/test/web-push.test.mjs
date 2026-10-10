@@ -94,6 +94,15 @@ test("PUSH_CONFIG is optional, and a malformed one is refused", () => {
   assert.throws(() => pushConfig("{"), /not valid JSON/u);
   assert.throws(() => pushConfig(JSON.stringify({ vapid: { ...vapid, subject: "push@example.test" } })), /PUSH_CONFIG\.vapid/u);
   assert.throws(() => pushConfig(JSON.stringify({ vapid: { ...vapid, privateKey: "short" } })), /PUSH_CONFIG\.vapid/u);
+  const apns = { keyP8: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----", keyId: "ABCDE12345",
+    teamId: "TEAM123456", topic: "sh.example.app" };
+  const account = { project_id: "example-project", client_email: "push@example-project.iam.gserviceaccount.com",
+    private_key: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n", type: "service_account" };
+  assert.deepEqual(pushConfig(JSON.stringify({ vapid, apns, fcm: account })), { vapid, apns, fcm: {
+    projectId: account.project_id, clientEmail: account.client_email, privateKey: account.private_key.trim() } });
+  assert.deepEqual(pushConfig(JSON.stringify({ apns })), { apns });
+  assert.throws(() => pushConfig(JSON.stringify({ apns: { ...apns, keyId: "short" } })), /PUSH_CONFIG\.apns/u);
+  assert.throws(() => pushConfig(JSON.stringify({ fcm: { ...account, private_key: "" } })), /PUSH_CONFIG\.fcm/u);
 });
 
 test("a message is pushed to the devices of the people it is addressed to, and gone devices are forgotten", async () => {
