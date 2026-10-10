@@ -17,38 +17,49 @@ remain available through its package's lint command.
 
 ## Hosted runners
 
-`ci.yml` uses the existing private labels by default in private repositories.
-Short shared checks (`changes`, `node-checks`, `desktop`, and the aggregate)
-use `xmatrix-ci-offload`; product partitions use `xmatrix-ci-linux`. This keeps
-an available short-check runner useful while the long-test pool is occupied.
-In public repositories it defaults to `ubuntu-24.04` and `windows-2025`.
+`ci.yml` defaults to GitHub-hosted `ubuntu-24.04` and `windows-2025`.
+The public repository has no self-hosted runners. Hosted Hub validation uses
+one static job and three test-file shards; Web uses one primary job and four
+functional browser shards. Together with Node, desktop, Android, both Rust
+jobs, the selector and aggregate, the full matrix has 16 jobs.
 Reusable callers can set `linux_runner`, `offload_runner`, and `windows_runner`
 to a JSON runner label or array, for example `'"ubuntu-24.04"'`. These inputs
 select compute only; they do not change the tests or release authorization.
-Hosted jobs always execute their checks rather than reusing the private CI
-ledger.
+Hosted jobs use the same content-addressed CI ledger as release gates; a
+missing or unreachable ledger runs the complete selected checks.
 
 `public-ci.yml` runs the full shared matrix on a public snapshot's `main` push.
 Its manual dispatch also verifies that path in the private repository. A
 private `main` push skips this workflow's only job. Public PRs use `ci.yml` and
 its hosted defaults, including the aggregate `ci` result.
 
-The public snapshot must keep both workflows, the local composite setup
-actions they reference, and their scripts. Exclude private runner maintenance,
-CI ledger recording, credential-bearing deployment and release workflows from
-the snapshot. `node scripts/public-snapshot.mjs <destination>` applies that
-filter. It also drops contract tests that read the excluded workflows and
-rewrites `knip.jsonc` so the snapshot's Node gate does not refer to removed
-files. The external pull-request closer stays, because the snapshot takes
+The repository keeps CI, the content ledger, release workflows and their local
+composite actions together. External pull requests are closed in favour of
 prompt requests. Hosted validation requires no production secrets: Hub tests
 bootstrap isolated PostgreSQL tools, Web uses the existing browser fixtures,
 and native tests use the pinned toolchains. Signing and production publication
-remain governed by the agent release workflow.
+remain governed by Production Release Intent and its immutable release train.
 
 The root `db:generate`, `db:migrate` and `db:studio` Drizzle commands were
 removed because `@xmatrix/db` no longer uses Drizzle. Use its `check` command
 for migration validation and the documented PostgreSQL release path for
 applying migrations.
+
+## Windows compile cache
+
+Native Windows CI archives kache's artifact store and SQLite index after
+trimming the store to 640 MiB, stopping its job-local writer, and waiting up to
+45 seconds for that process to exit. Cargo finishing alone does not stop the
+writer: archiving its live root previously failed with tar's "file changed as
+we read it" error while the test job still succeeded. Coordination files,
+locks and logs are excluded. Restore and save use identical payload paths.
+
+The `kache-Windows-test-v2-` namespace starts this payload format with a cold
+build; it does not restore the old live-root archives. Main refreshes the
+cache, and a PR seeds it when no cache for its lockfile was restored, including
+when it only found a different lockfile's fallback. Existing pruning retains
+one entry per ref and lockfile and removes closed PR caches. These caches save
+compilation work; the required native suite still runs on the selected content.
 
 ## Deny scan
 
@@ -59,8 +70,7 @@ Stripe keys) and the official deployment's identifiers. The identifiers come
 from the repository secret `XMATRIX_DENY_IDENTIFIERS` (a JSON array or one per
 line, each at least 6 characters), so the list itself is never public. The job
 fails closed when the secret is unreadable, which includes pull requests from
-forks. Findings name the file and a redacted value only. The public snapshot
-export runs the same scan on the exported tree. The private repository skips
+forks. Findings name the file and a redacted value only. The private repository skips
 the job, since it legitimately holds the values the scan refuses.
 
 ## Shared Linux host admission

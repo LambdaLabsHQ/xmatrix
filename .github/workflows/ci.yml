@@ -485,6 +485,8 @@ jobs:
       - *checkout_selected_ref
       # An ephemeral hosted runner keeps kache's store on the workspace volume
       # (hard links need one volume) and restores it from the Actions cache.
+      # v2 archives only persistent payloads after the cache writer exits;
+      # restore and save must name identical paths for Actions cache versions.
       - name: Place the kache store on a GitHub-hosted runner
         if: runner.environment == 'github-hosted'
         shell: powershell
@@ -496,11 +498,13 @@ jobs:
         if: runner.environment == 'github-hosted'
         uses: actions/cache/restore@v6
         with:
-          path: ${{ runner.temp }}\kache
-          key: kache-${{ runner.os }}-test-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}\kache\store
+            ${{ runner.temp }}\kache\index.db*
+          key: kache-${{ runner.os }}-test-v2-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
-            kache-${{ runner.os }}-test-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-
-            kache-${{ runner.os }}-test-
+            kache-${{ runner.os }}-test-v2-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-
+            kache-${{ runner.os }}-test-v2-
       - uses: ./.github/actions/setup-windows-rust-cli
       # The pinned cargo-nextest release, next to cargo. A download, not an
       # action: the native toolchain PATH above deliberately has no bash.
@@ -528,20 +532,40 @@ jobs:
         if: steps.ledger.outputs.hit != 'true'
         shell: powershell
         run: node scripts/ci.mjs rust-cli-windows
-      - name: Trim the kache store
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || steps.kache-cache.outputs.cache-matched-key == '')
+      # A restored cache from an older lockfile is only a fallback: seed this
+      # lockfile on the PR too, so corrective pushes reuse their new artifacts.
+      - name: Trim and stop the kache cache writer
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || !startsWith(steps.kache-cache.outputs.cache-matched-key, format('kache-{0}-test-v2-{1}-', runner.os, hashFiles('packages/cli-rs/Cargo.lock'))))
         shell: powershell
         env:
           KACHE_MAX_SIZE: 640MiB
         run: |
+          $ErrorActionPreference = 'Stop'
           & $env:RUSTC_WRAPPER gc
           if ($LASTEXITCODE -ne 0) { throw 'kache gc failed' }
+          # The daemon keeps a SQLite writer and updates coordination files
+          # after cargo exits. Its stop acknowledges before shutdown finishes.
+          $statePath = Join-Path $env:KACHE_CACHE_DIR 'daemon.state.json'
+          if (Test-Path -LiteralPath $statePath) {
+            $daemonState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            $cacheWriter = Get-Process -Id $daemonState.pid -ErrorAction SilentlyContinue
+            & $env:RUSTC_WRAPPER daemon stop
+            if ($LASTEXITCODE -ne 0) { throw 'kache daemon stop failed' }
+            if ($cacheWriter) {
+              if (-not $cacheWriter.WaitForExit(45000)) { throw 'kache cache writer did not exit within 45 seconds' }
+            }
+          }
+      # Persist artifacts and the closed SQLite index, not daemon state,
+      # locks or logs. Archiving the live root failed with tar exit code 1
+      # (directory changed during read), leaving Windows on a stale cache.
       - name: Save the kache store
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || steps.kache-cache.outputs.cache-matched-key == '')
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && success() && (github.ref == 'refs/heads/main' || !startsWith(steps.kache-cache.outputs.cache-matched-key, format('kache-{0}-test-v2-{1}-', runner.os, hashFiles('packages/cli-rs/Cargo.lock'))))
         uses: actions/cache/save@v6
         with:
-          path: ${{ runner.temp }}\kache
-          key: kache-${{ runner.os }}-test-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}\kache\store
+            ${{ runner.temp }}\kache\index.db*
+          key: kache-${{ runner.os }}-test-v2-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
 
   ci:
     needs:
