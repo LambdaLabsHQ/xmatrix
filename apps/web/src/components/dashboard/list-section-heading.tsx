@@ -16,7 +16,8 @@ export type ListSectionMark = { icon: ComponentType<Pick<SVGProps<SVGSVGElement>
 export function ListSectionHeading({ label, count, action, mark }: {
   label: string;
   count?: number;
-  action?: { label: string; onClick: () => void };
+  /** `expanded` says the action folds the section's rows, and whether they show now. */
+  action?: { label: string; onClick: () => void; expanded?: boolean };
   mark?: ListSectionMark;
 }) {
   const Icon = mark?.icon;
@@ -29,7 +30,7 @@ export function ListSectionHeading({ label, count, action, mark }: {
       </h2>
       {action && (
         <button type="button" className="app-list-section-action ml-auto pl-2 font-medium hover:text-foreground"
-          onClick={action.onClick}>
+          aria-expanded={action.expanded} onClick={action.onClick}>
           {action.label}
         </button>
       )}

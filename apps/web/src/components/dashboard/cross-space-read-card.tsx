@@ -6,11 +6,10 @@ import { Check, Eye, Loader2, X } from "lucide-react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import { actionClass } from "@/components/ui/action-tone";
-import { statusChipClass } from "@/components/ui/status-tone";
-import { ErrorNotice } from "@/components/ui/error-notice";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { AskCard, AskError } from "./ask-card";
 import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
 /**
@@ -47,8 +46,7 @@ export function crossSpaceReadMetadata(metadata: Record<string, unknown> | undef
   return { grantId, spaceId, ownerUserId: text(record.ownerUserId), agentName: text(record.agentName) };
 }
 
-const STATUS_COPY: Record<CrossSpaceReadGrant["status"], string> = {
-  pending: "Waiting for the owner",
+const STATUS_COPY: Record<Exclude<CrossSpaceReadGrant["status"], "pending">, string> = {
   approved: "Approved · read-only",
   denied: "Denied",
   revoked: "Revoked",
@@ -150,87 +148,69 @@ export function CrossSpaceReadCard({ request, token, userId }: {
   const status = grant?.status ?? "pending";
   const agentName = grant?.agentName || request.agentName || "Agent";
   return (
-    <div className="app-request-broker-card mt-2 w-full max-w-2xl rounded-md border border-border bg-muted/35 p-3">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="app-request-broker-icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-background text-muted-foreground">
-          <Eye className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="text-sm font-black">Read access outside this Space</span>
-            {(grant || !isOwner) && (
-              <span className={statusChipClass(status === "pending" ? "attention"
-                : status === "approved" ? "settled" : "alert", "app-request-broker-status px-1.5 py-0.5 text-[11px] font-bold")}>
-                {grant ? STATUS_COPY[status] : "Owner decides"}
-              </span>
-            )}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">{agentName}</div>
-          {!isOwner && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Only this Agent&apos;s owner sees what it asks to read, and decides.
-            </p>
-          )}
-          {isOwner && grant && (
-            <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-              <div>
-                Reads: <span className="break-all font-mono text-foreground">{grant.scope === "space"
-                  ? `the whole Space of Channel ${grant.channelId}` : `Channel ${grant.channelId} and its threads`}</span>
-              </div>
-              {grant.reason && <div>Reason: {grant.reason}</div>}
-              <div>Read-only, for this Run only. What it reads may be repeated in this Channel.</div>
-              {status === "approved" && (
-                <div>Until {new Date(grant.expiresAt).toLocaleString()} · {grant.readCount} reads so far</div>
-              )}
-            </div>
-          )}
-          {isOwner && grantQuery.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
-          {error ? <div role="alert" className="mt-2 text-xs text-destructive">{error}</div>
-            : <ErrorNotice error={grantQuery.error} action="Couldn't load this access request"
-              className="mt-2 text-xs text-destructive" onRetry={() => void grantQuery.refetch()} />}
-          {isOwner && grant?.status === "pending" && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              {grant.scope === "space" && (
-                <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
-                  <input type="checkbox" checked={narrow} disabled={busy} onChange={(event) => setNarrow(event.target.checked)} />
-                  Only this Channel
-                </label>
-              )}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void decide("approve")}
-                className={actionClass({ variant: "primary", size: "sm" }, "app-request-broker-control")}
-              >
-                {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                Approve
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void decide("deny")}
-                className={actionClass({ variant: "secondary", size: "sm" }, "app-request-broker-control")}
-              >
-                <X className="size-3.5" />
-                Deny
-              </button>
-            </div>
-          )}
-          {isOwner && grant?.status === "approved" && (
-            <div className="mt-3">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void decide("revoke")}
-                className={actionClass({ variant: "secondary", size: "sm" }, "app-request-broker-control")}
-              >
-                {busy ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
-                Revoke now
-              </button>
-            </div>
+    <AskCard
+      who={agentName}
+      kind="Read access"
+      icon={<Eye className="size-3.5" />}
+      open={isOwner && status === "pending"}
+      question={`Let ${agentName} read another Space?`}
+      detail={isOwner ? grant && <>
+        {grant.scope === "space" ? "The whole Space of Channel " : "Channel "}
+        <span className="font-mono [overflow-wrap:anywhere]">{grant.channelId}</span>
+        {grant.scope === "space" ? "" : " and its threads"}, read-only, for this Run only
+        {grant.reason && <> · “{grant.reason}”</>}
+        <div>What it reads may be repeated in this Channel.</div>
+        {status === "approved" && (
+          <div>Until {new Date(grant.expiresAt).toLocaleString()} · {grant.readCount} reads so far</div>
+        )}
+      </> : "Only this Agent's owner sees what it asks to read, and decides."}
+      status={!isOwner ? { tone: "secondary", label: "Owner decides" }
+        : grant && status !== "pending" && { tone: status === "approved" ? "settled" : "alert", label: STATUS_COPY[status] }}
+    >
+      {isOwner && grantQuery.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
+      <AskError error={error} loadError={grantQuery.error} action="Couldn't load this access request"
+        onRetry={() => void grantQuery.refetch()} />
+      {isOwner && grant?.status === "pending" && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void decide("approve")}
+            className={actionClass({ variant: "primary", size: "sm" })}
+          >
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            Approve
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void decide("deny")}
+            className={actionClass({ variant: "secondary", size: "sm" })}
+          >
+            <X className="size-3.5" />
+            Deny
+          </button>
+          {grant.scope === "space" && (
+            <label className="ml-1 inline-flex items-center gap-1.5 text-xs text-foreground">
+              <input type="checkbox" checked={narrow} disabled={busy} onChange={(event) => setNarrow(event.target.checked)} />
+              Only this Channel
+            </label>
           )}
         </div>
-      </div>
-    </div>
+      )}
+      {isOwner && grant?.status === "approved" && (
+        <div className="mt-3">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void decide("revoke")}
+            className={actionClass({ variant: "secondary", size: "sm" })}
+          >
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+            Revoke now
+          </button>
+        </div>
+      )}
+    </AskCard>
   );
 }
