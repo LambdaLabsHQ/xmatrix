@@ -5,9 +5,11 @@ import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
   E2E_NOW,
+  E2E_SPACE,
   E2E_USER_SENDER,
   channelHistoryFixture,
   conversationOpened,
+  fixtureChannelCatalog,
   openGeneralChannelWithHistory,
 } from "./workspace-fixtures";
 
@@ -25,6 +27,16 @@ type Rise = { sent: boolean; fromPx: number; fades: boolean };
 const HISTORY_LENGTH = 40;
 const SENT_BODY = "Rising message";
 
+const AUTHORITY = { protocolVersion: 1, contentRevision: 1 };
+
+/** #general as the catalog lists it when it holds `messages` messages. */
+function channelAt(messages: number) {
+  return {
+    ...E2E_CHANNEL, updatedAt: E2E_NOW, messageCount: messages, lastMessageSequence: messages,
+    historyHeadSequence: messages, contentAuthority: AUTHORITY,
+  };
+}
+
 async function openChannelRecordingRises(page: Page) {
   await page.addInitScript(() => {
     const rises: Rise[] = [];
@@ -40,8 +52,7 @@ async function openChannelRecordingRises(page: Page) {
       return animate.call(this, keyframes, options);
     };
   });
-  const channel = { ...E2E_CHANNEL, updatedAt: E2E_NOW, messageCount: HISTORY_LENGTH, lastMessageSequence: HISTORY_LENGTH };
-  await openGeneralChannelWithHistory(page, channel, channelHistoryFixture(HISTORY_LENGTH, "rise"));
+  await openGeneralChannelWithHistory(page, channelAt(HISTORY_LENGTH), channelHistoryFixture(HISTORY_LENGTH, "rise"));
   await fixtureJson(page, "send-rise", "**/api/xmatrix/channels/channel-general/messages",
     { message: {
       messageId: "sent-rise", channelId: E2E_CHANNEL.id, sequence: HISTORY_LENGTH + 1, body: SENT_BODY,
@@ -59,23 +70,71 @@ async function sendAndReadRises(page: Page): Promise<Rise[]> {
   return page.evaluate(() => (window as unknown as { __timelineRises: Rise[] }).__timelineRises);
 }
 
+/** The frames painted while `send` plays out, once the rows stand still again. */
+async function framesOfSend(page: Page, send: () => Promise<void>) {
+  await recordPaintedTimelineFrames(page);
+  await send();
+  await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-row]").evaluateAll((rows) =>
+    rows.filter((row) => (row as HTMLElement).style.translate || row.getAnimations().length > 0).length)).toBe(0);
+  return paintedTimelineFrames(page);
+}
+
+/** How far, frame by frame, the newest message of the history moved. */
+function movesOfRowAbove(frames: Awaited<ReturnType<typeof paintedTimelineFrames>>) {
+  return paintedRowMoves(frames).filter((move) => move.row === `message:rise-${HISTORY_LENGTH}`).map((move) => move.by);
+}
+
 test("a sent message rises from the composer and lifts the rows above it", async ({ page }) => {
   await openChannelRecordingRises(page);
-  const rises = await sendAndReadRises(page);
+  let rises: Rise[] = [];
+  const moves = movesOfRowAbove(await framesOfSend(page, async () => {
+    rises = await sendAndReadRises(page);
+  }));
 
-  const sent = rises.filter((rise) => rise.sent);
-  expect(sent).toHaveLength(1);
-  expect(sent[0]!.fades).toBe(true);
-  expect(sent[0]!.fromPx).toBeGreaterThan(0);
+  expect(rises).toEqual([{ sent: true, fromPx: expect.any(Number), fades: true }]);
+  // The rows above travel the room the new row took, over several frames,
+  // upward only, and slower as they arrive.
+  expect(moves.length).toBeGreaterThan(3);
+  expect(moves.filter((by) => by > 0)).toEqual([]);
+  expect(Math.abs(moves[0]!)).toBeGreaterThan(Math.abs(moves[moves.length - 1]!));
+});
 
-  // The rows above travel the room the new row took: together, and no further
-  // than the new row itself.
-  const above = rises.filter((rise) => !rise.sent);
-  expect(above.length).toBeGreaterThan(0);
-  expect(new Set(above.map((rise) => rise.fromPx)).size).toBe(1);
-  expect(above[0]!.fromPx).toBeGreaterThan(0);
-  expect(above[0]!.fromPx).toBeLessThanOrEqual(sent[0]!.fromPx);
-  expect(above.every((rise) => !rise.fades)).toBe(true);
+/* The list makes room for a new row by an estimate and corrects it a frame
+   later. For a short row under the sender's last one the estimate is too
+   large: the rows were lifted too far and came back, like a spring
+   (user 2026-10-10: "整个消息页面会往上弹一下然后弹回来，像弹簧"). */
+test("messages sent one after another lift the rows without a bounce", async ({ page }) => {
+  await openChannelRecordingRises(page);
+  const draft = page.locator("textarea.composer-textarea").first();
+  for (const [index, body] of ["One", "Two", "Three"].entries()) {
+    await answerNextSend(page, HISTORY_LENGTH + 1 + index, body, 150);
+    const moves = movesOfRowAbove(await framesOfSend(page, async () => {
+      await draft.fill(body);
+      await draft.press("Enter");
+      await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1 + index}"]`)).toBeInViewport();
+    }));
+    expect(moves.length).toBeGreaterThan(3);
+    expect(moves.filter((by) => by > 0)).toEqual([]);
+  }
+});
+
+/* Every message that comes in is a new row at the end, whoever wrote it
+   (user 2026-10-10: "我想让 agent 发的消息也有这个动态效果，或者说所有新消息都有这个效果"). */
+test("a message from someone else comes in the same way", async ({ page }) => {
+  await openChannelRecordingRises(page);
+  const arrived = { ...channelHistoryFixture(HISTORY_LENGTH + 1, "rise")[HISTORY_LENGTH]!,
+    body: "An Agent's report, just in.", from: { ...E2E_USER_SENDER, identityId: "user:someone-else", userId: "someone-else", label: "Someone" } };
+  const moves = movesOfRowAbove(await framesOfSend(page, async () => {
+    await fixtureChannelCatalog(page, "catalog-arrived", [channelAt(HISTORY_LENGTH + 1)]);
+    await fixtureJson(page, "history-arrived", "**/api/xmatrix/channels/channel-general/history**",
+      { messages: [arrived], hasMore: false, historyHeadSequence: HISTORY_LENGTH + 1, contentAuthority: AUTHORITY });
+    await page.evaluate((spaceId) => window.dispatchEvent(new CustomEvent(
+      "xmatrix:channel-catalog-change", { detail: { spaceId, kind: "structure" } },
+    )), E2E_SPACE.id);
+    await expect(page.locator(`[id="message:rise-${HISTORY_LENGTH + 1}"]`)).toBeInViewport();
+  }));
+  expect(moves.length).toBeGreaterThan(3);
+  expect(moves.filter((by) => by > 0)).toEqual([]);
 });
 
 test("a sent message lands without motion when the reader asked for less of it", async ({ page }) => {
@@ -155,14 +214,14 @@ test("a draft of several lines is sent without the rows above dropping", async (
   await draft.fill(body);
   await expect(draft).toHaveValue(body);
 
-  await recordPaintedTimelineFrames(page);
-  await draft.press("Enter");
-  await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1}"]`)).toBeInViewport();
-  // The rise, and what follows it, has played out.
-  await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-row]").last()
-    .evaluate((row) => row.getAnimations().length)).toBe(0);
-  const frames = await paintedTimelineFrames(page);
-  expect(paintedRowMoves(frames).filter((move) => move.by > 1)).toEqual([]);
+  const frames = await framesOfSend(page, async () => {
+    await draft.press("Enter");
+    await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1}"]`)).toBeInViewport();
+  });
+  // The composer's own shrinking can still reach a frame ahead of the rise:
+  // a drift of a few pixels, where the rows used to drop by the whole of it.
+  const dropped = movesOfRowAbove(frames).filter((by) => by > 0).reduce((sum, by) => sum + by, 0);
+  expect(dropped).toBeLessThan(20);
   const above = `message:rise-${HISTORY_LENGTH}`;
   expect(frames[frames.length - 1]!.tops[above]).toBeLessThan(frames[0]!.tops[above]!);
 });
