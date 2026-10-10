@@ -271,6 +271,35 @@ function digest(value: unknown, field: string): string {
   return normalized;
 }
 
+/** What still waits on a reader in a conversation after a read: the mentions they
+ * have not answered and anything past their cursor, as a catalog read reports it.
+ * Read at answer time, never stored with the command's replayable result. */
+async function remainingAttention(
+  transaction: DatabaseTransaction, spaceId: string, channelId: string, subjectId: string, ackedSequence: number,
+): Promise<Record<string, unknown> | undefined> {
+  const waiting = (await transaction.query<QueryResultRow & {
+    unread_count: string | number; message_id: string | null; kind: string | null;
+    timeline_sequence: string | number | null; created_at: Date | string | null; kinds: string[] | null;
+  }>({
+    name: "message_ack_attention_summary_v1",
+    text: `SELECT COUNT(*) AS unread_count,
+        (ARRAY_AGG(message_id ORDER BY timeline_sequence DESC))[1] AS message_id,
+        (ARRAY_AGG(kind ORDER BY timeline_sequence DESC))[1] AS kind,
+        MAX(timeline_sequence) AS timeline_sequence,
+        (ARRAY_AGG(created_at ORDER BY timeline_sequence DESC))[1] AS created_at,
+        ARRAY_AGG(DISTINCT kind) AS kinds
+      FROM data.message_attention WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3
+        AND (awaiting_response OR timeline_sequence>$4)`,
+    values: [spaceId, subjectId, channelId, ackedSequence], maxRows: 1,
+  }))[0];
+  if (!waiting || Number(waiting.unread_count) <= 0 || !waiting.message_id || !waiting.created_at) return undefined;
+  const at = waiting.created_at instanceof Date ? waiting.created_at.toISOString() : String(waiting.created_at);
+  return { channelId, unreadAttentionCount: Number(waiting.unread_count), lastAttentionAt: at,
+    lastMessageId: waiting.message_id, lastMessageSequence: Number(waiting.timeline_sequence),
+    primaryTriggerKind: waiting.kind,
+    triggerKinds: ["broadcast", "mention", "reply"].filter(kind => waiting.kinds?.includes(kind)), updatedAt: at };
+}
+
 function iso(value: Date | string | null): string | null {
   if (value === null) return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -1527,13 +1556,14 @@ export class PostgresMessageRepository {
             attachmentOwnerUserId, sentAt], maxRows: 0,
         });
       if (targets.size > 0) await transaction.query({
-        name: "message_append_attention_batch_v2",
+        name: "message_append_attention_batch_v3",
         text: `WITH incoming AS MATERIALIZED (
             SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(subject_id text,kind text)
           ), attention_rows AS (
             INSERT INTO data.message_attention
-              (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at)
-            SELECT $2,incoming.subject_id,$3,$4,incoming.kind,$5,$6 FROM incoming
+              (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
+            SELECT $2,incoming.subject_id,$3,$4,incoming.kind,$5,$6,
+              CASE WHEN incoming.kind='mention' THEN TRUE END FROM incoming
             ON CONFLICT DO NOTHING RETURNING subject_id
           ) INSERT INTO data.message_attention_revisions
             (space_id,subject_id,channel_id,revision,updated_at)
@@ -1547,6 +1577,20 @@ export class PostgresMessageRepository {
           subject_id: subjectId, kind,
         }))), spaceId, channelId, messageId, sequence, sentAt],
         maxRows: 0,
+      });
+      // The sender has responded: no mention in this conversation still waits on them.
+      if (senderKind === "user" || senderKind === "agent") await transaction.query({
+        name: "message_append_attention_respond_v1",
+        text: `WITH responded AS (
+            UPDATE data.message_attention SET awaiting_response=FALSE
+            WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3 AND awaiting_response RETURNING 1
+          ) INSERT INTO data.message_attention_revisions
+            (space_id,subject_id,channel_id,revision,updated_at)
+          SELECT $1,$2,$3,1,$4 WHERE EXISTS (SELECT 1 FROM responded)
+          ON CONFLICT (space_id,subject_id,channel_id) DO UPDATE SET
+            revision=data.message_attention_revisions.revision+1,
+            updated_at=EXCLUDED.updated_at`,
+        values: [spaceId, `${senderKind}:${senderId}`, channelId, sentAt], maxRows: 0,
       });
       const result = {
         messageId, channelId, spaceId, sequence, entityVersion: 1,
@@ -1984,6 +2028,21 @@ export class PostgresMessageRepository {
             values: [spaceId, channelId, messageId, emoji, principal.id, reactorLabel, now, principal.kind],
             maxRows: 0,
           });
+          // Reacting to a mention answers it.
+          await transaction.query({
+            name: "message_reaction_attention_respond_v1",
+            text: `WITH responded AS (
+                UPDATE data.message_attention SET awaiting_response=FALSE
+                WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3 AND message_id=$4
+                  AND awaiting_response RETURNING 1
+              ) INSERT INTO data.message_attention_revisions
+                (space_id,subject_id,channel_id,revision,updated_at)
+              SELECT $1,$2,$3,1,$5 WHERE EXISTS (SELECT 1 FROM responded)
+              ON CONFLICT (space_id,subject_id,channel_id) DO UPDATE SET
+                revision=data.message_attention_revisions.revision+1,
+                updated_at=EXCLUDED.updated_at`,
+            values: [spaceId, `${principal.kind}:${principal.id}`, channelId, messageId, now], maxRows: 0,
+          });
         } else {
           await transaction.query({
             name: "message_reaction_remove_v2",
@@ -2296,6 +2355,8 @@ export class PostgresMessageRepository {
     principal: MessagePrincipal;
     sequence?: number;
     messageId?: string;
+    /** The reader has dealt with the mentions waiting on them here without replying. */
+    responded?: boolean;
   }): Promise<Record<string, unknown>> {
     const { requestId, spaceId, channelId } = channelRequest(input);
     const commandId = bounded(input.commandId, "commandId");
@@ -2327,7 +2388,9 @@ export class PostgresMessageRepository {
             replay[0].request_digest !== requestDigest) {
           throw new MessageAuthorityError("idempotency_conflict", 409, "Command id was reused");
         }
-        return replay[0].result_json;
+        const attention = principal.kind !== "user" ? undefined : await remainingAttention(transaction, spaceId,
+          channelId, `user:${principal.id}`, Number(replay[0].result_json.ackedSequence) || 0);
+        return { ...replay[0].result_json, ...(attention ? { attention } : {}) };
       }
       const heads = await transaction.query<QueryResultRow & { sequence: string | number }>({
         name: "message_ack_head_v1",
@@ -2386,7 +2449,14 @@ export class PostgresMessageRepository {
               ELSE data.delivery_cursors.updated_at END`,
         values: [spaceId, subjectId, channelId, ackedSequence, version, now], maxRows: 0,
       });
-      if (advanced) {
+      const responded = input.responded === true && (await transaction.query({
+        name: "message_ack_attention_respond_v1",
+        text: `UPDATE data.message_attention SET awaiting_response=FALSE
+          WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3 AND awaiting_response
+            AND timeline_sequence<=$4 RETURNING message_id`,
+        values: [spaceId, subjectId, channelId, ackedSequence], maxRows: 10_000,
+      })).length > 0;
+      if (advanced || responded) {
         await transaction.query({
           name: "message_ack_attention_revision_v1",
           text: `INSERT INTO data.message_attention_revisions
@@ -2399,6 +2469,7 @@ export class PostgresMessageRepository {
       const result = {
         subjectId, channelId, ackedSequence, advanced, committedSequence, version,
         updatedAt: cursors[0] && !advanced ? iso(cursors[0].updated_at) : now,
+        ...(responded ? { responded } : {}),
       };
       await transaction.query({
         name: "message_ack_idempotency_write_v1",
@@ -2409,7 +2480,9 @@ export class PostgresMessageRepository {
         values: [spaceId, commandId, requestDigest, JSON.stringify(result), now,
           new Date(Date.parse(now) + IDEMPOTENCY_TTL_MS).toISOString()], maxRows: 0,
       });
-      return result;
+      const attention = principal.kind !== "user" ? undefined
+        : await remainingAttention(transaction, spaceId, channelId, subjectId, ackedSequence);
+      return { ...result, ...(attention ? { attention } : {}) };
     });
   }
 
@@ -2576,7 +2649,7 @@ export class PostgresMessageRepository {
         subject_id: string; unread_count: string | number; message_id: string; kind: string;
         timeline_sequence: string | number; created_at: Date | string; kinds: string[];
       }>({
-        name: "message_live_routing_attention_summary_v1",
+        name: "message_live_routing_attention_summary_v2",
         text: `SELECT subject.subject_id,COUNT(*) AS unread_count,
             (ARRAY_AGG(a.message_id ORDER BY a.timeline_sequence DESC))[1] AS message_id,
             (ARRAY_AGG(a.kind ORDER BY a.timeline_sequence DESC))[1] AS kind,
@@ -2585,8 +2658,8 @@ export class PostgresMessageRepository {
             ARRAY_AGG(DISTINCT a.kind) AS kinds
           FROM unnest($3::text[]) subject(subject_id)
           JOIN data.message_attention a ON a.space_id=$1 AND a.channel_id=$2 AND a.subject_id=subject.subject_id
-          WHERE a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
-            WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0)
+          WHERE (a.awaiting_response OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
+            WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0))
           GROUP BY subject.subject_id`,
         values: [spaceId, channelId, notified.map(row => row.subject_id)], maxRows: notified.length,
       }) : []).map(row => {

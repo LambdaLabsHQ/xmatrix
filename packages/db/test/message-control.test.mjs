@@ -149,7 +149,7 @@ test("append commits structured invocation intent with its source and excludes o
   await new PostgresMessageRepository(db).append(input);
   const stored = JSON.parse(db.calls.find(call => call.name === "message_agent_targets_commit_v1").values[3]);
   assert.deepEqual(stored, { entityVersion: 1, bodyHash, targets: [], selections: invocationSelections });
-  assert.deepEqual(JSON.parse(db.calls.find(call => call.name === "message_append_attention_batch_v2").values[0]),
+  assert.deepEqual(JSON.parse(db.calls.find(call => call.name === "message_append_attention_batch_v3").values[0]),
     [{ subject_id: "user:alice", kind: "mention" }]);
   await assert.rejects(() => new PostgresMessageRepository(db).append({ ...input,
     invocationSelections: { ...invocationSelections, sourceRevision: 2 } }), error => error.code === "invocation_selection_stale");
@@ -600,7 +600,7 @@ test("Message live delivery carries the mentioned Human's unread attention summa
         ? [{ user_id: "user-1", recipient_count: "2" }, { user_id: "user-2", recipient_count: "2" }]
         : query.name === "message_live_routing_attention_v1"
           ? [{ subject_id: "user:user-2", kind: "mention" }]
-          : query.name === "message_live_routing_attention_summary_v1"
+          : query.name === "message_live_routing_attention_summary_v2"
             ? [{ subject_id: "user:user-2", unread_count: "2", message_id: "message-1", kind: "mention",
               timeline_sequence: "9", created_at: new Date("2026-09-26T00:00:00.000Z"), kinds: ["mention", "reply"] }]
             : []
@@ -612,7 +612,7 @@ test("Message live delivery carries the mentioned Human's unread attention summa
     attention: { channelId: "channel-1", unreadAttentionCount: 2, lastAttentionAt: "2026-09-26T00:00:00.000Z",
       lastMessageId: "message-1", lastMessageSequence: 9, primaryTriggerKind: "mention",
       triggerKinds: ["mention", "reply"], updatedAt: "2026-09-26T00:00:00.000Z" } } }]);
-  const summary = db.calls.find((call) => call.name === "message_live_routing_attention_summary_v1");
+  const summary = db.calls.find((call) => call.name === "message_live_routing_attention_summary_v2");
   assert.deepEqual(summary.values[2], ["user:user-2"]);
   assert.match(summary.text, /delivery_cursors/u);
 });
@@ -675,7 +675,7 @@ test("Message append reauthorizes and commits every relational fact with one out
   for (const queryName of [
     "message_append_preflight_v4",
     "message_append_commit_facts_v5",
-    "message_append_attention_batch_v2",
+    "message_append_attention_batch_v3",
     "message_append_publish_unmetered_v1",
   ]) assert.equal(db.calls.some((call) => call.name === queryName), true, queryName);
   const billingAdvance = db.calls.find(
@@ -860,7 +860,7 @@ for (const [body, ambiguous, broadcast] of [
   }
   await append();
 
-  const attentionWrite = db.calls.find((call) => call.name === "message_append_attention_batch_v2");
+  const attentionWrite = db.calls.find((call) => call.name === "message_append_attention_batch_v3");
   assert.deepEqual(JSON.parse(attentionWrite.values[0]), broadcast ? [
     { subject_id: "user:user-2", kind: "broadcast" },
     { subject_id: "user:user-3", kind: "broadcast" },
@@ -878,7 +878,7 @@ for (const [body, ambiguous, broadcast] of [
   assert.equal(db.calls.some((call) => call.name === "message_attention_authorize_v3"), true);
   await new PostgresMessageRepository(db).append({ ...request, commandId: "command-literal-attention",
     messageId: "message-literal-attention", attentionBody: "`@everyone`\n\n> @everyone\n\n@alice inspect" });
-  const literalWrite = db.calls.filter(call => call.name === "message_append_attention_batch_v2").at(-1);
+  const literalWrite = db.calls.filter(call => call.name === "message_append_attention_batch_v3").at(-1);
   assert.deepEqual(JSON.parse(literalWrite.values[0]), [{ subject_id: "user:user-2", kind: "mention" }]);
 
 });

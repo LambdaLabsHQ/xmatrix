@@ -171,12 +171,33 @@ test("family attention targets one Human and clear survives catalog reconciliati
     for (const cleared of clears) {
       assert.equal(cleared.response.status, 200, JSON.stringify(cleared.payload));
       assert.equal(cleared.payload.readSequence, mentionSequence);
+      assert.equal(cleared.payload.attention?.unreadAttentionCount, 2,
+        "reading a mention does not answer it");
     }
     const clearedChannel = { readSequence: mentionSequence };
     const deviceClearEvents = await Promise.all([firstDeviceClear, secondDeviceClear]);
     assert.ok(deviceClearEvents.every((event) =>
       event.event.metadata.readSequence === clearedChannel.readSequence &&
-      event.event.metadata.attention === undefined));
+      event.event.metadata.attention?.unreadAttentionCount === 2));
+
+    const afterRead = await requestJson(
+      worker,
+      TARGET,
+      `/api/channels?spaceId=${encodeURIComponent(spaceId)}`,
+    );
+    assert.equal(afterRead.response.status, 200, JSON.stringify(afterRead.payload));
+    assert.equal(afterRead.payload.channels.find((channel) => channel.id === channelId)
+      .attention?.unreadAttentionCount, 2, "both mentions still wait on the target after the read");
+
+    // The target deals with them without replying.
+    const done = await requestJson(
+      worker,
+      TARGET,
+      `/api/channels/${encodeURIComponent(channelId)}/read`,
+      { method: "POST", body: JSON.stringify({ sequence: mentionSequence, responded: true }) },
+    );
+    assert.equal(done.response.status, 200, JSON.stringify(done.payload));
+    assert.equal(done.payload.attention, undefined);
 
     const afterClear = await requestJson(
       worker,
@@ -194,6 +215,9 @@ test("family attention targets one Human and clear survives catalog reconciliati
     assert.deepEqual(selfMention.frames.map((frame) => frame.notification),
       [undefined, undefined, undefined]);
 
+    const mentionedAgain = await send("one more for @mention-target");
+    assert.equal(mentionedAgain.frames[1].notification.reason, "mention");
+
     const reply = await sendFrom(
       TARGET,
       channelId,
@@ -203,6 +227,16 @@ test("family attention targets one Human and clear survives catalog reconciliati
     assert.equal(reply.frames[0].notification.reason, "reply");
     assert.equal(reply.frames[1].notification, undefined);
     assert.equal(reply.frames[2].notification, undefined);
+
+    // Replying in the conversation answers the mention that waited on the sender.
+    const answered = await requestJson(
+      worker,
+      TARGET,
+      `/api/channels/${encodeURIComponent(channelId)}/read`,
+      { method: "POST", body: JSON.stringify({ sequence: reply.payload.message.sequence }) },
+    );
+    assert.equal(answered.response.status, 200, JSON.stringify(answered.payload));
+    assert.equal(answered.payload.attention, undefined);
 
     const mentionOutranksReply = await sendFrom(
       TARGET,
