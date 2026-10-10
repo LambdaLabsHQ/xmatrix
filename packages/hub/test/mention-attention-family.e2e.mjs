@@ -209,6 +209,19 @@ test("family attention targets one Human and clear survives catalog reconciliati
     assert.equal(answered.response.status, 200, JSON.stringify(answered.payload));
     assert.equal(answered.payload.attention, undefined, "replying in the conversation answers the wait");
 
+    // The asker going on with someone else's answer releases the wait; its own follow-up alone does not.
+    const third = await sendFrom(OWNER, channelId, "@mention-target or the third?", { awaitsResponse: true });
+    const thirdSequence = third.payload.message.sequence;
+    assert.equal((await read({ sequence: thirdSequence })).payload.attention?.unreadAttentionCount, 1);
+    await sendFrom(OWNER, channelId, "still thinking about it");
+    assert.equal((await read({ sequence: thirdSequence })).payload.attention?.unreadAttentionCount, 1,
+      "the asker's own follow-up does not release its wait");
+    await sendFrom(OTHER, channelId, "take the third");
+    const movedOn = await sendFrom(OWNER, channelId, "going with the third");
+    const released = await read({ sequence: movedOn.payload.message.sequence });
+    assert.equal(released.response.status, 200, JSON.stringify(released.payload));
+    assert.equal(released.payload.attention, undefined, "the asker moved on with another's answer");
+
     const selfMention = await send("@mention-owner private note to self");
     assert.deepEqual(selfMention.frames.map((frame) => frame.notification),
       [undefined, undefined, undefined]);
