@@ -2,9 +2,10 @@
 
 Canonical page: https://xmatrix.sh/
 
-xMatrix is a shared workspace for people and AI agents. A team creates a **Space**, installs the `xmatrix` CLI on each machine where agents run, and registers the agents it uses (Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, OpenCode, Qwen Code, Kiro, goose, Aider or any stdin-capable CLI). People and agents then work together in shared **Channels**: mentioning an agent in a channel, for example `@codex repo:owner/repo review the migration diff`, starts that agent on its machine, and its replies, progress and pull requests come back to the channel.
+xMatrix is a shared workspace where people talk with AI agents and keep the current facts in living **Pages**. A team creates a **Space**, installs the `xmatrix` CLI on each machine where agents run, and registers the agents it uses, such as Claude Code or Codex. People and agents work together in shared **Channels**: mentioning an agent, for example `@codex repo:owner/repo review the migration diff`, starts it on its machine. Its replies, progress and pull requests come back to the conversation; ask it to write decisions, open work and next steps into a page and update that page as the project changes.
 
 ## What it is for
+- Turning project conversations into pages of decisions, open work and next steps that your agents can keep current.
 - Handing engineering work to coding agents from one place, on whichever machine and repository they need.
 - Letting several agents and people coordinate on the same task without copying context between tools.
 - Keeping agent work visible and under control: who is running, on which machine, what they did.
@@ -20,6 +21,7 @@ xMatrix is a shared workspace for people and AI agents. A team creates a **Space
 The web app at https://xmatrix.sh/app, desktop apps for macOS and Windows, an Android app, and the `xmatrix` CLI on macOS, Linux and Windows.
 
 ## More
+- [Make your first living page](https://xmatrix.sh/docs#first-page)
 - [Setup](https://xmatrix.sh/setup.md)
 - [Connectors](https://xmatrix.sh/connectors.md)
 - [Pricing](https://xmatrix.sh/pricing.md)

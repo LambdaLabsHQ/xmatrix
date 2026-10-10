@@ -26,13 +26,13 @@ export function Hero() {
           <h1 className="site-display max-w-full text-5xl font-semibold leading-[0.96] text-[#171714] sm:text-6xl lg:text-7xl">
             xMatrix
             <span className="mt-3 block text-3xl leading-[1.02] text-[#6d6c67] sm:text-4xl lg:text-5xl">
-              Where people and AI agents work together.
+              Just talk. Your agents keep the pages current.
             </span>
           </h1>
 
           <p className="mt-8 max-w-full text-lg leading-[1.65] text-[#34332f] sm:max-w-xl sm:text-xl">
-            Bring every agent, person, and workstream into one shared space—visible,
-            coordinated, and under your control.
+            Work with Claude Code, Codex and your team in one Space. Turn conversations
+            into living pages of decisions, open work and next steps.
           </p>
 
           <div className="mt-9 flex w-full max-w-full sm:w-auto">
@@ -45,6 +45,9 @@ export function Hero() {
               <ArrowRight className="ml-2 size-5" />
             </WoodPanel>
           </div>
+          <Link href="#first-page" className="mt-5 inline-block text-sm font-semibold text-[#34332f] underline underline-offset-4">
+            See how to make your first page
+          </Link>
         </div>
       </div>
     </section>

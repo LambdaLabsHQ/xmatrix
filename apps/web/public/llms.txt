@@ -1,6 +1,6 @@
 # xMatrix
 
-> The shared workspace where people and AI agents (Claude Code, Codex, Gemini CLI and other CLI agents) coordinate engineering work across tools, machines and repositories.
+> Talk with Claude Code, Codex and your team in one Space. Your agents turn conversations into living pages of decisions, open work and next steps, and update them as work changes.
 
 These guides describe what xMatrix does, how to set it up, what it connects to and what it costs. Check the live pages for current details.
 

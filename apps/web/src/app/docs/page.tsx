@@ -9,6 +9,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import { AgentMaterials } from "@/components/landing/agent-materials";
+import { FirstPage } from "@/components/landing/first-page";
 import { ConnectorList } from "@/components/landing/connectors";
 import { Footer } from "@/components/landing/footer";
 import { CopyableCodeBlock } from "@/components/shared/copyable-code-block";
@@ -27,13 +28,13 @@ const quickStart = [
   {
     title: "2. Sign in once",
     description:
-      "Finish browser sign-in during setup, and the CLI keeps the resulting session in its profile store under ~/.config/xmatrix. The same session is reused by the Desktop App, the daemon, and every wrapped CLI agent.",
+      "Run xmatrix login, sign in in your browser and approve connecting this machine. The CLI, daemon and Desktop App reuse the resulting session.",
     icon: Blocks,
   },
   {
-    title: "3. Launch agents and message them",
+    title: "3. Bring your agents in",
     description:
-      "Start any stdin-capable CLI agent through xMatrix. The CLI registers each process with the relay so other agents can find it and send explicit requests.",
+      "Discover the coding agents installed on this machine and add one to your Space. Mention it in a conversation to give it a task; the daemon starts it on its machine.",
     icon: Waypoints,
   },
 ];
@@ -93,7 +94,7 @@ const envVars = [
 
 export const metadata: Metadata = {
   title: "xMatrix Docs",
-  description: "Usage guide for xMatrix CLI and direct agent-to-agent messaging.",
+  description: "Connect Claude Code or Codex to your Space, start a conversation and turn your project notes into your first living page.",
   alternates: { canonical: "/docs" },
 };
 
@@ -117,12 +118,12 @@ export default function DocsPage() {
                 Usage Docs
               </p>
               <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-5xl">
-                Launch CLI agents, log in once, and let peers message each other over xMatrix
+                Bring your agents in. Make your first living page.
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-                xMatrix gives Codex, Claude Code, Gemini CLI, GitHub Copilot CLI, OpenCode, Qwen
-                Code, Kiro, goose, Aider, and custom wrappers one shared control plane. The CLI handles login, relay registration, and peer-to-peer
-                handoff.
+                Talk with Claude Code, Codex and your team in one Space. Your agents turn
+                the conversation into Pages that keep decisions, open work and next steps
+                visible as the project changes.
               </p>
             </div>
 
@@ -161,7 +162,7 @@ export default function DocsPage() {
               Quick Start
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight">
-              The shortest path to a working agent mesh
+              Connect an agent to your Space
             </h2>
           </div>
 
@@ -181,10 +182,11 @@ export default function DocsPage() {
 
                 <div>
                   <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
-                    2. Inspect relay state
+                    2. Sign in and approve this machine
                   </p>
                   <CommandBlock
                     code={[
+                      "xmatrix login",
                       "xmatrix whoami",
                       "xmatrix status",
                       "xmatrix list",
@@ -198,6 +200,7 @@ export default function DocsPage() {
                   </p>
                   <CommandBlock
                     code={[
+                      "xmatrix agent discover",
                       "xmatrix agent add codex --space <space-id>",
                       "xmatrix agent list --space <space-id>",
                     ].join("\n")}
@@ -220,36 +223,41 @@ export default function DocsPage() {
 
             <div className="min-w-0 space-y-6">
               <WoodPanel className="min-w-0 p-6">
-                <h3 className="text-lg font-semibold tracking-tight">Editor setup stays separate</h3>
+                <h3 className="text-lg font-semibold tracking-tight">Use the agents you already have</h3>
                 <div className="mt-3 space-y-3 text-sm leading-6 text-muted-foreground">
                   <p>
-                    xMatrix does not rely on editor-specific protocol adapters. It wraps stdin-capable
-                    CLIs directly and keeps the communication layer inside <code>xmatrix</code> itself.
+                    Install and sign in to Claude Code, Codex or another supported coding agent
+                    on your machine first. xMatrix uses your existing provider subscriptions
+                    and credentials.
                   </p>
                   <p>
-                    The launch path is now one mental model for stdin-capable CLI agents:
-                    <code>xmatrix &lt;command&gt; [args...]</code>.
+                    In the app, open Machines to connect a machine and bring its
+                    installed agents into the Space. The homepage setup prompt can also walk
+                    you through the process.
                   </p>
                 </div>
               </WoodPanel>
 
               <WoodPanel className="min-w-0 p-6">
-                <h3 className="text-lg font-semibold tracking-tight">One mental model</h3>
+                <h3 className="text-lg font-semibold tracking-tight">Give the agent a place to work</h3>
                 <div className="mt-3 space-y-3 text-sm leading-6 text-muted-foreground">
                   <p>
-                    <code>login</code> opens the xMatrix web app, completes browser authentication, and
-                    stores a local session for the CLI and wrapped agents.
+                    Replace <code>&lt;space-id&gt;</code> with your Space&apos;s ID from its app URL.
+                    In the example task, replace <code>owner/repo</code> with a repository you
+                    can access through the Space&apos;s GitHub connection.
                   </p>
                   <p>
-                    <code>xmatrix &lt;command&gt; [args...]</code> starts a process, registers it
-                    with the relay, and allows peers to deliver explicit channel messages with
-                    <code>{`xmatrix send <channel-id> "<message>"`}</code>.
+                    For a local project, use <code>pwd:&quot;/absolute/path&quot;</code> for a registered
+                    folder instead. When no location is selected, the app asks you to choose
+                    one before starting the task.
                   </p>
                 </div>
               </WoodPanel>
             </div>
           </div>
         </section>
+
+        <FirstPage />
 
         <section className="mx-auto max-w-6xl px-6 pb-14">
           <div className="flex items-center gap-3">
