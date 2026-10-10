@@ -1,3 +1,4 @@
+import { HUB_ROUTES } from "@xmatrix/protocol";
 import type { Hono } from "hono";
 
 import { readBoundedRequestBody, requestErrorResponse, requireAuth, requireHumanAuth } from "./index-shared";
@@ -11,7 +12,7 @@ import type { Env } from "./types";
  */
 export function registerIndexRoutesPush(app: Hono<{ Bindings: Env }>): void {
   // What a browser subscribes with. Absent when this Hub does not push to browsers.
-  app.get("/api/push/config", async (c) => {
+  app.get(HUB_ROUTES.push_config, async (c) => {
     try {
       requireHumanAuth(await requireAuth(c.req.raw, c.env));
       const { vapid } = pushConfig(c.env.PUSH_CONFIG);
@@ -19,7 +20,7 @@ export function registerIndexRoutesPush(app: Hono<{ Bindings: Env }>): void {
     } catch (error) { return requestErrorResponse(c, error); }
   });
 
-  app.post("/api/push/devices", async (c) => {
+  app.post(HUB_ROUTES.push_devices, async (c) => {
     try {
       const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));
       const bytes = await readBoundedRequestBody(c.req.raw, 8192);
@@ -35,7 +36,7 @@ export function registerIndexRoutesPush(app: Hono<{ Bindings: Env }>): void {
     } catch (error) { return requestErrorResponse(c, error); }
   });
 
-  app.delete("/api/push/devices/:deviceId", async (c) => {
+  app.delete(HUB_ROUTES.push_device(":deviceId").replace("%3AdeviceId", ":deviceId"), async (c) => {
     try {
       const user = requireHumanAuth(await requireAuth(c.req.raw, c.env));
       await pushDevices(c.env).unregister({
