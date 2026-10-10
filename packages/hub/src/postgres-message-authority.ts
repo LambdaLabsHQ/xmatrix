@@ -765,9 +765,11 @@ export async function postgresMessageAcknowledge(
     channelId, principal: actor,
     ...(sequence === undefined ? {} : { sequence }),
     ...(messageId === undefined ? {} : { messageId }),
+    ...(input.responded === true ? { responded: true } : {}),
   }));
   return messages.acknowledge({
     requestId, commandId, requestDigest, spaceId, channelId, principal: actor, sequence, messageId,
+    ...(input.responded === true ? { responded: true } : {}),
   });
 }
 
