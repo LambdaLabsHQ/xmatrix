@@ -8,8 +8,15 @@ import { fixtureJson } from "./in-page-api-fixtures";
 test.use(E2E_DESKTOP_CONTEXT);
 
 async function openNotifications(page: Page, config: Record<string, unknown>) {
-  // A headless browser denies notifications by default; this reader has not blocked them.
-  await page.context().grantPermissions(["notifications"]);
+  // A headless browser has no push service and denies notifications. Stand in a
+  // browser that supports push, has not been asked yet and is not subscribed.
+  await page.addInitScript(() => {
+    const define = (target: object, name: string, value: unknown) =>
+      Object.defineProperty(target, name, { value, configurable: true });
+    define(window, "PushManager", class {});
+    define(window, "Notification", { permission: "default", requestPermission: async () => "default" });
+    define(navigator, "serviceWorker", { getRegistration: async () => undefined });
+  });
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
   await fixtureJson(page, "push-config", "**/api/xmatrix/push/config", config);
   await page.goto("/app/personal-sspaceperso/settings?item=notifications");
