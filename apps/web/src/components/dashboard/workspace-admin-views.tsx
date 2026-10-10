@@ -119,7 +119,10 @@ import {
   Globe,
   Monitor,
   X,
+  Bell,
 } from "lucide-react";
+import { BrowserPushSetting, browserPushSummary } from "./browser-push-setting";
+import { browserPushState, type BrowserPushState } from "@/lib/push-subscription";
 import { SectionedToolView, ToolDetailSection, ToolSettingRow, type ToolSection } from "./tool-split";
 import { spacePlansAbsent } from "./space-plan-mark";
 import {
@@ -335,6 +338,14 @@ export function SettingsView({
   } | null>(null);
   const [confirmingSecretRef, setConfirmingSecretRef] = useState<string | null>(null);
   const [clientEnvironment, setClientEnvironment] = useState<XMatrixClientEnvironment>("production");
+  // A browser tab has no native notifications: it can be pushed to instead.
+  const [pushState, setPushState] = useState<BrowserPushState | null>(null);
+  useEffect(() => {
+    if (!token || desktopAvailable) return;
+    let current = true;
+    void browserPushState(token).then((state) => { if (current) setPushState(state); }).catch(() => undefined);
+    return () => { current = false; };
+  }, [desktopAvailable, token]);
   const [environmentSwitchError, setEnvironmentSwitchError] = useState<string | null>(null);
   const [environmentSwitching, setEnvironmentSwitching] = useState(false);
   const testEnvironmentAllowed = useAuthCapability("testEnvironment", token);
@@ -750,6 +761,12 @@ export function SettingsView({
       key: SPACE_BILLING_SECTION, label: "Billing", icon: CreditCard, summary: spaceBillingSummary(spaceBillingQuery.data),
       content: <SpaceBillingSection userId={user.id} space={space} />,
     }]),
+    ...(token && !desktopAvailable ? [{
+      key: "notifications", label: "Notifications", icon: Bell, summary: browserPushSummary(pushState), content: (
+        <div className="app-settings-section min-w-0">
+          <BrowserPushSetting token={token} state={pushState} onState={setPushState} />
+        </div>
+      ) }] : []),
     { key: "desktop", label: "Desktop app", icon: Monitor, summary: desktopAvailable ? "Connected" : "Browser", content: (
         <div className="app-settings-section min-w-0 space-y-10">
           <ToolDetailSection title="This app" action={
