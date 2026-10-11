@@ -10,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import androidx.core.app.NotificationCompat;
+import java.util.function.Consumer;
 import org.json.JSONObject;
 
 public final class NativeBridge {
@@ -54,6 +55,23 @@ public final class NativeBridge {
     } catch (Exception error) {
       return failure(error.getMessage());
     }
+  }
+
+  /**
+   * What the Hub pushes to on this device. The token does not depend on the
+   * notification permission, so it is asked for alongside rather than first.
+   */
+  void pushDevice(Consumer<String> reply) {
+    activity.requestNotificationPermissionIfNeeded();
+    PushMessaging.token(activity, token -> {
+      try {
+        reply.accept(success(token == null
+          ? JSONObject.NULL
+          : new JSONObject().put("platform", "fcm").put("token", token)));
+      } catch (Exception error) {
+        reply.accept(failure(error.getMessage()));
+      }
+    });
   }
 
   private JSONObject contextPayload() throws Exception {
