@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { parse } from "yaml";
 
 import {
   validateHubCompatibilityResponse,
@@ -7,6 +9,16 @@ import {
   validatePostgresReadinessResponse,
   waitForHubHealth,
 } from "./hub-postdeploy-smoke.mjs";
+
+test("production Hub upload and post-deploy smoke bind the authorized release SHA", () => {
+  const workflow = parse(readFileSync(new URL("../.github/workflows/server-release.yml", import.meta.url), "utf8"));
+  const hub = workflow.jobs.hub;
+  assert.equal(hub.env.XMATRIX_DEPLOY_SHA, "${{ inputs.deploy_sha }}");
+  const deploy = hub.steps.find((step) => step.name === "Deploy tagged Hub to production");
+  const smoke = hub.steps.find((step) => step.name === "Verify deployed production Hub health");
+  assert.match(deploy.run.replace(/\\\n\s*/gu, " "), /wrangler deploy[^\n]*--tag "\$XMATRIX_DEPLOY_SHA"/u);
+  assert.match(smoke.run, /--expected-sha "\$XMATRIX_DEPLOY_SHA"/u);
+});
 
 test("post-deploy response must identify the public Hub service", () => {
   assert.deepEqual(
