@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("xmatrixDesktop", {
   openWindow: (path?: string) => ipcRenderer.invoke("desktop:open-window", path),
   getNotificationSettings: () => ipcRenderer.invoke("desktop:get-notification-settings"),
   requestNotifications: () => ipcRenderer.invoke("desktop:request-notifications"),
+  pushDevice: () => ipcRenderer.invoke("desktop:push-device"),
   notify: (payload: DesktopNotification) => ipcRenderer.invoke("desktop:notify", payload),
   openExternal: (url: string) => ipcRenderer.invoke("desktop:open-external", url),
   writeClipboardImage: (image: DesktopClipboardImage) =>
