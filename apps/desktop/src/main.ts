@@ -1167,6 +1167,8 @@ async function macPushDevice() {
   if (process.platform !== "darwin" || !app.isPackaged) return null;
   try {
     const token = await pushNotifications.registerForAPNSNotifications();
+    pushNotifications.removeAllListeners("received-apns-notification");
+    pushNotifications.on("received-apns-notification", () => { applePushDelivers = true; });
     return token ? { platform: "apns" as const, token, app: "mac" as const } : null;
   } catch {
     return null;
@@ -2836,9 +2838,6 @@ app.whenReady().then(async () => {
   void startDaemonBestEffort();
   configureAutoUpdates();
   powerMonitor.on("resume", dropStaleRendererConnections);
-  if (process.platform === "darwin") {
-    pushNotifications.on("received-apns-notification", () => { applePushDelivers = true; });
-  }
   powerMonitor.on("unlock-screen", dropStaleRendererConnections);
 
   app.on("activate", () => {

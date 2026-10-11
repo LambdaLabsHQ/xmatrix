@@ -35,7 +35,6 @@ function harness() {
     startDaemonBestEffort: async () => calls.push("daemon"),
     configureAutoUpdates() {},
     powerMonitor: { on() {} },
-    pushNotifications: { on() {}, registerForAPNSNotifications: async () => "" },
     dropStaleRendererConnections() {},
     isTrustedSender: event => event.trusted,
   });
