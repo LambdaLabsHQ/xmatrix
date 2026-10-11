@@ -65,6 +65,12 @@ when it only found a different lockfile's fallback. Existing pruning retains
 one entry per ref and lockfile and removes closed PR caches. These caches save
 compilation work; the required native suite still runs on the selected content.
 
+Windows handoff coverage follows the daemon's monitor retries under a five-second
+test deadline, since process queries can be transiently denied during teardown.
+An exclusive status-file reader also forces a restoration failure: the handoff
+must retain the original Run, emit no terminal report on any sweep, and restore
+its PID, status and adoption evidence after the reader releases the file.
+
 ## Deny scan
 
 In the public repository, `.github/workflows/deny-scan.yml` runs

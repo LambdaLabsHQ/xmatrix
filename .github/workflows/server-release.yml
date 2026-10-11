@@ -483,7 +483,7 @@ jobs:
             error_reporting=(--define "XMATRIX_SENTRY_DSN:\"$SENTRY_DSN\"" --define "XMATRIX_SENTRY_RELEASE:\"$GITHUB_REF_NAME\"")
           fi
           for attempt in 1 2 3; do
-            if pnpm exec wrangler deploy --config "$XMATRIX_HUB_CONFIG" --secrets-file "$secrets_file" \
+            if pnpm exec wrangler deploy --config "$XMATRIX_HUB_CONFIG" --secrets-file "$secrets_file" --tag "$XMATRIX_DEPLOY_SHA" \
                 "${error_reporting[@]}"; then
               break
             else
@@ -535,6 +535,7 @@ jobs:
           --url "$XMATRIX_HUB_ORIGIN/"
           --attempts 12
           --delay-ms 5000
+          --expected-sha "$XMATRIX_DEPLOY_SHA"
 
       - name: Verify HTTP redirects to HTTPS
         run: node scripts/https-postdeploy-smoke.mjs "$XMATRIX_HUB_ORIGIN"
