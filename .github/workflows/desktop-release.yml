@@ -436,6 +436,48 @@ jobs:
             exit 1
           }
 
+      # Gatekeeper refuses to open a downloaded app Apple has not notarized.
+      # Each app is submitted, and Apple's ticket is stapled into it before it
+      # is packaged, so the DMG and the updater ZIP both carry a verified app.
+      - name: Notarize macOS apps
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          if [ -z "${ASC_API_KEY_ID:-}" ] || [ -z "${ASC_API_ISSUER_ID:-}" ] || [ -z "${ASC_P8_BASE64:-}" ]; then
+            echo "ASC_API_KEY_ID, ASC_API_ISSUER_ID and ASC_P8_BASE64 are required; refusing to publish a macOS app Apple has not notarized." >&2
+            exit 1
+          fi
+          umask 077
+          key="$DESKTOP_SIGNING_ROOT/notary-key.p8"
+          printf '%s' "$ASC_P8_BASE64" | base64 -D > "$key"
+          notary=(--key "$key" --key-id "$ASC_API_KEY_ID" --issuer "$ASC_API_ISSUER_ID")
+          cd apps/desktop
+
+          for arch in arm64 x64; do
+            app="$(find "release/build-$arch" -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
+            archive="$RUNNER_TEMP/xmatrix-notarize-$arch.zip"
+            result="$RUNNER_TEMP/xmatrix-notarize-$arch.json"
+            rm -f "$archive"
+            ditto -c -k --keepParent "$app" "$archive"
+            xcrun notarytool submit "$archive" "${notary[@]}" --wait --timeout 40m --output-format json > "$result" || true
+            cat "$result"
+            status="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).status||'')" "$result" || true)"
+            if [ "$status" != "Accepted" ]; then
+              id="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).id||'')" "$result" || true)"
+              if [ -n "$id" ]; then xcrun notarytool log "$id" "${notary[@]}" || true; fi
+              echo "Apple did not notarize the $arch app (status: ${status:-none})." >&2
+              exit 1
+            fi
+            xcrun stapler staple "$app"
+            xcrun stapler validate "$app"
+            # Stapling must leave the signature the updater checks intact.
+            "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
+              "$app" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "notarized $arch app"
+            spctl --assess --type execute --verbose=2 "$app"
+            rm -f "$archive" "$result"
+          done
+          rm -f "$key"
+
       - name: Package macOS artifacts
         timeout-minutes: 10
         run: |
@@ -490,6 +532,8 @@ jobs:
             fi
             "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
               "$app_bundle" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "packaged $arch ZIP app"
+            # What people and the updater receive must still carry Apple's ticket.
+            xcrun stapler validate "$app_bundle"
           done
 
           node ../../scripts/desktop-updater-manifest.mjs release
@@ -562,6 +606,7 @@ jobs:
               "$DESKTOP_SIGNING_ROOT/DeveloperIDG2CA.cer" \
               "$DESKTOP_SIGNING_ROOT/signing.keychain-db" \
               "$DESKTOP_SIGNING_ROOT/xmatrix.provisionprofile" \
+              "$DESKTOP_SIGNING_ROOT/notary-key.p8" \
               "$DESKTOP_SIGNING_ROOT/entitlements.mac.push.plist"
             rmdir "$DESKTOP_SIGNING_ROOT"
           fi
