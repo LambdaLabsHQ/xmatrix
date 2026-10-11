@@ -15,6 +15,10 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Device pushes share a bounded outbound delivery profile across Web Push, APNs
+and FCM, including OAuth refresh, response decoding and notification fan-out.
+See [device push delivery](../operations/push-delivery.md).
+
 The operational activation report reads registration cohorts across all currently
 placed PostgreSQL shards and emits aggregate message, first-reply, Page and
 second-week activity counts. External users require explicit classification;
