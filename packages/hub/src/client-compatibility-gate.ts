@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import {
   CLIENT_COMPATIBILITY_HEADERS,
   CLIENT_COMPATIBILITY_PATH,
+  HUB_ROUTES,
   evaluateClientCompatibility,
   missingClientCompatibilityDecision,
   parseClientCompatibilityIdentity,
@@ -16,12 +17,29 @@ const PROTECTED_SOCKET_PATHS = new Set([
   "/ws/relay-v2-runtime",
 ]);
 
+/**
+ * Auth routes that mint or renew a session for a CLI or daemon. A client that
+ * declares an outdated identity is refused here, before any auth write; the
+ * rest of `/api/auth/` (browser sign-in, device login) stays reachable.
+ */
+const SESSION_ISSUING_AUTH_PATHS = new Set<string>([
+  HUB_ROUTES.exchange_session,
+  HUB_ROUTES.refresh,
+]);
+
 export function registerClientCompatibilityGate(app: Hono<{ Bindings: Env }>): void {
   app.use("*", async (context, next) => {
     const request = context.req.raw;
     const pathname = new URL(request.url).pathname;
     if (pathname === CLIENT_COMPATIBILITY_PATH) {
       return compatibilityResponse(clientCompatibilityDecisionForRequest(request), request);
+    }
+    if (SESSION_ISSUING_AUTH_PATHS.has(pathname) && request.method !== "OPTIONS") {
+      const decision = clientCompatibilityDecisionForRequest(request);
+      if (decision.reason !== "identity_missing" && !decision.compatible) {
+        return compatibilityResponse(decision, request);
+      }
+      return next();
     }
     if (!clientCompatibilityRequired(request)) return next();
     const decision = clientCompatibilityDecisionForRequest(request);
