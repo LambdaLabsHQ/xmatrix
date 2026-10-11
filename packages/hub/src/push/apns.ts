@@ -1,4 +1,5 @@
 import { base64DecodeBytes, base64UrlEncodeValue } from "../relay-v2-primitives";
+import { pushResponseOutcome, type PushOutcome } from "./outcome";
 
 /** The Hub's identity with Apple's push service: a token-signing key and the app it speaks for. */
 export interface ApnsConfig {
@@ -9,8 +10,6 @@ export interface ApnsConfig {
   /** The app's bundle id. */
   topic: string;
 }
-
-export type PushOutcome = "sent" | "gone" | "failed";
 
 const encoder = new TextEncoder();
 
@@ -52,9 +51,5 @@ export async function sendApns(input: {
       ...input.data,
     }),
   });
-  if (response.ok) return "sent";
-  if (response.status === 410) return "gone";
-  const reason = response.status === 400
-    ? (await response.json().catch(() => ({})) as { reason?: unknown }).reason : undefined;
-  return reason === "BadDeviceToken" || reason === "DeviceTokenNotForTopic" ? "gone" : "failed";
+  return pushResponseOutcome("apns", response);
 }

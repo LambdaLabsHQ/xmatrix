@@ -5,8 +5,9 @@ import { compactMessageBodyPreview } from "../message-body-preview";
 import { createPostgresAuthorityDatabase } from "../postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "../postgres-authority-http";
 import type { Env } from "../types";
-import { sendApns, type ApnsConfig, type PushOutcome } from "./apns";
+import { sendApns, type ApnsConfig } from "./apns";
 import { sendFcm, type FcmConfig } from "./fcm";
+import type { PushOutcome } from "./outcome";
 import { sendWebPush, type VapidKeys } from "./web-push";
 
 /** What the Hub needs to push; each part is its own channel and absent parts are simply not sent on. */

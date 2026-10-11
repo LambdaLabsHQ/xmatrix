@@ -1,6 +1,7 @@
 import { concatenateBytes } from "@xmatrix/protocol";
 
 import { base64UrlDecodeBytes, base64UrlEncodeBytes, base64UrlEncodeValue } from "../relay-v2-primitives";
+import { pushResponseOutcome, type PushOutcome } from "./outcome";
 
 /** The Hub's own Web Push identity (RFC 8292): browsers accept a push only from the key they subscribed to. */
 export interface VapidKeys {
@@ -16,9 +17,6 @@ export interface WebPushSubscription {
   endpoint: string;
   keys: { p256dh: string; auth: string };
 }
-
-/** `sent`, or `gone` when the push service says the subscription no longer exists. */
-export type WebPushOutcome = "sent" | "gone" | "failed";
 
 const encoder = new TextEncoder();
 const RECORD_SIZE = 4096;
@@ -83,7 +81,7 @@ export async function vapidAuthorization(vapid: VapidKeys, endpoint: string, now
 export async function sendWebPush(input: {
   vapid: VapidKeys; subscription: WebPushSubscription; payload: string; topic?: string;
   fetch?: typeof fetch; nowSeconds?: number;
-}): Promise<WebPushOutcome> {
+}): Promise<PushOutcome> {
   const body = await encryptWebPush(input.subscription, encoder.encode(input.payload));
   const response = await (input.fetch ?? fetch)(input.subscription.endpoint, {
     method: "POST",
@@ -98,6 +96,5 @@ export async function sendWebPush(input: {
     },
     body: buffer(body),
   });
-  if (response.ok) return "sent";
-  return response.status === 404 || response.status === 410 ? "gone" : "failed";
+  return pushResponseOutcome("webpush", response);
 }
