@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { DurableObject } from "cloudflare:workers";
 
 import * as decoding from "lib0/decoding";
 import * as encoding from "lib0/encoding";
@@ -13,6 +15,7 @@ import {
 } from "../src/page-session.ts";
 import { RelayPageSession } from "../src/page-session-do.ts";
 import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
+import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
 const HEAD = "# Project\n\n## Status\n\nIn progress\n\n## Notes\n\nnone\n";
 const human = (id) => ({ kind: "user", id, label: id });
@@ -588,49 +591,51 @@ test("pages written by hand and Agent edits in any markdown style merge as the s
 });
 
 
+const summarySessionModule = await compileCommonJsSourceModule(new URL("../src/page-session-do.ts", import.meta.url));
+const summarySessionRequire = createRequire(new URL("../src/page-session-do.ts", import.meta.url));
+
 function summaryGateFixture({ sockets, stored } = {}) {
   const data = new Map(stored ? [["summary", stored]] : []);
-  const reads = [];
-  const original = PostgresPageRepository.prototype.summarySource;
-  // A read of the page's head is the first thing a summary does: counting them counts starts.
-  PostgresPageRepository.prototype.summarySource = async (input) => { reads.push(input.pageId); return null; };
+  const issued = [];
+  const { RelayPageSession: SummarySession } = summarySessionModule(name => name === "./page-summary" ? {
+    async startPageSummary(_env, input) {
+      const requestId = `summary-${issued.length + 1}`;
+      issued.push({ ...input, requestId });
+      return { started: true, requestId, revision: 3 };
+    },
+  } : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
   const socket = (kind) => ({ deserializeAttachment: () => ({ principal: { kind, id: kind, label: kind } }) });
   const connected = (sockets ?? []).map(socket);
-  const object = Object.create(RelayPageSession.prototype);
-  Object.assign(object, { spaceId: "space", pageId: "page",
-    env: { RELAY_POSTGRES_SHARD_ID: "test", RELAY_POSTGRES: { connectionString: "postgresql://localhost/unused" } },
+  const object = Object.create(SummarySession.prototype);
+  Object.assign(object, { spaceId: "space", pageId: "page", env: {},
     ctx: { getWebSockets: () => connected, storage: { get: async (key) => data.get(key),
       put: async (key, value) => { data.set(key, value); }, delete: async (key) => data.delete(key) } } });
-  return { object, connected, reads, restore: () => { PostgresPageRepository.prototype.summarySource = original; } };
+  return { object, connected, data, issued };
 }
 
 test("summary: nothing starts while a person is in the editor; it starts when the last one leaves", async () => {
   const f = summaryGateFixture({ sockets: ["user", "user", "agent"] });
-  try {
-    await f.object.summaryDue();
-    assert.deepEqual(f.reads, [], "two people are editing");
-    await f.object.summaryDue(f.connected[0]);
-    assert.deepEqual(f.reads, [], "one of them left, the other is still there");
-    f.connected.splice(0, 1);
-    await f.object.summaryDue(f.connected[0]);
-    assert.deepEqual(f.reads, ["page"], "the last person left; an Agent's connection does not hold it back");
-  } finally { f.restore(); }
+  await f.object.summaryDue();
+  assert.equal(f.issued.length, 0, "two people are editing");
+  await f.object.summaryDue(f.connected[0]);
+  assert.equal(f.issued.length, 0, "one of them left, the other is still there");
+  f.connected.splice(0, 1);
+  await f.object.summaryDue(f.connected[0]);
+  assert.equal(f.issued.length, 1, "the last person left; an Agent's connection does not hold it back");
+  assert.equal(f.data.get("summary").requestId, f.issued[0].requestId, "the issued task is persisted for recovery");
 });
 
 test("summary: an Agent's edit starts one at once, and a second does not start beside one that is running", async () => {
   const idle = summaryGateFixture({ sockets: ["agent"] });
-  try {
-    await idle.object.summaryDue();
-    assert.deepEqual(idle.reads, ["page"]);
-  } finally { idle.restore(); }
+  await idle.object.summaryDue();
+  assert.equal(idle.issued.length, 1);
+  await idle.object.summaryDue();
+  assert.equal(idle.issued.length, 1, "the persisted in-flight task prevents a second dispatch");
   const running = summaryGateFixture({ stored: { requestId: "r", revision: 3, startedAt: Date.now() } });
-  try {
-    await running.object.summaryDue();
-    assert.deepEqual(running.reads, [], "one is being written");
-  } finally { running.restore(); }
+  await running.object.summaryDue();
+  assert.equal(running.issued.length, 0, "one is being written");
   const ended = summaryGateFixture({ stored: { requestId: "r", revision: 3, startedAt: Date.now(), ended: true } });
-  try {
-    await ended.object.summaryDue();
-    assert.deepEqual(ended.reads, ["page"], "that one ended: the page is looked at again");
-  } finally { ended.restore(); }
+  await ended.object.summaryDue();
+  assert.equal(ended.issued.length, 1, "that one ended: a new task can be issued");
+  assert.equal(ended.issued[0].triedRevision, 3, "the next dispatch remembers the revision already tried");
 });

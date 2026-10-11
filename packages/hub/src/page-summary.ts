@@ -1,5 +1,6 @@
-import { PostgresMachineControlRepository, PostgresPageRepository } from "@xmatrix/db";
-import { MACHINE_TEXT_TASK_CAPABILITY, TEXT_TASK_HARNESSES, TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength } from "@xmatrix/protocol";
+import { PageControlError, PostgresMachineControlRepository, PostgresPageRepository } from "@xmatrix/db";
+import { MACHINE_TEXT_TASK_CAPABILITY, TEXT_TASK_HARNESSES, TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength,
+  type PageDocument } from "@xmatrix/protocol";
 import { registrationQuotaProbeTargetReader } from "./agent-routing-quota-refresh";
 import { machineDaemonCommand, machineDatabase } from "./machines";
 import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet } from "./postgres-authority-fleet";
@@ -53,23 +54,19 @@ export function summaryPages(env: Env): PostgresPageRepository {
 }
 
 export type PageSummaryStart = { started: true; requestId: string; revision: number }
-  | { started: false; reason: "current" | "tried" | "empty" | "no_machine" | "missing" };
+  | { started: false; reason: "current" | "tried" | "empty" | "no_machine" };
 
 /**
  * Starts the summary of a page whose head has none yet, on the first of the
- * Space's enabled Agents whose Machine is online and can take a text task.
+ * Space's enabled Agents whose Machine is online and can take a text task,
+ * and whose owner may currently read the page, including its ancestors.
  * With none, nothing starts: the page keeps the line it has. A revision is
  * tried once (`triedRevision`), so a harness that fails on it is not asked
  * again until the page changes.
  */
 export async function startPageSummary(env: Env, input: { spaceId: string; pageId: string; triedRevision?: number }):
   Promise<PageSummaryStart> {
-  const source = await summaryPages(env).summarySource({ requestId: crypto.randomUUID(), spaceId: input.spaceId,
-    pageId: input.pageId });
-  if (!source) return { started: false, reason: "missing" };
-  if (source.summaryRevision === source.headRevision) return { started: false, reason: "current" };
-  if (input.triedRevision === source.headRevision) return { started: false, reason: "tried" };
-  if (!source.body.trim()) return { started: false, reason: "empty" };
+  const pages = summaryPages(env);
   const database = createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-page-summary-targets",
     connectTimeoutMs: POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS, statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000,
     lockTimeoutMs: 2_000 });
@@ -78,11 +75,24 @@ export async function startPageSummary(env: Env, input: { spaceId: string; pageI
   const targets = (await registrationQuotaProbeTargetReader(database, directory)(input.spaceId))
     .filter((target) => TEXT_TASK_HARNESSES.includes(target.harness));
   const machines = new PostgresMachineControlRepository(machineDatabase(env));
-  const requestId = `page-summary:${input.spaceId}:${input.pageId}:${source.headRevision}:${crypto.randomUUID()}`;
   for (const target of targets) {
     const route = { ownerUserId: target.ownerUserId, machineId: target.machineId, hostId: target.hostId };
-    const { daemon } = await machines.getDaemon({ requestId, ...route });
+    const { daemon } = await machines.getDaemon({ requestId: crypto.randomUUID(), ...route });
     if (!daemon || daemon.status !== "online" || !daemon.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) continue;
+    // A Machine is its owner's environment. Read through the ordinary page
+    // authority as that owner before disclosing any text to its harness.
+    let source: PageDocument;
+    try {
+      ({ page: source } = await pages.read({ requestId: crypto.randomUUID(), spaceId: input.spaceId,
+        pageId: input.pageId, principal: { kind: "user", id: route.ownerUserId } }));
+    } catch (error) {
+      if (error instanceof PageControlError && error.status === 404) continue;
+      throw error;
+    }
+    if (source.summary?.revision === source.headRevision) return { started: false, reason: "current" };
+    if (input.triedRevision === source.headRevision) return { started: false, reason: "tried" };
+    if (!source.body.trim()) return { started: false, reason: "empty" };
+    const requestId = `page-summary:${input.spaceId}:${input.pageId}:${source.headRevision}:${crypto.randomUUID()}`;
     await machineDaemonCommand(env, {
       ...route, ownerEmail: daemon.email, daemonId: daemon.id,
       commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "text_task",
