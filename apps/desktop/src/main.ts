@@ -2815,6 +2815,18 @@ app.on("open-url", (event, url) => {
   }
 });
 
+// Started by a tap on a notification the Hub pushed while the app was not
+// running: macOS hands over what the notification carried, which names its
+// conversation. It is opened like a link to that conversation.
+app.on("ready", (_event, launchInfo) => {
+  const info = launchInfo as { userInfo?: unknown } | undefined;
+  const carried = (info?.userInfo ?? info) as { channelId?: unknown } | undefined;
+  const channelId = typeof carried?.channelId === "string" ? carried.channelId.trim() : "";
+  if (channelId && !pendingDeepLink) {
+    pendingDeepLink = `${APP_PROTOCOL}://channel/${encodeURIComponent(channelId)}`;
+  }
+});
+
 function dropStaleRendererConnections() {
   // Mac sleep leaves Chromium holding dead HTTP/2 sockets. The next send then
   // hangs until the 15s deadline and the catalog fetch reports Failed to fetch.
