@@ -96,6 +96,9 @@ for (const agentCount of [1, 3]) {
     const rows = page.locator(".app-message-row");
     const lastRow = rows.last();
     await lastRow.hover();
+    // Hover reveals the controls through a CSS transition. Sample their
+    // geometry only after that reveal, rather than racing its first frame.
+    await expect(lastRow.getByRole("button", { name: "Add reaction" })).toHaveCSS("opacity", "1");
 
     const geometry = await tailGeometry(page);
     expect(geometry.button).not.toBeNull();
@@ -108,7 +111,7 @@ for (const agentCount of [1, 3]) {
     const centerY = button.top + button.height / 2;
     for (let x = button.left + 4; x < button.right - 4; x += 12) {
       await page.mouse.move(x, centerY);
-      const state = await page.evaluate(
+      await expect.poll(() => page.evaluate(
         ([pointerX, pointerY]) => {
           const rows = Array.from(document.querySelectorAll<HTMLElement>(".app-message-row"));
           const last = rows[rows.length - 1];
@@ -123,8 +126,7 @@ for (const agentCount of [1, 3]) {
           };
         },
         [x, centerY]
-      );
-      expect(state, `pointer at x=${x} over the last message's hover control`).toEqual({
+      ), { message: `pointer at x=${x} over the last message's hover control` }).toEqual({
         opacity: "1",
         overDock: false,
       });
