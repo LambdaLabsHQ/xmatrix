@@ -125,14 +125,21 @@ export async function pushToPeople(input: {
           Math.min(remaining, PUSH_DELIVERY_BUDGET.timeoutMs));
         if (outcome === "sent") result.sent += 1;
         else if (outcome === "gone") { result.gone += 1; gone.push(device.deviceId); }
-        else if (outcome === "failed") result.failed += 1;
-      } catch {
+        else if (outcome === "failed") { result.failed += 1; notDelivered(device, "refused or unanswered by its push service"); }
+        else if (outcome === "skipped") notDelivered(device, "the Hub holds no identity for this kind of device");
+      } catch (error) {
         result.failed += 1;
+        notDelivered(device, error instanceof Error ? error.message : String(error));
       }
     }
   }));
   if (gone.length > 0) await input.devices.forget({ requestId, deviceIds: gone });
   return result;
+}
+
+/** Says which kind of device a push did not reach and why; never its token or whose it is. */
+function notDelivered(device: PushDevice, reason: string): void {
+  console.warn("Push not delivered", { platform: device.platform, ...(device.app ? { app: device.app } : {}), reason: reason.slice(0, 200) });
 }
 
 /** The notification a delivered message becomes: its sender, and its text as a list row would preview it. */
