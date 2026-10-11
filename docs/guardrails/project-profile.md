@@ -15,6 +15,12 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+The operational activation report reads registration cohorts across all currently
+placed PostgreSQL shards and emits aggregate message, first-reply, Page and
+second-week activity counts. External users require explicit classification;
+unknown accounts stay separate from team/test accounts. See
+[activation report](../operations/activation-report.md).
+
 The Google Cloud operations connector uses a separate GCP OAuth grant and
 provides bounded resource, Cloud Run status, log, metric and alert-policy reads,
 plus direct App Optimize gross-cost reports, billing/export discovery and
