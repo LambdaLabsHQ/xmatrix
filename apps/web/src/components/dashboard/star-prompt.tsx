@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Star } from "lucide-react";
 import { actionClass } from "@/components/ui/action-tone";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import {
   AGENT_ANSWERED_EVENT,
@@ -67,17 +68,17 @@ export function useStarPrompt(): { asking: boolean; putOff: () => void; settle: 
 export function StarAsk({ onStar, onLater }: { onStar: () => void; onLater: () => void }) {
   return (
     <>
-      <p id="star-ask-title" className="flex items-center gap-1.5 text-sm font-bold">
-        <Star className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        Enjoying xMatrix?
-      </p>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <p id="star-ask-title" className="text-sm font-bold">Enjoying xMatrix?</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         If it helped today, a GitHub star helps other developers find it.
       </p>
-      <div className="mt-2.5 flex items-center gap-2">
-        <button type="button" className={actionClass({ variant: "primary", size: "sm" })} onClick={onStar}>
+      {/* A plank on the pane: a glass or paper button here would be a panel in a panel. */}
+      <div className="mt-3 flex items-center gap-1">
+        <WoodPanel as="button" type="button" onClick={onStar}
+          className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold whitespace-nowrap active:translate-y-px">
+          <Star className="size-3.5 shrink-0 fill-current" aria-hidden />
           Star on GitHub
-        </button>
+        </WoodPanel>
         <button type="button" className={actionClass({ variant: "quiet", size: "sm" })} onClick={onLater}>
           Later
         </button>
