@@ -2,7 +2,7 @@
 
 import { normalizeChannelSearchText } from "./workspace-shell-search-model";
 import type { LiquidGlassMaterial } from "@/components/ui/liquid-glass-material";
-import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
+import { LiquidGlassCard, LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import type { CreateAction } from "./list-create";
 import { useGlobalSearchClearance } from "./global-search-clearance";
 import { StarAsk, openRepositoryToStar, useStarPrompt } from "./star-prompt";
@@ -220,26 +220,58 @@ export function WorkspaceRail({
   );
 }
 
+type StarAskPlace = { left: number; bottom: number; width: number };
+
+const STAR_ASK_WIDTH = 288;
+/* The pane lies over rows of text, so its veil is a little denser than a
+   control's. The blur stays the recipe's: a wider one drags the dark outside
+   the pane in, and the lens folds it into a ring along the rim. */
+const STAR_ASK_GLASS: LiquidGlassMaterial = { veil: "oklch(0.985 0.004 85 / 0.6)" };
+
+/** Centred over the foot of the list column; beside Help where no list shows. */
+function starAskPlace(anchor: DOMRect): StarAskPlace {
+  const list = Array.from(document.querySelectorAll(".app-sidebar"), (node) => node.getBoundingClientRect())
+    .find((rect) => rect.width > 0);
+  if (!list) return { left: anchor.right + 8, bottom: Math.max(12, window.innerHeight - anchor.bottom), width: STAR_ASK_WIDTH };
+  const width = Math.min(STAR_ASK_WIDTH, list.width - 24);
+  return { left: Math.round(list.left + (list.width - width) / 2), bottom: 16, width };
+}
+
 /** Help is one "?" on the rail: the docs and issue reports live in its menu,
     so neither needs an icon of its own that could pass for something else.
-    The ask for a GitHub star opens from the same place, where starring already
-    lives in the menu, and waits there without taking focus. */
+    Starring lives in that menu; the ask for a star is a pane of glass centred
+    over the foot of the list column, where it waits without taking focus. */
 function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const starPrompt = useStarPrompt();
+  const [askPlace, setAskPlace] = useState<StarAskPlace | null>(null);
   const star = () => {
     starPrompt.settle();
     openRepositoryToStar();
   };
 
   useLayoutEffect(() => {
-    if (!open && !starPrompt.asking) return;
+    if (!open) return;
     const rect = anchorRef.current?.getBoundingClientRect();
     if (rect) setPos({ left: rect.right + 8, bottom: Math.max(12, window.innerHeight - rect.bottom) });
-  }, [open, starPrompt.asking]);
+  }, [open]);
+
+  // The list column is dragged wider, and a destination without a list hides it.
+  useLayoutEffect(() => {
+    if (!starPrompt.asking) return;
+    const place = () => {
+      const anchor = anchorRef.current?.getBoundingClientRect();
+      if (anchor) setAskPlace(starAskPlace(anchor));
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(document.documentElement);
+    for (const list of document.querySelectorAll(".app-sidebar")) observer.observe(list);
+    return () => observer.disconnect();
+  }, [starPrompt.asking]);
 
   useEffect(() => {
     if (!open) return;
@@ -285,14 +317,14 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
         </div>,
         document.body
       )}
-      {starPrompt.asking && !open && pos && typeof document !== "undefined" && createPortal(
-        <aside
-          aria-labelledby="star-ask-title"
-          className="xmatrix-app app-rail-help-menu fixed z-[var(--z-popover)] w-64 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
-          style={{ left: pos.left, bottom: pos.bottom }}
-        >
-          <StarAsk onStar={star} onLater={starPrompt.putOff} />
-        </aside>,
+      {starPrompt.asking && !open && askPlace && typeof document !== "undefined" && createPortal(
+        // The app root paints paper; this one only carries the theme to the glass.
+        <div className="xmatrix-app fixed z-[var(--z-popover)]" style={{ ...askPlace, background: "transparent" }}>
+          <LiquidGlassCard as="aside" aria-labelledby="star-ask-title" material={STAR_ASK_GLASS}
+            className="px-4 pt-3.5 pb-3.5 text-foreground">
+            <StarAsk onStar={star} onLater={starPrompt.putOff} />
+          </LiquidGlassCard>
+        </div>,
         document.body
       )}
     </span>
