@@ -71,7 +71,7 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
         pages: ["Summary", "Discussion"].map((title, index) => ({
           pageId: `p-${title.toLowerCase()}`, parentPageId: null, title, position: String.fromCharCode(86 + index),
           accessMode: "open", headRevision: 1, agentSuggestOnly: false, canEdit: true, updatedAt: E2E_NOW,
-          summary: { text: "**状态**：已上线。 *shared* `syntax` ~~old~~ [notes](https://example.test) "
+          summary: { revision: 1, at: E2E_NOW, text: "**状态**：已上线。 *shared* `syntax` ~~old~~ [notes](https://example.test) "
             + "![image](https://example.test/image.png) <b>literal</b> " + "Long summary. ".repeat(30) },
         })),
       });
