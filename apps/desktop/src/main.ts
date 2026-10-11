@@ -1163,10 +1163,30 @@ let applePushDelivers = false;
  * What the Hub pushes to on this Mac, or null where the app cannot be pushed
  * to: another platform, or a build that carries no push entitlement.
  */
+/**
+ * macOS asks whether an app may notify the first time it posts a notification,
+ * and shows nothing Apple pushes until that is allowed. Post one when push is
+ * first set up, so the question comes then and not after a missed message.
+ */
+function askToNotifyOnce() {
+  const asked = path.join(app.getPath("userData"), "notifications-asked");
+  if (fs.existsSync(asked) || !Notification.isSupported()) return;
+  try {
+    fs.writeFileSync(asked, new Date().toISOString());
+    new Notification({
+      title: "xMatrix notifications are on",
+      body: "You will be told here when something is addressed to you.",
+    }).show();
+  } catch {
+    // A profile that cannot be written is asked again next time.
+  }
+}
+
 async function macPushDevice() {
   if (process.platform !== "darwin" || !app.isPackaged) return null;
   try {
     const token = await pushNotifications.registerForAPNSNotifications();
+    askToNotifyOnce();
     pushNotifications.removeAllListeners("received-apns-notification");
     pushNotifications.on("received-apns-notification", () => { applePushDelivers = true; });
     return token ? { platform: "apns" as const, token, app: "mac" as const } : null;
