@@ -39,6 +39,7 @@ final class BridgeScript {
     "    setTitle: (title) => invoke('setTitle', { title }),\n" +
     "    getNotificationSettings: () => invoke('getNotificationSettings'),\n" +
     "    requestNotifications: () => invoke('requestNotifications'),\n" +
+    "    pushDevice: () => invoke('pushDevice'),\n" +
     "    notify: (payload) => invoke('notify', payload),\n" +
     "    openExternal: (url) => invoke('openExternal', { url }),\n" +
     "    getClipboardImages: () => Promise.resolve([]),\n" +

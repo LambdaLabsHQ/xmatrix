@@ -46,6 +46,12 @@ final class TrustedWebBridge {
     try {
       BridgeProtocol.Request request = BridgeProtocol.parseRequest(message.getData());
       requestId = request.id;
+      if ("pushDevice".equals(request.method)) {
+        // The token arrives later, so this one method answers when it does.
+        String id = request.id;
+        bridge.pushDevice(response -> replyProxy.postMessage(BridgeProtocol.reply(id, response)));
+        return;
+      }
       String response = bridge.invoke(request.method, request.payload.toString());
       replyProxy.postMessage(BridgeProtocol.reply(request.id, response));
     } catch (Exception error) {

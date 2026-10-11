@@ -185,6 +185,9 @@ public final class MainActivity extends ComponentActivity {
   private void loadInitialUrl(Intent intent) {
     usePackagedAssets = false;
     Uri uri = intent == null ? null : intent.getData();
+    if (uri == null) {
+      uri = PushMessaging.conversationLink(intent);
+    }
     String targetUrl;
     if (uri != null && AppConfiguration.APP_SCHEME.equalsIgnoreCase(uri.getScheme())) {
       targetUrl = AppConfiguration.mapDeepLink(uri);

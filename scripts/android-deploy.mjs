@@ -88,6 +88,10 @@ function gradleArgs(task) {
   pushIfDefined(args, "versionName", versionName);
   pushIfDefined(args, "versionCode", versionCode);
   pushIfDefined(args, "track", process.env.ANDROID_PLAY_TRACK || "internal");
+  pushIfDefined(args, "xmatrixFirebaseAppId", process.env.XMATRIX_FIREBASE_APP_ID);
+  pushIfDefined(args, "xmatrixFirebaseApiKey", process.env.XMATRIX_FIREBASE_API_KEY);
+  pushIfDefined(args, "xmatrixFirebaseSenderId", process.env.XMATRIX_FIREBASE_SENDER_ID);
+  pushIfDefined(args, "xmatrixFirebaseProjectId", process.env.XMATRIX_FIREBASE_PROJECT_ID);
 
   const keystorePath =
     process.env.ANDROID_KEYSTORE_FILE ||

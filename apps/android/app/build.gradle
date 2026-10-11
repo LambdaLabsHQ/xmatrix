@@ -9,6 +9,11 @@ def repoRoot = rootDir.parentFile.parentFile
 def rootPackage = new JsonSlurper().parse(new File(repoRoot, "package.json"))
 def resolvedVersionName = findProperty("xmatrixVersionName") ?: findProperty("versionName") ?: rootPackage.version
 def resolvedVersionCode = (findProperty("xmatrixVersionCode") ?: findProperty("versionCode") ?: "1").toString().toInteger()
+// The Firebase app's identifiers. They ship inside the app, so they are configuration, not secrets;
+// a build without them simply has no push.
+def firebaseValue = { String name, String environmentName ->
+  ((findProperty(name) ?: System.getenv(environmentName) ?: "").toString()).replaceAll(/[^A-Za-z0-9:._-]/, "")
+}
 def playCredentials = findProperty("play.serviceAccountCredentials") ?: System.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
 android {
@@ -21,6 +26,10 @@ android {
     targetSdk 36
     versionCode resolvedVersionCode
     versionName resolvedVersionName
+    buildConfigField "String", "FIREBASE_APP_ID", "\"${firebaseValue("xmatrixFirebaseAppId", "XMATRIX_FIREBASE_APP_ID")}\""
+    buildConfigField "String", "FIREBASE_API_KEY", "\"${firebaseValue("xmatrixFirebaseApiKey", "XMATRIX_FIREBASE_API_KEY")}\""
+    buildConfigField "String", "FIREBASE_SENDER_ID", "\"${firebaseValue("xmatrixFirebaseSenderId", "XMATRIX_FIREBASE_SENDER_ID")}\""
+    buildConfigField "String", "FIREBASE_PROJECT_ID", "\"${firebaseValue("xmatrixFirebaseProjectId", "XMATRIX_FIREBASE_PROJECT_ID")}\""
   }
 
   buildFeatures {
@@ -49,6 +58,7 @@ dependencies {
   implementation "androidx.activity:activity:1.13.0"
   implementation "androidx.core:core:1.18.0"
   implementation "androidx.webkit:webkit:1.16.0"
+  implementation "com.google.firebase:firebase-messaging:24.1.2"
   testImplementation "junit:junit:4.13.2"
   testImplementation "org.json:json:20250517"
 }
