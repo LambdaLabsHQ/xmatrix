@@ -575,7 +575,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
   }), [channels, currentSpaceId, machines, user?.id]);
   const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
-  const openedPage = phonePageOpen ? pageTree.data?.find((page) => page.pageId === selectedPageId) ?? null : null;
+  // The route owns whether a page is open; its tree entry may arrive later.
+  // Keep the back bar and its content spacing while the title is loading.
+  const openedPage = phonePageOpen
+    ? pageTree.data?.find((page) => page.pageId === selectedPageId) ?? { title: "Page" }
+    : null;
   // A conversation, a new one and an open page are pushed screens: their back bar replaces the dock.
   const nativeMobileTabVisible = !loading && Boolean(user) &&
     !(view === "messages" && (Boolean(selectedChannelId) || composingConversation)) && !phonePageOpen;

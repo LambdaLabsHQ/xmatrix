@@ -84,7 +84,7 @@ test("switching dock tabs keeps the Pages list mounted instead of reloading it",
 
 // Like Notion, + makes an untitled page at once and opens it with its title
 // selected, so typing names it. No prompt or form: native shells decline prompts.
-for (const entry of ["FAB", "first page", "sub-page"] as const) {
+for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
   test(`a phone makes an untitled page from the ${entry} and names it on the page`, async ({ page }) => {
     const parent = summary("p-lambda", null, "Lambda Labs");
     const initial = entry === "first page" ? [] : [parent];
@@ -133,7 +133,9 @@ for (const entry of ["FAB", "first page", "sub-page"] as const) {
         await expect(create).toBeVisible();
       } else create = page.locator(".app-mobile-create-fab");
     }
-    await fixtureJson(page, "updated-tree", PAGE_TREE_PATTERN, { pages: [...initial, created] }, { method: "GET" });
+    // The document can be ready before the tree projection includes it.
+    await fixtureJson(page, "updated-tree", PAGE_TREE_PATTERN,
+      { pages: entry === "stale tree" ? initial : [...initial, created] }, { method: "GET" });
     await create.tap();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     // A second tap while the first is on its way does not make a second page.
@@ -143,6 +145,18 @@ for (const entry of ["FAB", "first page", "sub-page"] as const) {
     ]);
     await releaseFixture(page, "page-create");
     await expect(page).toHaveURL(/page=p-new/u);
+    await expect(page.getByRole("button", { name: "Back to pages", exact: true })).toBeVisible();
+    if (entry === "stale tree") {
+      await page.getByRole("button", { name: "Back to pages", exact: true }).tap();
+      await expect(page.getByTestId("page-list")).toBeVisible();
+      await expect(page).not.toHaveURL(/page=p-new/u);
+      return;
+    }
+    const backBar = await page.locator(".app-topbar").boundingBox();
+    const controls = await page.getByTestId("page-controls").boundingBox();
+    expect(backBar).not.toBeNull();
+    expect(controls).not.toBeNull();
+    expect(controls!.y).toBeGreaterThanOrEqual(backBar!.y + backBar!.height);
     const title = page.getByTestId("page-title");
     await expect(title).toBeFocused();
     await expect(title).toHaveValue("Untitled");
