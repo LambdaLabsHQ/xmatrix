@@ -101,6 +101,9 @@ test("PUSH_CONFIG is optional, and a malformed one is refused", () => {
   assert.deepEqual(pushConfig(JSON.stringify({ vapid, apns, fcm: account })), { vapid, apns, fcm: {
     projectId: account.project_id, clientEmail: account.client_email, privateKey: account.private_key.trim() } });
   assert.deepEqual(pushConfig(JSON.stringify({ apns })), { apns });
+  assert.deepEqual(pushConfig(JSON.stringify({ apns: { ...apns, macTopic: "net.example.mac" } })),
+    { apns: { ...apns, macTopic: "net.example.mac" } });
+  assert.throws(() => pushConfig(JSON.stringify({ apns: { ...apns, macTopic: "no spaces allowed" } })), /PUSH_CONFIG\.apns/u);
   assert.throws(() => pushConfig(JSON.stringify({ apns: { ...apns, keyId: "short" } })), /PUSH_CONFIG\.apns/u);
   assert.throws(() => pushConfig(JSON.stringify({ fcm: { ...account, private_key: "" } })), /PUSH_CONFIG\.fcm/u);
 });

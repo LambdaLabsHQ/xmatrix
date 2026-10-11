@@ -156,3 +156,25 @@ test("only explicit phone-token expiry permits forgetting a registered device", 
     assert.deepEqual(result, { sent: 0, gone: terminal ? 1 : 0, failed: terminal ? 0 : 1 }, label);
   }
 });
+
+test("the Mac app is pushed to under its own topic, and not at all without one", async () => {
+  const { config } = appleIdentity();
+  const listed = [
+    { deviceId: "a".repeat(64), userId: "user-1", platform: "apns", token: "ab".repeat(32) },
+    { deviceId: "b".repeat(64), userId: "user-1", platform: "apns", token: "cd".repeat(32), app: "mac" },
+  ];
+  const devices = { async listForUsers() { return listed; }, async forget() {} };
+  const notification = { channelId: "channel-1", messageId: "m-1", title: "claude:1", body: "等你确认" };
+  const topics = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { topics.push(`${String(url).slice(-4)} ${init.headers["apns-topic"]}`); return new Response(null, { status: 200 }); };
+  try {
+    assert.deepEqual(await pushToPeople({ config: { apns: config }, devices, userIds: ["user-1"], notification }),
+      { sent: 1, gone: 0, failed: 0 });
+    assert.deepEqual(await pushToPeople({ config: { apns: { ...config, macTopic: "net.example.mac" } }, devices,
+      userIds: ["user-1"], notification }), { sent: 2, gone: 0, failed: 0 });
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.deepEqual(topics.sort(), ["abab sh.example.app", "abab sh.example.app", "cdcd net.example.mac"]);
+});

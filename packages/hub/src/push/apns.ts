@@ -8,8 +8,10 @@ export interface ApnsConfig {
   keyP8: string;
   keyId: string;
   teamId: string;
-  /** The app's bundle id. */
+  /** The iPhone app's bundle id. */
   topic: string;
+  /** The Mac app's bundle id; without it Mac devices are not pushed to. */
+  macTopic?: string;
 }
 
 const encoder = new TextEncoder();
@@ -35,14 +37,14 @@ export async function apnsAuthorization(config: ApnsConfig, nowSeconds: number):
 /** Send one alert to one iPhone. `collapseId` replaces an undelivered earlier alert of the same conversation. */
 export async function sendApns(input: {
   config: ApnsConfig; deviceToken: string; title: string; body: string;
-  data: Record<string, string>; collapseId: string; fetch?: typeof fetch; nowSeconds?: number; signal?: AbortSignal;
+  data: Record<string, string>; collapseId: string; topic?: string; fetch?: typeof fetch; nowSeconds?: number; signal?: AbortSignal;
 }): Promise<PushOutcome> {
   return withPushDelivery(input.fetch ?? fetch, async (request, signal) => {
     const response = await request(`https://api.push.apple.com/3/device/${input.deviceToken}`, {
       method: "POST",
       headers: {
         authorization: await apnsAuthorization(input.config, input.nowSeconds ?? Math.floor(Date.now() / 1000)),
-        "apns-topic": input.config.topic,
+        "apns-topic": input.topic ?? input.config.topic,
         "apns-push-type": "alert",
         "apns-priority": "10",
         "apns-collapse-id": input.collapseId,

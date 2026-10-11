@@ -26,6 +26,19 @@ test("a phone registers its token and a person keeps a bounded number of devices
   assert.deepEqual(trims.map((call) => call.values), [["user-1", 20], ["user-2", 20], ["user-1", 20]]);
 });
 
+test("the Mac app registers as an Apple device of its own kind", async () => {
+  const db = recordingDatabase((query) => query.name === "push_device_list_v1" ? [
+    { device_id: "a".repeat(64), user_id: "user-1", platform: "apns", token: "cd".repeat(32), keys_json: { app: "mac" } },
+    { device_id: "b".repeat(64), user_id: "user-1", platform: "apns", token: "ab".repeat(32), keys_json: null },
+  ] : []);
+  const devices = new PostgresPushDeviceRepository(db);
+  await devices.register({ requestId: "r1", userId: "user-1", platform: "apns", token: "cd".repeat(32), app: "mac" });
+  const write = db.calls.find((call) => call.name === "push_device_register_v1");
+  assert.deepEqual(JSON.parse(write.values[4]), { app: "mac" });
+  const listed = await devices.listForUsers({ requestId: "r2", userIds: ["user-1"] });
+  assert.deepEqual(listed.map((device) => device.app), ["mac", undefined]);
+});
+
 test("a browser registers its subscription with its keys", async () => {
   const db = recordingDatabase();
   const devices = new PostgresPushDeviceRepository(db);
@@ -43,6 +56,8 @@ test("what is not a device is refused before anything is written", async () => {
     { platform: "sms", token: "123" },
     { platform: "apns", token: "" },
     { platform: "apns", token: "not hexadecimal" },
+    { platform: "apns", token: "ab".repeat(32), app: "watch" },
+    { platform: "fcm", token: "ab".repeat(32), app: "mac" },
     { platform: "webpush", token: "http://push.example.test/send/abc", keys: { p256dh: "a", auth: "b" } },
     { platform: "webpush", token: "https://push.example.test/send/abc" },
     { platform: "webpush", token: "https://push.example.test/send/abc", keys: { p256dh: "a b", auth: "b" } },

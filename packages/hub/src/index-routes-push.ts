@@ -30,7 +30,7 @@ export function registerIndexRoutesPush(app: Hono<{ Bindings: Env }>): void {
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) input = parsed as Record<string, unknown>;
       } catch { /* answered as an invalid device below */ }
       const device = await pushDevices(c.env).register({
-        requestId: crypto.randomUUID(), userId: user.id, platform: input.platform, token: input.token, keys: input.keys,
+        requestId: crypto.randomUUID(), userId: user.id, platform: input.platform, token: input.token, keys: input.keys, app: input.app,
       });
       return c.json(device, 200, { "cache-control": "private, no-store" });
     } catch (error) { return requestErrorResponse(c, error); }
