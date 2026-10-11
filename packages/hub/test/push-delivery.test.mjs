@@ -26,6 +26,41 @@ function deliver(list, options = {}) {
     devices: { async listForUsers() { return list; }, async forget(input) { forgotten.push(...input.deviceIds); } }, ...options }) };
 }
 
+test("provider exceptions produce secret-free diagnostics without inspecting thrown values", async (t) => {
+  const warnings = [];
+  t.mock.method(console, "warn", (...args) => warnings.push(args));
+  const privateText = "https://push.example.test/private-device Bearer private-grant person@example.test";
+  let inspected = 0;
+  const failures = [new Error(privateText), privateText, {
+    get message() { inspected++; throw new Error("must not read foreign error properties"); },
+    toString() { inspected++; throw new Error("must not stringify foreign errors"); },
+  }];
+  for (const [index, platform] of ["webpush", "apns", "fcm"].entries()) {
+    t.mock.method(globalThis, "fetch", async () => { throw failures[index]; });
+    const batch = deliver(devices(platform));
+    assert.deepEqual(await batch.result, { sent: 0, gone: 0, failed: 1 });
+    assert.deepEqual(batch.forgotten, []);
+  }
+  assert.equal(inspected, 0);
+  assert.deepEqual(warnings, ["webpush", "apns", "fcm"].map(platform =>
+    ["Push not delivered", { platform, reason: "delivery raised an exception" }]));
+});
+
+test("delivery diagnostics and counters agree for provider outcomes without disclosing device data", async (t) => {
+  const warnings = [];
+  t.mock.method(console, "warn", (...args) => warnings.push(args));
+  const list = devices("apns", 4).map(device => ({ ...device, app: "mac" }));
+  const outcomes = ["sent", "gone", "failed", "skipped"];
+  const batch = deliver(list, { send: async device => outcomes[list.indexOf(device)] });
+  assert.deepEqual(await batch.result, { sent: 1, gone: 1, failed: 1 });
+  assert.deepEqual(batch.forgotten, ["device-1"]);
+  assert.deepEqual(warnings, [
+    "the push service no longer recognizes this registration",
+    "refused or unanswered by its push service",
+    "the Hub holds no identity for this kind of device",
+  ].map(reason => ["Push not delivered", { platform: "apns", app: "mac", reason }]));
+});
+
 test("a notification has at most eight simultaneous device deliveries and visits every device once", async () => {
   const gate = Promise.withResolvers(), ready = Promise.withResolvers();
   const started = [];
@@ -107,6 +142,8 @@ test("stalled headers or provider bodies expire, cancel work, and preserve devic
 
 test("the batch deadline stops queued sends and late retirement replies cannot delete devices", { timeout: 2000 }, async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  const warnings = [];
+  t.mock.method(console, "warn", (...args) => warnings.push(args));
   let now = 0;
   t.mock.method(Date, "now", () => now);
   const late = Promise.withResolvers();
@@ -126,9 +163,12 @@ test("the batch deadline stops queued sends and late retirement replies cannot d
   t.mock.timers.tick(10_000);
   assert.deepEqual(await batch.result, { sent: 0, gone: 0, failed: 25 });
   assert.equal(started.length, 16, "queued devices never start after the batch expires");
+  assert.equal(warnings.length, 25, "every undelivered device has one diagnostic, including queued devices");
+  assert.equal(warnings.filter(([, detail]) => detail.reason === "notification delivery budget exhausted").length, 9);
   late.resolve("gone");
   await setImmediate();
   assert.deepEqual(batch.forgotten, []);
+  assert.equal(warnings.length, 25, "late outcomes cannot emit a second diagnostic");
 });
 
 test("a timed out OAuth refresh frees its slot, and a late grant cannot replace the successful retry", { timeout: 2000 }, async (t) => {

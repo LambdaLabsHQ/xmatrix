@@ -79,6 +79,20 @@ export interface PushNotification {
   body: string;
 }
 
+type DeliveryOutcome = PushOutcome | "skipped" | "expired" | "exception";
+type DeliveryCounts = { sent: number; gone: number; failed: number };
+
+// Counting, retirement and diagnostics describe the same outcome. Exception
+// text is foreign data, not a diagnostic: it may carry URLs, tokens or people.
+const DELIVERY_FACTS: Record<DeliveryOutcome, { counter?: keyof DeliveryCounts; reason?: string }> = {
+  sent: { counter: "sent" },
+  gone: { counter: "gone", reason: "the push service no longer recognizes this registration" },
+  failed: { counter: "failed", reason: "refused or unanswered by its push service" },
+  skipped: { reason: "the Hub holds no identity for this kind of device" },
+  expired: { counter: "failed", reason: "notification delivery budget exhausted" },
+  exception: { counter: "failed", reason: "delivery raised an exception" },
+};
+
 /**
  * Push one message to the devices of the people it is addressed to. Runs
  * after the message is delivered, never in its way: a failure here is logged
@@ -90,7 +104,7 @@ export async function pushToPeople(input: {
   userIds: readonly string[];
   notification: PushNotification;
   send?: (device: PushDevice, payload: string, topic: string, signal: AbortSignal) => Promise<PushOutcome | "skipped">;
-}): Promise<{ sent: number; gone: number; failed: number }> {
+}): Promise<DeliveryCounts> {
   const result = { sent: 0, gone: 0, failed: 0 };
   const { vapid, apns, fcm } = input.config;
   if (input.userIds.length === 0 || (!vapid && !apns && !fcm)) return result;
@@ -113,33 +127,32 @@ export async function pushToPeople(input: {
     return Promise.resolve("skipped" as const);
   });
   const gone: string[] = [];
+  const record = (device: PushDevice, outcome: DeliveryOutcome) => {
+    const { counter, reason } = DELIVERY_FACTS[outcome];
+    if (counter) result[counter] += 1;
+    if (outcome === "gone") gone.push(device.deviceId);
+    if (reason) console.warn("Push not delivered", {
+      platform: device.platform, ...(device.app ? { app: device.app } : {}), reason,
+    });
+  };
   const deadlineAt = Date.now() + PUSH_DELIVERY_BUDGET.batchTimeoutMs;
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(devices.length, PUSH_DELIVERY_BUDGET.concurrency) }, async () => {
     while (next < devices.length) {
       const device = devices[next++];
+      let outcome: DeliveryOutcome;
       try {
         const remaining = deadlineAt - Date.now();
-        if (remaining <= 0) { result.failed += 1; continue; }
-        const outcome = await withPushBudget(signal => send(device, payload, topic, signal), undefined,
+        outcome = remaining <= 0 ? "expired" : await withPushBudget(signal => send(device, payload, topic, signal), undefined,
           Math.min(remaining, PUSH_DELIVERY_BUDGET.timeoutMs));
-        if (outcome === "sent") result.sent += 1;
-        else if (outcome === "gone") { result.gone += 1; gone.push(device.deviceId); }
-        else if (outcome === "failed") { result.failed += 1; notDelivered(device, "refused or unanswered by its push service"); }
-        else if (outcome === "skipped") notDelivered(device, "the Hub holds no identity for this kind of device");
-      } catch (error) {
-        result.failed += 1;
-        notDelivered(device, error instanceof Error ? error.message : String(error));
+      } catch {
+        outcome = "exception";
       }
+      record(device, outcome);
     }
   }));
   if (gone.length > 0) await input.devices.forget({ requestId, deviceIds: gone });
   return result;
-}
-
-/** Says which kind of device a push did not reach and why; never its token or whose it is. */
-function notDelivered(device: PushDevice, reason: string): void {
-  console.warn("Push not delivered", { platform: device.platform, ...(device.app ? { app: device.app } : {}), reason: reason.slice(0, 200) });
 }
 
 /** The notification a delivered message becomes: its sender, and its text as a list row would preview it. */

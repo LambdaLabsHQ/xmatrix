@@ -258,8 +258,10 @@ export async function publishChannelLiveDelivery(
   const notification = addressed.length > 0 && env.PUSH_CONFIG ? messagePushNotification(channelId, payload) : null;
   if (notification) waitUntil(Promise.resolve().then(() => pushToPeople({
     config: pushConfig(env.PUSH_CONFIG), devices: pushDevices(env), userIds: addressed, notification,
-  })).catch((error: unknown) => {
-    console.error("Push delivery failed", { channelId, error: error instanceof Error ? error.message : String(error) });
+  })).catch(() => {
+    // Configuration and storage errors can also contain credentials or private
+    // query data. Keep the batch diagnostic independent of foreign error text.
+    console.error("Push delivery failed");
   }));
   return;
 }
