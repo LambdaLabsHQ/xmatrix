@@ -2,7 +2,7 @@ import UIKit
 import UserNotifications
 import WebKit
 
-final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCenterDelegate {
+final class NativeBridge: NSObject, WKScriptMessageHandler {
     weak var webView: WKWebView?
     private let subscriptions = AppleSubscriptions()
     var onMobileTabStateChanged: ((MobileTabState) -> Void)?
@@ -407,7 +407,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
     }
 
     @MainActor
-    private func openNotification(_ userInfo: [AnyHashable: Any]) {
+    func openNotification(_ userInfo: [AnyHashable: Any]) {
         // A notification this app posted carries its URL; one the Hub pushed names its conversation.
         guard
             let url = (userInfo[Self.notificationURLKey] as? String).flatMap({ URL(string: $0) })
@@ -428,26 +428,6 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         }
 
         UIApplication.shared.open(url)
-    }
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        // While the app is open the web app posts the same message itself; a pushed copy would show it twice.
-        if notification.request.trigger is UNPushNotificationTrigger {
-            return []
-        }
-        return [.banner, .list, .sound, .badge]
-    }
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
-        await MainActor.run {
-            openNotification(response.notification.request.content.userInfo)
-        }
     }
 
     @MainActor
