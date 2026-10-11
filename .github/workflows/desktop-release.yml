@@ -560,7 +560,9 @@ jobs:
             rm -f \
               "$DESKTOP_SIGNING_ROOT/developer-id.p12" \
               "$DESKTOP_SIGNING_ROOT/DeveloperIDG2CA.cer" \
-              "$DESKTOP_SIGNING_ROOT/signing.keychain-db"
+              "$DESKTOP_SIGNING_ROOT/signing.keychain-db" \
+              "$DESKTOP_SIGNING_ROOT/xmatrix.provisionprofile" \
+              "$DESKTOP_SIGNING_ROOT/entitlements.mac.push.plist"
             rmdir "$DESKTOP_SIGNING_ROOT"
           fi
 
