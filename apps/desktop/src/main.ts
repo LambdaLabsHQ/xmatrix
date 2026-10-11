@@ -1155,9 +1155,21 @@ function flushPendingNotificationReplies() {
   }
 }
 
-// Set once Apple has delivered a push to this running app: only then is it
-// known that the system shows messages itself while no window is in front.
-let applePushDelivers = false;
+// Whether this Mac has given the Hub its push address. From then on it
+// listens for Apple's pushes only while it has no window.
+let macPushRegistered = false;
+
+/**
+ * While a window is open the app posts its own notifications, which open their
+ * conversation and take a reply; Apple's copy of the same message would only
+ * repeat them and opens nothing. So the Mac listens for pushes when its last
+ * window closes and when it quits, and stops when a window opens.
+ */
+function listenForApplePush(listen: boolean) {
+  if (process.platform !== "darwin" || !macPushRegistered) return;
+  if (listen) void pushNotifications.registerForAPNSNotifications().catch(() => undefined);
+  else pushNotifications.unregisterForAPNSNotifications();
+}
 
 /**
  * What the Hub pushes to on this Mac, or null where the app cannot be pushed
@@ -1187,9 +1199,11 @@ async function macPushDevice() {
   try {
     const token = await pushNotifications.registerForAPNSNotifications();
     askToNotifyOnce();
-    pushNotifications.removeAllListeners("received-apns-notification");
-    pushNotifications.on("received-apns-notification", () => { applePushDelivers = true; });
-    return token ? { platform: "apns" as const, token, app: "mac" as const } : null;
+    if (!token) return null;
+    macPushRegistered = true;
+    // The window that asked is open, so the app's own notifications serve for now.
+    listenForApplePush(liveWindows().length === 0);
+    return { platform: "apns" as const, token, app: "mac" as const };
   } catch {
     return null;
   }
@@ -1201,11 +1215,6 @@ function showNativeNotification(
 ) {
   const plan = planNotification(payload);
   if (!Notification.isSupported() || !plan.show) {
-    return false;
-  }
-  // The system already shows a pushed message while the app is in the
-  // background; posting it here as well would show it twice.
-  if (applePushDelivers && plan.canReply && !BrowserWindow.getFocusedWindow()) {
     return false;
   }
 
@@ -2881,6 +2890,7 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   appIsQuitting = true;
+  listenForApplePush(true);
   disableDaemonKeepAlive();
   stopDaemonHeartbeat();
   profileRegistryWatcher?.close();
@@ -2898,5 +2908,11 @@ app.on("before-quit", () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
+    return;
   }
+  listenForApplePush(true);
+});
+
+app.on("browser-window-created", () => {
+  if (!appIsQuitting) listenForApplePush(false);
 });
