@@ -14,6 +14,7 @@ import {
   nativeImage,
   nativeTheme,
   powerMonitor,
+  pushNotifications,
   screen,
   type IpcMainInvokeEvent,
   type MessageBoxOptions,
@@ -1154,12 +1155,35 @@ function flushPendingNotificationReplies() {
   }
 }
 
+// Set once Apple has delivered a push to this running app: only then is it
+// known that the system shows messages itself while no window is in front.
+let applePushDelivers = false;
+
+/**
+ * What the Hub pushes to on this Mac, or null where the app cannot be pushed
+ * to: another platform, or a build that carries no push entitlement.
+ */
+async function macPushDevice() {
+  if (process.platform !== "darwin" || !app.isPackaged) return null;
+  try {
+    const token = await pushNotifications.registerForAPNSNotifications();
+    return token ? { platform: "apns" as const, token, app: "mac" as const } : null;
+  } catch {
+    return null;
+  }
+}
+
 function showNativeNotification(
   payload: DesktopNotificationPayload,
   originWindowId?: number
 ) {
   const plan = planNotification(payload);
   if (!Notification.isSupported() || !plan.show) {
+    return false;
+  }
+  // The system already shows a pushed message while the app is in the
+  // background; posting it here as well would show it twice.
+  if (applePushDelivers && plan.canReply && !BrowserWindow.getFocusedWindow()) {
     return false;
   }
 
@@ -2668,6 +2692,8 @@ function registerIpcHandlers() {
   ipcMain.handle("desktop:get-notification-settings", secureIpc(() => getNotificationSettings()));
   ipcMain.handle("desktop:request-notifications", secureIpc(() => getNotificationSettings()));
 
+  ipcMain.handle("desktop:push-device", secureIpc(() => macPushDevice()));
+
   ipcMain.handle("desktop:notify", secureIpc((event, payload: DesktopNotificationPayload) => {
     return showNativeNotification(payload || {}, senderWindow(event)?.id);
   }));
@@ -2810,6 +2836,9 @@ app.whenReady().then(async () => {
   void startDaemonBestEffort();
   configureAutoUpdates();
   powerMonitor.on("resume", dropStaleRendererConnections);
+  if (process.platform === "darwin") {
+    pushNotifications.on("received-apns-notification", () => { applePushDelivers = true; });
+  }
   powerMonitor.on("unlock-screen", dropStaleRendererConnections);
 
   app.on("activate", () => {

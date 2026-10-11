@@ -191,6 +191,9 @@ jobs:
       # app's signing requirement. Treat this identity as release compatibility,
       # not as optional packaging metadata.
       MACOS_RELEASE_TEAM_ID: VWN9V9V56Z
+      # A Developer ID app may carry the push entitlement only with a profile
+      # that grants it. Without this secret the app is built without push.
+      MACOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PROVISIONING_PROFILE_BASE64 }}
       MACOS_RELEASE_APP_ID: net.madebyrobot.xmatrix
       # The self-hosted macOS runner cannot reliably complete large GitHub
       # binary downloads. Use the same checksum-aware mirrors supported by
@@ -386,10 +389,21 @@ jobs:
           rm -rf apps/desktop/release
           cd apps/desktop
 
+          push_args=()
+          if [ -n "${MACOS_PROVISIONING_PROFILE_BASE64:-}" ]; then
+            profile="$DESKTOP_SIGNING_ROOT/xmatrix.provisionprofile"
+            entitlements="$DESKTOP_SIGNING_ROOT/entitlements.mac.push.plist"
+            printf '%s' "$MACOS_PROVISIONING_PROFILE_BASE64" | base64 -D > "$profile"
+            sed -e "s/__TEAM__/$MACOS_RELEASE_TEAM_ID/g" -e "s/__APP__/$MACOS_RELEASE_APP_ID/g" \
+              build/entitlements.mac.push.plist > "$entitlements"
+            push_args=("--config.mac.provisioningProfile=$profile" "--config.mac.entitlements=$entitlements")
+          fi
+
           for arch in arm64 x64; do
             cp "$CLI_SEED_ROOT/$arch/xmatrix" resources/cli/xmatrix
             pnpm exec electron-builder --mac --dir --publish never \
               --config.mac.notarize=false \
+              ${push_args[@]+"${push_args[@]}"} \
               "--$arch" \
               "--config.directories.output=release/build-$arch"
           done
@@ -403,7 +417,24 @@ jobs:
             app="$(find "release/build-$arch" -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
             "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
               "$app" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "$arch app"
+            if [ -n "${MACOS_PROVISIONING_PROFILE_BASE64:-}" ]; then
+              codesign -d --entitlements - "$app" 2>/dev/null | grep -q "aps-environment" || {
+                echo "The $arch app was given a push profile but carries no push entitlement." >&2
+                exit 1
+              }
+            fi
           done
+
+          # macOS refuses to start an app whose entitlements its profile does
+          # not grant, and no signature check shows that. Start the build this
+          # runner can run, without its windows, before anything is published.
+          case "$(uname -m)" in arm64) native=arm64 ;; *) native=x64 ;; esac
+          app="$(find "release/build-$native" -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
+          executable="$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")"
+          ELECTRON_RUN_AS_NODE=1 "$executable" -e "process.exit(0)" || {
+            echo "macOS would not start the signed $native app." >&2
+            exit 1
+          }
 
       - name: Package macOS artifacts
         timeout-minutes: 10
