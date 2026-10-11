@@ -1,4 +1,5 @@
 use super::*;
+use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::process::CommandExt;
 use xmatrix_cli_core::profile::{InstallationRoot, ProfileContext, ProfileId, ProfileStateKind};
 
@@ -155,66 +156,107 @@ fn handoff_restored_auth_uses_the_exact_admitted_grant() {
 
 #[tokio::test]
 async fn handoff_candidate_exit_cannot_report_the_live_run_as_finished() {
-    let fixture = Fixture::new();
-    config::scope_profile_context(fixture.profile.clone(), async {
-        {
+    // Repeated native startup/teardown exposed the original single-sweep flake.
+    for _ in 0..50 {
+        let fixture = Fixture::new();
+        config::scope_profile_context(fixture.profile.clone(), async {
+            {
+                let mut guard = fixture.registry.lock().await;
+                let run = guard.get_mut("run:handoff").unwrap();
+                reap_handoff_candidate(run);
+                let mut failure = marker(fixture.candidate_pid, None);
+                failure.phase = "wrapper_startup_failed".into();
+                failure.completed = true;
+                persist_daemon_run_status_marker_unlocked(&fixture.status_path, &failure);
+                let snapshots = daemon_run_snapshot_items_from_guard(&guard);
+                assert_eq!(snapshots[0].pid, Some(fixture.old_pid));
+                assert_ne!(
+                    snapshots[0].status_phase.as_deref(),
+                    Some("wrapper_startup_failed")
+                );
+            }
+            // An exclusive reader prevents status restoration on the first sweep.
+            // That IO failure must keep the original Run and handoff owned.
+            let blocked_status = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&fixture.status_path)
+                .unwrap();
+            assert!(
+                collect_finished_daemon_children(&fixture.registry)
+                    .await
+                    .is_empty()
+            );
+            {
+                let guard = fixture.registry.lock().await;
+                assert!(guard["run:handoff"].handoff.is_some());
+                assert_eq!(
+                    daemon_run_snapshot_items_from_guard(&guard)[0].pid,
+                    Some(fixture.old_pid)
+                );
+            }
+            drop(blocked_status);
+
+            // Windows may transiently refuse cleanup queries while the candidate
+            // tears down. The daemon keeps the handoff owned and retries its monitor
+            // sweep; prove convergence without treating the candidate as a Run exit.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    assert!(
+                        collect_finished_daemon_children(&fixture.registry)
+                            .await
+                            .is_empty()
+                    );
+                    if fixture.registry.lock().await["run:handoff"]
+                        .handoff
+                        .is_none()
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("candidate rollback must converge within five seconds");
             let mut guard = fixture.registry.lock().await;
             let run = guard.get_mut("run:handoff").unwrap();
-            reap_handoff_candidate(run);
-            let mut failure = marker(fixture.candidate_pid, None);
-            failure.phase = "wrapper_startup_failed".into();
-            failure.completed = true;
-            persist_daemon_run_status_marker_unlocked(&fixture.status_path, &failure);
-            let snapshots = daemon_run_snapshot_items_from_guard(&guard);
-            assert_eq!(snapshots[0].pid, Some(fixture.old_pid));
-            assert_ne!(
-                snapshots[0].status_phase.as_deref(),
-                Some("wrapper_startup_failed")
+            assert_eq!(run.pid, fixture.old_pid);
+            assert!(run.child.is_some() && run.process_tree.is_some() && run.handoff.is_none());
+            assert!(!run.exit_audited);
+            assert!(crate::process_tree::process_alive(fixture.old_pid));
+            assert_eq!(
+                read_daemon_run_status_marker(Some(&fixture.status_path))
+                    .unwrap()
+                    .pid,
+                fixture.old_pid
             );
-        }
-        assert!(
-            collect_finished_daemon_children(&fixture.registry)
-                .await
-                .is_empty()
-        );
-        let mut guard = fixture.registry.lock().await;
-        let run = guard.get_mut("run:handoff").unwrap();
-        assert_eq!(run.pid, fixture.old_pid);
-        assert!(run.child.is_some() && run.process_tree.is_some() && run.handoff.is_none());
-        assert!(!run.exit_audited);
-        assert!(crate::process_tree::process_alive(fixture.old_pid));
-        assert_eq!(
-            read_daemon_run_status_marker(Some(&fixture.status_path))
-                .unwrap()
-                .pid,
-            fixture.old_pid
-        );
-        assert_eq!(
-            runtime_windows_run_adoption::read_evidence(&fixture.status_path)
-                .unwrap()
-                .pid,
-            fixture.old_pid
-        );
-        // The old helper may ask to roll back after the monitor already did it.
-        rebind_managed_daemon_run_pid(
-            &mut guard,
-            "run:handoff",
-            "execution:handoff",
-            fixture.old_pid,
-        )
-        .unwrap();
-        assert!(
-            guard["run:handoff"].child.is_some(),
-            "idempotent rollback retains ownership"
-        );
-        drop(guard);
-        assert!(
-            collect_finished_daemon_children(&fixture.registry)
-                .await
-                .is_empty()
-        );
-    })
-    .await;
+            assert_eq!(
+                runtime_windows_run_adoption::read_evidence(&fixture.status_path)
+                    .unwrap()
+                    .pid,
+                fixture.old_pid
+            );
+            // The old helper may ask to roll back after the monitor already did it.
+            rebind_managed_daemon_run_pid(
+                &mut guard,
+                "run:handoff",
+                "execution:handoff",
+                fixture.old_pid,
+            )
+            .unwrap();
+            assert!(
+                guard["run:handoff"].child.is_some(),
+                "idempotent rollback retains ownership"
+            );
+            drop(guard);
+            assert!(
+                collect_finished_daemon_children(&fixture.registry)
+                    .await
+                    .is_empty()
+            );
+        })
+        .await;
+    }
 }
 
 #[tokio::test]
