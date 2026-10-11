@@ -466,7 +466,9 @@ pub fn render_page_changes(changes: &PageChanges) -> String {
 }
 
 /// The `blocks:` front matter: per section, its last change, claims and who is on it.
-pub fn render_page_awareness(awareness: &PageAwareness) -> String {
+/// A claim held for `own_conversation` is marked as the reader's, so a Run whose
+/// Automation claimed the section on its behalf does not mistake it for another Run's.
+pub fn render_page_awareness(awareness: &PageAwareness, own_conversation: Option<&str>) -> String {
     let mut out = String::new();
     for block in &awareness.blocks {
         let mut lines = Vec::new();
@@ -493,6 +495,9 @@ pub fn render_page_awareness(awareness: &PageAwareness) -> String {
             );
             if let Some(conversation) = &claim.conversation_id {
                 line.push_str(&format!(" in conversation {conversation}"));
+                if own_conversation == Some(conversation.as_str()) {
+                    line.push_str(" (this Run's conversation: the claim is yours)");
+                }
             }
             lines.push(line);
         }
@@ -589,7 +594,10 @@ pub fn render_page_document_with(page: &PageDocument, awareness: Option<&PageAwa
         header.push_str("agentEdits: suggestions for a human to accept\n");
     }
     if let Some(awareness) = awareness {
-        header.push_str(&render_page_awareness(awareness));
+        header.push_str(&render_page_awareness(
+            awareness,
+            run_conversation().as_deref(),
+        ));
     }
     header.push_str("---\n");
     format!("{header}{}", page.body)
@@ -1390,10 +1398,31 @@ mod page_tests {
         }))
         .unwrap();
         assert_eq!(
-            render_page_awareness(&awareness),
+            render_page_awareness(&awareness, None),
             "blocks:\n  status:\n    updated: r12 2026-09-27T13:00:00.000Z by claude:1 in conversation conv-1\n    claimed: codex:2 until 2026-09-27T16:00:00.000Z (claim c1) in conversation conv-2\n    editing: claude:3 (Agent) in conversation conv-3\n    viewing: Yiming\n    owed: an update — https://github.com/o/r/pull/7 merged at 2026-09-27T15:00:00.000Z (codex:2) in conversation conv-2\n    discussion: \"Shipped 'today'\" in conversation conv-4 (link l1; `xmatrix page resolve` once its outcome is in the page)\n"
         );
-        assert_eq!(render_page_awareness(&PageAwareness { blocks: vec![] }), "");
+        assert_eq!(
+            render_page_awareness(&PageAwareness { blocks: vec![] }, None),
+            ""
+        );
+    }
+
+    #[test]
+    fn a_page_read_marks_a_claim_held_for_the_readers_own_conversation() {
+        let awareness: PageAwareness = serde_json::from_value(json!({
+            "pageId": "p", "headRevision": 4,
+            "blocks": [
+                { "blockId": "status", "updated": null, "present": [],
+                  "claims": [{ "claimId": "c1", "blockId": "status", "holder": { "kind": "agent", "id": "auto", "label": "status" },
+                    "expiresAt": "2026-09-27T16:00:00.000Z", "conversationId": "conv-run" }] }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(
+            render_page_awareness(&awareness, Some("conv-run")),
+            "blocks:\n  status:\n    claimed: status until 2026-09-27T16:00:00.000Z (claim c1) in conversation conv-run (this Run's conversation: the claim is yours)\n"
+        );
+        assert!(!render_page_awareness(&awareness, Some("conv-other")).contains("yours"));
     }
 
     #[test]
@@ -1409,7 +1438,7 @@ mod page_tests {
         }))
         .unwrap();
         assert_eq!(
-            render_page_awareness(&awareness),
+            render_page_awareness(&awareness, None),
             "blocks:\n  (top):\n    idle: codex:1 (Agent) in conversation conv-9\n  release:\n    working: claude:2 (Agent) in conversation conv-5\n"
         );
     }
