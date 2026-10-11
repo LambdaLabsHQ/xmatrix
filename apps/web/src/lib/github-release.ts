@@ -295,13 +295,13 @@ export function findAndroidReleaseAssetByAlias(release: GitHubRelease, assetName
 }
 
 export function findDesktopReleaseAssetByAlias(release: GitHubRelease, assetName: string) {
-  const macMatch = assetName.match(/^latest-arm64\.(dmg|zip)$/);
+  const macMatch = assetName.match(/^latest-(arm64|x64)\.(dmg|zip)$/);
   if (macMatch) {
-    const [, extension] = macMatch;
+    const [, arch, extension] = macMatch;
     return release.assets.find((asset) => {
       if (!asset.name.endsWith(`.${extension}`)) return false;
       if (asset.name.includes("universal")) return false;
-      return asset.name.includes("-arm64.");
+      return asset.name.includes(`-${arch}.`);
     });
   }
 

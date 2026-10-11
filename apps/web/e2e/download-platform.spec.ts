@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 
 const cases = [
   { name: "Windows", ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", href: "/api/desktop/releases/stable/latest-x64.exe" },
-  { name: "macOS", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/api/desktop/releases/stable/latest-arm64.dmg" },
+  { name: "macOS", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/api/desktop/releases/stable/latest-arm64.dmg", architecture: "arm", other: "/api/desktop/releases/stable/latest-x64.dmg" },
+  { name: "Intel macOS", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/api/desktop/releases/stable/latest-x64.dmg", architecture: "x86", other: "/api/desktop/releases/stable/latest-arm64.dmg" },
+  { name: "macOS without client hints", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/api/desktop/releases/stable/latest-arm64.dmg", architecture: null, other: "/api/desktop/releases/stable/latest-x64.dmg" },
   { name: "Android", ua: "Mozilla/5.0 (Linux; Android 14; Pixel 8)", href: "/api/android/releases/stable/latest.apk" },
   { name: "iOS", ua: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", href: "/app" },
   { name: "iPadOS desktop mode", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/app", ipad: true },
@@ -19,11 +21,22 @@ for (const scenario of cases) {
         Object.defineProperty(navigator, "maxTouchPoints", { value: 5 });
       });
     }
+    if ("architecture" in scenario) {
+      // The test browser's own client hints describe the CI host, not a Mac.
+      await context.addInitScript((architecture) => {
+        Object.defineProperty(navigator, "userAgentData", {
+          value: architecture === null ? undefined : { getHighEntropyValues: async () => ({ architecture }) },
+        });
+      }, scenario.architecture);
+    }
     const page = await context.newPage();
     await page.goto("/download");
     const recommendation = page.getByTestId("download-recommendation");
     await expect(recommendation.getByRole("link").first()).toHaveAttribute("href", scenario.href);
-    if (scenario.name === "macOS") await expect(recommendation).toContainText("Apple Silicon");
+    if (scenario.other) {
+      await expect(recommendation).toContainText(scenario.architecture === "x86" ? "Intel-based Macs" : "Apple Silicon");
+      await expect(recommendation.getByRole("link", { name: scenario.architecture === "x86" ? "Apple Silicon Mac" : "Intel Mac" })).toHaveAttribute("href", scenario.other);
+    }
     await recommendation.getByRole("link", { name: "All platforms and preview builds" }).click();
     await expect(page).toHaveURL(/#all-downloads$/);
     await expect(page.getByRole("link", { name: "Stable EXE", exact: true })).toBeVisible();

@@ -6,7 +6,7 @@ test("macOS desktop releases use one isolated keychain for the pinned complete c
   const chainStep = workflow.indexOf(
     "name: Prepare isolated Developer ID signing keychain",
   );
-  const buildStep = workflow.indexOf("name: Build signed macOS app (arm64)");
+  const buildStep = workflow.indexOf("name: Build signed macOS apps (arm64, x64)");
 
   assert.notEqual(chainStep, -1);
   assert.match(workflow, /source scripts\/macos-signing-keychain\.sh/u);
@@ -24,22 +24,29 @@ test("macOS desktop releases use one isolated keychain for the pinned complete c
   assert.match(signingPreparation, /security import "\$certificate" -k "\$keychain"/);
   assert.match(workflow, /echo "CSC_KEYCHAIN=\$keychain" >> "\$GITHUB_ENV"/);
   assert.match(signingPreparation, /macos-keychain-search-list\.sh add "\$keychain"/);
-  const arm64Build = workflow.slice(
-    workflow.indexOf("name: Build signed macOS app (arm64)"),
+  const macBuild = workflow.slice(
+    workflow.indexOf("name: Build signed macOS apps (arm64, x64)"),
     workflow.indexOf("name: Verify macOS app signing identity"),
   );
   const packaging = workflow.slice(
     workflow.indexOf("name: Package macOS artifacts"),
     workflow.indexOf("name: Stage stable macOS release assets on runner"),
   );
-  for (const step of [arm64Build, packaging]) {
+  for (const step of [macBuild, packaging]) {
     assert.match(step, /unset CSC_LINK CSC_KEY_PASSWORD/);
   }
   const macosRelease = workflow.slice(
     workflow.indexOf("\n  release:\n"),
     workflow.indexOf("\n  windows-release:\n"),
   );
-  assert.doesNotMatch(macosRelease, /--x64|xMatrix-\$DESKTOP_VERSION-x64\.(?:dmg|zip)/u);
+  // One app per architecture, never a universal build: each carries its own
+  // CLI seed, and the updater feed picks the file by architecture.
+  for (const arch of ["arm64", "x64"]) {
+    for (const extension of ["dmg", "zip", "dmg.blockmap", "zip.blockmap"]) {
+      assert.ok(macosRelease.includes(`"xMatrix-$version-${arch}.${extension}"`), `${arch} ${extension} is never staged`);
+    }
+  }
+  assert.doesNotMatch(macosRelease, /--universal/u);
   assert.match(workflow, /name: Remove isolated Developer ID signing keychain/);
   assert.match(workflow, /macos-keychain-search-list\.sh remove "\$CSC_KEYCHAIN"/);
   assert.match(workflow, /security delete-keychain "\$CSC_KEYCHAIN"/);

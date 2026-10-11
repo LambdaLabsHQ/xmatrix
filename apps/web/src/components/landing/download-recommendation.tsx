@@ -17,16 +17,39 @@ function detectPlatform(): Platform {
   return "unknown";
 }
 
+// Every Mac browser reports "Intel Mac OS X"; only Chromium can tell the CPU
+// apart, through User-Agent Client Hints. Elsewhere Apple Silicon is the default
+// and the Intel build is one link away.
+async function detectIntelMac() {
+  const uaData = (navigator as Navigator & {
+    userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }> };
+  }).userAgentData;
+  if (!uaData) return false;
+  const { architecture } = await uaData.getHighEntropyValues(["architecture"]);
+  return architecture === "x86";
+}
+
+const macDownloads = {
+  arm64: { name: "Apple Silicon", href: "/api/desktop/releases/stable/latest-arm64.dmg", label: "Download for macOS", detail: "For Apple Silicon (M-series) Macs." },
+  x64: { name: "Intel", href: "/api/desktop/releases/stable/latest-x64.dmg", label: "Download for macOS", detail: "For Intel-based Macs." },
+};
+
 const downloads = {
-  macOS: { href: "/api/desktop/releases/stable/latest-arm64.dmg", label: "Download for macOS", detail: "For Apple Silicon (M-series) Macs. Intel Macs can use the web app." },
   Windows: { href: "/api/desktop/releases/stable/latest-x64.exe", label: "Download for Windows", detail: "Stable installer for Windows x64." },
   Android: { href: "/api/android/releases/stable/latest.apk", label: "Download for Android", detail: "Install the stable Android APK." },
 };
 
 export function DownloadRecommendation() {
   const [platform, setPlatform] = useState<Platform>("unknown");
-  useEffect(() => { setPlatform(detectPlatform()); }, []);
-  const download = platform === "macOS" || platform === "Windows" || platform === "Android" ? downloads[platform] : null;
+  const [intelMac, setIntelMac] = useState(false);
+  useEffect(() => {
+    const detected = detectPlatform();
+    setPlatform(detected);
+    if (detected === "macOS") detectIntelMac().then(setIntelMac).catch(() => {});
+  }, []);
+  const download = platform === "macOS" ? macDownloads[intelMac ? "x64" : "arm64"]
+    : platform === "Windows" || platform === "Android" ? downloads[platform] : null;
+  const otherMac = platform === "macOS" ? macDownloads[intelMac ? "arm64" : "x64"] : null;
 
   return (
     <WoodPanel className="mb-10 min-w-0 p-5 sm:p-7" data-testid="download-recommendation">
@@ -43,6 +66,7 @@ export function DownloadRecommendation() {
           {download && <Download className="size-4" />}
           {download ? download.label : "Open web app"}
         </LiquidGlassPill>
+        {otherMac && <a href={otherMac.href} className="text-sm font-semibold text-primary underline underline-offset-4">{`${otherMac.name} Mac`}</a>}
         <a href="#all-downloads" className="text-sm font-semibold text-primary underline underline-offset-4">All platforms and preview builds</a>
       </div>
     </WoodPanel>

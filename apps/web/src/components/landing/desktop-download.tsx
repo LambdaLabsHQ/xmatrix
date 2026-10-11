@@ -10,6 +10,7 @@ const channels = [
     badge: "Recommended",
     builds: [
       ["Apple Silicon", "M-series Macs", "/api/desktop/releases/stable/latest-arm64.dmg", "/api/desktop/releases/stable/latest-arm64.zip"],
+      ["Intel", "Intel-based Macs", "/api/desktop/releases/stable/latest-x64.dmg", "/api/desktop/releases/stable/latest-x64.zip"],
     ],
   },
   {
@@ -18,6 +19,7 @@ const channels = [
     badge: "Latest",
     builds: [
       ["Apple Silicon", "M-series Macs", "/api/desktop/releases/dev/latest-arm64.dmg", "/api/desktop/releases/dev/latest-arm64.zip"],
+      ["Intel", "Intel-based Macs", "/api/desktop/releases/dev/latest-x64.dmg", "/api/desktop/releases/dev/latest-x64.zip"],
     ],
   },
 ];

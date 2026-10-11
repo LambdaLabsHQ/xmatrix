@@ -3,10 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { runCliMain } from "./cli-entrypoint.mjs";
 
+// One feed serves both architectures: electron-updater on Apple Silicon picks
+// the files whose name carries `arm64`, and an Intel Mac picks the others. The
+// legacy top-level path stays on the arm64 ZIP that older clients read.
 export function writeMacUpdaterManifest({ directory, version, releaseDate = new Date().toISOString() }) {
-  const stem = `xMatrix-${version}-arm64`;
-  const entries = ["zip", "dmg"].map((extension) => {
-    const fileName = `${stem}.${extension}`;
+  const entries = ["arm64.zip", "arm64.dmg", "x64.zip", "x64.dmg"].map((suffix) => {
+    const fileName = `xMatrix-${version}-${suffix}`;
     const filePath = path.join(directory, fileName);
     return {
       fileName,
