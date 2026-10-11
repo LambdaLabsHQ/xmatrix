@@ -155,6 +155,7 @@ fn handoff_restored_auth_uses_the_exact_admitted_grant() {
 
 #[tokio::test]
 async fn handoff_candidate_exit_cannot_report_the_live_run_as_finished() {
+    for _ in 0..50 {
     let fixture = Fixture::new();
     config::scope_profile_context(fixture.profile.clone(), async {
         {
@@ -215,6 +216,7 @@ async fn handoff_candidate_exit_cannot_report_the_live_run_as_finished() {
         );
     })
     .await;
+    }
 }
 
 #[tokio::test]

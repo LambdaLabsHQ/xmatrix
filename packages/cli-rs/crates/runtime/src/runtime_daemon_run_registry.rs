@@ -104,6 +104,7 @@ async fn collect_finished_daemon_children(registry: &DaemonRunRegistry) -> Vec<D
                 append_daemon_registry_audit(&format!(
                     "handoff_reconcile_failed key={key} error={error}"
                 ));
+                eprintln!("daemon Run handoff reconciliation failed: {error}");
             }
             handoff_changed |= managed.handoff.is_none();
             persist_daemon_run_sidecar(&persisted_daemon_run_from_child(managed));
