@@ -186,7 +186,11 @@ struct WebContainerView: UIViewRepresentable {
             bridge.onOpenURL = { [weak self] url in
                 self?.load(url)
             }
-            UNUserNotificationCenter.current().delegate = bridge
+            Task { @MainActor [weak bridge] in
+                NotificationTaps.shared.deliver { userInfo in
+                    bridge?.openNotification(userInfo)
+                }
+            }
             self.bridge = bridge
             self.pageCoordinator = pageCoordinator
 

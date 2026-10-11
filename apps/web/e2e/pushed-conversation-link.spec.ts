@@ -8,6 +8,22 @@ import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_SPACE, fixtur
 
 const RANDOM = { ...E2E_CHANNEL, id: "channel-random", name: "random" };
 
+const TEAM_SPACE = { ...E2E_SPACE, id: "space-team", name: "Team" };
+const ELSEWHERE = { ...E2E_CHANNEL, id: "channel-elsewhere", name: "elsewhere", spaceId: TEAM_SPACE.id };
+
+test.describe("in another Space", () => {
+  test.use(E2E_MOBILE_CONTEXT);
+
+  test("a tapped push opens a conversation of a Space that is not the one on screen", async ({ page }) => {
+    await installWorkspaceStubs(page, { spaces: [E2E_SPACE, TEAM_SPACE], channels: [E2E_CHANNEL, ELSEWHERE] });
+    await fixtureJson(page, "elsewhere-history", "**/api/xmatrix/channels/channel-elsewhere/history**",
+      { messages: [], hasMore: false });
+    await page.goto("/app?channel=channel-elsewhere", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("textarea.composer-textarea").first()).toBeVisible();
+    await expect(page).toHaveURL(/\/channels\/elsewhere-/u);
+  });
+});
+
 for (const [name, context] of [["a computer", E2E_DESKTOP_CONTEXT], ["a phone", E2E_MOBILE_CONTEXT]] as const) {
   test.describe(`on ${name}`, () => {
     test.use(context);
