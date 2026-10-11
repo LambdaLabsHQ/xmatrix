@@ -138,7 +138,7 @@ function names(agents: readonly PageTreeAgent[]): string {
  * changed. Whoever is on the page is also drawn at the line's end, so a
  * summary is not given up for "reading".
  */
-export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary">, agents: readonly PageTreeAgent[],
+export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary" | "headRevision">, agents: readonly PageTreeAgent[],
   latest: PageTreeActivity["discussions"]["latest"] = null, now = Date.now()): ReactNode {
   const editing = agents.filter((agent) => agent.activity === "editing");
   if (editing.length > 0) {
@@ -146,7 +146,7 @@ export function pageRowMeta(page: Pick<PageSummary, "updatedAt" | "summary">, ag
     return `${names(editing)} editing${sections.length === 1 ? ` · ${sections[0]}` : ""}`;
   }
   if (latest) return <>{latest.from.label}: <InlineRowPreview text={latest.bodyPreview} /></>;
-  if (page.summary?.text) return <InlineRowPreview text={page.summary.text} />;
+  if (page.summary?.text && page.summary.revision === page.headRevision) return <InlineRowPreview text={page.summary.text} />;
   if (agents.length > 0) return `${names(agents)} reading`;
   const age = formatRelativeAge(page.updatedAt, now);
   return age ? `Edited ${age}` : "";
