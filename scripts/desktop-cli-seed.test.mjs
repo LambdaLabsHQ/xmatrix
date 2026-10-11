@@ -24,7 +24,7 @@ test("an on-demand Desktop release requires its exact-version CLI seed", () => {
 });
 
 for (const [platform, jobName, nextJob, asset, seed, buildStep] of [
-  ["macOS", "release", "windows-release", "xmatrix-macos-arm64", "xmatrix", "name: Build signed macOS app (arm64)"],
+  ["macOS", "release", "windows-release", "xmatrix-macos-$arch", "xmatrix", "name: Build signed macOS apps (arm64, x64)"],
   ["Windows", "windows-release", "publish-desktop-release", "xmatrix-windows-x64.exe", "xmatrix.exe", "name: Build Windows installer"],
 ]) {
   test(`the ${platform} job fetches the exact-version signed CLI seed before it packages`, () => {

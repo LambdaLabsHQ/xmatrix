@@ -82,13 +82,23 @@ test("selectLatestPublishedGitHubReleaseByTagPrefix applies target asset eligibi
   assert.equal(selected?.tag_name, "desktop-v0.11.9");
 });
 
-test("desktop release assets only expose Apple Silicon macOS downloads", () => {
-  const candidate = release("desktop-v0.11.10", {
+test("desktop macOS aliases resolve each architecture's own build", () => {
+  const armOnly = release("desktop-v0.11.10", {
     assets: desktopMacAssets("0.11.10"),
   });
-  assert.equal(hasCompleteDesktopMacReleaseAssets(candidate), true);
-  assert.equal(findDesktopReleaseAssetByAlias(candidate, "latest-arm64.dmg")?.name, "xMatrix-0.11.10-arm64.dmg");
-  assert.equal(findDesktopReleaseAssetByAlias(candidate, "latest-x64.dmg"), undefined);
+  assert.equal(hasCompleteDesktopMacReleaseAssets(armOnly), true);
+  assert.equal(findDesktopReleaseAssetByAlias(armOnly, "latest-arm64.dmg")?.name, "xMatrix-0.11.10-arm64.dmg");
+  assert.equal(findDesktopReleaseAssetByAlias(armOnly, "latest-x64.dmg"), undefined);
+
+  const both = release("desktop-v0.11.11", {
+    assets: [
+      ...desktopMacAssets("0.11.11"),
+      ...[`xMatrix-0.11.11-x64.dmg`, `xMatrix-0.11.11-x64.zip`, `xMatrix-0.11.11-x64.exe`].map(asset),
+    ],
+  });
+  assert.equal(findDesktopReleaseAssetByAlias(both, "latest-x64.dmg")?.name, "xMatrix-0.11.11-x64.dmg");
+  assert.equal(findDesktopReleaseAssetByAlias(both, "latest-x64.zip")?.name, "xMatrix-0.11.11-x64.zip");
+  assert.equal(findDesktopReleaseAssetByAlias(both, "latest-arm64.zip")?.name, "xMatrix-0.11.11-arm64.zip");
 });
 
 test("desktop mac release eligibility accepts published releases without Windows assets", () => {

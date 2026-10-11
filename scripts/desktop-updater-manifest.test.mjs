@@ -10,26 +10,26 @@ import { parse } from "yaml";
 
 import { writeMacUpdaterManifest } from "./desktop-updater-manifest.mjs";
 
-test("macOS updater manifest names the versioned artifacts with their digests", async (t) => {
+test("macOS updater manifest names both architectures' artifacts with their digests", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "xmatrix-updater-manifest-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const version = "1.2.3";
   const releaseDate = "2026-10-03T20:00:00.000Z";
-  const assets = new Map(["zip", "dmg", "zip.blockmap", "dmg.blockmap"].map((extension) => [
-    extension, Buffer.from(`signed ${extension} fixture`),
-  ]));
-  for (const [extension, bytes] of assets) {
-    await writeFile(path.join(directory, `xMatrix-${version}-arm64.${extension}`), bytes);
+  const assets = new Map(["arm64", "x64"].flatMap((arch) => ["zip", "dmg", "zip.blockmap", "dmg.blockmap"].map((extension) => [
+    `${arch}.${extension}`, Buffer.from(`signed ${arch} ${extension} fixture`),
+  ])));
+  for (const [name, bytes] of assets) {
+    await writeFile(path.join(directory, `xMatrix-${version}-${name}`), bytes);
   }
   const cli = spawnSync(process.execPath, [
     fileURLToPath(new URL("./desktop-updater-manifest.mjs", import.meta.url)), directory,
   ], { encoding: "utf8", env: { ...process.env, DESKTOP_VERSION: version } });
   assert.equal(cli.status, 0, cli.stderr);
   writeMacUpdaterManifest({ directory, version, releaseDate });
-  const files = ["zip", "dmg"].map((extension) => ({
-    url: `xMatrix-${version}-arm64.${extension}`,
-    sha512: createHash("sha512").update(assets.get(extension)).digest("base64"),
-    size: assets.get(extension).length,
+  const files = ["arm64.zip", "arm64.dmg", "x64.zip", "x64.dmg"].map((name) => ({
+    url: `xMatrix-${version}-${name}`,
+    sha512: createHash("sha512").update(assets.get(name)).digest("base64"),
+    size: assets.get(name).length,
   }));
   assert.deepEqual(parse(await readFile(path.join(directory, "latest-mac.yml"), "utf8")), {
     version, files, path: files[0].url, sha512: files[0].sha512, releaseDate,

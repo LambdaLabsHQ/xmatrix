@@ -306,20 +306,29 @@ jobs:
         run: |
           set -euo pipefail
           # The App installs the CLI from this seed (`xmatrix setup daemon`),
-          # so it must be the exact same-version signed release binary.
-          seed_dir="apps/desktop/resources/cli"
-          rm -rf "$seed_dir"
-          mkdir -p "$seed_dir"
-          download_dir="$RUNNER_TEMP/xmatrix-cli-seed"
-          node scripts/r2-release-store.mjs download-directory \
-            --bucket xmatrix-release-assets \
-            --prefix "releases/cli-v${DESKTOP_VERSION}" \
-            --directory "$download_dir" \
-            --exclude-manifest \
-            --only xmatrix-macos-arm64
-          cp "$download_dir/xmatrix-macos-arm64" "$seed_dir/xmatrix"
-          chmod +x "$seed_dir/xmatrix"
-          reported="$("$seed_dir/xmatrix" --version | head -n 1)"
+          # so it must be the exact same-version signed release binary. Each
+          # architecture's App carries its own; the build steps copy the
+          # matching one into apps/desktop/resources/cli.
+          seed_root="$RUNNER_TEMP/xmatrix-cli-seeds"
+          rm -rf "$seed_root" apps/desktop/resources/cli
+          mkdir -p apps/desktop/resources/cli
+          for arch in arm64 x64; do
+            node scripts/r2-release-store.mjs download-directory \
+              --bucket xmatrix-release-assets \
+              --prefix "releases/cli-v${DESKTOP_VERSION}" \
+              --directory "$seed_root/download-$arch" \
+              --exclude-manifest \
+              --only "xmatrix-macos-$arch"
+            mkdir -p "$seed_root/$arch"
+            cp "$seed_root/download-$arch/xmatrix-macos-$arch" "$seed_root/$arch/xmatrix"
+            chmod +x "$seed_root/$arch/xmatrix"
+            codesign --verify --strict --verbose=2 "$seed_root/$arch/xmatrix"
+          done
+          test "$(lipo -archs "$seed_root/arm64/xmatrix")" = arm64
+          test "$(lipo -archs "$seed_root/x64/xmatrix")" = x86_64
+          # The runner is Apple Silicon, so only the arm64 seed can run; both
+          # come from the same immutable cli-v<version> release.
+          reported="$("$seed_root/arm64/xmatrix" --version | head -n 1)"
           case "$reported" in
             *"$DESKTOP_VERSION"*) ;;
             *)
@@ -327,7 +336,7 @@ jobs:
               exit 1
               ;;
           esac
-          codesign --verify --strict --verbose=2 "$seed_dir/xmatrix"
+          echo "CLI_SEED_ROOT=$seed_root" >> "$GITHUB_ENV"
 
       - name: Require macOS release signing identity
         run: |
@@ -366,8 +375,8 @@ jobs:
             exit 1
           fi
 
-      - name: Build signed macOS app (arm64)
-        timeout-minutes: 10
+      - name: Build signed macOS apps (arm64, x64)
+        timeout-minutes: 20
         env:
           APPLE_ID: ""
           APPLE_APP_SPECIFIC_PASSWORD: ""
@@ -377,19 +386,24 @@ jobs:
           rm -rf apps/desktop/release
           cd apps/desktop
 
-          pnpm exec electron-builder --mac --dir --publish never \
-            --config.mac.notarize=false \
-            --arm64 \
-            --config.directories.output=release/build-arm64
+          for arch in arm64 x64; do
+            cp "$CLI_SEED_ROOT/$arch/xmatrix" resources/cli/xmatrix
+            pnpm exec electron-builder --mac --dir --publish never \
+              --config.mac.notarize=false \
+              "--$arch" \
+              "--config.directories.output=release/build-$arch"
+          done
 
       - name: Verify macOS app signing identity
         run: |
           set -euo pipefail
           cd apps/desktop
 
-          arm64_app="$(find release/build-arm64 -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
-          "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
-            "$arm64_app" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "arm64 app"
+          for arch in arm64 x64; do
+            app="$(find "release/build-$arch" -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
+            "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
+              "$app" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "$arch app"
+          done
 
       - name: Package macOS artifacts
         timeout-minutes: 10
@@ -398,47 +412,54 @@ jobs:
           unset CSC_LINK CSC_KEY_PASSWORD
           cd apps/desktop
 
-          arm64_app="$(find release/build-arm64 -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
-
-          if [ -z "$arm64_app" ]; then
-            echo "Expected an arm64 app bundle before packaging." >&2
-            exit 1
-          fi
-
-          update_config="$arm64_app/Contents/Resources/app-update.yml"
-          if [ ! -f "$update_config" ]; then
-            echo "Expected updater config at $update_config." >&2
-            exit 1
-          fi
-          if ! grep -q "https://xmatrix.sh/api/desktop/releases/stable" "$update_config"; then
-            echo "Updater config in $arm64_app does not point at the stable feed." >&2
-            exit 1
-          fi
-
-          ELECTRON_MIRROR="$ELECTRON_BUILDER_BINARIES_MIRROR" \
-          pnpm exec electron-builder --mac dmg zip --arm64 \
-            --prepackaged "$arm64_app" \
-            --publish never \
-            --config.mac.notarize=false \
-            --config.directories.output=release/package-arm64
-
-          find release/package-arm64 -maxdepth 1 -type f \
-            \( -name "*.dmg" -o -name "*.zip" -o -name "*.blockmap" \) \
-            -exec cp {} release/ \;
-
           verify_root="$RUNNER_TEMP/xmatrix-packaged-signatures"
           rm -rf "$verify_root"
-          mkdir -p "$verify_root"
-          extract_dir="$verify_root/arm64"
-          mkdir -p "$extract_dir"
-          ditto -x -k "release/xMatrix-$DESKTOP_VERSION-arm64.zip" "$extract_dir"
-          app_bundle="$(find "$extract_dir" -maxdepth 3 -path "*/xMatrix.app" -print -quit)"
-          if [ -z "$app_bundle" ]; then
-            echo "Packaged arm64 ZIP does not contain xMatrix.app." >&2
-            exit 1
-          fi
-          "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
-            "$app_bundle" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "packaged arm64 ZIP app"
+
+          for arch in arm64 x64; do
+            app="$(find "release/build-$arch" -maxdepth 4 -path "*/xMatrix.app" -print -quit)"
+
+            if [ -z "$app" ]; then
+              echo "Expected an $arch app bundle before packaging." >&2
+              exit 1
+            fi
+
+            update_config="$app/Contents/Resources/app-update.yml"
+            if [ ! -f "$update_config" ]; then
+              echo "Expected updater config at $update_config." >&2
+              exit 1
+            fi
+            if ! grep -q "https://xmatrix.sh/api/desktop/releases/stable" "$update_config"; then
+              echo "Updater config in $app does not point at the stable feed." >&2
+              exit 1
+            fi
+            case "$arch" in arm64) seed_arch=arm64 ;; x64) seed_arch=x86_64 ;; esac
+            if [ "$(lipo -archs "$app/Contents/Resources/cli/xmatrix")" != "$seed_arch" ]; then
+              echo "The $arch app does not carry the $seed_arch CLI seed." >&2
+              exit 1
+            fi
+
+            ELECTRON_MIRROR="$ELECTRON_BUILDER_BINARIES_MIRROR" \
+            pnpm exec electron-builder --mac dmg zip "--$arch" \
+              --prepackaged "$app" \
+              --publish never \
+              --config.mac.notarize=false \
+              "--config.directories.output=release/package-$arch"
+
+            find "release/package-$arch" -maxdepth 1 -type f \
+              \( -name "*.dmg" -o -name "*.zip" -o -name "*.blockmap" \) \
+              -exec cp {} release/ \;
+
+            extract_dir="$verify_root/$arch"
+            mkdir -p "$extract_dir"
+            ditto -x -k "release/xMatrix-$DESKTOP_VERSION-$arch.zip" "$extract_dir"
+            app_bundle="$(find "$extract_dir" -maxdepth 3 -path "*/xMatrix.app" -print -quit)"
+            if [ -z "$app_bundle" ]; then
+              echo "Packaged $arch ZIP does not contain xMatrix.app." >&2
+              exit 1
+            fi
+            "$GITHUB_WORKSPACE/scripts/verify-macos-app-signature.sh" \
+              "$app_bundle" "$MACOS_RELEASE_APP_ID" "$MACOS_RELEASE_TEAM_ID" "packaged $arch ZIP app"
+          done
 
           node ../../scripts/desktop-updater-manifest.mjs release
 
@@ -460,6 +481,10 @@ jobs:
             "xMatrix-$version-arm64.zip" \
             "xMatrix-$version-arm64.dmg.blockmap" \
             "xMatrix-$version-arm64.zip.blockmap" \
+            "xMatrix-$version-x64.dmg" \
+            "xMatrix-$version-x64.zip" \
+            "xMatrix-$version-x64.dmg.blockmap" \
+            "xMatrix-$version-x64.zip.blockmap" \
             "latest-mac.yml"
           do
             cp "apps/desktop/release/$asset" "$stage_dir/"
