@@ -189,6 +189,12 @@ it belongs in the repository.**
    italic, code, and strikethrough using the conversation preview renderer.
    It stays on one line with an ellipsis; links and images show their labels,
    and author and activity names remain plain text.
+   A summary describes the page's current state only when its revision equals
+   the page's head. Otherwise the row shows who is reading, or when the page
+   was edited; editing and discussion activity still take precedence. Summary
+   executions read through the ordinary page authority as the selected
+   Machine's owner, so restricted pages and inherited restrictions apply
+   before any text is sent to that Machine.
    Conversation page bookmarks and page-reference hover previews share these
    inline marks. Extracting a status line removes block markers while keeping
    leading emphasis delimiters intact.

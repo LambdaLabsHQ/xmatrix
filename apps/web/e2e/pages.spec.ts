@@ -113,6 +113,44 @@ async function selectLine(browser: Page, text: string) {
   await browser.getByTestId("page-editor").getByText(text, { exact: true }).click({ clickCount: 3 });
 }
 
+for (const width of [1280, 393]) {
+  test(`page rows show only summaries of their current revision at ${width}px`, async ({ page: browser }) => {
+    await browser.setViewportSize({ width, height: 852 });
+    const rows = [
+      { ...page("p-current", null, "Current", "A"), summary: { text: "**Ready** to ship", revision: 3, at: NOW } },
+      { ...page("p-stale", null, "Outdated", "B"), summary: { text: "Obsolete conclusion", revision: 2, at: NOW } },
+      { ...page("p-missing", null, "Missing", "C"), summary: null },
+      { ...page("p-reading", null, "Reading", "D"), summary: { text: "Obsolete reading", revision: 2, at: NOW } },
+      { ...page("p-editing", null, "Editing", "E"), summary: { text: "Hidden by editor", revision: 3, at: NOW } },
+      { ...page("p-discussion", null, "Discussion", "F"), summary: { text: "Hidden by reply", revision: 3, at: NOW } },
+    ];
+    await stubPages(browser, rows);
+    const agent = { instanceId: "i-audit", name: "codex:1", status: "busy", conversationId: E2E_CHANNEL.id,
+      activity: "viewing", blockId: "status", section: "Status" };
+    const reply = { from: { kind: "user", label: "Ada" }, bodyPreview: "Check the release", sentAt: NOW };
+    await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, { pages: [
+      { pageId: "p-current", agents: [agent], discussions: { open: 0, unread: 0, latest: null } },
+      { pageId: "p-reading", agents: [agent], discussions: { open: 0, unread: 0, latest: null } },
+      { pageId: "p-editing", agents: [{ ...agent, activity: "editing" }],
+        discussions: { open: 1, unread: 0, latest: reply } },
+      { pageId: "p-discussion", agents: [], discussions: { open: 1, unread: 0, latest: reply } },
+    ] });
+    await browser.goto("/app", { waitUntil: "domcontentloaded" });
+    await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+    const tree = browser.getByTestId(width < 768 ? "page-list" : "page-tree");
+    const row = (title: string) => tree.getByRole("button", { name: new RegExp(`^${title} `, "u") });
+    await expect(row("Current")).toContainText("Ready to ship");
+    await expect(row("Current").locator("strong")).toHaveText("Ready");
+    await expect(row("Outdated")).toContainText("Edited");
+    await expect(row("Missing")).toContainText("Edited");
+    await expect(row("Reading")).toContainText("codex:1 reading");
+    await expect(row("Editing")).toContainText("codex:1 editing · Status");
+    await expect(row("Discussion")).toContainText("Ada: Check the release");
+    await expect(tree).not.toContainText("Obsolete");
+    await expect(tree).not.toContainText("Hidden by");
+  });
+}
+
 test("a page is co-edited live and shows an Agent working on a section it claimed", async ({ page: browser }) => {
   await stubPages(browser, [page("p-company", null, "Company", "V"), page("p-relay", "p-company", "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
