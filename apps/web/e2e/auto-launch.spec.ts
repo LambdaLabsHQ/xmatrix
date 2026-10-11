@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { E2E_CHANNEL, E2E_SPACE, fixtureJson, fixtureRequestBodies, installWorkspaceStubs, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { E2E_CHANNEL, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureRule, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 test.use({ viewport: { width: 1280, height: 900 }, isMobile: false, hasTouch: false });
 test.beforeEach(async ({ page }) => {
@@ -213,8 +213,10 @@ test.describe("mobile launch syntax", () => {
 
 
 test("new syntax completes from registrations without legacy Profiles or live instances", async ({ page }) => {
-  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
-    launchTargets: { repos: [{ value: "owner/registered-repo" }], workspaces: [
+  // Override only this catalog. Reinstalling the entire workspace on a live
+  // page temporarily lets the broad Space rule answer a pending page-tree read.
+  await fixtureRule(page, { id: "launch-targets", pattern: "**/api/xmatrix/spaces/*/launch-targets**",
+    responder: { kind: "launchTargets", repos: [{ value: "owner/registered-repo" }], workspaces: [
       { canonicalCwd: "/work/registered", ownerUserId: "e2e-user", machineId: "registered-machine", hostName: "registered-host" }] } });
   const registration = {
     key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "registered-machine", harness: "codex" },

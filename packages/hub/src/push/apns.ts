@@ -1,4 +1,5 @@
 import { base64DecodeBytes, base64UrlEncodeValue } from "../relay-v2-primitives";
+import { withPushDelivery } from "./delivery";
 import { pushResponseOutcome, type PushOutcome } from "./outcome";
 
 /** The Hub's identity with Apple's push service: a token-signing key and the app it speaks for. */
@@ -36,22 +37,24 @@ export async function apnsAuthorization(config: ApnsConfig, nowSeconds: number):
 /** Send one alert to one iPhone. `collapseId` replaces an undelivered earlier alert of the same conversation. */
 export async function sendApns(input: {
   config: ApnsConfig; deviceToken: string; title: string; body: string;
-  data: Record<string, string>; collapseId: string; topic?: string; fetch?: typeof fetch; nowSeconds?: number;
+  data: Record<string, string>; collapseId: string; topic?: string; fetch?: typeof fetch; nowSeconds?: number; signal?: AbortSignal;
 }): Promise<PushOutcome> {
-  const response = await (input.fetch ?? fetch)(`https://api.push.apple.com/3/device/${input.deviceToken}`, {
-    method: "POST",
-    headers: {
-      authorization: await apnsAuthorization(input.config, input.nowSeconds ?? Math.floor(Date.now() / 1000)),
-      "apns-topic": input.topic ?? input.config.topic,
-      "apns-push-type": "alert",
-      "apns-priority": "10",
-      "apns-collapse-id": input.collapseId,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      aps: { alert: { title: input.title, body: input.body }, sound: "default", "thread-id": input.collapseId },
-      ...input.data,
-    }),
-  });
-  return pushResponseOutcome("apns", response);
+  return withPushDelivery(input.fetch ?? fetch, async (request, signal) => {
+    const response = await request(`https://api.push.apple.com/3/device/${input.deviceToken}`, {
+      method: "POST",
+      headers: {
+        authorization: await apnsAuthorization(input.config, input.nowSeconds ?? Math.floor(Date.now() / 1000)),
+        "apns-topic": input.topic ?? input.config.topic,
+        "apns-push-type": "alert",
+        "apns-priority": "10",
+        "apns-collapse-id": input.collapseId,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        aps: { alert: { title: input.title, body: input.body }, sound: "default", "thread-id": input.collapseId },
+        ...input.data,
+      }),
+    });
+    return pushResponseOutcome("apns", response, signal);
+  }, input.signal);
 }

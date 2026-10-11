@@ -6,6 +6,7 @@ import { createPostgresAuthorityDatabase } from "../postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "../postgres-authority-http";
 import type { Env } from "../types";
 import { sendApns, type ApnsConfig } from "./apns";
+import { PUSH_DELIVERY_BUDGET, withPushBudget } from "./delivery";
 import { sendFcm, type FcmConfig } from "./fcm";
 import type { PushOutcome } from "./outcome";
 import { sendWebPush, type VapidKeys } from "./web-push";
@@ -88,7 +89,7 @@ export async function pushToPeople(input: {
   devices: Pick<PostgresPushDeviceRepository, "listForUsers" | "forget">;
   userIds: readonly string[];
   notification: PushNotification;
-  send?: (device: PushDevice, payload: string, topic: string) => Promise<PushOutcome | "skipped">;
+  send?: (device: PushDevice, payload: string, topic: string, signal: AbortSignal) => Promise<PushOutcome | "skipped">;
 }): Promise<{ sent: number; gone: number; failed: number }> {
   const result = { sent: 0, gone: 0, failed: 0 };
   const { vapid, apns, fcm } = input.config;
@@ -101,25 +102,33 @@ export async function pushToPeople(input: {
   const topic = (await sha256Hex(input.notification.channelId)).slice(0, 32);
   const { title, body: words, channelId, messageId } = input.notification;
   // Each device is reached on its own platform's service; one the Hub holds no identity for is skipped.
-  const send = input.send ?? ((device, body, collapse) => {
+  const send = input.send ?? ((device, body, collapse, signal) => {
     if (device.platform === "webpush" && device.keys && vapid) return sendWebPush({
-      vapid, subscription: { endpoint: device.token, keys: device.keys }, payload: body, topic: collapse });
+      vapid, subscription: { endpoint: device.token, keys: device.keys }, payload: body, topic: collapse, signal });
     const appleTopic = device.app === "mac" ? apns?.macTopic : apns?.topic;
-    if (device.platform === "apns" && apns && appleTopic) return sendApns({ config: apns, topic: appleTopic,
-      deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseId: collapse });
+    if (device.platform === "apns" && apns && appleTopic) return sendApns({
+      config: apns, topic: appleTopic, deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseId: collapse, signal });
     if (device.platform === "fcm" && fcm) return sendFcm({
-      config: fcm, deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseKey: collapse });
+      config: fcm, deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseKey: collapse, signal });
     return Promise.resolve("skipped" as const);
   });
   const gone: string[] = [];
-  await Promise.all(devices.map(async (device) => {
-    try {
-      const outcome = await send(device, payload, topic);
-      if (outcome === "sent") result.sent += 1;
-      else if (outcome === "gone") { result.gone += 1; gone.push(device.deviceId); }
-      else if (outcome === "failed") result.failed += 1;
-    } catch {
-      result.failed += 1;
+  const deadlineAt = Date.now() + PUSH_DELIVERY_BUDGET.batchTimeoutMs;
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(devices.length, PUSH_DELIVERY_BUDGET.concurrency) }, async () => {
+    while (next < devices.length) {
+      const device = devices[next++];
+      try {
+        const remaining = deadlineAt - Date.now();
+        if (remaining <= 0) { result.failed += 1; continue; }
+        const outcome = await withPushBudget(signal => send(device, payload, topic, signal), undefined,
+          Math.min(remaining, PUSH_DELIVERY_BUDGET.timeoutMs));
+        if (outcome === "sent") result.sent += 1;
+        else if (outcome === "gone") { result.gone += 1; gone.push(device.deviceId); }
+        else if (outcome === "failed") result.failed += 1;
+      } catch {
+        result.failed += 1;
+      }
     }
   }));
   if (gone.length > 0) await input.devices.forget({ requestId, deviceIds: gone });
