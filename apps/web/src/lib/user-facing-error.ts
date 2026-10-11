@@ -1,6 +1,7 @@
 import type { ClientDefectAction } from "@xmatrix/protocol";
 
 import { reportClientDefect } from "./client-defect-report";
+import { getDesktopBridge } from "./desktop/bridge";
 import { XMatrixApiError, isTransientFailure } from "./query/api-client";
 
 /**
@@ -8,8 +9,8 @@ import { XMatrixApiError, isTransientFailure } from "./query/api-client";
  * (docs/architecture/client-resilience.md, "Showing a failure"). Raw exception
  * text never reaches the screen: a browser or JavaScript error is a defect and
  * shows a generic sentence, a generic Hub rejection shows its category in plain
- * words, and only a specific Hub rejection shows the Hub's own reason, because
- * only the Hub knows what that domain rule means.
+ * words, and a specific Hub rejection or a recognized native precondition
+ * keeps its domain owner's reason.
  */
 export interface UserFacingError {
   /** The action that failed, then why and what to do: whole sentences. */
@@ -53,6 +54,14 @@ const STILL_OFFLINE = "xMatrix still can't be reached after several tries. Check
 const STILL_UNAVAILABLE = "xMatrix is still unavailable after several tries. Try again later, and report it if it keeps happening.";
 const DEFECT = "Something went wrong on our side. Try again, and report it if it keeps happening.";
 const CLIENT_DEFECT = "Something went wrong. Try again, and report it if it keeps happening.";
+
+// Existing iOS shells send their own purchase preconditions as plain strings.
+// Recognize only these fixed refusals, at their purchase action and iOS boundary;
+// arbitrary native errors still reach the defect report below.
+const IOS_PURCHASE_BINDING_REFUSALS = new Set([
+  "Your App Store subscription is bound to another Space. Rebinding is not supported.",
+  "This App Store purchase history belongs to another Space. Restore it there; rebinding is not supported.",
+]);
 
 /** Whether the failure is the caller ending its own request: not a failure to show. */
 export function isAbort(error: unknown): boolean {
@@ -109,6 +118,10 @@ export function describeError(error: unknown, action: ClientDefectAction,
   }
   if (error instanceof UserFacingProblem) {
     return { message: `${headline} ${sentence(error.message)}`, retryable: error.retryable };
+  }
+  if (action === "Couldn't complete the purchase" && getDesktopBridge()?.client === "ios" &&
+      error instanceof Error && IOS_PURCHASE_BINDING_REFUSALS.has(error.message)) {
+    return { message: `${headline} Your App Store subscription belongs to another Space. Open the original Space to manage or restore it. Purchases cannot be moved between Spaces.`, retryable: false };
   }
   if (error instanceof Error && error.name === "TimeoutError") {
     return { message: `${headline} xMatrix took too long to answer. Try again.`, retryable: true };
