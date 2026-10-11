@@ -1,5 +1,6 @@
 import type { PushPlatform } from "@xmatrix/db";
-import { isPlainRecord, readBoundedStream } from "@xmatrix/protocol";
+import { isPlainRecord } from "@xmatrix/protocol";
+import { pushResponseJson } from "./delivery";
 
 /** Only `gone` authorizes removing a device; other failures preserve its registration. */
 export type PushOutcome = "sent" | "gone" | "failed";
@@ -14,14 +15,14 @@ const TERMINAL: Record<PushPlatform, Record<number, readonly string[] | null>> =
 const FCM_ERROR_TYPE = "type.googleapis.com/google.firebase.fcm.v1.FcmError";
 
 /** Decode provider evidence once, with unknown or malformed replies failing closed. */
-export async function pushResponseOutcome(platform: PushPlatform, response: Response): Promise<PushOutcome> {
+export async function pushResponseOutcome(platform: PushPlatform, response: Response, signal: AbortSignal): Promise<PushOutcome> {
+  signal.throwIfAborted();
   if (response.ok) return "sent";
   const allowed = TERMINAL[platform][response.status];
   if (allowed === undefined) return "failed";
   if (allowed === null) return "gone";
   try {
-    const bytes = await readBoundedStream(response.body, 16_384, () => new Error("Push error response too large"));
-    const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    const body = await pushResponseJson(response, signal);
     if (!isPlainRecord(body)) return "failed";
     const error = isPlainRecord(body.error) ? body.error : {};
     const codes = platform === "apns" ? [body.reason]

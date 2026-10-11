@@ -1,6 +1,7 @@
 import { concatenateBytes } from "@xmatrix/protocol";
 
 import { base64UrlDecodeBytes, base64UrlEncodeBytes, base64UrlEncodeValue } from "../relay-v2-primitives";
+import { withPushDelivery } from "./delivery";
 import { pushResponseOutcome, type PushOutcome } from "./outcome";
 
 /** The Hub's own Web Push identity (RFC 8292): browsers accept a push only from the key they subscribed to. */
@@ -80,21 +81,23 @@ export async function vapidAuthorization(vapid: VapidKeys, endpoint: string, now
  */
 export async function sendWebPush(input: {
   vapid: VapidKeys; subscription: WebPushSubscription; payload: string; topic?: string;
-  fetch?: typeof fetch; nowSeconds?: number;
+  fetch?: typeof fetch; nowSeconds?: number; signal?: AbortSignal;
 }): Promise<PushOutcome> {
-  const body = await encryptWebPush(input.subscription, encoder.encode(input.payload));
-  const response = await (input.fetch ?? fetch)(input.subscription.endpoint, {
-    method: "POST",
-    headers: {
-      authorization: await vapidAuthorization(input.vapid, input.subscription.endpoint,
-        input.nowSeconds ?? Math.floor(Date.now() / 1000)),
-      "content-encoding": "aes128gcm",
-      "content-type": "application/octet-stream",
-      ttl: String(TTL_SECONDS),
-      urgency: "high",
-      ...(input.topic ? { topic: input.topic } : {}),
-    },
-    body: buffer(body),
-  });
-  return pushResponseOutcome("webpush", response);
+  return withPushDelivery(input.fetch ?? fetch, async (request, signal) => {
+    const body = await encryptWebPush(input.subscription, encoder.encode(input.payload));
+    const response = await request(input.subscription.endpoint, {
+      method: "POST",
+      headers: {
+        authorization: await vapidAuthorization(input.vapid, input.subscription.endpoint,
+          input.nowSeconds ?? Math.floor(Date.now() / 1000)),
+        "content-encoding": "aes128gcm",
+        "content-type": "application/octet-stream",
+        ttl: String(TTL_SECONDS),
+        urgency: "high",
+        ...(input.topic ? { topic: input.topic } : {}),
+      },
+      body: buffer(body),
+    });
+    return pushResponseOutcome("webpush", response, signal);
+  }, input.signal);
 }
