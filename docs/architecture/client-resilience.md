@@ -103,11 +103,16 @@ the reason comes from the failure's class, never from raw exception text:
 | A specific Hub code with a sentence, or a body without a code | The Hub's own sentence. |
 | Any other `5xx`, a response missing what it promised (`unexpectedResponse`) | Something went wrong on our side; the code is the reference. |
 | A `UserFacingProblem` thrown by client code; a desktop main-process refusal | The sentence as written. |
+| The two fixed iOS cross-Space purchase binding refusals, only during purchase | Open the original Space to manage or restore it; retrying in this Space cannot move the purchase. |
 | Any other exception (`TypeError`, `SyntaxError`, an invariant) | A generic sentence; the detail goes to the console. |
 
 - A failed response is read with `errorFromResponse` (or `requireResponseOk`)
   before its body, so status, code and retry policy survive. Reading JSON first
   turns a gateway's HTML page into a `SyntaxError`.
+- Existing iOS shells send subscription preconditions as strings. Compatibility
+  recognizes only the exact current-entitlement and purchase-history binding
+  refusals on the iOS purchase action, without reporting a client defect. Other
+  native failures remain defects; this does not change server binding authority.
 - `<ErrorNotice>` offers "Try again" when a retry can succeed and shows the Hub
   code as a reference for a report.
 - A background poll whose only result is a transient failure shows nothing; the
