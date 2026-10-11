@@ -339,3 +339,28 @@ test("agent presence outside dual routing reaches cell-0 unless that cell publis
   assert.deepEqual(publishedByOwner.runtimeCalls.map((call) => call.cell), ["cell-0"]);
   assert.deepEqual(publishedByOwner.directoryCalls, []);
 });
+
+test("presence delivery exposes every original failure through the standard error cause chain", async () => {
+  const transportFailure = new Error("connection lost after delivery");
+  const fixture = input({
+    mode: "dual",
+    routes: [{ cellName: "user-bob", expiresAtMs: 1_700_000_000_000 }],
+    handlers: {
+      "cell-0": async () => Response.json({ error: "Invalid channel agent presence delivery" }, { status: 400 }),
+      "user-bob": async () => { throw transportFailure; },
+    },
+  });
+  await assert.rejects(publishRuntimeChannelAgentPresence({
+    env: fixture.input.env, channelId: SCOPE, body: "{}", exceptCell: "user-alice",
+  }), (error) => {
+    assert.ok(error instanceof RuntimeRouteDirectoryDeliveryError);
+    assert.ok(error.cause instanceof AggregateError);
+    assert.equal(error.cause.errors.length, 2);
+    assert.equal(error.cause.errors[0].status, 400);
+    assert.match(error.cause.errors[0].message, /Invalid channel agent presence delivery/);
+    assert.equal(error.cause.errors[1], transportFailure);
+    assert.ok(error.cause.errors.every((failure) => failure.stack));
+    return true;
+  });
+  assert.deepEqual(fixture.runtimeCalls.map((call) => call.cell).sort(), ["cell-0", "user-bob"]);
+});

@@ -58,7 +58,11 @@ interface RuntimeRouteDeliveryFailure {
  */
 export class RuntimeRouteDirectoryDeliveryError extends Error {
   constructor(readonly failures: readonly RuntimeRouteDeliveryFailure[]) {
-    super(`RelayRuntime committed delivery failed in ${failures.length} routed cell(s)`);
+    super(`RelayRuntime committed delivery failed in ${failures.length} routed cell(s)`, {
+      // Error reporters follow standard causes, not our routing metadata. Keep
+      // the original errors and stacks without adding cell identities to them.
+      cause: new AggregateError(failures.map((failure) => failure.error), "Runtime delivery failures"),
+    });
     this.name = "RuntimeRouteDirectoryDeliveryError";
   }
 }
