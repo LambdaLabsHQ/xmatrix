@@ -14,6 +14,8 @@ export interface PushDevice {
   token: string;
   /** A Web Push subscription's keys; absent for a phone. */
   keys?: { p256dh: string; auth: string };
+  /** Set on an APNs device that is the Mac app, which Apple addresses under its own topic. */
+  app?: "mac";
 }
 
 export class PushDeviceError extends ControlError {
@@ -55,7 +57,7 @@ export class PostgresPushDeviceRepository {
 
   /** Register a device for a person, or move it to them: a token belongs to whoever signed in on it last. */
   async register(input: {
-    requestId: string; userId: string; platform: unknown; token: unknown; keys?: unknown;
+    requestId: string; userId: string; platform: unknown; token: unknown; keys?: unknown; app?: unknown;
   }): Promise<{ deviceId: string }> {
     const { platform } = input;
     if (platform !== "apns" && platform !== "fcm" && platform !== "webpush") throw invalid("Unknown push platform");
@@ -63,7 +65,9 @@ export class PostgresPushDeviceRepository {
     if (!token || token.length > 4096) throw invalid("A push device needs its token");
     if (platform === "apns" && !/^[0-9a-fA-F]{32,400}$/u.test(token)) throw invalid("An APNs token is hexadecimal");
     if (platform === "webpush" && !webPushEndpoint(token)) throw invalid("A browser subscription needs its https endpoint");
-    const keys = platform === "webpush" ? pushKeys(input.keys) : null;
+    if (input.app !== undefined && !(platform === "apns" && input.app === "mac")) throw invalid("Unknown push app");
+    // What a device carries besides its token: a browser's keys, or which Apple app it is.
+    const keys = platform === "webpush" ? pushKeys(input.keys) : input.app === "mac" ? { app: "mac" } : null;
     const deviceId = await sha256Hex(`${platform}\n${token}`);
     await this.database.transaction({ requestId: input.requestId, operation: "push-device.register" }, async (tx) => {
       await tx.query({
@@ -113,6 +117,7 @@ export class PostgresPushDeviceRepository {
       return rows.map((row) => ({
         deviceId: row.device_id, userId: row.user_id, platform: row.platform, token: row.token,
         ...(row.platform === "webpush" ? { keys: pushKeys(row.keys_json) } : {}),
+        ...(row.platform === "apns" && (row.keys_json as { app?: unknown } | null)?.app === "mac" ? { app: "mac" as const } : {}),
       }));
     });
   }

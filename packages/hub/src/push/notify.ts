@@ -26,11 +26,13 @@ const part = (value: unknown): Record<string, unknown> | undefined =>
 
 function apnsConfig(raw: Record<string, unknown>): ApnsConfig {
   const config = { keyP8: text(raw.keyP8), keyId: text(raw.keyId), teamId: text(raw.teamId), topic: text(raw.topic) };
+  const macTopic = text(raw.macTopic);
+  const bundleId = /^[A-Za-z0-9.-]{3,200}$/u;
   if (!config.keyP8.includes("PRIVATE KEY") || !/^[A-Z0-9]{10}$/u.test(config.keyId) ||
-      !/^[A-Z0-9]{10}$/u.test(config.teamId) || !/^[A-Za-z0-9.-]{3,200}$/u.test(config.topic)) {
+      !/^[A-Z0-9]{10}$/u.test(config.teamId) || !bundleId.test(config.topic) || (macTopic && !bundleId.test(macTopic))) {
     throw new Error("PUSH_CONFIG.apns needs keyP8, keyId, teamId and topic");
   }
-  return config;
+  return macTopic ? { ...config, macTopic } : config;
 }
 
 /** `fcm` is the service account's JSON key as Firebase issues it, or its three fields in camelCase. */
@@ -102,8 +104,9 @@ export async function pushToPeople(input: {
   const send = input.send ?? ((device, body, collapse) => {
     if (device.platform === "webpush" && device.keys && vapid) return sendWebPush({
       vapid, subscription: { endpoint: device.token, keys: device.keys }, payload: body, topic: collapse });
-    if (device.platform === "apns" && apns) return sendApns({
-      config: apns, deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseId: collapse });
+    const appleTopic = device.app === "mac" ? apns?.macTopic : apns?.topic;
+    if (device.platform === "apns" && apns && appleTopic) return sendApns({ config: apns, topic: appleTopic,
+      deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseId: collapse });
     if (device.platform === "fcm" && fcm) return sendFcm({
       config: fcm, deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseKey: collapse });
     return Promise.resolve("skipped" as const);
