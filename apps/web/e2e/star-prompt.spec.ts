@@ -1,12 +1,13 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { E2E_CHANNEL, channelHistoryFixture, openGeneralChannelWithHistory, routeHumanSocket } from "./workspace-fixtures";
+import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, channelHistoryFixture, openGeneralChannelWithHistory, routeHumanSocket } from "./workspace-fixtures";
 
 /* The ask for a GitHub star (lib/star-prompt.ts). It opens centred over the
    foot of the list column once an Agent has answered this person a few times,
    waits there without taking focus, and is answered by a person's own click: "Star on
    GitHub" opens the repository and ends the asking, "Later" keeps it away for
-   days. Messages that did not notify this person are not answers to them. */
+   days. Messages that did not notify this person are not answers to them.
+   A phone never shows it. */
 
 const VIEWPORT = { width: 1440, height: 900 };
 const REPOSITORY = "https://github.com/LambdaLabsHQ/xmatrix";
@@ -100,4 +101,18 @@ test("the Help menu stars at any time", async ({ page }) => {
   await page.getByRole("button", { name: "Help" }).click();
   await page.getByRole("menuitem", { name: "Star on GitHub" }).click();
   expect(await opened(page)).toEqual([REPOSITORY]);
+});
+
+test.describe("on a phone", () => {
+  test.use(E2E_MOBILE_CONTEXT);
+
+  test("the ask never opens", async ({ page }) => {
+    await openGeneralChannelWithHistory(page, E2E_CHANNEL, channelHistoryFixture(2, "star"));
+    await expect(page.getByText("Message 2.", { exact: false }).first()).toBeAttached();
+    await page.evaluate(() => {
+      for (let index = 0; index < 50; index += 1) window.dispatchEvent(new Event("xmatrix:agent-answered"));
+    });
+    await page.waitForTimeout(300);
+    await expect(page.getByText(ASK)).toHaveCount(0);
+  });
 });

@@ -20,6 +20,7 @@ import {
 import {
   ChannelCreateMode,
   copyTextToClipboard,
+  useIsMobileViewport,
 } from "./workspace-shell-helpers";
 
 
@@ -240,13 +241,15 @@ function starAskPlace(anchor: DOMRect): StarAskPlace {
 /** Help is one "?" on the rail: the docs and issue reports live in its menu,
     so neither needs an icon of its own that could pass for something else.
     Starring lives in that menu; the ask for a star is a pane of glass centred
-    over the foot of the list column, where it waits without taking focus. */
+    over the foot of the list column, where it waits without taking focus.
+    A phone never shows the ask: its list is the whole screen. */
 function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const starPrompt = useStarPrompt();
+  const isMobile = useIsMobileViewport();
   const [askPlace, setAskPlace] = useState<StarAskPlace | null>(null);
   const star = () => {
     starPrompt.settle();
@@ -261,7 +264,7 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
 
   // The list column is dragged wider, and a destination without a list hides it.
   useLayoutEffect(() => {
-    if (!starPrompt.asking) return;
+    if (!starPrompt.asking || isMobile) return;
     const place = () => {
       const anchor = anchorRef.current?.getBoundingClientRect();
       if (anchor) setAskPlace(starAskPlace(anchor));
@@ -271,7 +274,7 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
     observer.observe(document.documentElement);
     for (const list of document.querySelectorAll(".app-sidebar")) observer.observe(list);
     return () => observer.disconnect();
-  }, [starPrompt.asking]);
+  }, [starPrompt.asking, isMobile]);
 
   useEffect(() => {
     if (!open) return;
@@ -317,7 +320,7 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
         </div>,
         document.body
       )}
-      {starPrompt.asking && !open && askPlace && typeof document !== "undefined" && createPortal(
+      {starPrompt.asking && !isMobile && !open && askPlace && typeof document !== "undefined" && createPortal(
         // The app root paints paper; this one only carries the theme to the glass.
         <div className="xmatrix-app fixed z-[var(--z-popover)]" style={{ ...askPlace, background: "transparent" }}>
           <LiquidGlassCard as="aside" aria-labelledby="star-ask-title" material={STAR_ASK_GLASS}
