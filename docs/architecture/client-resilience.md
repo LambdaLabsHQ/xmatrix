@@ -54,6 +54,21 @@ uncaught failures through it so no route answers a plain-text `500`.
 - No body carries a driver's or provider's raw message; the detail goes to the
   error report.
 
+### Push provider outcomes
+
+The Hub shares one provider response decoder and a table of terminal evidence.
+It forgets a phone only on FCM HTTP 404 with a typed
+`google.firebase.fcm.v1.FcmError` naming `UNREGISTERED`, or APNs HTTP 410
+with `Unregistered` or `ExpiredToken`. Unknown, malformed, oversized or
+conflicting phone responses preserve the registration. APNs `BadDeviceToken`
+and `DeviceTokenNotForTopic` also preserve it: a mismatched environment or topic
+can be a provider configuration error. Web Push keeps its subscription endpoint
+HTTP 404/410 retirement behavior.
+
+Provider contracts: [FCM error codes](https://firebase.google.com/docs/cloud-messaging/error-codes),
+[APNs responses](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns).
+This classification does not add retries or change notification routing.
+
 ### Web client
 
 - **Transport.** Every client request goes through `src/lib/query/api-client.ts`
