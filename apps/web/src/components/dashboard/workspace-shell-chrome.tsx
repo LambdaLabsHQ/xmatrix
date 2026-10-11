@@ -223,8 +223,10 @@ export function WorkspaceRail({
 type StarAskPlace = { left: number; bottom: number; width: number };
 
 const STAR_ASK_WIDTH = 288;
-/* The pane lies over rows of text: a little more veil and blur than a control's. */
-const STAR_ASK_GLASS: LiquidGlassMaterial = { veil: "oklch(0.985 0.004 85 / 0.52)", blur: 7 };
+/* The pane lies over rows of text, so its veil is a little denser than a
+   control's. The blur stays the recipe's: a wider one drags the dark outside
+   the pane in, and the lens folds it into a ring along the rim. */
+const STAR_ASK_GLASS: LiquidGlassMaterial = { veil: "oklch(0.985 0.004 85 / 0.6)" };
 
 /** Centred over the foot of the list column; beside Help where no list shows. */
 function starAskPlace(anchor: DOMRect): StarAskPlace {
