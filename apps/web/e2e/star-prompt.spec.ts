@@ -2,9 +2,9 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, channelHistoryFixture, openGeneralChannelWithHistory, routeHumanSocket } from "./workspace-fixtures";
 
-/* The ask for a GitHub star (lib/star-prompt.ts). It opens beside the rail's
-   Help button once an Agent has answered this person a few times, waits there
-   without taking focus, and is answered by a person's own click: "Star on
+/* The ask for a GitHub star (lib/star-prompt.ts). It opens centred over the
+   foot of the list column once an Agent has answered this person a few times,
+   waits there without taking focus, and is answered by a person's own click: "Star on
    GitHub" opens the repository and ends the asking, "Later" keeps it away for
    days. Messages that did not notify this person are not answers to them. */
 
@@ -63,11 +63,12 @@ test("the ask opens after an Agent's fifth answer and Later keeps it away", asyn
 
   await answer(1);
   await expect(ask).toBeVisible();
-  // It waits beside the Help button and leaves the keyboard where it was.
-  const [help, panel] = await Promise.all([
-    page.getByRole("button", { name: "Help" }).boundingBox(), ask.boundingBox()]);
-  expect(panel!.x).toBeGreaterThanOrEqual(help!.x + help!.width);
+  // It waits centred over the list column and leaves the keyboard where it was.
+  const [list, panel] = await Promise.all([page.locator(".app-sidebar").first().boundingBox(), ask.boundingBox()]);
+  expect(panel!.x).toBeGreaterThan(list!.x);
+  expect(Math.abs(panel!.x + panel!.width / 2 - (list!.x + list!.width / 2))).toBeLessThanOrEqual(1);
   expect(panel!.y + panel!.height).toBeLessThanOrEqual(VIEWPORT.height);
+  await expect(ask.getByRole("button", { name: "Star on GitHub" }).locator("svg")).toBeVisible();
   expect(await ask.evaluate((node) => node.contains(document.activeElement))).toBe(false);
 
   await ask.getByRole("button", { name: "Later" }).click();

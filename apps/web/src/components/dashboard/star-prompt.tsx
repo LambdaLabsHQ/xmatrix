@@ -67,15 +67,13 @@ export function useStarPrompt(): { asking: boolean; putOff: () => void; settle: 
 export function StarAsk({ onStar, onLater }: { onStar: () => void; onLater: () => void }) {
   return (
     <>
-      <p id="star-ask-title" className="flex items-center gap-1.5 text-sm font-bold">
-        <Star className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        Enjoying xMatrix?
-      </p>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <p id="star-ask-title" className="text-sm font-bold">Enjoying xMatrix?</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         If it helped today, a GitHub star helps other developers find it.
       </p>
-      <div className="mt-2.5 flex items-center gap-2">
+      <div className="mt-3 flex items-center gap-1">
         <button type="button" className={actionClass({ variant: "primary", size: "sm" })} onClick={onStar}>
+          <Star className="size-3.5 shrink-0 fill-[oklch(0.84_0.14_86)] text-[oklch(0.62_0.13_72)]" aria-hidden />
           Star on GitHub
         </button>
         <button type="button" className={actionClass({ variant: "quiet", size: "sm" })} onClick={onLater}>
