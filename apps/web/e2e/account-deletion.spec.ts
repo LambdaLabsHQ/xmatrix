@@ -1,5 +1,12 @@
 import { expect, test } from "./fixtures";
 
+test("Space closure reaches the real Web proxy compatibility gate", async ({ request }) => {
+  // Do not intercept this request: a browser mock concealed a missing route.
+  const response = await request.post("/api/xmatrix/account-deletion/close-space", { data: {} });
+  expect(response.status()).toBe(426);
+  expect(await response.json()).toMatchObject({ code: "client_upgrade_required" });
+});
+
 test("account deletion requires all confirmations and retries an uncertain delivery with the same receipt", async ({ page }) => {
   const requests: Record<string, unknown>[] = [];
   await page.route("**/api/xmatrix/account-deletion", async route => {
