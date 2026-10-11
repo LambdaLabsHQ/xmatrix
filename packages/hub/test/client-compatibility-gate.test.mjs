@@ -98,3 +98,35 @@ test("every socket domain requires compatibility before a Runtime Durable Object
     true,
   );
 });
+
+test("an outdated declared client is refused a session before auth work", async () => {
+  for (const path of ["/api/auth/cli/exchange-session", "/api/auth/refresh"]) {
+    const calls = [];
+    const app = new Hono();
+    gate.registerClientCompatibilityGate(app);
+    app.post(path, (context) => {
+      calls.push("route");
+      return context.json({ reached: true });
+    });
+    const post = (headers) => app.request(`https://hub.test${path}`, { method: "POST", headers }, {});
+
+    const outdated = await post({
+      authorization: "Bearer token",
+      "x-xmatrix-client-component": "daemon",
+      "x-xmatrix-client-version": "0.16.666",
+      "x-xmatrix-client-protocol": "2",
+    });
+    assert.equal(outdated.status, 426, path);
+    assert.equal((await outdated.json()).code, "client_upgrade_required");
+    assert.deepEqual(calls, [], path);
+
+    // Browsers and the web proxy declare no identity and are never gated here.
+    assert.equal((await post({ authorization: "Bearer token" })).status, 200, path);
+    assert.equal((await post({
+      "x-xmatrix-client-component": "daemon",
+      "x-xmatrix-client-version": "0.16.698",
+      "x-xmatrix-client-protocol": "2",
+    })).status, 200, path);
+    assert.deepEqual(calls, ["route", "route"], path);
+  }
+});

@@ -568,6 +568,12 @@ async function createPostgresSessionForUser(env: Env, user: AuthUser): Promise<A
         values: [user.id, name, user.email, user.avatarUrl || null, now], maxRows: 0,
       });
     }
+    // Each exchange adds a row; the user's expired ones are dead tokens.
+    await transaction.query({
+      name: "auth_session_exchange_prune_expired_v1",
+      text: `DELETE FROM control.auth_sessions WHERE user_id = $1 AND expires_at < $2`,
+      values: [sessionUser.id, now], maxRows: 0,
+    });
     await transaction.query({
       name: "auth_session_exchange_insert_session_v1",
       text: `INSERT INTO control.auth_sessions
