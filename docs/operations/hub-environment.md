@@ -71,6 +71,21 @@ Leave unset to keep the feature off.
 | `STRIPE_SECRET_KEY` | secret | Stripe API key for paid plans. Unset with the webhook secret: checkout and the billing portal answer 503. |
 | `STRIPE_WEBHOOK_SECRET` | secret | Stripe webhook signing secret. |
 
+### Push device retirement
+
+The Hub shares one provider response decoder and a table of terminal evidence.
+It forgets a phone only on FCM HTTP 404 with a typed
+`google.firebase.fcm.v1.FcmError` naming `UNREGISTERED`, or APNs HTTP 410
+with `Unregistered` or `ExpiredToken`. Unknown, malformed, oversized or
+conflicting phone responses preserve the registration. APNs `BadDeviceToken`
+and `DeviceTokenNotForTopic` also preserve it: a mismatched environment or topic
+can be a provider configuration error. Web Push keeps its subscription endpoint
+HTTP 404/410 retirement behavior.
+
+Provider contracts: [FCM error codes](https://firebase.google.com/docs/cloud-messaging/error-codes),
+[APNs responses](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns).
+This classification does not add retries or change notification routing.
+
 ## Tuning
 
 Optional overrides of code defaults.
