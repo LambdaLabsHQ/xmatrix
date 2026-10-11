@@ -51,5 +51,7 @@ currently placed Spaces and refuses missing/duplicate shard coverage or moving/
 blocked placement. Snapshots are taken separately per shard; use a fixed historical
 `to` and avoid concurrent Space migrations. Output contains aggregate counts,
 window and shard coverage only; no IDs, emails, message bodies or credentials.
+Reports support at most 32 physical shards and 10,000 Space placements, refusing
+larger datasets rather than silently truncating coverage.
 CLI failures suppress database error details. Nothing is persisted or deployed by
 running this report. Use `xmatrix secret exec` with explicitly named runtime secrets.

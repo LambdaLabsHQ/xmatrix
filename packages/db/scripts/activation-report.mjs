@@ -36,7 +36,7 @@ function validateConfig(config) {
   if (config.externalUserIds.some(id => config.excludedUserIds.includes(id))) {
     throw new Error("External and excluded classifications overlap");
   }
-  if (new Set(config.shardUrlEnvs).size !== config.shardUrlEnvs.length) {
+  if (config.shardUrlEnvs.length > 31 || new Set(config.shardUrlEnvs).size !== config.shardUrlEnvs.length) {
     throw new Error("Supply each shard environment once");
   }
 }
@@ -61,7 +61,8 @@ export async function readActivationReport(config, from, to, env = process.env) 
     }
     const control = clients[0];
     const placements = (await control.query(`SELECT space_id,shard_id,state
-      FROM control.space_placement`)).rows;
+      FROM control.space_placement ORDER BY space_id LIMIT 10001`)).rows;
+    if (placements.length > 10000) throw new Error("Space placement exceeds report bound");
     if (placements.some(row => row.state !== "active")) throw new Error("Space placement is not stable");
     const users = (await control.query(`SELECT id,created_at FROM control.auth_users
       WHERE created_at >= $1 AND created_at < $2 ORDER BY created_at,id LIMIT 10001`, [from, to])).rows;
