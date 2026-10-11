@@ -83,9 +83,10 @@ export type DesktopBridge = {
   requestNotifications?: () => Promise<DesktopNotificationStatus>;
   /**
    * What the Hub pushes to on this device, once the person allows
-   * notifications; null when they do not. Only phone shells have one.
+   * notifications; null when they do not or the shell cannot be pushed to.
+   * The Mac app says so with `app`, since Apple addresses it separately.
    */
-  pushDevice?: () => Promise<{ platform: "apns" | "fcm"; token: string } | null>;
+  pushDevice?: () => Promise<{ platform: "apns" | "fcm"; token: string; app?: "mac" } | null>;
   notify: (payload: DesktopNotification) => Promise<boolean | void>;
   openExternal: (url: string) => Promise<void>;
   getClipboardImages?: () => Promise<DesktopClipboardImage[]>;
