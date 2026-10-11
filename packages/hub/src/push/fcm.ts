@@ -1,5 +1,6 @@
 import { base64UrlEncodeValue } from "../relay-v2-primitives";
-import { pemPrivateKeyBytes, type PushOutcome } from "./apns";
+import { pemPrivateKeyBytes } from "./apns";
+import { pushResponseOutcome, type PushOutcome } from "./outcome";
 
 /** The Firebase service account the Hub sends as: the fields of its JSON key that sending needs. */
 export interface FcmConfig {
@@ -58,8 +59,5 @@ export async function sendFcm(input: {
         android: { collapse_key: input.collapseKey, priority: "HIGH", notification: { tag: input.collapseKey } },
       } }),
     });
-  if (response.ok) return "sent";
-  // Google answers 404 UNREGISTERED once the app is uninstalled. A 400 is not read as that: it is
-  // also what a request the Hub built wrongly gets, and that must not cost anyone their devices.
-  return response.status === 404 ? "gone" : "failed";
+  return pushResponseOutcome("fcm", response);
 }

@@ -37,8 +37,8 @@ test("an iPhone push is signed as the team's key and names the app", async () =>
     data: { channelId: "channel-1", messageId: "m-1" }, nowSeconds: 1_800_000_000 };
   assert.equal(await sendApns({ ...input, fetch: respond(200) }), "sent");
   assert.equal(await sendApns({ ...input, fetch: respond(410, { reason: "Unregistered" }) }), "gone");
-  assert.equal(await sendApns({ ...input, fetch: respond(400, { reason: "BadDeviceToken" }) }), "gone");
-  assert.equal(await sendApns({ ...input, fetch: respond(400, { reason: "DeviceTokenNotForTopic" }) }), "gone");
+  assert.equal(await sendApns({ ...input, fetch: respond(400, { reason: "BadDeviceToken" }) }), "failed");
+  assert.equal(await sendApns({ ...input, fetch: respond(400, { reason: "DeviceTokenNotForTopic" }) }), "failed");
   assert.equal(await sendApns({ ...input, fetch: respond(400, { reason: "PayloadTooLarge" }) }), "failed");
   assert.equal(await sendApns({ ...input, fetch: respond(403, { reason: "InvalidProviderToken" }) }), "failed");
   const { url, init } = requests[0];
@@ -64,7 +64,7 @@ test("an Android push is sent as the service account, whose access token is reus
   const input = { config, deviceToken: "device-token", title: "claude:1", body: "等你确认", collapseKey: "c".repeat(32),
     data: { channelId: "channel-1", messageId: "m-1" }, nowSeconds: 1_800_000_000 };
   assert.equal(await sendFcm({ ...input, fetch: respond(200) }), "sent");
-  assert.equal(await sendFcm({ ...input, fetch: respond(404) }), "gone");
+  assert.equal(await sendFcm({ ...input, fetch: respond(404) }), "failed");
   assert.equal(await sendFcm({ ...input, fetch: respond(400) }), "failed");
   assert.equal(await sendFcm({ ...input, fetch: respond(503) }), "failed");
   assert.deepEqual(requests.map((request) => new URL(request.url).hostname),
@@ -114,4 +114,45 @@ test("a refused service account fails the push without forgetting the device", a
     globalThis.fetch = original;
   }
   assert.deepEqual(forgotten, []);
+});
+
+test("only explicit phone-token expiry permits forgetting a registered device", async (t) => {
+  const { config: apns } = appleIdentity();
+  const { config: fcm } = firebaseIdentity("expiry@example-project.iam.gserviceaccount.com");
+  const detail = (errorCode, type = "type.googleapis.com/google.firebase.fcm.v1.FcmError") =>
+    ({ error: { code: 404, status: "NOT_FOUND", details: [{ "@type": type, errorCode }] } });
+  const cases = [
+    ["fcm", 404, detail("UNREGISTERED"), true],
+    ["fcm", 404, { error: { status: "NOT_FOUND" } }, false],
+    ["fcm", 404, detail("UNREGISTERED", "type.googleapis.com/google.rpc.BadRequest"), false],
+    ["fcm", 404, detail("SENDER_ID_MISMATCH"), false],
+    ["fcm", 404, { error: { details: [...detail("UNREGISTERED").error.details,
+      ...detail("SENDER_ID_MISMATCH").error.details] } }, false],
+    ["fcm", 404, { error: { details: null } }, false],
+    ["fcm", 404, { error: { details: [null, "UNREGISTERED"] } }, false],
+    ["fcm", 403, detail("UNREGISTERED"), false],
+    ["apns", 410, { reason: "Unregistered" }, true],
+    ["apns", 410, { reason: "ExpiredToken" }, true],
+    ["apns", 400, { reason: "BadDeviceToken" }, false],
+    ["apns", 400, { reason: "DeviceTokenNotForTopic" }, false],
+    ["apns", 410, { reason: "Unknown" }, false],
+    ...["fcm", "apns"].flatMap(platform => [null, "not json", "null", "x".repeat(16_385)].map(body =>
+      [platform, platform === "fcm" ? 404 : 410, body, false])),
+  ];
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  for (const [platform, status, body, terminal] of cases) {
+    const device = { deviceId: "d".repeat(64), userId: "user-1", platform,
+      token: platform === "apns" ? "ab".repeat(32) : "device-token" };
+    const forgotten = [];
+    globalThis.fetch = async url => url === "https://oauth2.googleapis.com/token"
+      ? Response.json({ access_token: "expiry-test-token", expires_in: 3600 })
+      : new Response(typeof body === "object" && body !== null ? JSON.stringify(body) : body, { status });
+    const result = await pushToPeople({ config: { apns, fcm }, userIds: ["user-1"],
+      devices: { async listForUsers() { return [device]; }, async forget(input) { forgotten.push(...input.deviceIds); } },
+      notification: { channelId: "channel-1", messageId: "m-1", title: "Agent", body: "Ready" } });
+    const label = `${platform} ${status}: ${JSON.stringify(body).slice(0, 180)}`;
+    assert.deepEqual(forgotten, terminal ? [device.deviceId] : [], label);
+    assert.deepEqual(result, { sent: 0, gone: terminal ? 1 : 0, failed: terminal ? 0 : 1 }, label);
+  }
 });
