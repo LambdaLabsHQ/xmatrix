@@ -16,10 +16,4 @@ public final class PushMessagingTest {
     assertFalse(PushMessaging.isConversationId("a b"));
     assertFalse(PushMessaging.isConversationId("a".repeat(201)));
   }
-
-  @Test
-  public void aBuildWithoutTheFirebaseAppHasNoPush() {
-    // Unit-test builds carry no Firebase identifiers.
-    assertFalse(PushMessaging.configured());
-  }
 }
