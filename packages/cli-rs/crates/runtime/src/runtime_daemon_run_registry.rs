@@ -474,7 +474,8 @@ fn rollback_windows_run_handoff(managed: &mut DaemonRunChild) -> error::Result<(
         }
     }
     if managed.process_tree.is_some() || crate::process_tree::process_alive(managed.pid) {
-        stop_handoff_process(managed.pid, &mut managed.process_tree)?;
+        stop_handoff_process(managed.pid, &mut managed.process_tree)
+            .inspect_err(|error| eprintln!("handoff candidate cleanup failed: {error}"))?;
     }
     if !handoff.previous_is_alive() {
         // Both wrappers are gone. Let the next monitor sweep report the
@@ -482,7 +483,8 @@ fn rollback_windows_run_handoff(managed: &mut DaemonRunChild) -> error::Result<(
         managed.handoff = None;
         return Ok(());
     }
-    runtime_windows_run_adoption::persist_evidence(status_path, &handoff.previous_evidence)?;
+    runtime_windows_run_adoption::persist_evidence(status_path, &handoff.previous_evidence)
+        .inspect_err(|error| eprintln!("handoff predecessor evidence restore failed: {error}"))?;
     if !persist_daemon_run_status_marker_unlocked(status_path, &handoff.previous_status) {
         return Err(CliError::Launch("could not restore handoff status".into()));
     }
