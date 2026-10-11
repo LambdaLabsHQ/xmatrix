@@ -108,3 +108,6 @@ xmatrix-cli-args = { path = "crates/args" }
 # function the daemon uses, so the two cannot drift apart.
 xmatrix-cli-core = { path = "crates/core" }
 xmatrix-cli-runtime = { path = "crates/runtime" }
+
+[dev-dependencies]
+serde_json = { workspace = true }

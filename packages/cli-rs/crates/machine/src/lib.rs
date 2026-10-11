@@ -42,7 +42,10 @@ pub async fn cmd_config(
             let session = config::load_session_for_hub(hub_url).await;
             match session {
                 Some(s) => {
-                    println!("{}", serde_json::to_string_pretty(&s)?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&session_diagnostics(s)?)?
+                    );
                 }
                 None => {
                     println!("No config found. Run: xmatrix login");
@@ -53,7 +56,7 @@ pub async fn cmd_config(
             let session = config::load_session_for_hub(hub_url).await;
             match session {
                 Some(s) => {
-                    let val = serde_json::to_value(&s)?;
+                    let val = session_diagnostics(s)?;
                     if let Some(v) = val.get(&k) {
                         println!("{v}");
                     } else {
@@ -67,6 +70,16 @@ pub async fn cmd_config(
         }
     }
     Ok(())
+}
+
+// Config output is diagnostic data, never a credential export. Apply the same
+// redaction before selecting a key so `config token` cannot bypass it.
+fn session_diagnostics(mut session: config::CliSession) -> error::Result<serde_json::Value> {
+    session.token = "[redacted]".into();
+    if let Some(refresh_token) = session.refresh_token.as_mut() {
+        *refresh_token = "[redacted]".into();
+    }
+    Ok(serde_json::to_value(session)?)
 }
 
 async fn cmd_machine_worktrees(command: Option<MachineWorktreesCommand>) -> error::Result<()> {

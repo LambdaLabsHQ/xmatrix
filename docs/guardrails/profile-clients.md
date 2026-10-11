@@ -1,5 +1,13 @@
 Part of the descriptive project profile. Not policy. The index is `project-profile.md`. The ten guardrails in `project-guardrails.md` override this file.
 
+## CLI Configuration Diagnostics
+
+`xmatrix config` displays session metadata with `token` and `refreshToken`
+replaced by `[redacted]`. Selecting either key uses the same redacted view;
+other keys and missing-key diagnostics retain their existing behavior. Reading
+configuration never modifies the stored credentials. Consumers must use the
+authorized session APIs rather than parse diagnostic output for credentials.
+
 ## SQL Syntax Validation
 
 The ordinary `@xmatrix/db check` runs PostgreSQL 17 syntax validation through the

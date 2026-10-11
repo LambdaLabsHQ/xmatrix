@@ -3185,6 +3185,7 @@ dependencies = [
  "clap",
  "colored",
  "rustls",
+ "serde_json",
  "tokio",
  "xmatrix-cli-args",
  "xmatrix-cli-core",
