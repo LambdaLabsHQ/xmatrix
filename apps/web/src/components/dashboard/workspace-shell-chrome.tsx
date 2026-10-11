@@ -223,8 +223,8 @@ export function WorkspaceRail({
 type StarAskPlace = { left: number; bottom: number; width: number };
 
 const STAR_ASK_WIDTH = 288;
-/* The pane lies over rows of text, so its veil is denser than a control's. */
-const STAR_ASK_GLASS: LiquidGlassMaterial = { veil: "oklch(0.985 0.004 85 / 0.78)", blur: 6 };
+/* The pane lies over rows of text: a little more veil and blur than a control's. */
+const STAR_ASK_GLASS: LiquidGlassMaterial = { veil: "oklch(0.985 0.004 85 / 0.52)", blur: 7 };
 
 /** Centred over the foot of the list column; beside Help where no list shows. */
 function starAskPlace(anchor: DOMRect): StarAskPlace {
@@ -319,7 +319,7 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
         // The app root paints paper; this one only carries the theme to the glass.
         <div className="xmatrix-app fixed z-[var(--z-popover)]" style={{ ...askPlace, background: "transparent" }}>
           <LiquidGlassCard as="aside" aria-labelledby="star-ask-title" material={STAR_ASK_GLASS}
-            className="px-4 pt-3.5 pb-3 text-foreground">
+            className="px-4 pt-3.5 pb-3.5 text-foreground">
             <StarAsk onStar={star} onLater={starPrompt.putOff} />
           </LiquidGlassCard>
         </div>,

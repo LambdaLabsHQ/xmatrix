@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Star } from "lucide-react";
 import { actionClass } from "@/components/ui/action-tone";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import {
   AGENT_ANSWERED_EVENT,
@@ -71,11 +72,13 @@ export function StarAsk({ onStar, onLater }: { onStar: () => void; onLater: () =
       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
         If it helped today, a GitHub star helps other developers find it.
       </p>
+      {/* A plank on the pane: a glass or paper button here would be a panel in a panel. */}
       <div className="mt-3 flex items-center gap-1">
-        <button type="button" className={actionClass({ variant: "primary", size: "sm" })} onClick={onStar}>
-          <Star className="size-3.5 shrink-0 fill-[oklch(0.84_0.14_86)] text-[oklch(0.62_0.13_72)]" aria-hidden />
+        <WoodPanel as="button" type="button" onClick={onStar}
+          className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold whitespace-nowrap active:translate-y-px">
+          <Star className="size-3.5 shrink-0 fill-current" aria-hidden />
           Star on GitHub
-        </button>
+        </WoodPanel>
         <button type="button" className={actionClass({ variant: "quiet", size: "sm" })} onClick={onLater}>
           Later
         </button>
