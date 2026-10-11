@@ -21,6 +21,15 @@ Worker isolates. Sends are best effort, with no automatic delivery retry. A
 deadline or invalid grant is a failed send and leaves the registration intact.
 Late outcomes cannot contribute retirement evidence after a delivery expires.
 
+Delivery outcomes have one finite fact table for counting and diagnostics.
+Every unsent device in a started batch, including an expired queued delivery or a retired
+registration, emits one warning with only its platform, optional Mac app kind
+and a fixed reason. Provider exceptions are counted as failures without reading
+or stringifying the thrown value. Configuration and database failures emit a
+fixed batch error. Tokens, endpoints, credentials, recipient/message data and
+raw exceptions never enter these push diagnostics. Late completions emit no
+additional warning and cannot authorize retirement.
+
 FCM stores one token/refresh state per service-account email and signing key in
 the isolate. Concurrent callers share the pending refresh. The initiating
 delivery owns that refresh's deadline; if it expires, current waiters fail and a

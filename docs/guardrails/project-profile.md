@@ -17,6 +17,8 @@ English is the default language for repository documentation, guardrails, releas
 
 Device pushes share a bounded outbound delivery profile across Web Push, APNs
 and FCM, including OAuth refresh, response decoding and notification fan-out.
+Delivery accounting and diagnostics share a finite outcome table; push logs
+contain fixed reasons and device kinds, never raw exceptions or private inputs.
 See [device push delivery](../operations/push-delivery.md).
 
 The operational activation report reads registration cohorts across all currently
