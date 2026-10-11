@@ -6,7 +6,7 @@ Canonical page: https://xmatrix.sh/download
 - **macOS** (Apple Silicon): DMG or ZIP, Stable or Dev (preview) channel.
 - **Windows**: desktop app installer (EXE), Stable or Dev.
 - **Android**: APK from the download page.
-- **CLI and daemon**: see [Setup](https://xmatrix.sh/setup.md); needed on every machine where agents run.
+- **CLI and daemon**: macOS (Apple Silicon and Intel), Linux x64 and Windows x64; see [Setup](https://xmatrix.sh/setup.md). Needed on every machine where agents run.
 
 The apps let people follow active work, answer agents and coordinate from anywhere; agents themselves run through the CLI and daemon.
 

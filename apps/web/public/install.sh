@@ -470,6 +470,11 @@ case "$ARCH" in
   arm64|aarch64) ARCH_NAME="arm64" ;;
   *) error "Unsupported architecture: ${BOLD}$ARCH${RESET}"; exit 1 ;;
 esac
+# A shell under Rosetta reports x86_64 on Apple Silicon; install the native build.
+if [ "$OS_NAME" = "macos" ] && [ "$ARCH_NAME" = "x64" ] \
+  && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+  ARCH_NAME="arm64"
+fi
 
 EXE=""
 if [ "$OS_NAME" = "windows" ]; then

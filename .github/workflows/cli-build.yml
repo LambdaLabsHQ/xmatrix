@@ -117,7 +117,7 @@ jobs:
     environment: production
     needs: prepare-release
     # The managed macOS label may resolve to multiple runner services on one
-    # host. Keep the Apple Silicon target serialized because signing mutates
+    # host. Keep the macOS targets serialized because signing mutates
     # the user's Keychain search list under an exact read/modify/write transaction.
     concurrency:
       group: cli-release-${{ contains(matrix.target, 'apple-darwin') && 'macos' || format('{0}-{1}', github.run_id, matrix.target) }}
@@ -136,6 +136,13 @@ jobs:
             asset: xmatrix-macos-arm64
             binary: xmatrix
             part: macos-arm64
+          # Intel Macs. The Apple Silicon release runner cross-compiles it;
+          # Apple's toolchain carries both architectures, so no second host.
+          - target: x86_64-apple-darwin
+            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-macos-release"]' || '"macos-26"' }}
+            asset: xmatrix-macos-x64
+            binary: xmatrix
+            part: macos-x64
           - target: x86_64-pc-windows-msvc
             runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","local-windows-x64"]' || '"windows-2025"' }}
             asset: xmatrix-windows-x64.exe

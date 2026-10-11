@@ -630,6 +630,7 @@ Secret recovery remains separate; this release neither generates nor rotates key
   upstream Run capability, return a retryable 503 during replacement, and never replay a written
   request. Explicit adoption disables legacy discovery. Already-running older wrappers require an ordinary instance
   Reborn recovery into the fixed CLI; a daemon-only update cannot patch those processes.
+- macOS CLI releases publish `xmatrix-macos-arm64` and `xmatrix-macos-x64`; the Apple Silicon release runner cross-compiles the Intel binary and signs both with the same Developer ID identity. `install.sh` installs the native arm64 binary when its shell runs under Rosetta.
 - A Windows CLI release publishes the single portable `xmatrix-windows-x64.exe` artifact through the same reviewed,
   immutable R2 handoff as the other CLI platforms. The release manifest records the exact workflow provenance, size,
   and SHA-256; a Windows code-signing certificate is not required.
