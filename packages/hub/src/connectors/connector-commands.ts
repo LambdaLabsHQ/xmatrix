@@ -5,6 +5,7 @@ import { wecomActionCapability } from "./wecom-native";
 import type { AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "../app-connectors";
 import { parseActionCommand, parsePolicyCommand } from "./action-parse";
+import { connectorActionCatalog } from "./action-catalog";
 import { commandScope, publishCommandStatus, withExecution } from "./command-support";
 import { connectionCredentials } from "./connection-credentials";
 import { discordActionCapability } from "./discord-native";
@@ -45,10 +46,11 @@ export function isPolicyAction(manifest: AppConnectorProviderManifest, actionId:
 
 export function connectorCommands(providerId: string,
   actions: Readonly<Record<string, ConnectorAction>> = {}, subscriptions?: ConnectorSubscriptionSync): ConnectorCommandHandler {
+  const catalog = connectorActionCatalog(providerId, actions);
   const accepts = (body: string) => {
     if (isConnectorSubscriptionCommand(providerId, body)) return true;
     const parsed = parseActionCommand(providerId, body);
-    return Boolean(parsed && (parsed.actionId === "policy" || actions[parsed.actionId]));
+    return Boolean(parsed && (parsed.actionId === "policy" || catalog.has(parsed.actionId)));
   };
   return {
     accepts,
@@ -62,9 +64,10 @@ export function connectorCommands(providerId: string,
         }
       } else {
         const parsed = parseActionCommand(providerId, input.body);
+        const action = parsed ? catalog.get(parsed.actionId)?.executor : undefined;
         if (parsed?.actionId === "policy") lines.push(await runPolicy(providerId, input, parsed.statement));
-        else if (parsed && actions[parsed.actionId]) {
-          lines.push(await runAction(providerId, input, parsed.actionId, actions[parsed.actionId]!, parsed.statement));
+        else if (parsed && action) {
+          lines.push(await runAction(providerId, input, parsed.actionId, action, parsed.statement));
         }
       }
       await publishCommandStatus(manifest, input, lines);
