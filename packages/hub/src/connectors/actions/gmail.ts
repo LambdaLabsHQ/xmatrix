@@ -48,21 +48,38 @@ function decodePart(data: string, contentType: string): string {
   try { return new TextDecoder(charset).decode(bytes); } catch { return new TextDecoder().decode(bytes); }
 }
 
-/** The first text/plain and text/html bodies of a `format=full` payload, depth-first. */
-export function gmailBodies(payload: Record<string, unknown>): { plain?: string; html?: string } {
-  const bodies: { plain?: string; html?: string } = {};
-  const queue = [payload];
-  for (let seen = 0; queue.length && seen < MAX_PARTS; seen++) {
-    const part = queue.shift()!;
+/** Inline bodies: mixed segments in order, with plain/HTML alternatives kept separate. */
+export function gmailBodies(payload: Record<string, unknown>): { plain?: string; html?: string; incomplete?: boolean } {
+  let seen = 0;
+  const visit = (part: Record<string, unknown>): { plain?: string; html?: string; incomplete?: boolean } => {
+    if (seen++ >= MAX_PARTS) return { incomplete: true };
+    const bodies: { plain?: string; html?: string; incomplete?: boolean } = {};
+    if (part.filename || /^attachment(?:\s*;|\s*$)/iu.test(header(part, "content-disposition").trim())) return bodies;
     const mime = String(part.mimeType ?? "").toLowerCase();
-    const data = record(part.body).data;
+    const body = record(part.body);
+    const data = body.data;
     const kind = mime === "text/plain" ? "plain" : mime === "text/html" ? "html" : undefined;
-    if (kind && !bodies[kind] && typeof data === "string" && !header(part, "content-disposition").toLowerCase().startsWith("attachment")) {
-      bodies[kind] = decodePart(data, header(part, "content-type"));
+    if (kind) {
+      if (typeof data === "string") bodies[kind] = decodePart(data, header(part, "content-type"));
+      else if (body.attachmentId || Number(body.size) > 0) bodies.incomplete = true;
+      return bodies;
     }
-    if (Array.isArray(part.parts)) queue.push(...part.parts.map(record));
-  }
-  return bodies;
+    if (!mime.startsWith("multipart/") || !Array.isArray(part.parts)) return bodies;
+    for (const [index, value] of part.parts.entries()) {
+      const child = visit(record(value));
+      if (child.incomplete) bodies.incomplete = true;
+      if (mime === "multipart/mixed") {
+        const plain = child.plain?.trim() ? child.plain : htmlText(child.html ?? "");
+        if (plain) bodies.plain = [bodies.plain, plain].filter(Boolean).join("\n\n");
+        if (child.html) bodies.html = [bodies.html, child.html].filter(Boolean).join("\n");
+      } else {
+        for (const type of ["plain", "html"] as const) if (!bodies[type]?.trim() && child[type]) bodies[type] = child[type];
+      }
+      if (seen >= MAX_PARTS && index < part.parts.length - 1) { bodies.incomplete = true; break; }
+    }
+    return bodies;
+  };
+  return visit(payload);
 }
 
 /** Readable text of an HTML body: no styles, scripts or tags, block ends as line breaks. */
@@ -137,6 +154,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
         `From: ${line(header(payload, "from"))}`, `To: ${line(header(payload, "to"))}`,
         `Subject: ${line(header(payload, "subject"))}`, `Date: ${line(header(payload, "date"))}`, "",
         text.length > MAX_BODY ? `${text.slice(0, MAX_BODY)}\n… (body truncated)` : text, "",
+        ...(bodies.incomplete ? ["(some body parts unavailable or omitted at the MIME part limit)", ""] : []),
         "Links:", ...links.map((link, index) => `[${index + 1}] ${link.url}${link.label ? `\t${link.label}` : ""}`),
       ];
       if (!links.length) lines.push("(none)");

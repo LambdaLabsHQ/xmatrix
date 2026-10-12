@@ -99,6 +99,52 @@ test("read returns the text body and every link, fenced, from nested parts", asy
   assert.match(plain.result.summary, /:\n~~~\n/u);
 });
 
+test("read preserves ordered mixed body segments without duplicating alternatives or reading attachments", async () => {
+  const text = (mimeType, value, extra = {}) => ({ mimeType, body: { data: base64url(value) }, ...extra });
+  const payload = { mimeType: "multipart/mixed", parts: [
+    { mimeType: "multipart/alternative", parts: [text("text/plain", "Opening paragraph"), text("text/html", "<p>HTML alternative</p>")] },
+    text("text/html", "<p>Middle paragraph <a href='https://example.test/help'>Help</a></p>"),
+    text("text/plain", "Closing paragraph"),
+    { mimeType: "multipart/mixed", headers: [{ name: "Content-Disposition", value: " attachment; filename=notes.mime" }],
+      parts: [text("text/plain", "Attached private notes https://example.test/attachment")] },
+    text("text/plain", "Filename-only attachment", { filename: "notes.txt" }),
+  ] };
+  const { result, calls } = await fetched([gmail({ payload })],
+    () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+  assert.match(result.summary, /Opening paragraph\n\nMiddle paragraph Help\n\nClosing paragraph/u);
+  assert.match(result.summary, /\[1\] https:\/\/example\.test\/help\tHelp/u);
+  assert.doesNotMatch(result.summary, /HTML alternative|Attached private notes|Filename-only attachment|example\.test\/attachment/u);
+  assert.equal(calls.length, 1);
+});
+
+test("read keeps all HTML body segments and marks the existing body preview limit", async () => {
+  const payload = { mimeType: "multipart/mixed", parts: [
+    { mimeType: "text/html", body: { data: base64url("<p>First paragraph</p>") } },
+    { mimeType: "text/html", body: { data: base64url("<p>Second paragraph</p>") } },
+  ] };
+  const { result } = await fetched([gmail({ payload })],
+    () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+  assert.match(result.summary, /First paragraph\n\nSecond paragraph/u);
+  const { result: long } = await fetched([gmail({ payload: { mimeType: "text/plain", body: { data: base64url("a".repeat(8_001)) } } })],
+    () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+  assert.match(long.summary, /a{8000}\n… \(body truncated\)/u);
+  assert.doesNotMatch(long.summary, /a{8001}/u);
+});
+
+test("read reports unavailable inline bodies and MIME limits without fetching external parts", async () => {
+  for (const payload of [
+    { mimeType: "text/plain", body: { attachmentId: "synthetic-body", size: 100 } },
+    { mimeType: "multipart/mixed", parts: Array.from({ length: 201 }, (_, index) =>
+      ({ mimeType: "text/plain", body: { data: base64url(`Paragraph ${index}`) } })) },
+  ]) {
+    const { result, calls } = await fetched([gmail({ payload })],
+      () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+    assert.match(result.summary, /some body parts unavailable or omitted at the MIME part limit/u);
+    assert.doesNotMatch(result.summary, /Paragraph 199|Paragraph 200/u);
+    assert.equal(calls.length, 1);
+  }
+});
+
 test("Gmail fails closed without its Composio account, on Gmail refusals and on bad data", async () => {
   await assert.rejects(ACTIONS.search.execute({ credentials: { composioApiKey: "composio-project-key" } }, { query: "" }), /Connect with Composio/u);
   await assert.rejects(ACTIONS.search.execute({ credentials: { composioAccountId: "ca_mailbox1" } }, { query: "" }), /Composio is not configured/u);

@@ -33,6 +33,11 @@ The public user guide includes a local-folder walkthrough for creating and
 updating a first project wiki with Claude Code or Codex, linked from the homepage.
 Its source is [the project wiki guide](../guide/project-wiki.md).
 
+The Gmail connector preserves ordered inline mixed body segments, excludes
+attachment subtrees, and marks incomplete MIME previews. Its read-only
+Composio path is independent of runtime-provided Gmail plugins; see
+[connector platform](../design/connector-platform.md).
+
 The Google Cloud operations connector uses a separate GCP OAuth grant and
 provides bounded resource, Cloud Run status, log, metric and alert-policy reads,
 plus direct App Optimize gross-cost reports, billing/export discovery and
