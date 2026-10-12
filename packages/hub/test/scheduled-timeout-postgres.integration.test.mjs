@@ -248,8 +248,10 @@ async function exerciseOwnerCancellation(client, repo, other, fixture) {
     VALUES ('space','owner','owner',1,$1,$1)`, [now]);
   await client.query(`INSERT INTO data.space_control_heads VALUES ('space',0,$1)`, [now]);
   await fixture("owner-cancel", { deadline: "2026-09-14" });
+  // This is an immediate replay, so its command must be inside the live
+  // 30-day replay window even when the historical timeout fixtures age.
   const input = { commandId: randomUUID(), kind: "scheduled_execution_cancel",
-    automationId: "owner-cancel", runId: "owner-cancel", actorUserId: "owner", at: now,
+    automationId: "owner-cancel", runId: "owner-cancel", actorUserId: "owner", at: new Date().toISOString(),
     principal: { kind: "user", id: "owner" } };
   await assert.rejects(repo.mutate({ ...input, principal: { kind: "agent", id: "profile" } }), /Human|Agent/);
   await assert.rejects(repo.mutate({ ...input, actorUserId: "stranger",
