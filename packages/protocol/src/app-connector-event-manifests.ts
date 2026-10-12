@@ -196,6 +196,20 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         "<https://example.com/page or origin> [form=phone|desktop|all] [scope=page|origin]"),
     ],
   }),
+  actionConnector({
+    id: "yandexwebmaster", name: "Yandex Webmaster", kind: "observability",
+    description: "Read Yandex site quality, indexing, site problems and popular search queries for your hosts, and queue pages for recrawl.",
+    credentials: [
+      { id: "token", label: "Yandex OAuth token", required: true,
+        description: "An OAuth token of the Yandex account with webmaster:hostinfo, plus webmaster:verify for recrawl (oauth.yandex.com)." },
+    ],
+    actions: [
+      readAction("list_hosts", "List hosts", "List the account's hosts with their Yandex host id and verification.", "*"),
+      readAction("summary", "Host summary", "Site quality index, pages in search, excluded pages and site problems by severity.", "<https:example.com:443>"),
+      readAction("queries", "Popular queries", "The 50 queries with the most clicks: shows, clicks and average positions over Yandex's recent window.", "<https:example.com:443>"),
+      writeAction("recrawl", "Queue recrawl", "Ask Yandex to recrawl one page of the host; reports the remaining daily quota.", "<https:example.com:443> <page url>"),
+    ],
+  }),
   {
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",

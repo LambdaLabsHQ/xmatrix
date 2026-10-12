@@ -84,6 +84,10 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Run a Lighthouse audit on a page and list its scores, lab metrics and failing SEO and performance checks.",
     "Read real-user Core Web Vitals for a page or origin from the Chrome UX Report.",
   ],
+  yandexwebmaster: [
+    "Read a site's Yandex quality index, indexed pages, site problems and top queries.",
+    "Queue a changed page for Yandex recrawl.",
+  ],
   gmail: [
     "Find a sign-up or login verification email and open its link without leaving the agent.",
     "Read receipts, alerts and replies from the connected mailbox as task context.",
