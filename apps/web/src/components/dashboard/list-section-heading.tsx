@@ -6,7 +6,7 @@ import { Clock } from "lucide-react";
 import { tagClass } from "./status-tag";
 
 /** A section's ink: brass for what waits on the reader, blue for the list's own main set, plain for the rest. */
-export type ListSectionTone = "attention" | "primary" | "plain";
+export type ListSectionTone = "attention" | "primary" | "plain" | "agent" | "human" | "app";
 export type ListSectionMark = { icon: ComponentType<Pick<SVGProps<SVGSVGElement>, "className">>; tone: ListSectionTone };
 
 /** The conversation list's own section, and what its skeleton stands under. */
@@ -24,14 +24,9 @@ export function ListSectionHeading({ label, count, action, mark }: {
   action?: { label: string; onClick: () => void; expanded?: boolean };
   mark?: ListSectionMark;
 }) {
-  const Icon = mark?.icon;
   return (
     <div className="app-list-section-heading flex min-w-0 items-end gap-1.5 pl-[var(--app-list-row-start)] pr-[var(--app-list-row-end)] text-xs font-bold text-muted-foreground">
-      <h2 className={tagClass("app-list-section-label min-w-0")} data-tone={mark?.tone ?? "plain"}>
-        {Icon && <Icon className="size-3 shrink-0" />}
-        <span className="min-w-0 truncate">{label}</span>
-        {count !== undefined && <span className="tabular-nums">{count}</span>}
-      </h2>
+      <ListSectionLabel as="h2" label={label} count={count} mark={mark} />
       {action && (
         <button type="button" className="app-list-section-action ml-auto pl-2 font-medium hover:text-foreground"
           aria-expanded={action.expanded} onClick={action.onClick}>
@@ -39,5 +34,22 @@ export function ListSectionHeading({ label, count, action, mark }: {
         </button>
       )}
     </div>
+  );
+}
+
+/** A section's name as a paper label in its tone: icon, name, then its count. */
+export function ListSectionLabel({ as: Element = "span", label, count, mark }: {
+  as?: "h2" | "span";
+  label: string;
+  count?: number;
+  mark?: ListSectionMark;
+}) {
+  const Icon = mark?.icon;
+  return (
+    <Element className={tagClass("app-list-section-label min-w-0")} data-tone={mark?.tone ?? "plain"}>
+      {Icon && <Icon className="size-3 shrink-0" />}
+      <span className="min-w-0 truncate">{label}</span>
+      {count !== undefined && <span className="tabular-nums">{count}</span>}
+    </Element>
   );
 }
