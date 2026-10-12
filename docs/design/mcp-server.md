@@ -1,0 +1,58 @@
+# MCP server for outside AI apps
+
+Outside AI apps (ChatGPT apps, Grok custom connectors, Cursor, Codex and
+other MCP clients) reach a person's xMatrix through one remote MCP server on
+the Hub. The app acts as that person, with exactly the access they have in
+xMatrix, and only for what they allowed.
+
+## Endpoints
+
+| Path (Hub origin) | What |
+|---|---|
+| `POST /mcp` | MCP over streamable HTTP, JSON responses only (no server-sent stream; `GET /mcp` is 405). |
+| `GET /.well-known/oauth-protected-resource[/mcp]` | Protected resource metadata (RFC 9728): the resource, its authorization server and scopes. |
+| `GET /.well-known/oauth-authorization-server`, `/.well-known/openid-configuration` | Authorization server metadata (RFC 8414), served by Better Auth at the issuer root. |
+| `/api/auth/oauth2/*` | Register (RFC 7591, unauthenticated, public clients), authorize, consent, token, revoke, userinfo. |
+
+An unauthenticated `POST /mcp` answers 401 with
+`WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp"`,
+which is how clients discover where to sign in.
+
+## Authorization
+
+- **The Hub is the OAuth 2.1 authorization server** (Better Auth
+  `@better-auth/oauth-provider`, PostgreSQL authority only; tables
+  `control.auth_oauth_*`). Authorization code with PKCE (S256), refresh
+  tokens with rotation and replay revocation; tokens and client secrets are
+  stored hashed.
+- **Sign-in and consent are Web pages.** Without a session the Hub sends the
+  person to `/oauth/authorize`, which signs them in as usual and resumes the
+  request; consent is `/oauth/consent`. The consent page shows the app's
+  self-declared name and, as the trustworthy part, the host the grant returns
+  to.
+- **Access tokens are short-lived ES256 JWTs whose audience is `…/mcp`.**
+  The Hub's own API requires its own audience, so an MCP token never works
+  there and a session token never works on `/mcp`. A token request that
+  names no `resource` gets the MCP resource: it is the Hub's only protected
+  resource.
+- **Scopes**: `xmatrix:read` (reading tools), `xmatrix:write` (reserved for
+  writing tools); plus `openid`, `profile`, `email`, `offline_access`.
+- **Removing an app** (profile → AI apps) deletes its consent and every
+  refresh token it holds; its last access token expires within 15 minutes.
+  A revoked account identity is refused on every call.
+
+## Tools
+
+Reading (`xmatrix:read`, all `readOnlyHint`): `list_spaces`, `list_pages`,
+`search_pages`, `read_page`, `list_channels`, `read_channel`. Each calls the
+same authority as the Web app with the person as principal, so a page or
+channel they cannot read is a tool error the model sees, never data.
+
+## Not yet
+
+- Writing tools (create and edit pages, send messages) under `xmatrix:write`,
+  attributed to the person and the app.
+- A ChatGPT page-card widget (Apps SDK output template).
+- Directory listings: ChatGPT app directory and the MCP Registry; Grok and
+  Cursor connect by entering the URL. The Claude connector directory is not a
+  target.

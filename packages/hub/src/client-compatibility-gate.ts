@@ -1,3 +1,4 @@
+import { MCP_PATH } from "./mcp-oauth";
 import type { Hono } from "hono";
 import {
   CLIENT_COMPATIBILITY_HEADERS,
@@ -105,6 +106,8 @@ export function clientCompatibilityRequired(request: Request): boolean {
   if (/^\/api\/connectors\/[^/]+\/events\//u.test(pathname) || pathname === "/api/connectors/mcp" ||
       pathname === "/api/connectors/oauth/callback") return false;
   if (pathname === "/api/migrations/slack/oauth/callback") return false;
+  // Outside AI apps: their OAuth token is for the MCP endpoint, not an xMatrix client.
+  if (pathname === MCP_PATH) return false;
   if (PROTECTED_SOCKET_PATHS.has(pathname)) return true;
   return /^Bearer\s+\S+/iu.test(request.headers.get("authorization") ?? "");
 }

@@ -314,6 +314,9 @@ importers:
       '@apple/app-store-server-library':
         specifier: 3.1.0
         version: 3.1.0
+      '@better-auth/oauth-provider':
+        specifier: 1.6.33
+        version: 1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2(patch_hash=1b860e5867e14a115d0f57c23e0e48b586ddb9a275f99db98918404fc7a2d566))(nanostores@1.4.0))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.6.33(next@15.5.24(@playwright/test@1.61.1)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.22.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(better-call@1.4.0(zod@4.4.3))
       '@xmatrix/billing':
         specifier: workspace:*
         version: link:../billing
@@ -890,6 +893,15 @@ packages:
     peerDependenciesMeta:
       mongodb:
         optional: true
+
+  '@better-auth/oauth-provider@1.6.33':
+    resolution: {integrity: sha512-o1WYKQnMTLGkDOfro9PeYMsWMwFEEubbI8SvKRwr3Kws1N/vHPr3zut0ni5wDS4/pjgC3imG72CsIFLHtQbPGQ==}
+    peerDependencies:
+      '@better-auth/core': ^1.6.33
+      '@better-auth/utils': 0.4.2
+      '@better-fetch/fetch': 1.3.1
+      better-auth: ^1.6.33
+      better-call: 1.4.0
 
   '@better-auth/prisma-adapter@1.6.33':
     resolution: {integrity: sha512-wloYc35VpI7tjuWgOckB4GVX8y0Ow12ER5CfSqc55K88BefgRtR3brruZ9GhHSll+ZIxjf/0p5IGa+z8rKUR2Q==}
@@ -7839,6 +7851,16 @@ snapshots:
     dependencies:
       '@better-auth/core': 1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2(patch_hash=1b860e5867e14a115d0f57c23e0e48b586ddb9a275f99db98918404fc7a2d566))(nanostores@1.4.0)
       '@better-auth/utils': 0.4.2
+
+  '@better-auth/oauth-provider@1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2(patch_hash=1b860e5867e14a115d0f57c23e0e48b586ddb9a275f99db98918404fc7a2d566))(nanostores@1.4.0))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-auth@1.6.33(next@15.5.24(@playwright/test@1.61.1)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.22.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(better-call@1.4.0(zod@4.4.3))':
+    dependencies:
+      '@better-auth/core': 1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2(patch_hash=1b860e5867e14a115d0f57c23e0e48b586ddb9a275f99db98918404fc7a2d566))(nanostores@1.4.0)
+      '@better-auth/utils': 0.4.2
+      '@better-fetch/fetch': 1.3.1
+      better-auth: 1.6.33(next@15.5.24(@babel/core@7.29.7)(@playwright/test@1.61.1)(@types/node@22.19.15)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.22.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      better-call: 1.4.0(zod@4.4.3)
+      jose: 6.2.3
+      zod: 4.4.3
 
   '@better-auth/prisma-adapter@1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2(patch_hash=1b860e5867e14a115d0f57c23e0e48b586ddb9a275f99db98918404fc7a2d566))(nanostores@1.4.0))(@better-auth/utils@0.4.2)':
     dependencies:

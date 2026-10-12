@@ -4,6 +4,7 @@ import { runConnectorAction } from "./connector-commands";
 import { connectorProvider } from "./registry";
 import { connectorActionCatalog } from "./action-catalog";
 import { listAppConnections } from "../apps";
+import { serveMcp, type McpTool } from "../mcp-jsonrpc";
 
 /*
  * Connector actions as MCP tools for an Agent Run (docs/design/connector-platform.md
@@ -14,7 +15,6 @@ import { listAppConnections } from "../apps";
  * there.
  */
 
-const PROTOCOL_VERSION = "2025-06-18";
 const TOOL_NAME = /^([a-z][a-z0-9-]*)__([a-z_]+)$/u;
 
 export interface ConnectorMcpCaller {
@@ -35,7 +35,7 @@ export async function connectedConnectorProviders(env: Env, caller: ConnectorMcp
 
 /* Only the Space's connected providers: a tool the Run could only learn is
    unusable by calling it is noise in every harness's tool list. */
-function tools(connected: ReadonlySet<string>) {
+function tools(connected: ReadonlySet<string>): McpTool[] {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) =>
     [...connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions).values()]
     .map(({ definition: action }) => ({
@@ -55,45 +55,24 @@ function tools(connected: ReadonlySet<string>) {
     })));
 }
 
-function result(id: unknown, value: unknown) {
-  return Response.json({ jsonrpc: "2.0", id, result: value });
-}
-
-function error(id: unknown, code: number, message: string) {
-  return Response.json({ jsonrpc: "2.0", id, error: { code, message } });
-}
-
 export async function handleConnectorMcp(env: Env, caller: ConnectorMcpCaller, body: unknown,
   run: typeof runConnectorAction = runConnectorAction,
   connected: typeof connectedConnectorProviders = connectedConnectorProviders): Promise<Response> {
-  const request = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
-  const { id, method } = request;
-  const params = request.params && typeof request.params === "object" ? request.params as Record<string, unknown> : {};
-  if (request.jsonrpc !== "2.0" || typeof method !== "string") return error(id ?? null, -32600, "Invalid Request");
-  if (id === undefined) return new Response(null, { status: 202 });
-  if (method === "initialize") {
-    return result(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: "xmatrix-connectors", version: "1" } });
-  }
-  if (method === "ping") return result(id, {});
-  if (method === "tools/list") {
-    try {
-      return result(id, { tools: tools(await connected(env, caller)) });
-    } catch (failure) {
-      return error(id, -32603, failure instanceof Error ? failure.message : "connector connections are unavailable");
-    }
-  }
-  if (method !== "tools/call") return error(id, -32601, "Method not found");
-  const match = typeof params.name === "string" ? params.name.match(TOOL_NAME) : null;
-  const provider = match ? connectorProvider(match[1]!) : undefined;
-  const action = provider && match ? connectorActionCatalog(provider.id, provider.actions).get(match[2]!)?.executor : undefined;
-  if (!match || !provider || !action) return error(id, -32602, "Unknown tool");
-  const args = params.arguments && typeof params.arguments === "object" ? params.arguments as Record<string, unknown> : {};
-  const target = typeof args.target === "string" ? args.target.trim() : "";
-  const text = typeof args.text === "string" ? args.text.trim() : "";
-  const line = await run(provider.id, {
-    env, channelId: caller.channelId, messageId: `mcp:${caller.runId}:${crypto.randomUUID()}`,
-    body: `@${provider.id}:${match[2]}:${target} ${text}`.trim(), actorUserId: caller.ownerUserId, senderKind: "agent",
-  }, match[2]!, action, { target, text });
-  return result(id, { content: [{ type: "text", text: line }], isError: !/: completed;/u.test(line) });
+  return serveMcp({
+    name: "xmatrix-connectors",
+    tools: async () => tools(await connected(env, caller)),
+    call: async (name, args) => {
+      const match = name.match(TOOL_NAME);
+      const provider = match ? connectorProvider(match[1]!) : undefined;
+      const action = provider && match ? connectorActionCatalog(provider.id, provider.actions).get(match[2]!)?.executor : undefined;
+      if (!match || !provider || !action) return null;
+      const target = typeof args.target === "string" ? args.target.trim() : "";
+      const text = typeof args.text === "string" ? args.text.trim() : "";
+      const line = await run(provider.id, {
+        env, channelId: caller.channelId, messageId: `mcp:${caller.runId}:${crypto.randomUUID()}`,
+        body: `@${provider.id}:${match[2]}:${target} ${text}`.trim(), actorUserId: caller.ownerUserId, senderKind: "agent",
+      }, match[2]!, action, { target, text });
+      return { content: [{ type: "text", text: line }], isError: !/: completed;/u.test(line) };
+    },
+  }, body);
 }
