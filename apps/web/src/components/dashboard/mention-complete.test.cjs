@@ -404,7 +404,10 @@ test("segmented completion uses channel-local instance labels for live reference
   const references = resolveMentionCompletion("@codex:", "@codex:".length, members(channel, agents));
 
   assert.equal(root.stage, "target");
-  assert.deepEqual(root.candidates.map((candidate) => candidate.mention), ["codex"]);
+  assert.deepEqual(root.candidates.map((candidate) => candidate.mention), ["codex:2", "codex:1", "codex"]);
+  assert.deepEqual(completeMention("@cod", 4, root.candidates[0]), { value: "@codex:2 ", cursor: 9 });
+  assert.deepEqual(resolveMentionCompletion("@", 1, channel, null, [], null, {}, "none")
+    .candidates.map(candidate => candidate.mention), ["codex"]);
   assert.equal(references.stage, "agent-reference");
   assert.deepEqual(
     references.candidates.map((candidate) => candidate.mention),
@@ -414,6 +417,7 @@ test("segmented completion uses channel-local instance labels for live reference
 
 test("agent reference stage keeps offline instances without offering a bare mention", () => {
   const channel = liveInstanceChannel("codex", "offline");
+  assert.deepEqual(resolveMentionCompletion("@", 1, channel).candidates.map(candidate => candidate.mention), ["codex"]);
 
   const agents = [{ id: "agent:codex", name: "codex", kind: "agent", status: "offline" }];
   const references = resolveMentionCompletion("@codex:", "@codex:".length, members(channel, agents));

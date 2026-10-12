@@ -578,7 +578,13 @@ export function resolveMentionCompletion(
   );
   return {
     active,
-    candidates: filterMentionCandidates(rootCandidates, active.query),
+    candidates: filterMentionCandidates([
+      ...agents.flatMap(agent => agentReferenceCandidates(
+        channel, agent, [agent], localContext, instanceTargetScope,
+      ).filter(candidate => candidate.schemaNodeId === "agent-reference:instance" &&
+        isLiveAgentStatus(candidate.status)).map(candidate => ({ ...candidate, name: candidate.mention! }))),
+      ...rootCandidates,
+    ], active.query),
     stage: "target",
     stageLabel: MENTION_COMMAND_COMPLETION_SCHEMA.label,
   };

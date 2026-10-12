@@ -157,9 +157,11 @@ test("normal completion has one capability per harness and explicit locations re
   }));
   const catalog = [{ harness: "codex", locations }];
   const existing = [{ id: "legacy-1", kind: "agent", completionSuffix: ":" },
-    { id: "legacy-2", kind: "agent", completionSuffix: ":" }, { id: "human", kind: "user" }];
+    { id: "legacy-2", kind: "agent", completionSuffix: ":" }, { id: "human", kind: "user" },
+    { id: "instance", kind: "agent", mention: "codex:1", status: "busy", completionSuffix: " " }];
   const candidates = registrationMentionCandidates(existing, catalog, "");
-  assert.equal(candidates.filter(item => item.kind === "agent").length, 1);
+  assert.equal(candidates.filter(item => item.kind === "agent").length, 2);
+  assert.equal(candidates.find(item => item.id === "instance").mention, "codex:1");
   assert.deepEqual(candidates[0].invocationTarget, { kind: "capability", harness: "codex" });
   const selected = registrationMentionCandidates(existing, catalog, "codex/mac");
   assert.equal(selected.length, 1);

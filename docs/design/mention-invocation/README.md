@@ -4,6 +4,11 @@ The invoking `@` owns its status. Each Agent in a message updates independently,
 
 These screenshots use local synthetic fixtures and the repository theme, not production data.
 
+The Web composer's root `@` list includes the current Channel's live Instances
+as explicit `@name:slot` addresses, alongside harness summons. Offline Instances
+remain in the colon reference picker. A new thread draft offers no Instances
+from its parent Channel.
+
 The Web composer asks Jev about summon intent after a 350 ms typing pause,
 using the exact outgoing body, summon ranges and the author's authorized
 Channel context. Mention bands show the reading. A declined address has a clickable dotted
