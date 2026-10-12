@@ -585,6 +585,12 @@ export function useComposerCompletion({
     const option = mentionOptionRefs.current[activeIndex];
     if (!list || !option) return;
 
+    // The first option belongs with its category heading, above the row.
+    if (activeIndex === 0) {
+      list.scrollTo({ top: 0 });
+      return;
+    }
+
     const optionTop = option.offsetTop;
     const optionBottom = optionTop + option.offsetHeight;
     const visibleTop = list.scrollTop;
