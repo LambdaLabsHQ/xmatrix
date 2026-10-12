@@ -145,7 +145,7 @@ async function applyPush(env: Env, spaceId: string, authUser: AuthUser, current:
     const pushed = splitFrontmatter(text(path, bytes));
     const pageId = pageByFile.get(path);
     if (pageId) {
-      if (pushed.frontmatter !== splitFrontmatter(text(path, previous!)).frontmatter) {
+      if (pushed.frontmatter !== (previous ? splitFrontmatter(text(path, previous)).frontmatter : null)) {
         throw new Refused(`${path}: xMatrix writes the frontmatter; rename pages in xMatrix and edit only the text`);
       }
       edits.push({ pageId, path, body: pushed.body });
