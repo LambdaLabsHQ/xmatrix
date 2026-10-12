@@ -15,6 +15,13 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Outside AI applications can read and write a person's Pages and Channels
+through the remote OAuth MCP server, using the person's existing access.
+The `show_page` tool supplies a sandboxed MCP Apps card and a source link;
+text-only clients receive the same page data. The ChatGPT/Codex submission
+package and remaining portal prerequisites live in `deploy/chatgpt-plugin`.
+See [MCP server](../design/mcp-server.md).
+
 Device pushes share a bounded outbound delivery profile across Web Push, APNs
 and FCM, including OAuth refresh, response decoding and notification fan-out.
 Delivery accounting and diagnostics share a finite outcome table; push logs

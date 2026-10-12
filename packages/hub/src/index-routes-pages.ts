@@ -111,7 +111,8 @@ async function readAsCaller(c: Context<{ Bindings: Env }>) {
 
 export function sessionPrincipal(authUser: AuthUser, conversationId?: string): PageSessionPrincipal {
   const run = authUser.agentRun;
-  if (!run) return { kind: "user", id: authUser.id, label: authUser.name || authUser.email };
+  if (!run) return { kind: "user", id: authUser.id, label: authUser.name || authUser.email,
+    ...(authUser.mcpApplication ? { application: authUser.mcpApplication } : {}) };
   return { kind: "agent", id: run.agentId, label: run.agentName || run.agentId, ownerUserId: run.ownerUserId,
     runProof: { runId: run.runId, instanceId: run.instanceId ?? "", executionKey: run.executionKey },
     conversationId: conversationId ?? run.channelId };

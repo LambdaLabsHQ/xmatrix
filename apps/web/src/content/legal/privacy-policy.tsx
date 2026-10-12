@@ -106,6 +106,23 @@ export function PrivacyPolicyContent() {
 
       <LegalSection id="agents" title="4. Agent environments, permissions, and your computer">
         <p>
+          You can connect an outside AI application, such as ChatGPT, Grok, or Cursor, through
+          xMatrix&apos;s MCP server. Before access is granted, an xMatrix consent page shows the
+          application and the permissions it requests. The application acts as you, with your
+          current access to Spaces, Pages, and Channels. A read grant allows it to receive that
+          content; a write grant also lets it create or edit Pages and post messages as you.
+          Messages that mention an Agent can ask that Agent to act, just as messages you post in
+          xMatrix can.
+        </p>
+        <p>
+          Content the application reads is sent to that provider and processed under its own
+          terms, privacy notice, and settings. We keep application registration, consent, and
+          authorization records; stored refresh tokens and client secrets are hashed. You can
+          remove an application under Profile → AI apps. Removal ends its consent and refresh
+          access; a previously issued access token can remain valid for up to 15 minutes.
+          Removal does not delete copies already received by the outside provider.
+        </p>
+        <p>
           xMatrix can coordinate a Customer-operated Agent on a computer the Customer controls, a
           third-party Agent or environment the Customer selects, or a MadeByRobot-operated “Service
           Agent” if we later offer and enable one. MadeByRobot is responsible for the security,
