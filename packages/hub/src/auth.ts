@@ -10,6 +10,7 @@ import {
   parseAgentRunPermissions,
   type AgentRunPermission,
   type AuthUser as ProtocolAuthUser,
+  type ExternalAppSource,
 } from "@xmatrix/protocol";
 import { ControlError } from "@xmatrix/db";
 
@@ -67,6 +68,8 @@ function authUserFromClaims(payload: JWTPayload): AuthUser | null {
 /** A signed-in user, and the Agent Run acting for them when a Run token signed in. */
 export interface AuthUser extends ProtocolAuthUser {
   agentRun?: AgentRunPrincipal;
+  /** Set only on internal MCP write requests, never from a token's profile claims. */
+  mcpApplication?: ExternalAppSource;
 }
 
 export interface AgentRunPrincipal {

@@ -33,7 +33,7 @@ export type { PageAuthor, PageClaim, PageDocument, PageLink, PageRevision, PageS
  */
 
 export type PagePrincipal =
-  | { kind: "user"; id: string; label?: string }
+  | { kind: "user"; id: string; label?: string; application?: PageAuthor["application"] }
   | { kind: "agent"; id: string; label?: string; runProof: AgentChannelRunProof };
 
 export class PageControlError extends MessageAuthorityError {
@@ -249,7 +249,8 @@ write: boolean): Promise<PageActor> {
     userId, role: member.role, isAgent: principal.kind === "agent",
     author: principal.kind === "agent"
       ? { kind: "agent", id: principal.id, label, ownerUserId: userId }
-      : { kind: "user", id: principal.id, label },
+      : { kind: "user", id: principal.id, label,
+        ...(principal.application ? { application: principal.application } : {}) },
   };
 }
 

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { pageBlocks, pageLineDiff } from "@xmatrix/protocol";
+import { pageBlocks, pageLineDiff, pageAuthorLabel } from "@xmatrix/protocol";
 import { FileText } from "lucide-react";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { useAuth } from "@/lib/auth-context";
@@ -118,7 +118,7 @@ function useSectionChange({ spaceId, page, blockId, token }: {
     const removed = added ? undefined : first("removed");
     if (!added && !removed) return null;
     return {
-      author: updated.authors.map((author) => author.label).join(", "),
+      author: updated.authors.map(pageAuthorLabel).join(", "),
       at: updated.createdAt,
       text: added ?? `Removed “${removed}”`,
     };

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { pageAuthorColor, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
+import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import { ArrowDown, ArrowLeft, ArrowUp } from "lucide-react";
 import {
@@ -407,7 +407,7 @@ export function PageHistory({ spaceId, pageId, token, headRevision, canEdit, con
                   <li key={revision.revision}>
                     <button type="button" onClick={() => void open(revision)}
                       aria-label={`${versionTime(revision.createdAt, false)} by ${
-                        revision.authors.map((author) => author.label).join(", ")}`}
+                        revision.authors.map(pageAuthorLabel).join(", ")}`}
                       className={cn("w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
                         preview?.revision.revision === revision.revision && "bg-accent")}>
                       <span className="font-semibold">{versionTime(revision.createdAt, false)}</span>
@@ -421,7 +421,9 @@ export function PageHistory({ spaceId, pageId, token, headRevision, canEdit, con
                       {revision.authors.map((author) => (
                         <span key={`${author.kind}:${author.id}`} className="mt-0.5 flex items-center gap-1.5 text-xs">
                           <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: pageAuthorColor(author) }} />
-                          <span className="truncate">{author.label}</span>
+                          <span className="truncate" title={author.application ? "OAuth application name supplied by its registration" : undefined}>
+                            {pageAuthorLabel(author)}
+                          </span>
                         </span>
                       ))}
                     </button>

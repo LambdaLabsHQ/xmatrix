@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
-  isLiveAgentStatus, pageAuthorColor, type SerializedAutomation, type SerializedChannel,
+  isLiveAgentStatus, pageAuthorColor, pageAuthorLabel, type SerializedAutomation, type SerializedChannel,
 } from "@xmatrix/protocol";
 import {
   Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2,
@@ -772,7 +772,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       .filter((updated) => updated !== null)
       .sort((a, b) => b.revision - a.revision)[0];
     if (!latest) return null;
-    const who = latest.authors.map((author) => author.label).join(", ");
+    const who = latest.authors.map(pageAuthorLabel).join(", ");
     const when = formatRelativeAge(latest.createdAt) ?? new Date(latest.createdAt).toLocaleString();
     return who ? `Last edit by ${who} · ${when}` : `Last edit ${when}`;
   }, [awareness.data]);

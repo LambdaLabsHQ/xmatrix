@@ -9,7 +9,7 @@ import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin 
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { nonOperationalMentionRanges, lowercaseHex } from "@xmatrix/protocol";
+import { nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
 export {
@@ -1733,6 +1733,7 @@ export const MessageRow = memo(function MessageRow({
     message.sendStatus === "unconfirmed" || message.sendStatus === "failed";
   const canEditMessage = message.own && !recalled && !isOutboundPending && Boolean(message.messageId);
   const MessageHead: ElementType = message.continuation ? FloatingMessageActions : "div";
+  const sourceApplication = messageExternalAppSource(message.metadata);
   const canSaveEdit = Boolean(editingBody.trim()) && editingBody.trim() !== message.body;
 
   const refreshAttachmentMedia = useCallback(() => {
@@ -2300,6 +2301,11 @@ export const MessageRow = memo(function MessageRow({
           {!message.continuation && (
           <div className={MESSAGE_META_CLASS_NAME}>
           <span className={MESSAGE_AUTHOR_NAME_CLASS_NAME}>{message.author}</span>
+          {sourceApplication && (
+            <span className="text-xs text-muted-foreground" title="OAuth application name supplied by its registration">
+              via {sourceApplication.name}
+            </span>
+          )}
           <MessageTimestamp value={message.sentAt} className={MESSAGE_HEADER_TIMESTAMP_CLASS_NAME} />
           {message.sendStatus === "pending" && <MessageSendingMark label />}
           {message.sendStatus === "unconfirmed" && (

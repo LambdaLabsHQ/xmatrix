@@ -1,5 +1,21 @@
 # Guardrail Review Sources
 
+- 2026-10-12 external MCP page cards and directory package: reviewed current
+  OpenAI packaging/submission documentation and the MCP Apps handshake.
+  Page cards re-read through the existing page authority; the static UI
+  resource contains no private data, network requests, or external assets.
+  The shipped iframe script renders untrusted text with textContent and
+  permits only canonical xMatrix source links through the host. OAuth E2E
+  coverage checks authorized cards, foreign-Space refusals, and missing read
+  scope; the browser-script boundary test checks hostile content and links.
+  The credential-free ZIP carries review cases but leaves verified publisher,
+  portal challenge, reviewer credentials, and a real recording to the portal.
+  MCP writes keep the human as principal while carrying the signed OAuth
+  client id and its self-declared registration name in optional author JSON
+  and reserved message metadata. The OAuth E2E checks source preservation
+  through live Page edits and rejects public metadata spoofing; Web grouping
+  coverage keeps application switches visible under the same human identity.
+
 - 2026-10-09 GCP caller attribution: reviewed consumed_api credential_id/method labels and daily aggregation preserving the comparison grid, exact-project API Keys v2 metadata without GetKeyString, typed API activation and secret-free historical audit principal summaries. Provider-boundary tests protect group/filter injection, key project/UUID mismatch, private field omission, bounded continuations, same-identity quota context and the distinction between key administrators and inference callers. See [GCP connector](../connectors/gcp.md).
 
 - 2026-10-09 GCP cost attribution: reviewed Cloud Billing v2beta SKU identity, explicit quota-project headers under the same OAuth identity and serviceusage.services.use, opt-in compatibility for existing billing reads, fixed Service Runtime metric/API filters, bounded historical windows and daily summed counts. Provider-boundary tests protect quota/header injection, SKU identity mismatch, fixed aggregation, page continuation and absence-versus-zero distinctions. See [GCP connector](../connectors/gcp.md).

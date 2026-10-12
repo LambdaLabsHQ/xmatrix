@@ -1,6 +1,7 @@
 import { pageBlocks } from "@xmatrix/protocol";
 
 import agents from "../../../../../docs/guide/agents.md";
+import aiApps from "../../../../../docs/guide/ai-apps.md";
 import cli from "../../../../../docs/guide/cli.md";
 import concepts from "../../../../../docs/guide/concepts.md";
 import connectors from "../../../../../docs/guide/connectors.md";
@@ -22,6 +23,7 @@ const sources: [file: string, markdown: string][] = [
   ["agents", agents],
   ["pages", pages],
   ["connectors", connectors],
+  ["ai-apps", aiApps],
   ["cli", cli],
 ];
 
