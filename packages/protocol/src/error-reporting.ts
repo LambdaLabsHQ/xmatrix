@@ -9,6 +9,7 @@ import {
   linkedErrorsIntegration,
   rewriteFramesIntegration,
   setCurrentClient,
+  type ErrorEvent,
   type StackFrame,
 } from "@sentry/core";
 import { nodeStackLineParser, ServerRuntimeClient } from "@sentry/core/server";
@@ -33,6 +34,46 @@ export function bundleFrame(frame: StackFrame): StackFrame {
   return { ...frame, filename: `app:///${filename}`, abs_path: `app:///${filename}` };
 }
 
+const CONSOLE_LINE_LIMIT = 400;
+
+function scalar(value: unknown): string | undefined {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? String(value) : undefined;
+}
+
+/**
+ * One logged line as its report's title. A Worker logs a sentence and an
+ * object of facts (`console.error("… rejection", { code, status })`); joined
+ * as strings the object reads `[object Object]`, so every failure logged under
+ * one sentence looked the same. The object's scalar fields are spelled out
+ * instead; nested values stay in the report's arguments.
+ */
+export function consoleLine(args: readonly unknown[]): string {
+  const parts = args.map((arg) => {
+    if (!arg || typeof arg !== "object" || Array.isArray(arg)) return scalar(arg) ?? "";
+    return Object.entries(arg).map(([key, value]) => {
+      const text = Array.isArray(value)
+        ? value.map(scalar).filter((item) => item !== undefined).join(",") : scalar(value);
+      return text === undefined || text === "" ? "" : `${key}=${text}`;
+    }).filter(Boolean).join(" ");
+  });
+  return parts.filter(Boolean).join(" ").slice(0, CONSOLE_LINE_LIMIT);
+}
+
+/** Titles a captured `console.error` report with the facts it logged. */
+function titleConsoleReport(event: ErrorEvent): ErrorEvent {
+  const args = event.extra?.arguments;
+  if (event.logger !== "console" || !Array.isArray(args) || !args.some((arg) => arg && typeof arg === "object")) {
+    return event;
+  }
+  const line = consoleLine(args);
+  if (!line) return event;
+  if (event.message !== undefined) event.message = line;
+  const logged = event.exception?.values;
+  if (logged?.length === 1 && logged[0]!.mechanism?.synthetic) logged[0]!.value = line;
+  return event;
+}
+
 /**
  * Opens error reporting for this Worker isolate; without a DSN nothing is
  * ever sent. A report carries the error, its stack, the component and the
@@ -49,6 +90,7 @@ export function startErrorReporting({ dsn, release, component }: ErrorReportingT
     runtime: { name: "cloudflare" },
     dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false },
     stackParser: createStackParser(nodeStackLineParser()),
+    beforeSend: titleConsoleReport,
     integrations: [
       dedupeIntegration(),
       linkedErrorsIntegration(),

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bundleFrame, reportError, sendErrorReports, startErrorReporting } from "../dist/error-reporting.js";
+import { bundleFrame, consoleLine, reportError, sendErrorReports, startErrorReporting } from "../dist/error-reporting.js";
 
 const sent = [];
 const realFetch = globalThis.fetch;
@@ -71,4 +71,26 @@ test("frames with a root or a scheme keep their path", () => {
     assert.equal(bundleFrame({ filename }).filename, filename);
   }
   assert.deepEqual(bundleFrame({ function: "native" }), { function: "native" });
+});
+
+test("a logged line is titled with the facts it logged, not [object Object] (XMATRIX-HUB-7B)", async () => {
+  sent.length = 0;
+  console.error("xMatrix runtime authority rejection", {
+    code: "runtime.authority_rejected", authorityCode: "machine_command_result_mismatch",
+    diagnosticId: "diag_1", retryable: false, operation: "MachineControlError", status: 409,
+  });
+  await sendErrorReports();
+  const [event] = events();
+  const title = "xMatrix runtime authority rejection code=runtime.authority_rejected " +
+    "authorityCode=machine_command_result_mismatch diagnosticId=diag_1 retryable=false " +
+    "operation=MachineControlError status=409";
+  assert.equal(event.exception?.values[0].value ?? event.message, title);
+  assert.doesNotMatch(JSON.stringify([event.message, event.exception]), /\[object Object\]/u);
+});
+
+test("a logged line spells out scalar fields and leaves nested values to the report's arguments", () => {
+  assert.equal(consoleLine(["failed", { errorClass: "TypeError", origin: ["a", "b"], nested: { secret: 1 }, empty: "" }]),
+    "failed errorClass=TypeError origin=a,b");
+  assert.equal(consoleLine(["plain line"]), "plain line");
+  assert.equal(consoleLine(["x", { text: "y".repeat(1000) }]).length, 400);
 });
