@@ -57,7 +57,7 @@ export async function fetchLatestVersion(latest: Latest, fetcher: typeof fetch =
 export interface HarnessReleaseWatchDependencies {
   presets?: readonly AgentPreset[];
   latest?: (latest: Latest) => Promise<string | undefined>;
-  targets?: (input: { presetId: string; version: string }) => Promise<HarnessReleaseTarget[]>;
+  targets?: (releases: { presetId: string; version: string }[]) => Promise<HarnessReleaseTarget[]>;
   /** Issues one daemon command; the Machine repository by default. */
   issue?: (command: Record<string, unknown>) => Promise<unknown>;
 }
@@ -72,32 +72,33 @@ export async function watchHarnessReleases(env: Env, dependencies: HarnessReleas
   Promise<{ issued: number }> {
   const database: AuthorityDatabaseSession | undefined = dependencies.targets ? undefined
     : postgresAuthorityDatabase(env, "Machine", "xmatrix-hub-harness-release").openSession();
-  const targets = dependencies.targets ?? (input => readHarnessReleaseTargets(database!,
-    { requestId: `harness-release:${crypto.randomUUID()}`, ...input }));
+  const targets = dependencies.targets ?? (releases => readHarnessReleaseTargets(database!,
+    { requestId: `harness-release:${crypto.randomUUID()}`, releases }));
   const latestOf = dependencies.latest ?? (latest => fetchLatestVersion(latest));
   let issued = 0;
   try {
     const watched = (dependencies.presets ?? AGENT_PRESETS)
       .flatMap(preset => preset.management?.latest ? [{ preset, latest: preset.management.latest }] : []);
     const versions = await Promise.all(watched.map(({ latest }) => latestOf(latest)));
-    for (const [index, { preset }] of watched.entries()) {
+    const releases = watched.flatMap(({ preset }, index) => {
       const version = versions[index];
-      if (!version) continue;
-      for (const target of await targets({ presetId: preset.id, version })) {
-        const requestId = `harness:${crypto.randomUUID()}`;
-        try {
-          await (dependencies.issue ?? (command => machineDaemonCommand(env, command)))({
-            ownerUserId: target.ownerUserId, ownerEmail: target.ownerEmail, machineId: target.machineId,
-            hostId: target.hostId, daemonId: target.daemonId,
-            commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "harness_action",
-            principal: { kind: "user", id: target.ownerUserId },
-            payload: { type: "machine_harness_action", requestId, presetId: preset.id, action: "release" },
-          });
-          issued++;
-        } catch (error) {
-          // An untold daemon stays a target and is told on a later pass.
-          console.warn("Harness release notice failed", { error: error instanceof Error ? error.message : String(error) });
-        }
+      return version ? [{ presetId: preset.id, version }] : [];
+    });
+    if (releases.length === 0) return { issued };
+    for (const target of await targets(releases)) {
+      const requestId = `harness:${crypto.randomUUID()}`;
+      try {
+        await (dependencies.issue ?? (command => machineDaemonCommand(env, command)))({
+          ownerUserId: target.ownerUserId, ownerEmail: target.ownerEmail, machineId: target.machineId,
+          hostId: target.hostId, daemonId: target.daemonId,
+          commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "harness_action",
+          principal: { kind: "user", id: target.ownerUserId },
+          payload: { type: "machine_harness_action", requestId, presetId: target.presetId, action: "release" },
+        });
+        issued++;
+      } catch (error) {
+        // An untold daemon stays a target and is told on a later pass.
+        console.warn("Harness release notice failed", { error: error instanceof Error ? error.message : String(error) });
       }
     }
   } finally {

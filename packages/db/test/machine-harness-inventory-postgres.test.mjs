@@ -76,10 +76,15 @@ integration("release targets read the current schema and skip daemons that alrea
         items: [{ id: "claude", installed: true, version: "1.0.0", probeStatus: "ok", latestVersion: "1.0.0" }] } } });
     const { hostname } = (await client.query(
       "SELECT hostname FROM data.machine_daemons WHERE daemon_id=$1", [daemonId])).rows[0];
-    const read = version => readHarnessReleaseTargets(session, { requestId: `release:${version}`, presetId: "claude", version });
+    const read = (...releases) => readHarnessReleaseTargets(session, { requestId: `release:${releases.length}`, releases });
+    const target = { presetId: "claude", ownerUserId, ownerEmail: "owner@example.test", machineId,
+      hostId: hostname ?? "", daemonId };
 
-    assert.deepEqual(await read("2.0.0"), [{ ownerUserId, ownerEmail: "owner@example.test", machineId,
-      hostId: hostname ?? "", daemonId }]);
-    assert.deepEqual(await read("1.0.0"), []);
+    assert.deepEqual(await read({ presetId: "claude", version: "2.0.0" }), [target]);
+    assert.deepEqual(await read({ presetId: "claude", version: "1.0.0" }), []);
+    // Every watched preset is read in one statement; a preset the daemon lacks names no target.
+    assert.deepEqual(await read({ presetId: "codex", version: "9.0.0" }, { presetId: "claude", version: "2.0.0" }),
+      [target]);
+    assert.deepEqual(await read(), []);
   } finally { await fixture.close(); }
 });
