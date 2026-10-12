@@ -26,7 +26,8 @@ test("properties, report options and statements are validated before any request
     limit: 10, channel: "Organic Search" });
   assert.deepEqual(analyticsReportOptions("by=none", noon).dimensions, []);
   for (const bad of ["by=date,page,country,device", "by=date,date", "by=hour", "days=0", "days=1096", "limit=251",
-    "days=3 days=4", "channel=Organic", "colour=red"]) {
+    "days=3 days=4", "channel=Organic", "by=constructor", "by=toString", "by=__proto__",
+    "channel=constructor", "channel=toString", "channel=__proto__", "channel=organic,direct", "colour=red"]) {
     assert.equal(typeof analyticsReportOptions(bad, noon), "string", bad);
   }
   assert.deepEqual(statement("@googleanalytics:list_properties:*"), {});

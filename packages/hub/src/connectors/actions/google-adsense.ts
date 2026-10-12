@@ -3,7 +3,7 @@ import { providerJson, ProviderRequestError } from "../http";
 import { googleHeaders } from "./google-headers";
 import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText } from "./common";
-import { cell as text, keyedOptions, trailingDays } from "./google-report";
+import { cell as text, keyedOptions, mappedChoices, trailingDays } from "./google-report";
 
 /*
  * Google AdSense (Management API v2), read-only. The grant is the single
@@ -35,8 +35,8 @@ export function adsenseReportOptions(input: string, now = Date.now()):
   const options = keyedOptions(input, ["by", "days", "limit"], "use by=<date,domain,…|none> days=<1-1095> limit=<1-250>");
   if (typeof options === "string") return options;
   const by = options.get("by") ?? "date";
-  const names = by === "none" ? [] : by.split(",");
-  if (names.length > 2 || new Set(names).size !== names.length || names.some(name => !(name in DIMENSIONS))) {
+  const dimensions = mappedChoices(by === "none" ? [] : by.split(","), DIMENSIONS, 2);
+  if (!dimensions) {
     return `by is none or up to two of ${Object.keys(DIMENSIONS).join(", ")}`;
   }
   const days = Number(options.get("days") ?? "7");
@@ -44,7 +44,7 @@ export function adsenseReportOptions(input: string, now = Date.now()):
   if (!Number.isSafeInteger(days) || days < 1 || days > MAX_DAYS) return `days is a whole number from 1 to ${MAX_DAYS}`;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ROWS) return `limit is a whole number from 1 to ${MAX_ROWS}`;
   const { start, end } = trailingDays(days, now);
-  return { dimensions: names.map(name => DIMENSIONS[name]!), start: new Date(start), end: new Date(end), limit };
+  return { dimensions, start: new Date(start), end: new Date(end), limit };
 }
 
 /** The generate URL: one custom date range, the fixed earnings metrics, newest dates first. */

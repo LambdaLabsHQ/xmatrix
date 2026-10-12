@@ -15,7 +15,9 @@ test("pages, origins and options are validated before any request", () => {
   assert.deepEqual(statement("@pagespeed:field:https://example.com/a scope=origin"), { origin: "https://example.com", form: "all" });
   for (const bad of ["@pagespeed:audit:example.com", "@pagespeed:audit:http://127.0.0.1/", "@pagespeed:audit:https://u:p@example.com/",
     "@pagespeed:audit:https://example.com/ strategy=tablet", "@pagespeed:audit:https://example.com/ form=phone",
-    "@pagespeed:field:https://example.com/ form=watch", "@pagespeed:field:https://example.com/ scope=site"]) {
+    "@pagespeed:field:https://example.com/ form=watch", "@pagespeed:field:https://example.com/ form=constructor",
+    "@pagespeed:field:https://example.com/ form=toString", "@pagespeed:field:https://example.com/ form=__proto__",
+    "@pagespeed:field:https://example.com/ form=phone,desktop", "@pagespeed:field:https://example.com/ scope=site"]) {
     assert.equal(typeof statement(bad), "string", bad);
   }
 });
