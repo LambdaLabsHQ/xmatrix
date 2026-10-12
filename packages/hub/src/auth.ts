@@ -161,6 +161,41 @@ async function verifySignedAuthToken(token: string, env: Env): Promise<AuthUser>
   throw new InvalidAuthTokenError();
 }
 
+/** A person reaching the MCP endpoint through an outside AI app, and what they granted it. */
+export interface McpCaller { user: AuthUser; clientId: string; scopes: string[] }
+
+/**
+ * An OAuth access token for the MCP endpoint (mcp-oauth.ts). It is a Better
+ * Auth JWT like a session token, but its audience is the MCP resource, so
+ * neither kind of token passes for the other.
+ */
+export async function verifyMcpAccessToken(token: string, env: Env, resource: string): Promise<McpCaller> {
+  let kid: string | undefined;
+  try {
+    const header = decodeProtectedHeader(token);
+    if (header.alg !== "ES256") throw new InvalidAuthTokenError();
+    kid = header.kid;
+  } catch {
+    throw new InvalidAuthTokenError();
+  }
+  const publicKey = kid ? await getBetterAuthPublicKey(env, kid) : null;
+  if (!publicKey) throw new InvalidAuthTokenError();
+  let payload: JWTPayload;
+  try {
+    ({ payload } = await jwtVerify(token, publicKey, {
+      algorithms: ["ES256"], issuer: hubAuthBaseUrl(env), audience: resource,
+    }));
+  } catch {
+    throw new InvalidAuthTokenError();
+  }
+  const user = authUserFromClaims(payload);
+  const clientId = stringValue((payload as { azp?: unknown }).azp);
+  const scope = stringValue((payload as { scope?: unknown }).scope);
+  if (!user || !clientId) throw new InvalidAuthTokenError();
+  if (await accountIdentityRevoked(env, user.id)) throw new InvalidAuthTokenError();
+  return { user, clientId, scopes: scope ? scope.split(" ").filter(Boolean) : [] };
+}
+
 const AGENT_RUN_TOKEN_ISSUER = "xmatrix-hub";
 const AGENT_RUN_TOKEN_AUDIENCE = "xmatrix-agent-run";
 

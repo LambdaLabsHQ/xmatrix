@@ -23,6 +23,7 @@ import { EmailDeliveryConfigurationError, escapeHtml, sendEmail } from "./email-
 import { passwordResetEmail, VERIFIED_PASSWORD_OPTIONS } from "./auth-password-policy";
 import { runBetterAuthHandlerWithObservedHookFailure } from "./better-auth-request-lifecycle";
 import { mintHandleForNewAccount } from "./human-handle-mint";
+import { mcpOAuthPlugins } from "./mcp-oauth";
 import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 
@@ -230,6 +231,7 @@ function createAuthWithDatabase(
       customRules: {
         "/sign-in/email": { window: 60, max: 5 },
         "/request-password-reset": { window: 60, max: 3 },
+        "/oauth2/register": { window: 60, max: 10 },
       },
     },
     account: {
@@ -322,6 +324,8 @@ function createAuthWithDatabase(
       }),
       jwtPlugin,
       bearer(),
+      // Outside AI apps sign in through the PostgreSQL authority only.
+      ...(postgres ? mcpOAuthPlugins(env) : []),
     ],
   });
 }

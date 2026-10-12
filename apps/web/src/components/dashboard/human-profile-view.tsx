@@ -6,6 +6,7 @@ import { AtSign, Pencil } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
+import { ConnectedAiApps } from "@/components/dashboard/connected-ai-apps";
 import { GitHubAccountLink } from "@/components/dashboard/github-account-link";
 import { HumanProfileEditor, humanProfileRefusal } from "@/components/dashboard/human-profile-editor";
 import {
@@ -289,6 +290,7 @@ export function HumanProfileView({
                 </li>
               ) : null}
               <li className="py-3"><GitHubAccountLink /></li>
+              <li className="py-3"><ConnectedAiApps /></li>
             </ul>
           </ToolDetailSection>
         </div>

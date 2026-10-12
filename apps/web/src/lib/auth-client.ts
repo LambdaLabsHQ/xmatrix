@@ -261,6 +261,79 @@ export async function signOutBetterAuth(): Promise<void> {
   }
 }
 
+/** Parameters the Hub adds to sign an authorization request it hands to this app, not part of the request. */
+const OAUTH_SIGNATURE_PARAMS = ["sig", "exp", "ba_iat", "ba_pl"];
+
+/**
+ * The Hub's authorization endpoint for an outside app's request, to resume it
+ * once the person is signed in here; a `login` prompt has been answered.
+ */
+export function oauthAuthorizeUrl(signedQuery: URLSearchParams): string {
+  const query = new URLSearchParams(signedQuery);
+  for (const name of OAUTH_SIGNATURE_PARAMS) query.delete(name);
+  const prompt = (query.get("prompt") ?? "").split(" ").filter((value) => value && value !== "login");
+  if (prompt.length) query.set("prompt", prompt.join(" "));
+  else query.delete("prompt");
+  return `${getAuthBaseUrl()}/api/auth/oauth2/authorize?${query}`;
+}
+
+export interface OAuthClientSummary { name: string }
+
+async function oauthRequest(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+  const response = await xmatrixRawResponse(`${getAuthBaseUrl()}/api/auth${path}`, {
+    ...init, credentials: "include", cache: "no-store",
+    headers: { accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}) },
+  });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    const message = typeof payload.error_description === "string" ? payload.error_description : "This app's request could not be read.";
+    throw new AuthClientError(message, typeof payload.error === "string" ? payload.error : undefined, response.status);
+  }
+  return payload;
+}
+
+/** What an outside app says about itself when it registered. */
+export async function readOAuthClient(clientId: string): Promise<OAuthClientSummary> {
+  const client = await oauthRequest(`/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`);
+  const text = (key: string) => typeof client[key] === "string" && client[key] ? client[key] as string : undefined;
+  return { name: text("client_name") ?? clientId };
+}
+
+/** The person's answer to an outside app; returns where the browser goes next (back to the app). */
+export async function answerOAuthConsent(accept: boolean, signedQuery: URLSearchParams): Promise<string> {
+  const answer = await oauthRequest("/oauth2/consent", {
+    method: "POST", body: JSON.stringify({ accept, oauth_query: signedQuery.toString() }),
+  });
+  const url = typeof answer.url === "string" ? answer.url : typeof answer.redirect_uri === "string" ? answer.redirect_uri : "";
+  if (!url) throw new AuthClientError("The app's return address is missing.");
+  return url;
+}
+
+/** The address an outside AI app connects to (ChatGPT, Grok, Cursor…). */
+export function mcpServerUrl(): string {
+  return `${getAuthBaseUrl()}/mcp`;
+}
+
+export interface ConnectedOAuthApp { consentId: string; clientId: string; name: string; scopes: string[] }
+
+/** The outside apps this person has allowed, by the names they registered with. */
+export async function listConnectedOAuthApps(): Promise<ConnectedOAuthApp[]> {
+  const consents = await oauthRequest("/oauth2/get-consents") as unknown;
+  const rows = Array.isArray(consents) ? consents as Array<Record<string, unknown>> : [];
+  return Promise.all(rows.map(async (row) => {
+    const clientId = String(row.clientId ?? "");
+    const scopes = Array.isArray(row.scopes) ? row.scopes.map(String)
+      : typeof row.scopes === "string" ? row.scopes.split(/[ ,]/u).filter(Boolean) : [];
+    const client = await readOAuthClient(clientId).catch(() => ({ name: clientId }));
+    return { consentId: String(row.id ?? ""), clientId, name: client.name, scopes };
+  }));
+}
+
+/** Removes an app: it can no longer reach this person's xMatrix. */
+export async function removeConnectedOAuthApp(consentId: string): Promise<void> {
+  await oauthRequest("/oauth2/delete-consent", { method: "POST", body: JSON.stringify({ id: consentId }) });
+}
+
 async function fetchBetterAuthJwt(): Promise<string | null> {
   const response = await xmatrixRawResponse(`${getAuthBaseUrl()}/api/auth/token`, {
     credentials: "include",
