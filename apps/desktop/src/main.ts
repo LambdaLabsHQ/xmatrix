@@ -432,6 +432,23 @@ function createWindow(targetUrl?: string): BrowserWindow {
  * it; "open this Space in a new window" only names a Space, so navigating
  * would yank an already-open window off the channel the user is reading.
  */
+// Links the page was asked to open itself, each with what to do if it cannot.
+const pendingAppLinks = new Map<number, () => void>();
+let nextAppLinkId = 1;
+
+/**
+ * Take an open window to an address inside the app. The page is asked to go
+ * there itself, which keeps what it holds (a draft, its scroll, its
+ * connection); only a page that cannot is loaded afresh.
+ */
+function openInPage(window: BrowserWindow, targetUrl: string) {
+  const id = nextAppLinkId++;
+  pendingAppLinks.set(id, () => {
+    if (!window.isDestroyed()) void window.loadURL(targetUrl);
+  });
+  window.webContents.send("desktop:open-app-link", id, targetUrl);
+}
+
 function openWindowForUrl(
   targetUrl: string,
   { navigateExisting }: { navigateExisting: boolean }
@@ -450,7 +467,7 @@ function openWindowForUrl(
     : appWindows.find((window) => window.id === existingId) ?? null;
   if (existing && !existing.isDestroyed()) {
     if (navigateExisting && existing.webContents.getURL() !== targetUrl) {
-      existing.loadURL(targetUrl);
+      openInPage(existing, targetUrl);
     }
     revealWindow(existing);
     return existing;
@@ -726,7 +743,7 @@ function openAppPath(pathname: string, inWindow?: BrowserWindow | null) {
   const url = new URL(pathname, getWebOrigin());
   const window = inWindow && !inWindow.isDestroyed() ? inWindow : primaryWindow();
   if (window) {
-    window.loadURL(url.toString());
+    openInPage(window, url.toString());
     revealWindow(window);
   } else {
     pendingDeepLink = url.toString();
@@ -2664,6 +2681,14 @@ async function checkRuntime(runtime: string): Promise<DesktopRuntimeCheckResult>
 }
 
 function registerIpcHandlers() {
+  ipcMain.on("desktop:open-app-link-result", (event, id: number, handled: boolean) => {
+    const loadAfresh = pendingAppLinks.get(id);
+    pendingAppLinks.delete(id);
+    // Only a page of the app is believed when it says it went there itself.
+    const went = handled === true && trustedSenderOrigin(event as unknown as IpcMainInvokeEvent) !== null;
+    if (!went) loadAfresh?.();
+  });
+
   ipcMain.handle("desktop:get-context", secureIpc(() => {
     return {
       client: "desktop",
