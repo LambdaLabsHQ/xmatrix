@@ -25,6 +25,7 @@ their respective owners; these assets identify integrations with those products.
 
 | Provider | Asset source |
 | --- | --- |
+| appstoreconnect | [App Store](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/apple-app-store.svg) |
 | bingwebmaster | [Bing](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/bing.svg) |
 | bitbucket | [Bitbucket](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/bitbucket.svg) |
 | buildkite | [Buildkite](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/buildkite-icon.svg) |

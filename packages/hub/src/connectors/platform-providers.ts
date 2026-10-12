@@ -1,5 +1,9 @@
 import type { ConnectorAction, ConnectorDelivery, ConnectorDeliveryResult, ConnectorProvider } from "./provider";
 import { DINGTALK_ACTIONS, GOOGLE_CHAT_ACTIONS, TEAMS_ACTIONS, TELEGRAM_ACTIONS, WECOM_ACTIONS, verifyTelegram } from "./actions/chat-webhooks";
+import { APP_STORE_CONNECT_READ_ACTIONS } from "./actions/app-store-connect";
+import { APP_STORE_CONNECT_RELEASE_ACTIONS } from "./actions/app-store-connect-release";
+import { APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "./app-store-connect-api";
+import { receiveAppStoreConnectDelivery } from "./app-store-connect-events";
 import { BITBUCKET_ACTIONS, verifyBitbucket } from "./actions/bitbucket";
 import { DISCORD_ACTIONS, verifyDiscord } from "./actions/discord";
 import { FEISHU_ACTIONS } from "./actions/feishu";
@@ -62,6 +66,9 @@ const PROVIDERS: Record<string, {
   cloudflare: { receive: receiveCloudflareDelivery, actions: CLOUDFLARE_ACTIONS, verify: verifyCloudflare,
     subscriptions: CLOUDFLARE_SUBSCRIPTIONS },
   gcp: { receive: receiveGcpDelivery, actions: GCP_ACTIONS, verify: verifyGcp },
+  appstoreconnect: { receive: (delivery) => receiveAppStoreConnectDelivery(delivery),
+    actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS },
+    verify: verifyAppStoreConnect, subscriptions: APP_STORE_CONNECT_SUBSCRIPTIONS },
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },
   notion: { actions: NOTION_ACTIONS, verify: verifyNotion },

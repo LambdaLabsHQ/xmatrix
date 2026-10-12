@@ -232,6 +232,36 @@ saved alone; Check reads the site list when an API key is saved. Bing also
 offers OAuth for Webmaster Tools, but a company app needs its own registration;
 the API key keeps the connection per account without one.
 
+App Store Connect (`appstoreconnect`) saves an App Store Connect API key: its
+Key ID, the team's Issuer ID (none for an individual key) and the `.p8` private
+key, pasted as text with or without its line breaks. The Hub signs a ten-minute
+ES256 token per action and calls only `api.appstoreconnect.apple.com`; a
+pagination link to any other origin is refused. An app is its bundle ID and a
+version its version string (`1.2.0`, or `macos/1.2.0` off iOS). Reads:
+`list_apps:*`, `status:<app>`, `builds:<app> [version]`,
+`read_version:<app> <version>` and `reviews:<app> [unanswered]`. Writes take an
+uploaded build to the store, each step reading Apple's state first so a repeat
+changes nothing: `create_version` (or renames the one version still open for
+editing, never downward), `set_metadata` (one language's listing text, checked
+against Apple's limits before any call), `set_build` (only the exact processed
+build, read back after binding), `submit`, `cancel_submission`, `release`
+(only from Pending Developer Release; Apple cannot undo it) and
+`reply_review`. `submit` reuses an open draft submission with whatever else
+the team put in it, and refuses while another submission is with App Review or
+waits for an answer. App Review contact and sign-in details never pass through
+a Channel: `create_version` copies them from the app's previous version, Apple
+to Apple, read actions do not request the password or notes, and calls that
+carry them report only Apple's error code. Events: subscribing a Channel to a
+bundle ID makes that app have one webhook named `xMatrix · <Space id>` pointing
+at the connection's ingress with the generated secret, and the Space's last
+unsubscribe deletes it; webhooks with other names are never touched. Apple
+signs each delivery as `x-apple-signature: hmacsha256=<hex>`. A payload names
+a version or build and never the app, so the registered URL carries
+`?app=<bundle id>`; `*` routes webhooks the team configured itself. Out of
+reach of the API and left to a person: creating the app record, the App
+Privacy answers, agreements, and replying to App Review. Uploading the binary
+needs Xcode and stays with the machine or CI that built it.
+
 Google Business Profile (`googlebusinessprofile`) is another connection on the
 company Google client, holding only `https://www.googleapis.com/auth/business.manage`
 (Google offers no read-only scope for these APIs). Reads: `list_accounts:*`,
@@ -716,6 +746,7 @@ or generates a webhook secret in the Apps view.
 | Notion | internal integration token | — (polling deferred) | read page, append block, create page |
 | Vercel | access token + webhook secret | deployment created/succeeded/error | redeploy |
 | Cloudflare | OAuth or API token; Hub-registered destination secret | notifications fired/resolved by alert type; subscriptions own the account's `xMatrix ·` policies | query logs, list deployments (read); rollback |
+| App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review |
 | Discord | bot token | — | post message |
 | Feishu/Lark | custom app id/secret + verification token | message in linked chat | send message |
 

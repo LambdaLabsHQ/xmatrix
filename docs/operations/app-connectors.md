@@ -41,6 +41,7 @@ provider's webhook at the ingress URL. Then subscribe a channel with
 | Jira Cloud | webhook secret (generated) | `X-Hub-Signature: sha256=` HMAC | project key |
 | Vercel | webhook secret | `x-vercel-signature` HMAC-SHA1 | project name |
 | Cloudflare | destination secret (generated; the Hub registers it) | `cf-webhook-auth` equality | alert type |
+| App Store Connect | webhook secret (generated; the Hub registers it) | `x-apple-signature` `hmacsha256=` HMAC-SHA256 | app bundle ID (`?app=` of the registered URL) |
 | Feishu / Lark | verification token (+ encrypt key) | token equality; AES-256-CBC decrypt and `X-Lark-Signature` when encrypted; URL handshake answered | chat id |
 | Bitbucket Cloud | webhook secret (generated) | `X-Hub-Signature: sha256=` HMAC | `workspace/repo` |
 | CircleCI | signing secret (generated) | `circleci-signature` `v1=` HMAC-SHA256 | project slug `gh/org/repo` |
@@ -79,6 +80,39 @@ Each delivery is `fired` or `resolved` (`alert_event`), deduplicated by
 `alert_correlation_id` and edge, so an Automation can use
 `--on cloudflare:fired:workers_observability_real_time_issue`.
 
+### App Store Connect
+
+App Store Connect connects with an API key from Users and Access →
+Integrations → App Store Connect API: save its Key ID, the Issuer ID shown
+above the team keys (leave it empty for an individual key) and the contents of
+the `AuthKey_<Key ID>.p8` file. Give the key the App Manager role: Apple
+requires it, or Admin, to submit for review and to manage webhooks. Check
+signs a token and lists one app.
+
+Nothing is configured in App Store Connect. The Space's subscriptions are the
+authority for which apps report to xMatrix:
+
+- `@appstoreconnect:subscribe:<bundle id>` finds the app, then creates or
+  updates its webhook named `xMatrix · <Space id>` with the connection's
+  ingress URL (carrying `?app=<bundle id>&id=<app id>`) and generated secret.
+  Apple allows ten webhooks per app; ones with other names are never touched.
+- When no Channel in the Space subscribes to the app any more, the Hub deletes
+  that webhook.
+- `*` routes deliveries of webhooks the team created itself with the ingress
+  URL and the secret shown under Credentials; without `?app=` in their URL
+  they reach only Channels subscribed to `*`.
+
+Features are `version` (App Store version state), `build` (upload processed or
+failed), `beta` (external TestFlight state) and `feedback` (tester screenshot
+or crash); the default is `version build`. A delivery is deduplicated by
+Apple's event id, so an Automation can use
+`--on appstoreconnect:version:com.example.app`.
+
+Apple gives no API for creating the app record, answering App Privacy,
+accepting agreements or replying to App Review; those stay in App Store
+Connect. A first version also needs its App Review contact entered there once;
+later versions inherit it through `create_version`.
+
 ### Outbound Actions And Policy
 
 One action runs per message, written as
@@ -97,6 +131,7 @@ section, and none is ever shown again.
 | Jira | `read_issue:<ENG-9>` (read), `comment:<ENG-9>`, `transition:<ENG-9> <status>` |
 | Vercel | `redeploy:<deployment id>` |
 | Cloudflare | `query_logs:<worker> [minutes] [error\|warn\|log]` (read), `list_deployments:<worker>` (read), `rollback:<worker> [version id] [reason]` |
+| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `release:<bundle id> <version>`, `reply_review:<review id> <text>` |
 | Feishu | `send:<chat id>` |
 | Telegram | `send:<chat id>` |
 | Discord | `post:<channel id>` (mentions never ping) |

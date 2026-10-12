@@ -93,6 +93,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Gmail | `gmail` | | `search`, `read` |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
+| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review` |
 | Discord | `discord` | | `post` |
 | Telegram | `telegram` | Messages | `send` |
 | Feishu / Lark | `feishu` | Messages | `send` |
@@ -113,6 +114,29 @@ A few examples:
 @google:create_doc:new Launch notes
 @slack:post:C0123456789 Deploy finished.
 ```
+
+## Shipping an app to the App Store
+
+With App Store Connect connected, an agent can take a build from upload to the store and tell you how review went. Connect it under **Apps** with an App Store Connect API key (Users and Access → Integrations): the Key ID, the Issuer ID and the `.p8` file's contents. The key needs the App Manager role.
+
+```text
+@appstoreconnect:subscribe:com.example.app
+@appstoreconnect:create_version:com.example.app 1.2.0
+@appstoreconnect:set_metadata:com.example.app 1.2.0 {"locale":"en-US","whatsNew":"Faster sync and two crash fixes."}
+@appstoreconnect:set_build:com.example.app 1.2.0 412
+@appstoreconnect:submit:com.example.app 1.2.0
+@appstoreconnect:release:com.example.app 1.2.0
+```
+
+- `subscribe` registers the app's webhook at Apple for you. The conversation then hears when a build finishes processing and each time the version changes state: waiting for review, in review, rejected, approved, live. Use it as an [Automation trigger](pages.md#when-it-runs) to have an agent pick up a rejection.
+- `create_version` creates the next version with manual release; add `release=after_approval` to let Apple publish it as soon as it is approved. App Review contact and sign-in details carry over from the previous version without appearing in the conversation.
+- `set_build` takes the build number you uploaded, once Apple has processed it. Uploading needs Xcode, so it happens on the Mac or CI that built the app, for example `xcrun altool --upload-package` with the same API key kept as [Space secrets](agents.md#secrets).
+- `submit` sends the version to App Review. If Apple refuses because the listing is incomplete, the receipt says what is missing.
+- `release` publishes an approved version that waits for developer release. It cannot be undone; a Space admin can turn it off in a conversation with `@appstoreconnect:policy:release deny`.
+
+`@appstoreconnect:status:com.example.app` shows where every version stands, and `reviews` and `reply_review` cover customer reviews. A version on another platform is written `macos/1.2.0`, `tvos/1.2.0` or `visionos/1.2.0`.
+
+Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, entering the App Review contact for the very first version, accepting agreements, and replying to App Review when it asks a question.
 
 ## Agents and apps
 
