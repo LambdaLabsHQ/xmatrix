@@ -39,9 +39,9 @@ test("each daemon that has not seen the latest version is told the preset, never
   const result = await watchHarnessReleases({}, {
     presets: [npm, pypi, unpublished],
     latest: async (latest) => latest.kind === "npm" ? "2.1.289" : undefined,
-    targets: async (input) => {
-      asked.push(input);
-      return [{ ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "machine",
+    targets: async (releases) => {
+      asked.push(releases);
+      return [{ presetId: "claude", ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "machine",
         hostId: "host", daemonId: "daemon" }];
     },
     issue: async (command) => {
@@ -50,7 +50,7 @@ test("each daemon that has not seen the latest version is told the preset, never
     },
   });
   assert.deepEqual(result, { issued: 1 });
-  assert.deepEqual(asked, [{ presetId: "claude", version: "2.1.289" }],
+  assert.deepEqual(asked, [[{ presetId: "claude", version: "2.1.289" }]],
     "an unreadable registry and an unpublished preset tell nobody");
   assert.equal(commands[0].commandType, "harness_action");
   assert.equal(commands[0].principal.id, "owner");
@@ -65,7 +65,7 @@ test("one refused notice does not stop the others", async () => {
   const result = await watchHarnessReleases({}, {
     presets: [npm],
     latest: async () => "2.1.289",
-    targets: async () => ["a", "b"].map(owner => ({ ownerUserId: owner, ownerEmail: `${owner}@example.test`,
+    targets: async () => ["a", "b"].map(owner => ({ presetId: "claude", ownerUserId: owner, ownerEmail: `${owner}@example.test`,
       machineId: "machine", hostId: "host", daemonId: `daemon-${owner}` })),
     issue: async () => {
       calls++;
@@ -74,4 +74,33 @@ test("one refused notice does not stop the others", async () => {
     },
   });
   assert.deepEqual(result, { issued: 1 });
+});
+
+test("every preset with a published version is read in one pass, each target told its own preset", async () => {
+  const asked = [];
+  const commands = [];
+  const result = await watchHarnessReleases({}, {
+    presets: [npm, pypi, unpublished],
+    latest: async (latest) => latest.kind === "npm" ? "2.1.289" : "2.25.8",
+    targets: async (releases) => {
+      asked.push(releases);
+      return releases.map(({ presetId }) => ({ presetId, ownerUserId: "owner", ownerEmail: "owner@example.test",
+        machineId: "machine", hostId: "host", daemonId: "daemon" }));
+    },
+    issue: async (command) => { commands.push(command); return {}; },
+  });
+  assert.deepEqual(result, { issued: 2 });
+  assert.deepEqual(asked, [[{ presetId: "claude", version: "2.1.289" }, { presetId: "vibe", version: "2.25.8" }]]);
+  assert.deepEqual(commands.map(command => command.payload.presetId), ["claude", "vibe"]);
+});
+
+test("a pass with no readable registry reads no targets", async () => {
+  let read = false;
+  const result = await watchHarnessReleases({}, {
+    presets: [npm, pypi],
+    latest: async () => undefined,
+    targets: async () => { read = true; return []; },
+  });
+  assert.deepEqual(result, { issued: 0 });
+  assert.equal(read, false);
 });
