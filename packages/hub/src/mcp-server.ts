@@ -102,7 +102,7 @@ const WRITE_TOOLS: McpTool[] = [
     required: ["spaceId", "pageId", "baseRevision", "body"], additionalProperties: false },
   },
   {
-    name: "send_message", title: "Send a message", annotations: WRITES,
+    name: "send_message", title: "Send a message", annotations: { ...WRITES, destructiveHint: true },
     description: "Post a message in a channel, as you. Mentioning an Agent (@name) asks it to act, as it would " +
       "if you typed the message in xMatrix.",
     inputSchema: { type: "object", properties: { channelId: id("The channel, from list_channels."),

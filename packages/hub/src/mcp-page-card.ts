@@ -8,7 +8,7 @@ export function pageCardResource(appUrl: string): McpResourceContent {
   const origin = new URL(appUrl).origin;
   return {
     uri: PAGE_CARD_URI, mimeType: PAGE_CARD_MIME,
-    _meta: { ui: { prefersBorder: true, csp: { connectDomains: [], resourceDomains: [] } },
+    _meta: { ui: { domain: origin, prefersBorder: true, csp: { connectDomains: [], resourceDomains: [] } },
       "openai/widgetDescription": "An xMatrix page with its title, revision, text preview and source link." },
     text: `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

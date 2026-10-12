@@ -95,6 +95,7 @@ test("an outside app connects over OAuth and reads the member's pages through MC
     assert.ok(resources.some((item) => item.uri === show._meta.ui.resourceUri));
     const card = (await mcp("resources/read", { uri: show._meta.ui.resourceUri })).contents[0];
     assert.equal(card.mimeType, "text/html;profile=mcp-app");
+    assert.equal(card._meta.ui.domain, APP, "the card has the plugin's own sandbox origin");
     assert.ok(!card.text.includes("Ship the MCP server."), "the static template has no private page data");
     assert.deepEqual(await tool("show_page", { spaceId: space.id, pageId: roadmap.pageId }), read);
     const elsewhere = await mcp("tools/call", { name: "read_page", arguments: { spaceId: `space-${randomUUID()}`, pageId: roadmap.pageId } });
@@ -110,6 +111,8 @@ test("an outside app connects over OAuth and reads the member's pages through MC
     const write = async (name, args) => (await writer("tools/call", { name, arguments: args }));
     assert.deepEqual((await writer("tools/list")).tools.filter((item) => !item.annotations.readOnlyHint)
       .map((item) => item.name).sort(), ["create_page", "edit_page", "send_message"]);
+    assert.equal((await writer("tools/list")).tools.find((item) => item.name === "send_message")
+      .annotations.destructiveHint, true, "sending may trigger effects that a recall cannot undo");
     const created = (await write("create_page", { spaceId: space.id, title: "Launch notes",
       body: "# Launch notes\n\nDrafted in ChatGPT.\n", parentPageId: roadmap.pageId })).structuredContent;
     const page = await json(await worker.fetch(`${pages}/${encodeURIComponent(created.pageId)}`, { headers: auth }));

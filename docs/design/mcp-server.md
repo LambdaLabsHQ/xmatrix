@@ -57,6 +57,11 @@ holds, no minted credential), so an app's message or edit is the same act,
 with the same checks and effects (mentions summon Agents), as one made in
 xMatrix.
 
+Both page replacement and message sends are marked `destructiveHint: true`:
+a sent message may already have been read or have summoned an Agent before
+it can be recalled. All tools stay within the caller's bounded private
+Spaces, so `openWorldHint` is false.
+
 Writes carry optional application attribution alongside the human author:
 the signed token's OAuth client id and its registration's self-declared name.
 Hub sets it on the internal caller, Page revision author JSON, and reserved
@@ -75,6 +80,7 @@ the ChatGPT output-template compatibility key). `resources/list` and
 The view uses the MCP Apps initialization handshake and tool-result
 notifications; it renders text safely and opens canonical xMatrix page links
 through the host. It needs no external scripts, network access, or credentials.
+Its sandbox-domain metadata names the xMatrix Web origin, unique to this plugin.
 Existing data tools stay text-first; clients without UI still get the page.
 
 The ChatGPT/Codex directory package is in `deploy/chatgpt-plugin`.
