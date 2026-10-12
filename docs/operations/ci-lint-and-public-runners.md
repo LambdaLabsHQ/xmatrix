@@ -44,6 +44,12 @@ bootstrap isolated PostgreSQL tools, Web uses the existing browser fixtures,
 and native tests use the pinned toolchains. Signing and production publication
 remain governed by Production Release Intent and its immutable release train.
 
+CLI release builds run both macOS architectures in parallel on isolated hosted
+VMs. When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized
+across architectures and release runs because runner services can share the
+user's Keychain search list. Signing identities, per-build isolated keychains,
+artifact verification and publication gates use the same paths in both fleets.
+
 The root `db:generate`, `db:migrate` and `db:studio` Drizzle commands were
 removed because `@xmatrix/db` no longer uses Drizzle. Use its `check` command
 for migration validation and the documented PostgreSQL release path for

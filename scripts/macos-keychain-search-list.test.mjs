@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const helper = path.join(rootDir, "scripts", "macos-keychain-search-list.sh");
@@ -122,4 +123,32 @@ test("every macOS signing workflow uses the bounded search-list transaction", ()
     assert.match(workflow, /macos-keychain-search-list\.sh remove/);
     assert.doesNotMatch(workflow, /security list-keychains -d user -s/);
   }
+});
+
+test("CLI release serialization follows shared macOS hosts, not isolated hosted VMs", () => {
+  // The transaction tests above protect mutations inside a signing host. This
+  // release-workflow boundary protects scheduling: shared hosts serialize,
+  // while isolated hosted VMs must not wait for one another's entire build.
+  const { concurrency, strategy } = parse(signingWorkflows[0]).jobs.build;
+  const expression = concurrency.group.match(/\$\{\{\s*([\s\S]*?)\s*\}\}/u)[1];
+  const evaluate = new Function("vars", "matrix", "github", "contains", "format", `return (${expression});`);
+  const group = (target, fleet, runId) => evaluate(
+    { XMATRIX_RUNNER_FLEET: fleet }, { target }, { run_id: runId },
+    (value, search) => value.includes(search),
+    (template, ...values) => template.replace(/\{(\d+)\}/gu, (_, index) => values[Number(index)]),
+  );
+  const targets = strategy.matrix.include.map(({ target }) => target);
+  assert.equal(concurrency["cancel-in-progress"], false);
+  for (const fleet of [undefined, "github-hosted"]) {
+    const groups = targets.flatMap((target) => [group(target, fleet, 1), group(target, fleet, 2)]);
+    assert.equal(new Set(groups).size, groups.length, "hosted builds must all be independent");
+  }
+  const macTargets = targets.filter((target) => target.includes("apple-darwin"));
+  assert.equal(macTargets.length, 2);
+  assert.equal(group(macTargets[0], "self-hosted", 1), group(macTargets[1], "self-hosted", 2),
+    "shared macOS keychains need serialization across architectures and release runs");
+  const nativeGroups = targets.filter((target) => !macTargets.includes(target))
+    .map((target) => group(target, "self-hosted", 1));
+  assert.equal(new Set(nativeGroups).size, nativeGroups.length);
+  assert.ok(nativeGroups.every((value) => value !== group(macTargets[0], "self-hosted", 1)));
 });
