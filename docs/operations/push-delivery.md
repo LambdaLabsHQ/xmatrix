@@ -45,3 +45,13 @@ responses preserve registrations. These rules live in `push/outcome.ts` and are
 exercised at the provider-send/registration-forget boundary, alongside the
 deadline, concurrency, retry and late-response regressions in
 `packages/hub/test/push-delivery.test.mjs`.
+
+Registration lookup admits at most 500 people with 20 devices each. Retirement
+shares that capacity and deduplicates the complete gone set; it never truncates
+evidence to the SQL write size. A single database transaction deletes chunks of
+at most 1,000 exact device IDs, with at most ten writes under the existing
+transaction budget. Failure rolls back all chunks; replay is harmless.
+Oversized evidence is refused before any mutation. The isolated PostgreSQL
+notification regression verifies the 1,001-device case, full 10,000-device
+capacity, mixed outcomes, replay, transaction rollback/retry and preservation of
+non-target registrations.
