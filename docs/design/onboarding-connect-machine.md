@@ -45,6 +45,14 @@ The terminal needs no browser tab and asks no question: the machine name
 defaults to the hostname, and the person approves on the page they are already
 signed in to.
 
+If preparing the command fails, the page shows the failure and a **Try again**
+action that requests a new command without reloading the Space. A connection
+status read uses the shared bounded transient retry policy; after failure it
+shows an error, stops polling and hides any stale approval controls. **Try
+again** reads the existing intent, without creating another intent or
+approving the terminal. The terminal still needs the person's explicit
+**Approve** click after a successful status read.
+
 ## Design
 
 ### Setup intent (Hub)

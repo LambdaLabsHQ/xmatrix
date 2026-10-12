@@ -13,11 +13,11 @@ type Rule = Parameters<typeof fixtureRule>[1];
 
 async function openWithIntent(page: import("@playwright/test").Page, state: Record<string, unknown>, rules: Rule[] = []) {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE] });
-  for (const rule of rules) await fixtureRule(page, rule);
   await fixtureRule(page, { id: "intent-create", pattern: "**/api/xmatrix/setup-intents",
     responder: { kind: "static", json: { ...base, phase: "waiting" } } });
   await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,
     responder: { kind: "static", json: state } });
+  for (const rule of rules) await fixtureRule(page, rule);
   await page.goto("/app", { waitUntil: "domcontentloaded" });
   return page.getByTestId("connect-machine");
 }
@@ -56,4 +56,38 @@ test("a stranger's terminal is turned away without approving it", async ({ page 
     responder: { kind: "static", json: { ok: true } } }]);
   await connect.getByRole("button", { name: "Not mine" }).click();
   await expect.poll(async () => (await fixtureRequests(page, "intent-decline")).length).toBe(1);
+});
+
+test("a failed command preparation can be retried without reloading the Space", async ({ page }) => {
+  const connect = await openWithIntent(page, { ...base, phase: "waiting" }, [{
+    id: "intent-create", pattern: "**/api/xmatrix/setup-intents",
+    responder: { kind: "static", status: 503, json: { error: "Temporarily unavailable" } },
+  }]);
+  await expect(connect.getByRole("alert")).toBeVisible();
+  await fixtureRule(page, { id: "intent-create", pattern: "**/api/xmatrix/setup-intents",
+    responder: { kind: "static", json: { ...base, phase: "waiting" } } });
+  await connect.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
+  await expect(connect).toContainText("Waiting for the command…");
+  await expect(connect.getByRole("alert")).toHaveCount(0);
+});
+
+test("a failed connection read hides stale approval and can recover without approving", async ({ page }) => {
+  const connect = await openWithIntent(page, { ...base, phase: "approval", terminal }, [{
+    id: "intent-approve", pattern: `**/api/xmatrix/setup-intents/${INTENT}/approve`,
+    responder: { kind: "static", json: { ok: true } },
+  }]);
+  await expect(connect.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+  const preparations = await fixtureRequests(page, "intent-create");
+  await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,
+    responder: { kind: "static", status: 503, json: { error: "Temporarily unavailable" } } });
+  await expect(connect.getByRole("alert")).toBeVisible({ timeout: 20_000 });
+  await expect(connect.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+  await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,
+    responder: { kind: "static", json: { ...base, phase: "approval", terminal } } });
+  await connect.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(connect.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+  await expect(connect.getByRole("alert")).toHaveCount(0);
+  expect(await fixtureRequests(page, "intent-approve")).toHaveLength(0);
+  expect(await fixtureRequests(page, "intent-create")).toEqual(preparations);
 });

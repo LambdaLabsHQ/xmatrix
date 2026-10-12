@@ -42,6 +42,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   const [shownAt, setShownAt] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preparationAttempt, setPreparationAttempt] = useState(0);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -51,6 +52,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   useEffect(() => {
     if (!spaceId || !token || intentId) return;
     let cancelled = false;
+    setError(null);
     void xmatrixApiRequest<SetupIntentStatus>({
       url: WEB_PROXY_ROUTES.setup_intents, token, method: "POST", body: { spaceId },
     }).then((created) => {
@@ -62,7 +64,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       if (!cancelled) setError(userErrorMessage(reason, "Couldn't prepare a setup command"));
     });
     return () => { cancelled = true; };
-  }, [spaceId, token, intentId]);
+  }, [spaceId, token, intentId, preparationAttempt]);
 
   const status = useQuery({
     queryKey: ["setup-intent", intentId],
@@ -70,8 +72,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       url: WEB_PROXY_ROUTES.setup_intent(intentId!), token, signal,
     }),
     enabled: Boolean(intentId && token),
-    refetchInterval: (query) => (reported(query.state.data) ? false : POLL_MS),
-    retry: (count, reason) => !(reason instanceof XMatrixApiError && reason.status === 404) && count < 3,
+    refetchInterval: (query) => (query.state.error || reported(query.state.data) ? false : POLL_MS),
   });
 
   const machineReported = reported(status.data);
@@ -107,7 +108,16 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   const decline = () => act(() => xmatrixApiRequest({
     url: WEB_PROXY_ROUTES.setup_intent_decline(intentId!), token, method: "POST",
   }));
-  return { intentId, status: status.data, shownAt, error, busy, approve, decline };
+  const retry = () => {
+    setError(null);
+    if (intentId) void status.refetch();
+    else setPreparationAttempt((attempt) => attempt + 1);
+  };
+  return {
+    intentId, status: status.error ? undefined : status.data, shownAt,
+    error: error || (!expired && status.error ? userErrorMessage(status.error, "Couldn't prepare a setup command", "Couldn't check the connection") : null),
+    busy, retrying: status.isFetching, approve, decline, retry,
+  };
 }
 
 function reported(status: SetupIntentStatus | undefined): boolean {
