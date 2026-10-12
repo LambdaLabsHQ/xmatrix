@@ -1,9 +1,9 @@
-import type { ConnectorAction } from "../provider";
-import { record } from "../command-support";
 import { providerJson, ProviderRequestError } from "../http";
-import { quoteRetrievedText } from "./common";
-import { pageUrl } from "./google-search-console-site";
+import { record } from "../command-support";
+import type { ConnectorAction } from "../provider";
 import { cell } from "./google-report";
+import { pageUrl } from "./google-search-console-site";
+import { quoteRetrievedText } from "./common";
 
 /*
  * Bing Webmaster Tools (JSON API) and IndexNow. The Bing credential is the
