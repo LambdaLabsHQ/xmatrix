@@ -32,7 +32,10 @@ async function installCanonicalCatalog(page: import("@playwright/test").Page) {
   return locations;
 }
 
-test("bare @ shows active Channel instances in their own category beside a full harness catalog", async ({ page }, testInfo) => {
+for (const mobile of [false, true]) {
+ test.describe(`mention categories on ${mobile ? "mobile" : "desktop"}`, () => {
+  test.use({ viewport: mobile ? { width: 393, height: 852 } : { width: 1280, height: 900 }, isMobile: mobile, hasTouch: mobile });
+  test("bare @ shows active Channel instances in their own category beside a full harness catalog", async ({ page }, testInfo) => {
   const harnesses = ["claude", "codex", "cursor", "grok", "opencode", "windsurf"];
   const locations = harnesses.map(harness => ({
     key: { spaceId: E2E_SPACE.id, ownerUserId: "owner", machineId: "machine", harness },
@@ -57,7 +60,9 @@ test("bare @ shows active Channel instances in their own category beside a full 
   await page.screenshot({ path: testInfo.outputPath("active-instance-mention.png") });
   await instance.click();
   await expect(draft).toHaveValue("@codex:1 ");
-});
+  });
+ });
+}
 
 async function canonicalComposer(page: import("@playwright/test").Page) {
   const locations = await installCanonicalCatalog(page);

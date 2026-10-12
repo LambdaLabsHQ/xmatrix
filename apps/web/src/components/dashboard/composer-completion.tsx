@@ -41,6 +41,7 @@ import {
 } from "@/components/dashboard/completion-option-button";
 import { ContentSkeleton } from "@/components/dashboard/content-skeleton";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { MentionCategoryLabel } from "./mention-category-label";
 import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
 import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonStartCandidates } from "./auto-launch-completion";
@@ -970,12 +971,12 @@ export function useComposerCompletion({
                 )
               ) : null}
               {mentionSuggestionSections.map((section) => (
-                <div key={section.kind}>
+                <div key={section.kind} className="app-mention-category" role="group" aria-label={section.label}>
                   {/* A folded section carries its label on the fold row itself,
                       so it costs one line rather than a header plus a row. */}
                   {mentionCompletion.stage === "target" && section.candidates.length > 0 ? (
-                    <div className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                      {section.label}
+                    <div className="app-mention-category-heading">
+                      <MentionCategoryLabel section={section} />
                     </div>
                   ) : null}
                   {section.candidates.map((candidate, sectionIndex) => {
@@ -1044,9 +1045,9 @@ export function useComposerCompletion({
                           ) : (
                             <>
                               <span className="font-semibold">{candidate.name}</span>
-                              <span className="ml-1.5 text-foreground/50">
-                                @{candidate.mention || candidate.name}
-                              </span>
+                              {candidate.mention && candidate.mention !== candidate.name && (
+                                <span className="ml-1.5 text-foreground/50">@{candidate.mention}</span>
+                              )}
                             </>
                           )}
                         </span>
@@ -1093,13 +1094,11 @@ export function useComposerCompletion({
                           }}
                           selected={index === activeIndex}
                           onSelect={() => expandMentionKind(section.kind)}
-                          className="min-h-6 gap-1 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60"
+                          className="app-mention-category-more"
                         >
-                          <ChevronRight className="size-3 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">{section.label}</span>
-                          <span className="shrink-0 text-muted-foreground/50">
-                            +{section.hiddenCount}
-                          </span>
+                          {section.candidates.length === 0 ? <MentionCategoryLabel section={section} /> :
+                            <span className="min-w-0 flex-1 truncate">Show {section.hiddenCount} more</span>}
+                          <ChevronRight aria-hidden="true" className="size-3.5 shrink-0" />
                         </CompletionOptionButton>
                       );
                     })()}

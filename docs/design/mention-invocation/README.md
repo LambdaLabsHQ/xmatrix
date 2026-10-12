@@ -10,6 +10,10 @@ category before Agent summons. Its fold is independent of the harness catalog. O
 remain in the colon reference picker. A new thread draft offers no Instances
 from its parent Channel.
 
+Mention categories use icon-and-count headings, inset rounded selections and
+plain expansion rows inside the composer's single Liquid Glass surface.
+Category labels and rows add no separate backdrop-filter material.
+
 The Web composer asks Jev about summon intent after a 350 ms typing pause,
 using the exact outgoing body, summon ranges and the author's authorized
 Channel context. Mention bands show the reading. A declined address has a clickable dotted
