@@ -216,6 +216,19 @@ Search Console clicks. There are no inbound events and no writes. Enable the
 Google Analytics Admin and Data APIs on the company Google project and add the
 scope to its consent screen; it is a sensitive scope like `webmasters`.
 
+PageSpeed Insights (`pagespeed`) has no OAuth: the connection saves one Google
+Cloud API key with the PageSpeed Insights and Chrome UX Report APIs enabled,
+sent only in the `x-goog-api-key` header. `audit:<page url> [strategy=mobile|desktop]`
+asks PageSpeed Insights for a Lighthouse run with a `fields` mask, so the
+response stays inside the provider response bound; it reports category
+scores, lab metrics, the worst 15 failing audits and the page's field data. A
+Lighthouse run takes up to a minute, so this one call waits up to 60 seconds
+(`providerJson`'s `timeoutMs`, capped at 60 seconds). `field:<page url or origin>`
+reads the Chrome UX Report's 28-day p75 and good/needs-improvement/poor shares;
+a bare origin, or `scope=origin`, reads the whole origin, and too little Chrome
+traffic is reported as no data rather than an error. Check reads the Chrome UX
+Report for a well-known origin. Google fetches the page, not the Hub.
+
 Gmail signs in through Composio rather than the company Google client:
 `gmail.readonly` is a restricted Google scope, and Composio's Google app is
 already verified for it. The `gmail` manifest uses `oauth.flow: "composio"`;
