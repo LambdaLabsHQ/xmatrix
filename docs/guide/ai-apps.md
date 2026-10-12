@@ -1,5 +1,5 @@
 ---
-title: Outside AI apps
+title: "Outside AI apps"
 description: "Connect an MCP-compatible AI app to your xMatrix pages and conversations."
 ---
 
