@@ -20,7 +20,6 @@ test("public routes share one warm material layer", () => {
 
   for (const route of [
     "page.tsx",
-    "docs/page.tsx",
     "download/page.tsx",
     "login/page.tsx",
     "billing/page.tsx",
@@ -72,14 +71,6 @@ test("homepage panels reuse app wood and liquid-glass primitives", () => {
   );
   assert.match(siteCss, /--site-wood-ink:/);
   assert.match(siteCss, /font-weight:\s*700/);
-});
-
-test("docs content panels use wood instead of large glass cards", () => {
-  const docsSource = source("docs/page.tsx");
-  assert.match(docsSource, /WoodPanel/);
-  assert.match(docsSource, /quickStart\.map[\s\S]*<WoodPanel /);
-  assert.match(docsSource, /launchCommands\.map[\s\S]*<WoodPanel /);
-  assert.match(docsSource, /<WoodPanel className="min-w-0 p-6">[\s\S]*Recommended flow/);
 });
 
 test("navbar keeps wood chrome beside selected-channel glass pills and woods the mobile sheet", () => {

@@ -65,6 +65,7 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 
 其余文档为英文：
 
+- [使用文档](../guide/index.md)（消息语法见 [Message syntax](../guide/syntax.md)），也发布在 [xmatrix.sh/docs](https://xmatrix.sh/docs)
 - [支持的 Agent](../../README.md#supported-agents)
 - [工作原理](../../README.md#how-it-works)
 - [参与开发](../../README.md#hack-on-xmatrix)
