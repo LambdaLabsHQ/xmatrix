@@ -267,7 +267,8 @@ export function PrivacyPolicyContent() {
           changes, or deletes mail. Gmail signs in through our subprocessor Composio, whose verified
           Google application holds the Gmail grant and relays each request. Search Console, AdSense, and Google Cloud access lets them read the
           sites, reports, projects, costs, logs, metrics, and alerts they ask about, and make the
-          changes they request.
+          changes they request. Search Console can also verify site ownership and manage property,
+          sitemap, and verification owner records when requested.
         </p>
         <p>
           We use Google user data only to provide those user-facing features: we retrieve it when a
