@@ -2,6 +2,7 @@ import { record } from "../command-support";
 import { providerJson, ProviderRequestError } from "../http";
 import type { ConnectorAction, ConnectorActionStatement } from "../provider";
 import { quoteRetrievedText } from "./common";
+import { describeGoogleError } from "../google-provider-error";
 import { googleHeaders } from "./google-headers";
 import { searchConsoleSite } from "./google-search-console-site";
 
@@ -48,7 +49,7 @@ function resourceSummary(value: unknown): string {
 function resourceAction(method: "GET" | "DELETE"): ConnectorAction {
   return { effect: method === "GET" ? "read" : "write", requires: ["oauthToken"], parse: resourceId,
     async execute({ credentials }, input) {
-      const result = await providerJson(resourceUrl(input.id!), { method, headers: headers(credentials) });
+      const result = await providerJson(resourceUrl(input.id!), { method, describeError: describeGoogleError, headers: headers(credentials) });
       if (method === "GET" && result.id !== input.id) throw new ProviderRequestError(502, "Google did not return the requested verification resource");
       return { summary: method === "DELETE" ? `Removed the connected account's ownership of verification resource ${input.id}.` :
         "Verified site:\n" + quoteRetrievedText(resourceSummary(result), 16_000) };
@@ -59,7 +60,7 @@ export const GOOGLE_SITE_VERIFICATION_ACTIONS: Record<string, ConnectorAction> =
   get_verification_token: {
     effect: "read", requires: ["oauthToken"], parse: verificationSite,
     async execute({ credentials }, input) {
-      const result = await providerJson(`${API}/token`, { method: "POST", headers: headers(credentials),
+      const result = await providerJson(`${API}/token`, { method: "POST", describeError: describeGoogleError, headers: headers(credentials),
         json: { site: { type: input.type, identifier: input.identifier }, verificationMethod: input.method } });
       if (result.method !== input.method || typeof result.token !== "string" || !result.token || result.token.length > 8192) {
         throw new ProviderRequestError(502, "Google did not return the requested verification token");
@@ -72,7 +73,7 @@ export const GOOGLE_SITE_VERIFICATION_ACTIONS: Record<string, ConnectorAction> =
     effect: "write", requires: ["oauthToken"], parse: verificationSite,
     async execute({ credentials }, input) {
       const result = await providerJson(`${API}/webResource?verificationMethod=${input.method}`, {
-        method: "POST", headers: headers(credentials), json: { site: { type: input.type, identifier: input.identifier } } });
+        method: "POST", describeError: describeGoogleError, headers: headers(credentials), json: { site: { type: input.type, identifier: input.identifier } } });
       const site = record(result.site);
       if (site.identifier !== input.identifier || site.type !== input.type) {
         throw new ProviderRequestError(502, "Google did not confirm the requested site's ownership");
@@ -84,7 +85,7 @@ export const GOOGLE_SITE_VERIFICATION_ACTIONS: Record<string, ConnectorAction> =
     effect: "read", requires: ["oauthToken"],
     parse: statement => statement.target === "*" && !statement.text.trim() ? {} : "use @googlesearchconsole:list_verifications:*",
     async execute({ credentials }) {
-      const result = await providerJson(`${API}/webResource`, { headers: headers(credentials) });
+      const result = await providerJson(`${API}/webResource`, { describeError: describeGoogleError, headers: headers(credentials) });
       if (result.items !== undefined && !Array.isArray(result.items)) throw new ProviderRequestError(502, "Google did not return verified sites");
       const items = (result.items as unknown[] | undefined) ?? [];
       return { summary: `Verified resources (${items.length}; at most 50 shown):\n` +
@@ -107,7 +108,7 @@ export const GOOGLE_SITE_VERIFICATION_ACTIONS: Record<string, ConnectorAction> =
       return { ...id, owners: JSON.stringify(owners) };
     },
     async execute({ credentials }, input) {
-      const result = await providerJson(resourceUrl(input.id!), { method: "PUT", headers: headers(credentials),
+      const result = await providerJson(resourceUrl(input.id!), { method: "PUT", describeError: describeGoogleError, headers: headers(credentials),
         json: { owners: JSON.parse(input.owners!) } });
       if (result.id !== input.id) throw new ProviderRequestError(502, "Google did not return the requested verification resource");
       return { summary: "Updated the verification owner list:\n" + quoteRetrievedText(resourceSummary(result), 16_000) };
