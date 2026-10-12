@@ -22,8 +22,11 @@ export class PushDeviceError extends ControlError {
   override name = "PushDeviceError";
 }
 
+// Read and retirement describe one notification's bounded registration set.
+// A SQL chunk limits each write, never the total evidence to be retired.
+const PUSH_DEVICE_LIMITS = { users: 500, devicesPerUser: 20, retirementChunk: 1000 };
 /** A person registers at most this many devices; the oldest make way. */
-export const MAX_PUSH_DEVICES_PER_USER = 20;
+export const MAX_PUSH_DEVICES_PER_USER = PUSH_DEVICE_LIMITS.devicesPerUser;
 const BASE64URL = /^[A-Za-z0-9_-]{1,200}$/u;
 
 function invalid(message: string): PushDeviceError {
@@ -102,7 +105,7 @@ export class PostgresPushDeviceRepository {
 
   /** Every device of the given people, newest first. */
   async listForUsers(input: { requestId: string; userIds: readonly string[] }): Promise<PushDevice[]> {
-    const userIds = [...new Set(input.userIds)].slice(0, 500);
+    const userIds = [...new Set(input.userIds)].slice(0, PUSH_DEVICE_LIMITS.users);
     if (userIds.length === 0) return [];
     const limit = userIds.length * MAX_PUSH_DEVICES_PER_USER;
     return this.database.transaction({ requestId: input.requestId, operation: "push-device.list" }, async (tx) => {
@@ -124,13 +127,19 @@ export class PostgresPushDeviceRepository {
 
   /** Forget devices the push service says are gone (an uninstalled app, an expired subscription). */
   async forget(input: { requestId: string; deviceIds: readonly string[] }): Promise<void> {
-    const deviceIds = [...new Set(input.deviceIds)].slice(0, 1000);
+    const deviceIds = [...new Set(input.deviceIds)];
+    if (deviceIds.length > PUSH_DEVICE_LIMITS.users * MAX_PUSH_DEVICES_PER_USER) {
+      throw invalid("Retirement evidence exceeds one notification's device capacity");
+    }
     if (deviceIds.length === 0) return;
-    await this.database.transaction({ requestId: input.requestId, operation: "push-device.forget" }, (tx) =>
-      tx.query({
-        name: "push_device_forget_v1",
-        text: "DELETE FROM control.push_devices WHERE device_id=ANY($1::text[])",
-        values: [deviceIds], maxRows: 0,
-      }));
+    await this.database.transaction({ requestId: input.requestId, operation: "push-device.forget" }, async (tx) => {
+      for (let offset = 0; offset < deviceIds.length; offset += PUSH_DEVICE_LIMITS.retirementChunk) {
+        await tx.query({
+          name: "push_device_forget_v1",
+          text: "DELETE FROM control.push_devices WHERE device_id=ANY($1::text[])",
+          values: [deviceIds.slice(offset, offset + PUSH_DEVICE_LIMITS.retirementChunk)], maxRows: 0,
+        });
+      }
+    });
   }
 }
