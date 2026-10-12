@@ -1,6 +1,7 @@
 /** Wire types of the page authority (docs/design/pages-and-conversations.md). */
 
 import type { LiveAgentStatus } from "./authority-foundation.js";
+import { externalAppSource, type ExternalAppSource } from "./external-app-source.js";
 
 export interface PageSummary {
   pageId: string;
@@ -25,7 +26,16 @@ export interface PageSummary {
   readRevision?: number | null;
 }
 
-export interface PageAuthor { kind: "user" | "agent"; id: string; label: string; ownerUserId?: string }
+export interface PageAuthor {
+  kind: "user" | "agent"; id: string; label: string; ownerUserId?: string;
+  /** Optional attribution supplied by Hub; identity and access still belong to the person. */
+  application?: ExternalAppSource;
+}
+
+export function pageAuthorLabel(author: Pick<PageAuthor, "label" | "application">): string {
+  const application = externalAppSource(author.application);
+  return author.label + (application ? ` via ${application.name}` : "");
+}
 
 const PAGE_AUTHOR_COLORS = ["#2563eb", "#db2777", "#16a34a", "#ea580c", "#7c3aed", "#0891b2", "#ca8a04"];
 

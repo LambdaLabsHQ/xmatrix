@@ -11,6 +11,7 @@ import { listSpaces } from "./spaces";
 import { asInternalCaller } from "./internal-caller";
 import type { Env } from "./types";
 import { PAGE_CARD_MIME, PAGE_CARD_URI, pageCardResource } from "./mcp-page-card";
+import { authPostgresTransaction } from "./auth-authority";
 
 /**
  * The Hub's MCP server for outside AI apps (docs/design/mcp-server.md): a
@@ -157,7 +158,17 @@ export function mcpServer(env: Env, caller: McpCaller, dispatch: (request: Reque
   const writable = readable && caller.scopes.includes("xmatrix:write");
   /** One of the Hub's routes, called as the person; its refusal is the tool's. */
   const route = async (method: string, path: string, body: Record<string, unknown>) => {
-    const response = await asInternalCaller(caller.user, (headers) => dispatch(new Request(
+    // Source comes from the signed token's client id and the authorization
+    // server's registration, never from tool arguments or public metadata.
+    const application = await authPostgresTransaction(env, "mcp.application.read", async (tx) => {
+      const client = (await tx.query<{ name: string | null }>({ name: "mcp_application_source_v1",
+        text: "SELECT name FROM control.auth_oauth_clients WHERE client_id=$1 LIMIT 1",
+        values: [caller.clientId], maxRows: 1 }))[0];
+      if (!client) throw new McpToolError("The application's registration is no longer available");
+      const name = (client.name ?? "").replace(/[\p{Cc}\p{Cf}]/gu, "").trim().slice(0, 80) || "AI app";
+      return { clientId: caller.clientId, name };
+    });
+    const response = await asInternalCaller({ ...caller.user, mcpApplication: application }, (headers) => dispatch(new Request(
       new URL(path, hubAuthBaseUrl(env)), { method, headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify(body) })));
     if (!response.ok) return refused(response);

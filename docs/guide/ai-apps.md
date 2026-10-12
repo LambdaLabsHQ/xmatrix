@@ -22,6 +22,8 @@ The connected app has the same access you have in xMatrix. Reading lets it
 find your Spaces, search and read pages, and read conversations. A write
 grant also lets it create or edit pages and send messages as you. A message
 that mentions an Agent can ask that Agent to act.
+Page history and message headers show the outside application's registered
+name next to your authorship. That name is supplied by the application.
 
 Try “Find my roadmap and summarize its decisions” or “Show my project wiki.”
 Clients that support MCP Apps can show a page card with its current revision,

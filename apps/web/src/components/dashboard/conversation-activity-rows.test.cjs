@@ -164,3 +164,17 @@ test("a message on its way is grouped the way it will be once the server confirm
     assert.equal(stalled.continuation, undefined, `${sendStatus}: the header is where the row says so`);
   }
 });
+
+
+test("an outside app source stays visible when the same person switches apps", () => {
+  const app = (clientId, name) => ({ metadata: { xmatrixMcpApplication: { clientId, name } } });
+  const rows = buildConversationRows([
+    said(yiming, "Typed in xMatrix", 0),
+    said(yiming, "Sent in Chat", 1, app("chat-client", "Chat")),
+    said(yiming, "More in Chat", 2, app("chat-client", "Chat")),
+    said(yiming, "Sent in Cursor", 3, app("cursor-client", "Cursor")),
+    said(yiming, "Back in xMatrix", 4),
+  ]);
+  assert.deepEqual(rows.map((row) => Boolean(row.continuation)), [false, false, true, false, false]);
+  assert.ok(rows.every((row) => row.senderId === yiming.id), "the application is not another actor");
+});

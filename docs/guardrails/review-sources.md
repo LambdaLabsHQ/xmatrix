@@ -10,6 +10,11 @@
   scope; the browser-script boundary test checks hostile content and links.
   The credential-free ZIP carries review cases but leaves verified publisher,
   portal challenge, reviewer credentials, and a real recording to the portal.
+  MCP writes keep the human as principal while carrying the signed OAuth
+  client id and its self-declared registration name in optional author JSON
+  and reserved message metadata. The OAuth E2E checks source preservation
+  through live Page edits and rejects public metadata spoofing; Web grouping
+  coverage keeps application switches visible under the same human identity.
 
 - 2026-10-09 GCP caller attribution: reviewed consumed_api credential_id/method labels and daily aggregation preserving the comparison grid, exact-project API Keys v2 metadata without GetKeyString, typed API activation and secret-free historical audit principal summaries. Provider-boundary tests protect group/filter injection, key project/UUID mismatch, private field omission, bounded continuations, same-identity quota context and the distinction between key administrators and inference callers. See [GCP connector](../connectors/gcp.md).
 

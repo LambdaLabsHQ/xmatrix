@@ -57,6 +57,15 @@ holds, no minted credential), so an app's message or edit is the same act,
 with the same checks and effects (mentions summon Agents), as one made in
 xMatrix.
 
+Writes carry optional application attribution alongside the human author:
+the signed token's OAuth client id and its registration's self-declared name.
+Hub sets it on the internal caller, Page revision author JSON, and reserved
+`xmatrixMcpApplication` message metadata. Public callers cannot provide it.
+Web history and message headers show "via …"; the name is identified as
+self-declared, not proof of a verified provider. Older clients ignore these
+optional fields and keep showing the same human author. No schema migration
+or additional acting identity is needed.
+
 ## Page cards and directory submission
 
 `show_page` returns the same authorized current page as `read_page` and names
@@ -74,7 +83,6 @@ publishing identity, domain verification, reviewer access, and a real demo.
 
 ## Not yet
 
-- Showing which app wrote a message or revision ("via ChatGPT").
 - The ChatGPT app directory (submitted from the OpenAI dashboard by a
   person). Grok and Cursor connect by entering the URL. The Claude connector
   directory is not a target.

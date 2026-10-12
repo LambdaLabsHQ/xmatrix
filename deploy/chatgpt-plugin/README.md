@@ -1,6 +1,6 @@
 # ChatGPT and Codex directory package
 
-Build the portable Agent Plugins ZIP from the repository root:
+Build the Codex-compatible plugin ZIP from the repository root:
 
 ```sh
 python3 scripts/package-chatgpt-plugin.py /tmp/xmatrix-chatgpt-1.0.0.zip

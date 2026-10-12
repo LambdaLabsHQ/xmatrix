@@ -1,4 +1,4 @@
-import type { PageRecentChange } from "@xmatrix/protocol";
+import { pageAuthorLabel, type PageRecentChange } from "@xmatrix/protocol";
 
 /** Recent changes the Pages list shows, and how many once the reader asks for more. */
 export const RECENT_CHANGES = 3;
@@ -6,7 +6,7 @@ export const MORE_RECENT_CHANGES = 10;
 
 /** A recent change's second line, as a conversation row's preview: who, then what they wrote. */
 export function pageRecentChangePreview(change: Pick<PageRecentChange, "authors" | "gist" | "created">): string {
-  const who = [...new Set(change.authors.map((author) => author.label))].join(", ");
+  const who = [...new Set(change.authors.map(pageAuthorLabel))].join(", ");
   const what = change.gist ?? (change.created ? "Created the page" : "Edited");
   return who ? `${who}: ${what}` : what;
 }

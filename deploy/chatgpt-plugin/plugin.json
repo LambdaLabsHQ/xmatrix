@@ -37,19 +37,19 @@
               "description": "Create a page",
               "prompt": "Create a page called Meeting notes in App review with the text: We decided to ship the integration.",
               "tools_triggered": "list_spaces, create_page",
-              "expected_behavior": "Create one page authored by the connected account; return its source link."
+              "expected_behavior": "Create one page authored by the connected account; return its source link. In xMatrix, verify the human author and the application source shown next to it."
             },
             {
               "description": "Edit a page on the current revision",
               "prompt": "Read Meeting notes in App review and add: Owner: Review team.",
               "tools_triggered": "list_spaces, search_pages, read_page, edit_page",
-              "expected_behavior": "Read the revision first, preserve existing content, and save the requested change."
+              "expected_behavior": "Read the revision first, preserve existing content, and save the requested change. In xMatrix, verify the human author and the application source shown next to it."
             },
             {
               "description": "Read and send a channel message",
               "prompt": "Read the review channel in App review, then post: The integration review is complete.",
               "tools_triggered": "list_spaces, list_channels, read_channel, send_message",
-              "expected_behavior": "Read authorized recent messages and post the exact requested text as the connected account."
+              "expected_behavior": "Read authorized recent messages and post the exact requested text as the connected account. In xMatrix, verify the human author and the application source shown next to it."
             }
           ],
           "negative": [

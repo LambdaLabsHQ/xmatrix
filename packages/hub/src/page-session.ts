@@ -36,6 +36,7 @@ export interface PageSessionPrincipal {
   kind: "user" | "agent";
   id: string;
   label: string;
+  application?: import("@xmatrix/protocol").ExternalAppSource;
   runProof?: { runId: string; instanceId: string; executionKey: string };
   ownerUserId?: string;
   /** The conversation an Agent works from. */

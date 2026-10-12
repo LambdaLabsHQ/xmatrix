@@ -67,13 +67,15 @@ test("an outside app connects over OAuth and reads the member's pages through MC
       const tokens = await json(await call("/oauth2/token", { method: "POST", form: { grant_type: "authorization_code",
         code: back.searchParams.get("code"), code_verifier: verifier, client_id: client.client_id, redirect_uri: REDIRECT } }));
       let id = 0;
-      return async (method, params = {}, expectedStatus = 200) => {
+      const callMcp = async (method, params = {}, expectedStatus = 200) => {
         const response = await worker.fetch("/mcp", { method: "POST", headers: {
           authorization: `Bearer ${tokens.access_token}`, "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
         assert.equal(response.status, expectedStatus, await response.clone().text());
         return (await response.json()).result;
       };
+      callMcp.clientId = client.client_id;
+      return callMcp;
     };
     const mcp = await connectApp("xmatrix:read offline_access");
     const tool = async (name, args) => (await mcp("tools/call", { name, arguments: args })).structuredContent;
@@ -113,9 +115,13 @@ test("an outside app connects over OAuth and reads the member's pages through MC
     const page = await json(await worker.fetch(`${pages}/${encodeURIComponent(created.pageId)}`, { headers: auth }));
     assert.equal(page.page.parentPageId, roadmap.pageId);
     assert.equal(page.page.revisionInfo.authors[0].id, userId, "the member wrote it");
+    assert.deepEqual(page.page.revisionInfo.authors[0].application, { clientId: writer.clientId, name: "Chat" });
     const edited = (await write("edit_page", { spaceId: space.id, pageId: created.pageId,
       baseRevision: created.revision, body: "# Launch notes\n\nShipped.\n" })).structuredContent;
     assert.equal(edited.revision, created.revision + 1);
+    const afterEdit = await json(await worker.fetch(`${pages}/${encodeURIComponent(created.pageId)}`, { headers: auth }));
+    assert.deepEqual(afterEdit.page.revisionInfo.authors[0].application, { clientId: writer.clientId, name: "Chat" },
+      "the live session preserves the MCP application's attribution on an edit");
     const stale = await write("edit_page", { spaceId: space.id, pageId: created.pageId, baseRevision: created.revision,
       body: "# Launch notes\n\nSomething else entirely.\n" });
     assert.equal(stale.isError, true, "an edit on an old revision that overlaps is refused with the current text");
@@ -127,6 +133,13 @@ test("an outside app connects over OAuth and reads the member's pages through MC
     const message = history.messages.find((item) => item.messageId === sent.messageId);
     assert.equal(message.body, "Posted from ChatGPT");
     assert.equal(message.from.userId, userId, "sent as the member");
+    assert.deepEqual(message.metadata.xmatrixMcpApplication, { clientId: writer.clientId, name: "Chat" });
+    const spoofed = await json(await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
+      method: "POST", headers: auth, body: JSON.stringify({ body: "Typed in xMatrix",
+        metadata: { xmatrixMcpApplication: { clientId: writer.clientId, name: "Chat" } } }) }));
+    const afterSpoof = await json(await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/history`, { headers: auth }));
+    assert.equal(afterSpoof.messages.find((item) => item.messageId === spoofed.message.messageId)
+      .metadata?.xmatrixMcpApplication, undefined, "public metadata cannot impersonate an MCP application's source");
     assert.equal(await mcp("tools/call", { name: "send_message", arguments: { channelId: channel.id, body: "x" } }),
       undefined, "a read grant has no writing tool to call");
   } finally {
