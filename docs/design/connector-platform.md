@@ -258,6 +258,12 @@ a bare origin, or `scope=origin`, reads the whole origin, and too little Chrome
 traffic is reported as no data rather than an error. Check reads the Chrome UX
 Report for a well-known origin. Google fetches the page, not the Hub.
 
+Google report dimensions, Analytics channel aliases and CrUX form factors are
+explicit vocabularies. `google-report.ts` resolves their bounded, distinct names
+through `mappedChoices`; only own entries count as choices, and mapping happens
+after validation. Each connector retains its vocabulary, defaults and usage
+message, including dimension-free reports and the all-device CrUX form.
+
 Yandex Webmaster (`yandexwebmaster`) saves an OAuth token of the Yandex
 account (`webmaster:hostinfo`, plus `webmaster:verify` for recrawl), sent as
 `Authorization: OAuth <token>`; a company Yandex app for one-click Connect is
