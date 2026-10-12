@@ -53,6 +53,7 @@ their respective owners; these assets identify integrations with those products.
 | telegram | [Telegram](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/telegram.svg) |
 | vercel | [Vercel](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/vercel-icon.svg) |
 | wecom | [WeCom](https://wwcdn.weixin.qq.com/node/wework/images/WWLogo.08631f189a.svg) |
+| yandexwebmaster | [Yandex](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/yandex-ru.svg) (the red Я mark only, without the wordmark) |
 
 The existing GitHub mark and generic Webhook glyph are retained. OpenConnector
 is a user-supplied runtime rather than one vendor, so it uses a neutral connected
