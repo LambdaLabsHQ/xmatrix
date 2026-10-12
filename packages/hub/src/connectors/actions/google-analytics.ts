@@ -78,6 +78,16 @@ function values(row: unknown, field: "dimensionValues" | "metricValues"): string
   return Array.isArray(cells) ? cells.map(value => cell(record(value).value)) : [];
 }
 
+/** GA4 dates as `2026-10-12` and months as `2026-10`; fractional metrics such as engagementRate to two places. */
+function readable(dimensions: string[], row: string[]): string[] {
+  return row.map((value, index) => {
+    const dimension = dimensions[index];
+    if (dimension === "date" && /^\d{8}$/u.test(value)) return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}`;
+    if (dimension === "yearMonth" && /^\d{6}$/u.test(value)) return `${value.slice(0, 4)}-${value.slice(4)}`;
+    return index >= dimensions.length && /^-?\d+\.\d{3,}$/u.test(value) ? Number(value).toFixed(2) : value;
+  });
+}
+
 export const GOOGLE_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
   list_properties: {
     effect: "read", requires: ["oauthToken"],
@@ -119,8 +129,9 @@ export const GOOGLE_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
         throw new ProviderRequestError(502, "Google did not return a Google Analytics report");
       }
       const header = [...options.dimensions, ...(result.metricHeaders as unknown[]).map(value => cell(record(value).name))];
-      const rows = ((result.rows as unknown[] | undefined) ?? []).map(row => [...values(row, "dimensionValues"), ...values(row, "metricValues")].join("\t"));
-      const totals = Array.isArray(result.totals) ? values(result.totals[0], "metricValues") : [];
+      const rows = ((result.rows as unknown[] | undefined) ?? []).map(row =>
+        readable(options.dimensions, [...values(row, "dimensionValues"), ...values(row, "metricValues")]).join("\t"));
+      const totals = Array.isArray(result.totals) ? readable([], values(result.totals[0], "metricValues")) : [];
       const lines = [header.join("\t"), ...rows, ...(totals.length ? [`TOTAL\t${totals.join("\t")}`] : [])];
       return { summary: `Google Analytics traffic for ${input.property}${options.channel ? ` (${options.channel} sessions)` : ""}, ` +
         `${options.startDate} to ${options.endDate} in the property time zone (recent days are still being processed):\n` +
