@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { startErrorReporting } from "@xmatrix/protocol/error-reporting";
 import { RelayRuntimeLive } from "../src/relay-runtime.ts";
+import { captureErrorReports } from "./support/error-reports.mjs";
 
 test("Runtime reports the receiving exception before RPC obscures it and preserves its rejection", async (t) => {
-  const envelopes = [];
-  t.mock.method(globalThis, "fetch", async (_url, init) => {
-    envelopes.push(String(init.body));
-    return new Response(null, { status: 200 });
-  });
-  startErrorReporting({ dsn: "https://public@errors.example.test/1", release: "test", component: "hub" });
+  const envelopes = captureErrorReports(t);
   const original = new Error("receiving socket failed");
   const pending = [];
   let attempts = 0;

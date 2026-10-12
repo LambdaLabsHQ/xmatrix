@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { startErrorReporting, sendErrorReports } from "@xmatrix/protocol/error-reporting";
+import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { requestErrorResponse } from "../src/index-shared.ts";
+import { captureErrorReports } from "./support/error-reports.mjs";
 
 test("an internal failure quotes its report, and the report says what the route was doing", async (t) => {
-  const envelopes = [];
-  t.mock.method(globalThis, "fetch", async (_url, init) => {
-    envelopes.push(String(init.body));
-    return new Response(null, { status: 200 });
-  });
-  startErrorReporting({ dsn: "https://public@errors.example.test/1", release: "test", component: "hub" });
+  const envelopes = captureErrorReports(t);
   const { Hono } = await import("hono");
   const app = new Hono();
   app.get("/api/spaces/:spaceId/channels/:channelId", (c) => requestErrorResponse(c, new Error("relation missing")));
