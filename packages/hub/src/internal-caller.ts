@@ -9,7 +9,9 @@ import type { AuthUser } from "./auth";
  */
 
 const HEADER = "x-xmatrix-internal-caller";
-const ISOLATE_SECRET = crypto.randomUUID();
+// Drawn on first use: a Worker may not generate random values at global scope.
+let isolateSecret: string | undefined;
+const secret = () => (isolateSecret ??= crypto.randomUUID());
 const callers = new Map<string, AuthUser>();
 
 /** Runs `call` with a header that makes the Hub's routes see `user` as the caller. */
@@ -17,7 +19,7 @@ export async function asInternalCaller<T>(user: AuthUser, call: (headers: Record
   const key = crypto.randomUUID();
   callers.set(key, user);
   try {
-    return await call({ [HEADER]: `${ISOLATE_SECRET}.${key}` });
+    return await call({ [HEADER]: `${secret()}.${key}` });
   } finally {
     callers.delete(key);
   }
@@ -27,6 +29,6 @@ export async function asInternalCaller<T>(user: AuthUser, call: (headers: Record
 export function internalCallerOf(request: Request): AuthUser | undefined {
   const value = request.headers.get(HEADER);
   if (!value) return undefined;
-  const [secret, key] = value.split(".");
-  return secret === ISOLATE_SECRET && key ? callers.get(key) : undefined;
+  const [presented, key] = value.split(".");
+  return isolateSecret !== undefined && presented === isolateSecret && key ? callers.get(key) : undefined;
 }
