@@ -15,9 +15,12 @@ import { cell, keyedOptions, mappedChoices } from "./google-report";
 const PSI = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 const CRUX = "https://chromeuxreport.googleapis.com/v1/records:queryRecord";
 const CATEGORIES = ["performance", "accessibility", "best-practices", "seo"];
-/* Only what is reported is asked for, so a full Lighthouse report never crosses the response bound. */
-const PSI_FIELDS = "id,lighthouseResult(finalUrl,fetchTime,runWarnings,categories/*/score,audits/*(title,score,scoreDisplayMode,displayValue))," +
-  "loadingExperience(overall_category,metrics)";
+/*
+ * Google rejects a field mask inside the audits map, so the audits come whole (a few hundred KB) and only the
+ * large page screenshot outside them is left out.
+ */
+const PSI_FIELDS = "id,lighthouseResult(finalUrl,fetchTime,runWarnings,categories/*/score,audits),loadingExperience(overall_category,metrics)";
+const AUDIT_MAX_BYTES = 2 * 1024 * 1024;
 const LAB = ["largest-contentful-paint", "cumulative-layout-shift", "total-blocking-time", "first-contentful-paint", "speed-index"];
 /* Core Web Vitals first; time to first byte has carried an `experimental_` prefix in the Chrome UX Report. */
 const FIELD = ["largest_contentful_paint", "interaction_to_next_paint", "cumulative_layout_shift", "first_contentful_paint",
@@ -61,12 +64,12 @@ export function fieldInput(statement: { target: string; text: string }): Record<
   return { [scope === "origin" ? "origin" : "url"]: scope === "origin" ? url.origin : url.href, form };
 }
 
-function fieldLines(metrics: Record<string, unknown>, names: string[], p75: (metric: Record<string, unknown>) => unknown,
+function fieldLines(metrics: Record<string, unknown>, names: string[], p75: (metric: Record<string, unknown>, name: string) => unknown,
   shares: (metric: Record<string, unknown>) => unknown[]): string[] {
   return names.filter(name => metrics[name] !== undefined).map(name => {
     const metric = record(metrics[name]);
     const buckets = shares(metric).map(value => `${Math.round(Number(value) * 100)}%`);
-    return [name, cell(p75(metric)), ...buckets].join("\t");
+    return [name, cell(p75(metric, name)), ...buckets].join("\t");
   });
 }
 
@@ -80,7 +83,7 @@ export const PAGESPEED_ACTIONS: Record<string, ConnectorAction> = {
       url.searchParams.set("strategy", input.strategy!);
       for (const category of CATEGORIES) url.searchParams.append("category", category.toUpperCase().replace("-", "_"));
       url.searchParams.set("fields", PSI_FIELDS);
-      const result = await providerJson(url, { headers: apiKey(credentials), timeoutMs: AUDIT_TIMEOUT_MS });
+      const result = await providerJson(url, { headers: apiKey(credentials), timeoutMs: AUDIT_TIMEOUT_MS, maxBytes: AUDIT_MAX_BYTES });
       const lighthouse = record(result.lighthouseResult);
       const categories = record(lighthouse.categories);
       const audits = record(lighthouse.audits);
@@ -89,7 +92,7 @@ export const PAGESPEED_ACTIONS: Record<string, ConnectorAction> = {
       }
       const lines = [`final url: ${cell(lighthouse.finalUrl)}`, `fetched: ${cell(lighthouse.fetchTime)}`,
         `scores: ${CATEGORIES.map(category => `${category} ${score(record(categories[category]).score)}`).join(", ")}`,
-        "lab metrics:", ...LAB.filter(id => audits[id] !== undefined).map(id => `  ${id}\t${cell(record(audits[id]).displayValue)}`)];
+        "lab metrics:", ...LAB.filter(id => audits[id] !== undefined).map(id => `  ${id}\t${cell(record(audits[id]).displayValue) || "-"}`)];
       const failing = Object.entries(audits).map(([id, value]) => ({ id, audit: record(value) }))
         .filter(({ id, audit }) => typeof audit.score === "number" && audit.score < 0.9 &&
           ["binary", "numeric", "metricSavings"].includes(String(audit.scoreDisplayMode)) && !LAB.includes(id))
@@ -102,7 +105,8 @@ export const PAGESPEED_ACTIONS: Record<string, ConnectorAction> = {
       const experience = record(result.loadingExperience);
       if (experience.overall_category) {
         lines.push(`field data (28 days, Chrome users): ${cell(experience.overall_category)}`,
-          ...fieldLines(record(experience.metrics), Object.keys(record(experience.metrics)).slice(0, 10), metric => metric.percentile,
+          ...fieldLines(record(experience.metrics), Object.keys(record(experience.metrics)).slice(0, 10), // PageSpeed reports field CLS multiplied by 100.
+            (metric, name) => name === "CUMULATIVE_LAYOUT_SHIFT_SCORE" ? Number(metric.percentile) / 100 : metric.percentile,
             metric => (Array.isArray(metric.distributions) ? metric.distributions : []).map(bucket => record(bucket).proportion)));
       }
       const warnings = Array.isArray(lighthouse.runWarnings) ? lighthouse.runWarnings.slice(0, 3).map(cell) : [];
