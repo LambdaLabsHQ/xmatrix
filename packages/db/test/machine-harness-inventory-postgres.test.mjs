@@ -86,5 +86,8 @@ integration("release targets read the current schema and skip daemons that alrea
     assert.deepEqual(await read({ presetId: "codex", version: "9.0.0" }, { presetId: "claude", version: "2.0.0" }),
       [target]);
     assert.deepEqual(await read(), []);
+    // Every watched preset at once stays within the client's result bound.
+    const many = Array.from({ length: 40 }, (_, index) => ({ presetId: `preset-${index}`, version: "1.0.0" }));
+    assert.deepEqual(await read(...many, { presetId: "claude", version: "2.0.0" }), [target]);
   } finally { await fixture.close(); }
 });
