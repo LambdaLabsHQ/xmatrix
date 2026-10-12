@@ -120,6 +120,16 @@ With project IAM access, use GCP `read_api_status` / `enable_api` on
 `<project-number>/siteverification.googleapis.com`.
 Existing webmasters-only connections retain their previous actions.
 
+Do not treat every provider 403 as a missing OAuth grant. Error receipts expose
+only typed Google reason/status, API name, consumer project number and supported
+IAM permission names; raw messages, activation URLs and credentials are omitted.
+`SERVICE_DISABLED` (or legacy `accessNotConfigured`) means the API must be enabled
+in the indicated consumer project. `ACCESS_TOKEN_SCOPE_INSUFFICIENT` identifies a
+scope problem. A generic `PERMISSION_DENIED` alone does not prove that reconnecting
+will help. The local "Reconnect Google Search Console" refusal remains distinct
+from a provider denial: it occurs before HTTP when confirmed verification scope
+is absent.
+
 1. `@googlesearchconsole:get_verification_token:sc-domain:example.com DNS_TXT`
    returns the account's public DNS record. Publish it using the domain's DNS
    provider without replacing unrelated TXT records. URL properties can instead

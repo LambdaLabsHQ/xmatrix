@@ -503,34 +503,14 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 }
 
 /*
- * What changed since this reader last had the page on screen (§3.1), played as it scrolls into view
- * over READER_CHANGE_MS: new text surfaces out of a blur on a tint that then fades; text taken out is
- * struck, then folds away. A change still waiting below the fold holds the first frame.
+ * What changed since this reader last read the page (§3.1), as a diff that stays until they tick it
+ * viewed: new text on a tint, text taken out struck where it stood.
  */
-@keyframes page-reader-arrive {
-  0% { opacity: 0; filter: blur(4px); background-color: color-mix(in oklab, var(--primary) 30%, transparent); }
-  14% { opacity: 1; filter: blur(0); }
-  50% { background-color: color-mix(in oklab, var(--primary) 20%, transparent); }
-  100% { opacity: 1; filter: blur(0); background-color: transparent; }
-}
-@keyframes page-reader-arrive-block {
-  0% { opacity: 0; transform: translateY(6px); background-color: color-mix(in oklab, var(--primary) 16%, transparent); }
-  16% { opacity: 1; transform: none; }
-  50% { background-color: color-mix(in oklab, var(--primary) 12%, transparent); }
-  100% { opacity: 1; transform: none; background-color: transparent; }
-}
-@keyframes page-reader-leave {
-  0%, 50% { opacity: 0.85; font-size: 1em; }
-  100% { opacity: 0; font-size: 0; }
-}
 .page-document .page-reader-change {
   border-radius: 2px;
-  animation: page-reader-arrive 4.2s ease-out both;
+  background-color: color-mix(in oklab, var(--primary) 18%, transparent);
 }
-.page-document .page-reader-change.is-block {
-  border-radius: 6px;
-  animation-name: page-reader-arrive-block;
-}
+.page-document .page-reader-change.is-block { border-radius: 6px; }
 .page-document .page-reader-removed {
   border-radius: 2px;
   color: var(--destructive);
@@ -539,17 +519,8 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   white-space: pre-wrap;
   user-select: none;
   pointer-events: none;
-  animation: page-reader-leave 2.4s ease-in both;
 }
-.page-document .page-reader-removed.is-block { display: block; overflow: hidden; }
-@keyframes page-reader-tint {
-  0%, 50% { background-color: color-mix(in oklab, var(--primary) 20%, transparent); }
-  100% { background-color: transparent; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .page-document .page-reader-change, .page-document .page-reader-change.is-block { animation-name: page-reader-tint; }
-  .page-document .page-reader-removed { animation-timing-function: steps(1, end); }
-}
+.page-document .page-reader-removed.is-block { display: block; }
 
 /* Someone out of view (§3.2): the dot beside their name pulses while they write. */
 @keyframes page-offscreen-typing {

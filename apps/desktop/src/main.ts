@@ -780,7 +780,6 @@ function refreshDockBadge() {
     return [{
       key: appSpaceKey(url) ?? `window:${window.id}`,
       mentionCount: state.mentionCount ?? 0,
-      hasUnread: Boolean(state.hasUnread),
     }];
   });
   setDockBadge(aggregateBadge(reports));
@@ -2692,7 +2691,6 @@ function registerIpcHandlers() {
     if (!window) return;
     windowBadges.set(window.id, {
       mentionCount: state?.mentionCount ?? 0,
-      hasUnread: Boolean(state?.hasUnread),
     });
     refreshDockBadge();
   }));

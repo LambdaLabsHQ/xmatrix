@@ -825,11 +825,10 @@ function remoteChanges(fragment: Y.XmlFragment, awareness: Awareness): Plugin {
 }
 
 /**
- * What changed since this reader last had the page on screen (§3.1): new text
- * appears and is tinted, text taken out is struck and folds away. Each change
- * plays when it first scrolls into view, so a change below the fold is not
- * spent before it is read. Positions are Yjs relative positions, because a
- * remote update redraws the whole document.
+ * What changed since this reader last read the page (§3.1), shown in place as
+ * a diff until they tick it viewed: new text is tinted, text taken out stands
+ * struck where it was. Positions are Yjs relative positions, because a remote
+ * update redraws the whole document.
  */
 interface ReaderChange {
   id: number;
@@ -838,33 +837,20 @@ interface ReaderChange {
   from: Y.RelativePosition;
   to: Y.RelativePosition | null;
   text: string;
-  /** When it began to play, staggered within the changes that came into view together; null until seen. */
-  startsAt: number | null;
 }
 
-export const READER_CHANGE_MS = 4200;
-const READER_STAGGER_MS = 60;
-const READER_STAGGER_MAX_MS = 900;
-export const readerChangesKey = new PluginKey<DecorationSet>("page-reader-changes");
+const readerChangesKey = new PluginKey<DecorationSet>("page-reader-changes");
 
-function readerStyle(change: ReaderChange, now: number): string {
-  return change.startsAt === null ? "animation-play-state: paused"
-    : `animation-delay: ${change.startsAt - now}ms`;
-}
-
-function removedWidget(change: ReaderChange, now: number): HTMLElement {
+function removedWidget(change: ReaderChange): HTMLElement {
   const element = document.createElement(change.block ? "div" : "span");
   element.className = `page-reader-removed${change.block ? " is-block" : ""}`;
-  element.dataset.readerChange = String(change.id);
   element.contentEditable = "false";
   element.setAttribute("aria-hidden", "true");
-  element.textContent = change.text.length > 280 ? `${change.text.slice(0, 280)}…` : change.text;
-  element.setAttribute("style", readerStyle(change, now));
+  element.textContent = change.text;
   return element;
 }
 
-function readerDecorations(state: EditorState, fragment: Y.XmlFragment, changes: readonly ReaderChange[],
-  now: number): DecorationSet {
+function readerDecorations(state: EditorState, fragment: Y.XmlFragment, changes: readonly ReaderChange[]): DecorationSet {
   const mapping = yMapping(state);
   if (!mapping || !fragment.doc || changes.length === 0) return DecorationSet.empty;
   const size = state.doc.content.size;
@@ -880,13 +866,12 @@ function readerDecorations(state: EditorState, fragment: Y.XmlFragment, changes:
     const from = resolve(change.from);
     if (from === null || from > size) continue;
     if (change.kind === "removed") {
-      decorations.push(Decoration.widget(from, () => removedWidget(change, now), {
-        side: -1, ignoreSelection: true, marks: [], key: `reader-removed-${change.id}-${change.startsAt ?? "waiting"}`,
+      decorations.push(Decoration.widget(from, () => removedWidget(change), {
+        side: -1, ignoreSelection: true, marks: [], key: `reader-removed-${change.id}`,
       }));
       continue;
     }
-    const attrs = { class: change.block ? "page-reader-change is-block" : "page-reader-change",
-      "data-reader-change": String(change.id), style: readerStyle(change, now) };
+    const attrs = { class: change.block ? "page-reader-change is-block" : "page-reader-change" };
     if (change.block) {
       appendBlockChangeDecoration(decorations, state, from, attrs);
       continue;
@@ -904,86 +889,31 @@ function readerChanges(fragment: Y.XmlFragment): Plugin {
     state: {
       init: () => DecorationSet.empty,
       apply: (tr, value, _old, state) => {
-        const set = tr.getMeta(readerChangesKey) as ReaderChange[] | true | undefined;
-        if (Array.isArray(set)) changes = set;
-        return tr.docChanged || set ? readerDecorations(state, fragment, changes, Date.now()) : value;
+        const set = tr.getMeta(readerChangesKey) as ReaderChange[] | undefined;
+        if (set) changes = set;
+        return tr.docChanged || set ? readerDecorations(state, fragment, changes) : value;
       },
     },
     props: { decorations: (state) => readerChangesKey.getState(state) },
-    view: (view) => {
-      let expiry = 0;
-      const seen = new Set<number>();
-      const redraw = () => view.dispatch(view.state.tr.setMeta(readerChangesKey, true));
-      const expire = () => {
-        const now = Date.now();
-        const before = changes.length;
-        changes = changes.filter((change) => change.startsAt === null || now - change.startsAt < READER_CHANGE_MS);
-        if (changes.length !== before) redraw();
-        window.clearTimeout(expiry);
-        const next = Math.min(...changes.flatMap((change) => change.startsAt === null ? [] : [change.startsAt]));
-        if (Number.isFinite(next)) expiry = window.setTimeout(expire, next + READER_CHANGE_MS - now + 20);
-      };
-      // The changes that came into view play together, top to bottom, each a moment after the last.
-      const play = () => {
-        if (document.visibilityState !== "visible" || seen.size === 0) return;
-        const now = Date.now();
-        let order = 0;
-        for (const change of changes) {
-          if (change.startsAt !== null || !seen.has(change.id)) continue;
-          change.startsAt = now + Math.min(order++ * READER_STAGGER_MS, READER_STAGGER_MAX_MS);
-        }
-        seen.clear();
-        if (order) { redraw(); expire(); }
-      };
-      const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          seen.add(Number((entry.target as HTMLElement).dataset.readerChange));
-          observer!.unobserve(entry.target);
-        }
-        play();
-      });
-      const observe = () => {
-        const waiting = new Set(changes.filter((change) => change.startsAt === null).map((change) => String(change.id)));
-        if (!waiting.size) return;
-        observer?.disconnect();
-        for (const element of view.dom.querySelectorAll<HTMLElement>("[data-reader-change]")) {
-          if (!waiting.has(element.dataset.readerChange ?? "")) continue;
-          if (observer) observer.observe(element);
-          else seen.add(Number(element.dataset.readerChange));
-        }
-        if (!observer) play();
-      };
-      document.addEventListener("visibilitychange", play);
-      return {
-        update: (_view, previous) => {
-          if (readerChangesKey.getState(view.state) !== readerChangesKey.getState(previous)) observe();
-        },
-        destroy: () => {
-          observer?.disconnect();
-          document.removeEventListener("visibilitychange", play);
-          window.clearTimeout(expiry);
-        },
-      };
-    },
   });
 }
 
 /**
- * Shows what changed since the revision the reader last had on screen, read as
- * its markdown, against the document the editor holds now.
+ * Shows what changed since the revision the reader last read, given as its
+ * markdown, against the document the editor holds now, and says how many
+ * changes that is. Without a baseline the page is shown as it is.
  */
-export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, baseline: string): void {
+export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, baseline: string | null): number {
   const mapping = yMapping(view.state);
-  if (!mapping) return;
+  if (!mapping) return 0;
   const relative = (pos: number) => absolutePositionToRelativePosition(pos, fragment, mapping as never);
-  const changes = pageDocChanges(markdownToPageDoc(baseline), view.state.doc).map((change, id): ReaderChange =>
+  const changes = baseline === null ? [] : pageDocChanges(markdownToPageDoc(baseline), view.state.doc).map((change, id): ReaderChange =>
     change.kind === "added"
       ? { id, kind: "added", block: change.block, from: relative(change.from), to: change.block ? null : relative(change.to),
-        text: "", startsAt: null }
-      : { id, kind: "removed", block: change.block, from: relative(change.at), to: null, text: change.text,
-        startsAt: null });
+        text: "" }
+      : { id, kind: "removed", block: change.block, from: relative(change.at), to: null, text: change.text });
   view.dispatch(view.state.tr.setMeta(readerChangesKey, changes));
+  return changes.length;
 }
 
 /** Whether `/` opened the insert menu, and what has been typed after it. */

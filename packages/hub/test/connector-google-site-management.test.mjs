@@ -65,6 +65,32 @@ test("verification refuses legacy grants before HTTP and rejects mismatched or d
   await fetched([{ status: 403, body: {} }], () => assert.rejects(actions.verify_site.execute({ credentials }, parse("verify_site", property, "DNS_TXT")), /403/u));
 });
 
+// The existing GCP boundary test covers sanitized ErrorInfo extraction. This regression
+// protects its wiring at the verification HTTP boundary: the previous code hid the cause
+// as generic 403, prompting repeated reconnects even when the API itself was disabled.
+test("verification errors expose typed Google causes without raw bodies or credentials", async () => {
+  const error = { status: "PERMISSION_DENIED", message: "private-access-token must not be repeated", details: [
+    { "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "SERVICE_DISABLED", metadata: {
+      service: "siteverification.googleapis.com", consumer: "projects/123456789", activationUrl: "https://example.com/private-access-token" } },
+  ] };
+  await fetched([{ status: 403, body: { error } }], () => assert.rejects(
+    actions.get_verification_token.execute({ credentials }, parse("get_verification_token", property, "DNS_TXT")), failure => {
+      assert.match(failure.message, /SERVICE_DISABLED/u);
+      assert.match(failure.message, /API=siteverification\.googleapis\.com/u);
+      assert.match(failure.message, /consumer=projects\/123456789/u);
+      assert.doesNotMatch(failure.message, /private-access-token|example\.com/u);
+      return true;
+    }));
+  await fetched([{ status: 403, body: { error: { message: "private-access-token", errors: [{ reason: "accessNotConfigured" }] } } }],
+    () => assert.rejects(actions.list_verifications.execute({ credentials }, parse("list_verifications", "*")), /accessNotConfigured/u));
+  await fetched([{ status: 403, body: { message: "private-access-token", error: "private-access-token" } }],
+    () => assert.rejects(actions.list_verifications.execute({ credentials }, parse("list_verifications", "*")), failure => {
+      assert.match(failure.message, /without typed error details/u);
+      assert.doesNotMatch(failure.message, /private-access-token/u);
+      return true;
+    }));
+});
+
 test("verification resource reads, owner replacement and unverification encode opaque ids", async () => {
   const listed = await fetched([{ body: { items: [resource] } }], () => actions.list_verifications.execute({ credentials }, parse("list_verifications", "*")));
   assert.equal(listed.calls[0].url, "https://www.googleapis.com/siteVerification/v1/webResource");

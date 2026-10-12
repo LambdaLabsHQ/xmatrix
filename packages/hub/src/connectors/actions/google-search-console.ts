@@ -5,6 +5,7 @@ import { quoteRetrievedText } from "./common";
 import { pageUrl, searchConsoleSite, searchConsoleSiteContains } from "./google-search-console-site";
 import { GOOGLE_SITE_VERIFICATION_ACTIONS } from "./google-site-verification";
 import { searchAnalyticsOptions } from "./google-search-analytics";
+import { describeGoogleError } from "../google-provider-error";
 import { googleHeaders } from "./google-headers";
 import { cell } from "./google-report";
 
@@ -40,7 +41,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
     return [id, { effect: method === "GET" ? "read" : "write", requires: ["oauthToken"],
       parse: statement => siteOnly(statement, "name an exact Search Console property"),
       async execute({ credentials }, input) {
-        const result = await providerJson(siteUrl(input.site!), { method, headers: googleHeaders(credentials, "Google Search Console") });
+        const result = await providerJson(siteUrl(input.site!), { method, describeError: describeGoogleError, headers: googleHeaders(credentials, "Google Search Console") });
         if (method === "GET" && (result.siteUrl !== input.site || typeof result.permissionLevel !== "string")) {
           throw new ProviderRequestError(502, "Google did not return the requested property");
         }
@@ -56,7 +57,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
       parse: statement => siteAndPage(statement, "name a property and a sitemap URL inside it"),
       async execute({ credentials }, input) {
         const result = await providerJson(siteUrl(input.site!, `/sitemaps/${encodeURIComponent(input.page!)}`), {
-          method, headers: googleHeaders(credentials, "Google Search Console") });
+          method, describeError: describeGoogleError, headers: googleHeaders(credentials, "Google Search Console") });
         if (method === "GET" && result.path !== input.page) throw new ProviderRequestError(502, "Google did not return the requested sitemap");
         return { summary: method === "GET" ? `Sitemap ${input.page}:\n` + quoteRetrievedText(JSON.stringify(result), 16_000) :
           `Removed sitemap ${input.page} from ${input.site}; the sitemap file is unchanged.` };
@@ -69,7 +70,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
       return statement.target === "*" && !statement.text.trim() ? {} : "use @googlesearchconsole:list_sites:*";
     },
     async execute({ credentials }) {
-      const result = await providerJson(`${API}/sites`, { headers: googleHeaders(credentials, "Google Search Console") });
+      const result = await providerJson(`${API}/sites`, { describeError: describeGoogleError, headers: googleHeaders(credentials, "Google Search Console") });
       // Google omits siteEntry entirely when the account has no properties.
       if (result.siteEntry !== undefined && !Array.isArray(result.siteEntry)) {
         throw new ProviderRequestError(502, "Google did not return a Search Console site list");
@@ -94,7 +95,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
     async execute({ credentials }, input) {
       const options = JSON.parse(input.options!) as Exclude<ReturnType<typeof searchAnalyticsOptions>, string>;
       const result = await providerJson(siteUrl(input.site!, "/searchAnalytics/query"), { method: "POST",
-        headers: googleHeaders(credentials, "Google Search Console"), json: options });
+        describeError: describeGoogleError, headers: googleHeaders(credentials, "Google Search Console"), json: options });
       if (result.rows !== undefined && !Array.isArray(result.rows)) {
         throw new ProviderRequestError(502, "Google did not return Search Analytics rows");
       }
@@ -117,7 +118,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
     effect: "read", requires: ["oauthToken"],
     parse: statement => siteOnly(statement, "name a property: sc-domain:example.com or https://www.example.com/"),
     async execute({ credentials }, input) {
-      const result = await providerJson(siteUrl(input.site!, "/sitemaps"), { headers: googleHeaders(credentials, "Google Search Console") });
+      const result = await providerJson(siteUrl(input.site!, "/sitemaps"), { describeError: describeGoogleError, headers: googleHeaders(credentials, "Google Search Console") });
       if (result.sitemap !== undefined && !Array.isArray(result.sitemap)) {
         throw new ProviderRequestError(502, "Google did not return a sitemap list");
       }
@@ -147,7 +148,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
       return { ...input, ...(language ? { languageCode: language.slice(9) } : {}) };
     },
     async execute({ credentials }, input) {
-      const result = await providerJson(INSPECT, { method: "POST", headers: googleHeaders(credentials, "Google Search Console"),
+      const result = await providerJson(INSPECT, { method: "POST", describeError: describeGoogleError, headers: googleHeaders(credentials, "Google Search Console"),
         json: { inspectionUrl: input.page, siteUrl: input.site, ...(input.languageCode ? { languageCode: input.languageCode } : {}) } });
       const status = record(record(result.inspectionResult).indexStatusResult);
       if (typeof status.verdict !== "string") throw new ProviderRequestError(502, "Google did not return an index status");
@@ -163,7 +164,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
     parse: statement => siteAndPage(statement, "name a property and a sitemap URL inside it: <property> <sitemap url>"),
     async execute({ credentials }, input) {
       await providerJson(siteUrl(input.site!, `/sitemaps/${encodeURIComponent(input.page!)}`), { method: "PUT",
-        headers: googleHeaders(credentials, "Google Search Console") });
+        describeError: describeGoogleError, headers: googleHeaders(credentials, "Google Search Console") });
       return { summary: `Submitted sitemap ${input.page} to ${input.site}; Google fetches it asynchronously.` };
     },
   },
@@ -171,7 +172,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
 
 /** Confirm the grant with a real read; the property list is not stored. */
 export async function verifyGoogleSearchConsole(credentials: Readonly<Record<string, string>>): Promise<void> {
-  const result = await providerJson(`${API}/sites`, { headers: googleHeaders(credentials, "Google Search Console") });
+  const result = await providerJson(`${API}/sites`, { describeError: describeGoogleError, headers: googleHeaders(credentials, "Google Search Console") });
   if (result.siteEntry !== undefined && !Array.isArray(result.siteEntry)) {
     throw new ProviderRequestError(502, "Google did not confirm Search Console access");
   }

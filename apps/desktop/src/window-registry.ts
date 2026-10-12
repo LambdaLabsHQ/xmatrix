@@ -136,7 +136,6 @@ export type WindowBadgeReport = {
    */
   key: string;
   mentionCount: number;
-  hasUnread: boolean;
 };
 
 /**
@@ -146,16 +145,14 @@ export type WindowBadgeReport = {
  */
 export function aggregateBadge(
   reports: readonly WindowBadgeReport[]
-): { mentionCount: number; hasUnread: boolean } {
+): { mentionCount: number } {
   const bySpace = new Map<string, WindowBadgeReport>();
   for (const report of reports) bySpace.set(report.key, report);
   let mentionCount = 0;
-  let hasUnread = false;
   for (const report of bySpace.values()) {
     mentionCount += Number.isFinite(report.mentionCount)
       ? Math.max(0, Math.floor(report.mentionCount))
       : 0;
-    hasUnread = hasUnread || report.hasUnread;
   }
-  return { mentionCount, hasUnread };
+  return { mentionCount };
 }
