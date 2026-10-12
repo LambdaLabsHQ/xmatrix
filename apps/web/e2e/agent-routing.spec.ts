@@ -32,6 +32,32 @@ async function installCanonicalCatalog(page: import("@playwright/test").Page) {
   return locations;
 }
 
+test("bare @ keeps the active Channel instance visible ahead of a full harness catalog", async ({ page }, testInfo) => {
+  const harnesses = ["claude", "codex", "cursor", "grok", "opencode", "windsurf"];
+  const locations = harnesses.map(harness => ({
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "owner", machineId: "machine", harness },
+    displayName: harness, ownerName: "Owner", machineName: "Workstation", version: 1, state: "enabled",
+    models: [], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
+  }));
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [{ ...E2E_CHANNEL,
+    memberPresence: { "agent:codex": { kind: "agent", status: "busy", label: "codex",
+      instances: [{ id: "instance-codex", channelInstanceId: "1", label: "codex:1", status: "busy",
+        connectedAt: E2E_CHANNEL.createdAt, lastSeenAt: E2E_CHANNEL.updatedAt }] } },
+  }] });
+  await fixtureJson(page, "registration-catalog", "**/agent-registrations", {
+    registrations: locations,
+    capabilities: locations.map(location => ({ harness: location.key.harness, models: [], locations: [location] })),
+  });
+  await page.goto("/app/personal-sspaceperso/channels/channel-general");
+  const draft = page.locator("textarea.composer-textarea").first();
+  await draft.fill("@");
+  const instance = page.getByRole("option", { name: /^codex:1\s/u });
+  await expect(instance).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("active-instance-mention.png") });
+  await instance.click();
+  await expect(draft).toHaveValue("@codex:1 ");
+});
+
 async function canonicalComposer(page: import("@playwright/test").Page) {
   const locations = await installCanonicalCatalog(page);
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
