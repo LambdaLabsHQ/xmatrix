@@ -105,6 +105,7 @@ section, and none is ever shown again.
 | Google Analytics | `list_properties:*`, `report:<property id> [by=…] [days=…] [limit=…] [channel=…]` (reads) |
 | Bing Webmaster Tools | `list_sites:*`, `traffic:<site>`, `queries:<site>`, `pages:<site>`, `crawl_stats:<site>` (reads), `submit_urls:<site> <url …>`, `submit_sitemap:<site> <sitemap url>`, `indexnow:<site> <url …>` |
 | PageSpeed Insights | `audit:<page url> [strategy=mobile\|desktop]`, `field:<page url or origin> [form=phone\|desktop\|all] [scope=page\|origin]` (reads; Google API key) |
+| Yandex Webmaster | `list_hosts:*`, `summary:<host id>`, `queries:<host id>` (reads), `recrawl:<host id> <page url>` |
 | Gmail (via Composio) | `search:* [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub) |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 

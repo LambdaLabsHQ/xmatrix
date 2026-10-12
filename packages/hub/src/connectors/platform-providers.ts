@@ -15,6 +15,7 @@ import { GOOGLE_ANALYTICS_ACTIONS, verifyGoogleAnalytics } from "./actions/googl
 import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
 import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
 import { OPENCONNECTOR_ACTIONS, verifyOpenConnector } from "./actions/openconnector";
+import { YANDEX_WEBMASTER_ACTIONS, verifyYandexWebmaster } from "./actions/yandex-webmaster";
 import { PAGERDUTY_ACTIONS, verifyPagerDuty } from "./actions/pagerduty";
 import { SENTRY_ACTIONS, verifySentry } from "./actions/sentry";
 import { SLACK_ACTIONS, verifySlack } from "./actions/slack";
@@ -83,6 +84,7 @@ const PROVIDERS: Record<string, {
   dingtalk: { actions: DINGTALK_ACTIONS },
   wecom: { actions: WECOM_ACTIONS },
   openconnector: { actions: OPENCONNECTOR_ACTIONS, verify: verifyOpenConnector },
+  yandexwebmaster: { actions: YANDEX_WEBMASTER_ACTIONS, verify: verifyYandexWebmaster },
 };
 
 export const PLATFORM_CONNECTOR_PROVIDERS: readonly ConnectorProvider[] = Object.entries(PROVIDERS)
