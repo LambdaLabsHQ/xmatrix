@@ -7,6 +7,7 @@ import { Footer } from "@/components/landing/footer";
 import { Navbar } from "@/components/shared/navbar";
 import { guideLinkHref, guidePages, type GuidePage } from "@/lib/docs/guide";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
+import { siteUrl } from "@/lib/site-url";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 function plainText(node: ReactNode): string {
@@ -40,6 +41,22 @@ const components = {
   table: ({ children }: ComponentPropsWithoutRef<"table">) => <div className="docs-table"><table>{children}</table></div>,
 };
 
+/** What the page is, for search engines: an article of the guide, and where it sits in the site. */
+function guideStructuredData(page: GuidePage): string {
+  const url = (href: string) => new URL(href, siteUrl).href;
+  const publisher = { "@type": "Organization", name: "xMatrix", url: url("/") };
+  return JSON.stringify({ "@context": "https://schema.org", "@graph": [
+    { "@type": "TechArticle", headline: page.title, description: page.description, url: url(page.href),
+      mainEntityOfPage: url(page.href), inLanguage: "en", author: publisher, publisher,
+      image: url("/android-chrome-512x512.png") },
+    { "@type": "BreadcrumbList", itemListElement: [
+      { "@type": "ListItem", position: 1, name: "xMatrix", item: url("/") },
+      { "@type": "ListItem", position: 2, name: "Docs", item: url("/docs") },
+      ...(page.file === "index" ? [] : [{ "@type": "ListItem", position: 3, name: page.title, item: url(page.href) }]),
+    ] },
+  ] }).replace(/</gu, "\\u003c");
+}
+
 /**
  * One page of the user guide. The text is drawn with the styles an xMatrix
  * page uses (`page-document`), so the guide reads like a page in the app.
@@ -50,6 +67,7 @@ export function GuideDocument({ page }: { page: GuidePage }) {
   const next = guidePages[position + 1];
   return (
     <div className="site-page docs-page">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: guideStructuredData(page) }} />
       <Navbar />
       <main className="docs-shell">
         <nav className="docs-nav" aria-label="Guide">

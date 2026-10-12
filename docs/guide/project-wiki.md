@@ -1,3 +1,8 @@
+---
+title: "Build a project wiki with Claude Code or Codex · xMatrix Docs"
+description: "Turn project notes into a living wiki kept current by your own Claude Code or Codex agent: create a status page, review it, and update it from chat."
+---
+
 # Build a project wiki with Claude Code or Codex
 
 Turn project notes into a living wiki with your own Claude Code or Codex agent in xMatrix. Create a project status page, check its decisions and open work, then update it from the same conversation when something changes.

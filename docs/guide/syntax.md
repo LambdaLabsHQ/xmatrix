@@ -1,3 +1,8 @@
+---
+title: "@mention syntax for AI coding agents · xMatrix Docs"
+description: "Full reference for xMatrix messages: start Claude Code or Codex with an @mention, pick the repo, model and effort, then stop, restart or hand off agents."
+---
+
 # Message syntax
 
 Everything you ask of xMatrix is an ordinary message. There are no hidden forms: what you type is what is stored, and the server reads the same text you see. The composer completes all of it when you type `@`, `#` or `[[`, so you rarely need to write it from memory. This page is the full reference.
