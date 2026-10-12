@@ -293,7 +293,13 @@ the project default. Reads: `search:* [Gmail search]` returns the ten newest
 matching messages (id, received time, sender, subject, snippet) and
 `read:<message id>` returns the headers, the text body (plain text, else HTML
 reduced to text, truncated at 8,000 characters) and every distinct http(s)
-link the message contains, fenced as untrusted content. The Hub never
+link the message contains, fenced as untrusted content. Inline
+`multipart/mixed` body segments retain their order, choosing plain text or
+rendered HTML for each segment without duplicating alternative versions.
+Attachment parts and their descendants are excluded. Reads visit at most
+200 MIME parts and report incomplete content when that limit is reached or
+an inline text body is stored externally; they do not fetch attachments.
+The Hub never
 requests a link found in mail; an Agent that needs to confirm a sign-up opens
 the link itself. There is no send, label or delete action and no inbound
 event. Composio is a subprocessor for connected mailboxes.
