@@ -337,11 +337,164 @@ html:has(.site-page) {
   box-shadow: var(--site-paper-shadow) !important;
 }
 
-.site-document-hero {
-  background:
-    linear-gradient(90deg, oklch(0.88 0.057 76 / 0.52), transparent 58%),
-    var(--site-paper-soft);
-  box-shadow: inset 0 -1px 0 var(--site-wood-line);
+/* The user guide (/docs): the app's paper, a page's own typography
+   (`page-document`), and two quiet text columns beside it. No wood, glass,
+   cards or rules; the current page is a flat tint. */
+.docs-page {
+  background: var(--app-panel-paper);
+}
+
+.docs-shell {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 46rem) 12rem;
+  justify-content: space-between;
+  gap: 3rem;
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 7.5rem 1.5rem 6rem;
+}
+
+.docs-nav,
+.docs-toc {
+  position: sticky;
+  top: 6.5rem;
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  max-height: calc(100dvh - 8rem);
+  overflow-y: auto;
+}
+
+.docs-label {
+  margin-bottom: 0.5rem;
+  padding: 0 0.75rem;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted-foreground);
+}
+
+.docs-nav a {
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: color-mix(in oklab, var(--foreground) 68%, transparent);
+}
+
+.docs-nav a[aria-current="page"] {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  font-weight: 650;
+}
+
+.docs-toc a {
+  padding: 0.25rem 0.75rem;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+
+:is(.docs-nav, .docs-toc) a:hover,
+.docs-nav a[aria-current="page"] {
+  color: var(--foreground);
+}
+
+/* The guide is rendered HTML, not an editor's text: lines wrap normally. */
+.docs-article.page-document {
+  padding-bottom: 0;
+  white-space: normal;
+}
+
+.docs-article h1 {
+  font-family: var(--font-site-display-family);
+  letter-spacing: -0.02em;
+}
+
+.docs-table {
+  overflow-x: auto;
+}
+
+.docs-article table {
+  table-layout: auto;
+}
+
+.docs-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 4rem;
+}
+
+.docs-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.docs-pager a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.docs-pager a[rel="next"] {
+  margin-left: auto;
+  text-align: right;
+}
+
+.docs-pager a span,
+.docs-source {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.docs-source:hover {
+  color: var(--foreground);
+}
+
+@media (min-width: 768px) {
+  /* What you type stays on one line; the explanation beside it wraps. */
+  .docs-article td:first-child code {
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 1100px) {
+  .docs-shell {
+    grid-template-columns: 13rem minmax(0, 1fr);
+  }
+
+  .docs-toc {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .docs-shell {
+    display: block;
+    padding: 5.5rem 1.25rem 4rem;
+  }
+
+  /* The guide's pages become one row of text that scrolls sideways. */
+  .docs-nav {
+    position: static;
+    flex-direction: row;
+    max-height: none;
+    margin: 0 -1.25rem 1.5rem;
+    padding: 0 0.75rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .docs-nav .docs-label {
+    display: none;
+  }
+
+  .docs-nav a {
+    white-space: nowrap;
+  }
 }
 
 .site-legal-header {
