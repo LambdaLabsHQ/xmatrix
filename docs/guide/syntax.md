@@ -236,6 +236,8 @@ The command must begin the message, and one message carries one command. Lines a
 
 The id is the reference, so renaming a page or a conversation never breaks old messages. A reference grants nothing: a reader who cannot see the target gets no title and no link. Mentioning a page in a conversation links the page to it.
 
+The same `page:<page-id>` and `channel:<channel-id>` written in a page's own text are shown as these chips too; the id shows again on the reference the caret is in.
+
 `#` followed by a digit stays text, so `#3484` remains a pull request number. A Chinese input method can open the page list with `【【`.
 
 ## Limits

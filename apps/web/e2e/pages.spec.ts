@@ -609,6 +609,26 @@ test("a page is typed like Typora: the caret's line shows its markers", async ({
   await browser.screenshot({ path: test.info().outputPath("pages-editing.png") });
 });
 
+test("a page: reference in a page's text is a chip with the page's title that opens it", async ({ page: browser }) => {
+  const planId = "0b7c2a1e-4f3d-4c2b-9a8e-1d2c3b4a5f6e";
+  const unseenId = "11111111-2222-4333-8444-555555555555";
+  await stubPages(browser, [page("p-relay", null, "Relay", "V"), page(planId, null, "Launch plan", "W")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  await servePageSession(browser, pageDocument(
+    `# Relay\n\nDates are in page:${planId}#status and \`page:${planId}\` names it.\n\nSee page:${unseenId} too.\n`));
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  const editor = browser.getByTestId("page-editor");
+  const chip = editor.getByTestId("page-reference-chip");
+  await expect(chip).toHaveText("Launch plan › status");
+  // The id is hidden behind its chip; one in code, or to a page this reader cannot see, stays as typed.
+  await expect(editor.locator(".page-reference-source")).toBeHidden();
+  await expect(editor.locator("code")).toHaveText(`page:${planId}`);
+  await expect(editor).toContainText(`See page:${unseenId} too.`);
+  await chip.click();
+  await expect(browser).toHaveURL(new RegExp(`/pages\\?page=${planId}`, "u"));
+});
+
 test("a page shows its document at once, and the live editor takes over when its session syncs", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
