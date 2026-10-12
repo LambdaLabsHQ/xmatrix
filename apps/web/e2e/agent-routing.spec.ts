@@ -57,6 +57,8 @@ for (const mobile of [false, true]) {
   await expect(page.getByRole("listbox").getByText("Instance", { exact: true })).toBeVisible();
   const instance = page.getByRole("option", { name: /^codex:1\s/u });
   await expect(instance).toBeVisible();
+  await expect.poll(() => page.locator(".app-composer-box").first()
+    .evaluate(box => box.getAnimations().length)).toBe(0);
   await page.screenshot({ path: testInfo.outputPath("active-instance-mention.png") });
   await instance.click();
   await expect(draft).toHaveValue("@codex:1 ");
