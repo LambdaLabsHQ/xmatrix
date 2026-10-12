@@ -22,19 +22,24 @@ xmatrix agent add codex --space <space-id> --workspace ~/xmatrix/project-wiki
 
 Replace `<space-id>` with the id of the Space you opened. For Claude Code, replace `codex` with `claude`. On Windows, create a folder such as `C:\xmatrix\project-wiki` and use that path for `--workspace`.
 
-Find the folder's full path with `realpath ~/xmatrix/project-wiki` on macOS or Linux, or `Resolve-Path C:\xmatrix\project-wiki` in PowerShell. Use that path in the message below, including the quotes. [Working with agents](agents.md) explains registration and supported tools.
+Find the folder's full path with `echo "$HOME/xmatrix/project-wiki"` on macOS or Linux, or `Resolve-Path C:\xmatrix\project-wiki` in PowerShell. Use that path in the message below, including the quotes. [Working with agents](agents.md) explains registration and supported tools.
 
 ## Ask for the first page
 
 Create a conversation in your Space. Paste the message below, replacing the path and the example notes with your project's actual facts. Use `@claude` if you added Claude Code.
 
 ```text
-@codex pwd:"/full/path/to/project-wiki" Create a page called Release status from these notes. Use sections for Goal, Decisions, Open work and Next steps. Keep unknown owners or dates marked unknown. Work from these notes and link the page here when it is ready.
+@codex pwd:"/full/path/to/project-wiki"
+Create a page called Release status from these notes.
+Use sections for Goal, Decisions, Open work and Next steps.
+Keep unknown owners or dates marked unknown.
+Work from these notes and link the page here when it is ready.
 
-Goal: Ship the next release with an installation guide people can follow.
-Decided: Support macOS and Windows first. Linux support is still open.
-Open work: Check the Windows instructions. The owner and release date are not decided.
-Next: Ask a maintainer to try the instructions on a clean Windows machine.
+Goal: Ship the next release with a usable installation guide.
+Decided: Support macOS and Windows first. Linux is still open.
+Open work: Check the Windows instructions.
+The owner and release date are not decided.
+Next: Ask a maintainer to try a clean Windows install.
 ```
 
 The folder selects where the agent runs. Your notes supply the content; this task does not need repository access. Windows messages use the same `pwd:` syntax with your full Windows path.
@@ -48,7 +53,10 @@ If no agent replies, check `xmatrix status` and `xmatrix agent list --space <spa
 Reply to the instance that answered. For example, if it appeared as `codex:1`, send:
 
 ```text
-@codex:1 Windows installation has now been checked. Update Release status: remove that open item and make the next step choosing a release date. Leave the date unknown until we agree on it.
+@codex:1 Windows installation has now been checked.
+Update Release status: remove that open item.
+Make the next step choosing a release date.
+Leave the date unknown until we agree on it.
 ```
 
 Use the actual name and number from your conversation. Reopen the same page and verify the old open item is gone and the next step has changed. This is the useful result: one current page you can return to, instead of rereading the thread to reconstruct the plan.
