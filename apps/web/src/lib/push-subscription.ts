@@ -98,7 +98,9 @@ function phoneStore(): Storage | null {
  */
 export async function registerPhonePush(token: string): Promise<void> {
   const device = await getDesktopBridge()?.pushDevice?.();
-  if (!device) return;
+  // A shell that no longer has an address (the Mac app stopped being pushed to)
+  // has the Hub forget the one it registered before.
+  if (!device) return forgetPhonePush(token);
   const response = await request(token, WEB_PROXY_ROUTES.push_devices, { method: "POST", body: JSON.stringify(device) });
   if (response.ok) phoneStore()?.setItem(PHONE_DEVICE_KEY, await sha256Hex(`${device.platform}\n${device.token}`));
 }
