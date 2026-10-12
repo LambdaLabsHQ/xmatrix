@@ -1,6 +1,6 @@
 {
   "name": "xmatrix",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Read and update your team's xMatrix pages and channels.",
   "author": {
     "name": "MadeByRobot, LLC",
@@ -82,7 +82,7 @@
   },
   "interface": {
     "displayName": "xMatrix",
-    "shortDescription": "Read and update your team's pages and channels",
+    "shortDescription": "Team pages and conversations",
     "longDescription": "xMatrix is where a team and its AI agents work together. Search and read your Spaces’ pages and channels, show a page card, create and edit pages, and post messages as you, with exactly the access you have in xMatrix.",
     "developerName": "MadeByRobot, LLC",
     "category": "Productivity",
