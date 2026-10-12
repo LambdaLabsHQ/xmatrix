@@ -229,6 +229,12 @@ a bare origin, or `scope=origin`, reads the whole origin, and too little Chrome
 traffic is reported as no data rather than an error. Check reads the Chrome UX
 Report for a well-known origin. Google fetches the page, not the Hub.
 
+Google report dimensions, Analytics channel aliases and CrUX form factors are
+explicit vocabularies. `google-report.ts` resolves their bounded, distinct names
+through `mappedChoices`; only own entries count as choices, and mapping happens
+after validation. Each connector retains its vocabulary, defaults and usage
+message, including dimension-free reports and the all-device CrUX form.
+
 Gmail signs in through Composio rather than the company Google client:
 `gmail.readonly` is a restricted Google scope, and Composio's Google app is
 already verified for it. The `gmail` manifest uses `oauth.flow: "composio"`;

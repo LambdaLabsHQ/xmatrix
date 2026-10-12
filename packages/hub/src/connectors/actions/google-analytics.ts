@@ -3,7 +3,7 @@ import { record } from "../command-support";
 import { providerJson, ProviderRequestError } from "../http";
 import { quoteRetrievedText } from "./common";
 import { googleHeaders } from "./google-headers";
-import { cell, isoDate, keyedOptions, trailingDays } from "./google-report";
+import { cell, isoDate, keyedOptions, mappedChoices, trailingDays } from "./google-report";
 
 /*
  * Google Analytics 4 (Admin API v1beta for the property list, Data API v1beta
@@ -44,19 +44,19 @@ export function analyticsReportOptions(input: string, now = Date.now()): Analyti
     "use by=<date,page,…|none> days=<1-1095> limit=<1-250> channel=<organic,…>");
   if (typeof options === "string") return options;
   const by = options.get("by") ?? "date";
-  const names = by === "none" ? [] : by.split(",");
-  if (names.length > 3 || new Set(names).size !== names.length || names.some(name => !(name in DIMENSIONS))) {
+  const dimensions = mappedChoices(by === "none" ? [] : by.split(","), DIMENSIONS, 3);
+  if (!dimensions) {
     return `by is none or up to three of ${Object.keys(DIMENSIONS).join(", ")}`;
   }
   const days = Number(options.get("days") ?? "28");
   const limit = Number(options.get("limit") ?? "50");
   if (!Number.isSafeInteger(days) || days < 1 || days > MAX_DAYS) return `days is a whole number from 1 to ${MAX_DAYS}`;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ROWS) return `limit is a whole number from 1 to ${MAX_ROWS}`;
-  const channel = options.get("channel");
-  if (channel !== undefined && !(channel in CHANNELS)) return `channel is one of ${Object.keys(CHANNELS).join(", ")}`;
+  const channels = mappedChoices(options.has("channel") ? [options.get("channel")!] : [], CHANNELS);
+  if (!channels) return `channel is one of ${Object.keys(CHANNELS).join(", ")}`;
   const { start, end } = trailingDays(days, now);
-  return { dimensions: names.map(name => DIMENSIONS[name]!), startDate: isoDate(start), endDate: isoDate(end),
-    limit, ...(channel ? { channel: CHANNELS[channel]! } : {}) };
+  return { dimensions, startDate: isoDate(start), endDate: isoDate(end),
+    limit, ...(channels.length ? { channel: channels[0]! } : {}) };
 }
 
 /** The runReport body: one date range, the fixed traffic metrics, newest dates first or most sessions first. */

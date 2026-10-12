@@ -15,6 +15,14 @@ export function trailingDays(days: number, now: number): { start: number; end: n
   return { start: end - (days - 1) * DAY_MS, end };
 }
 
+/** Resolve a bounded, distinct list from an explicit vocabulary; inherited keys are never choices. */
+export function mappedChoices<T>(names: readonly string[], choices: Readonly<Record<string, T>>, maximum = 1): T[] | undefined {
+  if (names.length > maximum || new Set(names).size !== names.length || names.some(name => !Object.hasOwn(choices, name))) {
+    return undefined;
+  }
+  return names.map(name => choices[name]!);
+}
+
 /** `key=value` words, each key known and given at most once; otherwise the usage line. */
 export function keyedOptions(input: string, keys: readonly string[], usage: string): Map<string, string> | string {
   const options = new Map<string, string>();

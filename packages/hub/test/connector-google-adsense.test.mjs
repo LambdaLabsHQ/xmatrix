@@ -26,7 +26,8 @@ test("accounts, report options and statements are validated before any request",
   assert.equal(range.start.toISOString().slice(0, 10), "2026-09-09");
   assert.equal(range.end.toISOString().slice(0, 10), "2026-10-08");
   assert.deepEqual(adsenseReportOptions("by=none", noon).dimensions, []);
-  for (const bad of ["by=date,domain,country", "by=date,date", "by=hour", "days=0", "days=1096", "limit=251", "days=3 days=4", "colour=red"]) {
+  for (const bad of ["by=date,domain,country", "by=date,date", "by=hour", "by=constructor", "by=toString", "by=__proto__",
+    "days=0", "days=1096", "limit=251", "days=3 days=4", "colour=red"]) {
     assert.equal(typeof adsenseReportOptions(bad, noon), "string", bad);
   }
   assert.deepEqual(statement("@googleadsense:list_accounts:*"), {});
