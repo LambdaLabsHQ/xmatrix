@@ -658,7 +658,7 @@ test("a page shows its document at once, and the live editor takes over when its
   }
 });
 
-test("what changed since the reader last read the page plays as it comes into view, and the page is then read", async ({ page: browser }) => {
+test("what changed since the reader last read the page stays as a diff until it is ticked viewed, and the page is then read", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 2 },
@@ -676,8 +676,16 @@ test("what changed since the reader last read the page plays as it comes into vi
   await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
   await expect(editor.locator(".page-reader-removed")).toContainText("Planned for next");
   await browser.screenshot({ path: test.info().outputPath("pages-reader-changes.png") });
-  // Once played, the page is as it is.
-  await expect(added).toHaveCount(0, { timeout: 10_000 });
+  // The diff does not play out or fade, and the page is not read behind its reader's back.
+  const viewed = browser.getByTestId("page-reader-diff");
+  await expect(viewed).toContainText("since you last read this page");
+  await browser.waitForTimeout(2_500);
+  await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
+  expect(await added.first().evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
+  expect(await fixtureRequestBodies(browser, "page-mark-read")).toEqual([]);
+  // Ticked viewed, the page is as it is.
+  await viewed.getByRole("checkbox").check();
+  await expect(added).toHaveCount(0);
   await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
   await expect(editor).toContainText("Shipped this week");
   await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))

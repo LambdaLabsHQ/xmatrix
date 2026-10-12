@@ -164,17 +164,20 @@ fact is about.
   (§4.4).
 - **The scrollbar** marks where others are, where discussions are and which
   sections owe an update.
-- **What changed since this person last read the page** plays as they read
-  it. How far each person has read each page is theirs and kept by the Hub
+- **What changed since this person last read the page** is shown to them as
+  a diff, in place. How far each person has read each page is theirs and kept by the Hub
   (`data.page_reads`, `GET`/`PUT /api/spaces/:spaceId/pages/:pageId/read`),
   so it follows them across devices; it is the newest revision they have had
   on screen, moves only forward, and is set once the page has been in view at
-  a revision for a moment. Opening the page diffs the revision they last read
+  a revision for a moment, or, when the page opened on a diff, once they tick
+  that diff *Viewed*. Opening the page diffs the revision they last read
   against the document now, block by block and then word by word inside
-  changed blocks: new text surfaces out of a blur on a tint that fades, new
-  blocks rise in, and text taken out is struck and folds away where it stood.
-  Each change plays when it first scrolls into view. A first visit shows
-  nothing as changed. Agents have no read state.
+  changed blocks: new text stands on a tint and text taken out is struck
+  where it stood. Nothing is animated and nothing fades: the diff stays until
+  its reader ticks *Viewed* above the page, which shows the page as it is;
+  unticking shows the diff again. A diff they have viewed is not shown again:
+  the page opens as it is. A first visit shows nothing as changed. Agents
+  have no read state.
 - **Opening a page draws it as the editor will.** Until the live session has
   synced, the page shows its prefetched document rendered from the same
   document schema and list item view as the editor, with the margin's room

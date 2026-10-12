@@ -135,7 +135,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readGitHubFile, references }: {
+  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, readGitHubFile, references }: {
   session: PageLiveSession;
   canEdit: boolean;
   onBlockChange?: (blockId: string) => void;
@@ -165,8 +165,10 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   cursorPresence?: CursorPresence;
   /** The editor is drawn and may take the place of the page's preview. */
   onReady?: () => void;
-  /** The page as this reader last had it on screen, as markdown: what changed since is shown as it is read. */
-  readerBaseline?: string | null;
+  /** The page as this reader last read it, as markdown, and the revision to diff it against: what changed since is shown as a diff. */
+  readerBaseline?: { body: string; head: number } | null;
+  /** How many changes that diff shows. */
+  onReaderChanges?: (count: number) => void;
   /** Reads a GitHub file the page embeds, through the Hub. */
   readGitHubFile?: ReadGitHubFile;
   /** What `page:<id>` and `channel:<id>` in the text name and open. */
@@ -356,14 +358,19 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     if (view.current && follow) scrollToSection(view.current, follow.blockId);
   }, [follow]);
 
+  const readerChanges = useRef(onReaderChanges);
+  readerChanges.current = onReaderChanges;
+  const readerBody = readerBaseline?.body ?? null;
+  const readerHead = readerBaseline?.head;
   useEffect(() => {
-    if (readerBaseline === null) return;
     // After the synced document is in the editor, so the changes are measured against it.
     const frameId = requestAnimationFrame(() => {
-      if (view.current) showReaderChanges(view.current, session.fragment, readerBaseline);
+      if (!view.current) return;
+      const count = showReaderChanges(view.current, session.fragment, readerBody);
+      if (readerBody !== null) readerChanges.current?.(count);
     });
     return () => cancelAnimationFrame(frameId);
-  }, [readerBaseline, session]);
+  }, [readerBody, readerHead, session]);
 
   useEffect(() => {
     // An Agent's Run going to sleep or waking changes whose carets show, with no awareness change.
