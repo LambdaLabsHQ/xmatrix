@@ -46,6 +46,8 @@
     "apps/web": {
       "entry": [
         "next.config.ts",
+        // next.config.ts names it by path as the loader for the guide's Markdown.
+        "markdown-source-loader.cjs",
         "open-next.config.ts",
         "postcss.config.mjs",
         "src/middleware.ts",
