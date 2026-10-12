@@ -46,6 +46,7 @@ their respective owners; these assets identify integrations with those products.
 | notion | [Notion](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/notion-icon.svg) |
 | opsgenie | [Opsgenie](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/opsgenie.svg) |
 | pagerduty | [PagerDuty](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/pagerduty-icon.svg) |
+| pagespeed | [PageSpeed Insights](https://raw.githubusercontent.com/simple-icons/simple-icons/9f1c11219a45e1440271e98a143490594a4aba6d/icons/pagespeedinsights.svg) |
 | sentry | [Sentry](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/sentry-icon.svg) |
 | slack | [Slack](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/slack-icon.svg) |
 | stripe | [Stripe](https://raw.githubusercontent.com/simple-icons/simple-icons/9f1c11219a45e1440271e98a143490594a4aba6d/icons/stripe.svg) |

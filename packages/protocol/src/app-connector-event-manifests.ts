@@ -202,6 +202,20 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/analytics.readonly"], secretRefs: [] },
   },
+  actionConnector({
+    id: "pagespeed", name: "PageSpeed Insights", kind: "observability",
+    description: "Run Lighthouse on a public page through PageSpeed Insights and read real-user Core Web Vitals from the Chrome UX Report. Read-only.",
+    credentials: [
+      { id: "apiKey", label: "Google API key", required: true,
+        description: "A Google Cloud API key with the PageSpeed Insights API and Chrome UX Report API enabled; restrict it to those two APIs." },
+    ],
+    actions: [
+      readAction("audit", "Lighthouse audit", "Performance, accessibility, best-practices and SEO scores, lab metrics, the worst failing audits and the page's field data. Takes up to a minute.",
+        "<https://example.com/page> [strategy=mobile|desktop]"),
+      readAction("field", "Core Web Vitals", "p75 and good/needs-improvement/poor shares of LCP, INP, CLS, FCP and TTFB over the last 28 days. A bare origin reads the whole origin.",
+        "<https://example.com/page or origin> [form=phone|desktop|all] [scope=page|origin]"),
+    ],
+  }),
   {
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",

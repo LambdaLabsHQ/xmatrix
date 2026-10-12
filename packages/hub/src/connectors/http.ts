@@ -29,15 +29,20 @@ export function providerUrl(base: string, path = ""): URL {
   return url;
 }
 
-export async function providerJson(url: URL | string, init: RequestInit & { json?: unknown; describeError?: (payload: Record<string, unknown>) => string | undefined } = {}):
+/* A provider that does its own slow work per call, such as a Lighthouse run, may wait up to this long. */
+const MAX_TIMEOUT_MS = 60_000;
+
+export async function providerJson(url: URL | string, init: RequestInit & { json?: unknown; timeoutMs?: number;
+  describeError?: (payload: Record<string, unknown>) => string | undefined } = {}):
   Promise<Record<string, unknown>> {
-  const { json, describeError, ...rest } = init;
+  const { json, describeError, timeoutMs = TIMEOUT_MS, ...rest } = init;
+  const timeout = AbortSignal.timeout(Math.min(Math.max(timeoutMs, 1), MAX_TIMEOUT_MS));
   const headers = new Headers(rest.headers);
   if (json !== undefined) headers.set("content-type", "application/json");
   headers.set("accept", headers.get("accept") ?? "application/json");
   headers.set("user-agent", "xMatrix-Connectors");
   const response = await fetch(url, { ...rest, headers, redirect: "manual",
-    ...(json !== undefined ? { body: JSON.stringify(json) } : {}), signal: rest.signal ? AbortSignal.any([rest.signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS) });
+    ...(json !== undefined ? { body: JSON.stringify(json) } : {}), signal: rest.signal ? AbortSignal.any([rest.signal, timeout]) : timeout });
   const reader = response.body?.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;

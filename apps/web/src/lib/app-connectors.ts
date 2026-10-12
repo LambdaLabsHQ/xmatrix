@@ -84,6 +84,10 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Read sessions, users and key events by landing page, channel or country, or only organic search traffic.",
     "Follow a page from Search Console clicks to Google Analytics sessions and conversions.",
   ],
+  pagespeed: [
+    "Run a Lighthouse audit on a page and list its scores, lab metrics and failing SEO and performance checks.",
+    "Read real-user Core Web Vitals for a page or origin from the Chrome UX Report.",
+  ],
   gmail: [
     "Find a sign-up or login verification email and open its link without leaving the agent.",
     "Read receipts, alerts and replies from the connected mailbox as task context.",
