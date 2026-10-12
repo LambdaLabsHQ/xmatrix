@@ -5,9 +5,15 @@ The invoking `@` owns its status. Each Agent in a message updates independently,
 These screenshots use local synthetic fixtures and the repository theme, not production data.
 
 The Web composer's root `@` list includes the current Channel's live Instances
-as explicit `@name:slot` addresses, alongside harness summons. Offline Instances
+as explicit `@name:slot` addresses in a separate, initially open Instance
+category before Agent summons. Its fold is independent of the harness catalog. Offline Instances
 remain in the colon reference picker. A new thread draft offers no Instances
 from its parent Channel.
+
+Mention categories use quiet text captions with a count and no icon, one-line choices (name,
+then its description truncated in the remaining width), inset rounded selections
+and plain expansion rows inside the composer's single Liquid Glass surface.
+Category labels and rows add no separate backdrop-filter material.
 
 The Web composer asks Jev about summon intent after a 350 ms typing pause,
 using the exact outgoing body, summon ranges and the author's authorized
