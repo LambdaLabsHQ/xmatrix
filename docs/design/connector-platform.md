@@ -167,24 +167,41 @@ with incremental scope union disabled and [Picker disposal](https://developers.g
 Google Search Console is a separate `googlesearchconsole` connection with its
 own token. It signs in with the same company Google OAuth client
 (`CONNECTOR_GOOGLE_CLIENT_ID` / `CONNECTOR_GOOGLE_CLIENT_SECRET`) but requests
-only `https://www.googleapis.com/auth/webmasters`, offline access and consent;
-the Hub requires exactly that provider-confirmed scope on exchange and refresh,
-so neither Google connection can hold the other's permission. The signed state
-names the provider, so a Docs state cannot complete a Search Console connect.
-Check lists the account's properties without storing them. Reads:
-`list_sites:*`, `query:<property> [by=<up to three of query,page,country,device,date,searchAppearance>|none] [days=1-480] [limit=1-250] [type=…]`
-(defaults `by=query days=28 limit=25 type=web`, UTC dates ending today),
-`list_sitemaps:<property>` and `inspect_url:<property> <page url>`. The write
-`submit_sitemap:<property> <sitemap url>` runs unless a Space admin denies it
-in the Channel. A
-property is `sc-domain:<domain>` or an exact URL-prefix address ending in `/`;
-page and sitemap URLs must belong to the named property before any provider
-call. Google decides whether the connected account can see the property.
-Search Console has no webhooks, so it has no inbound events; schedule a page
-Automation for recurring reports. Enable the Search Console API on the company
-Google project and add the `webmasters` scope to its consent screen; it is a
-sensitive scope, so external use beyond Testing users needs Google verification.
-See [Search Console API](https://developers.google.com/webmaster-tools/v1/api_reference_index).
+`webmasters` and `siteverification`, offline access and consent. New connections
+require both provider-confirmed scopes; existing webmasters-only grants remain
+refreshable and retain Search Console access. Verification actions require the
+provider-confirmed managed `oauthScopes` field and tell older connections to
+reconnect. A refresh never upgrades a grant. The signed state names the provider,
+so a Docs state cannot complete a Search Console connect.
+
+The connector covers all Search Console API methods: property list/get/add/delete,
+sitemap list/get/submit/delete, Search Analytics query, and URL inspection. Adding
+a property does not verify ownership. Site Verification covers token retrieval,
+verification, resource list/get, owner-list replacement, and removal of the
+connected account's ownership. Domain properties use DNS_TXT or DNS_CNAME; URL
+properties use FILE, META, ANALYTICS or TAG_MANAGER. Token retrieval returns only
+the public verification record. Publishing that record is a separate DNS or
+website operation; this connector never follows provider-supplied links or writes
+to a website. Resource ids are opaque encoded path segments. Owner replacement
+explicitly replaces the entire list; Google protects the caller's ownership and
+requires removed owners' tokens to be removed beforehand.
+
+`query` retains concise defaults `by=query days=28 limit=25 type=web` and also
+accepts validated API JSON with explicit dates, all supported dimensions,
+dimension filters, startRow, aggregationType and dataState (including hourly_all).
+Dates use Pacific calendar days. Calls return at most 250 rows within the shared
+response-size bound; paginate explicitly with startRow. Google returns top rows,
+not a guaranteed complete export. URL inspection includes the bounded full
+inspection result, including rich results and referring URLs.
+
+All actions follow the existing Channel policy: an explicit deny blocks execution.
+Page/sitemap URLs must belong to the exact property before any provider call.
+Search Console has no webhooks; schedule a page Automation for recurring reports.
+Enable both Search Console and Site Verification APIs on the company Google
+project and configure both scopes in its consent screen. External use beyond
+Testing users must meet Google's verification requirements.
+See [Search Console API](https://developers.google.com/webmaster-tools/v1/api_reference_index)
+and [Site Verification API](https://developers.google.com/site-verification/v1).
 
 Google Analytics is a separate `googleanalytics` connection on the same
 company Google client, holding only

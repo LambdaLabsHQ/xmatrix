@@ -22,7 +22,7 @@ import { composioConnectedAccount, composioConnectUrl, composioUserId } from "./
 
 const STATE_TTL_MS = 10 * 60_000;
 const REFRESH_MARGIN_MS = 2 * 60_000;
-/* Each Google provider holds exactly one scope, on its own connection and token. */
+/* Each Google provider holds its own bounded grant, connection and token. */
 const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   google: { scope: "https://www.googleapis.com/auth/drive.file", name: "per-file" },
   googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
@@ -48,9 +48,14 @@ function validateGoogleGrant(providerId: string, payload: Record<string, unknown
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
   const expires = Number(payload.expires_in);
   const scopes = typeof payload.scope === "string" ? payload.scope.split(/\s+/u).filter(Boolean) : [];
+  const expected = providerId === "googlesearchconsole"
+    ? [scope, "https://www.googleapis.com/auth/siteverification"] : [scope];
+  // Old Search Console grants remain refreshable; only a new consent can add verification.
+  const validScopes = scopes.includes(scope) && new Set(scopes).size === scopes.length &&
+    scopes.every(value => expected.includes(value)) && (!initial || scopes.length === expected.length);
   if (!Number.isFinite(expires) || expires <= 0 || expires > 86_400 ||
       typeof payload.token_type !== "string" || payload.token_type.toLowerCase() !== "bearer" ||
-      ((initial || payload.scope !== undefined) && (scopes.length !== 1 || scopes[0] !== scope)) ||
+      ((initial || payload.scope !== undefined) && !validScopes) ||
       (initial && (typeof payload.refresh_token !== "string" || !payload.refresh_token))) {
     throw new ProviderRequestError(502, `Google did not confirm an offline, ${name} OAuth grant; reconnect with the requested permission`);
   }
@@ -197,6 +202,9 @@ export function oauthTokenFields(client: OAuthClient, payload: Record<string, un
   if (client.manifest.id === "pagerduty") {
     validatePagerDutyGrant(payload);
     fields.oauthScopes = String(payload.scope);
+  }
+  if (client.manifest.id === "googlesearchconsole" && typeof payload.scope === "string") {
+    fields.oauthScopes = payload.scope;
   }
   return fields;
 }

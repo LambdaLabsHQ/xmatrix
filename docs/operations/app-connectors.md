@@ -101,10 +101,44 @@ section, and none is ever shown again.
 | Telegram | `send:<chat id>` |
 | Discord | `post:<channel id>` (mentions never ping) |
 | Notion | `append:<page id>`, `create_page:<parent page id>` |
-| Google Search Console | `list_sites:*`, `query:<property> [by=…] [days=…] [limit=…] [type=…]`, `list_sitemaps:<property>`, `inspect_url:<property> <page url>` (reads), `submit_sitemap:<property> <sitemap url>` |
+| Google Search Console | Property `list_sites/get_site/add_site/delete_site`; sitemap `list_sitemaps/get_sitemap/submit_sitemap/delete_sitemap`; `query` (concise options or bounded API JSON); `inspect_url`; ownership `get_verification_token/verify_site/list_verifications/get_verification/update_verification_owners/delete_verification`. See the onboarding procedure below. |
 | Google Analytics | `list_properties:*`, `report:<property id> [by=…] [days=…] [limit=…] [channel=…]` (reads) |
 | Gmail (via Composio) | `search:* [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub) |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
+
+### Search Console onboarding
+
+Connect requests `webmasters` and `siteverification`. Reconnect an older grant in
+Apps to consent to verification; refresh cannot add permission. The company
+Google project must have Search Console API and Site Verification API enabled.
+With project IAM access, use GCP `read_api_status` / `enable_api` on
+`<project-number>/searchconsole.googleapis.com` and
+`<project-number>/siteverification.googleapis.com`.
+Existing webmasters-only connections retain their previous actions.
+
+1. `@googlesearchconsole:get_verification_token:sc-domain:example.com DNS_TXT`
+   returns the account's public DNS record. Publish it using the domain's DNS
+   provider without replacing unrelated TXT records. URL properties can instead
+   use FILE or META with a separate website deployment.
+2. `@googlesearchconsole:verify_site:sc-domain:example.com DNS_TXT` confirms
+   ownership after propagation. Domain methods are DNS_TXT/DNS_CNAME; URL methods
+   are FILE/META/ANALYTICS/TAG_MANAGER. Verification does not publish the token.
+3. `@googlesearchconsole:add_site:sc-domain:example.com` adds the property to the
+   account. `get_site` must then show `siteOwner`.
+4. `@googlesearchconsole:submit_sitemap:sc-domain:example.com https://example.com/sitemap.xml`
+   and `get_sitemap` confirm submission; fetching and indexing remain asynchronous.
+
+Every mutation respects the Channel's current deny policy. Property removal,
+sitemap removal and unverification are separate actions. Owner-list replacement
+requires an exact resource id and `{"owners":["email@example.com"]}`; it replaces
+the full list and does not remove verification tokens from DNS or the website.
+Google rejects removal while the affected owner's tokens remain published.
+
+Advanced analytics example (Pacific dates; at most 250 rows per call):
+`@googlesearchconsole:query:sc-domain:example.com {"startDate":"2026-10-01","endDate":"2026-10-07","dimensions":["page","query"],"startRow":250,"rowLimit":250,"dataState":"all","dimensionFilterGroups":[{"filters":[{"dimension":"query","operator":"contains","expression":"pixel art"}]}]}`.
+The result reports the next offset and incomplete-data metadata. Explicit offsets
+remain necessary; the API does not promise a complete export.
+
 | OpenConnector | `search:<service>` (read), `run:<service.action>[@alias] <json>` (write) against the Space's own runtime |
 
 OpenConnector is a gateway to a Space-owned external runtime, not a built-in

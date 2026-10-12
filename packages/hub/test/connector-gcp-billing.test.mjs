@@ -115,6 +115,9 @@ test("Google failures explain disabled APIs and missing IAM without echoing raw 
   await fetched([{ status: 403, body: { error: { status: "PERMISSION_DENIED", message: "Permission 'bigquery.jobs.create' denied for private-token" } } }],
     () => assert.rejects(actions.query_costs.execute(context, input("query_costs")), /permission=bigquery.jobs.create/u));
   assert.equal(actions.enable_api.effect, "write");
+  for (const api of ["searchconsole.googleapis.com", "siteverification.googleapis.com"]) {
+    assert.deepEqual(actions.enable_api.parse({ target: `123456789/${api}`, text: "" }), { project: "123456789", api });
+  }
   assert.deepEqual(actions.enable_api.parse({ target: "123456789/bigquery.googleapis.com", text: "" }), { project: "123456789", api: "bigquery.googleapis.com" });
   for (const resource of ["billing-project/unknown.googleapis.com", "billing-project/bigquery.googleapis.com/", "billing-project/bigquery.googleapis.com/../other"]) {
     assert.equal(typeof actions.enable_api.parse({ target: resource, text: "" }), "string");

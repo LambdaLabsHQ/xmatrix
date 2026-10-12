@@ -88,3 +88,14 @@ Channel About sessions submit summary/title text directly through Hub using
 CLI arguments or bounded JSON stdin; they do not stage local files. Their
 own-Channel authorization and immutable database revision/input evidence are
 unchanged. See [Channel metadata revisions](../design/channel-metadata-revisions.md).
+
+### Search Console ownership and management
+
+The Search Console connector covers the Search Console and Site Verification API
+methods through typed actions. New OAuth grants request webmasters plus
+siteverification; existing webmasters grants remain usable and refreshable,
+while verification requires a new consent. Verification records are public,
+separate from OAuth credentials, and are published through the site's own DNS or
+website workflow. Advanced analytics supports validated JSON, Pacific calendar
+dates, filters, explicit offsets and fresh/hourly data within bounded calls.
+See [app connectors](../operations/app-connectors.md) for onboarding and policy.
