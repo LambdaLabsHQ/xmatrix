@@ -81,6 +81,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, sitemaps, properties, verification |
 | Google Analytics | `googleanalytics` | | `list_properties`, `report` |
 | Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `report` |
+| PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Gmail | `gmail` | | `search`, `read` |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
