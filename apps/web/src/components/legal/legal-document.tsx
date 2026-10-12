@@ -6,8 +6,8 @@ import { WoodPanel } from "@/components/ui/material-surfaces";
 
 export const LEGAL_ENTITY = "MadeByRobot, LLC";
 export const LEGAL_CONTACT_EMAIL = "contact@madebyrobot.net";
-export const LEGAL_EFFECTIVE_DATE = "Formal public launch date";
-export const LEGAL_VERSION = "Pre-launch draft 2026-09-14";
+export const LEGAL_EFFECTIVE_DATE = "12 October 2026";
+export const LEGAL_VERSION = "2026-10-12";
 
 const legalLinks = [
   { label: "Privacy", href: "/privacy" },
@@ -50,7 +50,7 @@ export function LegalDocument({
           <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">{title}</h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">{description}</p>
           <div className="mt-4 space-y-1 text-sm font-medium text-muted-foreground">
-            <p>{LEGAL_VERSION} — not yet effective</p>
+            <p>Version {LEGAL_VERSION}</p>
             <p>Effective date: {LEGAL_EFFECTIVE_DATE}</p>
           </div>
         </div>
