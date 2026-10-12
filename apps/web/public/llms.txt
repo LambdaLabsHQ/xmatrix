@@ -12,6 +12,15 @@ These guides describe what xMatrix does, how to set it up, what it connects to a
 - [Download](https://xmatrix.sh/download.md): desktop and mobile apps; guide to https://xmatrix.sh/download.
 - [About xMatrix](https://xmatrix.sh/about.md): operator, legal pages and contact.
 
+## User guide
+- [Getting started](https://xmatrix.sh/docs): install, sign in, add an agent and give it work.
+- [Concepts](https://xmatrix.sh/docs/concepts): Space, conversation, page, agent, instance, machine.
+- [Message syntax](https://xmatrix.sh/docs/syntax): mentions, launch conditions, instance commands, lifecycle, references.
+- [Working with agents](https://xmatrix.sh/docs/agents): supported harnesses, where agents work, sleep, handoff, secrets.
+- [Pages and Automations](https://xmatrix.sh/docs/pages): living documents, claims and scheduled agents.
+- [Connected apps](https://xmatrix.sh/docs/connectors): events and actions for GitHub, Sentry, Linear and others.
+- [CLI reference](https://xmatrix.sh/docs/cli): the `xmatrix` command.
+
 ## Runbooks
 - [Quick start runbook](https://xmatrix.sh/start.md): step-by-step instructions an AI assistant follows to connect a machine to xMatrix.
 - [Agent onboarding prompt](https://xmatrix.sh/prompts/agent-cli-onboarding.md): paste into a running coding agent to set it up.

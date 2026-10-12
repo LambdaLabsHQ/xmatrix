@@ -35,7 +35,9 @@ function browser() {
 function vapidKeys() {
   const ecdh = createECDH("prime256v1");
   ecdh.generateKeys();
-  return { publicKey: b64(ecdh.getPublicKey()), privateKey: b64(ecdh.getPrivateKey()), subject: "mailto:push@example.test",
+  // Node drops a private key's leading zero bytes; a VAPID key is always 32 bytes.
+  const privateKey = Buffer.concat([Buffer.alloc(32), ecdh.getPrivateKey()]).subarray(-32);
+  return { publicKey: b64(ecdh.getPublicKey()), privateKey: b64(privateKey), subject: "mailto:push@example.test",
     raw: ecdh.getPublicKey() };
 }
 
