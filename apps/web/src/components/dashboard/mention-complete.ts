@@ -117,8 +117,8 @@ export type MentionCompletionResult = {
 };
 
 export type MentionCandidateSection = {
-  kind: MentionCandidate["kind"];
-  label: "Condition" | "AI service" | "Agent" | "Human" | "App";
+  kind: MentionCandidate["kind"] | "instance";
+  label: "Instance" | "Condition" | "AI service" | "Agent" | "Human" | "App";
   candidates: MentionCandidate[];
   startIndex: number;
   totalCount: number;
@@ -129,13 +129,13 @@ export type MentionCandidateSection = {
 export type MentionCandidateSectionOptions = {
   limitPerKind?: number;
   /** Kinds the human opened by hand, which show every candidate they have. */
-  expandedKinds?: Iterable<MentionCandidate["kind"]>;
+  expandedKinds?: Iterable<MentionCandidateSection["kind"]>;
   /**
    * Kinds that start open at `limitPerKind` rows. Every other kind folds to no
    * rows at all until it is expanded. Omit it and every kind starts open, which
    * is what the non-browsing stages want.
    */
-  openKinds?: Iterable<MentionCandidate["kind"]>;
+  openKinds?: Iterable<MentionCandidateSection["kind"]>;
 };
 
 export type ActiveMention = {
@@ -1272,7 +1272,7 @@ export function filterMentionCandidates(
  * start open. The lower-traffic kinds fold to a single line until the human
  * asks for them, which is what keeps the panel short enough to read.
  */
-export const DEFAULT_OPEN_MENTION_KINDS: ReadonlyArray<MentionCandidate["kind"]> = ["agent", "user"];
+export const DEFAULT_OPEN_MENTION_KINDS: ReadonlyArray<MentionCandidateSection["kind"]> = ["instance", "agent", "user"];
 
 /**
  * Rows an open section shows before it too offers a fold row. A Space with two
@@ -1293,6 +1293,7 @@ export function groupedMentionCandidates(
     typeof options === "number" || !options.openKinds ? null : new Set(options.openKinds);
   let startIndex = 0;
   return ([
+    { kind: "instance", label: "Instance" },
     { kind: "launch", label: "Condition" },
     { kind: "service", label: "AI service" },
     { kind: "agent", label: "Agent" },
@@ -1300,7 +1301,10 @@ export function groupedMentionCandidates(
     { kind: "app", label: "App" },
   ] as const)
     .map((section) => {
-      const sectionCandidates = candidates.filter((candidate) => candidate.kind === section.kind);
+      const sectionCandidates = candidates.filter((candidate) => {
+        const isInstance = candidate.kind === "agent" && candidate.schemaNodeId === "agent-reference:instance";
+        return section.kind === "instance" ? isInstance : !isInstance && candidate.kind === section.kind;
+      });
       const expanded = expandedKinds.has(section.kind);
       const open = expanded || !openKinds || openKinds.has(section.kind);
       const visibleCandidates = expanded

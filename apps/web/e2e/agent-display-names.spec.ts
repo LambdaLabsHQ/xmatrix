@@ -27,7 +27,7 @@ test("same-name Agents collapse to one shout without offering retired launch suf
   await expect(draft).toHaveValue("@codex ");
 });
 
-test("selected completion option is one full-width bar", async ({ page }) => {
+test("selected category option is inset and rounded inside a single glass surface", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
     registrations: [{
       key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "machine-0", harness: "codex" },
@@ -51,6 +51,8 @@ test("selected completion option is one full-width bar", async ({ page }) => {
     return {
       radius: style.borderRadius,
       background: style.backgroundColor,
+      backdrop: style.backdropFilter,
+      shadow: style.boxShadow,
       optionLeft: optionBox.left,
       optionRight: optionBox.right,
       panelLeft: panelBox.left,
@@ -59,10 +61,12 @@ test("selected completion option is one full-width bar", async ({ page }) => {
   });
 
   expect(geometry).not.toBeNull();
-  expect(geometry!.radius === "0px" || geometry!.radius === "0px 0px 0px 0px").toBe(true);
+  expect(geometry!.radius).toBe("10px");
+  expect(geometry!.backdrop).toBe("none");
+  expect(geometry!.shadow).toBe("none");
   expect(geometry!.background).not.toBe("rgba(0, 0, 0, 0)");
-  expect(Math.abs(geometry!.optionLeft - geometry!.panelLeft)).toBeLessThanOrEqual(1);
-  expect(Math.abs(geometry!.optionRight - geometry!.panelRight)).toBeLessThanOrEqual(1);
+  expect(geometry!.optionLeft - geometry!.panelLeft).toBeCloseTo(8, 0);
+  expect(geometry!.panelRight - geometry!.optionRight).toBeCloseTo(8, 0);
 });
 
 test("message headers and the details rail distinguish same-name Agents by owner and machine", async ({ page }) => {

@@ -7230,6 +7230,37 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   color: var(--muted-foreground);
 }
 
+/* One glass surface, with inset ink and gentle solid selection inside it.
+   Categories are dense: a caption line, then one-line rows, so the choices
+   own the panel's height. */
+.app-mention-suggestions { padding-block: 4px; }
+.app-mention-category-heading { padding: 6px 18px 2px; }
+.app-mention-category-label { display: flex; align-items: center; gap: 8px; flex: 1; font-size: 11px; line-height: 16px; font-weight: 600; color: var(--muted-foreground); }
+/* The caption's icon sits in the avatar column, so captions and names share one left edge. */
+.app-mention-category-label > svg { box-sizing: content-box; padding-inline: 3px; }
+.app-mention-category-count { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; opacity: .6; }
+.xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option {
+  width: calc(100% - 16px) !important;
+  min-height: 32px;
+  margin: 0 8px !important;
+  padding: 0 10px;
+  border-radius: 10px !important;
+}
+.xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option:is(:hover, [aria-selected="true"]) {
+  background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
+  border-radius: 10px !important;
+}
+.xmatrix-app .app-mention-suggestions .app-mention-category button.app-mention-category-more {
+  min-height: 26px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+/* A finger needs a taller target than a pointer. */
+@media (pointer: coarse) {
+  .xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option { min-height: 38px; }
+  .xmatrix-app .app-mention-suggestions .app-mention-category button.app-mention-category-more { min-height: 32px; }
+}
+
 .app-invocation-popup:has(.app-routing-board) { width: min(520px, calc(100vw - 24px)); }
 .app-routing-board { --invocation-color: var(--primary); display: grid; gap: 8px; margin: 4px 0 12px; }
 .app-routing-verdict { margin: 0; color: var(--foreground); font-size: 13px; line-height: 1.45; }
