@@ -45,6 +45,49 @@ fn connected_session_refreshes_before_the_local_expiry_boundary() {
 }
 
 #[test]
+fn daemon_enrollment_refusal_requests_refresh_only_for_expired_auth() {
+    assert!(super::daemon_enrollment_auth_rejected(
+        "Machine Daemon credential enrollment failed: Invalid or expired auth token"
+    ));
+    for reason in [
+        "Machine Daemon credential enrollment failed: error sending request for url",
+        "Machine Daemon credential enrollment failed: Machine retired",
+        "Machine Daemon credential enrollment failed: Upgrade required",
+        "WebSocket handshake failed: Invalid or expired auth token",
+    ] {
+        assert!(!super::daemon_enrollment_auth_rejected(reason), "{reason}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn daemon_enrollment_refusal_interrupts_the_scheduled_refresh_wait() {
+    let requested = std::sync::Arc::new(tokio::sync::Notify::new());
+    let waiting = requested.clone();
+    let task = tokio::spawn(async move {
+        super::wait_for_machine_daemon_session_refresh(&waiting, 20 * 60).await;
+    });
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(30)).await;
+    assert!(!task.is_finished());
+    requested.notify_one();
+    tokio::task::yield_now().await;
+    assert!(task.is_finished());
+    task.await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn daemon_enrollment_refusals_before_wait_are_coalesced_without_a_retry_loop() {
+    let requested = tokio::sync::Notify::new();
+    requested.notify_one();
+    requested.notify_one();
+    let start = tokio::time::Instant::now();
+    super::wait_for_machine_daemon_session_refresh(&requested, 20 * 60).await;
+    assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+    super::wait_for_machine_daemon_session_refresh(&requested, 20 * 60).await;
+    assert_eq!(start.elapsed(), std::time::Duration::from_secs(20 * 60));
+}
+
+#[test]
 fn daemon_saved_session_reload_rejects_source_rollback() {
     let current = super::DaemonSessionSource {
         hub_url: "https://xmatrix.test".to_string(),

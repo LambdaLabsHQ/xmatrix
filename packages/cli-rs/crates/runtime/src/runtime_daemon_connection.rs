@@ -2256,8 +2256,12 @@ async fn cmd_daemon_connected(
         activation.as_ref(),
     )
     .await?;
-    let _daemon_auth_refresh_handle =
-        spawn_daemon_auth_refresh_task(relay.clone(), daemon_session.clone());
+    let daemon_auth_refresh_requested = Arc::new(tokio::sync::Notify::new());
+    let _daemon_auth_refresh_handle = spawn_daemon_auth_refresh_task(
+        relay.clone(),
+        daemon_session.clone(),
+        daemon_auth_refresh_requested.clone(),
+    );
     let _run_handoff_handle = spawn_daemon_run_handoff_task(run_registry.clone());
     let (_disabled_update_guard, mut self_update_rx) = if update_authority {
         (
@@ -2745,6 +2749,9 @@ async fn cmd_daemon_connected(
                         });
                     }
                     MachineDaemonConnectionEvent::Disconnected { reason } => {
+                        if daemon_enrollment_auth_rejected(&reason) {
+                            daemon_auth_refresh_requested.notify_one();
+                        }
                         eprintln!("{} daemon disconnected: {reason}", "⚠".yellow().bold());
                         if let Some(profile) = config::active_profile_context() {
                             profile_manager.set_runtime_state(
@@ -3083,9 +3090,22 @@ async fn reload_daemon_session_from_saved_session(
     Ok(result)
 }
 
+fn daemon_enrollment_auth_rejected(reason: &str) -> bool {
+    reason.starts_with("Machine Daemon credential enrollment failed:")
+        && reason.contains("Invalid or expired auth token")
+}
+
+async fn wait_for_machine_daemon_session_refresh(requested: &tokio::sync::Notify, sleep_secs: u64) {
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_secs(sleep_secs)) => {}
+        _ = requested.notified() => {}
+    }
+}
+
 fn spawn_daemon_auth_refresh_task(
     relay: SharedMachineDaemonConnection,
     session_state: Option<DaemonSessionState>,
+    requested: Arc<tokio::sync::Notify>,
 ) -> tokio::task::JoinHandle<()> {
     config::spawn_profile_task(async move {
         let Some(session_state) = session_state else {
@@ -3121,7 +3141,10 @@ fn spawn_daemon_auth_refresh_task(
             }
 
             let sleep_secs = connected_token_refresh_sleep_secs(&session, now);
-            tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
+            // Resume after sleep or a network outage can leave the access token
+            // expired while the independent seven-day session is still valid.
+            // Coalesce enrollment refusals and wake the existing refresh owner.
+            wait_for_machine_daemon_session_refresh(&requested, sleep_secs).await;
 
             let snapshot = session_state.read().await.clone();
             let session = snapshot.session.clone();
