@@ -84,7 +84,7 @@ export function registerMcpRoutes(app: Hono<{ Bindings: Env }>): void {
     try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch {
       return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, 200, CORS);
     }
-    const response = await mcpServer(c.env, caller)(body);
+    const response = await mcpServer(c.env, caller, (request) => Promise.resolve(app.fetch(request, c.env, c.executionCtx)))(body);
     const headers = new Headers(response.headers);
     for (const [name, value] of Object.entries(CORS)) headers.set(name, value);
     return new Response(response.body, { status: response.status, headers });
