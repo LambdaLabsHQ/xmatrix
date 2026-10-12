@@ -28,6 +28,10 @@ const nextConfig: NextConfig = {
     ? { eslint: { ignoreDuringBuilds: true }, typescript: { ignoreBuildErrors: true } }
     : {}),
   transpilePackages: ["@xmatrix/protocol"],
+  // A page rendered per request streams its title, description and canonical
+  // into <body> for clients Next believes run scripts, Googlebot among them.
+  // Search engines read those from <head>, so every client gets them there.
+  htmlLimitedBots: /.*/u,
   // The user guide's Markdown is imported as text (src/lib/docs/guide.ts).
   turbopack: { rules: { "*.md": { loaders: ["./markdown-source-loader.cjs"], as: "*.js" } } },
   webpack(config) {
