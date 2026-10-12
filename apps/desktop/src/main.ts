@@ -1155,20 +1155,20 @@ function flushPendingNotificationReplies() {
   }
 }
 
-// Whether this Mac has given the Hub its push address. From then on it
-// listens for Apple's pushes only while it has no window.
+// Whether this Mac has given the Hub its push address. From then on Apple's
+// push is the one notification a message gets here, open or not: the app does
+// not post a second one of its own.
 let macPushRegistered = false;
 
-/**
- * While a window is open the app posts its own notifications, which open their
- * conversation and take a reply; Apple's copy of the same message would only
- * repeat them and opens nothing. So the Mac listens for pushes when its last
- * window closes and when it quits, and stops when a window opens.
- */
-function listenForApplePush(listen: boolean) {
-  if (process.platform !== "darwin" || !macPushRegistered) return;
-  if (listen) void pushNotifications.registerForAPNSNotifications().catch(() => undefined);
-  else pushNotifications.unregisterForAPNSNotifications();
+// The conversation of a push that arrived while the app was not in front.
+// macOS shows it; a tap on it brings the app forward without saying which
+// notification was tapped, so the app opens the conversation it was told of.
+let pushedConversationId: string | null = null;
+
+function rememberPushedConversation(userInfo: unknown) {
+  const channelId = (userInfo as { channelId?: unknown } | null)?.channelId;
+  pushedConversationId = typeof channelId === "string" && channelId.trim() && !BrowserWindow.getFocusedWindow()
+    ? channelId.trim() : null;
 }
 
 /**
@@ -1201,8 +1201,8 @@ async function macPushDevice() {
     askToNotifyOnce();
     if (!token) return null;
     macPushRegistered = true;
-    // The window that asked is open, so the app's own notifications serve for now.
-    listenForApplePush(liveWindows().length === 0);
+    pushNotifications.removeAllListeners("received-apns-notification");
+    pushNotifications.on("received-apns-notification", (_event, userInfo) => rememberPushedConversation(userInfo));
     return { platform: "apns" as const, token, app: "mac" as const };
   } catch {
     return null;
@@ -1215,6 +1215,10 @@ function showNativeNotification(
 ) {
   const plan = planNotification(payload);
   if (!Notification.isSupported() || !plan.show) {
+    return false;
+  }
+  // Apple pushes this same message to a Mac that registered; one notification is enough.
+  if (macPushRegistered && plan.canReply) {
     return false;
   }
 
@@ -2890,7 +2894,6 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   appIsQuitting = true;
-  listenForApplePush(true);
   disableDaemonKeepAlive();
   stopDaemonHeartbeat();
   profileRegistryWatcher?.close();
@@ -2908,11 +2911,11 @@ app.on("before-quit", () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
-    return;
   }
-  listenForApplePush(true);
 });
 
-app.on("browser-window-created", () => {
-  if (!appIsQuitting) listenForApplePush(false);
+app.on("did-become-active", () => {
+  const channelId = pushedConversationId;
+  pushedConversationId = null;
+  if (channelId) openAppPath(`/app?channel=${encodeURIComponent(channelId)}`);
 });
