@@ -61,7 +61,7 @@ test("selected category option is inset and rounded inside a single glass surfac
   });
 
   expect(geometry).not.toBeNull();
-  expect(geometry!.radius).toBe("14px");
+  expect(geometry!.radius).toBe("10px");
   expect(geometry!.backdrop).toBe("none");
   expect(geometry!.shadow).toBe("none");
   expect(geometry!.background).not.toBe("rgba(0, 0, 0, 0)");
