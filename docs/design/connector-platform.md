@@ -216,6 +216,22 @@ Search Console clicks. There are no inbound events and no writes. Enable the
 Google Analytics Admin and Data APIs on the company Google project and add the
 scope to its consent screen; it is a sensitive scope like `webmasters`.
 
+Bing Webmaster Tools (`bingwebmaster`) saves the account's API key (Settings →
+API access); Bing accepts it only as the `apikey` query parameter of its JSON
+API, so the Hub never echoes a request URL into a summary or error. A site is
+the exact URL Bing lists (`https://example.com/`). Reads: `list_sites:*`,
+`traffic:<site>` (daily clicks and impressions), `queries:<site>` and
+`pages:<site>` (top 50 by clicks), `crawl_stats:<site>`. Writes, under the
+Channel's action policy: `submit_urls:<site> <url …>` (at most 100, all inside
+the site; the reply carries the remaining quota), `submit_sitemap:<site> <url>`
+and `indexnow:<site> <url …>`. IndexNow needs no account: the connection keeps
+the site's own IndexNow key, which the site publishes at `/<key>.txt`; the
+Hub posts the URLs to `api.indexnow.org`, which shares them with Bing, Yandex,
+Naver, Seznam and the other participating engines. Either credential may be
+saved alone; Check reads the site list when an API key is saved. Bing also
+offers OAuth for Webmaster Tools, but a company app needs its own registration;
+the API key keeps the connection per account without one.
+
 Google Business Profile (`googlebusinessprofile`) is another connection on the
 company Google client, holding only `https://www.googleapis.com/auth/business.manage`
 (Google offers no read-only scope for these APIs). Reads: `list_accounts:*`,

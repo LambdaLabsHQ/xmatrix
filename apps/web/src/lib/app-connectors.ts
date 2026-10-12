@@ -72,6 +72,10 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Verify site ownership, manage properties and sitemaps, and inspect search performance.",
     "Run a scheduled Automation that reports search traffic changes into the channel.",
   ],
+  bingwebmaster: [
+    "Read Bing clicks, impressions, top queries, top pages and crawl errors next to Search Console.",
+    "Submit changed URLs or a sitemap to Bing, or push them to every IndexNow engine at once.",
+  ],
   googleadsense: [
     "Read daily AdSense earnings, page views and RPM by site, country or page.",
     "Let a scheduled Automation track each site's revenue next to its search traffic.",
