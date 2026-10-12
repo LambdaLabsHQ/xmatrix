@@ -550,12 +550,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // a dot when the page moved past it, as Google Docs does. `opened` is where it stood as the page opened.
   const [seenRevision, setSeenRevision] = useState<number | null>(null);
   const [opened, setOpened] = useState<{ pageId: string; revision: number | null } | null>(null);
-  // What the page was when this reader last had it on screen, for showing what changed since.
+  // What the page was when this reader last read it, for showing what changed since as a diff.
   const [readerBaseline, setReaderBaseline] = useState<string | null>(null);
+  // How many changes that diff shows (null until known), and whether the reader has ticked it viewed.
+  const [readerChanges, setReaderChanges] = useState<number | null>(null);
+  const [diffViewed, setDiffViewed] = useState(false);
   useEffect(() => {
     setSeenRevision(null);
     setOpened(null);
     setReaderBaseline(null);
+    setReaderChanges(null);
+    setDiffViewed(false);
     if (!spaceId || !pageId || !token) return;
     const controller = new AbortController();
     // Unknown, nothing is marked read and nothing is shown as changed.
@@ -577,9 +582,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const readGitHubFile = useCallback((href: string, signal: AbortSignal) =>
     pageApi.githubFile(spaceId!, pageId!, token, href, signal), [spaceId, pageId, token]);
   const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
-  // The page on screen in this tab is read at its head once it has been there a moment.
+  // The page on screen in this tab is read at its head once it has been there a moment; a diff of what
+  // changed is read when its reader ticks it viewed.
+  const diffWaits = readerChanges === null || (readerChanges > 0 && !diffViewed);
   useEffect(() => {
-    if (mode !== "page" || !drawn || headRevision === null) return;
+    if (mode !== "page" || !drawn || headRevision === null || diffWaits) return;
     let timer: number | undefined;
     const read = () => {
       window.clearTimeout(timer);
@@ -588,16 +595,20 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     read();
     window.document.addEventListener("visibilitychange", read);
     return () => { window.clearTimeout(timer); window.document.removeEventListener("visibilitychange", read); };
-  }, [drawn, headRevision, markSeen, mode]);
+  }, [diffWaits, drawn, headRevision, markSeen, mode]);
   const baselineFor = useRef<typeof opened>(null);
   useEffect(() => {
     if (!opened || opened.pageId !== pageId || headRevision === null || baselineFor.current === opened) return;
     baselineFor.current = opened;
     setReaderBaseline(null);
-    if (opened.revision === null || opened.revision >= headRevision || !spaceId) return;
-    void pageApi.read(spaceId, opened.pageId, token, opened.revision)
-      .then((result) => { if (baselineFor.current === opened) setReaderBaseline(result.page.body); }, () => undefined);
+    // A first visit, or a page that has not moved, has nothing to show as changed.
+    if (opened.revision === null || opened.revision >= headRevision || !spaceId) { setReaderChanges(0); return; }
+    void pageApi.read(spaceId, opened.pageId, token, opened.revision).then((result) => {
+      if (baselineFor.current === opened) setReaderBaseline(result.page.body);
+    }, () => { if (baselineFor.current === opened) setReaderChanges(0); });
   }, [headRevision, opened, pageId, spaceId, token]);
+  const readerDiff = useMemo(() => readerBaseline === null || headRevision === null || diffViewed || !drawn ? null
+    : { body: readerBaseline, head: headRevision }, [diffViewed, drawn, headRevision, readerBaseline]);
   const queryClient = useQueryClient();
   const userId = user?.id ?? null;
   const userName = user?.name || user?.email || "";
@@ -1188,9 +1199,20 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
                       references={references} /></div>
                   )}
+                  {drawn && !!readerChanges && (
+                    <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground"
+                      data-testid="page-reader-diff">
+                      <input type="checkbox" checked={diffViewed} onChange={(event) => {
+                        setDiffViewed(event.target.checked);
+                        if (event.target.checked && headRevision !== null) markSeen(headRevision);
+                      }} />
+                      <span className="text-foreground">Viewed</span>
+                      <span>{readerChanges === 1 ? "1 change" : `${readerChanges} changes`} since you last read this page</span>
+                    </label>
+                  )}
                   <div className={drawn ? undefined : "hidden"}>
                     {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit}
-                      onReady={() => setEditorReady(true)} readerBaseline={drawn ? readerBaseline : null}
+                      onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
                       actions={sectionActions} headingActions={headingActions} onBlocks={setBlocks} sections={sections}
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById} references={references}
