@@ -138,7 +138,7 @@ export async function readRecentHarnessActions(database: AuthorityDatabase, inpu
 }
 
 export interface HarnessReleaseTarget {
-  ownerUserId: string; ownerEmail: string; machineId: string; hostId: string; daemonId: string;
+  presetId: string; ownerUserId: string; ownerEmail: string; machineId: string; hostId: string; daemonId: string;
 }
 
 /** A release is told again to the same Machine at most this often, so a
@@ -146,36 +146,45 @@ export interface HarnessReleaseTarget {
 const RELEASE_REPEAT_INTERVAL = "30 minutes";
 
 /**
- * Online, capable daemons whose reported inventory has the preset installed
- * but has not seen `version` as its latest, and that were not told about a
- * release of this preset recently. The daemon's own inventory is the only
- * state: once it reports the new latest version it is no longer a target.
+ * For each preset's latest version: online, capable daemons whose reported
+ * inventory has the preset installed but has not seen that version as its
+ * latest, and that were not told about a release of this preset recently. The
+ * daemon's own inventory is the only state: once it reports the new latest
+ * version it is no longer a target. Every preset is read in one statement, so
+ * a pass costs one transaction however many presets are watched.
  */
 export async function readHarnessReleaseTargets(database: AuthorityDatabase, input: {
-  requestId: string; presetId: string; version: string; limit?: number;
+  requestId: string; releases: readonly { presetId: string; version: string }[]; limit?: number;
 }): Promise<HarnessReleaseTarget[]> {
+  if (input.releases.length === 0) return [];
   const limit = Math.min(Math.max(input.limit ?? 500, 1), 500);
   return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-release-targets" },
     async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v2", text: `SELECT
-        daemon.owner_user_id,daemon.owner_email,daemon.machine_id,daemon.hostname,daemon.daemon_id
-        FROM data.machine_daemons daemon
-        WHERE daemon.status='online' AND daemon.capabilities_json ? $1
-          AND EXISTS (SELECT 1 FROM jsonb_array_elements(
-              CASE WHEN jsonb_typeof(daemon.metadata_json->'harnesses'->'items')='array'
-                THEN daemon.metadata_json->'harnesses'->'items' ELSE '[]'::jsonb END) item
-            WHERE item->>'id'=$2 AND item->'installed'='true'::jsonb
-              AND item->>'latestVersion' IS DISTINCT FROM $3)
-          AND NOT EXISTS (SELECT 1 FROM data.machine_daemon_commands command
-            WHERE command.owner_user_id=daemon.owner_user_id AND command.machine_id=daemon.machine_id
-              AND command.command_type='harness_action' AND command.payload_json->>'presetId'=$2
-              AND command.payload_json->>'action'='release'
-              AND command.created_at>clock_timestamp()-$4::interval)
-        ORDER BY daemon.daemon_id LIMIT $5`,
-      values: [MACHINE_HARNESS_RELEASE_CAPABILITY, input.presetId, input.version, RELEASE_REPEAT_INTERVAL, limit],
-      maxRows: limit });
-      return rows.map(row => ({ ownerUserId: String(row.owner_user_id), ownerEmail: String(row.owner_email),
-        machineId: String(row.machine_id), hostId: String(row.hostname ?? ""), daemonId: String(row.daemon_id) }));
+      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v3", text: `SELECT
+        release.preset_id,target.owner_user_id,target.owner_email,target.machine_id,target.hostname,target.daemon_id
+        FROM unnest($2::text[],$3::text[]) WITH ORDINALITY AS release(preset_id,version,position)
+        CROSS JOIN LATERAL (SELECT
+          daemon.owner_user_id,daemon.owner_email,daemon.machine_id,daemon.hostname,daemon.daemon_id
+          FROM data.machine_daemons daemon
+          WHERE daemon.status='online' AND daemon.capabilities_json ? $1
+            AND EXISTS (SELECT 1 FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(daemon.metadata_json->'harnesses'->'items')='array'
+                  THEN daemon.metadata_json->'harnesses'->'items' ELSE '[]'::jsonb END) item
+              WHERE item->>'id'=release.preset_id AND item->'installed'='true'::jsonb
+                AND item->>'latestVersion' IS DISTINCT FROM release.version)
+            AND NOT EXISTS (SELECT 1 FROM data.machine_daemon_commands command
+              WHERE command.owner_user_id=daemon.owner_user_id AND command.machine_id=daemon.machine_id
+                AND command.command_type='harness_action' AND command.payload_json->>'presetId'=release.preset_id
+                AND command.payload_json->>'action'='release'
+                AND command.created_at>clock_timestamp()-$4::interval)
+          ORDER BY daemon.daemon_id LIMIT $5) target
+        ORDER BY release.position,target.daemon_id`,
+      values: [MACHINE_HARNESS_RELEASE_CAPABILITY, input.releases.map(release => release.presetId),
+        input.releases.map(release => release.version), RELEASE_REPEAT_INTERVAL, limit],
+      maxRows: limit * input.releases.length });
+      return rows.map(row => ({ presetId: String(row.preset_id), ownerUserId: String(row.owner_user_id),
+        ownerEmail: String(row.owner_email), machineId: String(row.machine_id), hostId: String(row.hostname ?? ""),
+        daemonId: String(row.daemon_id) }));
     });
 }
 
