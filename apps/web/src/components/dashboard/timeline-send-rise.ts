@@ -126,7 +126,10 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
       if (!row.isConnected) drawn.delete(row);
     }
     if (lag !== 0) {
-      for (const row of scrollRoot.querySelectorAll<HTMLElement>("[data-timeline-rise-row]")) drawn.add(row);
+      // Only the rows already on screen need this compensation. New rows have
+      // their own entrance; shifting them too can extend the scroll overflow
+      // past the footer and make the browser clamp its scroll position again.
+      for (const row of rows) if (row.isConnected) drawn.add(row);
     }
     for (const row of drawn) row.style.translate = lag === 0 ? "" : `0 ${lag}px`;
     if (lag === 0) drawn.clear();
