@@ -343,6 +343,9 @@ function createWindow(targetUrl?: string): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // A window put away on a Mac still holds the connection that notifies;
+      // its timers must keep their pace for the connection to stay alive.
+      backgroundThrottling: false,
     },
   });
   appWindows.push(window);
@@ -391,6 +394,20 @@ function createWindow(targetUrl?: string): BrowserWindow {
 
     event.preventDefault();
     openExternalUrl(url);
+  });
+
+  // On a Mac, closing the last window puts it away and the app goes on running
+  // with its connection, as chat apps do there: a message that arrives is
+  // still notified. Quitting closes it for good.
+  window.on("close", (event) => {
+    if (process.platform !== "darwin" || appIsQuitting || liveWindows().length !== 1) return;
+    event.preventDefault();
+    if (window.isFullScreen()) {
+      window.once("leave-full-screen", () => window.hide());
+      window.setFullScreen(false);
+    } else {
+      window.hide();
+    }
   });
 
   window.on("closed", () => {
@@ -1155,30 +1172,10 @@ function flushPendingNotificationReplies() {
   }
 }
 
-// Whether this Mac has given the Hub its push address. From then on Apple's
-// push is the one notification a message gets here, open or not: the app does
-// not post a second one of its own.
-let macPushRegistered = false;
-
-// The conversation of a push that arrived while the app was not in front.
-// macOS shows it; a tap on it brings the app forward without saying which
-// notification was tapped, so the app opens the conversation it was told of.
-let pushedConversationId: string | null = null;
-
-function rememberPushedConversation(userInfo: unknown) {
-  const channelId = (userInfo as { channelId?: unknown } | null)?.channelId;
-  pushedConversationId = typeof channelId === "string" && channelId.trim() && !BrowserWindow.getFocusedWindow()
-    ? channelId.trim() : null;
-}
-
 /**
- * What the Hub pushes to on this Mac, or null where the app cannot be pushed
- * to: another platform, or a build that carries no push entitlement.
- */
-/**
- * macOS asks whether an app may notify the first time it posts a notification,
- * and shows nothing Apple pushes until that is allowed. Post one when push is
- * first set up, so the question comes then and not after a missed message.
+ * macOS asks whether an app may notify the first time it posts a notification.
+ * Post one once someone is signed in, so the question comes then and not after
+ * a missed message.
  */
 function askToNotifyOnce() {
   const asked = path.join(app.getPath("userData"), "notifications-asked");
@@ -1194,19 +1191,18 @@ function askToNotifyOnce() {
   }
 }
 
-async function macPushDevice() {
-  if (process.platform !== "darwin" || !app.isPackaged) return null;
-  try {
-    const token = await pushNotifications.registerForAPNSNotifications();
+/**
+ * The Mac is not pushed to. Apple's push reached a Mac but macOS did not show
+ * it, so the app notifies for itself while it runs, as its own notifications
+ * always did, and keeps running when its window is closed. An address an
+ * earlier build registered is given up, so the Hub stops sending to it.
+ */
+function macPushDevice() {
+  if (process.platform === "darwin" && app.isPackaged) {
     askToNotifyOnce();
-    if (!token) return null;
-    macPushRegistered = true;
-    pushNotifications.removeAllListeners("received-apns-notification");
-    pushNotifications.on("received-apns-notification", (_event, userInfo) => rememberPushedConversation(userInfo));
-    return { platform: "apns" as const, token, app: "mac" as const };
-  } catch {
-    return null;
+    try { pushNotifications.unregisterForAPNSNotifications(); } catch { /* never registered */ }
   }
+  return null;
 }
 
 function showNativeNotification(
@@ -1215,10 +1211,6 @@ function showNativeNotification(
 ) {
   const plan = planNotification(payload);
   if (!Notification.isSupported() || !plan.show) {
-    return false;
-  }
-  // Apple pushes this same message to a Mac that registered; one notification is enough.
-  if (macPushRegistered && plan.canReply) {
     return false;
   }
 
@@ -1538,8 +1530,12 @@ async function installDownloadedUpdate() {
 
   setImmediate(() => {
     try {
+      // The updater closes every window before it quits; say so first, or a
+      // Mac would only put its last window away and never restart.
+      appIsQuitting = true;
       autoUpdater.quitAndInstall(false, true);
     } catch (error) {
+      appIsQuitting = false;
       const message = readableUpdateErrorMessage(error);
       console.warn("xMatrix update install failed", error);
       setUpdateStatus("error", { message });
@@ -2848,18 +2844,6 @@ app.on("open-url", (event, url) => {
   }
 });
 
-// Started by a tap on a notification the Hub pushed while the app was not
-// running: macOS hands over what the notification carried, which names its
-// conversation. It is opened like a link to that conversation.
-app.on("ready", (_event, launchInfo) => {
-  const info = launchInfo as { userInfo?: unknown } | undefined;
-  const carried = (info?.userInfo ?? info) as { channelId?: unknown } | undefined;
-  const channelId = typeof carried?.channelId === "string" ? carried.channelId.trim() : "";
-  if (channelId && !pendingDeepLink) {
-    pendingDeepLink = `${APP_PROTOCOL}://channel/${encodeURIComponent(channelId)}`;
-  }
-});
-
 function dropStaleRendererConnections() {
   // Mac sleep leaves Chromium holding dead HTTP/2 sockets. The next send then
   // hangs until the 15s deadline and the catalog fetch reports Failed to fetch.
@@ -2886,8 +2870,11 @@ app.whenReady().then(async () => {
   powerMonitor.on("unlock-screen", dropStaleRendererConnections);
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    const windows = liveWindows();
+    if (windows.length === 0) {
       createWindow();
+    } else if (!windows.some((window) => window.isVisible())) {
+      revealWindow(windows[0]);
     }
   });
 });
@@ -2914,8 +2901,3 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("did-become-active", () => {
-  const channelId = pushedConversationId;
-  pushedConversationId = null;
-  if (channelId) openAppPath(`/app?channel=${encodeURIComponent(channelId)}`);
-});
