@@ -29,6 +29,10 @@ second-week activity counts. External users require explicit classification;
 unknown accounts stay separate from team/test accounts. See
 [activation report](../operations/activation-report.md).
 
+The public user guide includes a local-folder walkthrough for creating and
+updating a first project wiki with Claude Code or Codex, linked from the homepage.
+Its source is [the project wiki guide](../guide/project-wiki.md).
+
 The Google Cloud operations connector uses a separate GCP OAuth grant and
 provides bounded resource, Cloud Run status, log, metric and alert-policy reads,
 plus direct App Optimize gross-cost reports, billing/export discovery and

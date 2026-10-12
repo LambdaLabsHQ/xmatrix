@@ -6,6 +6,7 @@ import concepts from "../../../../../docs/guide/concepts.md";
 import connectors from "../../../../../docs/guide/connectors.md";
 import index from "../../../../../docs/guide/index.md";
 import pages from "../../../../../docs/guide/pages.md";
+import projectWiki from "../../../../../docs/guide/project-wiki.md";
 import syntax from "../../../../../docs/guide/syntax.md";
 
 /**
@@ -15,6 +16,7 @@ import syntax from "../../../../../docs/guide/syntax.md";
  */
 const sources: [file: string, markdown: string][] = [
   ["index", index],
+  ["project-wiki", projectWiki],
   ["concepts", concepts],
   ["syntax", syntax],
   ["agents", agents],
