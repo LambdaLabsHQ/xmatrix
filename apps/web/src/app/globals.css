@@ -7234,11 +7234,10 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    Categories are dense: a caption line, then one-line rows, so the choices
    own the panel's height. */
 .app-mention-suggestions { padding-block: 4px; }
-.app-mention-category-heading { padding: 6px 18px 2px; }
-.app-mention-category-label { display: flex; align-items: center; gap: 8px; flex: 1; font-size: 11px; line-height: 16px; font-weight: 600; color: var(--muted-foreground); }
-/* The caption's icon sits in the avatar column, so captions and names share one left edge. */
-.app-mention-category-label > svg { box-sizing: content-box; padding-inline: 3px; }
-.app-mention-category-count { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; opacity: .6; }
+.app-mention-category-heading { padding: 8px 18px 2px; }
+/* A caption is quiet text beside its count: no icon, weight or ink a choice has. */
+.app-mention-category-label { display: flex; align-items: baseline; gap: 6px; flex: 1; font-size: 11px; line-height: 16px; font-weight: 500; color: color-mix(in oklch, var(--foreground) 45%, transparent); }
+.app-mention-category-count { font-variant-numeric: tabular-nums; opacity: .75; }
 .xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option {
   width: calc(100% - 16px) !important;
   min-height: 32px;
