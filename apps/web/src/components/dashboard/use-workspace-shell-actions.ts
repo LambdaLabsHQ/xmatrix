@@ -360,6 +360,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   const handleTimelineOpenInternalAppLink = useStableCallback((href: string) => openInternalAppLink(href));
 
+  // A notification tapped in the desktop app opens its conversation in the
+  // page that is already here, rather than loading the app again.
+  useEffect(
+    () => s.desktopBridge?.onOpenAppLink?.(handleTimelineOpenInternalAppLink),
+    [handleTimelineOpenInternalAppLink, s.desktopBridge]
+  );
+
   // The in-memory cache holds only this user's reads; it renders once the
   // selected Channel's rows are authorized. A copy per cache revision lets the
   // memos below see writes to the cache ref.
