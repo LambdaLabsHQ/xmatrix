@@ -33,7 +33,8 @@ test("the audit sends the key only in a header, masks the Lighthouse report and 
   const run = await fetched([{ body: { lighthouseResult: { finalUrl: "https://example.com/", fetchTime: "2026-10-12T08:00:00Z",
     categories: { performance: { score: 0.61 }, accessibility: { score: 0.9 }, "best-practices": { score: 1 }, seo: { score: 0.83 } }, audits },
   loadingExperience: { overall_category: "AVERAGE", metrics: { LARGEST_CONTENTFUL_PAINT_MS: { percentile: 2900,
-    distributions: [{ proportion: 0.7 }, { proportion: 0.2 }, { proportion: 0.1 }] } } } } }],
+    distributions: [{ proportion: 0.7 }, { proportion: 0.2 }, { proportion: 0.1 }] },
+    CUMULATIVE_LAYOUT_SHIFT_SCORE: { percentile: 18, distributions: [] } } } } }],
   () => ACTIONS.audit.execute({ credentials: key }, statement("@pagespeed:audit:https://example.com/")));
   const call = new URL(run.calls[0].url);
   assert.equal(call.origin + call.pathname, "https://www.googleapis.com/pagespeedonline/v5/runPagespeed");
@@ -46,6 +47,7 @@ test("the audit sends the key only in a header, masks the Lighthouse report and 
   assert.match(summary, /largest-contentful-paint\t3\.9 s/u);
   assert.match(summary, /failing audits \(2\):\n {2}document-title\t0\tDocument has a `<title>` ```\n {2}uses-long-cache-ttl\t40\tLong cache \(12 resources\)/u);
   assert.doesNotMatch(summary, /meta-description|Diagnostics/u);
+  assert.match(summary, /CUMULATIVE_LAYOUT_SHIFT_SCORE\t0\.18/u);
   assert.match(summary, /field data \(28 days, Chrome users\): AVERAGE\nLARGEST_CONTENTFUL_PAINT_MS\t2900\t70%\t20%\t10%/u);
   assert.match(summary, /:\n~~~\n/u);
 });
@@ -78,4 +80,22 @@ test("a missing or malformed key and an empty answer fail closed", async () => {
   await fetched([{ body: { record: {} } }], () => assert.rejects(verifyPageSpeed(key), /confirm Chrome UX Report/u));
   const verified = await fetched([{ body: { record: { metrics: { largest_contentful_paint: {} } } } }], () => verifyPageSpeed(key));
   assert.equal(verified.calls[0].headers.get("x-goog-api-key"), key.apiKey);
+});
+
+test("a Lighthouse report larger than the default response bound is read, while other calls keep the bound", async () => {
+  const filler = { title: "Screenshot", score: null, scoreDisplayMode: "informative", details: { data: "x".repeat(320 * 1024) } };
+  const body = { lighthouseResult: { finalUrl: "https://example.com/", categories: { performance: { score: 0.9 } },
+    audits: { "final-screenshot": filler, "document-title": { title: "Title", score: 0, scoreDisplayMode: "binary" } } } };
+  const run = await fetched([{ body }], () => ACTIONS.audit.execute({ credentials: key }, { url: "https://example.com/", strategy: "mobile" }));
+  assert.equal(new URL(run.calls[0].url).searchParams.get("fields"),
+    "id,lighthouseResult(finalUrl,fetchTime,runWarnings,categories/*/score,audits),loadingExperience(overall_category,metrics)");
+  assert.match(run.result.summary, /document-title\t0\tTitle/u);
+  await fetched([{ body: { record: { metrics: { x: filler } } } }],
+    () => assert.rejects(ACTIONS.field.execute({ credentials: key }, { origin: "https://example.com", form: "all" }), /too large/u));
+});
+
+test("Google's error message is reported instead of the bare status text", async () => {
+  await fetched([{ status: 400, body: { error: { code: 400, message: "Invalid value at 'url'" } } }],
+    () => assert.rejects(ACTIONS.audit.execute({ credentials: key }, { url: "https://example.com/", strategy: "mobile" }),
+      /Provider returned 400: Invalid value at 'url'/u));
 });

@@ -29,13 +29,18 @@ export function providerUrl(base: string, path = ""): URL {
   return url;
 }
 
-/* A provider that does its own slow work per call, such as a Lighthouse run, may wait up to this long. */
+/*
+ * A provider that does its own slow work per call, such as a Lighthouse run, may wait up to this long and
+ * answer up to this much; a Lighthouse report cannot be trimmed per audit and runs to a few hundred KB.
+ */
 const MAX_TIMEOUT_MS = 60_000;
+const MAX_LARGE_RESPONSE_BYTES = 4 * 1024 * 1024;
 
-export async function providerJson(url: URL | string, init: RequestInit & { json?: unknown; timeoutMs?: number;
+export async function providerJson(url: URL | string, init: RequestInit & { json?: unknown; timeoutMs?: number; maxBytes?: number;
   describeError?: (payload: Record<string, unknown>) => string | undefined } = {}):
   Promise<Record<string, unknown>> {
-  const { json, describeError, timeoutMs = TIMEOUT_MS, ...rest } = init;
+  const { json, describeError, timeoutMs = TIMEOUT_MS, maxBytes = MAX_RESPONSE_BYTES, ...rest } = init;
+  const limit = Math.min(Math.max(maxBytes, 1), MAX_LARGE_RESPONSE_BYTES);
   const timeout = AbortSignal.timeout(Math.min(Math.max(timeoutMs, 1), MAX_TIMEOUT_MS));
   const headers = new Headers(rest.headers);
   if (json !== undefined) headers.set("content-type", "application/json");
@@ -50,7 +55,7 @@ export async function providerJson(url: URL | string, init: RequestInit & { json
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_RESPONSE_BYTES) {
+    if (size > limit) {
       await reader.cancel();
       throw new ProviderRequestError(502, "Provider response is too large");
     }
@@ -68,7 +73,9 @@ export async function providerJson(url: URL | string, init: RequestInit & { json
     const reason = describeError?.(payload) ?? [payload.message, payload.error, payload.error_description, payload.errorMessages, payload.errors]
       .map((value) => Array.isArray(value) ? value.map((item) => typeof item === "string" ? item
         : typeof (item as { message?: unknown })?.message === "string" ? (item as { message: string }).message : "")
-        .filter(Boolean).join("; ") : typeof value === "string" ? value : "")
+        .filter(Boolean).join("; ") : typeof value === "string" ? value
+        // Google APIs answer `{ "error": { "message": … } }`.
+        : typeof (value as { message?: unknown } | undefined)?.message === "string" ? (value as { message: string }).message : "")
       .find(Boolean) ?? response.statusText;
     throw new ProviderRequestError(response.status, `Provider returned ${response.status}${reason ? `: ${String(reason).slice(0, 200)}` : ""}`);
   }
