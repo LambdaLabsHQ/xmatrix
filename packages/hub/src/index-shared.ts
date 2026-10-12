@@ -1,4 +1,5 @@
 import { PRIVATE_JSON_HEADERS, privateJsonResponse } from "./private-json-response";
+import { internalCallerOf } from "./internal-caller";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { agentBillingReadRoute, BillingReadAccessDenied } from "./billing-read-access";
@@ -441,6 +442,8 @@ export function parseCliRedirectUri(value: string | null): URL | null {
 }
 
 export async function requireAuth(request: Request, env: Env) {
+  const internal = internalCallerOf(request);
+  if (internal) return internal;
   const token = readBearerToken(request.headers.get("authorization"));
   if (!token) {
     throw new AuthFailure("Missing bearer token");

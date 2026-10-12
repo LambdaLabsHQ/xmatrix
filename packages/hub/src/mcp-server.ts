@@ -2,12 +2,13 @@ import { ControlError, PostgresPageRepository } from "@xmatrix/db";
 import type { McpCaller } from "./auth";
 import { readChannelCatalogForPrincipal } from "./channel-catalog-read";
 import { channelMessageHistory, channelMessageResult } from "./channel-messages";
-import { appOrigin } from "./deployment-origins";
+import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
 import { pageDatabaseOptions } from "./index-routes-pages";
 import { McpToolError, serveMcp, type McpTool, type McpToolResult } from "./mcp-jsonrpc";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { runPrincipalOf } from "./run-principal";
 import { listSpaces } from "./spaces";
+import { asInternalCaller } from "./internal-caller";
 import type { Env } from "./types";
 
 /**
@@ -63,13 +64,50 @@ const READ_TOOLS: McpTool[] = [
   },
 ];
 
+const WRITES = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
+
+const WRITE_TOOLS: McpTool[] = [
+  {
+    name: "create_page", title: "Create a page", annotations: WRITES,
+    description: "Add a page to a Space, as you. Its text is Markdown; refer to another page with `page:<id>`.",
+    inputSchema: { type: "object", properties: { spaceId: id("The Space, from list_spaces."),
+      title: { type: "string", minLength: 1, maxLength: 200 },
+      body: { type: "string", maxLength: 200_000, description: "The page's Markdown text." },
+      parentPageId: id("The page to put it below; omit for the top level.") },
+    required: ["spaceId", "title"], additionalProperties: false },
+  },
+  {
+    name: "edit_page", title: "Edit a page", annotations: { ...WRITES, destructiveHint: true },
+    description: "Replace a page's text with your new version of the revision you read (read_page gives the " +
+      "revision). Edits made by others meanwhile are merged; if yours overlaps them, read the page again and redo it.",
+    inputSchema: { type: "object", properties: { spaceId: id("The Space."), pageId: id("The page."),
+      baseRevision: { type: "integer", minimum: 1, description: "The revision your text is based on." },
+      body: { type: "string", maxLength: 200_000, description: "The page's whole new Markdown text." } },
+    required: ["spaceId", "pageId", "baseRevision", "body"], additionalProperties: false },
+  },
+  {
+    name: "send_message", title: "Send a message", annotations: WRITES,
+    description: "Post a message in a channel, as you. Mentioning an Agent (@name) asks it to act, as it would " +
+      "if you typed the message in xMatrix.",
+    inputSchema: { type: "object", properties: { channelId: id("The channel, from list_channels."),
+      body: { type: "string", minLength: 1, maxLength: 20_000 },
+      replyToMessageId: id("A message to reply to.") },
+    required: ["channelId", "body"], additionalProperties: false },
+  },
+];
+
 function text(value: unknown): McpToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], structuredContent: value };
 }
 
 /** A refusal the Hub answered with: the model hears why; an outage stays an error. */
 async function refused(response: Response): Promise<never> {
-  const reason = (await response.json().catch(() => ({})) as { error?: string }).error;
+  const refusal = await response.json().catch(() => ({})) as { error?: string; code?: string; detail?: unknown };
+  const reason = refusal.error;
+  // An overlapping edit carries the current text, so the model can redo its change on it.
+  if (refusal.code === "page_revision_conflict") {
+    throw new McpToolError(`${reason ?? "The page changed"}. Current page: ${JSON.stringify(refusal.detail)}`);
+  }
   if (response.status < 500) throw new McpToolError(reason ?? "Not allowed");
   throw new Error(reason ?? `xMatrix answered ${response.status}`);
 }
@@ -89,13 +127,28 @@ function pick(value: unknown, keys: readonly string[]): Record<string, unknown> 
     .map((key) => [key, source[key]]));
 }
 
-export function mcpServer(env: Env, caller: McpCaller) {
+/**
+ * `dispatch` runs a request through the Hub's own routes: writing tools act
+ * through them as the person, so a message or an edit from an outside app is
+ * the same act, with the same checks and effects, as one made in xMatrix.
+ */
+export function mcpServer(env: Env, caller: McpCaller, dispatch: (request: Request) => Promise<Response>) {
   const principal = runPrincipalOf(caller.user);
   const pages = () => new PostgresPageRepository(createPostgresAuthorityDatabase(env, pageDatabaseOptions));
   const pageLink = (spaceId: string, pageId: string) =>
     `${appOrigin(env)}/app/${encodeURIComponent(spaceId)}/pages?page=${encodeURIComponent(pageId)}`;
   const requestId = () => crypto.randomUUID();
   const readable = caller.scopes.includes("xmatrix:read");
+  const writable = readable && caller.scopes.includes("xmatrix:write");
+  /** One of the Hub's routes, called as the person; its refusal is the tool's. */
+  const route = async (method: string, path: string, body: Record<string, unknown>) => {
+    const response = await asInternalCaller(caller.user, (headers) => dispatch(new Request(
+      new URL(path, hubAuthBaseUrl(env)), { method, headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify(body) })));
+    if (!response.ok) return refused(response);
+    return await response.json() as Record<string, unknown>;
+  };
+  const pagesPath = (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/pages`;
 
   const calls: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
     list_spaces: async () => text({ spaces: (await listSpaces(env, { kind: "user", id: caller.user.id }))
@@ -138,13 +191,43 @@ export function mcpServer(env: Env, caller: McpCaller) {
     },
   };
 
+  const writes: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
+    create_page: async (args) => {
+      const spaceId = argument(args, "spaceId");
+      const { page } = await route("POST", pagesPath(spaceId), { title: argument(args, "title"),
+        ...(typeof args.body === "string" ? { body: args.body } : {}),
+        ...(typeof args.parentPageId === "string" ? { parentPageId: args.parentPageId } : {}) });
+      const created = record(page);
+      return text({ pageId: created.pageId, revision: created.headRevision,
+        url: pageLink(spaceId, String(created.pageId)) });
+    },
+    edit_page: async (args) => {
+      const spaceId = argument(args, "spaceId");
+      const pageId = argument(args, "pageId");
+      if (typeof args.baseRevision !== "number" || typeof args.body !== "string") {
+        throw new McpToolError("baseRevision and body are required");
+      }
+      const edited = await route("PUT", `${pagesPath(spaceId)}/${encodeURIComponent(pageId)}`,
+        { baseRevision: args.baseRevision, body: args.body });
+      return text({ pageId, revision: edited.headRevision, url: pageLink(spaceId, pageId) });
+    },
+    send_message: async (args) => {
+      const channelId = argument(args, "channelId");
+      const sent = await route("POST", `/api/channels/${encodeURIComponent(channelId)}/messages`, {
+        body: argument(args, "body"),
+        ...(typeof args.replyToMessageId === "string" ? { replyToMessageId: args.replyToMessageId } : {}),
+      });
+      return text(pick(sent.message, ["messageId", "channelId", "sentAt"]));
+    },
+  };
+
   return serveMcp.bind(null, {
     name: "xmatrix",
     instructions: "xMatrix is where a team and its AI agents work together: Spaces hold pages (living documents of " +
       "how things stand) and channels (conversations). Find a Space with list_spaces, then read its pages and channels.",
-    tools: async () => readable ? READ_TOOLS : [],
+    tools: async () => [...(readable ? READ_TOOLS : []), ...(writable ? WRITE_TOOLS : [])],
     call: async (name, args) => {
-      const call = readable ? calls[name] : undefined;
+      const call = (readable ? calls[name] : undefined) ?? (writable ? writes[name] : undefined);
       if (!call) return null;
       try {
         return await call(args);
