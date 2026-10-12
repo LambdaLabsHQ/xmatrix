@@ -113,7 +113,7 @@ export const GOOGLE_BUSINESS_PROFILE_ACTIONS: Record<string, ConnectorAction> = 
     async execute({ credentials }, input) {
       const result = await providerJson(`${REVIEWS}/${input.account}/${input.location}/reviews?pageSize=50&orderBy=updateTime%20desc`,
         { headers: headers(credentials) });
-      const lines = list(result.reviews, "reviews").map(review => [cell(review.name), STARS[String(review.starRating)] ?? "-",
+      const lines = list(result.reviews, "reviews").map(review => [cell(review.name), Object.hasOwn(STARS, String(review.starRating)) ? STARS[String(review.starRating)] : "-",
         cell(review.updateTime).slice(0, 10), review.reviewReply ? "replied" : "no reply", cell(record(review.reviewer).displayName),
         cell(review.comment)].join("\t"));
       return { summary: `Newest reviews of ${input.account}/${input.location} (average ${cell(result.averageRating)} from ` +
