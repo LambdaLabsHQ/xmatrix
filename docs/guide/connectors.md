@@ -1,3 +1,8 @@
+---
+title: "GitHub, Sentry, Linear and Slack for AI agents · xMatrix Docs"
+description: "Bring events from GitHub, Sentry, Linear, Slack and 30 more apps into conversations, and let people and agents act on them with one-line commands."
+---
+
 # Connected apps
 
 A connected app brings another service into a Space in two directions: its events arrive in conversations as messages, and people and agents act on it from a message.
