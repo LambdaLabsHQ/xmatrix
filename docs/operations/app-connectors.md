@@ -103,6 +103,7 @@ section, and none is ever shown again.
 | Notion | `append:<page id>`, `create_page:<parent page id>` |
 | Google Search Console | Property `list_sites/get_site/add_site/delete_site`; sitemap `list_sitemaps/get_sitemap/submit_sitemap/delete_sitemap`; `query` (concise options or bounded API JSON); `inspect_url`; ownership `get_verification_token/verify_site/list_verifications/get_verification/update_verification_owners/delete_verification`. See the onboarding procedure below. |
 | Google Analytics | `list_properties:*`, `report:<property id> [by=…] [days=…] [limit=…] [channel=…]` (reads) |
+| PageSpeed Insights | `audit:<page url> [strategy=mobile\|desktop]`, `field:<page url or origin> [form=phone\|desktop\|all] [scope=page\|origin]` (reads; Google API key) |
 | Gmail (via Composio) | `search:* [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub) |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 
