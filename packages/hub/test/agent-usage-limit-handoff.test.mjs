@@ -125,6 +125,9 @@ test("any other refused turn-failure notice is still reported as an error", asyn
   assert.deepEqual(logged.error.map(([message]) => message),
     ["xMatrix runtime authority rejection", "Agent turn-failure notice could not be committed"]);
   assert.deepEqual(logged.warn, []);
+  // The client sees the folded code; the log names the authority's own (XMATRIX-HUB-7B).
+  assert.equal(logged.error[0][1].code, "runtime.authority_rejected");
+  assert.equal(logged.error[0][1].authorityCode, "message_sender_unavailable");
   assert.deepEqual(commands.map(command => command.family), ["append-message"]);
 });
 

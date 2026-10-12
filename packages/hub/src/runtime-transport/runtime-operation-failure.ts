@@ -24,6 +24,7 @@ const PUBLIC_CODES = new Set([
 // The authority already holds a fact under this command or message id. The
 // caller learns its id is taken; the Hub has not failed.
 const COMMITTED_IDENTITY_CONFLICT_CODES = new Set(["idempotency_conflict", "message_exists"]);
+const AUTHORITY_CODE = /^[a-z][a-z0-9_.]{0,79}$/u;
 
 /** Keeps safe classification across an authority rejection without copying its body. */
 export class RuntimeAuthorityOperationError extends Error {
@@ -42,8 +43,12 @@ export class RuntimeAuthorityOperationError extends Error {
       COMMITTED_IDENTITY_CONFLICT_CODES.has(value.code);
     // The originating authority owns its private details. Correlation here is
     // intentionally free of response bodies, SQL, credentials and payloads.
+    // The log keeps the authority's own code: the client's copy folds every
+    // unpublished code into `runtime.authority_rejected`, which names no cause.
+    const authorityCode = typeof value.code === "string" && AUTHORITY_CODE.test(value.code)
+      ? value.code : "unknown";
     (this.committedIdentityConflict ? console.warn : console.error)(
-      "xMatrix runtime authority rejection", { ...this.failure, operation, status });
+      "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status });
   }
 }
 
