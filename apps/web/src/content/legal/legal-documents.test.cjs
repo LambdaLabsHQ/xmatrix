@@ -70,6 +70,11 @@ test("privacy policy separates MadeByRobot providers from Customer-selected prov
   assert.match(privacySource, /Cloudflare/);
   assert.match(privacySource, /Anthropic/);
   assert.match(privacySource, /Google or Stripe/);
+  assert.match(privacySource, /Google Analytics access is read-only/);
+  assert.match(privacySource, /Google Business Profile access lists/);
+  assert.match(privacySource, /publishes a review reply only when/);
+  assert.match(subprocessorsSource, /active in this version/);
+  assert.doesNotMatch(subprocessorsSource, /active in this draft/);
   assert.match(privacySource, /Customer-selected provider/);
   assert.match(privacySource, /enterprise or API no-training setting/);
   assert.match(privacySource, /do not sell personal information/);

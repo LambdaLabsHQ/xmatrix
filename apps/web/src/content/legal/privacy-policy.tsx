@@ -268,7 +268,11 @@ export function PrivacyPolicyContent() {
           Google application holds the Gmail grant and relays each request. Search Console, AdSense, and Google Cloud access lets them read the
           sites, reports, projects, costs, logs, metrics, and alerts they ask about, and make the
           changes they request. Search Console can also verify site ownership and manage property,
-          sitemap, and verification owner records when requested.
+          sitemap, and verification owner records when requested. Google Analytics access is read-only:
+          it lists the connected account&apos;s GA4 properties and reads the reports a person or Agent
+          asks for, including sessions, users, and landing pages. Google Business Profile access lists
+          accounts and locations, reads performance and reviews, and publishes a review reply only when
+          someone in the Space asks for that reply.
         </p>
         <p>
           We use Google user data only to provide those user-facing features: we retrieve it when a
