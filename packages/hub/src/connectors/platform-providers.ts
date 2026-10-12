@@ -12,9 +12,11 @@ import { GOOGLE_SEARCH_CONSOLE_ACTIONS, verifyGoogleSearchConsole } from "./acti
 import { BING_WEBMASTER_ACTIONS, verifyBingWebmaster } from "./actions/bing-webmaster";
 import { GOOGLE_ADSENSE_ACTIONS, verifyGoogleAdsense } from "./actions/google-adsense";
 import { GOOGLE_ANALYTICS_ACTIONS, verifyGoogleAnalytics } from "./actions/google-analytics";
+import { GOOGLE_BUSINESS_PROFILE_ACTIONS, verifyGoogleBusinessProfile } from "./actions/google-business-profile";
 import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
 import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
 import { OPENCONNECTOR_ACTIONS, verifyOpenConnector } from "./actions/openconnector";
+import { YANDEX_WEBMASTER_ACTIONS, verifyYandexWebmaster } from "./actions/yandex-webmaster";
 import { PAGERDUTY_ACTIONS, verifyPagerDuty } from "./actions/pagerduty";
 import { SENTRY_ACTIONS, verifySentry } from "./actions/sentry";
 import { SLACK_ACTIONS, verifySlack } from "./actions/slack";
@@ -68,6 +70,7 @@ const PROVIDERS: Record<string, {
   bingwebmaster: { actions: BING_WEBMASTER_ACTIONS, verify: verifyBingWebmaster },
   googleadsense: { actions: GOOGLE_ADSENSE_ACTIONS, verify: verifyGoogleAdsense },
   googleanalytics: { actions: GOOGLE_ANALYTICS_ACTIONS, verify: verifyGoogleAnalytics },
+  googlebusinessprofile: { actions: GOOGLE_BUSINESS_PROFILE_ACTIONS, verify: verifyGoogleBusinessProfile },
   pagespeed: { actions: PAGESPEED_ACTIONS, verify: verifyPageSpeed },
   gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail },
   bitbucket: { receive: receiveBitbucketDelivery, actions: BITBUCKET_ACTIONS, verify: verifyBitbucket },
@@ -83,6 +86,7 @@ const PROVIDERS: Record<string, {
   dingtalk: { actions: DINGTALK_ACTIONS },
   wecom: { actions: WECOM_ACTIONS },
   openconnector: { actions: OPENCONNECTOR_ACTIONS, verify: verifyOpenConnector },
+  yandexwebmaster: { actions: YANDEX_WEBMASTER_ACTIONS, verify: verifyYandexWebmaster },
 };
 
 export const PLATFORM_CONNECTOR_PROVIDERS: readonly ConnectorProvider[] = Object.entries(PROVIDERS)

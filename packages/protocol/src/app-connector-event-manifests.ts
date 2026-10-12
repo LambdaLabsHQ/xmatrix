@@ -202,6 +202,25 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/analytics.readonly"], secretRefs: [] },
   },
+  {
+    ...actionConnector({
+      id: "googlebusinessprofile", name: "Google Business Profile", kind: "observability",
+      description: "Read Business Profile accounts, locations, search and Maps performance and reviews, and reply to reviews under the channel's action policy.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/business.manage"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS],
+      actions: [
+        readAction("list_accounts", "List accounts", "List the Business Profile accounts of the connected Google account and your role in each.", "*"),
+        readAction("list_locations", "List locations", "List an account's locations with address, website and Maps link.", "<accounts/123>"),
+        readAction("performance", "Performance", "Search and Maps views, website clicks, calls and direction requests, summed over the range (ending three days ago). Default days=28.",
+          "<accounts/1/locations/2> [days=1-540]"),
+        readAction("reviews", "Reviews", "The 50 newest reviews with stars, reply state and text, and the location's average rating.", "<accounts/1/locations/2>"),
+        writeAction("reply_review", "Reply to review", "Post or replace the owner's public reply to one review.", "<accounts/1/locations/2/reviews/<id>> <reply text>"),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/business.manage"], secretRefs: [] },
+  },
   actionConnector({
     id: "pagespeed", name: "PageSpeed Insights", kind: "observability",
     description: "Run Lighthouse on a public page through PageSpeed Insights and read real-user Core Web Vitals from the Chrome UX Report. Read-only.",
@@ -214,6 +233,20 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         "<https://example.com/page> [strategy=mobile|desktop]"),
       readAction("field", "Core Web Vitals", "p75 and good/needs-improvement/poor shares of LCP, INP, CLS, FCP and TTFB over the last 28 days. A bare origin reads the whole origin.",
         "<https://example.com/page or origin> [form=phone|desktop|all] [scope=page|origin]"),
+    ],
+  }),
+  actionConnector({
+    id: "yandexwebmaster", name: "Yandex Webmaster", kind: "observability",
+    description: "Read Yandex site quality, indexing, site problems and popular search queries for your hosts, and queue pages for recrawl.",
+    credentials: [
+      { id: "token", label: "Yandex OAuth token", required: true,
+        description: "An OAuth token of the Yandex account with webmaster:hostinfo, plus webmaster:verify for recrawl (oauth.yandex.com)." },
+    ],
+    actions: [
+      readAction("list_hosts", "List hosts", "List the account's hosts with their Yandex host id and verification.", "*"),
+      readAction("summary", "Host summary", "Site quality index, pages in search, excluded pages and site problems by severity.", "<https:example.com:443>"),
+      readAction("queries", "Popular queries", "The 50 queries with the most clicks: shows, clicks and average positions over Yandex's recent window.", "<https:example.com:443>"),
+      writeAction("recrawl", "Queue recrawl", "Ask Yandex to recrawl one page of the host; reports the remaining daily quota.", "<https:example.com:443> <page url>"),
     ],
   }),
   {

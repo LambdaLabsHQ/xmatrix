@@ -232,6 +232,19 @@ saved alone; Check reads the site list when an API key is saved. Bing also
 offers OAuth for Webmaster Tools, but a company app needs its own registration;
 the API key keeps the connection per account without one.
 
+Google Business Profile (`googlebusinessprofile`) is another connection on the
+company Google client, holding only `https://www.googleapis.com/auth/business.manage`
+(Google offers no read-only scope for these APIs). Reads: `list_accounts:*`,
+`list_locations:<accounts/1>`, `performance:<accounts/1/locations/2> [days=1-540]`
+(Performance API daily metrics summed over a range ending three days ago, since
+Google's figures lag) and `reviews:<location>` (My Business v4, still the only
+reviews API; newest 50). The write `reply_review:<…/reviews/<id>> <text>` puts
+the owner's public reply under the Channel's action policy. Check lists one
+account. Google must approve the company Cloud project for Business Profile
+API access (a request form, separate from OAuth verification) and the
+Account Management, Business Information and Performance APIs must be enabled;
+until then every call returns Google's 403.
+
 PageSpeed Insights (`pagespeed`) has no OAuth: the connection saves one Google
 Cloud API key with the PageSpeed Insights and Chrome UX Report APIs enabled,
 sent only in the `x-goog-api-key` header. `audit:<page url> [strategy=mobile|desktop]`
@@ -250,6 +263,16 @@ explicit vocabularies. `google-report.ts` resolves their bounded, distinct names
 through `mappedChoices`; only own entries count as choices, and mapping happens
 after validation. Each connector retains its vocabulary, defaults and usage
 message, including dimension-free reports and the all-device CrUX form.
+
+Yandex Webmaster (`yandexwebmaster`) saves an OAuth token of the Yandex
+account (`webmaster:hostinfo`, plus `webmaster:verify` for recrawl), sent as
+`Authorization: OAuth <token>`; a company Yandex app for one-click Connect is
+not registered yet. Every call first reads the token's user id from `/user`,
+which Check also does. A host is Yandex's id, `https:example.com:443`. Reads:
+`list_hosts:*`, `summary:<host>` (SQI, pages in search, excluded pages, site
+problems by severity), `queries:<host>` (top 50 popular queries by clicks).
+The write `recrawl:<host> <page url>` queues one page of that exact scheme,
+host and port, under the Channel's action policy.
 
 Gmail signs in through Composio rather than the company Google client:
 `gmail.readonly` is a restricted Google scope, and Composio's Google app is
