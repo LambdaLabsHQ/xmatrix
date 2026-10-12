@@ -1,4 +1,5 @@
 import { plainDeliveryRecord as plainObject } from "./runtime-transport/delivery-record";
+import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG } from "@xmatrix/protocol";
 import { parseAgentChannelLiveDelivery, parseHumanChannelLiveDelivery } from "./runtime-transport/channel-live-delivery";
 import { DurableObject } from "cloudflare:workers";
@@ -194,7 +195,19 @@ export class RelayRuntimeLive extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    return this.routeFetch(request);
+    try {
+      return await this.routeFetch(request);
+    } catch (error) {
+      // Record the receiving stack before the platform transports the exception
+      // to another DO. A failed delivery may already have reached some sockets.
+      try {
+        reportError(error, { operation: "RelayRuntime.fetch" });
+        this.ctx.waitUntil(sendErrorReports());
+      } catch {
+        // Reporting must not replace the originating delivery failure.
+      }
+      throw error;
+    }
   }
 
   private async routeFetch(request: Request): Promise<Response> {
