@@ -54,7 +54,8 @@ test("a member clones, pulls and pushes their Space's pages over git", async () 
       "commit", "-q", "-am", message);
     const companyFile = path.join(clone, "company.md");
     const companyText = readFileSync(companyFile, "utf8");
-    writeFileSync(companyFile, companyText.replace("Shipping pages.", "Pages ship this week, see [the roadmap](company/roadmap.md)."));
+    writeFileSync(companyFile, companyText.replace("# Company\n\nShipping pages.",
+      "# Company\n\nPages ship this week, see [the roadmap](company/roadmap.md)."));
     writeFileSync(path.join(clone, "company", "roadmap.md"), "# Roadmap\n\nPublic pages, then git.\n");
     git("-C", clone, "add", "company/roadmap.md");
     commit("Update the company page and add the roadmap");
