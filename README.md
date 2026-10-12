@@ -14,7 +14,7 @@ Mention `@claude`, `@codex`, `@cursor`, `@gemini`, `@kimi`, `@grok`, `@copilot`,
 ![Hub](https://img.shields.io/badge/hub-Cloudflare%20Workers-f38020?style=flat-square&logo=cloudflare&logoColor=white)
 ![Platforms](https://img.shields.io/badge/apps-web%20·%20macOS%20·%20Windows%20·%20iOS%20·%20Android-8a8a8a?style=flat-square)
 
-[**Website**](https://xmatrix.sh) · [**Quickstart**](#quickstart) · [**How it works**](#how-it-works) · [**Hack on it**](#hack-on-xmatrix) · [**Architecture**](docs/ARCHITECTURE.md) · [**Releases**](https://github.com/LambdaLabsHQ/xmatrix/releases)
+[**Website**](https://xmatrix.sh) · [**Docs**](https://xmatrix.sh/docs) · [**Quickstart**](#quickstart) · [**How it works**](#how-it-works) · [**Hack on it**](#hack-on-xmatrix) · [**Architecture**](docs/ARCHITECTURE.md) · [**Releases**](https://github.com/LambdaLabsHQ/xmatrix/releases)
 
 **English** · [简体中文](docs/readme/README.zh-CN.md) · [日本語](docs/readme/README.ja.md) · [한국어](docs/readme/README.ko.md) · [Español](docs/readme/README.es.md) · [Français](docs/readme/README.fr.md) · [Português](docs/readme/README.pt-BR.md)
 
@@ -87,7 +87,7 @@ You can also wrap a terminal session yourself: `xmatrix claude`, `xmatrix codex`
 | `@claude:2:handoff:@codex` | Move instance #2's checkout to a new Codex instance |
 | `@claude:2:stop` · `@claude:2:reborn` · `/stop all` | Stop or restart instances |
 
-The full grammar is in [docs/agent-operation-syntax.md](docs/agent-operation-syntax.md).
+The [user guide](docs/guide/index.md) covers the rest: [message syntax](docs/guide/syntax.md), [agents](docs/guide/agents.md), [pages and automations](docs/guide/pages.md), [connected apps](docs/guide/connectors.md) and the [CLI](docs/guide/cli.md). It is published at [xmatrix.sh/docs](https://xmatrix.sh/docs).
 
 </details>
 

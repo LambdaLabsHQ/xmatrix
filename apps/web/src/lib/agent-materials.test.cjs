@@ -4,22 +4,20 @@ const path = require("node:path");
 const test = require("node:test");
 require("../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
 
-const { agentOnboardingPrompt, xmatrixSkill, xmatrixSkillInstallCommand } = require("./agent-materials.ts");
-const xmatrixSkillFiles = xmatrixSkillInstallCommand.match(/for skill_file in (.+); do/)[1].split(" ");
 const skillRoot = path.join(__dirname, "..", "..", "public", "skills", "xmatrix");
+
+function publicMaterial(relativePath) {
+  return fs.readFileSync(path.join(__dirname, "..", "..", "public", relativePath), "utf8");
+}
+
+const agentOnboardingPrompt = publicMaterial("prompts/agent-cli-onboarding.md");
+const xmatrixSkill = publicMaterial("skills/xmatrix/SKILL.md");
+// The onboarding prompt's own install loop is the list of files an agent downloads.
+const xmatrixSkillFiles = agentOnboardingPrompt.match(/for skill_file in (.+); do/)[1].split(" ");
 const skillBundle = xmatrixSkillFiles.filter((file) => file.endsWith(".md"))
   .map((file) => fs.readFileSync(path.join(skillRoot, file), "utf8")).join("\n");
 
-function publicMaterial(relativePath) {
-  return fs
-    .readFileSync(path.join(__dirname, "..", "..", "public", relativePath), "utf8")
-    .replace(/\r?\n/g, "\r\n");
-}
-
-test("agent materials embed public docs with secret guidance", () => {
-  assert.equal(agentOnboardingPrompt, publicMaterial("prompts/agent-cli-onboarding.md"));
-  assert.equal(xmatrixSkill, publicMaterial("skills/xmatrix/SKILL.md"));
-
+test("agent materials carry secret guidance", () => {
   const canonicalPromptDoc = fs.readFileSync(
     path.join(__dirname, "..", "..", "..", "..", "docs", "prompts", "agent-cli-onboarding.md"),
     "utf8"
@@ -30,7 +28,7 @@ test("agent materials embed public docs with secret guidance", () => {
   ).replace(/\r\n/g, "\n").trimEnd();
   assert.ok(
     canonicalPromptDoc.includes(`\`\`\`\`text\n${publicPrompt}\n\`\`\`\``),
-    "canonical, public, and embedded onboarding prompts must stay in lockstep"
+    "canonical and public onboarding prompts must stay in lockstep"
   );
 
   for (const material of [agentOnboardingPrompt, skillBundle]) {
@@ -53,7 +51,6 @@ test("agent materials embed public docs with secret guidance", () => {
   assert.match(skillBundle, /agent add <harness> --space <space-id>/);
   assert.doesNotMatch(skillBundle, /agent (create|approve|requests|edit)\b|management agents|Agent Profile|--access /);
   // Roles are retired: no material teaches Role Packages, Role Cards, or `xmatrix role`.
-  assert.doesNotMatch(xmatrixSkillInstallCommand, /references\/roles\.md/);
   for (const material of [agentOnboardingPrompt, skillBundle]) {
     assert.doesNotMatch(material, /Role (Package|Card)|references\/roles\.md|xmatrix role\b|\brole (assign|summon|publish|visibility)\b/);
   }
@@ -119,10 +116,7 @@ test("skill installation includes every distributed file and resolves workflow l
   assert.equal(new Set(xmatrixSkillFiles).size, xmatrixSkillFiles.length);
   for (const file of xmatrixSkillFiles) {
     assert.ok(!file.startsWith("/") && !file.split("/").includes(".."));
-    assert.ok(xmatrixSkillInstallCommand.includes(file), `website installer misses ${file}`);
-    const posix = agentOnboardingPrompt.split("```sh")[1].split("```")[0];
     const powershell = agentOnboardingPrompt.split("```powershell")[1].split("```")[0];
-    assert.ok(posix.includes(file), `POSIX onboarding misses ${file}`);
     assert.ok(powershell.includes(file), `PowerShell onboarding misses ${file}`);
     if (!file.endsWith(".md")) continue;
     const content = fs.readFileSync(path.join(skillRoot, file), "utf8");

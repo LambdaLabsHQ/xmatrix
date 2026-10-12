@@ -1,20 +1,53 @@
 import { expect, test } from "@playwright/test";
 
-test("public guides show connectors with loaded icons and no nested glass", async ({ page }) => {
-  for (const route of ["/", "/docs"]) {
-    await page.goto(route);
-    const list = page.getByRole("list", { name: "Connectors", exact: true });
-    await list.scrollIntoViewIfNeeded();
-    await expect(list).toBeVisible();
-    expect(await list.getByRole("listitem").count()).toBeGreaterThan(0);
-    for (const item of await list.getByRole("listitem").all()) {
-      const icon = item.locator("img");
-      await expect(icon).toBeVisible();
-      await expect.poll(() => icon.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
-      expect(await item.evaluate((element) =>
-        element.parentElement?.closest(".app-liquid-glass-surface") !== null)).toBe(false);
+test("the home page shows connectors with loaded icons and no nested glass", async ({ page }) => {
+  await page.goto("/");
+  const list = page.getByRole("list", { name: "Connectors", exact: true });
+  await list.scrollIntoViewIfNeeded();
+  await expect(list).toBeVisible();
+  expect(await list.getByRole("listitem").count()).toBeGreaterThan(0);
+  for (const item of await list.getByRole("listitem").all()) {
+    const icon = item.locator("img");
+    await expect(icon).toBeVisible();
+    await expect.poll(() => icon.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+    expect(await item.evaluate((element) =>
+      element.parentElement?.closest(".app-liquid-glass-surface") !== null)).toBe(false);
+  }
+});
+
+test("the guide serves every page, and every link inside it reaches a section that exists", async ({ page }) => {
+  await page.goto("/docs");
+  const guide = page.getByRole("navigation", { name: "Guide" });
+  const pages = await guide.getByRole("link").evaluateAll((links) => links.map((link) => link.getAttribute("href")!));
+  expect(pages.length).toBeGreaterThan(3);
+  const targets = new Set<string>();
+  for (const href of pages) {
+    await page.goto(href);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(guide.locator('[aria-current="page"]')).toHaveAttribute("href", href);
+    for (const link of await page.locator(".docs-article a, .docs-toc a").evaluateAll((links) =>
+      links.map((element) => new URL((element as HTMLAnchorElement).href)))) {
+      if (link.origin === new URL(page.url()).origin && link.pathname.startsWith("/docs")) targets.add(link.pathname + link.hash);
     }
   }
+  for (const target of targets) {
+    const [path, section] = target.split("#");
+    expect(pages, target).toContain(path);
+    if (!section) continue;
+    await page.goto(target);
+    await expect(page.locator(`[id="${decodeURIComponent(section)}"]`), target).toBeAttached();
+  }
+});
+
+test("the guide is a paper document: no wood or glass around its text, and a phone does not scroll sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/docs/syntax");
+  const article = page.locator(".docs-article");
+  await expect(article.getByRole("table").first()).toBeVisible();
+  expect(await page.locator(".docs-shell").locator('[data-material], .app-liquid-glass-surface').count()).toBe(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+  // The same definition a page in the app is drawn with.
+  await expect(article).toHaveClass(/page-document/);
 });
 
 for (const width of [393, 820, 1440]) {
