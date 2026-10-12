@@ -5,9 +5,8 @@ export function workspaceKey(workspace: Pick<SerializedWorkspace, "machineId" | 
   return JSON.stringify([workspace.machineId, comparableWorkspacePath(workspace.canonicalCwd)]);
 }
 
-/* The registered working directory a live instance is sitting in. An instance
-   reports its machine and cwd but never a repository, so the repo name a summon
-   would use only exists on the Workspace row this finds. */
+/* The registered directory matching an instance, when it has one. Managed
+   repository checkouts do not need a registered Workspace row. */
 export function workspaceForInstance(
   workspaces: SerializedWorkspace[],
   instance: { machineId?: string; cwd?: string; workspace?: { machineId: string; canonicalCwd: string } }

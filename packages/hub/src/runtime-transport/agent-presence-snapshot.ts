@@ -1,4 +1,4 @@
-import { plainRecord } from "@xmatrix/protocol";
+import { plainRecord, repoSummonReference } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
   AgentStatus,
@@ -33,6 +33,7 @@ export interface LiveAgentSessionSnapshot {
   machineId: string;
   hostId: string;
   cwd?: string;
+  repository?: string;
   /** What the Instance last reported over its own socket. */
   status: LiveAgentStatus;
   /**
@@ -108,6 +109,7 @@ export function liveAgentSessionSnapshots(
       machineId: session.run.machineId,
       hostId: session.run.hostId,
       ...(session.run.cwd ? { cwd: session.run.cwd } : {}),
+      ...(session.run.repository ? { repository: session.run.repository } : {}),
       status: session.run.instanceStatus,
       ...(machineOffline ? { machineOffline: true as const } : {}),
       connectedAt: session.connectedAt,
@@ -259,6 +261,7 @@ function livePresenceSession(
       machineId: snapshot.machineId,
       hostId: snapshot.hostId,
       ...(snapshot.cwd ? { cwd: snapshot.cwd } : {}),
+      ...(snapshot.repository ? { repository: snapshot.repository } : {}),
       status: "running",
       instanceStatus: snapshot.status,
     },
@@ -299,6 +302,8 @@ function parseLiveAgentSessionSnapshot(value: unknown): LiveAgentSessionSnapshot
   }
   const channelInstanceId = boundedText(value.channelInstanceId, 32);
   const cwd = boundedText(value.cwd, 2_048);
+  const repositoryText = boundedText(value.repository, 2_048);
+  const repository = repositoryText ? repoSummonReference(repositoryText) : undefined;
   const machineOffline = value.machineOffline === true;
   const presentation = value.presentation === undefined
     ? undefined
@@ -315,6 +320,7 @@ function parseLiveAgentSessionSnapshot(value: unknown): LiveAgentSessionSnapshot
     machineId,
     hostId,
     ...(cwd ? { cwd } : {}),
+    ...(repository ? { repository } : {}),
     status,
     ...(machineOffline ? { machineOffline: true as const } : {}),
     connectedAt,
