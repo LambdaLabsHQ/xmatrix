@@ -144,6 +144,8 @@ export interface HarnessReleaseTarget {
 /** A release is told again to the same Machine at most this often, so a
  * daemon that cannot reach the registry is not asked every minute. */
 const RELEASE_REPEAT_INTERVAL = "30 minutes";
+/** Rows one target read may return, within the database client's result bound. */
+const RELEASE_TARGET_ROWS = 5_000;
 
 /**
  * For each preset's latest version: online, capable daemons whose reported
@@ -157,7 +159,10 @@ export async function readHarnessReleaseTargets(database: AuthorityDatabase, inp
   requestId: string; releases: readonly { presetId: string; version: string }[]; limit?: number;
 }): Promise<HarnessReleaseTarget[]> {
   if (input.releases.length === 0) return [];
-  const limit = Math.min(Math.max(input.limit ?? 500, 1), 500);
+  // One statement returns at most RELEASE_TARGET_ROWS; each preset gets an
+  // equal share, and a daemon past it is told on a later pass.
+  const limit = Math.max(1, Math.min(input.limit ?? 500, 500,
+    Math.floor(RELEASE_TARGET_ROWS / input.releases.length)));
   return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-release-targets" },
     async (tx) => {
       const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v3", text: `SELECT
