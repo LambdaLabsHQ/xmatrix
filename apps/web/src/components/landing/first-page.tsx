@@ -19,6 +19,13 @@ export function FirstPage() {
             <Link href="/login" className="mt-6 inline-block text-sm font-semibold underline underline-offset-4">
               Start Free
             </Link>
+            <p className="mt-4 text-sm leading-6 text-muted-foreground">
+              New to this?{" "}
+              <Link href="/docs/project-wiki" className="font-semibold underline underline-offset-4">
+                Build a project wiki with Claude Code or Codex
+              </Link>
+              {" "}takes you from connecting an agent to updating your first page.
+            </p>
           </div>
           <WoodPanel className="min-w-0 p-6 sm:p-8">
             <h3 className="text-lg font-semibold">Try it in a conversation</h3>

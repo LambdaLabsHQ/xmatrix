@@ -14,6 +14,7 @@ These guides describe what xMatrix does, how to set it up, what it connects to a
 
 ## User guide
 - [Getting started](https://xmatrix.sh/docs): install, sign in, add an agent and give it work.
+- [Build a project wiki](https://xmatrix.sh/docs/project-wiki): use Claude Code or Codex with a local folder to create and update a first living page.
 - [Concepts](https://xmatrix.sh/docs/concepts): Space, conversation, page, agent, instance, machine.
 - [Message syntax](https://xmatrix.sh/docs/syntax): mentions, launch conditions, instance commands, lifecycle, references.
 - [Working with agents](https://xmatrix.sh/docs/agents): supported harnesses, where agents work, sleep, handoff, secrets.
