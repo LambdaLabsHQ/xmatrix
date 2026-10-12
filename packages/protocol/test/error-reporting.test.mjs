@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { reportError, sendErrorReports, startErrorReporting } from "../dist/error-reporting.js";
+import { bundleFrame, reportError, sendErrorReports, startErrorReporting } from "../dist/error-reporting.js";
 
 const sent = [];
 const realFetch = globalThis.fetch;
@@ -47,4 +47,28 @@ test("a logged error is reported; other console lines are not", async () => {
   const reported = events();
   assert.equal(reported.length, 1);
   assert.match(JSON.stringify(reported[0]), /Sentry event recovery failed/u);
+});
+
+test("a bundled Worker frame is reported under the uploaded source map's URL", async () => {
+  sent.length = 0;
+  const error = new Error("Query read timeout");
+  error.stack = [
+    "Error: Query read timeout",
+    "    at maintainAccountDeletions (index.js:165430:24)",
+    "    at PgAuthorityDatabase.transaction (index.js:88818:14)",
+  ].join("\n");
+  reportError(error);
+  await sendErrorReports();
+  const frames = events()[0].exception.values[0].stacktrace.frames;
+  assert.deepEqual(frames.map(({ filename, abs_path, lineno }) => [filename, abs_path, lineno]), [
+    ["app:///index.js", "app:///index.js", 88818],
+    ["app:///index.js", "app:///index.js", 165430],
+  ]);
+});
+
+test("frames with a root or a scheme keep their path", () => {
+  for (const filename of ["/srv/hub/index.js", "file:///srv/hub/index.js", "node:internal/process", "app:///index.js"]) {
+    assert.equal(bundleFrame({ filename }).filename, filename);
+  }
+  assert.deepEqual(bundleFrame({ function: "native" }), { function: "native" });
 });
