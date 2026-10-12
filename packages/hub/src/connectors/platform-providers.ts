@@ -1,6 +1,7 @@
 import type { ConnectorAction, ConnectorDelivery, ConnectorDeliveryResult, ConnectorProvider } from "./provider";
 import { DINGTALK_ACTIONS, GOOGLE_CHAT_ACTIONS, TEAMS_ACTIONS, TELEGRAM_ACTIONS, WECOM_ACTIONS, verifyTelegram } from "./actions/chat-webhooks";
 import { APP_STORE_CONNECT_READ_ACTIONS } from "./actions/app-store-connect";
+import { APP_STORE_CONNECT_LISTING_ACTIONS } from "./actions/app-store-connect-listing";
 import { APP_STORE_CONNECT_RELEASE_ACTIONS } from "./actions/app-store-connect-release";
 import { APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "./app-store-connect-api";
 import { receiveAppStoreConnectDelivery } from "./app-store-connect-events";
@@ -67,7 +68,7 @@ const PROVIDERS: Record<string, {
     subscriptions: CLOUDFLARE_SUBSCRIPTIONS },
   gcp: { receive: receiveGcpDelivery, actions: GCP_ACTIONS, verify: verifyGcp },
   appstoreconnect: { receive: (delivery) => receiveAppStoreConnectDelivery(delivery),
-    actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS },
+    actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS },
     verify: verifyAppStoreConnect, subscriptions: APP_STORE_CONNECT_SUBSCRIPTIONS },
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },

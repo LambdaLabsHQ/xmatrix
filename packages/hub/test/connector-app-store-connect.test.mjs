@@ -3,59 +3,13 @@ import { createHmac, webcrypto } from "node:crypto";
 import { test } from "node:test";
 
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
-import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { connectorActionCatalog } from "../src/connectors/action-catalog.ts";
 import { APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "../src/connectors/app-store-connect-api.ts";
 import { receiveAppStoreConnectDelivery } from "../src/connectors/app-store-connect-events.ts";
-import { connectorProvider } from "../src/connectors/registry.ts";
+import { ACTIONS, APP, apps, BUNDLE, credentials, pair, pem, run, statement, version, versions, withApple, writes } from "./support/app-store-connect-double.mjs";
 
-const ACTIONS = connectorProvider("appstoreconnect").actions;
-const BUNDLE = "com.example.app";
-const APP = { type: "apps", id: "6760000001", attributes: { bundleId: BUNDLE, name: "Example" } };
 const SPACE = "space-1";
 const env = { HUB_URL: "https://hub.test" };
-
-const pair = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-const pkcs8 = Buffer.from(await webcrypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
-const pem = `-----BEGIN PRIVATE KEY-----\n${pkcs8.match(/.{1,64}/gu).join("\n")}\n-----END PRIVATE KEY-----\n`;
-const credentials = { issuerId: "57246542-96fe-1a63-e053-0824d011072a", keyId: "2X9R4HXF34", privateKey: pem,
-  webhookSecret: "hook-secret", ingressKey: "ingress-key" };
-
-/* An App Store Connect double keyed by "METHOD /v1/path"; every call is recorded. A route answers a JSON:API
-   document, or `{ status, errors }` to refuse. */
-async function withApple(routes, work) {
-  const calls = [];
-  const original = globalThis.fetch;
-  globalThis.fetch = async (url, init = {}) => {
-    const target = new URL(String(url));
-    const call = { method: init.method ?? "GET", origin: target.origin, path: target.pathname, query: Object.fromEntries(target.searchParams),
-      body: init.body ? JSON.parse(init.body).data : undefined, authorization: new Headers(init.headers).get("authorization") };
-    calls.push(call);
-    const route = routes[`${call.method} ${call.path}`];
-    const result = typeof route === "function" ? route(call) : route;
-    if (result === undefined) return Response.json({ errors: [{ status: "404", code: "NOT_FOUND", detail: `no route ${call.method} ${call.path}` }] }, { status: 404 });
-    if (result === null) return new Response(null, { status: 204 });
-    return Response.json(result, { status: result.status ?? 200 });
-  };
-  try { return { value: await work(), calls }; } finally { globalThis.fetch = original; }
-}
-
-const statement = (body) => {
-  const command = parseActionCommand("appstoreconnect", body);
-  return ACTIONS[command.actionId].parse(command.statement);
-};
-const run = (routes, body, keys = credentials) => {
-  const command = parseActionCommand("appstoreconnect", body);
-  const action = ACTIONS[command.actionId];
-  return withApple(routes, () => action.execute({ credentials: keys }, action.parse(command.statement)));
-};
-const apps = { "GET /v1/apps": { data: [APP] } };
-const version = (id, versionString, state, build, createdDate = "2026-09-01T00:00:00Z") => ({ type: "appStoreVersions", id,
-  attributes: { platform: "IOS", versionString, appVersionState: state, releaseType: "MANUAL", createdDate },
-  relationships: { build: { data: build ? { type: "builds", id: build } : null } } });
-const versions = (...rows) => ({ "GET /v1/apps/6760000001/appStoreVersions": { data: rows,
-  included: [{ type: "builds", id: "build-7", attributes: { version: "7", processingState: "VALID", expired: false } }] } });
-const writes = (calls) => calls.filter((call) => call.method !== "GET").map((call) => `${call.method} ${call.path}`);
 
 test("every call carries a short-lived ES256 token Apple can verify and goes only to Apple's API", async () => {
   const { calls } = await withApple(apps, () => verifyAppStoreConnect(credentials));
@@ -316,5 +270,5 @@ test("every declared App Store Connect action has an executor with the declared 
   const catalog = connectorActionCatalog("appstoreconnect", ACTIONS);
   assert.deepEqual([...catalog.keys()].sort(), Object.keys(ACTIONS).sort());
   assert.deepEqual([...catalog.values()].filter((entry) => entry.definition.effect === "read").map((entry) => entry.definition.id).sort(),
-    ["builds", "list_apps", "read_version", "reviews", "status"]);
+    ["builds", "list_apps", "read_app", "read_version", "reviews", "status"]);
 });

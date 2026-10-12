@@ -15,7 +15,8 @@ import { cell } from "./google-report";
 
 const PLATFORMS: Readonly<Record<string, string>> = { ios: "IOS", macos: "MAC_OS", tvos: "TV_OS", visionos: "VISION_OS" };
 const VERSION = /^\d{1,4}(?:\.\d{1,5}){0,3}$/u;
-const MAX_OUTPUT = 12_000;
+export const MAX_OUTPUT = 12_000;
+export const LOCALE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/u;
 const LOCALIZED = ["description", "keywords", "promotionalText", "whatsNew", "supportUrl", "marketingUrl"] as const;
 
 /** States a version can still be edited and submitted from. */
@@ -46,6 +47,40 @@ export function platformRef(word: string): string | undefined {
 export function appVersion(statement: ConnectorActionStatement): Record<string, string> | string {
   const app = bundleId(statement.target), ref = versionRef(statement.text.trim());
   return app && ref ? { app, ...ref } : "name an app and a version: <com.example.app> <1.2.0> (or <macos/1.2.0>)";
+}
+
+/** `<bundle id> <version> {json}`: the JSON object's members, or why the statement is not one. */
+export function appVersionFields(statement: ConnectorActionStatement, usage: string, maximum: number):
+  { app: string; platform: string; version: string; fields: Record<string, unknown> } | string {
+  const app = bundleId(statement.target);
+  const [, word = "", json = ""] = statement.text.trim().match(/^(\S+)\s+([\s\S]+)$/u) ?? [];
+  const ref = versionRef(word);
+  if (!app || !ref || json.length > maximum) return usage;
+  const fields = jsonFields(json);
+  return fields ? { app, ...ref, fields } : "the fields are not a JSON object";
+}
+
+/** A JSON object's own members; anything else is refused. */
+export function jsonFields(json: string): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try { parsed = JSON.parse(json); } catch { return undefined; }
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+}
+
+/** Why a text field is not acceptable, if it is not: text within its limit, and https where it is a URL. */
+export function textFieldProblem(name: string, value: unknown, limit: number): string | undefined {
+  if (typeof value !== "string" || !value.trim() || [...value].length > limit) return `${name} must be text of at most ${limit} characters`;
+  return /url$/iu.test(name) && !/^https:\/\/[^\s/?#]+\.[^\s/?#]+/u.test(value) ? `${name} must be an https URL` : undefined;
+}
+
+/** A version's App Review details, if it has any. Never shown: they carry contact and sign-in data. */
+export async function reviewDetail(api: AppStoreConnectApi, version: AppleResource): Promise<AppleResource | undefined> {
+  try {
+    return appleResource((await api.request(`/v1/appStoreVersions/${encodeURIComponent(version.id)}/appStoreReviewDetail`, { quiet: true })).data);
+  } catch (error) {
+    if (error instanceof ProviderRequestError && error.status === 404) return undefined;
+    throw error;
+  }
 }
 
 /** Numeric order of dotted versions; a missing part counts as zero. */

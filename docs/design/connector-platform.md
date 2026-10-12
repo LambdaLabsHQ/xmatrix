@@ -257,10 +257,20 @@ at the connection's ingress with the generated secret, and the Space's last
 unsubscribe deletes it; webhooks with other names are never touched. Apple
 signs each delivery as `x-apple-signature: hmacsha256=<hex>`. A payload names
 a version or build and never the app, so the registered URL carries
-`?app=<bundle id>`; `*` routes webhooks the team configured itself. Out of
-reach of the API and left to a person: creating the app record, the App
-Privacy answers, agreements, and replying to App Review. Uploading the binary
-needs Xcode and stays with the machine or CI that built it.
+`?app=<bundle id>`; `*` routes webhooks the team configured itself. What a
+new app needs once before its first submission is kept per app: `read_app`
+prints names and privacy policy per language, categories, age rating answers,
+content rights, price and availability in the shape the writes take back.
+`set_app_info`, `set_age_rating`, `set_price` and `set_review_contact` write
+them; app info and the age rating go to the app info that is not live. Age
+rating answers are the developer's declarations to Apple, so each is checked
+against Apple's vocabulary and none is defaulted. `set_review_contact`
+refuses a sign-in password, which is entered in App Store Connect, and its
+receipt names the fields it set and never their values. Out of reach of the
+API and left to a person: creating the app record, the App Privacy answers,
+agreements, and replying to App Review. Availability by territory and
+screenshots are not covered yet. Uploading the binary needs Xcode and stays
+with the machine or CI that built it.
 
 Google Business Profile (`googlebusinessprofile`) is another connection on the
 company Google client, holding only `https://www.googleapis.com/auth/business.manage`
@@ -746,7 +756,7 @@ or generates a webhook secret in the Apps view.
 | Notion | internal integration token | — (polling deferred) | read page, append block, create page |
 | Vercel | access token + webhook secret | deployment created/succeeded/error | redeploy |
 | Cloudflare | OAuth or API token; Hub-registered destination secret | notifications fired/resolved by alert type; subscriptions own the account's `xMatrix ·` policies | query logs, list deployments (read); rollback |
-| App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review |
+| App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version, app record and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review; set app info, age rating, price and review contact |
 | Discord | bot token | — | post message |
 | Feishu/Lark | custom app id/secret + verification token | message in linked chat | send message |
 
