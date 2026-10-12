@@ -40,8 +40,8 @@ export interface AppleResource {
 }
 
 export interface AppStoreConnectApi {
-  /** One JSON:API call; `data` is wrapped as the request's `data` member. A 204 answers `{}`. */
-  request(path: string, init?: { method?: "GET" | "POST" | "PATCH" | "DELETE"; query?: Record<string, string>; data?: unknown;
+  /** One JSON:API call; `data` and `included` (resources created inline) become the request's members. A 204 answers `{}`. */
+  request(path: string, init?: { method?: "GET" | "POST" | "PATCH" | "DELETE"; query?: Record<string, string>; data?: unknown; included?: unknown[];
     /** Keep Apple's error text out of the receipt: the call carries review contact or sign-in details. */
     quiet?: boolean }): Promise<Record<string, unknown>>;
   /** A collection and what it includes, following Apple's own next links for at most `pages` pages. */
@@ -57,6 +57,12 @@ export function appleResource(value: unknown): AppleResource | undefined {
 /** The id a to-one relationship points at, if it points at anything. */
 export function relatedId(row: AppleResource, name: string): string | undefined {
   return text(record(record(row.relationships[name]).data).id) || undefined;
+}
+
+/** The ids a to-many relationship lists; empty unless the response included it. */
+export function relatedIds(row: AppleResource, name: string): string[] {
+  const data = record(row.relationships[name]).data;
+  return (Array.isArray(data) ? data : []).flatMap((item) => text(record(item).id) || []);
 }
 
 export const relation = (type: string, id: string) => ({ data: { type, id } });
@@ -118,7 +124,8 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
     let problem: string | undefined;
     try {
       return await providerJson(apiUrl(path, init.query), { method: init.method ?? "GET", maxBytes: MAX_LIST_BYTES,
-        headers: { authorization: await authorization }, ...(init.data === undefined ? {} : { json: { data: init.data } }),
+        headers: { authorization: await authorization },
+        ...(init.data === undefined ? {} : { json: { data: init.data, ...(init.included ? { included: init.included } : {}) } }),
         describeError: (payload) => problem = appleProblem(payload, init.quiet === true) });
     } catch (error) {
       if (!(error instanceof ProviderRequestError)) throw error;
@@ -151,7 +158,7 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
  * not be, so a miss is retried against the key's whole app list.
  */
 export async function appleApp(api: AppStoreConnectApi, bundleId: string): Promise<AppleResource> {
-  const query = { "fields[apps]": "name,bundleId,sku,primaryLocale", limit: "200" };
+  const query = { "fields[apps]": "name,bundleId,sku,primaryLocale,contentRightsDeclaration", limit: "200" };
   const named = (rows: AppleResource[]) => rows.filter((app) => text(app.attributes.bundleId).toLowerCase() === bundleId.toLowerCase());
   let apps = named((await api.list("/v1/apps", { ...query, "filter[bundleId]": bundleId })).rows);
   if (!apps.length) apps = named((await api.list("/v1/apps", query)).rows);

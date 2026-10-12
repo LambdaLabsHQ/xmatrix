@@ -2,8 +2,8 @@ import { appStoreConnect, appleResource, relatedId, relation, type AppleResource
 import { text } from "../event-format";
 import { ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
-import { appAction, appVersion, appVersions, bundleId, compareVersions, EDITABLE_STATES, openSubmissions, platformRef, versionAction, versionRef,
-  versionState } from "./app-store-connect";
+import { appAction, appVersion, appVersionFields, appVersions, bundleId, compareVersions, EDITABLE_STATES, LOCALE, openSubmissions, platformRef,
+  reviewDetail, textFieldProblem, versionAction, versionRef, versionState } from "./app-store-connect";
 import { requireText } from "./common";
 import { keyedOptions } from "./google-report";
 
@@ -21,7 +21,6 @@ import { keyedOptions } from "./google-report";
 
 const BUILD = /^\d[\d.]{0,17}$/u;
 const REVIEW = /^[A-Za-z0-9._-]{1,128}$/u;
-const LOCALE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/u;
 const MAX_METADATA_TEXT = 16_000;
 const RELEASE_TYPES: Readonly<Record<string, string>> = { manual: "MANUAL", after_approval: "AFTER_APPROVAL" };
 const METADATA_LIMITS: Readonly<Record<string, number>> = { description: 4_000, keywords: 100, promotionalText: 170, whatsNew: 4_000,
@@ -30,15 +29,6 @@ const REVIEW_FIELDS = ["contactFirstName", "contactLastName", "contactEmail", "c
   "demoAccountPassword", "notes"];
 
 const versionPath = (version: AppleResource) => `/v1/appStoreVersions/${encodeURIComponent(version.id)}`;
-
-async function reviewDetail(api: AppStoreConnectApi, version: AppleResource): Promise<AppleResource | undefined> {
-  try {
-    return appleResource((await api.request(`${versionPath(version)}/appStoreReviewDetail`, { quiet: true })).data);
-  } catch (error) {
-    if (error instanceof ProviderRequestError && error.status === 404) return undefined;
-    throw error;
-  }
-}
 
 /** Give a new version the App Review contact and sign-in details of the newest earlier version that has them. */
 async function inheritReviewDetail(api: AppStoreConnectApi, version: AppleResource, earlier: AppleResource[]): Promise<string> {
@@ -71,29 +61,20 @@ async function patchSubmission(api: AppStoreConnectApi, submission: AppleResourc
 
 /** `<version> {json}`: the listing fields to change, validated to Apple's limits before any call. */
 function metadata(statement: { target: string; text: string }): Record<string, string> | string {
-  const usage = 'name an app, a version and the fields to change: <com.example.app> <1.2.0> {"locale":"en-US","description":"…","keywords":"…","whatsNew":"…"}';
-  const app = bundleId(statement.target);
-  const [, word = "", json = ""] = statement.text.trim().match(/^(\S+)\s+([\s\S]+)$/u) ?? [];
-  const ref = versionRef(word);
-  if (!app || !ref || json.length > MAX_METADATA_TEXT) return usage;
-  let parsed: unknown;
-  try { parsed = JSON.parse(json); } catch { return "the listing fields are not valid JSON"; }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return usage;
-  const { locale, ...fields } = parsed as Record<string, unknown>;
+  const parsed = appVersionFields(statement,
+    'name an app, a version and the fields to change: <com.example.app> <1.2.0> {"locale":"en-US","description":"…","keywords":"…","whatsNew":"…"}', MAX_METADATA_TEXT);
+  if (typeof parsed === "string") return parsed;
+  const { locale, ...fields } = parsed.fields;
   const names = Object.keys(fields);
   if (!names.length || names.some(name => !Object.hasOwn(METADATA_LIMITS, name))) {
     return `set at least one of ${Object.keys(METADATA_LIMITS).join(", ")}; locale names the language`;
   }
-  for (const name of names) {
-    const value = fields[name];
-    if (typeof value !== "string" || !value.trim() || [...value].length > METADATA_LIMITS[name]!) {
-      return `${name} must be text of at most ${METADATA_LIMITS[name]} characters`;
-    }
-    if (name.endsWith("Url") && !/^https:\/\/[^\s/?#]+\.[^\s/?#]+/u.test(value)) return `${name} must be an https URL`;
+  const problem = names.map(name => textFieldProblem(name, fields[name], METADATA_LIMITS[name]!)).find(Boolean);
+  if (problem) return problem;
+  if (names.some(name => name !== "copyright") && (typeof locale !== "string" || !LOCALE.test(locale))) {
+    return 'name the language of the listing text: "locale":"en-US"';
   }
-  const localized = names.filter(name => name !== "copyright");
-  if (localized.length && (typeof locale !== "string" || !LOCALE.test(locale))) return 'name the language of the listing text: "locale":"en-US"';
-  return { app, ...ref, locale: typeof locale === "string" ? locale : "", fields: JSON.stringify(fields) };
+  return { app: parsed.app, platform: parsed.platform, version: parsed.version, locale: typeof locale === "string" ? locale : "", fields: JSON.stringify(fields) };
 }
 
 export const APP_STORE_CONNECT_RELEASE_ACTIONS: Record<string, ConnectorAction> = {

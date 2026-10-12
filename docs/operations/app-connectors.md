@@ -110,8 +110,10 @@ Apple's event id, so an Automation can use
 
 Apple gives no API for creating the app record, answering App Privacy,
 accepting agreements or replying to App Review; those stay in App Store
-Connect. A first version also needs its App Review contact entered there once;
-later versions inherit it through `create_version`.
+Connect, as do availability by territory, screenshots and the App Review
+sign-in password. `read_app` shows what a new app still lacks. A first
+version's App Review contact is set with `set_review_contact`; later versions
+inherit it through `create_version`.
 
 ### Outbound Actions And Policy
 
@@ -131,7 +133,7 @@ section, and none is ever shown again.
 | Jira | `read_issue:<ENG-9>` (read), `comment:<ENG-9>`, `transition:<ENG-9> <status>` |
 | Vercel | `redeploy:<deployment id>` |
 | Cloudflare | `query_logs:<worker> [minutes] [error\|warn\|log]` (read), `list_deployments:<worker>` (read), `rollback:<worker> [version id] [reason]` |
-| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `release:<bundle id> <version>`, `reply_review:<review id> <text>` |
+| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `read_app:<bundle id>` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_review_contact:<bundle id> <version> {json}` |
 | Feishu | `send:<chat id>` |
 | Telegram | `send:<chat id>` |
 | Discord | `post:<channel id>` (mentions never ping) |

@@ -93,7 +93,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Gmail | `gmail` | | `search`, `read` |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
-| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review` |
+| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_review_contact` |
 | Discord | `discord` | | `post` |
 | Telegram | `telegram` | Messages | `send` |
 | Feishu / Lark | `feishu` | Messages | `send` |
@@ -136,7 +136,19 @@ With App Store Connect connected, an agent can take a build from upload to the s
 
 `@appstoreconnect:status:com.example.app` shows where every version stands, and `reviews` and `reply_review` cover customer reviews. A version on another platform is written `macos/1.2.0`, `tvos/1.2.0` or `visionos/1.2.0`.
 
-Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, entering the App Review contact for the very first version, accepting agreements, and replying to App Review when it asks a question.
+A new app needs a few things once before its first submission. `@appstoreconnect:read_app:com.example.app` shows which are still missing, and an agent can fill in most of them:
+
+```text
+@appstoreconnect:set_app_info:com.example.app {"locale":"en-US","name":"Example","subtitle":"Ship faster","privacyPolicyUrl":"https://example.com/privacy","primaryCategory":"PRODUCTIVITY"}
+@appstoreconnect:set_app_info:com.example.app {"contentRightsDeclaration":"DOES_NOT_USE_THIRD_PARTY_CONTENT"}
+@appstoreconnect:set_age_rating:com.example.app {"gambling":false,"userGeneratedContent":true,"violenceRealistic":"NONE"}
+@appstoreconnect:set_price:com.example.app free
+@appstoreconnect:set_review_contact:com.example.app 1.0.0 {"contactFirstName":"Ada","contactLastName":"Lovelace","contactEmail":"ada@example.com","contactPhone":"+1 555 0100"}
+```
+
+The age rating answers are your statements to Apple about the app, so nothing is filled in for you: give every answer the questionnaire asks, and `read_app` lists the ones still unanswered as `null`.
+
+Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, choosing the countries the app is sold in, uploading screenshots, entering the App Review sign-in password if reviewers need one, accepting agreements, and replying to App Review when it asks a question.
 
 ## Agents and apps
 
