@@ -43,11 +43,12 @@ function protectedResourceMetadata(c: Context<{ Bindings: Env }>): Response {
   }, 200, { ...CORS, "cache-control": "public, max-age=3600" });
 }
 
-/** Better Auth's own metadata endpoint, reached at the root where clients look for it. */
-async function authorizationServerMetadata(c: Context<{ Bindings: Env }>, document: string): Promise<Response> {
-  const url = new URL(c.req.url);
-  url.pathname = `/api/auth/.well-known/${document}`;
-  const response = await createAuth(c.env).handler(new Request(url, { headers: c.req.raw.headers }));
+/**
+ * Better Auth answers its metadata documents at the issuer's root path itself
+ * (the provider's request hook), outside its /api/auth routes.
+ */
+async function authorizationServerMetadata(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const response = await createAuth(c.env).handler(new Request(c.req.url, { headers: c.req.raw.headers }));
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(CORS)) headers.set(name, value);
   return new Response(response.body, { status: response.status, headers });
@@ -56,8 +57,8 @@ async function authorizationServerMetadata(c: Context<{ Bindings: Env }>, docume
 export function registerMcpRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get("/.well-known/oauth-protected-resource", protectedResourceMetadata);
   app.get(RESOURCE_METADATA_PATH, protectedResourceMetadata);
-  app.get("/.well-known/oauth-authorization-server", (c) => authorizationServerMetadata(c, "oauth-authorization-server"));
-  app.get("/.well-known/openid-configuration", (c) => authorizationServerMetadata(c, "openid-configuration"));
+  app.get("/.well-known/oauth-authorization-server", authorizationServerMetadata);
+  app.get("/.well-known/openid-configuration", authorizationServerMetadata);
   for (const path of ["/.well-known/oauth-protected-resource", RESOURCE_METADATA_PATH,
     "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration", MCP_PATH]) {
     app.options(path, () => new Response(null, { status: 204, headers: CORS }));
