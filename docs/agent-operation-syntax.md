@@ -5,6 +5,10 @@ selects either an existing Channel-local Instance or a lifecycle operation that
 creates or transfers an Instance. Internal globally unique `instanceId` values
 are never typed into a mention.
 
+This file is the short reference for contributors. The user-facing guide, with
+every form explained and examples, is [docs/guide/syntax.md](guide/syntax.md),
+published at <https://xmatrix.sh/docs/syntax>.
+
 The executable create and handoff grammar lives in
 `packages/protocol/src/agent-mention.ts`. Composer completion and Hub parsing
 must continue importing the same protocol definitions.

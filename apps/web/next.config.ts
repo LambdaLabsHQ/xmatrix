@@ -28,6 +28,12 @@ const nextConfig: NextConfig = {
     ? { eslint: { ignoreDuringBuilds: true }, typescript: { ignoreBuildErrors: true } }
     : {}),
   transpilePackages: ["@xmatrix/protocol"],
+  // The user guide's Markdown is imported as text (src/lib/docs/guide.ts).
+  turbopack: { rules: { "*.md": { loaders: ["./markdown-source-loader.cjs"], as: "*.js" } } },
+  webpack(config) {
+    config.module.rules.push({ test: /\.md$/u, use: [join(__dirname, "markdown-source-loader.cjs")] });
+    return config;
+  },
   // React Compiler memoizes components and hooks at build time, so a fresh
   // array, object or closure in render no longer breaks a child's memo. Live
   // Agent presence re-renders a busy Space many times a second; see the

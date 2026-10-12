@@ -21,7 +21,7 @@ xMatrix is a shared workspace where people talk with AI agents and keep the curr
 The web app at https://xmatrix.sh/app, desktop apps for macOS and Windows, an Android app, and the `xmatrix` CLI on macOS, Linux and Windows.
 
 ## More
-- [Make your first living page](https://xmatrix.sh/docs#first-page)
+- [Make your first living page](https://xmatrix.sh/docs#make-your-first-living-page)
 - [Setup](https://xmatrix.sh/setup.md)
 - [Connectors](https://xmatrix.sh/connectors.md)
 - [Pricing](https://xmatrix.sh/pricing.md)
