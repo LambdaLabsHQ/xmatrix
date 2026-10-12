@@ -266,6 +266,33 @@ test("connector MCP tools carry no policy precondition", async () => {
   assert.ok(read && !read.description.includes("policy"), "a read action still needs no policy");
 });
 
+test("MCP rejects undeclared and prototype action names before execution or storage", async () => {
+  const { handleConnectorMcp } = await import("../src/connectors/mcp.ts");
+  const caller = { ownerUserId: "owner", channelId: "channel-1", runId: "run-1", spaceId: "space-1" };
+  for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
+    for (const action of ["constructor", "__proto__", "not_declared"]) {
+      const response = await (await handleConnectorMcp({}, caller, {
+        jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: `${provider.id}__${action}`, arguments: { target: "*" } },
+      })).json();
+      assert.deepEqual(response.error, { code: -32602, message: "Unknown tool" }, `${provider.id}__${action}`);
+    }
+  }
+});
+
+test("Channel action admission requires a declared own executor with the declared effect", () => {
+  const post = connectorProvider("slack").actions.post;
+  for (const actions of [Object.create({ post }), { post: { ...post, effect: "read" } }, { not_declared: post }]) {
+    const commands = connectorCommands("slack", actions);
+    for (const action of ["post", "not_declared", "constructor", "__proto__"]) {
+      assert.equal(commands.accepts(`@slack:${action}:C0123456789 hi`), false, action);
+    }
+    assert.equal(commands.accepts("@slack:policy:post allow"), true);
+    assert.equal(commands.accepts("@slack:subscribe:C0123456789"), true);
+  }
+  assert.equal(connectorCommands("slack", { post }).accepts("@slack:post:C0123456789 hi"), true);
+});
+
 test("chat webhook actions only post to their provider's own hosts", async () => {
   const teams = await run("teams", "@teams:post Deploy finished", { webhookUrl: "https://acme.webhook.office.com/webhookb2/x" });
   assert.equal(teams.calls[0].body.attachments[0].content.body[0].text, "Deploy finished");

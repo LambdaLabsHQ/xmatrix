@@ -2,6 +2,7 @@ import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "@xmatrix/protocol";
 import type { Env } from "../types";
 import { runConnectorAction } from "./connector-commands";
 import { connectorProvider } from "./registry";
+import { connectorActionCatalog } from "./action-catalog";
 import { listAppConnections } from "../apps";
 
 /*
@@ -35,9 +36,9 @@ export async function connectedConnectorProviders(env: Env, caller: ConnectorMcp
 /* Only the Space's connected providers: a tool the Run could only learn is
    unusable by calling it is noise in every harness's tool list. */
 function tools(connected: ReadonlySet<string>) {
-  return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) => manifest.actions
-    .filter((action) => action.effect && connectorProvider(manifest.id)?.actions?.[action.id])
-    .map((action) => ({
+  return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) =>
+    [...connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions).values()]
+    .map(({ definition: action }) => ({
       name: `${manifest.id}__${action.id}`,
       title: `${manifest.name}: ${action.label}`,
       description: `${action.description} Runs in your Channel with ${manifest.name} connected to the Space; ` +
@@ -85,7 +86,7 @@ export async function handleConnectorMcp(env: Env, caller: ConnectorMcpCaller, b
   if (method !== "tools/call") return error(id, -32601, "Method not found");
   const match = typeof params.name === "string" ? params.name.match(TOOL_NAME) : null;
   const provider = match ? connectorProvider(match[1]!) : undefined;
-  const action = match ? provider?.actions?.[match[2]!] : undefined;
+  const action = provider && match ? connectorActionCatalog(provider.id, provider.actions).get(match[2]!)?.executor : undefined;
   if (!match || !provider || !action) return error(id, -32602, "Unknown tool");
   const args = params.arguments && typeof params.arguments === "object" ? params.arguments as Record<string, unknown> : {};
   const target = typeof args.target === "string" ? args.target.trim() : "";

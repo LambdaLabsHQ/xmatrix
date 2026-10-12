@@ -681,10 +681,15 @@ GitHub triggers may use either spelling.
 - Agent entry point: `POST /api/connectors/mcp` (streamable HTTP MCP).
   - Authenticated with the Agent Instance credential and scoped to the Run's
     Channel.
-  - Tools are the actions whose policy is not `deny` in that Channel, and their
-    input schemas come from `ConnectorAction.input`.
-  - A CLI shim, `xmatrix connector run <provider>:<action> --input <json>`,
-    uses the same endpoint.
+  - Tools list the Space's configured providers' executable actions. The
+    shared action catalog admits only manifest-declared actions with an own
+    executor whose read/write effect matches the declaration. MCP listing,
+    calls and generic Channel commands use that catalog; prototype properties
+    and undeclared executors are unknown actions. GitHub retains its specialized
+    command handler and is not exposed through this generic MCP catalog.
+  - Tool inputs are `target` and optional `text`, parsed by the same executor
+    as a Channel command. Channel access, connection credentials and live
+    action policy are checked at execution; a listed tool grants no authority.
 - Every request, whatever its entry point, writes one
   `app_connector_executions` row and one Channel receipt.
 
