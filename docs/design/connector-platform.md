@@ -216,6 +216,19 @@ Search Console clicks. There are no inbound events and no writes. Enable the
 Google Analytics Admin and Data APIs on the company Google project and add the
 scope to its consent screen; it is a sensitive scope like `webmasters`.
 
+Google Business Profile (`googlebusinessprofile`) is another connection on the
+company Google client, holding only `https://www.googleapis.com/auth/business.manage`
+(Google offers no read-only scope for these APIs). Reads: `list_accounts:*`,
+`list_locations:<accounts/1>`, `performance:<accounts/1/locations/2> [days=1-540]`
+(Performance API daily metrics summed over a range ending three days ago, since
+Google's figures lag) and `reviews:<location>` (My Business v4, still the only
+reviews API; newest 50). The write `reply_review:<…/reviews/<id>> <text>` puts
+the owner's public reply under the Channel's action policy. Check lists one
+account. Google must approve the company Cloud project for Business Profile
+API access (a request form, separate from OAuth verification) and the
+Account Management, Business Information and Performance APIs must be enabled;
+until then every call returns Google's 403.
+
 PageSpeed Insights (`pagespeed`) has no OAuth: the connection saves one Google
 Cloud API key with the PageSpeed Insights and Chrome UX Report APIs enabled,
 sent only in the `x-goog-api-key` header. `audit:<page url> [strategy=mobile|desktop]`
