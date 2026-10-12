@@ -5,11 +5,14 @@
  * reader always gets the same commit ids, and nothing they cannot read reaches
  * them through history.
  *
- * Layout follows the page tree: a page with pages below it is a directory
- * whose README.md is its own text; any other page is `<title>.md`.
+ * The repository is an Open Knowledge Format bundle (page-okf.ts). Layout
+ * follows the page tree: every page is `<title>.md`, a page with pages below
+ * it also has a directory `<title>/` holding them, and every directory has
+ * an `index.md` listing what is in it.
  */
 
 import { inflateAt } from "./page-git-inflate";
+import { conceptDocument, indexDocument, OKF_RESERVED, pageDescription, type IndexEntry } from "./page-okf";
 import { lowercaseHex } from "@xmatrix/protocol";
 
 export interface GitPage {
@@ -91,11 +94,11 @@ export function pagePaths(pages: readonly GitPage[]): Map<string, { dir: string;
     const taken = new Set<string>();
     for (const page of siblings) {
       let name = pageSlug(page.title);
-      if (taken.has(name)) name = `${name}-${page.pageId.slice(0, 8)}`;
+      if (taken.has(name) || OKF_RESERVED.has(`${name}.md`)) name = `${name}-${page.pageId.slice(0, 8)}`;
       taken.add(name);
       const hasChildren = (children.get(page.pageId)?.length ?? 0) > 0 && depth < 64;
       paths.set(page.pageId, hasChildren
-        ? { dir: `${prefix}${name}/`, file: `${prefix}${name}/README.md` }
+        ? { dir: `${prefix}${name}/`, file: `${prefix}${name}.md` }
         : { dir: prefix, file: `${prefix}${name}.md` });
       if (hasChildren) walk(page.pageId, `${prefix}${name}/`, depth + 1);
     }
@@ -104,24 +107,35 @@ export function pagePaths(pages: readonly GitPage[]): Map<string, { dir: string;
   return paths;
 }
 
+export interface BundleOptions {
+  /** The bundle root's `index.md` heading: the Space's name. */
+  heading: string;
+  /** Where a page lives in xMatrix, its concept's `resource`. */
+  resource: (pageId: string) => string;
+}
+
 /** One commit per revision, in the order they were made; returns the head commit id. */
-export async function buildPageHistory(pages: readonly GitPage[], revisions: readonly GitRevision[]):
-  Promise<{ head: string | null; objects: Map<string, GitObject> }> {
+export async function buildPageHistory(pages: readonly GitPage[], revisions: readonly GitRevision[],
+  options: BundleOptions): Promise<{ head: string | null; objects: Map<string, GitObject> }> {
   const store = new ObjectStore();
   const paths = pagePaths(pages);
+  const fileOf = new Map([...paths].map(([pageId, place]) => [pageId, place.file]));
   const titles = new Map(pages.map((page) => [page.pageId, page.title]));
-  const bodies = new Map<string, string>();
+  const documents = new Map<string, { file: string; text: string; description: string | null }>();
   const ordered = [...revisions]
     .filter((revision) => paths.has(revision.pageId))
     .sort((a, b) => a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1
       : a.pageId < b.pageId ? -1 : a.pageId > b.pageId ? 1 : a.revision - b.revision);
   let head: string | null = null;
   for (const revision of ordered) {
-    bodies.set(revision.pageId, revision.body);
-    const files = new Map<string, string>();
-    for (const [pageId, body] of bodies) files.set(paths.get(pageId)!.file, body);
-    const tree = await writeTree(store, files);
     const author = revision.authors[0] ?? { kind: "user", id: "unknown", label: "Unknown" };
+    documents.set(revision.pageId, {
+      file: paths.get(revision.pageId)!.file,
+      description: pageDescription(revision.body),
+      text: conceptDocument({ pageId: revision.pageId, title: titles.get(revision.pageId)!, revision: revision.revision,
+        body: revision.body, author, createdAt: revision.createdAt, resource: options.resource(revision.pageId) }, fileOf),
+    });
+    const tree = await writeTree(store, bundleFiles(documents, paths, titles, options.heading));
     const when = `${Math.floor(Date.parse(revision.createdAt) / 1000)} +0000`;
     const signature = `${author.label.replace(/[<>\n]/gu, "")} <${author.kind}.${author.id.replace(/[<>\s]/gu, "")}@xmatrix.sh> ${when}`;
     const coauthors = revision.authors.slice(1).map((other) =>
@@ -138,6 +152,49 @@ export async function buildPageHistory(pages: readonly GitPage[], revisions: rea
     ].join("\n")));
   }
   return { head, objects: store.objects };
+}
+
+/**
+ * The files of one commit: each page's concept document and an `index.md` in
+ * every directory, listing the pages there and the directories below them.
+ */
+function bundleFiles(documents: ReadonlyMap<string, { file: string; text: string; description: string | null }>,
+  paths: ReadonlyMap<string, { dir: string; file: string }>, titles: ReadonlyMap<string, string>,
+  heading: string): Map<string, string> {
+  const files = new Map<string, string>();
+  const listings = new Map<string, IndexEntry[]>([["", []]]);
+  const headings = new Map<string, string>([["", heading]]);
+  const ownerOfDir = new Map([...paths].filter(([, place]) => place.file === `${place.dir.slice(0, -1)}.md`)
+    .map(([pageId, place]) => [place.dir, pageId]));
+  const list = (dir: string, entry: IndexEntry) => {
+    if (!listings.has(dir)) listings.set(dir, []);
+    listings.get(dir)!.push(entry);
+  };
+  for (const [pageId, document] of documents) {
+    files.set(document.file, document.text);
+    const dir = document.file.slice(0, document.file.lastIndexOf("/") + 1);
+    list(dir, { name: document.file.slice(dir.length), title: titles.get(pageId)!, description: document.description,
+      directory: false });
+  }
+  // A directory appears once a page in it does, and is listed in the directory above it.
+  const pending = [...listings.keys()].filter((dir) => dir !== "");
+  for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
+    if (headings.has(dir)) continue;
+    const ownerId = ownerOfDir.get(dir);
+    const title = ownerId ? titles.get(ownerId)! : dir.slice(0, -1).split("/").at(-1)!;
+    headings.set(dir, title);
+    const parent = dir.slice(0, dir.slice(0, -1).lastIndexOf("/") + 1);
+    if (!listings.has(parent)) pending.push(parent);
+    list(parent, { name: dir.slice(parent.length, -1), title, description: `The pages below ${title}.`, directory: true });
+  }
+  for (const [dir, entries] of listings) {
+    // A page, then the directory of pages below it.
+    const key = (entry: IndexEntry) => entry.directory ? entry.name : entry.name.replace(/\.md$/u, "");
+    const ordered = [...entries].sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1
+      : Number(a.directory) - Number(b.directory));
+    files.set(`${dir}index.md`, indexDocument(headings.get(dir)!, ordered, dir === ""));
+  }
+  return files;
 }
 
 async function writeTree(store: ObjectStore, files: Map<string, string>): Promise<string> {

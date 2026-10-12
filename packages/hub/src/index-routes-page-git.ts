@@ -7,6 +7,8 @@ import {
   buildPageHistory, commitFiles, commitParents, concatBytes, pagePaths, pktLine, readPack, writePack,
   type GitObject,
 } from "./page-git";
+import { appOrigin } from "./deployment-origins";
+import { frontmatterTitle, isReservedFile, splitFrontmatter, unlinkPages } from "./page-okf";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { authorityFailure, runPrincipalOf } from "./run-principal";
 import type { Env } from "./types";
@@ -14,8 +16,9 @@ import type { Env } from "./types";
 /**
  * The page store over git's smart HTTP protocol (docs/design/pages-and-conversations.md
  * §5.4): `git clone https://<hub>/git/<space>.git` with an xMatrix token as the
- * password. Each reader clones only the pages they can read, and a push is an
- * ordinary authorized edit: every changed page becomes a revision by the pusher.
+ * password. Each reader clones only the pages they can read, as an Open
+ * Knowledge Format bundle (page-okf.ts), and a push is an ordinary authorized
+ * edit: every changed page becomes a revision by the pusher.
  */
 function repository(env: Env): PostgresPageRepository {
   return new PostgresPageRepository(createPostgresAuthorityDatabase(env, {
@@ -47,7 +50,10 @@ function spaceOf(c: Context<{ Bindings: Env }>): string {
 async function history(env: Env, spaceId: string, authUser: AuthUser) {
   const view = await repository(env).gitView({ requestId: crypto.randomUUID(), spaceId,
     principal: runPrincipalOf(authUser) });
-  return { view, ...(await buildPageHistory(view.pages, view.revisions)) };
+  const pages = `${appOrigin(env)}/app/${encodeURIComponent(spaceId)}/pages?page=`;
+  return { view, ...(await buildPageHistory(view.pages, view.revisions, {
+    heading: view.spaceName, resource: (pageId) => `${pages}${encodeURIComponent(pageId)}`,
+  })) };
 }
 
 function unauthorized(): Response {
@@ -86,10 +92,10 @@ function readCommands(body: Uint8Array): { commands: Array<{ from: string; to: s
   return { commands, pack: body.subarray(at) };
 }
 
-/** A new page's title: its first heading, or its file name. */
-function titleOf(body: string, path: string): string {
+/** A new page's title: its frontmatter `title`, its first heading, or its file name. */
+function titleOf(frontmatter: string | null, body: string, path: string): string {
   const heading = /^#\s+(.+)$/mu.exec(body)?.[1]?.trim();
-  return (heading || path.split("/").at(-1)!.replace(/\.md$/u, "")).slice(0, 200);
+  return (frontmatterTitle(frontmatter) || heading || path.split("/").at(-1)!.replace(/\.md$/u, "")).slice(0, 200);
 }
 
 class Refused extends Error {}
@@ -98,7 +104,10 @@ class Refused extends Error {}
  * Applies a pushed commit that fast-forwards the reader's history: changed
  * pages are edited as the pusher, new Markdown files become pages below the
  * page their directory belongs to. Removing or renaming a page happens in
- * xMatrix, not by a push.
+ * xMatrix, not by a push. A page's frontmatter is xMatrix's to write, and
+ * `index.md`/`log.md` are never pages, so a pushed OKF bundle reads as its
+ * concepts: a directory no page owns becomes a page named after it, and
+ * links between the pushed files become `page:<id>` references.
  */
 async function applyPush(env: Env, spaceId: string, authUser: AuthUser, current: Awaited<ReturnType<typeof history>>,
   to: string, objects: Map<string, GitObject>): Promise<void> {
@@ -112,8 +121,9 @@ async function applyPush(env: Env, spaceId: string, authUser: AuthUser, current:
     }
     commit = parents[0]!;
   }
-  const before = current.head ? commitFiles(current.head, lookup) : new Map<string, Uint8Array>();
-  const after = commitFiles(to, lookup);
+  const concepts = (files: Map<string, Uint8Array>) => new Map([...files].filter(([path]) => !isReservedFile(path)));
+  const before = concepts(current.head ? commitFiles(current.head, lookup) : new Map<string, Uint8Array>());
+  const after = concepts(commitFiles(to, lookup));
   const paths = pagePaths(current.view.pages);
   const pageByFile = new Map([...paths].map(([pageId, place]) => [place.file, pageId]));
   const heads = new Map<string, number>();
@@ -127,44 +137,69 @@ async function applyPush(env: Env, spaceId: string, authUser: AuthUser, current:
   for (const path of before.keys()) {
     if (!after.has(path)) throw new Refused(`${path}: remove or move pages in xMatrix, not by a push`);
   }
-  const edits: Array<{ pageId: string; body: string }> = [];
-  const creations: Array<{ path: string; body: string }> = [];
+  const edits: Array<{ pageId: string; path: string; body: string }> = [];
+  const creations: Array<{ path: string; frontmatter: string | null; body: string }> = [];
   for (const [path, bytes] of after) {
     const previous = before.get(path);
     if (previous && previous.length === bytes.length && previous.every((byte, index) => byte === bytes[index])) continue;
-    const body = text(path, bytes);
+    const pushed = splitFrontmatter(text(path, bytes));
     const pageId = pageByFile.get(path);
-    if (pageId) edits.push({ pageId, body });
-    else creations.push({ path, body });
+    if (pageId) {
+      if (pushed.frontmatter !== splitFrontmatter(text(path, previous!)).frontmatter) {
+        throw new Refused(`${path}: xMatrix writes the frontmatter; rename pages in xMatrix and edit only the text`);
+      }
+      edits.push({ pageId, path, body: pushed.body });
+    } else creations.push({ path, ...pushed });
   }
   const pages = repository(env);
   const principal = runPrincipalOf(authUser);
-  for (const edit of edits) {
-    const response = await sessionCall(env, spaceId, edit.pageId, "/internal/edit", {
-      principal: sessionPrincipal(authUser), baseRevision: heads.get(edit.pageId), body: edit.body, conversationIds: [],
+  // Parents before children: a directory belongs to the page `<dir>.md` beside it,
+  // created first; a directory with no such page (a pushed bundle's group) becomes one.
+  const created: Array<{ pageId: string; path: string; pushed: string; body: string; revision: number }> = [];
+  const create = async (path: string, parentPageId: string | null, title: string, pushed: string) => {
+    const body = unlinkPages(pushed, path, pageByFile);
+    const { page } = await pages.create({ requestId: crypto.randomUUID(), spaceId, principal, parentPageId, title, body });
+    pageByFile.set(path, page.pageId);
+    created.push({ pageId: page.pageId, path, pushed, body, revision: page.headRevision });
+    return page.pageId;
+  };
+  const dirPage = async (dir: string): Promise<string | null> => {
+    if (dir === "") return null;
+    const file = `${dir.slice(0, -1)}.md`;
+    const owner = pageByFile.get(file);
+    if (owner) return owner;
+    const name = dir.slice(0, -1).split("/").at(-1)!;
+    return create(file, await dirPage(dir.slice(0, dir.slice(0, -1).lastIndexOf("/") + 1)), name, `# ${name}\n`);
+  };
+  const ordered = creations.sort((a, b) => a.path.split("/").length - b.path.split("/").length ||
+    (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  for (const creation of ordered) {
+    if (pageByFile.has(creation.path)) throw new Refused(`${creation.path}: a page already has this file`);
+    await create(creation.path, await dirPage(creation.path.slice(0, creation.path.lastIndexOf("/") + 1)),
+      titleOf(creation.frontmatter, creation.body, creation.path), creation.body);
+  }
+  // Links to pages created later in the push resolve once every page exists.
+  for (const page of created) {
+    const body = unlinkPages(page.pushed, page.path, pageByFile);
+    if (body === page.body) continue;
+    const response = await sessionCall(env, spaceId, page.pageId, "/internal/edit", {
+      principal: sessionPrincipal(authUser), baseRevision: page.revision, body, conversationIds: [],
     });
     if (!response.ok) {
       const refusal = await response.json().catch(() => ({})) as { error?: string };
-      throw new Refused(`${[...pageByFile].find(([, id]) => id === edit.pageId)?.[0]}: ${refusal.error ?? "edit refused"}`);
+      throw new Refused(`${page.path}: ${refusal.error ?? "edit refused"}`);
     }
   }
-  // Parents before children: a directory's README.md, then the files in it.
-  const dirPage = (dir: string): string | null => {
-    if (dir === "") return null;
-    const pageId = pageByFile.get(`${dir}README.md`) ?? pageByFile.get(`${dir.slice(0, -1)}.md`);
-    if (!pageId) throw new Refused(`${dir}: no page owns this directory`);
-    return pageId;
-  };
-  const ordered = creations.sort((a, b) => a.path.split("/").length - b.path.split("/").length ||
-    Number(b.path.endsWith("/README.md")) - Number(a.path.endsWith("/README.md")));
-  for (const creation of ordered) {
-    const segments = creation.path.split("/");
-    const readme = segments.at(-1) === "README.md" && segments.length > 1;
-    const parentDir = segments.slice(0, readme ? -2 : -1).join("/");
-    const { page } = await pages.create({ requestId: crypto.randomUUID(), spaceId, principal,
-      parentPageId: dirPage(parentDir ? `${parentDir}/` : ""), title: titleOf(creation.body, creation.path),
-      body: creation.body });
-    pageByFile.set(creation.path, page.pageId);
+  // Edits last, so their links reach the pages this push created.
+  for (const edit of edits) {
+    const response = await sessionCall(env, spaceId, edit.pageId, "/internal/edit", {
+      principal: sessionPrincipal(authUser), baseRevision: heads.get(edit.pageId),
+      body: unlinkPages(edit.body, edit.path, pageByFile), conversationIds: [],
+    });
+    if (!response.ok) {
+      const refusal = await response.json().catch(() => ({})) as { error?: string };
+      throw new Refused(`${edit.path}: ${refusal.error ?? "edit refused"}`);
+    }
   }
 }
 
