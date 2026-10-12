@@ -6,6 +6,7 @@ import { pageUrl, searchConsoleSite, searchConsoleSiteContains } from "./google-
 import { GOOGLE_SITE_VERIFICATION_ACTIONS } from "./google-site-verification";
 import { searchAnalyticsOptions } from "./google-search-analytics";
 import { googleHeaders } from "./google-headers";
+import { cell } from "./google-report";
 
 /*
  * Google Search Console (Search Console API v1 / webmasters v3). The grant is
@@ -19,10 +20,6 @@ const MAX_LINES = 250;
 
 function siteUrl(site: string, path = ""): string {
   return `${API}/sites/${encodeURIComponent(site)}${path}`;
-}
-
-function cell(value: unknown): string {
-  return String(value ?? "").slice(0, 300).replace(/[\r\n\t]/gu, " ");
 }
 
 function siteOnly(statement: { target: string; text: string }, usage: string): Record<string, string> | string {
@@ -61,7 +58,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
         const result = await providerJson(siteUrl(input.site!, `/sitemaps/${encodeURIComponent(input.page!)}`), {
           method, headers: googleHeaders(credentials, "Google Search Console") });
         if (method === "GET" && result.path !== input.page) throw new ProviderRequestError(502, "Google did not return the requested sitemap");
-        return { summary: method === "GET" ? `Sitemap ${input.page}:\n` + quoteRetrievedText(JSON.stringify(result).slice(0, 12_000)) :
+        return { summary: method === "GET" ? `Sitemap ${input.page}:\n` + quoteRetrievedText(JSON.stringify(result), 16_000) :
           `Removed sitemap ${input.page} from ${input.site}; the sitemap file is unchanged.` };
       },
     } satisfies ConnectorAction];
@@ -110,10 +107,10 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
             `${(Number(row.ctr ?? 0) * 100).toFixed(2)}%`, Number(row.position ?? 0).toFixed(1)].join("\t");
         })];
       return { summary: `Search performance for ${input.site} (${options.type}, ${options.startDate} to ${options.endDate} Pacific Time; ` +
-        `by ${options.dimensions.join(", ") || "total"}; Google's data lags about two to three days):\n` +
-        quoteRetrievedText((rows.length ? lines.join("\n") : "(no data for this range)") +
-          `\nNext startRow: ${(options.startRow ?? 0) + rows.length}; returned ${rows.length} rows; Google returns top rows, not a complete export.\n` +
-          JSON.stringify({ responseAggregationType: result.responseAggregationType, metadata: result.metadata })) };
+        `by ${options.dimensions.join(", ") || "total"}; dataState=${options.dataState ?? "final"}):\n` +
+        `Next startRow: ${(options.startRow ?? 0) + rows.length}; returned ${rows.length} rows; Google returns top rows, not a complete export.\n` +
+        quoteRetrievedText(JSON.stringify({ responseAggregationType: result.responseAggregationType, metadata: result.metadata }) + "\n" +
+          (rows.length ? lines.join("\n") : "(no data for this range)"), 16_000) };
     },
   },
   list_sitemaps: {
@@ -158,7 +155,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
         "crawledAs", "googleCanonical", "userCanonical"];
       const lines = fields.filter(field => status[field] !== undefined).map(field => `${field}: ${cell(status[field])}`);
       return { summary: `URL inspection for ${input.page} in ${input.site}:\n` + quoteRetrievedText(lines.join("\n") +
-        "\nFull inspection (including rich results and referring URLs):\n" + JSON.stringify(result.inspectionResult).slice(0, 16_000)) };
+        "\nFull inspection (including rich results and referring URLs):\n" + JSON.stringify(result.inspectionResult), 16_000) };
     },
   },
   submit_sitemap: {

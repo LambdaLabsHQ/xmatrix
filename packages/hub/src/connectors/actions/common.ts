@@ -24,7 +24,10 @@ export function parseIssueComment(statement: ConnectorActionStatement, issue: Re
 }
 
 /** Fence retrieved content so it cannot inject receipt formatting. */
-export function quoteRetrievedText(value: string): string {
+export function quoteRetrievedText(value: string, maxCharacters = Infinity): string {
+  if (value.length > maxCharacters) {
+    value = value.slice(0, maxCharacters) + `\n[Output truncated at ${maxCharacters} characters; some retrieved content is omitted.]`;
+  }
   const longest = (character: "`" | "~") => Math.max(0, ...Array.from(value.matchAll(
     character === "`" ? /`+/gu : /~+/gu), match => match[0].length));
   const backticks = longest("`");

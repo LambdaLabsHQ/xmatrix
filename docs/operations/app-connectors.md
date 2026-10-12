@@ -102,6 +102,7 @@ section, and none is ever shown again.
 | Discord | `post:<channel id>` (mentions never ping) |
 | Notion | `append:<page id>`, `create_page:<parent page id>` |
 | Google Search Console | Property `list_sites/get_site/add_site/delete_site`; sitemap `list_sitemaps/get_sitemap/submit_sitemap/delete_sitemap`; `query` (concise options or bounded API JSON); `inspect_url`; ownership `get_verification_token/verify_site/list_verifications/get_verification/update_verification_owners/delete_verification`. See the onboarding procedure below. |
+| Google Analytics | `list_properties:*`, `report:<property id> [by=…] [days=…] [limit=…] [channel=…]` (reads) |
 | Gmail (via Composio) | `search:* [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub) |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 
@@ -135,7 +136,9 @@ Google rejects removal while the affected owner's tokens remain published.
 
 Advanced analytics example (Pacific dates; at most 250 rows per call):
 `@googlesearchconsole:query:sc-domain:example.com {"startDate":"2026-10-01","endDate":"2026-10-07","dimensions":["page","query"],"startRow":250,"rowLimit":250,"dataState":"all","dimensionFilterGroups":[{"filters":[{"dimension":"query","operator":"contains","expression":"pixel art"}]}]}`.
-The result reports the next offset and incomplete-data metadata. Explicit offsets
+The result identifies the requested data state, next offset and incomplete-data
+metadata. Receipts are capped at 16000 retrieved characters and explicitly mark
+truncation; request a smaller page to inspect omitted content. Explicit offsets
 remain necessary; the API does not promise a complete export.
 
 | OpenConnector | `search:<service>` (read), `run:<service.action>[@alias] <json>` (write) against the Space's own runtime |
