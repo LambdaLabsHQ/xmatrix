@@ -1326,6 +1326,7 @@ export class PostgresPageRepository {
    * cannot read contributes nothing, not even history.
    */
   async gitView(input: { requestId: string; spaceId: string; principal: PagePrincipal }): Promise<{
+    spaceName: string;
     pages: Array<{ pageId: string; parentPageId: string | null; title: string; position: string }>;
     revisions: Array<{ pageId: string; revision: number; body: string; authors: PageAuthor[];
       conversationIds: string[]; createdAt: string }>;
@@ -1344,7 +1345,12 @@ export class PostgresPageRepository {
       if (rows.length > MAX_GIT_REVISIONS) {
         throw new PageControlError("page_history_too_large", 409, "This Space's page history is too long to serve as git");
       }
+      const space = await tx.query<QueryResultRow & { name: string }>({
+        name: "page_git_space_v1", text: "SELECT name FROM data.spaces WHERE space_id=$1", values: [spaceId], maxRows: 1,
+      });
+      if (!space[0]) throw new PageControlError("space_not_found", 404);
       return {
+        spaceName: space[0].name,
         pages: readable.map((row) => ({ pageId: row.page_id, parentPageId: row.parent_page_id, title: row.title,
           position: row.position })),
         revisions: rows.map((row) => ({ pageId: row.page_id, revision: Number(row.revision), body: row.body ?? "",
