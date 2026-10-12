@@ -9,6 +9,7 @@ import { LINEAR_ACTIONS, verifyLinear } from "./actions/linear";
 import { NOTION_ACTIONS, verifyNotion } from "./actions/notion";
 import { GOOGLE_ACTIONS, verifyGoogle } from "./actions/google";
 import { GOOGLE_SEARCH_CONSOLE_ACTIONS, verifyGoogleSearchConsole } from "./actions/google-search-console";
+import { BING_WEBMASTER_ACTIONS, verifyBingWebmaster } from "./actions/bing-webmaster";
 import { GOOGLE_ADSENSE_ACTIONS, verifyGoogleAdsense } from "./actions/google-adsense";
 import { GOOGLE_ANALYTICS_ACTIONS, verifyGoogleAnalytics } from "./actions/google-analytics";
 import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
@@ -65,6 +66,7 @@ const PROVIDERS: Record<string, {
   notion: { actions: NOTION_ACTIONS, verify: verifyNotion },
   google: { actions: GOOGLE_ACTIONS, verify: verifyGoogle },
   googlesearchconsole: { actions: GOOGLE_SEARCH_CONSOLE_ACTIONS, verify: verifyGoogleSearchConsole },
+  bingwebmaster: { actions: BING_WEBMASTER_ACTIONS, verify: verifyBingWebmaster },
   googleadsense: { actions: GOOGLE_ADSENSE_ACTIONS, verify: verifyGoogleAdsense },
   googleanalytics: { actions: GOOGLE_ANALYTICS_ACTIONS, verify: verifyGoogleAnalytics },
   pagespeed: { actions: PAGESPEED_ACTIONS, verify: verifyPageSpeed },

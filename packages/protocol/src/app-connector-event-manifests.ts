@@ -149,6 +149,26 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/webmasters", "https://www.googleapis.com/auth/siteverification"], secretRefs: [] },
   },
+  actionConnector({
+    id: "bingwebmaster", name: "Bing Webmaster Tools", kind: "observability",
+    description: "Read Bing search traffic, top queries and pages and crawl statistics for your verified sites; submit URLs and sitemaps to Bing, or URLs to every IndexNow engine.",
+    credentials: [
+      { id: "apiKey", label: "Bing Webmaster API key",
+        description: "For Bing reads and submissions: Bing Webmaster Tools → Settings → API access → API key." },
+      { id: "indexNowKey", label: "IndexNow key",
+        description: "For indexnow: the site's IndexNow key, published at https://<site>/<key>.txt." },
+    ],
+    actions: [
+      readAction("list_sites", "List sites", "List the sites of the Bing Webmaster account and whether each is verified.", "*"),
+      readAction("traffic", "Search traffic", "Daily Bing clicks and impressions, newest 30 days.", "<https://example.com/>"),
+      readAction("queries", "Top queries", "The 50 queries with the most Bing clicks, with impressions and average positions.", "<https://example.com/>"),
+      readAction("pages", "Top pages", "The 50 pages with the most Bing clicks, with impressions and average positions.", "<https://example.com/>"),
+      readAction("crawl_stats", "Crawl statistics", "Pages crawled, in index, crawl errors, 4xx/5xx, robots.txt blocks, timeouts and DNS failures, newest 14 days.", "<https://example.com/>"),
+      writeAction("submit_urls", "Submit URLs", "Ask Bing to crawl up to 100 URLs of the site; reports the remaining daily and monthly quota.", "<https://example.com/> <url> [<url> …]"),
+      writeAction("submit_sitemap", "Submit sitemap", "Submit or resubmit a sitemap URL inside the site.", "<https://example.com/> <sitemap url>"),
+      writeAction("indexnow", "Push to IndexNow", "Notify Bing, Yandex, Naver, Seznam and other IndexNow engines of up to 100 changed URLs of the site.", "<https://example.com/> <url> [<url> …]"),
+    ],
+  }),
   {
     ...actionConnector({
       id: "googleadsense", name: "Google AdSense", kind: "observability",
