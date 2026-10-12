@@ -48,6 +48,12 @@ test("the guide is a paper document: no wood or glass around its text, and a pho
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
   // The same definition a page in the app is drawn with.
   await expect(article).toHaveClass(/page-document/);
+  await page.goto("/docs/project-wiki");
+  const examples = page.locator(".docs-article pre:has(code.language-text)");
+  await expect(examples.first()).toBeVisible();
+  for (const example of await examples.all()) {
+    expect(await example.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+  }
 });
 
 for (const width of [393, 820, 1440]) {
