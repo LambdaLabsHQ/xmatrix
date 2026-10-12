@@ -4,9 +4,10 @@ import type { Context } from "hono";
 import type { AuthUser } from "./auth";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import type { Env } from "./types";
+import type { ExternalAppSource } from "@xmatrix/protocol";
 
 export type RunPrincipal =
-  | { kind: "user"; id: string; label?: string }
+  | { kind: "user"; id: string; label?: string; application?: ExternalAppSource }
   | { kind: "agent"; id: string; label?: string; runProof: AgentChannelRunProof };
 
 /**
@@ -15,7 +16,8 @@ export type RunPrincipal =
  */
 export function runPrincipalOf(authUser: AuthUser): RunPrincipal {
   const run = authUser.agentRun;
-  if (!run) return { kind: "user", id: authUser.id, label: authUser.name || authUser.email };
+  if (!run) return { kind: "user", id: authUser.id, label: authUser.name || authUser.email,
+    ...(authUser.mcpApplication ? { application: authUser.mcpApplication } : {}) };
   return { kind: "agent", id: run.agentId, label: run.agentName, runProof: {
     runId: run.runId, instanceId: run.instanceId ?? "", executionKey: run.executionKey,
   } };

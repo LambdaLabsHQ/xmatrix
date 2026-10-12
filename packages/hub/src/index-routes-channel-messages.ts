@@ -285,6 +285,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         // off as a system notice that no Agent is woken by.
         const appMetadata = {
           ...callerMessageMetadata(body.metadata),
+          ...(authUser.mcpApplication ? { xmatrixMcpApplication: authUser.mcpApplication } : {}),
           ...(message.appMentions?.length ? { appMentions: message.appMentions } : {}),
         };
         const residual = {

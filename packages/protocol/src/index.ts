@@ -463,8 +463,11 @@ export type {
   ChannelReferenceSpan, MessageReferenceSpan,
 } from "./message-references.js";
 export {
-  PAGE_DOCUMENT_FRAGMENT, pageAuthorColor,
+  PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,
 } from "./pages.js";
+
+export { externalAppSource, messageExternalAppSource } from "./external-app-source.js";
+export type { ExternalAppSource } from "./external-app-source.js";
 export type {
   PageAuthor, PageAutomationAnchorChange, PageAwareness, PageBlockAwareness, PageChanges, PageEditResult, PageClaim, PageConversation,
   PageDocument, PageGitHubFile, PageLink, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,

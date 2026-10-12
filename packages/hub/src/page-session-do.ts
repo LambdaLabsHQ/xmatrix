@@ -48,7 +48,8 @@ export function pagePrincipalFromSession(principal: PageSessionPrincipal): PageP
   if (principal.kind === "agent" && principal.runProof) {
     return { kind: "agent", id: principal.id, label: principal.label, runProof: principal.runProof };
   }
-  return { kind: "user", id: principal.id, label: principal.label };
+  return { kind: "user", id: principal.id, label: principal.label,
+    ...(principal.application ? { application: principal.application } : {}) };
 }
 
 function pages(env: Env): PostgresPageRepository {

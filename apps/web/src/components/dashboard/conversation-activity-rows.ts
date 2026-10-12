@@ -1,4 +1,4 @@
-import { channelActivityOf, type ChannelActivity } from "@xmatrix/protocol";
+import { channelActivityOf, messageExternalAppSource, type ChannelActivity } from "@xmatrix/protocol";
 import type { TimelineItem } from "./workspace-shell-message-model";
 
 /**
@@ -56,6 +56,11 @@ function changedTags(previous: TimelineItem, next: TimelineItem): string[] {
 /** Same sender moments later on the same day: everything continuation asks but the tags. */
 function sameTurn(previous: TimelineItem, item: TimelineItem): boolean {
   if (previous.isEvent || item.isEvent) return false;
+  // Keep the source visible when the person switches between xMatrix and an
+  // outside app, or between two apps. It is attribution, not another identity.
+  const before = messageExternalAppSource(previous.metadata);
+  const after = messageExternalAppSource(item.metadata);
+  if (before?.clientId !== after?.clientId || before?.name !== after?.name) return false;
   // A send that failed, or whose result is unknown, says so in its header.
   if (item.sendStatus === "unconfirmed" || item.sendStatus === "failed") return false;
   // A provenance badge or a link origin is part of what the reader must see.

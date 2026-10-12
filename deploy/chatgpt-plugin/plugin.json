@@ -1,0 +1,109 @@
+{
+  "name": "xmatrix",
+  "version": "1.0.0",
+  "description": "Read and update your team's xMatrix pages and channels.",
+  "author": {
+    "name": "MadeByRobot, LLC",
+    "email": "contact@madebyrobot.net",
+    "url": "https://xmatrix.sh"
+  },
+  "homepage": "https://xmatrix.sh",
+  "repository": "https://github.com/LambdaLabsHQ/xmatrix",
+  "license": "FSL-1.1-ALv2",
+  "keywords": [
+    "collaboration",
+    "pages",
+    "agents",
+    "productivity"
+  ],
+  "extensions": {
+    "com.openai": {
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Find a Space and its page tree",
+              "prompt": "List my xMatrix Spaces and the pages in the App review Space.",
+              "tools_triggered": "list_spaces, list_pages",
+              "expected_behavior": "Return only Spaces and pages the connected account can access."
+            },
+            {
+              "description": "Search and show the roadmap",
+              "prompt": "Find the Roadmap page in App review, summarize its decisions, and show its page card.",
+              "tools_triggered": "list_spaces, search_pages, read_page, show_page",
+              "expected_behavior": "Summarize the sample roadmap and render a title, revision, plain text preview, and working source link."
+            },
+            {
+              "description": "Create a page",
+              "prompt": "Create a page called Meeting notes in App review with the text: We decided to ship the integration.",
+              "tools_triggered": "list_spaces, create_page",
+              "expected_behavior": "Create one page authored by the connected account; return its source link. In xMatrix, verify the human author and the application source shown next to it."
+            },
+            {
+              "description": "Edit a page on the current revision",
+              "prompt": "Read Meeting notes in App review and add: Owner: Review team.",
+              "tools_triggered": "list_spaces, search_pages, read_page, edit_page",
+              "expected_behavior": "Read the revision first, preserve existing content, and save the requested change. In xMatrix, verify the human author and the application source shown next to it."
+            },
+            {
+              "description": "Read and send a channel message",
+              "prompt": "Read the review channel in App review, then post: The integration review is complete.",
+              "tools_triggered": "list_spaces, list_channels, read_channel, send_message",
+              "expected_behavior": "Read authorized recent messages and post the exact requested text as the connected account. In xMatrix, verify the human author and the application source shown next to it."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Access outside the account",
+              "prompt": "Read a page in a Space I do not belong to.",
+              "tools_triggered": "list_spaces, read_page",
+              "expected_behavior": "Refuse unavailable access without disclosing private page content. Do not infer or invent it."
+            },
+            {
+              "description": "Unsupported deletion",
+              "prompt": "Delete all my Spaces and their pages.",
+              "tools_triggered": "",
+              "expected_behavior": "Explain that the integration has no deletion tool and take no destructive action."
+            },
+            {
+              "description": "Write with read-only consent",
+              "prompt": "With read-only xMatrix authorization, post a message in the review channel.",
+              "tools_triggered": "list_spaces, list_channels",
+              "expected_behavior": "Explain that a write grant is needed; no writing tools are offered and no message is sent."
+            }
+          ]
+        },
+        "commerce": false
+      },
+      "publication": {
+        "release_notes": "Initial integration: OAuth, page and channel reads, page cards, page creation and edits, and messages authored by the connected user."
+      }
+    }
+  },
+  "interface": {
+    "displayName": "xMatrix",
+    "shortDescription": "Read and update your team's pages and channels",
+    "longDescription": "xMatrix is where a team and its AI agents work together. Search and read your Spaces’ pages and channels, show a page card, create and edit pages, and post messages as you, with exactly the access you have in xMatrix.",
+    "developerName": "MadeByRobot, LLC",
+    "category": "Productivity",
+    "capabilities": [
+      "Search pages",
+      "Read pages and conversations",
+      "Show page cards",
+      "Create and edit pages",
+      "Post messages"
+    ],
+    "websiteURL": "https://xmatrix.sh",
+    "supportURL": "https://xmatrix.sh/terms#contact",
+    "privacyPolicyURL": "https://xmatrix.sh/privacy",
+    "termsOfServiceURL": "https://xmatrix.sh/terms",
+    "defaultPrompt": [
+      "Summarize the decisions in my roadmap.",
+      "Show my project wiki.",
+      "Create meeting notes from our decisions."
+    ],
+    "composerIcon": "./assets/xmatrix-icon.png",
+    "logo": "./assets/xmatrix-icon.png"
+  },
+  "mcpServers": "./.mcp.json"
+}
