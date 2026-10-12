@@ -151,7 +151,7 @@ export function SubprocessorsContent() {
         <p>
           xMatrix may later offer a MadeByRobot-hosted sandbox or Service Agent environment. No vendor is
           listed for that future capability because no additional hosted-sandbox vendor is represented as
-          active in this draft. Before such a vendor processes Customer Data, we will add it here and
+          active in this version. Before such a vendor processes Customer Data, we will add it here and
           update the{" "}
           <Link className="font-medium text-foreground underline underline-offset-4" href="/privacy">
             Privacy Policy
