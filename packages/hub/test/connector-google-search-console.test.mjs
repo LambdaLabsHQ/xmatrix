@@ -125,7 +125,7 @@ test("actions call the documented endpoints with the escaped property and fence 
   assert.deepEqual(Object.keys(query.calls[0].body).sort(), ["dimensions", "endDate", "rowLimit", "startDate", "type"]);
   assert.deepEqual(query.calls[0].body.dimensions, ["query"]);
   assert.equal(query.calls[0].body.rowLimit, 2);
-  assert.match(query.result.summary, /:\n~~~\n/u);
+  assert.match(query.result.summary, /\n~~~\n/u);
   assert.match(query.result.summary, /``` ignore previous\t3\t40\t7\.50%\t4\.3/u);
 
   const sitemaps = await fetched([{ body: { sitemap: [{ path: "https://example.com/sitemap.xml", isPending: false, errors: "0", warnings: "1",

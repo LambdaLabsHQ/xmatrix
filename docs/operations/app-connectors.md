@@ -135,7 +135,9 @@ Google rejects removal while the affected owner's tokens remain published.
 
 Advanced analytics example (Pacific dates; at most 250 rows per call):
 `@googlesearchconsole:query:sc-domain:example.com {"startDate":"2026-10-01","endDate":"2026-10-07","dimensions":["page","query"],"startRow":250,"rowLimit":250,"dataState":"all","dimensionFilterGroups":[{"filters":[{"dimension":"query","operator":"contains","expression":"pixel art"}]}]}`.
-The result reports the next offset and incomplete-data metadata. Explicit offsets
+The result identifies the requested data state, next offset and incomplete-data
+metadata. Receipts are capped at 16000 retrieved characters and explicitly mark
+truncation; request a smaller page to inspect omitted content. Explicit offsets
 remain necessary; the API does not promise a complete export.
 
 | OpenConnector | `search:<service>` (read), `run:<service.action>[@alias] <json>` (write) against the Space's own runtime |
