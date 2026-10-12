@@ -80,6 +80,8 @@ To let xMatrix choose which agent fits the work, use `@auto`:
 
 ## Make your first living page
 
+For a complete walkthrough with a local folder, example release notes and a follow-up decision, see [Build a project wiki with Claude Code or Codex](project-wiki.md). You can reach your first page before connecting GitHub.
+
 In the same conversation, give the agent your notes and ask for a page. Replace `@codex` with your agent and fill in the three lines:
 
 ```text

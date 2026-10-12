@@ -71,17 +71,20 @@ export function playSentRowEntrance(scrollRoot: HTMLElement | null, sentRow: HTM
  */
 export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   const rows = scrollRoot.querySelectorAll<HTMLElement>("[data-timeline-rise-row]");
-  // The newest row's place in the list: the row's own node is drawn elsewhere.
-  const place = rows[rows.length - 1]?.parentElement;
-  if (!place || motionReduced()) return;
+  if (motionReduced()) return;
   risingTimelines.get(scrollRoot)?.stop();
+  // Follow a row itself: its offset within the list wrapper can change too.
+  // A row still playing its entrance has a separate transform, so use the
+  // newest one that is standing still before this rise starts.
+  const anchor = Array.from(rows).reverse().find(row => row.getAnimations().length === 0);
+  if (!anchor) return;
 
   /* How far below their place in the layout the rows are drawn. A move of the
      layout adds to it, so the rows stay where they were on screen; time takes
      it away. A reader who sent from further up is brought down by more than a
      screen: that is a jump, not a rise, and is not drawn. */
   let lag = 0;
-  let laidOutAt = place.getBoundingClientRect().top;
+  let laidOutAt = anchor.getBoundingClientRect().top;
   /* Time only counts between painted frames. A move is found in the middle of
      a long task as often as not, and one slow frame must not use up the rise:
      a frame takes away no more than two frames' worth.
@@ -98,11 +101,12 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   const until = performance.now() + SEND_RISE_FRESH_MS;
   const drawn = new Set<HTMLElement>();
   const draw = (frameAt?: number) => {
-    if (!place.isConnected) {
+    if (!anchor.isConnected) {
       stop();
       return;
     }
-    const top = place.getBoundingClientRect().top;
+    // Remove our last painted offset to measure where layout put the row.
+    const top = anchor.getBoundingClientRect().top - (drawn.has(anchor) ? lag : 0);
     const moved = top - laidOutAt;
     laidOutAt = top;
     if (Math.abs(moved) > scrollRoot.clientHeight) lag = 0;
@@ -122,7 +126,10 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
       if (!row.isConnected) drawn.delete(row);
     }
     if (lag !== 0) {
-      for (const row of scrollRoot.querySelectorAll<HTMLElement>("[data-timeline-rise-row]")) drawn.add(row);
+      // Only the rows already on screen need this compensation. New rows have
+      // their own entrance; shifting them too can extend the scroll overflow
+      // past the footer and make the browser clamp its scroll position again.
+      for (const row of rows) if (row.isConnected) drawn.add(row);
     }
     for (const row of drawn) row.style.translate = lag === 0 ? "" : `0 ${lag}px`;
     if (lag === 0) drawn.clear();
