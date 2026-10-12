@@ -44,7 +44,7 @@ function assertEventsMatchManifest(id, result) {
 }
 
 test("every event provider is registered with a manifest, credentials, and subscription commands", () => {
-  for (const id of ["webhook", "sentry", "linear", "pagerduty", "gitlab", "slack", "jira", "vercel", "cloudflare", "feishu",
+  for (const id of ["webhook", "sentry", "linear", "pagerduty", "gitlab", "slack", "jira", "vercel", "cloudflare", "appstoreconnect", "feishu",
     "bitbucket", "circleci", "buildkite", "stripe", "grafana", "opsgenie", "netlify", "telegram"]) {
     const provider = connectorProvider(id);
     assert.ok(provider?.events, `${id} receives events`);

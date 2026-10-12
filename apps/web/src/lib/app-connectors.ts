@@ -100,6 +100,11 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Find a sign-up or login verification email and open its link without leaving the agent.",
     "Read receipts, alerts and replies from the connected mailbox as task context.",
   ],
+  appstoreconnect: [
+    "Let an agent take an uploaded build to App Review: create the version, write the listing, attach the build and submit.",
+    "Hear in the channel when App Review starts, rejects or approves, or when a build finishes processing.",
+    "Read new App Store reviews and publish replies.",
+  ],
   bitbucket: [
     "Follow Bitbucket pull requests and builds alongside agents.",
   ],
