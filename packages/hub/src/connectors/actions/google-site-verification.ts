@@ -42,7 +42,7 @@ function resourceSummary(value: unknown): string {
       typeof site.identifier !== "string" || !Array.isArray(resource.owners) || resource.owners.some(owner => typeof owner !== "string")) {
     throw new ProviderRequestError(502, "Google did not return a verified site resource");
   }
-  return JSON.stringify({ id: resource.id, site, owners: resource.owners }).slice(0, 12_000);
+  return JSON.stringify({ id: resource.id, site, owners: resource.owners });
 }
 
 function resourceAction(method: "GET" | "DELETE"): ConnectorAction {
@@ -51,7 +51,7 @@ function resourceAction(method: "GET" | "DELETE"): ConnectorAction {
       const result = await providerJson(resourceUrl(input.id!), { method, headers: headers(credentials) });
       if (method === "GET" && result.id !== input.id) throw new ProviderRequestError(502, "Google did not return the requested verification resource");
       return { summary: method === "DELETE" ? `Removed the connected account's ownership of verification resource ${input.id}.` :
-        "Verified site:\n" + quoteRetrievedText(resourceSummary(result)) };
+        "Verified site:\n" + quoteRetrievedText(resourceSummary(result), 16_000) };
     } };
 }
 
@@ -77,7 +77,7 @@ export const GOOGLE_SITE_VERIFICATION_ACTIONS: Record<string, ConnectorAction> =
       if (site.identifier !== input.identifier || site.type !== input.type) {
         throw new ProviderRequestError(502, "Google did not confirm the requested site's ownership");
       }
-      return { summary: "Ownership verified; add the property with add_site if needed:\n" + quoteRetrievedText(resourceSummary(result)) };
+      return { summary: "Ownership verified; add the property with add_site if needed:\n" + quoteRetrievedText(resourceSummary(result), 16_000) };
     },
   },
   list_verifications: {
@@ -88,7 +88,7 @@ export const GOOGLE_SITE_VERIFICATION_ACTIONS: Record<string, ConnectorAction> =
       if (result.items !== undefined && !Array.isArray(result.items)) throw new ProviderRequestError(502, "Google did not return verified sites");
       const items = (result.items as unknown[] | undefined) ?? [];
       return { summary: `Verified resources (${items.length}; at most 50 shown):\n` +
-        quoteRetrievedText(items.slice(0, 50).map(resourceSummary).join("\n").slice(0, 16_000) || "(no verified resources)") };
+        quoteRetrievedText(items.slice(0, 50).map(resourceSummary).join("\n") || "(no verified resources)", 16_000) };
     },
   },
   get_verification: resourceAction("GET"),
@@ -110,7 +110,7 @@ export const GOOGLE_SITE_VERIFICATION_ACTIONS: Record<string, ConnectorAction> =
       const result = await providerJson(resourceUrl(input.id!), { method: "PUT", headers: headers(credentials),
         json: { owners: JSON.parse(input.owners!) } });
       if (result.id !== input.id) throw new ProviderRequestError(502, "Google did not return the requested verification resource");
-      return { summary: "Updated the verification owner list:\n" + quoteRetrievedText(resourceSummary(result)) };
+      return { summary: "Updated the verification owner list:\n" + quoteRetrievedText(resourceSummary(result), 16_000) };
     },
   },
 };

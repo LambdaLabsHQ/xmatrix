@@ -99,6 +99,11 @@ test("advanced analytics forwards supported bounded options and uses Pacific dat
   assert.deepEqual(result.calls[0].body, options);
   assert.match(result.result.summary, /Next startRow: 250/u);
   assert.match(result.result.summary, /first_incomplete_date/u);
+  assert.match(result.result.summary, /dataState=all/u);
+  const large = await fetched([{ body: { rows: Array.from({ length: 50 }, () => ({ keys: Array(4).fill("x".repeat(300)), clicks: 1 })) } }],
+    () => actions.query.execute({ credentials }, parse("query", property, JSON.stringify(options))));
+  assert.ok(large.result.summary.length < 17_000);
+  assert.match(large.result.summary, /Output truncated at 16000 characters/u);
   assert.equal(searchAnalyticsOptions("days=1", Date.UTC(2026, 9, 7, 1)).endDate, "2026-10-06");
   for (const changes of [{ startDate: "2026-02-30" }, { endDate: "2026-09-30" }, { startRow: -1 }, { rowLimit: 251 },
     { dimensions: ["query", "query"] }, { unexpected: true }, { dimensionFilterGroups: [{ groupType: "or", filters: [] }] },
