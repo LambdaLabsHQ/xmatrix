@@ -41,6 +41,7 @@ import {
 } from "@/components/dashboard/completion-option-button";
 import { ContentSkeleton } from "@/components/dashboard/content-skeleton";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { MentionCategoryLabel } from "./mention-category-label";
 import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
 import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonStartCandidates } from "./auto-launch-completion";
@@ -56,6 +57,7 @@ import {
   parseAppMentions,
   resolveMentionCompletion,
   type MentionCandidate,
+  type MentionCandidateSection,
   type MentionDynamicCompletionValues,
   type MentionInstanceTargetScope,
   type MentionLocalContext,
@@ -205,7 +207,7 @@ export function useComposerCompletion({
     ? summonAtCompletion(draft.slice(0, cursor), cursor) : undefined;
   const continuingLaunch = Boolean(boundarySummon) ||
     afterLaunchPick?.body === draft && afterLaunchPick.cursor === cursor;
-  const [expandedMentionKinds, setExpandedMentionKinds] = useState<Set<MentionCandidate["kind"]>>(
+  const [expandedMentionKinds, setExpandedMentionKinds] = useState<Set<MentionCandidateSection["kind"]>>(
     () => new Set()
   );
   const emptyMentionDynamicValues = useMemo<MentionDynamicCompletionValues>(() => ({}), []);
@@ -392,11 +394,11 @@ export function useComposerCompletion({
     () =>
       mentionSuggestionSections.flatMap((section) => {
         const items: Array<
-          | { candidate: MentionCandidate; sectionKind: MentionCandidate["kind"]; type: "candidate" }
+          | { candidate: MentionCandidate; sectionKind: MentionCandidateSection["kind"]; type: "candidate" }
           | {
               hiddenCount: number;
               label: string;
-              sectionKind: MentionCandidate["kind"];
+              sectionKind: MentionCandidateSection["kind"];
               type: "expand";
             }
         > = section.candidates.map((candidate) => ({
@@ -643,14 +645,14 @@ export function useComposerCompletion({
     focusAndSelect(next.value, next.cursor);
   }
 
-  function expandMentionKind(kind: MentionCandidate["kind"]) {
+  function expandMentionKind(kind: MentionCandidateSection["kind"]) {
     setExpandedMentionKinds((current) => {
       if (current.has(kind)) return current;
       return new Set([...current, kind]);
     });
   }
 
-  function expandableMentionKindForActiveItem(): MentionCandidate["kind"] | null {
+  function expandableMentionKindForActiveItem(): MentionCandidateSection["kind"] | null {
     const item = visibleMentionItems[activeIndex];
     if (!item) return null;
     if (item.type === "expand") return item.sectionKind;
@@ -969,12 +971,12 @@ export function useComposerCompletion({
                 )
               ) : null}
               {mentionSuggestionSections.map((section) => (
-                <div key={section.kind}>
+                <div key={section.kind} className="app-mention-category" role="group" aria-label={section.label}>
                   {/* A folded section carries its label on the fold row itself,
                       so it costs one line rather than a header plus a row. */}
                   {mentionCompletion.stage === "target" && section.candidates.length > 0 ? (
-                    <div className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                      {section.label}
+                    <div className="app-mention-category-heading">
+                      <MentionCategoryLabel section={section} />
                     </div>
                   ) : null}
                   {section.candidates.map((candidate, sectionIndex) => {
@@ -1043,9 +1045,9 @@ export function useComposerCompletion({
                           ) : (
                             <>
                               <span className="font-semibold">{candidate.name}</span>
-                              <span className="ml-1.5 text-foreground/50">
-                                @{candidate.mention || candidate.name}
-                              </span>
+                              {candidate.mention && candidate.mention !== candidate.name && (
+                                <span className="ml-1.5 text-foreground/50">@{candidate.mention}</span>
+                              )}
                             </>
                           )}
                         </span>
@@ -1092,13 +1094,11 @@ export function useComposerCompletion({
                           }}
                           selected={index === activeIndex}
                           onSelect={() => expandMentionKind(section.kind)}
-                          className="min-h-6 gap-1 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60"
+                          className="app-mention-category-more"
                         >
-                          <ChevronRight className="size-3 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">{section.label}</span>
-                          <span className="shrink-0 text-muted-foreground/50">
-                            +{section.hiddenCount}
-                          </span>
+                          {section.candidates.length === 0 ? <MentionCategoryLabel section={section} /> :
+                            <span className="min-w-0 flex-1 truncate">Show {section.hiddenCount} more</span>}
+                          <ChevronRight aria-hidden="true" className="size-3.5 shrink-0" />
                         </CompletionOptionButton>
                       );
                     })()}
