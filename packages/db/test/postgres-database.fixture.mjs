@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { promisify } from "node:util";
+import { setTimeout } from "node:timers/promises";
 import { Client } from "pg";
 import { createAuthorityDatabase } from "../dist/index.js";
 
@@ -111,11 +112,22 @@ export async function isolatedPostgres(prefix, { migrate = true, shard = false, 
   await admin.connect();
   let client, session, created = false, roleCreated = false;
   const close = async () => {
-    await session?.close?.();
-    await client?.end();
-    if (created) await admin.query(`DROP DATABASE ${name} WITH (FORCE)`);
-    if (roleCreated) await admin.query(`DROP ROLE ${role}`);
-    await admin.end();
+    try {
+      await session?.close?.();
+      await client?.end();
+      if (created) {
+        // pg Pool.end() can settle before its removed clients' sockets close.
+        // FORCE races those sockets and emits 57P01 in the test that owns them.
+        // Wait only for this fixture's connections; a leak fails cleanup.
+        const deadline = Date.now() + 5_000;
+        while ((await admin.query("SELECT 1 FROM pg_stat_activity WHERE datname=$1 LIMIT 1", [name])).rowCount) {
+          assert.ok(Date.now() < deadline, `connections did not drain from fixture ${name}`);
+          await setTimeout(25);
+        }
+        await admin.query(`DROP DATABASE ${name}`);
+      }
+      if (roleCreated) await admin.query(`DROP ROLE ${role}`);
+    } finally { await admin.end(); }
   };
   try {
     await admin.query(`CREATE DATABASE ${name}`);
