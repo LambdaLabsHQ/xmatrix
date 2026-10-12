@@ -35,8 +35,9 @@ which is how clients discover where to sign in.
   there and a session token never works on `/mcp`. A token request that
   names no `resource` gets the MCP resource: it is the Hub's only protected
   resource.
-- **Scopes**: `xmatrix:read` (reading tools), `xmatrix:write` (reserved for
-  writing tools); plus `openid`, `profile`, `email`, `offline_access`.
+- **Scopes**: `xmatrix:read` (reading tools), `xmatrix:write` (writing
+  tools, offered with reading); plus `openid`, `profile`, `email`,
+  `offline_access`.
 - **Removing an app** (profile → AI apps) deletes its consent and every
   refresh token it holds; its last access token expires within 15 minutes.
   A revoked account identity is refused on every call.
@@ -48,10 +49,17 @@ Reading (`xmatrix:read`, all `readOnlyHint`): `list_spaces`, `list_pages`,
 same authority as the Web app with the person as principal, so a page or
 channel they cannot read is a tool error the model sees, never data.
 
+Writing (`xmatrix:write` as well): `create_page`, `edit_page` (on the
+revision read; an overlapping edit is refused with the current text),
+`send_message`. Each runs through the Hub's own route in-process as the
+person (`internal-caller.ts`: a single-use key plus a secret only the isolate
+holds, no minted credential), so an app's message or edit is the same act,
+with the same checks and effects (mentions summon Agents), as one made in
+xMatrix.
+
 ## Not yet
 
-- Writing tools (create and edit pages, send messages) under `xmatrix:write`,
-  attributed to the person and the app.
+- Showing which app wrote a message or revision ("via ChatGPT").
 - A ChatGPT page-card widget (Apps SDK output template).
 - Directory listings: ChatGPT app directory and the MCP Registry; Grok and
   Cursor connect by entering the URL. The Claude connector directory is not a
