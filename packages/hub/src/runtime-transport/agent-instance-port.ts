@@ -107,6 +107,8 @@ export interface AgentInstanceAuthorityRunBinding {
   /** Dense per-channel ordinal for `@agent:N` / memberPresence cards. */
   channelInstanceId?: string;
   cwd?: string;
+  /** Server-owned Run repository, for presentation only. */
+  repository?: string;
 }
 
 export interface AgentInstanceAuthorityAuthentication {

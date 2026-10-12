@@ -15,6 +15,7 @@ import {
   isAgentUsageLimitLifecycle,
   isLiveAgentStatus,
   normalizeChannelActivity,
+  repoSummonReference,
 } from "@xmatrix/protocol";
 
 import { InvalidAuthTokenError, verifyAuthToken, type AgentRunPrincipal, type AuthUser } from "../auth";
@@ -539,6 +540,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       channelDeliveryEnabled,
       ...(channelInstanceId ? { channelInstanceId } : {}),
       ...(cwd ? { cwd } : {}),
+      ...(typeof metadata.remoteRepo === "string" && repoSummonReference(metadata.remoteRepo)
+        ? { repository: repoSummonReference(metadata.remoteRepo) } : {}),
     };
     if (run.runId !== principal.runId ||
         !liveRunIsAdmitted(run, principal, LIVE_RUN_ROUTED_FIELDS) ||

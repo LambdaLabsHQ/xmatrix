@@ -83,7 +83,7 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
   const principalKeys = ["ownerUserId", "agentId", "agentName", "spaceId", "runId", "executionKey", "channelId", "machineId"] as const;
   const optionalPrincipalKeys = ["hostId", "runKind", "channelWriteAllowed"] as const;
   const requiredRunKeys = ["runId", "agentId", "instanceId", "executionKey", "channelId", "machineId", "status", "instanceStatus"] as const;
-  const optionalRunKeys = ["hostId", "kind", "channelDeliveryEnabled", "channelInstanceId", "cwd", "connectionVersion"] as const;
+  const optionalRunKeys = ["hostId", "kind", "channelDeliveryEnabled", "channelInstanceId", "cwd", "repository", "connectionVersion"] as const;
   if (!hibernationRecord(principal) ||
       !hibernationHasOnlyKeys(principal, [...principalKeys, ...optionalPrincipalKeys]) ||
       !principalKeys.every((key) => Object.prototype.hasOwnProperty.call(principal, key)) ||
@@ -95,6 +95,7 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
       !(run.channelDeliveryEnabled === undefined || typeof run.channelDeliveryEnabled === "boolean") ||
       !(run.channelInstanceId === undefined || hibernationBoundedString(run.channelInstanceId)) ||
       !(run.cwd === undefined || hibernationBoundedString(run.cwd, 2_048)) ||
+      !(run.repository === undefined || hibernationBoundedString(run.repository, 2_048)) ||
       !(run.connectionVersion === undefined ||
         Number.isSafeInteger(run.connectionVersion) && (run.connectionVersion as number) > 0) ||
       !(run.kind === undefined || run.kind === "channel-instance" || run.kind === "channel-about-session") ||
@@ -132,6 +133,7 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
       : {}),
     ...(typeof run.channelInstanceId === "string" ? { channelInstanceId: run.channelInstanceId } : {}),
     ...(typeof run.cwd === "string" ? { cwd: run.cwd } : {}),
+    ...(typeof run.repository === "string" ? { repository: run.repository } : {}),
   };
   const presentation = session.presentation === undefined
     ? undefined

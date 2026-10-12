@@ -101,8 +101,10 @@ test("a legacy unregister cannot borrow the current connection version", async (
 
 test("every handshake claims its own version; stale close and refresh cannot adopt the successor", async () => {
   const f = fixture();
+  f.state.metadata.remoteRepo = "LambdaLabsHQ/xmatrix";
   const old = f.session(await f.port.authenticate(f.message));
   const current = f.session(await f.port.authenticate(f.message));
+  assert.equal(current.run.repository, "LambdaLabsHQ/xmatrix");
   assert.equal(old.run.connectionVersion, 2);
   assert.equal(current.run.connectionVersion, 3);
   assert.notEqual(f.commands[0].commandId, f.commands[1].commandId);

@@ -8,6 +8,7 @@ import {
   type AgentInstanceRest,
   type AgentStatusChip,
   normalizeAgentPresetRuntime,
+  repoSummonReference,
   type ChannelMemberPresence,
   type SerializedAgentInstance,
 } from "@xmatrix/protocol";
@@ -66,7 +67,7 @@ function metadataText(
  * fanout, so returning all of it made Presence a leading source of egress.
  */
 const PRESENCE_RUN_METADATA_KEYS = ["routedAs", "clientVersion", "machineId", "hostname", "hostId",
-  "hostName", "cwd", "canonicalCwd", "workspaceName", "gitBranch"] as const;
+  "hostName", "cwd", "canonicalCwd", "workspaceName", "gitBranch", "remoteRepo"] as const;
 const PRESENCE_RUN_METADATA_SQL = `jsonb_strip_nulls(jsonb_build_object(${PRESENCE_RUN_METADATA_KEYS
   .map((key) => `'${key}',r.metadata_json->'${key}'`).join(",")}))`;
 /**
@@ -98,7 +99,7 @@ export async function loadChannelAgentPresence(
     throw new DatabaseContractError("Agent presence Channel selector limit exceeded");
   }
   const rows = await transaction.query<ChannelAgentPresenceRow>({
-    name: "channel_agent_presence_v8",
+    name: "channel_agent_presence_v9",
     text: `SELECT i.instance_id,i.channel_id,i.channel_instance_id,i.status,
         i.created_at,i.updated_at,i.presentation_json->'usage' AS instance_usage,${DURABLE_PRESENTATION_SQL},
         r.workspace_machine_id,
@@ -134,7 +135,7 @@ export async function loadChannelAgentPresence(
   // wakes it (docs/instance-sleep.md §5). Newest first, a bounded few per
   // Channel; unlike live Instances, a Channel with more simply shows fewer.
   const resting = await transaction.query<ChannelAgentPresenceRow>({
-    name: "channel_agent_resting_presence_v4",
+    name: "channel_agent_resting_presence_v5",
     text: `SELECT * FROM (SELECT i.instance_id,i.channel_id,i.channel_instance_id,i.status,i.rest_state,i.rest_reason,
         i.created_at,i.updated_at,i.presentation_json->'usage' AS instance_usage,${DURABLE_PRESENTATION_SQL},
         r.workspace_machine_id,
@@ -280,6 +281,8 @@ function addPresenceRow(
     throw new DatabaseContractError("Agent presence ordinal is invalid");
   }
   const runMetadata = row.run_metadata_json ?? {};
+  const remoteRepo = metadataText(runMetadata, "remoteRepo");
+  const repository = remoteRepo ? repoSummonReference(remoteRepo) : undefined;
   const label = row.agent_name;
   const avatarUrl = harnessAvatarUrl(row.registration_harness);
   const channelInstanceId = String(ordinal);
@@ -293,6 +296,7 @@ function addPresenceRow(
     connectedAt,
     lastSeenAt,
     status: row.status as SerializedAgentInstance["status"],
+    ...(repository ? { repository } : {}),
     ...(localLlmUsage(row.instance_usage ?? undefined) ? { usage: localLlmUsage(row.instance_usage ?? undefined) } : {}),
     ...(rest ? { rest } : {}),
     ...(rest === "wake_failed" && row.rest_reason ? { restReason: row.rest_reason } : {}),
