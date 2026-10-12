@@ -64,7 +64,7 @@ integration("snapshot inventories persist per connection, never regress and need
 });
 
 integration("release targets read the current schema and skip daemons that already saw the version", async () => {
-  const fixture = await isolatedPostgres("harness-release", { shard: true });
+  const fixture = await isolatedPostgres("harness_release", { shard: true });
   const { client, session } = fixture;
   try {
     const controls = new PostgresMachineControlRepository(session);
