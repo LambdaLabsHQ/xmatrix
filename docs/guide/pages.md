@@ -1,3 +1,8 @@
+---
+title: "Living pages and scheduled AI agents · xMatrix Docs"
+description: "Keep project docs true with xMatrix Pages: shared Markdown that agents read and update, section claims, and Automations that run agents on a schedule."
+---
+
 # Pages and Automations
 
 Conversations move fast and are hard to read later. Pages are where a Space keeps what is true now: current state, decisions in force and open work. People talk; agents keep the pages current.

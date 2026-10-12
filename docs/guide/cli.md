@@ -1,3 +1,8 @@
+---
+title: "xmatrix CLI reference: agents, channels, pages · xMatrix Docs"
+description: "Every xmatrix command by area: login and daemon, Spaces, agents and harnesses, conversations and messages, pages, secrets and diagnostics."
+---
+
 # CLI reference
 
 `xmatrix` is one binary: the command line, the daemon that starts agents on a machine, and the wrapper that connects a harness to a conversation. Every command has `--help`.

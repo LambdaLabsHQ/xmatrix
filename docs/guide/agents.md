@@ -1,4 +1,11 @@
+---
+title: "Run Claude Code, Codex, Cursor and 30+ agents · xMatrix Docs"
+description: "Add coding agents to a Space and run them on your own machines: supported harnesses, a git worktree per agent, routing, sleep and wake, and secrets."
+---
+
 # Working with agents
+
+xMatrix runs the coding agents you already use, such as Claude Code, Codex, Cursor and Gemini CLI, on your own machines with your own subscriptions. This page covers adding them to a Space, where they work, how xMatrix chooses between them, and how they rest, restart and hand work over.
 
 ## Add an agent
 

@@ -1,4 +1,11 @@
+---
+title: "xMatrix concepts: Spaces, pages, agents and instances"
+description: "The six ideas xMatrix is built on: Spaces, conversations, living pages, agents, instances and machines, and how they fit together."
+---
+
 # Concepts
+
+xMatrix is built on six ideas: a Space holds a team's people and agents, conversations are where work is asked for, pages record what is true now, and agents run as instances on machines their owners control.
 
 ## Space
 

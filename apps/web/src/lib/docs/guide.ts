@@ -29,8 +29,10 @@ export interface GuidePage {
   /** File name without `.md`; `index` is the guide's first page. */
   file: string;
   href: string;
+  /** The page's heading, as the guide's own navigation names it. */
   title: string;
-  /** The first paragraph, for search results and link previews. */
+  /** What a search result shows: the file's front matter `title` and `description`. */
+  searchTitle: string;
   description: string;
   /** The Markdown below the title. */
   body: string;
@@ -41,16 +43,21 @@ function guideHref(file: string): string {
   return file === "index" ? "/docs" : `/docs/${file}`;
 }
 
-export const guidePages: GuidePage[] = sources.map(([file, markdown]) => {
+/** A file opens with `---`, `title: "…"`, `description: "…"`, `---`; GitHub draws that as a table. */
+const FRONT_MATTER = /^---\ntitle: "([^"\n]+)"\ndescription: "([^"\n]+)"\n---\n+/u;
+
+export const guidePages: GuidePage[] = sources.map(([file, source]) => {
+  const frontMatter = FRONT_MATTER.exec(source);
+  if (!frontMatter) throw new Error(`docs/guide/${file}.md needs a front matter title and description`);
+  const markdown = source.slice(frontMatter[0].length);
   const [title, ...sections] = pageBlocks(markdown).filter((block) => block.depth === 1 || block.depth === 2);
-  const body = markdown.slice(markdown.indexOf("\n", title!.start) + 1);
-  const description = body.split(/\n{2,}/u).map((part) => part.trim()).find(Boolean) ?? "";
   return {
     file,
     href: guideHref(file),
     title: title!.title,
-    description: description.replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1").replace(/[*_`]/gu, ""),
-    body,
+    searchTitle: frontMatter[1]!,
+    description: frontMatter[2]!,
+    body: markdown.slice(markdown.indexOf("\n", title!.start) + 1),
     sections: sections.map((block) => ({ id: block.id, title: block.title })),
   };
 });

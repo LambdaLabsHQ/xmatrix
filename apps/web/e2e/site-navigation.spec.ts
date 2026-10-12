@@ -21,15 +21,33 @@ test("the guide serves every page, and every link inside it reaches a section th
   const pages = await guide.getByRole("link").evaluateAll((links) => links.map((link) => link.getAttribute("href")!));
   expect(pages.length).toBeGreaterThan(3);
   const targets = new Set<string>();
+  const titles = new Set<string>();
   for (const href of pages) {
     await page.goto(href);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    // What a search result and a shared link show is this page's own, not the site's.
+    // Inside <head>, where every crawler reads it (next.config.ts htmlLimitedBots).
+    const head = (selector: string) => page.locator(`head ${selector}`).getAttribute(selector.startsWith("link") ? "href" : "content");
+    const title = await page.title();
+    const description = (await head('meta[name="description"]'))!;
+    titles.add(title);
+    expect(title.length, title).toBeLessThanOrEqual(62);
+    expect(description.length, description).toBeGreaterThan(80);
+    expect(description.length, description).toBeLessThanOrEqual(158);
+    expect(new URL((await head('link[rel="canonical"]'))!).pathname).toBe(href);
+    expect(new URL((await head('meta[property="og:url"]'))!).pathname).toBe(href);
+    expect(await head('meta[property="og:title"]')).toBe(title);
+    expect(await head('meta[property="og:description"]')).toBe(description);
+    const graph = JSON.parse((await page.locator('script[type="application/ld+json"]').textContent())!)["@graph"];
+    expect(new URL(graph[0].url).pathname).toBe(href);
+    expect(new URL(graph[1].itemListElement.at(-1).item).pathname).toBe(href);
     await expect(guide.locator('[aria-current="page"]')).toHaveAttribute("href", href);
     for (const link of await page.locator(".docs-article a, .docs-toc a").evaluateAll((links) =>
       links.map((element) => new URL((element as HTMLAnchorElement).href)))) {
       if (link.origin === new URL(page.url()).origin && link.pathname.startsWith("/docs")) targets.add(link.pathname + link.hash);
     }
   }
+  expect(titles.size).toBe(pages.length);
   for (const target of targets) {
     const [path, section] = target.split("#");
     expect(pages, target).toContain(path);
