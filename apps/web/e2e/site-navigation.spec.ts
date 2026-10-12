@@ -26,7 +26,8 @@ test("the guide serves every page, and every link inside it reaches a section th
     await page.goto(href);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     // What a search result and a shared link show is this page's own, not the site's.
-    const head = (selector: string) => page.locator(`head ${selector}`).getAttribute(selector.startsWith("link") ? "href" : "content");
+    // Next streams a per-request page's metadata, so a browser may find it after <head>; crawlers get it inside.
+    const head = (selector: string) => page.locator(selector).first().getAttribute(selector.startsWith("link") ? "href" : "content");
     const title = await page.title();
     const description = (await head('meta[name="description"]'))!;
     titles.add(title);
