@@ -8,7 +8,9 @@ import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 
 const env = { CONNECTOR_GOOGLE_CLIENT_ID: "fixture-client.apps.googleusercontent.com", CONNECTOR_GOOGLE_CLIENT_SECRET: "fixture-secret" };
-const scope = "https://www.googleapis.com/auth/webmasters";
+const legacyScope = "https://www.googleapis.com/auth/webmasters";
+const verificationScope = "https://www.googleapis.com/auth/siteverification";
+const scope = `${legacyScope} ${verificationScope}`;
 const grant = { access_token: "fixture-access", refresh_token: "fixture-refresh", token_type: "Bearer", expires_in: 3600, scope };
 const credentials = { oauthToken: "fixture-access" };
 const now = Date.UTC(2026, 9, 7, 9, 30);
@@ -27,7 +29,7 @@ test("Search Console signs in with the company Google client but its own provide
   const url = new URL(await oauthAuthorizeUrl(client, { spaceId: "space-1", userId: "admin-1", redirectUri: "https://hub.test/cb" }));
   assert.equal(url.searchParams.get("scope"), scope);
   assert.equal(url.searchParams.get("access_type"), "offline");
-  assert.equal(url.searchParams.has("include_granted_scopes"), false);
+  assert.equal(url.searchParams.get("include_granted_scopes"), "false");
   const verified = await verifyOAuthState(env, url.searchParams.get("state"));
   assert.equal(verified.client.manifest.id, "googlesearchconsole");
   assert.equal(verified.spaceId, "space-1");
@@ -35,15 +37,19 @@ test("Search Console signs in with the company Google client but its own provide
   assert.equal((await verifyOAuthState(env, docs.searchParams.get("state"))).client.manifest.id, "google");
 });
 
-test("Search Console code exchange and refresh accept only the webmasters scope", async () => {
+test("Search Console code exchange and refresh require both scopes for new consent and preserve legacy refresh", async () => {
   const client = oauthClient(env, "googlesearchconsole");
   const { result } = await fetched([{ body: grant }], () => exchangeOAuthGrant(client, "code", "https://hub.test/cb"));
   assert.equal(result.fields.oauthToken, "fixture-access");
   assert.equal(result.fields.oauthRefreshToken, "fixture-refresh");
-  for (const changes of [{ scope: "https://www.googleapis.com/auth/drive.file" }, { scope: `${scope} https://www.googleapis.com/auth/drive` },
+  assert.equal(result.fields.oauthScopes, scope);
+  for (const changes of [{ scope: legacyScope }, { scope: "https://www.googleapis.com/auth/drive.file" }, { scope: `${scope} https://www.googleapis.com/auth/drive` },
     { scope: undefined }, { refresh_token: undefined }, { token_type: "mac" }]) {
     await fetched([{ body: { ...grant, ...changes } }], () => assert.rejects(exchangeOAuthGrant(client, "code", "https://hub.test/cb"), /Search Console OAuth grant/u));
   }
+  const legacy = await fetched([{ body: { ...grant, scope: legacyScope } }],
+    () => refreshOAuthFields(env, "googlesearchconsole", { oauthToken: "old", oauthRefreshToken: "keep", oauthExpiresAt: String(now) }, now));
+  assert.equal(legacy.result.oauthScopes, legacyScope);
   // The Docs provider still refuses a Search Console grant.
   await fetched([{ body: grant }], () => assert.rejects(exchangeOAuthGrant(oauthClient(env, "google"), "code", "https://hub.test/cb"), /per-file/u));
   const stored = { oauthToken: "old", oauthRefreshToken: "keep", oauthExpiresAt: String(now + 10_000) };
@@ -92,10 +98,10 @@ test("page actions refuse pages outside the named property before any provider c
   }
 });
 
-test("manifest exposes reads and the sitemap write", () => {
+test("manifest and executors agree on action effects", () => {
   const manifest = getAppConnectorProvider("googlesearchconsole");
   assert.equal(manifest.status, "available");
-  assert.deepEqual(manifest.oauth.scopes, [scope]);
+  assert.deepEqual(manifest.oauth.scopes, [legacyScope, verificationScope]);
   const effects = Object.fromEntries(manifest.actions.map(action => [action.id, [action.effect]]));
   assert.deepEqual(effects.submit_sitemap, ["write"]);
   for (const id of ["list_sites", "query", "list_sitemaps", "inspect_url"]) assert.equal(effects[id][0], "read");

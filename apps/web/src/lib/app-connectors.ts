@@ -69,7 +69,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   ],
   googlesearchconsole: [
     "Pull clicks, impressions, CTR and ranking for every site the connected Google account manages.",
-    "Check a page's index status or submit a sitemap without opening Search Console.",
+    "Verify site ownership, manage properties and sitemaps, and inspect search performance.",
     "Run a scheduled Automation that reports search traffic changes into the channel.",
   ],
   googleadsense: [

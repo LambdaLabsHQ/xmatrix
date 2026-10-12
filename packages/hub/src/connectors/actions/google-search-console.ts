@@ -2,51 +2,20 @@ import { record } from "../command-support";
 import { providerJson, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText } from "./common";
+import { pageUrl, searchConsoleSite, searchConsoleSiteContains } from "./google-search-console-site";
+import { GOOGLE_SITE_VERIFICATION_ACTIONS } from "./google-site-verification";
+import { searchAnalyticsOptions } from "./google-search-analytics";
 import { googleHeaders } from "./google-headers";
 
 /*
  * Google Search Console (Search Console API v1 / webmasters v3). The grant is
- * the single `webmasters` scope; a site is an address, and Google decides
+ * `webmasters` and `siteverification` scopes; Google decides
  * whether the connected account may read or submit for it.
  */
 
 const API = "https://www.googleapis.com/webmasters/v3";
 const INSPECT = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect";
-const DOMAIN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/u;
-const DIMENSIONS = new Set(["query", "page", "country", "device", "date", "searchAppearance"]);
-const SEARCH_TYPES = new Set(["web", "image", "video", "news", "discover", "googleNews"]);
-const MAX_URL = 2_048;
 const MAX_LINES = 250;
-const DAY_MS = 86_400_000;
-
-
-/** A public http(s) page or sitemap address without credentials or fragments. */
-function pageUrl(value: string): URL | undefined {
-  if (!value || value.length > MAX_URL || /\s/u.test(value)) return undefined;
-  let url: URL;
-  try { url = new URL(value); } catch { return undefined; }
-  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash || !DOMAIN.test(url.hostname)) return undefined;
-  return url;
-}
-
-/** `sc-domain:example.com` or a URL-prefix property such as `https://www.example.com/`. */
-export function searchConsoleSite(target: string): string | undefined {
-  if (target.startsWith("sc-domain:")) {
-    const domain = target.slice("sc-domain:".length);
-    return DOMAIN.test(domain) ? target : undefined;
-  }
-  const url = pageUrl(target);
-  return url && !url.search && url.pathname.endsWith("/") && url.href === target ? target : undefined;
-}
-
-/** Whether a page belongs to the property, so Google is never asked about another site. */
-function searchConsoleSiteContains(site: string, page: URL): boolean {
-  if (site.startsWith("sc-domain:")) {
-    const domain = site.slice("sc-domain:".length);
-    return page.hostname === domain || page.hostname.endsWith(`.${domain}`);
-  }
-  return page.href.startsWith(site);
-}
 
 function siteUrl(site: string, path = ""): string {
   return `${API}/sites/${encodeURIComponent(site)}${path}`;
@@ -54,31 +23,6 @@ function siteUrl(site: string, path = ""): string {
 
 function cell(value: unknown): string {
   return String(value ?? "").slice(0, 300).replace(/[\r\n\t]/gu, " ");
-}
-
-function isoDate(ms: number): string { return new Date(ms).toISOString().slice(0, 10); }
-
-/** `by=query,page days=28 limit=25 type=web`; every key is optional. */
-export function searchAnalyticsOptions(text: string, now = Date.now()):
-  { dimensions: string[]; startDate: string; endDate: string; rowLimit: number; type: string } | string {
-  const options: Record<string, string> = {};
-  for (const word of text.trim().split(/\s+/u).filter(Boolean)) {
-    const match = word.match(/^(by|days|limit|type)=(\S{1,100})$/u);
-    if (!match || options[match[1]!] !== undefined) return "use by=<dimensions|none> days=<1-480> limit=<1-250> type=<search type>";
-    options[match[1]!] = match[2]!;
-  }
-  const dimensions = options.by === "none" ? [] : (options.by ?? "query").split(",");
-  if (dimensions.length > 3 || new Set(dimensions).size !== dimensions.length || dimensions.some(value => !DIMENSIONS.has(value))) {
-    return `by is none or up to three of ${[...DIMENSIONS].join(", ")}`;
-  }
-  const days = Number(options.days ?? "28");
-  const rowLimit = Number(options.limit ?? "25");
-  if (!Number.isSafeInteger(days) || days < 1 || days > 480) return "days is a whole number from 1 to 480";
-  if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > MAX_LINES) return `limit is a whole number from 1 to ${MAX_LINES}`;
-  const type = options.type ?? "web";
-  if (!SEARCH_TYPES.has(type)) return `type is one of ${[...SEARCH_TYPES].join(", ")}`;
-  const end = Math.floor(now / DAY_MS) * DAY_MS;
-  return { dimensions, startDate: isoDate(end - (days - 1) * DAY_MS), endDate: isoDate(end), rowLimit, type };
 }
 
 function siteOnly(statement: { target: string; text: string }, usage: string): Record<string, string> | string {
@@ -93,6 +37,35 @@ function siteAndPage(statement: { target: string; text: string }, usage: string)
 }
 
 export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
+  ...GOOGLE_SITE_VERIFICATION_ACTIONS,
+  ...Object.fromEntries((["get_site", "add_site", "delete_site"] as const).map(id => {
+    const method = id === "get_site" ? "GET" : id === "add_site" ? "PUT" : "DELETE";
+    return [id, { effect: method === "GET" ? "read" : "write", requires: ["oauthToken"],
+      parse: statement => siteOnly(statement, "name an exact Search Console property"),
+      async execute({ credentials }, input) {
+        const result = await providerJson(siteUrl(input.site!), { method, headers: googleHeaders(credentials, "Google Search Console") });
+        if (method === "GET" && (result.siteUrl !== input.site || typeof result.permissionLevel !== "string")) {
+          throw new ProviderRequestError(502, "Google did not return the requested property");
+        }
+        return { summary: method === "GET" ? `Property ${input.site}:\n` + quoteRetrievedText(cell(result.permissionLevel)) :
+          method === "PUT" ? `Added ${input.site} to the connected account; ownership verification is a separate step.` :
+          `Removed ${input.site} from the connected account's Search Console property list; site content is unchanged.` };
+      },
+    } satisfies ConnectorAction];
+  })),
+  ...Object.fromEntries((["get_sitemap", "delete_sitemap"] as const).map(id => {
+    const method = id === "get_sitemap" ? "GET" : "DELETE";
+    return [id, { effect: method === "GET" ? "read" : "write", requires: ["oauthToken"],
+      parse: statement => siteAndPage(statement, "name a property and a sitemap URL inside it"),
+      async execute({ credentials }, input) {
+        const result = await providerJson(siteUrl(input.site!, `/sitemaps/${encodeURIComponent(input.page!)}`), {
+          method, headers: googleHeaders(credentials, "Google Search Console") });
+        if (method === "GET" && result.path !== input.page) throw new ProviderRequestError(502, "Google did not return the requested sitemap");
+        return { summary: method === "GET" ? `Sitemap ${input.page}:\n` + quoteRetrievedText(JSON.stringify(result).slice(0, 12_000)) :
+          `Removed sitemap ${input.page} from ${input.site}; the sitemap file is unchanged.` };
+      },
+    } satisfies ConnectorAction];
+  })),
   list_sites: {
     effect: "read", requires: ["oauthToken"],
     parse(statement) {
@@ -124,8 +97,7 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
     async execute({ credentials }, input) {
       const options = JSON.parse(input.options!) as Exclude<ReturnType<typeof searchAnalyticsOptions>, string>;
       const result = await providerJson(siteUrl(input.site!, "/searchAnalytics/query"), { method: "POST",
-        headers: googleHeaders(credentials, "Google Search Console"), json: { startDate: options.startDate, endDate: options.endDate,
-          dimensions: options.dimensions, rowLimit: options.rowLimit, type: options.type } });
+        headers: googleHeaders(credentials, "Google Search Console"), json: options });
       if (result.rows !== undefined && !Array.isArray(result.rows)) {
         throw new ProviderRequestError(502, "Google did not return Search Analytics rows");
       }
@@ -137,9 +109,11 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
           return [...keys, Number(row.clicks ?? 0), Number(row.impressions ?? 0),
             `${(Number(row.ctr ?? 0) * 100).toFixed(2)}%`, Number(row.position ?? 0).toFixed(1)].join("\t");
         })];
-      return { summary: `Search performance for ${input.site} (${options.type}, ${options.startDate} to ${options.endDate} UTC; ` +
+      return { summary: `Search performance for ${input.site} (${options.type}, ${options.startDate} to ${options.endDate} Pacific Time; ` +
         `by ${options.dimensions.join(", ") || "total"}; Google's data lags about two to three days):\n` +
-        quoteRetrievedText(rows.length ? lines.join("\n") : "(no data for this range)") };
+        quoteRetrievedText((rows.length ? lines.join("\n") : "(no data for this range)") +
+          `\nNext startRow: ${(options.startRow ?? 0) + rows.length}; returned ${rows.length} rows; Google returns top rows, not a complete export.\n` +
+          JSON.stringify({ responseAggregationType: result.responseAggregationType, metadata: result.metadata })) };
     },
   },
   list_sitemaps: {
@@ -166,16 +140,25 @@ export const GOOGLE_SEARCH_CONSOLE_ACTIONS: Record<string, ConnectorAction> = {
   },
   inspect_url: {
     effect: "read", requires: ["oauthToken"],
-    parse: statement => siteAndPage(statement, "name a property and a page inside it: <property> <page url>"),
+    parse(statement) {
+      const [page = "", language, ...extra] = statement.text.trim().split(/\s+/u);
+      const input = siteAndPage({ ...statement, text: page }, "name a property and a page inside it: <property> <page url>");
+      if (typeof input === "string") return input;
+      if (extra.length || (language !== undefined && !/^language=[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,3}$/iu.test(language))) {
+        return "optional language is language=<BCP-47 code>, for example language=en-US";
+      }
+      return { ...input, ...(language ? { languageCode: language.slice(9) } : {}) };
+    },
     async execute({ credentials }, input) {
       const result = await providerJson(INSPECT, { method: "POST", headers: googleHeaders(credentials, "Google Search Console"),
-        json: { inspectionUrl: input.page, siteUrl: input.site } });
+        json: { inspectionUrl: input.page, siteUrl: input.site, ...(input.languageCode ? { languageCode: input.languageCode } : {}) } });
       const status = record(record(result.inspectionResult).indexStatusResult);
       if (typeof status.verdict !== "string") throw new ProviderRequestError(502, "Google did not return an index status");
       const fields = ["verdict", "coverageState", "indexingState", "robotsTxtState", "pageFetchState", "lastCrawlTime",
         "crawledAs", "googleCanonical", "userCanonical"];
       const lines = fields.filter(field => status[field] !== undefined).map(field => `${field}: ${cell(status[field])}`);
-      return { summary: `URL inspection for ${input.page} in ${input.site}:\n` + quoteRetrievedText(lines.join("\n")) };
+      return { summary: `URL inspection for ${input.page} in ${input.site}:\n` + quoteRetrievedText(lines.join("\n") +
+        "\nFull inspection (including rich results and referring URLs):\n" + JSON.stringify(result.inspectionResult).slice(0, 16_000)) };
     },
   },
   submit_sitemap: {
@@ -196,3 +179,7 @@ export async function verifyGoogleSearchConsole(credentials: Readonly<Record<str
     throw new ProviderRequestError(502, "Google did not confirm Search Console access");
   }
 }
+
+export { searchConsoleSite } from "./google-search-console-site";
+
+export { searchAnalyticsOptions } from "./google-search-analytics";
