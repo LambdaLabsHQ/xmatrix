@@ -53,6 +53,35 @@ function mcpDefaultResource(env: Env): BetterAuthPlugin {
   };
 }
 
+/**
+ * Removing an app ends its grant, not only the record that it was allowed:
+ * its refresh tokens go with the consent, so it cannot mint another access
+ * token, and the one it holds expires within accessTokenExpiresIn.
+ */
+const mcpRevokeOnRemoval: BetterAuthPlugin = {
+  id: "xmatrix-mcp-revoke-on-removal",
+  hooks: {
+    after: [{
+      matcher: (ctx) => ctx.path === "/oauth2/delete-consent",
+      handler: createAuthMiddleware(async (ctx) => {
+        const userId = ctx.context.session?.user.id;
+        if (!userId) return;
+        // Every grant of this person's that no consent backs any longer.
+        const consented = new Set((await ctx.context.adapter.findMany<{ clientId: string }>({
+          model: "oauthConsent", where: [{ field: "userId", value: userId }] })).map((consent) => consent.clientId));
+        const held = await ctx.context.adapter.findMany<{ clientId: string }>({
+          model: "oauthRefreshToken", where: [{ field: "userId", value: userId }] });
+        for (const clientId of new Set(held.map((token) => token.clientId).filter((id) => !consented.has(id)))) {
+          for (const model of ["oauthAccessToken", "oauthRefreshToken"]) {
+            await ctx.context.adapter.deleteMany({ model, where: [
+              { field: "userId", value: userId }, { field: "clientId", value: clientId }] });
+          }
+        }
+      }),
+    }],
+  },
+};
+
 export function mcpOAuthPlugins(env: Env): BetterAuthPlugin[] {
   const provider = oauthProvider({
     loginPage: `${appOrigin(env)}/oauth/authorize`,
@@ -79,5 +108,5 @@ export function mcpOAuthPlugins(env: Env): BetterAuthPlugin[] {
     fields: Object.fromEntries(Object.entries(definition.fields).map(([field, attribute]) =>
       [field, { ...attribute, fieldName: snake(field) }])),
   }]));
-  return [{ ...provider, schema } as BetterAuthPlugin, mcpDefaultResource(env)];
+  return [{ ...provider, schema } as BetterAuthPlugin, mcpDefaultResource(env), mcpRevokeOnRemoval];
 }

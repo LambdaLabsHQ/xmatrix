@@ -131,3 +131,18 @@ integration('without a session the app is sent to sign in on the Web app', async
     assert.ok(login.searchParams.get('sig'));
   } finally { await f.close(); }
 });
+
+integration('removing an app ends its grant: its refresh token no longer works', async () => {
+  const f = await fixture(); try {
+    const { clientId, refresh_token: refreshToken } = await connect(f);
+    const consents = await (await f.call('/oauth2/get-consents', { session: f.session })).json();
+    const consent = consents.find((item) => (item.clientId ?? item.client_id) === clientId);
+    assert.ok(consent, JSON.stringify(consents));
+    const removed = await f.call('/oauth2/delete-consent', { method: 'POST', session: f.session, body: { id: consent.id } });
+    assert.equal(removed.status, 200, await removed.clone().text());
+    const refreshed = await f.call('/oauth2/token', { method: 'POST', form: { grant_type: 'refresh_token',
+      refresh_token: refreshToken, client_id: clientId } });
+    assert.notEqual(refreshed.status, 200);
+    assert.equal((await f.run('SELECT count(*)::int n FROM control.auth_oauth_refresh_tokens'))[0].n, 0);
+  } finally { await f.close(); }
+});
