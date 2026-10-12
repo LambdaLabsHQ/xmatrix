@@ -318,7 +318,13 @@ export function ConnectMachine({ spaceId, token, userId, centered = false }: {
       </button>
       {step && <ConnectStepLine step={step} busy={intent.busy} centered={centered}
         onApprove={(code) => void intent.approve(code)} onDecline={() => void intent.decline()} />}
-      {intent.error && <p role="alert" className="mt-2 text-sm text-destructive">{intent.error}</p>}
+      {intent.error && <div className="mt-2">
+        <p role="alert" className="text-sm text-destructive">{intent.error}</p>
+        <button type="button" disabled={intent.busy || intent.retrying} onClick={intent.retry}
+          className={actionClass({ variant: "secondary", size: "sm" }, "mt-2")}>
+          <RefreshCw className="size-4" /> Try again
+        </button>
+      </div>}
     </div>
   );
 }
