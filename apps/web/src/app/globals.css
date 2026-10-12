@@ -7230,6 +7230,28 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   color: var(--muted-foreground);
 }
 
+/* One glass surface, with inset ink and gentle solid selection inside it. */
+.app-mention-category { padding: 4px 0; }
+.app-mention-category-heading { padding: 9px 18px 5px; }
+.app-mention-category-label { display: flex; align-items: center; gap: 7px; flex: 1; font-size: 12px; font-weight: 600; color: var(--muted-foreground); }
+.app-mention-category-count { margin-left: auto; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; opacity: .6; }
+.xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option {
+  width: calc(100% - 16px) !important;
+  margin: 2px 8px !important;
+  padding: 8px 10px;
+  border-radius: 14px !important;
+}
+.xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option:is(:hover, [aria-selected="true"]) {
+  background: color-mix(in oklch, var(--foreground) 5%, transparent) !important;
+  border-radius: 14px !important;
+}
+.xmatrix-app .app-mention-suggestions .app-mention-category button.app-mention-category-more {
+  min-height: 36px;
+  padding-block: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
 .app-invocation-popup:has(.app-routing-board) { width: min(520px, calc(100vw - 24px)); }
 .app-routing-board { --invocation-color: var(--primary); display: grid; gap: 8px; margin: 4px 0 12px; }
 .app-routing-verdict { margin: 0; color: var(--foreground); font-size: 13px; line-height: 1.45; }
