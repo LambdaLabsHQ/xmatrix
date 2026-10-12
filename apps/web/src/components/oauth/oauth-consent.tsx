@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth-context";
 import { answerOAuthConsent, readOAuthClient, type OAuthClientSummary } from "@/lib/auth-client";
+import { userErrorMessage } from "@/lib/user-facing-error";
 
 /** What each scope lets an outside app do, in the person's terms. */
 const SCOPE_TEXT: Record<string, string> = {
@@ -35,7 +36,7 @@ export function OAuthConsent() {
   useEffect(() => {
     if (!user || !clientId) return;
     readOAuthClient(clientId).then(setClient).catch((reason: unknown) =>
-      setError(reason instanceof Error ? reason.message : "This app's request could not be read."));
+      setError(userErrorMessage(reason, "Couldn't read the app's request") ?? ""));
   }, [clientId, user]);
 
   async function answer(accept: boolean) {
@@ -45,7 +46,7 @@ export function OAuthConsent() {
     try {
       window.location.assign(await answerOAuthConsent(accept, query));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Your answer could not be sent. Try again.");
+      setError(userErrorMessage(reason, "Couldn't answer the app's request") ?? "");
       setPending(false);
     }
   }
