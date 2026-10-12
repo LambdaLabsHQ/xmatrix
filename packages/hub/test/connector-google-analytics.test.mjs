@@ -73,3 +73,16 @@ test("properties list every account's properties and reads fail closed on bad da
     statement("@googleanalytics:report:123")), /Google Analytics report/u));
   await fetched([{ body: {} }], () => verifyGoogleAnalytics(token));
 });
+
+test("report dates, months and fractional rates are written the way people read them", async () => {
+  const byDate = await fetched([{ body: { metricHeaders: [{ name: "sessions" }, { name: "engagementRate" }],
+    rows: [{ dimensionValues: [{ value: "20261002" }], metricValues: [{ value: "3" }, { value: "0.66666666666666663" }] }],
+    totals: [{ metricValues: [{ value: "19" }, { value: "0.94736842105263153" }] }] } }],
+  () => ACTIONS.report.execute({ credentials: token }, statement("@googleanalytics:report:123 by=date")));
+  assert.match(byDate.result.summary, /\n2026-10-02\t3\t0\.67\n/u);
+  assert.match(byDate.result.summary, /TOTAL\t19\t0\.95/u);
+  const byMonth = await fetched([{ body: { metricHeaders: [{ name: "sessions" }],
+    rows: [{ dimensionValues: [{ value: "202609" }, { value: "20261002" }], metricValues: [{ value: "1" }] }] } }],
+  () => ACTIONS.report.execute({ credentials: token }, statement("@googleanalytics:report:123 by=month,page")));
+  assert.match(byMonth.result.summary, /\n2026-09\t20261002\t1\n/u);
+});

@@ -33,11 +33,13 @@ test("legal pages render repository-owned policy sources", () => {
   assert.doesNotMatch(termsPageSource, /Management Agent authority/);
 });
 
-test("published drafts identify the confirmed operator, contact, status, and language", () => {
+test("published policies identify the operator, contact, version, and language", () => {
   assert.match(legalDocumentSource, /MadeByRobot, LLC/);
   assert.match(legalDocumentSource, /contact@madebyrobot\.net/);
-  assert.match(legalDocumentSource, /Pre-launch draft 2026-09-14/);
-  assert.match(legalDocumentSource, /Formal public launch date/);
+  assert.match(legalDocumentSource, /LEGAL_VERSION = "2026-10-12"/);
+  assert.match(legalDocumentSource, /LEGAL_EFFECTIVE_DATE = "12 October 2026"/);
+  assert.match(legalDocumentSource, /Version \{LEGAL_VERSION\}/);
+  assert.doesNotMatch(legalDocumentSource, /not yet effective|Pre-launch draft|Formal public launch date/);
   assert.doesNotMatch(legalDocumentSource, /August 10, 2026|hello@madebyrobot\.net/);
   assert.match(privacySource, /English is the controlling version/);
   assert.match(termsSource, /English is the controlling version/);
@@ -68,6 +70,11 @@ test("privacy policy separates MadeByRobot providers from Customer-selected prov
   assert.match(privacySource, /Cloudflare/);
   assert.match(privacySource, /Anthropic/);
   assert.match(privacySource, /Google or Stripe/);
+  assert.match(privacySource, /Google Analytics access is read-only/);
+  assert.match(privacySource, /Google Business Profile access lists/);
+  assert.match(privacySource, /publishes a review reply only when/);
+  assert.match(subprocessorsSource, /active in this version/);
+  assert.doesNotMatch(subprocessorsSource, /active in this draft/);
   assert.match(privacySource, /Customer-selected provider/);
   assert.match(privacySource, /enterprise or API no-training setting/);
   assert.match(privacySource, /do not sell personal information/);
