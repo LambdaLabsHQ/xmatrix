@@ -153,6 +153,8 @@ test("the recorder runs for every workflow whose runs it accepts", () => {
   const names = [...RECORDED_WORKFLOWS].map((file) =>
     readFileSync(new URL(`../${file}`, import.meta.url), "utf8").match(/^name: (.+)$/mu)[1]);
   assert.deepEqual(names, ["CI", "Public Snapshot CI"]);
+  // The write-token workflow must not admit events its proof verifier rejects.
+  assert.match(recorder, /github\.event\.workflow_run\.event == 'push' \|\| github\.event\.workflow_run\.event == 'pull_request'/u);
   assert.match(recorder, new RegExp(`workflows: \\[${names.join(", ")}\\]`, "u"));
   assert.match(recorder, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/u);
   assert.match(recorder, /run: node scripts\/ci-ledger\.mjs record-run "\$RUN_ID"/u);
