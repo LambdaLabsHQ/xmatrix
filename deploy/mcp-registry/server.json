@@ -1,0 +1,12 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.LambdaLabsHQ/xmatrix",
+  "title": "xMatrix",
+  "description": "Your xMatrix team's pages and channels, where people and their AI agents work together.",
+  "version": "1.0.0",
+  "websiteUrl": "https://xmatrix.sh",
+  "repository": { "url": "https://github.com/LambdaLabsHQ/xmatrix", "source": "github" },
+  "remotes": [
+    { "type": "streamable-http", "url": "https://xmatrix-hub.xmatrix.sh/mcp" }
+  ]
+}

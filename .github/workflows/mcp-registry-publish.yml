@@ -1,0 +1,40 @@
+name: MCP Registry publish
+
+# Lists the Hub's MCP server (docs/design/mcp-server.md) in the official MCP
+# Registry as io.github.LambdaLabsHQ/xmatrix. The Registry checks the name
+# against this repository's GitHub OIDC identity, so no credential is stored.
+# A listing changes by a new `version` in deploy/mcp-registry/server.json.
+on:
+  push:
+    branches: [main]
+    paths: [deploy/mcp-registry/server.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-registry-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install mcp-publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+      - name: Publish deploy/mcp-registry/server.json
+        working-directory: deploy/mcp-registry
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/mcp-publisher" login github-oidc
+          "$GITHUB_WORKSPACE/mcp-publisher" publish
