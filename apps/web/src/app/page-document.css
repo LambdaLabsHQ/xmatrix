@@ -404,6 +404,9 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 .ProseMirror-yjs-cursor:hover > div { opacity: 1; animation: none; }
 .ProseMirror-yjs-cursor::after { content: ""; position: absolute; top: 0; bottom: 0; left: -5px; width: 10px; }
 
+/* A `page:<id>` or `channel:<id>` drawn as a chip: the id it stands for shows only where the caret is. */
+.page-document .page-reference-source { display: none; }
+
 /* A page's Automation (§6.1): its reference reads as a chip with its live state beside it. */
 .page-automation-chip {
   padding: 1px 6px;

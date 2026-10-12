@@ -13,6 +13,7 @@ import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutoma
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
+import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
 import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
@@ -134,7 +135,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readGitHubFile }: {
+  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, readGitHubFile, references }: {
   session: PageLiveSession;
   canEdit: boolean;
   onBlockChange?: (blockId: string) => void;
@@ -168,6 +169,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   readerBaseline?: string | null;
   /** Reads a GitHub file the page embeds, through the Hub. */
   readGitHubFile?: ReadGitHubFile;
+  /** What `page:<id>` and `channel:<id>` in the text name and open. */
+  references?: PageReferenceTargets;
 }) {
   const frame = useRef<HTMLDivElement | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
@@ -188,6 +191,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   ready.current = onReady;
   const readFile = useRef(readGitHubFile);
   readFile.current = readGitHubFile;
+  const referenceTargets = useRef(references);
+  referenceTargets.current = references;
   const anchorsChange = useRef(onAnchorOffsets);
   anchorsChange.current = onAnchorOffsets;
   const presenceOf = useRef<CursorPresence>(cursorPresence ?? (() => "active"));
@@ -283,6 +288,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         headingActions: () => heading.current,
         cursorPresence: () => presenceOf.current,
         readGitHubFile: () => readFile.current,
+        references: () => referenceTargets.current,
       }) }),
       nodeViews,
       editable: () => editable.current,
@@ -374,6 +380,11 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     const current = view.current;
     if (current && automations) current.dispatch(current.state.tr.setMeta(automationsKey, automations));
   }, [automations]);
+
+  useEffect(() => {
+    const current = view.current;
+    if (current) current.dispatch(current.state.tr.setMeta(referencesKey, true));
+  }, [references]);
 
   useEffect(() => {
     const current = view.current;

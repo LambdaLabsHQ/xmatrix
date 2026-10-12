@@ -1,5 +1,6 @@
 import { markdownToPageDoc, pageSchema } from "@xmatrix/protocol/page-document";
 import { DOMSerializer, type Node as DocNode } from "prosemirror-model";
+import { drawPageReferences, type PageReferenceTargets } from "./page-reference-chips";
 
 /**
  * Markdown drawn as the live editor draws a page (pages-live-document.md §4):
@@ -15,7 +16,7 @@ const serializer = new DOMSerializer({
       ["input", { type: "checkbox", tabindex: "-1", ...(node.attrs.checked ? { checked: "" } : {}) }], ["div", 0]],
 }, DOMSerializer.marksFromSchema(pageSchema));
 
-export function renderPageDocument(markdown: string, target: HTMLElement): void {
+export function renderPageDocument(markdown: string, target: HTMLElement, references?: PageReferenceTargets): void {
   const doc = markdownToPageDoc(markdown);
   const fragment = serializer.serializeFragment(doc.content, { document: target.ownerDocument });
   target.replaceChildren(fragment);
@@ -24,4 +25,5 @@ export function renderPageDocument(markdown: string, target: HTMLElement): void 
     if (!block.firstChild) block.append(Object.assign(target.ownerDocument.createElement("br"),
       { className: "ProseMirror-trailingBreak" }));
   }
+  if (references) drawPageReferences(target, references);
 }

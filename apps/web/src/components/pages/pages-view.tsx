@@ -41,6 +41,7 @@ import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resourc
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
+import type { PageReferenceTargets } from "./page-reference-chips";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
 // The native shell also imports this module for its list screens. The editor
@@ -451,13 +452,15 @@ type PageDialogState =
   | { kind: "conversations"; blockId: string | null }
   | { kind: "attach"; blockId: string };
 
-export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPageDeleted, conversation, activeConversationId = null,
+export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
   renderConversation, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
   freshPageId = null }: {
   spaceId: string | null;
   token: string;
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
+  /** Opens a page a reference in the text names, at its section when it names one. */
+  onOpenSection: (pageId: string, blockId?: string | null) => void;
   onPageDeleted: () => void;
   /** What this client knows live about a conversation: the channel it holds, when it holds it. */
   conversation: (conversationId: string) => SerializedChannel | null;
@@ -730,6 +733,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
   const conversationName = useCallback((conversationId: string) =>
     conversations.find((item) => item.conversationId === conversationId)?.name ?? conversation(conversationId)?.name ?? null,
   [conversation, conversations]);
+  // `page:<id>` and `channel:<id>` in the text read as the names this reader's lists give them.
+  // They are drawn again only when the page list changes; the rest is read when a chip is drawn or clicked.
+  const referenceActions = useRef({ conversation, onOpenConversation, onOpenSection });
+  referenceActions.current = { conversation, onOpenConversation, onOpenSection };
+  const references = useMemo<PageReferenceTargets>(() => ({
+    pageTitle: (id) => tree.data?.find((item) => item.pageId === id)?.title ?? null,
+    channelName: (id) => referenceActions.current.conversation(id)?.name ?? null,
+    openPage: (id, blockId) => referenceActions.current.onOpenSection(id, blockId),
+    openChannel: (id) => referenceActions.current.onOpenConversation(id),
+  }), [tree.data]);
   // Open discussions anchored in the text, highlighted there (pages-live-document.md §4.3).
   const discussions = useMemo<Discussion[]>(() => linkList.filter((link) => link.anchor && !link.resolvedAt)
     .map((link) => ({ linkId: link.linkId, conversationId: link.conversationId, from: link.anchor!.from,
@@ -1172,14 +1185,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onPage
                 <div ref={docColumn} className="min-w-0 max-w-3xl flex-1">
                   {!drawn && document.data && (
                     // Where the editor's host holds its height.
-                    <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview" /></div>
+                    <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
+                      references={references} /></div>
                   )}
                   <div className={drawn ? undefined : "hidden"}>
                     {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit}
                       onReady={() => setEditorReady(true)} readerBaseline={drawn ? readerBaseline : null}
                       actions={sectionActions} headingActions={headingActions} onBlocks={setBlocks} sections={sections}
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
-                      automations={automationsById}
+                      automations={automationsById} references={references}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
                       onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
                   </div>
