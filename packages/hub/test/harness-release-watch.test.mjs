@@ -10,6 +10,22 @@ import {
 const npm = { id: "claude", management: { latest: { kind: "npm", package: "@anthropic-ai/claude-code" } } };
 const pypi = { id: "vibe", management: { latest: { kind: "pypi", package: "mistral-vibe" } } };
 const unpublished = { id: "cursor", management: {} };
+/** A daemon the read names for a preset. */
+const target = (presetId, owner = "owner") => ({ presetId, ownerUserId: owner, ownerEmail: `${owner}@example.test`,
+  machineId: "machine", hostId: "host", daemonId: `daemon-${owner}` });
+
+/** One pass over npm, PyPI and an unpublished preset; records each target read and command. */
+async function watchAll(latest, found) {
+  const asked = [];
+  const commands = [];
+  const result = await watchHarnessReleases({}, {
+    presets: [npm, pypi, unpublished],
+    latest,
+    targets: async (releases) => { asked.push(releases); return found(releases); },
+    issue: async (command) => { commands.push(command); return { command: { id: command.controlId } }; },
+  });
+  return { result, asked, commands };
+}
 
 test("registry reads use the official endpoints and accept only bounded version strings", () => {
   assert.equal(latestVersionUrl(npm.management.latest),
@@ -34,21 +50,8 @@ test("a large registry document is read, but one past the bound is refused", asy
 });
 
 test("each daemon that has not seen the latest version is told the preset, never a version", async () => {
-  const asked = [];
-  const commands = [];
-  const result = await watchHarnessReleases({}, {
-    presets: [npm, pypi, unpublished],
-    latest: async (latest) => latest.kind === "npm" ? "2.1.289" : undefined,
-    targets: async (releases) => {
-      asked.push(releases);
-      return [{ presetId: "claude", ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "machine",
-        hostId: "host", daemonId: "daemon" }];
-    },
-    issue: async (command) => {
-      commands.push(command);
-      return { command: { id: command.controlId } };
-    },
-  });
+  const { result, asked, commands } = await watchAll(
+    async (latest) => latest.kind === "npm" ? "2.1.289" : undefined, () => [target("claude")]);
   assert.deepEqual(result, { issued: 1 });
   assert.deepEqual(asked, [[{ presetId: "claude", version: "2.1.289" }]],
     "an unreadable registry and an unpublished preset tell nobody");
@@ -65,8 +68,7 @@ test("one refused notice does not stop the others", async () => {
   const result = await watchHarnessReleases({}, {
     presets: [npm],
     latest: async () => "2.1.289",
-    targets: async () => ["a", "b"].map(owner => ({ presetId: "claude", ownerUserId: owner, ownerEmail: `${owner}@example.test`,
-      machineId: "machine", hostId: "host", daemonId: `daemon-${owner}` })),
+    targets: async () => ["a", "b"].map(owner => target("claude", owner)),
     issue: async () => {
       calls++;
       if (calls === 1) throw new Error("authority unavailable");
@@ -77,18 +79,9 @@ test("one refused notice does not stop the others", async () => {
 });
 
 test("every preset with a published version is read in one pass, each target told its own preset", async () => {
-  const asked = [];
-  const commands = [];
-  const result = await watchHarnessReleases({}, {
-    presets: [npm, pypi, unpublished],
-    latest: async (latest) => latest.kind === "npm" ? "2.1.289" : "2.25.8",
-    targets: async (releases) => {
-      asked.push(releases);
-      return releases.map(({ presetId }) => ({ presetId, ownerUserId: "owner", ownerEmail: "owner@example.test",
-        machineId: "machine", hostId: "host", daemonId: "daemon" }));
-    },
-    issue: async (command) => { commands.push(command); return {}; },
-  });
+  const { result, asked, commands } = await watchAll(
+    async (latest) => latest.kind === "npm" ? "2.1.289" : "2.25.8",
+    (releases) => releases.map(({ presetId }) => target(presetId)));
   assert.deepEqual(result, { issued: 2 });
   assert.deepEqual(asked, [[{ presetId: "claude", version: "2.1.289" }, { presetId: "vibe", version: "2.25.8" }]]);
   assert.deepEqual(commands.map(command => command.payload.presetId), ["claude", "vibe"]);
