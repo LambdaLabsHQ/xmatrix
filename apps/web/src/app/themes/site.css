@@ -417,6 +417,12 @@ html:has(.site-page) {
   table-layout: auto;
 }
 
+/* Chat messages should be readable without panning on a phone. */
+.docs-article pre:has(> code.language-text) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .docs-foot {
   display: flex;
   flex-direction: column;
