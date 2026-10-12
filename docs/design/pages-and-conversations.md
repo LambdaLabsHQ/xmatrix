@@ -334,19 +334,39 @@ revisions.
   pass through this interface.
 
 `git clone https://<hub>/git/<space>.git`, with an xMatrix token as the
-password, gives the reader a repository of the pages they can read now. A page
-with pages below it is a directory whose `README.md` is its text; any other
-page is `<title>.md`. Each commit is one page revision, authored by whoever
-wrote it, with `xMatrix-Page`, `xMatrix-Revision` and `xMatrix-Conversation`
-trailers, so the same reader always gets the same commit ids.
+password, gives the reader a repository of the pages they can read now. Each
+commit is one page revision, authored by whoever wrote it, with
+`xMatrix-Page`, `xMatrix-Revision` and `xMatrix-Conversation` trailers, so the
+same reader always gets the same commit ids.
+
+The repository is an [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf)
+v0.2 bundle, so any OKF tool reads a Space's pages as they are:
+
+- **Every page is a concept, `<title>.md`.** A page with pages below it also
+  has a directory `<title>/` holding them. Its frontmatter, which xMatrix
+  writes, carries `type: xMatrix Page`, `title`, a one-line `description`
+  from the text, the page's link as `resource`, `generated` (the latest
+  revision's author as `human:<id>` or `<agent>/xmatrix`, and its time), and
+  `xmatrix_page`/`xmatrix_revision`.
+- **`page:<id>` references are bundle links** (`[page:<id>](/company/relay.md)`),
+  so the pages form the bundle's graph. A page the reader cannot read stays
+  as written.
+- **Every directory has an `index.md`** listing its pages and the directories
+  below them; the root one declares `okf_version`.
 
 A push must build on the reader's current history, and each changed page
 becomes a revision by the pusher, merged with concurrent edits the same way as
 any other edit. A new Markdown file becomes a page below the page its
 directory belongs to (a person's act, like any new page). Removing or renaming
-a page happens in xMatrix, not by a push, and merge commits are refused. The
-Hub's own commits then replace the pushed one, so `git pull --rebase` finds
-nothing left to apply.
+a page happens in xMatrix, not by a push, and merge commits are refused. A
+push reads the bundle back: the frontmatter is xMatrix's (a changed one is
+refused), `index.md` and `log.md` are never pages, and links to files in the
+bundle become `page:<id>` again. So another tool's OKF bundle pushed into the
+repository becomes pages: each concept is a page titled by its `title`, a
+directory without a concept of its own becomes a page named after it, and the
+links between them become references. The Hub's own commits then replace the
+pushed one. A changed page rebases cleanly; a new page now carries
+frontmatter, so `git pull --rebase -X ours` takes the Hub's side of it.
 
 ### 5.5 Public pages
 
