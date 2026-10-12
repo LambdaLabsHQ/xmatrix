@@ -5,7 +5,30 @@ require("./typescript-require.cjs").installTypeScriptRequire();
 const {
   compactWorkspacePathTail,
   repoReferenceForWorkspace,
+  channelAgentInstanceWorkspaceTag,
 } = require("./workspace-labels.ts");
+
+test("repo launches show their admitted repository instead of the managed checkout cwd", () => {
+  const instance = { machineId: "machine", cwd: "/home/dev/.xmatrix-management/registration-123",
+    workspaceName: "Internal checkout", repository: "LambdaLabsHQ/xmatrix" };
+  const expected = { id: "repo", label: "Repository", value: "LambdaLabsHQ/xmatrix" };
+  assert.deepEqual(channelAgentInstanceWorkspaceTag(instance, []), expected);
+  assert.deepEqual(channelAgentInstanceWorkspaceTag(instance, [{ machineId: "machine",
+    canonicalCwd: instance.cwd, gitRemote: "https://github.com/other/repo.git" }]), expected);
+  assert.deepEqual(channelAgentInstanceWorkspaceTag({ ...instance,
+    repository: "https://token:private@github.com/LambdaLabsHQ/xmatrix.git?secret=hidden" }, []), expected);
+});
+
+test("directory launches and older Hub instances keep their workspace label", () => {
+  const instance = { machineId: "machine", cwd: "C:\\Users\\dev\\notes" };
+  assert.deepEqual(channelAgentInstanceWorkspaceTag(instance, []),
+    { id: "workspace", label: "Workspace", value: "dev/notes" });
+  assert.deepEqual(channelAgentInstanceWorkspaceTag(instance, [{ machineId: "machine",
+    canonicalCwd: instance.cwd, gitRemote: "git@github.com:team/project.git" }]),
+    { id: "repo", label: "Repository", value: "team/project" });
+  assert.deepEqual(channelAgentInstanceWorkspaceTag({ ...instance, repository: "/local/repo" }, []),
+    { id: "workspace", label: "Workspace", value: "dev/notes" });
+});
 
 test("workspace path tails keep the distinguishing directories", () => {
   assert.equal(compactWorkspacePathTail("/Users/eevee/code/xmatrix"), "code/xmatrix");

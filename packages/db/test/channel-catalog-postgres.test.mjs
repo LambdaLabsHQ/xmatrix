@@ -84,7 +84,7 @@ async function seed() {
       VALUES
       ('root-00:1#1','owner','root-00','running',1,'{}',$1,$1),
       ('root-40:6#1','owner','root-40','running',1,
-       '{"executionKey":"execution-6","machineId":"machine-1","hostId":"host-1"}',$1,$1),
+       '{"executionKey":"execution-6","machineId":"machine-1","hostId":"host-1","remoteRepo":"LambdaLabsHQ/xmatrix"}',$1,$1),
       ('root-40:7#1','owner','root-40','running',1,
        '{"executionKey":"execution-7","machineId":"machine-1","hostId":"host-1"}',$1,$1),
       ('root-40:8#1','owner','root-40','completed',1,
@@ -358,6 +358,8 @@ integration("channel catalog pages and resolves against PostgreSQL", async () =>
     ],
   );
   assert.equal(first.counts.active, 60, "every readable conversation is listed");
+  assert.deepEqual(catalogInstances(first.rows[0].channel).map(instance => instance.repository),
+    ["LambdaLabsHQ/xmatrix", undefined], "the catalog reads each exact Run's admitted repository");
   assert.equal(first.catalogRevision, 77);
   assert.ok(first.nextCursor);
 
@@ -609,7 +611,7 @@ integration("startup resolve omits participants, full reads hydrate them, and AC
     assert.equal(Object.hasOwn(channel, "memberPresence"), false);
     assert.equal(Object.hasOwn(channel, "visibleHumanMemberIds"), false);
   }
-  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v8"), false);
+  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v9"), false);
   assert.equal(observations.some(event => event.queryName === "channel_catalog_open_space_members_v2"), false);
   const full = await catalog.resolve(input);
   assert.equal(catalogInstances(full.channels.find(channel => channel.id === "root-40")).length, 2);

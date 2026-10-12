@@ -93,6 +93,11 @@ CLI arguments or bounded JSON stdin; they do not stage local files. Their
 own-Channel authorization and immutable database revision/input evidence are
 unchanged. See [Channel metadata revisions](../design/channel-metadata-revisions.md).
 
+Agent cards show the repository admitted for their Run instead of a managed
+checkout path. The optional Instance `repository` display field comes from
+Run metadata and survives live presence updates and sleep; directory launches
+and older Hubs retain the registered-workspace/path fallback.
+
 ### Search Console ownership and management
 
 The Search Console connector covers the Search Console and Site Verification API

@@ -174,14 +174,10 @@ test("the details rail tags where an Agent works: repository when there is one, 
     spaces: [{ ...E2E_SPACE, members: [...E2E_SPACE.members, { userId: "owner-0", name: "Legend Wang",
       email: "owner-0@example.test", role: "member", joinedAt: E2E_NOW }] }],
     channels: [{ ...E2E_CHANNEL, memberPresence: { [profile.id]: { kind: "agent", status: "busy",
-      label: "claude", instances: [instance("1", repoCwd), instance("2", plainCwd)] } } }],
-    workspaces: [{
-      ownerUserId: "owner-0", machineId, hostId: "Workstation", hostName: "Workstation",
-      canonicalCwd: repoCwd, displayName: "77961a92",
-      gitRemote: "https://github.com/LambdaLabsHQ/xmatrix.git",
-      runtimesSeen: [], boundChannelIds: [E2E_CHANNEL.id], visibility: "private",
-      createdAt: E2E_NOW, updatedAt: E2E_NOW, lastSeenAt: E2E_NOW, metadata: {},
-    }],
+      label: "claude", instances: [{ ...instance("1", repoCwd), repository: "LambdaLabsHQ/xmatrix" },
+        instance("2", plainCwd)] } } }],
+    // Managed repository checkouts have no registered Workspace row.
+    workspaces: [],
   });
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
   const rail = page.locator(".app-details");

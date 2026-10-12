@@ -249,6 +249,7 @@ test("usage heartbeats retire stale mirrored quota and context chips", () => {
 
 test("Agent presentation survives bounded hibernation with its required authority route", () => {
   const session = runtimeSession(fullPresentation());
+  session.run.repository = "LambdaLabsHQ/xmatrix";
   const serialized = serializeAgentInstanceHibernationAttachment(session);
   const restored = parseAgentInstanceHibernationAttachment(serialized);
 
@@ -256,6 +257,7 @@ test("Agent presentation survives bounded hibernation with its required authorit
   assert.equal(restored.session.presentation.statusChips[1].value, "high");
   assert.equal(restored.session.presentation.usage.quotaUsages[0].window, "5h");
   assert.equal(restored.session.principal.spaceId, "space-1");
+  assert.equal(restored.session.run.repository, "LambdaLabsHQ/xmatrix");
   assert.ok(new TextEncoder().encode(JSON.stringify(serialized)).byteLength <= 4_096);
 
   const systemSession = runtimeSession();
@@ -269,6 +271,7 @@ test("Agent presentation survives bounded hibernation with its required authorit
 
 test("Human channel presence and Agent peer cards receive the full live presentation", () => {
   const session = runtimeSession(fullPresentation());
+  session.run.repository = "LambdaLabsHQ/xmatrix";
   const channel = presentationChannel("migration", {
       "agent-1": {
         kind: "agent",
@@ -295,6 +298,7 @@ test("Human channel presence and Agent peer cards receive the full live presenta
   // channelInstanceId ordinals collide across sibling thread channels; every
   // live instance card must self-describe its owning channel scope.
   assert.equal(instance.channelId, "channel-1");
+  assert.equal(instance.repository, "LambdaLabsHQ/xmatrix");
   assert.equal(instance.gitBranch, "fix/restore-agent-migration-labels");
   assert.equal(instance.model, "gpt-5");
   assert.equal(instance.effort, "high");
@@ -306,6 +310,7 @@ test("Human channel presence and Agent peer cards receive the full live presenta
   assert.equal(peer.usage.totalTokens, 120);
   assert.equal(peer.instances[0].commands[0].token, "/model");
   assert.equal(peer.instances[0].channelId, "channel-1");
+  assert.equal(peer.instances[0].repository, "LambdaLabsHQ/xmatrix");
 });
 
 /** user-1 focuses channel-1, which reads as `channel`; returns what the fanout delivered. */
@@ -811,11 +816,11 @@ test("registration catalog and live presence retain one card per Instance throug
     instance_id: `instance-${ordinal}`, channel_id: "channel-1", channel_instance_id: ordinal,
     status: "online", created_at: "2026-09-24T09:00:00Z", updated_at: "2026-09-24T09:01:00Z", registration_owner: "owner-1", registration_machine: "machine-1",
     registration_harness: "claude", workspace_machine_id: "machine-1",
-    workspace_canonical_cwd: "/workspace", run_metadata_json: { identityKind: "instance" },
+    workspace_canonical_cwd: "/workspace", run_metadata_json: { identityKind: "instance", remoteRepo: "LambdaLabsHQ/xmatrix" },
     profile_name: "Claude", profile_runtime: "claude", profile_metadata_json: {}, owner_email: null,
   }));
   const catalog = await loadChannelAgentPresence({ async query(statement) {
-    return statement.name === "channel_agent_resting_presence_v4" ? [] : rows;
+    return statement.name === "channel_agent_resting_presence_v5" ? [] : rows;
   } }, "space-1", ["channel-1"]);
   let channel = { id: "channel-1", memberPresence: catalog.get("channel-1") };
   const sessions = rows.map(row => ({
@@ -832,6 +837,8 @@ test("registration catalog and live presence retain one card per Instance throug
     assert.equal(instances.length, 2);
     assert.deepEqual(instances.map(i => i.id).sort(), ["instance-3", "instance-4"]);
     assert.ok(instances.every(i => i.status === "idle" && i.model === "claude"));
+    assert.ok(instances.every(i => i.repository === "LambdaLabsHQ/xmatrix"),
+      "an older runtime snapshot cannot erase the catalog's Run repository");
   }
   channel = overlayAgentPresenceOnChannel(channel, {
     reason: "disconnect",
@@ -928,9 +935,11 @@ test("runtime presence accepts a missing hostname but still requires exact Machi
   const { loadLiveAgentPresenceFromRuntime } = await import("../src/runtime-transport/agent-presence-snapshot.ts");
   const snapshot = { ownerUserId: "owner", agentId: "instance", agentName: "Agent", runId: "run",
     instanceId: "instance", channelId: "channel", machineId: "machine", status: "idle",
+    repository: "LambdaLabsHQ/xmatrix",
     connectedAt: "2026-10-03T00:00:00Z", lastSeenAt: "2026-10-03T00:00:00Z" };
   const runtime = value => ({ fetch: async () => Response.json({ sessions: [value] }) });
   assert.equal((await loadLiveAgentPresenceFromRuntime(runtime(snapshot), "https://runtime.test"))[0].hostId, "");
+  assert.equal((await loadLiveAgentPresenceFromRuntime(runtime(snapshot), "https://runtime.test"))[0].repository, "LambdaLabsHQ/xmatrix");
   for (const field of ["machineId", "runId", "instanceId", "channelId"]) {
     assert.deepEqual(await loadLiveAgentPresenceFromRuntime(runtime({ ...snapshot, [field]: undefined,
       hostname: "same-name" }), "https://runtime.test"), []);

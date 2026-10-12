@@ -21,7 +21,6 @@ import type {
   LlmQuotaUsage,
   LlmUsage,
   LocalManagedAgent,
-  StatusChip,
   UsageLimitSummary,
 } from "./workspace-shell-domain-types";
 
@@ -54,14 +53,7 @@ import {
   type AgentTraceTimelineField,
 } from "@/components/dashboard/agent-trace-stream";
 
-import {
-  workspaceForInstance,
-} from "@/components/dashboard/agent-workspaces";
-
-import {
-  compactWorkspacePathTail,
-  repoReferenceForWorkspace,
-} from "@/components/dashboard/workspace-labels";
+export { channelAgentInstanceWorkspaceTag } from "./workspace-labels";
 
 import {
   type DesktopUpdateStatus,
@@ -80,7 +72,6 @@ import type {
   SerializedAgentInstance,
   SerializedChannel,
   SerializedSpace,
-  SerializedWorkspace,
 } from "@xmatrix/protocol";
 
 export function collapsedMessagePreview(body: string): string {
@@ -321,25 +312,6 @@ export function spacePreferredLanguage(space: SerializedSpace | null): "zh" | "e
   // Read the earlier setting while existing Spaces migrate to `metadata.locale`.
   const value = space?.metadata?.preferredLanguage;
   return value === "zh" || value === "en" ? value : undefined;
-}
-
-/* Where the instance is working, said the way a summon says it — a repository
-   when there is one, a path otherwise, and the two carry different marks because
-   a repository is not a folder. The registered Workspace is the only record that
-   knows the repository; an instance reports a cwd and nothing else, so its own
-   fields are the fallback. Machine, branch and model are their own tags. */
-export function channelAgentInstanceWorkspaceTag(
-  instance: SerializedAgentInstance,
-  workspaces: SerializedWorkspace[]
-): StatusChip | undefined {
-  const workspace = workspaceForInstance(workspaces, instance);
-  const repo = workspace && repoReferenceForWorkspace(workspace);
-  if (repo) return { id: "repo", label: "Repository", value: repo };
-
-  const path = workspace
-    ? compactWorkspacePathTail(workspace.canonicalCwd)
-    : instance.workspaceName?.trim() || (instance.cwd ? compactWorkspacePathTail(instance.cwd) : undefined);
-  return path ? { id: "workspace", label: "Workspace", value: path } : undefined;
 }
 
 export function latestChannelConnectorStateMessageId(history: ChannelMessage[]): string | undefined {

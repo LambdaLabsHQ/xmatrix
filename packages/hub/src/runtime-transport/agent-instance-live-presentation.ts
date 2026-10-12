@@ -28,6 +28,7 @@ export interface AgentInstanceLivePresenceSession {
     | "machineId"
     | "hostId"
     | "cwd"
+    | "repository"
     | "status"
     | "instanceStatus"
   >;
@@ -97,6 +98,8 @@ export function overlayAgentPresenceOnChannel(
       ...(session.run.machineId ? { machineId: session.run.machineId } : {}),
       ...(session.run.hostId ? { hostId: session.run.hostId } : {}),
       ...(session.run.cwd ? { cwd: session.run.cwd } : {}),
+      ...(session.run.repository || existing?.repository
+        ? { repository: session.run.repository || existing?.repository } : {}),
     };
     instances = [
       ...instances.filter((instance) => {
@@ -240,6 +243,7 @@ export function serializeAgentFromLivePresence(
       ...(session.run.machineId ? { machineId: session.run.machineId } : {}),
       ...(session.run.hostId ? { hostId: session.run.hostId } : {}),
       ...(session.run.cwd ? { cwd: session.run.cwd } : {}),
+      ...(session.run.repository ? { repository: session.run.repository } : {}),
     }],
   };
 }

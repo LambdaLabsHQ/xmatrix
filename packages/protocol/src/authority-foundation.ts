@@ -1154,6 +1154,8 @@ export interface SerializedAgentInstance extends AgentPresentationSnapshot {
   hostId?: string;
   hostName?: string;
   cwd?: string;
+  /** Repository admitted for this Run, for display only; independent of its checkout path. */
+  repository?: string;
   workspace?: WorkspaceRef;
   workspaceName?: string;
   /**
