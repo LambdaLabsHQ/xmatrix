@@ -1098,7 +1098,7 @@ export function useComposerCompletion({
                         >
                           {section.candidates.length === 0 ? <MentionCategoryLabel section={section} /> :
                             <span className="min-w-0 flex-1 truncate pl-7">Show {section.hiddenCount} more</span>}
-                          <ChevronRight aria-hidden="true" className="size-3.5 shrink-0" />
+                          <ChevronRight aria-hidden="true" className="ml-auto size-3.5 shrink-0" />
                         </CompletionOptionButton>
                       );
                     })()}

@@ -10,7 +10,7 @@ category before Agent summons. Its fold is independent of the harness catalog. O
 remain in the colon reference picker. A new thread draft offers no Instances
 from its parent Channel.
 
-Mention categories use quiet text captions with a count and no icon, one-line choices (name,
+Mention categories are named by the lists' coloured section label (icon, name, count; one hue per category), one-line choices (name,
 then its description truncated in the remaining width), inset rounded selections
 and plain expansion rows inside the composer's single Liquid Glass surface.
 Category labels and rows add no separate backdrop-filter material.

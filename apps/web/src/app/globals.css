@@ -7234,10 +7234,8 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    Categories are dense: a caption line, then one-line rows, so the choices
    own the panel's height. */
 .app-mention-suggestions { padding-block: 4px; }
-.app-mention-category-heading { padding: 8px 18px 2px; }
-/* A caption is quiet text beside its count: no icon, weight or ink a choice has. */
-.app-mention-category-label { display: flex; align-items: baseline; gap: 6px; flex: 1; font-size: 11px; line-height: 16px; font-weight: 500; color: color-mix(in oklch, var(--foreground) 45%, transparent); }
-.app-mention-category-count { font-variant-numeric: tabular-nums; opacity: .75; }
+/* A category is named by a coloured section label (ListSectionLabel), which no choice wears. */
+.app-mention-category-heading { display: flex; padding: 6px 18px 3px; }
 .xmatrix-app .app-mention-suggestions .app-mention-category button.app-completion-option {
   width: calc(100% - 16px) !important;
   min-height: 32px;
@@ -7745,8 +7743,8 @@ html[data-app-theme="wood"] .xmatrix-app.xmatrix-app .app-list-row span.app-list
 }
 
 /* The sidebar's own ink rules are !important; a label's tone has to outrank them. */
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-heading .app-list-section-label.app-list-section-label,
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-heading .app-list-section-label.app-list-section-label * {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.app-list-section-heading, .app-mention-category) .app-list-section-label.app-list-section-label,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app :is(.app-list-section-heading, .app-mention-category) .app-list-section-label.app-list-section-label * {
   color: var(--app-list-section-ink) !important;
 }
 
@@ -7757,6 +7755,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-
 .xmatrix-app .app-list-section-label[data-tone="primary"] {
   --app-list-section-ink: oklch(45% 0.11 255);
 }
+
+/* The @ list's categories: one hue each at the primary's lightness and chroma. */
+.xmatrix-app .app-list-section-label[data-tone="agent"] { --app-list-section-ink: oklch(45% 0.11 305); }
+.xmatrix-app .app-list-section-label[data-tone="human"] { --app-list-section-ink: oklch(45% 0.11 155); }
+.xmatrix-app .app-list-section-label[data-tone="app"] { --app-list-section-ink: oklch(45% 0.11 205); }
 
 html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-label.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip {
   background: color-mix(in oklch, var(--app-list-section-ink) 12%, transparent) !important;
