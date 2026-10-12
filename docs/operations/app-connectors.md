@@ -110,6 +110,8 @@ section, and none is ever shown again.
 | Gmail (via Composio) | `search:* [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub) |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 
+xmatrix.sh publishes its own IndexNow key at `https://xmatrix.sh/71d38a28828cfa8a824127e9320a4668.txt` (`apps/web/public`), so the company's `bingwebmaster` connection can push xmatrix.sh URLs with that key. The key is public by design; a new key needs a new file.
+
 ### Search Console onboarding
 
 Connect requests `webmasters` and `siteverification`. Reconnect an older grant in
