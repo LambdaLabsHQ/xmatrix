@@ -61,6 +61,13 @@ xMatrix.
 
 - Showing which app wrote a message or revision ("via ChatGPT").
 - A ChatGPT page-card widget (Apps SDK output template).
-- Directory listings: ChatGPT app directory and the MCP Registry; Grok and
-  Cursor connect by entering the URL. The Claude connector directory is not a
-  target.
+- The ChatGPT app directory (submitted from the OpenAI dashboard by a
+  person). Grok and Cursor connect by entering the URL. The Claude connector
+  directory is not a target.
+
+## Listing
+
+The official MCP Registry lists the server as `io.github.LambdaLabsHQ/xmatrix`
+from `deploy/mcp-registry/server.json`; `mcp-registry-publish.yml` publishes
+it with this repository's GitHub OIDC identity when that file changes on
+main, so a new listing is a new `version` there.
