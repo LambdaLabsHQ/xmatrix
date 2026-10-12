@@ -84,9 +84,17 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Read sessions, users and key events by landing page, channel or country, or only organic search traffic.",
     "Follow a page from Search Console clicks to Google Analytics sessions and conversions.",
   ],
+  googlebusinessprofile: [
+    "Read each location's search and Maps views, website clicks, calls and direction requests.",
+    "Read new reviews and post a reply once a Space admin allows it in the channel.",
+  ],
   pagespeed: [
     "Run a Lighthouse audit on a page and list its scores, lab metrics and failing SEO and performance checks.",
     "Read real-user Core Web Vitals for a page or origin from the Chrome UX Report.",
+  ],
+  yandexwebmaster: [
+    "Read a site's Yandex quality index, indexed pages, site problems and top queries.",
+    "Queue a changed page for Yandex recrawl.",
   ],
   gmail: [
     "Find a sign-up or login verification email and open its link without leaving the agent.",
