@@ -67,11 +67,11 @@ test("an outside app connects over OAuth and reads the member's pages through MC
       const tokens = await json(await call("/oauth2/token", { method: "POST", form: { grant_type: "authorization_code",
         code: back.searchParams.get("code"), code_verifier: verifier, client_id: client.client_id, redirect_uri: REDIRECT } }));
       let id = 0;
-      return async (method, params = {}) => {
+      return async (method, params = {}, expectedStatus = 200) => {
         const response = await worker.fetch("/mcp", { method: "POST", headers: {
           authorization: `Bearer ${tokens.access_token}`, "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
-        assert.equal(response.status, 200, await response.clone().text());
+        assert.equal(response.status, expectedStatus, await response.clone().text());
         return (await response.json()).result;
       };
     };
@@ -80,7 +80,7 @@ test("an outside app connects over OAuth and reads the member's pages through MC
     assert.equal((await mcp("initialize", { protocolVersion: "2025-06-18" })).serverInfo.name, "xmatrix");
     const tools = (await mcp("tools/list")).tools;
     assert.deepEqual(tools.map((item) => item.name).sort(),
-      ["list_channels", "list_pages", "list_spaces", "read_channel", "read_page", "search_pages"]);
+      ["list_channels", "list_pages", "list_spaces", "read_channel", "read_page", "search_pages", "show_page"]);
     assert.ok(tools.every((item) => item.annotations.readOnlyHint === true), "reading is all a read grant offers");
     assert.ok((await tool("list_spaces", {})).spaces.some((item) => item.id === space.id));
     assert.ok((await tool("list_pages", { spaceId: space.id })).pages.some((page) => page.pageId === roadmap.pageId));
@@ -88,8 +88,20 @@ test("an outside app connects over OAuth and reads the member's pages through MC
     const read = await tool("read_page", { spaceId: space.id, pageId: roadmap.pageId });
     assert.equal(read.body, "# Roadmap\n\nShip the MCP server.\n");
     assert.match(read.url, new RegExp(`pages\\?page=${roadmap.pageId}$`, "u"));
+    const show = tools.find((item) => item.name === "show_page");
+    const resources = (await mcp("resources/list")).resources;
+    assert.ok(resources.some((item) => item.uri === show._meta.ui.resourceUri));
+    const card = (await mcp("resources/read", { uri: show._meta.ui.resourceUri })).contents[0];
+    assert.equal(card.mimeType, "text/html;profile=mcp-app");
+    assert.ok(!card.text.includes("Ship the MCP server."), "the static template has no private page data");
+    assert.deepEqual(await tool("show_page", { spaceId: space.id, pageId: roadmap.pageId }), read);
     const elsewhere = await mcp("tools/call", { name: "read_page", arguments: { spaceId: `space-${randomUUID()}`, pageId: roadmap.pageId } });
     assert.equal(elsewhere.isError, true, "a Space the member is not in reads as an error the model sees");
+    assert.equal((await mcp("tools/call", { name: "show_page", arguments: {
+      spaceId: `space-${randomUUID()}`, pageId: roadmap.pageId } })).isError, true, "page cards use the same access check");
+    const noRead = await connectApp("openid");
+    assert.equal(await noRead("resources/list", {}, 403), undefined, "no MCP access without a reading grant");
+    assert.equal(await noRead("resources/read", { uri: show._meta.ui.resourceUri }, 403), undefined);
 
     // A write grant adds the writing tools; each acts through the Hub's own routes as the member.
     const writer = await connectApp("xmatrix:read xmatrix:write");

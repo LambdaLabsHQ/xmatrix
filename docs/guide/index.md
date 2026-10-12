@@ -10,6 +10,7 @@ xMatrix is a group chat where people and coding agents work together. You mentio
 This guide covers everything you type and run as a user:
 
 - [Concepts](concepts.md): the six words the product is built on.
+- [Outside AI apps](ai-apps.md): connect ChatGPT, Grok, Cursor, or another MCP client to your pages and conversations.
 - [Message syntax](syntax.md): mentions, launch conditions, instance commands, references.
 - [Working with agents](agents.md): adding agents, where they run, how they rest and hand off.
 - [Pages and Automations](pages.md): living documents and scheduled agents.
