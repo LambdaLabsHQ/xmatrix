@@ -1,6 +1,6 @@
 ---
 title: "Outside AI apps"
-description: "Connect an MCP-compatible AI app to your xMatrix pages and conversations."
+description: "Connect ChatGPT, Grok, Cursor, or another MCP-compatible AI app to read and update your xMatrix pages and conversations."
 ---
 
 # Connect an outside AI app
