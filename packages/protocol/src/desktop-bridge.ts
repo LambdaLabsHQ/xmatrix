@@ -70,10 +70,8 @@ export type DesktopNotification = {
 };
 
 export type DesktopBadgeState = {
-  /** Count of unread mentions / direct attention. Drives the numeric dock badge (Slack-style). */
+  /** How much is addressed to the person and unread. The app icon's badge shows it, and nothing at zero. */
   mentionCount: number;
-  /** Whether any channel has unread activity without a mention. Drives the dot-only badge. */
-  hasUnread: boolean;
 };
 
 export type DesktopNotificationReply = {

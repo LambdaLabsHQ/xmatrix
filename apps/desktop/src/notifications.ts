@@ -24,10 +24,8 @@ export type NotificationPlan = {
 };
 
 /**
- * Slack-style dock badge text:
- * - a number for unread mentions/attention (capped at "99+"),
- * - a dot for unread activity without a mention,
- * - empty string once everything is read.
+ * The dock badge counts what is addressed to the person and unread (capped at
+ * "99+"). Activity that asks nothing of them puts nothing on the icon.
  */
 export function dockBadgeText(state: DesktopBadgeState): string {
   const mentionCount = Number.isFinite(state.mentionCount)
@@ -36,7 +34,7 @@ export function dockBadgeText(state: DesktopBadgeState): string {
   if (mentionCount > 0) {
     return mentionCount > 99 ? "99+" : String(mentionCount);
   }
-  return state.hasUnread ? "•" : "";
+  return "";
 }
 
 /**

@@ -61,7 +61,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         applePurchases: (payload) => invoke("applePurchases", payload),
         appleFinish: (transactionId) => invoke("appleFinish", { transactionId }),
         appleManage: () => invoke("appleManage"),
-        setBadge: (count) => invoke("setBadge", { count }),
+        setBadge: (state) => invoke("setBadge", { count: typeof state === "number" ? state : (state?.mentionCount ?? 0) }),
         setTitle: (title) => invoke("setTitle", { title }),
         getNotificationSettings: () => invoke("getNotificationSettings"),
         requestNotifications: () => invoke("requestNotifications"),

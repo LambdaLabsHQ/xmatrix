@@ -11,26 +11,26 @@ test.before(async () => {
 });
 
 test("dockBadgeText shows the mention count when there are mentions", () => {
-  assert.equal(dockBadgeText({ mentionCount: 3, hasUnread: true }), "3");
-  assert.equal(dockBadgeText({ mentionCount: 1, hasUnread: false }), "1");
+  assert.equal(dockBadgeText({ mentionCount: 3 }), "3");
+  assert.equal(dockBadgeText({ mentionCount: 1 }), "1");
 });
 
 test("dockBadgeText caps the mention count at 99+", () => {
-  assert.equal(dockBadgeText({ mentionCount: 100, hasUnread: true }), "99+");
-  assert.equal(dockBadgeText({ mentionCount: 99, hasUnread: true }), "99");
+  assert.equal(dockBadgeText({ mentionCount: 100 }), "99+");
+  assert.equal(dockBadgeText({ mentionCount: 99 }), "99");
 });
 
-test("dockBadgeText shows a dot for unread activity without mentions", () => {
-  assert.equal(dockBadgeText({ mentionCount: 0, hasUnread: true }), "•");
+test("dockBadgeText shows nothing for activity that is not addressed to the person", () => {
+  assert.equal(dockBadgeText({ mentionCount: 0 }), "");
 });
 
 test("dockBadgeText is empty when everything is read", () => {
-  assert.equal(dockBadgeText({ mentionCount: 0, hasUnread: false }), "");
+  assert.equal(dockBadgeText({ mentionCount: 0 }), "");
 });
 
 test("dockBadgeText tolerates non-finite/negative mention counts", () => {
-  assert.equal(dockBadgeText({ mentionCount: Number.NaN, hasUnread: true }), "•");
-  assert.equal(dockBadgeText({ mentionCount: -5, hasUnread: false }), "");
+  assert.equal(dockBadgeText({ mentionCount: Number.NaN }), "");
+  assert.equal(dockBadgeText({ mentionCount: -5 }), "");
 });
 
 test("planNotification builds a Slack-style channel toast with inline reply on macOS", () => {

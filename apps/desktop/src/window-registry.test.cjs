@@ -150,10 +150,10 @@ test("aggregateBadge sums the Spaces the open windows are showing", async () => 
   const { aggregateBadge } = await import("./window-registry.ts");
   assert.deepEqual(
     aggregateBadge([
-      { key: "space-a", mentionCount: 2, hasUnread: true },
-      { key: "space-b", mentionCount: 3, hasUnread: false },
+      { key: "space-a", mentionCount: 2 },
+      { key: "space-b", mentionCount: 3 },
     ]),
-    { mentionCount: 5, hasUnread: true }
+    { mentionCount: 5 }
   );
 });
 
@@ -161,18 +161,18 @@ test("aggregateBadge collapses two windows left on the same Space", async () => 
   const { aggregateBadge } = await import("./window-registry.ts");
   assert.deepEqual(
     aggregateBadge([
-      { key: "space-a", mentionCount: 4, hasUnread: true },
-      { key: "space-a", mentionCount: 4, hasUnread: true },
+      { key: "space-a", mentionCount: 4 },
+      { key: "space-a", mentionCount: 4 },
     ]),
-    { mentionCount: 4, hasUnread: true }
+    { mentionCount: 4 }
   );
 });
 
 test("aggregateBadge clears when no window reports anything", async () => {
   const { aggregateBadge } = await import("./window-registry.ts");
-  assert.deepEqual(aggregateBadge([]), { mentionCount: 0, hasUnread: false });
+  assert.deepEqual(aggregateBadge([]), { mentionCount: 0 });
   assert.deepEqual(
-    aggregateBadge([{ key: "space-a", mentionCount: Number.NaN, hasUnread: false }]),
-    { mentionCount: 0, hasUnread: false }
+    aggregateBadge([{ key: "space-a", mentionCount: Number.NaN }]),
+    { mentionCount: 0 }
   );
 });

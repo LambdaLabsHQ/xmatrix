@@ -113,7 +113,6 @@ import {
   buildMachineSummaries,
   buildTimeline,
   canInviteToSpace,
-  channelUnreadCount,
   clearBrowserHash,
   copyTextToClipboard,
   currentBrowserLocation,
@@ -837,16 +836,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void refreshAgentPresetDiscoveries();
   }, [s.desktopBridge, refreshAgentPresetDiscoveries, setAgentPresetDiscoveries]);
 
-  const totalChannelUnreadCount = useMemo(
-    () =>
-      s.channels.reduce(
-        (total, channel) =>
-          total + channelUnreadCount(channel, s.channelReadCounts, s.channelReadCountsBaselineReady),
-        0
-      ),
-    [s.channelReadCounts, s.channelReadCountsBaselineReady, s.channels]
-  );
-
   const totalChannelMentionCount = useMemo(
     () =>
       s.channels.reduce(
@@ -869,11 +858,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   useEffect(() => {
     if (!s.desktopBridge) return;
-    void s.desktopBridge.setBadge({
-      mentionCount: totalChannelMentionCount,
-      hasUnread: totalChannelUnreadCount > 0,
-    });
-  }, [s.desktopBridge, totalChannelMentionCount, totalChannelUnreadCount]);
+    void s.desktopBridge.setBadge({ mentionCount: totalChannelMentionCount });
+  }, [s.desktopBridge, totalChannelMentionCount]);
 
   useEffect(() => {
     if (!s.desktopBridge?.onNotificationReply) return;
