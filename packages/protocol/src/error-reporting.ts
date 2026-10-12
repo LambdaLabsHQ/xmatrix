@@ -7,7 +7,9 @@ import {
   flush,
   getGlobalScope,
   linkedErrorsIntegration,
+  rewriteFramesIntegration,
   setCurrentClient,
+  type StackFrame,
 } from "@sentry/core";
 import { nodeStackLineParser, ServerRuntimeClient } from "@sentry/core/server";
 
@@ -19,6 +21,17 @@ export type ErrorReportingTarget = {
 };
 
 let reporting = false;
+
+/**
+ * A Worker names its bundled module bare (`index.js`). The release uploads that
+ * bundle's source map under `app:///`, so a bare frame is reported there and
+ * resolves to `src/`; paths with a scheme or a root are left as they are.
+ */
+export function bundleFrame(frame: StackFrame): StackFrame {
+  const filename = frame.filename;
+  if (!filename || filename.startsWith("/") || /^[a-z][a-z0-9+.-]*:/iu.test(filename)) return frame;
+  return { ...frame, filename: `app:///${filename}`, abs_path: `app:///${filename}` };
+}
 
 /**
  * Opens error reporting for this Worker isolate; without a DSN nothing is
@@ -39,6 +52,7 @@ export function startErrorReporting({ dsn, release, component }: ErrorReportingT
     integrations: [
       dedupeIntegration(),
       linkedErrorsIntegration(),
+      rewriteFramesIntegration({ iteratee: bundleFrame }),
       captureConsoleIntegration({ levels: ["error"] }),
     ],
     transport: (options) => createTransport(options, async ({ body }) => {

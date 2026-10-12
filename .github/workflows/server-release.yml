@@ -483,8 +483,9 @@ jobs:
             error_reporting=(--define "XMATRIX_SENTRY_DSN:\"$SENTRY_DSN\"" --define "XMATRIX_SENTRY_RELEASE:\"$GITHUB_REF_NAME\"")
           fi
           for attempt in 1 2 3; do
+            # --outdir keeps the exact deployed bundle and its map for error reporting.
             if pnpm exec wrangler deploy --config "$XMATRIX_HUB_CONFIG" --secrets-file "$secrets_file" --tag "$XMATRIX_DEPLOY_SHA" \
-                "${error_reporting[@]}"; then
+                --outdir "$RUNNER_TEMP/hub-bundle" "${error_reporting[@]}"; then
               break
             else
               status=$?
@@ -492,6 +493,28 @@ jobs:
             if [ "$attempt" -eq 3 ]; then exit "$status"; fi
             sleep $((attempt * 20))
           done
+
+      # Hub stack traces name the bundle `index.js`; error reporting sends them
+      # as `app:///index.js`, which resolves against this map. The Worker never
+      # serves it.
+      - name: Upload Hub source map to error reporting
+        working-directory: apps/web
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN_HUB }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT_HUB }}
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/hub-bundle"
+          trap 'rm -rf "$bundle"' EXIT
+          if [ -z "$SENTRY_AUTH_TOKEN" ] || [ -z "$SENTRY_DSN" ]; then exit 0; fi
+          test -s "$bundle/index.js" && test -s "$bundle/index.js.map"
+          # Error reporting never blocks shipping: a rejected upload only
+          # leaves this release's Hub stacks unresolved.
+          if ! pnpm exec sentry-cli sourcemaps upload --release "$GITHUB_REF_NAME" --url-prefix "app:///" "$bundle"; then
+            echo "::warning::Hub source map was not uploaded to error reporting"
+          fi
 
       - name: Verify production Hub secret policy
         working-directory: packages/hub
