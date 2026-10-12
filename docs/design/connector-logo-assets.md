@@ -36,6 +36,7 @@ their respective owners; these assets identify integrations with those products.
 | gmail | [Gmail](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/google-gmail.svg) |
 | google | [Google](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/google-icon.svg) |
 | googlechat | [Google Chat](https://raw.githubusercontent.com/simple-icons/simple-icons/9f1c11219a45e1440271e98a143490594a4aba6d/icons/googlechat.svg) |
+| googleanalytics | [Google Analytics](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/google-analytics.svg) |
 | googlesearchconsole | [Google Search Console](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/google-search-console.svg) |
 | grafana | [Grafana](https://raw.githubusercontent.com/simple-icons/simple-icons/9f1c11219a45e1440271e98a143490594a4aba6d/icons/grafana.svg) |
 | jira | [Jira](https://raw.githubusercontent.com/gilbarbara/logos/37a6b807fd71c622efea27a9309b5d4edc792969/logos/jira.svg) |

@@ -6,6 +6,7 @@ import { pageUrl, searchConsoleSite, searchConsoleSiteContains } from "./google-
 import { GOOGLE_SITE_VERIFICATION_ACTIONS } from "./google-site-verification";
 import { searchAnalyticsOptions } from "./google-search-analytics";
 import { googleHeaders } from "./google-headers";
+import { cell } from "./google-report";
 
 /*
  * Google Search Console (Search Console API v1 / webmasters v3). The grant is
@@ -19,10 +20,6 @@ const MAX_LINES = 250;
 
 function siteUrl(site: string, path = ""): string {
   return `${API}/sites/${encodeURIComponent(site)}${path}`;
-}
-
-function cell(value: unknown): string {
-  return String(value ?? "").slice(0, 300).replace(/[\r\n\t]/gu, " ");
 }
 
 function siteOnly(statement: { target: string; text: string }, usage: string): Record<string, string> | string {
