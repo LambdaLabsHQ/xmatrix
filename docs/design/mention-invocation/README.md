@@ -5,8 +5,8 @@ The invoking `@` owns its status. Each Agent in a message updates independently,
 These screenshots use local synthetic fixtures and the repository theme, not production data.
 
 The Web composer's root `@` list includes the current Channel's live Instances
-as explicit `@name:slot` addresses ahead of the harness catalog, so the default
-fold does not hide them behind summon choices. Offline Instances
+as explicit `@name:slot` addresses in a separate, initially open Instance
+category before Agent summons. Its fold is independent of the harness catalog. Offline Instances
 remain in the colon reference picker. A new thread draft offers no Instances
 from its parent Channel.
 

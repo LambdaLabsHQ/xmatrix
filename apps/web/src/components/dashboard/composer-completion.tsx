@@ -56,6 +56,7 @@ import {
   parseAppMentions,
   resolveMentionCompletion,
   type MentionCandidate,
+  type MentionCandidateSection,
   type MentionDynamicCompletionValues,
   type MentionInstanceTargetScope,
   type MentionLocalContext,
@@ -205,7 +206,7 @@ export function useComposerCompletion({
     ? summonAtCompletion(draft.slice(0, cursor), cursor) : undefined;
   const continuingLaunch = Boolean(boundarySummon) ||
     afterLaunchPick?.body === draft && afterLaunchPick.cursor === cursor;
-  const [expandedMentionKinds, setExpandedMentionKinds] = useState<Set<MentionCandidate["kind"]>>(
+  const [expandedMentionKinds, setExpandedMentionKinds] = useState<Set<MentionCandidateSection["kind"]>>(
     () => new Set()
   );
   const emptyMentionDynamicValues = useMemo<MentionDynamicCompletionValues>(() => ({}), []);
@@ -392,11 +393,11 @@ export function useComposerCompletion({
     () =>
       mentionSuggestionSections.flatMap((section) => {
         const items: Array<
-          | { candidate: MentionCandidate; sectionKind: MentionCandidate["kind"]; type: "candidate" }
+          | { candidate: MentionCandidate; sectionKind: MentionCandidateSection["kind"]; type: "candidate" }
           | {
               hiddenCount: number;
               label: string;
-              sectionKind: MentionCandidate["kind"];
+              sectionKind: MentionCandidateSection["kind"];
               type: "expand";
             }
         > = section.candidates.map((candidate) => ({
@@ -643,14 +644,14 @@ export function useComposerCompletion({
     focusAndSelect(next.value, next.cursor);
   }
 
-  function expandMentionKind(kind: MentionCandidate["kind"]) {
+  function expandMentionKind(kind: MentionCandidateSection["kind"]) {
     setExpandedMentionKinds((current) => {
       if (current.has(kind)) return current;
       return new Set([...current, kind]);
     });
   }
 
-  function expandableMentionKindForActiveItem(): MentionCandidate["kind"] | null {
+  function expandableMentionKindForActiveItem(): MentionCandidateSection["kind"] | null {
     const item = visibleMentionItems[activeIndex];
     if (!item) return null;
     if (item.type === "expand") return item.sectionKind;

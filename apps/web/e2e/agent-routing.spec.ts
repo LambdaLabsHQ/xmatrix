@@ -32,7 +32,7 @@ async function installCanonicalCatalog(page: import("@playwright/test").Page) {
   return locations;
 }
 
-test("bare @ keeps the active Channel instance visible ahead of a full harness catalog", async ({ page }, testInfo) => {
+test("bare @ shows active Channel instances in their own category beside a full harness catalog", async ({ page }, testInfo) => {
   const harnesses = ["claude", "codex", "cursor", "grok", "opencode", "windsurf"];
   const locations = harnesses.map(harness => ({
     key: { spaceId: E2E_SPACE.id, ownerUserId: "owner", machineId: "machine", harness },
@@ -51,6 +51,7 @@ test("bare @ keeps the active Channel instance visible ahead of a full harness c
   await page.goto("/app/personal-sspaceperso/channels/channel-general");
   const draft = page.locator("textarea.composer-textarea").first();
   await draft.fill("@");
+  await expect(page.getByRole("listbox").getByText("Instance", { exact: true })).toBeVisible();
   const instance = page.getByRole("option", { name: /^codex:1\s/u });
   await expect(instance).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("active-instance-mention.png") });

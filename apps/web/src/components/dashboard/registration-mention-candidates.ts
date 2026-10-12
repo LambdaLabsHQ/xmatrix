@@ -27,15 +27,9 @@ export function registrationMentionCandidates(existing: readonly MentionCandidat
   }
   const groups = capabilities.filter(group => group.harness.toLowerCase().includes(query.toLowerCase()) &&
     group.locations.some(location => location.state === "enabled" && location.routingReady));
-  const references = existing.filter(candidate =>
-    !(candidate.kind === "agent" && !candidate.action && candidate.completionSuffix === ":"));
-  // Keep current Instances ahead of the harness catalog: the bare @ list folds
-  // after six Agent rows, so appending them makes a live target disappear.
-  const isInstance = (candidate: MentionCandidate) => candidate.schemaNodeId === "agent-reference:instance";
-  return [...references.filter(isInstance),
-    ...groups.map<MentionCandidate>(group => ({ id: `capability:${group.harness}`, name: group.harness,
+  return [...groups.map<MentionCandidate>(group => ({ id: `capability:${group.harness}`, name: group.harness,
     kind: "agent", status: "offline", mention: group.harness, completionSuffix: " ", avatarUrl: icon(group.harness),
     description: `Choose automatically · @${group.harness}/ to choose a location`,
     invocationTarget: { kind: "capability", harness: group.harness } })),
-  ...references.filter(candidate => !isInstance(candidate))];
+  ...existing.filter(candidate => !(candidate.kind === "agent" && !candidate.action && candidate.completionSuffix === ":"))];
 }
