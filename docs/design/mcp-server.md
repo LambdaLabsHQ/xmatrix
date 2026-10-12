@@ -45,7 +45,7 @@ which is how clients discover where to sign in.
 ## Tools
 
 Reading (`xmatrix:read`, all `readOnlyHint`): `list_spaces`, `list_pages`,
-`search_pages`, `read_page`, `list_channels`, `read_channel`. Each calls the
+`search_pages`, `read_page`, `show_page`, `list_channels`, `read_channel`. Each calls the
 same authority as the Web app with the person as principal, so a page or
 channel they cannot read is a tool error the model sees, never data.
 
@@ -57,10 +57,24 @@ holds, no minted credential), so an app's message or edit is the same act,
 with the same checks and effects (mentions summon Agents), as one made in
 xMatrix.
 
+## Page cards and directory submission
+
+`show_page` returns the same authorized current page as `read_page` and names
+`ui://xmatrix/page-card-v1.html` through MCP Apps `_meta.ui.resourceUri` (and
+the ChatGPT output-template compatibility key). `resources/list` and
+`resources/read` expose only that static view to callers with a read grant.
+The view uses the MCP Apps initialization handshake and tool-result
+notifications; it renders text safely and opens canonical xMatrix page links
+through the host. It needs no external scripts, network access, or credentials.
+Existing data tools stay text-first; clients without UI still get the page.
+
+The ChatGPT/Codex directory package is in `deploy/chatgpt-plugin`.
+Its README describes the ZIP builder and the remaining portal steps, including
+publishing identity, domain verification, reviewer access, and a real demo.
+
 ## Not yet
 
 - Showing which app wrote a message or revision ("via ChatGPT").
-- A ChatGPT page-card widget (Apps SDK output template).
 - The ChatGPT app directory (submitted from the OpenAI dashboard by a
   person). Grok and Cursor connect by entering the URL. The Claude connector
   directory is not a target.

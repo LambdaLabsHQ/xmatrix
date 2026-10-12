@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "xmatrix": {
+      "url": "https://xmatrix-hub.xmatrix.sh/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "dcr"
+            },
+            "resource": "https://xmatrix-hub.xmatrix.sh/mcp",
+            "baseScopes": [
+              "xmatrix:read"
+            ],
+            "defaultScopes": [
+              "xmatrix:write",
+              "offline_access"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
