@@ -116,11 +116,11 @@ jobs:
   build:
     environment: production
     needs: prepare-release
-    # The managed macOS label may resolve to multiple runner services on one
-    # host. Keep the macOS targets serialized because signing mutates
-    # the user's Keychain search list under an exact read/modify/write transaction.
+    # Self-hosted macOS services may share a user's Keychain search list, so
+    # serialize their builds across architectures and release runs. Hosted
+    # machines have independent Keychains and can build both targets in parallel.
     concurrency:
-      group: cli-release-${{ contains(matrix.target, 'apple-darwin') && 'macos' || format('{0}-{1}', github.run_id, matrix.target) }}
+      group: cli-release-${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && contains(matrix.target, 'apple-darwin') && 'macos' || format('{0}-{1}', github.run_id, matrix.target) }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
