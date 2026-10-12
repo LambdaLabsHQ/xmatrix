@@ -3,7 +3,7 @@ import { record } from "../command-support";
 import { providerJson, ProviderRequestError } from "../http";
 import { quoteRetrievedText } from "./common";
 import { pageUrl } from "./google-search-console-site";
-import { cell, keyedOptions } from "./google-report";
+import { cell, keyedOptions, mappedChoices } from "./google-report";
 
 /*
  * PageSpeed Insights v5 (a Lighthouse run Google makes against a public page)
@@ -57,7 +57,7 @@ export function fieldInput(statement: { target: string; text: string }): Record<
   if (!url || typeof options === "string") return usage;
   const form = options.get("form") ?? "all";
   const scope = options.get("scope") ?? (url.pathname === "/" && !url.search ? "origin" : "page");
-  if (!(form in FORMS) || !["page", "origin"].includes(scope)) return usage;
+  if (!mappedChoices([form], FORMS) || !["page", "origin"].includes(scope)) return usage;
   return { [scope === "origin" ? "origin" : "url"]: scope === "origin" ? url.origin : url.href, form };
 }
 
