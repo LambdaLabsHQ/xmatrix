@@ -157,6 +157,22 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   },
   {
     ...actionConnector({
+      id: "googleanalytics", name: "Google Analytics", kind: "observability",
+      description: "Read Google Analytics 4 properties and traffic reports for the properties the connected Google account can see. Read-only.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/analytics.readonly"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS],
+      actions: [
+        readAction("list_properties", "List properties", "List the GA4 properties of the connected Google account with their account.", "*"),
+        readAction("report", "Traffic report", "Sessions, users, engaged sessions, engagement rate and key events. channel=organic keeps Organic Search sessions only. Defaults: by=date days=28 limit=50.",
+          "<property id> [by=date,month,page,channel,source,medium,country,device|none] [days=1-1095] [limit=1-250] [channel=organic|direct|referral|social|paid|email]"),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/analytics.readonly"], secretRefs: [] },
+  },
+  {
+    ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",
       description: "Search and read the connected Google account's mail, with every link a message contains, so an Agent can find a verification email and open its link. Signs in through Composio. Read-only.",
       oauth: { authorizeUrl: "https://backend.composio.dev/api/v3.1/connected_accounts/link",

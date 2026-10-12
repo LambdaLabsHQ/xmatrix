@@ -3,6 +3,7 @@ import { providerJson, ProviderRequestError } from "../http";
 import { googleHeaders } from "./google-headers";
 import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText } from "./common";
+import { cell as text, keyedOptions, trailingDays } from "./google-report";
 
 /*
  * Google AdSense (Management API v2), read-only. The grant is the single
@@ -20,7 +21,6 @@ const DIMENSIONS: Record<string, string> = {
 const METRICS = ["ESTIMATED_EARNINGS", "PAGE_VIEWS", "PAGE_VIEWS_RPM", "IMPRESSIONS", "CLICKS"];
 const MAX_ROWS = 250;
 const MAX_DAYS = 1_095;
-const DAY_MS = 86_400_000;
 
 
 /** `pub-123…` or `accounts/pub-123…`, normalised to the API resource name. */
@@ -29,21 +29,11 @@ export function adsenseAccount(target: string): string | undefined {
   return match ? `accounts/${match[1]}` : undefined;
 }
 
-function text(value: unknown): string {
-  return String(value ?? "").slice(0, 300).replace(/[\r\n\t]/gu, " ");
-}
-
 /** `by=date,domain days=28 limit=50`; every key is optional. Dates are whole UTC days ending today. */
 export function adsenseReportOptions(input: string, now = Date.now()):
   { dimensions: string[]; start: Date; end: Date; limit: number } | string {
-  const options = new Map<string, string>();
-  for (const word of input.trim().split(/\s+/u).filter(Boolean)) {
-    const [key, value, ...rest] = word.split("=");
-    if (!key || !value || rest.length || !["by", "days", "limit"].includes(key) || options.has(key)) {
-      return "use by=<date,domain,…|none> days=<1-1095> limit=<1-250>";
-    }
-    options.set(key, value);
-  }
+  const options = keyedOptions(input, ["by", "days", "limit"], "use by=<date,domain,…|none> days=<1-1095> limit=<1-250>");
+  if (typeof options === "string") return options;
   const by = options.get("by") ?? "date";
   const names = by === "none" ? [] : by.split(",");
   if (names.length > 2 || new Set(names).size !== names.length || names.some(name => !(name in DIMENSIONS))) {
@@ -53,8 +43,8 @@ export function adsenseReportOptions(input: string, now = Date.now()):
   const limit = Number(options.get("limit") ?? "50");
   if (!Number.isSafeInteger(days) || days < 1 || days > MAX_DAYS) return `days is a whole number from 1 to ${MAX_DAYS}`;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ROWS) return `limit is a whole number from 1 to ${MAX_ROWS}`;
-  const end = new Date(Math.floor(now / DAY_MS) * DAY_MS);
-  return { dimensions: names.map(name => DIMENSIONS[name]!), start: new Date(end.getTime() - (days - 1) * DAY_MS), end, limit };
+  const { start, end } = trailingDays(days, now);
+  return { dimensions: names.map(name => DIMENSIONS[name]!), start: new Date(start), end: new Date(end), limit };
 }
 
 /** The generate URL: one custom date range, the fixed earnings metrics, newest dates first. */

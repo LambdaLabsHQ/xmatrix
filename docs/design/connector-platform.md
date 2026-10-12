@@ -186,6 +186,19 @@ Google project and add the `webmasters` scope to its consent screen; it is a
 sensitive scope, so external use beyond Testing users needs Google verification.
 See [Search Console API](https://developers.google.com/webmaster-tools/v1/api_reference_index).
 
+Google Analytics is a separate `googleanalytics` connection on the same
+company Google client, holding only
+`https://www.googleapis.com/auth/analytics.readonly`; like Search Console, the
+Hub requires exactly that scope on exchange and refresh. Check reads one
+account summary without storing it. Reads: `list_properties:*` (Admin API
+account summaries) and `report:<property id> [by=<up to three of date,month,page,channel,source,medium,country,device>|none] [days=1-1095] [limit=1-250] [channel=organic|direct|referral|social|paid|email]`
+(Data API `runReport`; sessions, users, engaged sessions, engagement rate and
+key events; defaults `by=date days=28 limit=50`). `channel=organic` filters on
+the session default channel group "Organic Search", so a report lines up with
+Search Console clicks. There are no inbound events and no writes. Enable the
+Google Analytics Admin and Data APIs on the company Google project and add the
+scope to its consent screen; it is a sensitive scope like `webmasters`.
+
 Gmail signs in through Composio rather than the company Google client:
 `gmail.readonly` is a restricted Google scope, and Composio's Google app is
 already verified for it. The `gmail` manifest uses `oauth.flow: "composio"`;

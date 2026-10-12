@@ -3,6 +3,7 @@ import { providerJson, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText } from "./common";
 import { googleHeaders } from "./google-headers";
+import { cell, isoDate, trailingDays } from "./google-report";
 
 /*
  * Google Search Console (Search Console API v1 / webmasters v3). The grant is
@@ -17,7 +18,6 @@ const DIMENSIONS = new Set(["query", "page", "country", "device", "date", "searc
 const SEARCH_TYPES = new Set(["web", "image", "video", "news", "discover", "googleNews"]);
 const MAX_URL = 2_048;
 const MAX_LINES = 250;
-const DAY_MS = 86_400_000;
 
 
 /** A public http(s) page or sitemap address without credentials or fragments. */
@@ -52,12 +52,6 @@ function siteUrl(site: string, path = ""): string {
   return `${API}/sites/${encodeURIComponent(site)}${path}`;
 }
 
-function cell(value: unknown): string {
-  return String(value ?? "").slice(0, 300).replace(/[\r\n\t]/gu, " ");
-}
-
-function isoDate(ms: number): string { return new Date(ms).toISOString().slice(0, 10); }
-
 /** `by=query,page days=28 limit=25 type=web`; every key is optional. */
 export function searchAnalyticsOptions(text: string, now = Date.now()):
   { dimensions: string[]; startDate: string; endDate: string; rowLimit: number; type: string } | string {
@@ -77,8 +71,8 @@ export function searchAnalyticsOptions(text: string, now = Date.now()):
   if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > MAX_LINES) return `limit is a whole number from 1 to ${MAX_LINES}`;
   const type = options.type ?? "web";
   if (!SEARCH_TYPES.has(type)) return `type is one of ${[...SEARCH_TYPES].join(", ")}`;
-  const end = Math.floor(now / DAY_MS) * DAY_MS;
-  return { dimensions, startDate: isoDate(end - (days - 1) * DAY_MS), endDate: isoDate(end), rowLimit, type };
+  const { start, end } = trailingDays(days, now);
+  return { dimensions, startDate: isoDate(start), endDate: isoDate(end), rowLimit, type };
 }
 
 function siteOnly(statement: { target: string; text: string }, usage: string): Record<string, string> | string {

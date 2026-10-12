@@ -196,7 +196,7 @@ test("Notion refresh rotates the access and refresh token together using Basic-a
 
 test("disconnecting a Google or Composio connection forgets its grant but keeps generated ingress secrets", () => {
   const tokens = { oauthToken: null, oauthRefreshToken: null, oauthExpiresAt: null };
-  for (const id of ["google", "googlesearchconsole", "googleadsense", "gcp"]) {
+  for (const id of ["google", "googlesearchconsole", "googleadsense", "googleanalytics", "gcp"]) {
     assert.deepEqual(grantFieldsForgottenOnDisconnect(id), tokens, id);
   }
   assert.deepEqual(grantFieldsForgottenOnDisconnect("gmail"), { composioAccountId: null });
