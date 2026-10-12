@@ -251,6 +251,16 @@ through `mappedChoices`; only own entries count as choices, and mapping happens
 after validation. Each connector retains its vocabulary, defaults and usage
 message, including dimension-free reports and the all-device CrUX form.
 
+Yandex Webmaster (`yandexwebmaster`) saves an OAuth token of the Yandex
+account (`webmaster:hostinfo`, plus `webmaster:verify` for recrawl), sent as
+`Authorization: OAuth <token>`; a company Yandex app for one-click Connect is
+not registered yet. Every call first reads the token's user id from `/user`,
+which Check also does. A host is Yandex's id, `https:example.com:443`. Reads:
+`list_hosts:*`, `summary:<host>` (SQI, pages in search, excluded pages, site
+problems by severity), `queries:<host>` (top 50 popular queries by clicks).
+The write `recrawl:<host> <page url>` queues one page of that exact scheme,
+host and port, under the Channel's action policy.
+
 Gmail signs in through Composio rather than the company Google client:
 `gmail.readonly` is a restricted Google scope, and Composio's Google app is
 already verified for it. The `gmail` manifest uses `oauth.flow: "composio"`;
