@@ -51,7 +51,7 @@ test("an outside app connects over OAuth and reads the member's pages through MC
     const call = (path, { method = "GET", body, form, signedIn } = {}) => worker.fetch(`/api/auth${path}`, {
       method, headers: { accept: "application/json", origin: APP, ...(signedIn ? { authorization: `Bearer ${session}` } : {}),
         ...(body ? { "content-type": "application/json" } : form ? { "content-type": "application/x-www-form-urlencoded" } : {}) },
-      body: body ? JSON.stringify(body) : form ? new URLSearchParams(form).toString() : undefined,
+      ...(body ? { body: JSON.stringify(body) } : form ? { body: new URLSearchParams(form).toString() } : {}),
     });
     const client = await json(await call("/oauth2/register", { method: "POST", body: {
       redirect_uris: [REDIRECT], token_endpoint_auth_method: "none", client_name: "Chat", scope: "xmatrix:read offline_access" } }));

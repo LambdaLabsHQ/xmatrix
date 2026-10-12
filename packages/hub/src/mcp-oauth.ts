@@ -15,7 +15,6 @@ import type { Env } from "./types";
 
 /** What an outside app may be granted: reading, and writing as the person. */
 export const MCP_SCOPES = ["xmatrix:read", "xmatrix:write"] as const;
-export type McpScope = typeof MCP_SCOPES[number];
 
 export const MCP_PATH = "/mcp";
 

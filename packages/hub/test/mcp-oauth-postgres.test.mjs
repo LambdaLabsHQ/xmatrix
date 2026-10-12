@@ -18,7 +18,7 @@ async function fixture() {
     method, headers: { accept: 'application/json', 'cf-connecting-ip': ip, origin: env.APP_URL,
       ...(session ? { authorization: `Bearer ${session}` } : {}),
       ...(body ? { 'content-type': 'application/json' } : form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) },
-    body: body ? JSON.stringify(body) : form ? new URLSearchParams(form).toString() : undefined,
+    ...(body ? { body: JSON.stringify(body) } : form ? { body: new URLSearchParams(form).toString() } : {}),
   }));
   await f.run(`INSERT INTO control.auth_users(id,name,email,email_verified,created_at,updated_at,handle)
     VALUES ('member','Member','member@example.test',true,now(),now(),'member')`);
@@ -28,22 +28,37 @@ async function fixture() {
   return { ...f, env, call, session };
 }
 
-/** An outside app registers itself, the member signs in and allows it, and the app trades the code for tokens. */
-async function connect(f, scope = 'openid offline_access xmatrix:read') {
+/** An outside app registers itself (RFC 7591, a public client). */
+async function register(f, scope) {
   const registered = await f.call('/oauth2/register', { method: 'POST', body: {
     redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', client_name: 'Chat', scope } });
   assert.equal(registered.status, 200, await registered.clone().text());
-  const { client_id: clientId } = await registered.json();
+  return (await registered.json()).client_id;
+}
+
+/** The app asks for the member's authorization; returns where the Hub sends the browser, and the PKCE verifier. */
+async function authorize(f, clientId, scope, { resource, signedIn = true } = {}) {
   const verifier = randomBytes(32).toString('base64url');
-  const challenge = createHash('sha256').update(verifier).digest('base64url');
-  const authorize = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: REDIRECT, scope,
-    state: 'state-1', code_challenge: challenge, code_challenge_method: 'S256', resource: mcpResource(f.env) });
-  const asked = await (await f.call(`/oauth2/authorize?${authorize}`, { session: f.session })).json();
-  const consentPage = new URL(asked.url);
+  const query = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: REDIRECT, scope,
+    state: 'state-1', code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+    code_challenge_method: 'S256', ...(resource ? { resource } : {}) });
+  const asked = await (await f.call(`/oauth2/authorize?${query}`, signedIn ? { session: f.session } : {})).json();
+  return { next: new URL(asked.url), verifier };
+}
+
+/** The member answers on the consent page; returns where the app is sent back. */
+async function answer(f, consentPage, accept) {
+  const answered = await (await f.call('/oauth2/consent', { method: 'POST', session: f.session,
+    body: { accept, oauth_query: consentPage.search.slice(1) } })).json();
+  return new URL(answered.url);
+}
+
+/** The whole connection: register, sign in and allow, trade the code for tokens. */
+async function connect(f, { scope = 'openid offline_access xmatrix:read', resource = mcpResource(f.env) } = {}) {
+  const clientId = await register(f, scope);
+  const { next: consentPage, verifier } = await authorize(f, clientId, scope, { resource });
   assert.equal(consentPage.origin + consentPage.pathname, `${f.env.APP_URL}/oauth/consent`, 'the member is asked first');
-  const allowed = await (await f.call('/oauth2/consent', { method: 'POST', session: f.session,
-    body: { accept: true, oauth_query: consentPage.search.slice(1) } })).json();
-  const back = new URL(allowed.url);
+  const back = await answer(f, consentPage, true);
   assert.equal(back.origin + back.pathname, REDIRECT);
   assert.equal(back.searchParams.get('state'), 'state-1');
   const tokens = await f.call('/oauth2/token', { method: 'POST', form: { grant_type: 'authorization_code',
@@ -88,31 +103,15 @@ integration('an outside app reaches the MCP endpoint, and only it, with the acce
 
 integration('a token request that names no resource still gets a token for the MCP endpoint', async () => {
   const f = await fixture(); try {
-    const registered = await (await f.call('/oauth2/register', { method: 'POST', body: {
-      redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', scope: 'xmatrix:read' } })).json();
-    const verifier = randomBytes(32).toString('base64url');
-    const authorize = new URLSearchParams({ response_type: 'code', client_id: registered.client_id, redirect_uri: REDIRECT,
-      scope: 'xmatrix:read', code_challenge: createHash('sha256').update(verifier).digest('base64url'),
-      code_challenge_method: 'S256' });
-    const asked = new URL((await (await f.call(`/oauth2/authorize?${authorize}`, { session: f.session })).json()).url);
-    const back = new URL((await (await f.call('/oauth2/consent', { method: 'POST', session: f.session,
-      body: { accept: true, oauth_query: asked.search.slice(1) } })).json()).url);
-    const tokens = await (await f.call('/oauth2/token', { method: 'POST', form: { grant_type: 'authorization_code',
-      code: back.searchParams.get('code'), code_verifier: verifier, client_id: registered.client_id, redirect_uri: REDIRECT } })).json();
-    assert.equal((await verifyMcpAccessToken(tokens.access_token, f.env, mcpResource(f.env))).user.id, 'member');
+    const { access_token: accessToken } = await connect(f, { scope: 'xmatrix:read', resource: undefined });
+    assert.equal((await verifyMcpAccessToken(accessToken, f.env, mcpResource(f.env))).user.id, 'member');
   } finally { await f.close(); }
 });
 
 integration('a member who denies an app sends it back with access_denied and no code', async () => {
   const f = await fixture(); try {
-    const registered = await (await f.call('/oauth2/register', { method: 'POST', body: {
-      redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', scope: 'xmatrix:read' } })).json();
-    const authorize = new URLSearchParams({ response_type: 'code', client_id: registered.client_id, redirect_uri: REDIRECT,
-      scope: 'xmatrix:read', state: 's', code_challenge: createHash('sha256').update('v'.repeat(43)).digest('base64url'),
-      code_challenge_method: 'S256' });
-    const asked = new URL((await (await f.call(`/oauth2/authorize?${authorize}`, { session: f.session })).json()).url);
-    const back = new URL((await (await f.call('/oauth2/consent', { method: 'POST', session: f.session,
-      body: { accept: false, oauth_query: asked.search.slice(1) } })).json()).url);
+    const clientId = await register(f, 'xmatrix:read');
+    const back = await answer(f, (await authorize(f, clientId, 'xmatrix:read')).next, false);
     assert.equal(back.searchParams.get('error'), 'access_denied');
     assert.equal(back.searchParams.get('code'), null);
   } finally { await f.close(); }
@@ -120,14 +119,10 @@ integration('a member who denies an app sends it back with access_denied and no 
 
 integration('without a session the app is sent to sign in on the Web app', async () => {
   const f = await fixture(); try {
-    const registered = await (await f.call('/oauth2/register', { method: 'POST', body: {
-      redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none', scope: 'xmatrix:read' } })).json();
-    const authorize = new URLSearchParams({ response_type: 'code', client_id: registered.client_id, redirect_uri: REDIRECT,
-      scope: 'xmatrix:read', code_challenge: createHash('sha256').update('v'.repeat(43)).digest('base64url'),
-      code_challenge_method: 'S256' });
-    const login = new URL((await (await f.call(`/oauth2/authorize?${authorize}`)).json()).url);
+    const clientId = await register(f, 'xmatrix:read');
+    const login = (await authorize(f, clientId, 'xmatrix:read', { signedIn: false })).next;
     assert.equal(login.origin + login.pathname, `${f.env.APP_URL}/oauth/authorize`);
-    assert.equal(login.searchParams.get('client_id'), registered.client_id);
+    assert.equal(login.searchParams.get('client_id'), clientId);
     assert.ok(login.searchParams.get('sig'));
   } finally { await f.close(); }
 });

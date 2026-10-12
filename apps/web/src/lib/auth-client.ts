@@ -309,6 +309,31 @@ export async function answerOAuthConsent(accept: boolean, signedQuery: URLSearch
   return url;
 }
 
+/** The address an outside AI app connects to (ChatGPT, Grok, Cursor…). */
+export function mcpServerUrl(): string {
+  return `${getAuthBaseUrl()}/mcp`;
+}
+
+export interface ConnectedOAuthApp { consentId: string; clientId: string; name: string; scopes: string[] }
+
+/** The outside apps this person has allowed, by the names they registered with. */
+export async function listConnectedOAuthApps(): Promise<ConnectedOAuthApp[]> {
+  const consents = await oauthRequest("/oauth2/get-consents") as unknown;
+  const rows = Array.isArray(consents) ? consents as Array<Record<string, unknown>> : [];
+  return Promise.all(rows.map(async (row) => {
+    const clientId = String(row.clientId ?? "");
+    const scopes = Array.isArray(row.scopes) ? row.scopes.map(String)
+      : typeof row.scopes === "string" ? row.scopes.split(/[ ,]/u).filter(Boolean) : [];
+    const client = await readOAuthClient(clientId).catch(() => ({ name: clientId }));
+    return { consentId: String(row.id ?? ""), clientId, name: client.name, scopes };
+  }));
+}
+
+/** Removes an app: it can no longer reach this person's xMatrix. */
+export async function removeConnectedOAuthApp(consentId: string): Promise<void> {
+  await oauthRequest("/oauth2/delete-consent", { method: "POST", body: JSON.stringify({ id: consentId }) });
+}
+
 async function fetchBetterAuthJwt(): Promise<string | null> {
   const response = await xmatrixRawResponse(`${getAuthBaseUrl()}/api/auth/token`, {
     credentials: "include",
