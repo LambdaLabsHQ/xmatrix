@@ -129,6 +129,12 @@ export type DesktopBridge = {
   onFullScreenChange?: (listener: (fullScreen: boolean) => void) => () => void;
   onDaemonStatus?: (listener: (status: DesktopDaemonStatus) => void) => () => void;
   onNotificationReply?: (listener: (reply: DesktopNotificationReply) => void) => () => void;
+  /**
+   * The shell asks the page to go to an address inside the app (a tapped
+   * notification, a link to a conversation). The page answers whether it did;
+   * the shell loads the address afresh only when it did not.
+   */
+  onOpenAppLink?: (listener: (href: string) => boolean) => () => void;
   /** iOS native shell controls the bottom tab dock instead of the web-rendered one. */
   setMobileTabState?: (state: {
     visible: boolean; activeView: string; spaceId?: string | null; userId?: string | null;

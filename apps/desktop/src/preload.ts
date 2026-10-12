@@ -29,6 +29,19 @@ type DesktopDefaultProfileChanged = {
   followedByWindow: boolean;
 };
 
+// The page's own way of going to an address inside the app. The main process
+// is always answered, so a page without one is loaded afresh instead.
+let openAppLink: ((href: string) => boolean) | null = null;
+ipcRenderer.on("desktop:open-app-link", (_event, id: number, href: string) => {
+  let handled = false;
+  try {
+    handled = openAppLink?.(href) === true;
+  } catch {
+    handled = false;
+  }
+  ipcRenderer.send("desktop:open-app-link-result", id, handled);
+});
+
 contextBridge.exposeInMainWorld("xmatrixDesktop", {
   client: "desktop",
   platform: process.platform,
@@ -124,6 +137,12 @@ contextBridge.exposeInMainWorld("xmatrixDesktop", {
     ipcRenderer.on("desktop:local-profile-selection-changed", handler);
     return () => {
       ipcRenderer.removeListener("desktop:local-profile-selection-changed", handler);
+    };
+  },
+  onOpenAppLink: (listener: (href: string) => boolean) => {
+    openAppLink = listener;
+    return () => {
+      if (openAppLink === listener) openAppLink = null;
     };
   },
   onNotificationReply: (listener: (reply: DesktopNotificationReply) => void) => {
