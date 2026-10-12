@@ -15,6 +15,11 @@ English is the default language for repository documentation, guardrails, releas
 
 ## Current behavior
 
+Runtime delivery errors retain the sending cause chain and report the original
+receiving exception before it crosses a Durable Object boundary. Reporting
+preserves rejection and never replays a potentially partial broadcast. See
+[Runtime delivery errors](../operations/runtime-delivery-errors.md).
+
 Outside AI applications can read and write a person's Pages and Channels
 through the remote OAuth MCP server, using the person's existing access.
 The `show_page` tool supplies a sandboxed MCP Apps card and a source link;
