@@ -79,6 +79,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Stripe | `stripe` | Every event of an object | |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, sitemaps, properties, verification |
+| Google Analytics | `googleanalytics` | | `list_properties`, `report` |
 | Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `report` |
 | Gmail | `gmail` | | `search`, `read` |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
