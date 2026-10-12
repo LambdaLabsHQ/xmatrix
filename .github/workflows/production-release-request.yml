@@ -179,11 +179,20 @@ jobs:
               // Migration and lifecycle cleanup workflows also hold the train,
               // including their preflight, before another deployment is dispatched.
               const active = [];
-              for (const workflow_id of ["production-release.yml", "postgres-contract-migration.yml", "production-agent-lifecycle-cleanup.yml"]) {
-                const { data } = await github.rest.actions.listWorkflowRuns({
-                  ...context.repo, workflow_id, per_page: 20,
-                });
-                active.push(...data.workflow_runs.filter((run) => run.status !== "completed"));
+              try {
+                for (const workflow_id of ["production-release.yml", "postgres-contract-migration.yml", "production-agent-lifecycle-cleanup.yml"]) {
+                  const { data } = await github.rest.actions.listWorkflowRuns({
+                    ...context.repo, workflow_id, per_page: 20,
+                  });
+                  active.push(...data.workflow_runs.filter((run) => run.status !== "completed"));
+                }
+              } catch (error) {
+                // GitHub answering 5xx says nothing about the trains; ask again
+                // until the deadline rather than failing this one.
+                if (!(error.status >= 500) || Date.now() > deadline) throw error;
+                core.warning(`GitHub answered ${error.status} listing workflow runs; asking again`);
+                await new Promise((resolve) => setTimeout(resolve, 30_000));
+                continue;
               }
               if (!active.length) break;
               if (Date.now() > deadline) {
