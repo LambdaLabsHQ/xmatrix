@@ -11,6 +11,7 @@ import { GOOGLE_ACTIONS, verifyGoogle } from "./actions/google";
 import { GOOGLE_SEARCH_CONSOLE_ACTIONS, verifyGoogleSearchConsole } from "./actions/google-search-console";
 import { GOOGLE_ADSENSE_ACTIONS, verifyGoogleAdsense } from "./actions/google-adsense";
 import { GOOGLE_ANALYTICS_ACTIONS, verifyGoogleAnalytics } from "./actions/google-analytics";
+import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
 import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
 import { OPENCONNECTOR_ACTIONS, verifyOpenConnector } from "./actions/openconnector";
 import { PAGERDUTY_ACTIONS, verifyPagerDuty } from "./actions/pagerduty";
@@ -65,6 +66,7 @@ const PROVIDERS: Record<string, {
   googlesearchconsole: { actions: GOOGLE_SEARCH_CONSOLE_ACTIONS, verify: verifyGoogleSearchConsole },
   googleadsense: { actions: GOOGLE_ADSENSE_ACTIONS, verify: verifyGoogleAdsense },
   googleanalytics: { actions: GOOGLE_ANALYTICS_ACTIONS, verify: verifyGoogleAnalytics },
+  pagespeed: { actions: PAGESPEED_ACTIONS, verify: verifyPageSpeed },
   gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail },
   bitbucket: { receive: receiveBitbucketDelivery, actions: BITBUCKET_ACTIONS, verify: verifyBitbucket },
   circleci: { receive: receiveCircleCiDelivery },
