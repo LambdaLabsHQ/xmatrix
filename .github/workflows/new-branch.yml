@@ -43,5 +43,17 @@ jobs:
             exit 1
           fi
           sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
-          gh api -X POST "repos/$REPO/git/refs" -f "ref=refs/heads/$NAME" -f "sha=$sha" >/dev/null
-          echo "created $NAME at $sha" >> "$GITHUB_STEP_SUMMARY"
+          if gh api -X POST "repos/$REPO/git/refs" -f "ref=refs/heads/$NAME" -f "sha=$sha" >/dev/null; then
+            echo "created $NAME at $sha" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # A repeated dispatch for a branch that still sits at the current main
+          # asked for exactly what exists, so it succeeds. Any other existing
+          # branch is someone's work and the name has to change.
+          existing=$(gh api "repos/$REPO/git/ref/heads/$NAME" --jq .object.sha)
+          if [ "$existing" = "$sha" ]; then
+            echo "$NAME already exists at main $sha" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "::error::$NAME already exists at $existing, not at main $sha; choose another name"
+          exit 1
