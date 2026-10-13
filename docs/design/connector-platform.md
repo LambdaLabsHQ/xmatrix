@@ -318,8 +318,15 @@ The write `recrawl:<host> <page url>` queues one page of that exact scheme,
 host and port, under the Channel's action policy.
 
 Gmail signs in through Composio rather than the company Google client:
-`gmail.readonly` is a restricted Google scope, and Composio's Google app is
-already verified for it. The `gmail` manifest uses `oauth.flow: "composio"`;
+`gmail.readonly` is a restricted Google scope. The configured OAuth client
+must have Google's approval for that exact scope; managed auth alone is not
+evidence that a narrower override is approved. Composio's
+[Gmail FAQ](https://docs.composio.dev/toolkits/gmail) identifies unverified
+client scopes as a cause of Google's app-blocked screen. Native acceptance
+requires successful consent and the connection's real API Check. If consent
+is blocked, confirm the client's scope coverage with Composio while keeping
+the read-only grant; a broader default grant does not satisfy this contract.
+The `gmail` manifest uses `oauth.flow: "composio"`;
 `CONNECTOR_GMAIL_CLIENT_ID` is the Composio auth config (Composio-managed
 Gmail auth limited to `gmail.readonly`) and the shared
 `CONNECTOR_COMPOSIO_API_KEY` is the Composio project API key. Connect creates a Composio Connect Link for the
