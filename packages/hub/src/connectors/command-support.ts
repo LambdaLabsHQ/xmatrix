@@ -81,7 +81,8 @@ export async function withExecution(
       : { reason: executionExcerpt(outcome.summary, 500) }),
     principal: scope.principal,
   });
-  return `${manifest.name} ${action.id}: ${outcome.status}; ${outcome.summary}.`;
+  /* A summary that already ends its own sentence, or in a fence, gets no second full stop. */
+  return `${manifest.name} ${action.id}: ${outcome.status}; ${outcome.summary}${/[.!?。`]$/u.test(outcome.summary.trimEnd()) ? "" : "."}`;
 }
 
 /* The receipt reports what the Hub already did, so it is a system fact:
