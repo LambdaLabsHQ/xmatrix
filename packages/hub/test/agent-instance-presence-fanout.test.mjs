@@ -2,12 +2,21 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { agentInstanceAttachment, FakeSocket, productionAgentInstanceTransport } from "./support/runtime-transport.mjs";
 
-/** Accepts only the presentation each presence frame persists; any other change fails the test. */
-function presentationRuntime() {
+/**
+ * Accepts only the presentation each presence frame persists, and with
+ * `unregister` an Instance's own unregister; any other change fails the test.
+ */
+function presentationRuntime(unregister = false) {
   const persisted = [];
   return { persisted, runtime: {
-    async getRun() { throw Error("unexpected Run read"); },
+    async getRun() {
+      if (!unregister) throw Error("unexpected Run read");
+      return { run: { metadata: {} } };
+    },
     async transition(command) {
+      if (unregister && command.kind === "instance_transition" && command.status === "offline") {
+        return { instanceId: command.instanceId, recorded: true };
+      }
       if (command.kind !== "instance_presentation") throw Error("unexpected Instance transition");
       persisted.push(command.instanceId);
       return { instanceId: command.instanceId, recorded: true };
@@ -17,7 +26,7 @@ function presentationRuntime() {
 }
 
 function fixture(separate = {}) {
-  const authority = presentationRuntime();
+  const authority = presentationRuntime(separate.unregister);
   const { transport } = productionAgentInstanceTransport(authority.runtime);
   const sockets = ["a", "b"].map(id => {
     const socket = new FakeSocket();
@@ -26,7 +35,7 @@ function fixture(separate = {}) {
       principal: { ownerUserId: separate.owner ? `owner-${id}` : "owner", agentId: `agent-${id}`,
         agentName: `Agent ${id}`, spaceId: "space", runId: `run-${id}`, executionKey: `execution-${id}`, channelId,
         machineId: "machine", hostId: "host" },
-      run: { instanceId: `instance-${id}`, instanceStatus: "online" },
+      run: { instanceId: `instance-${id}`, instanceStatus: "online", connectionVersion: 1 },
     })), true);
     return socket;
   });
@@ -65,4 +74,13 @@ test("concurrent broadcasts retain their owner and Channel boundary", async () =
     await concurrently(transport, sockets);
     assert.ok(sockets.every(socket => socket.sent.length === 0));
   }
+});
+
+test("an unregistered Instance leaves the live fanout of its peers", async () => {
+  const { transport, sockets: [gone, peer] } = fixture({ unregister: true });
+  await transport.handleFrame(gone, JSON.stringify({ type: "unregister", requestId: "bye" }));
+  assert.deepEqual(gone.sent.map(frame => frame.type), ["unregistered"]);
+  await transport.handleFrame(peer, JSON.stringify({ ...JSON.parse(presence), requestId: "peer" }));
+  assert.deepEqual(peer.sent.filter(frame => frame.type === "error"), [], "the peer's presence update succeeds");
+  assert.equal(gone.sent.length, 1, "nothing is delivered to the unregistered socket");
 });
