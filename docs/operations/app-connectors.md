@@ -4,6 +4,11 @@ App connectors route app context into xMatrix channels through typed provider ma
 
 ## Current Providers
 
+- Google Ads provides selected-account performance queries, dry-run validation,
+  atomic advertising configuration and policy-controlled campaign activation/
+  pausing. Cloud-project API access, separate OAuth, integer budgets and actual
+  stable acceptance are documented in [Google Ads connector](../connectors/google-ads.md).
+
 - Google Cloud provides operations context, direct project gross-cost reports, billing-export cost/credit analysis, public SKU descriptions, daily or credential/method API request counts, secret-free key metadata and historical audit-principal summaries
   and Monitoring incident routing. A supported API can be enabled through a
   separate policy-controlled action; OAuth does not override Google IAM.
@@ -152,6 +157,7 @@ section, and none is ever shown again.
 | Notion | `append:<page id>`, `create_page:<parent page id>` |
 | Google Search Console | Property `list_sites/get_site/add_site/delete_site`; sitemap `list_sitemaps/get_sitemap/submit_sitemap/delete_sitemap`; `query` (concise options or bounded API JSON); `inspect_url`; ownership `get_verification_token/verify_site/list_verifications/get_verification/update_verification_owners/delete_verification`. See the onboarding procedure below. |
 | Google Analytics | `list_properties:*`, `report:<property id> [by=…] [days=…] [limit=…] [channel=…]` (reads) |
+| Google Ads | `list_accounts:*`, `read_account:<customer ID>`, `query:<customer ID> <SELECT GAQL>`, `validate_mutations:<customer ID> {json}` (reads), `mutate:<customer ID> {json}`, `set_campaign_status:<customer ID>/<campaign ID> {json}` (writes, ask by default). See the [Google Ads contract](../connectors/google-ads.md). |
 | Bing Webmaster Tools | `list_sites:*`, `traffic:<site>`, `queries:<site>`, `pages:<site>`, `crawl_stats:<site>` (reads), `submit_urls:<site> <url …>`, `submit_sitemap:<site> <sitemap url>`, `indexnow:<site> <url …>` |
 | Google Business Profile | `list_accounts:*`, `list_locations:<account>`, `performance:<location> [days=…]`, `reviews:<location>` (reads), `reply_review:<review> <text>` |
 | PageSpeed Insights | `audit:<page url> [strategy=mobile\|desktop]`, `field:<page url or origin> [form=phone\|desktop\|all] [scope=page\|origin]` (reads; Google API key) |
@@ -243,7 +249,8 @@ time:
   Space admin approves or denies it in the Channel's Pending approvals. Each
   approval covers one request only; duplicate clicks cannot dispatch twice.
 - **`disallow`.** Block the action. Legacy `deny` remains the same restrictive alias.
-- **Default.** Gmail send/reply use ask; other actions retain allow. Existing
+- **Default.** Gmail send/reply and Google Ads mutate/set_campaign_status use
+  ask; other actions retain allow. Existing
   explicit overrides keep their meaning. GitHub's specialized dispatcher does
   not support ask and rejects it.
 
