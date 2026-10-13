@@ -297,6 +297,24 @@ every territory, and changes an existing one territory by territory, at most
 rejected items resolved and sends it back, which is what Resubmit does in App
 Store Connect; `cancel_submission` followed by `submit` starts over instead.
 
+Signing for distribution needs no Apple ID on the build machine. The machine
+makes a private key and a certificate signing request; only the request is
+pasted to `create_certificate`, and Apple's certificate comes back through
+`read_certificate`. `create_profile` ties a certificate to a bundle ID for the
+App Store, and `read_profile` returns it. Certificates and profiles are public
+documents; the private key never leaves the machine that made it.
+`create_certificate` makes one call and never retries, because a team holds
+only a few distribution certificates, and nothing here revokes a certificate or
+deletes a profile. `register_bundle_id` and `enable_capability` complete the
+setup, and `signing` shows all of it; Apple's bundle ID filter also matches
+longer identifiers, so the exact one is picked here. TestFlight: `testflight`
+shows tester groups and each build's testing state, `add_to_group`,
+`submit_beta_review` and `set_test_notes` distribute a build, and `feedback`
+and `crash_log` read what testers sent after a `feedback` event. Tester
+comments and crash logs are fenced and bounded, feedback image links are shown
+only when plain https on a public host, and a tester's email address and name
+are never requested.
+
 Google Business Profile (`googlebusinessprofile`) is another connection on the
 company Google client, holding only `https://www.googleapis.com/auth/business.manage`
 (Google offers no read-only scope for these APIs). Reads: `list_accounts:*`,
@@ -788,7 +806,7 @@ or generates a webhook secret in the Apps view.
 | Notion | internal integration token | — (polling deferred) | read page, append block, create page |
 | Vercel | access token + webhook secret | deployment created/succeeded/error | redeploy |
 | Cloudflare | OAuth or API token; Hub-registered destination secret | notifications fired/resolved by alert type; subscriptions own the account's `xMatrix ·` policies | query logs, list deployments (read); rollback |
-| App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version, app record and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review; set app info, age rating, price, availability and review contact; upload builds and screenshots |
+| App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version, app record and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review; set app info, age rating, price, availability and review contact; upload builds and screenshots; signing certificates and profiles; TestFlight groups, beta review and tester feedback |
 | Discord | bot token | — | post message |
 | Feishu/Lark | custom app id/secret + verification token | message in linked chat | send message |
 

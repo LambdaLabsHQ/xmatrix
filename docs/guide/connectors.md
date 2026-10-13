@@ -93,7 +93,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Gmail | `gmail` | | `search`, `read` |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
-| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption` |
+| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
 | Discord | `discord` | | `post` |
 | Telegram | `telegram` | Messages | `send` |
 | Feishu / Lark | `feishu` | Messages | `send` |
@@ -175,6 +175,34 @@ Screenshots work the same way, then get placed on the listing:
 `screenshot_specs` lists Apple's placement groups, one per device family, with the exact pixel sizes each accepts. `set_screenshots` makes that language and group show exactly the images you name, in that order; an image can be reused across languages. `screenshots` shows what a version has now.
 
 If Apple asks about export compliance, answer it for the build with `@appstoreconnect:declare_encryption:com.example.app 1.2.0 412 exempt`.
+
+### Signing on a machine without an Apple ID
+
+An agent on a fresh Mac or CI runner can set up App Store signing through the connector. The private key is made on that machine and stays there; only the signing request travels:
+
+```text
+@appstoreconnect:signing:com.example.app
+@appstoreconnect:register_bundle_id:com.example.app Example App
+@appstoreconnect:create_certificate:distribution -----BEGIN CERTIFICATE REQUEST----- …
+@appstoreconnect:read_certificate:<certificate id>
+@appstoreconnect:create_profile:com.example.app <certificate id>
+@appstoreconnect:read_profile:<profile id>
+```
+
+`signing` shows what already exists. A team has only a few distribution certificates, so create one only when no machine still holds the key of an existing one. `enable_capability` turns on things like `PUSH_NOTIFICATIONS` for the bundle ID; create the profile after that.
+
+### TestFlight
+
+```text
+@appstoreconnect:testflight:com.example.app
+@appstoreconnect:add_to_group:com.example.app 1.2.0 412 Early Access
+@appstoreconnect:set_test_notes:com.example.app 1.2.0 412 en-US Try the new sync.
+@appstoreconnect:submit_beta_review:com.example.app 1.2.0 412
+@appstoreconnect:feedback:com.example.app
+@appstoreconnect:crash_log:<feedback id>
+```
+
+Subscribe the conversation with `feedback` among its kinds and an agent can pick up what testers report: `feedback` lists their comments with device, OS and build, and `feedback:… crashes` with `crash_log` gives the crash behind a report.
 
 ### When App Review rejects a version
 

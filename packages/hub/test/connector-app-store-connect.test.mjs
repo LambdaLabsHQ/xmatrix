@@ -283,5 +283,6 @@ test("every declared App Store Connect action has an executor with the declared 
   const catalog = connectorActionCatalog("appstoreconnect", ACTIONS);
   assert.deepEqual([...catalog.keys()].sort(), Object.keys(ACTIONS).sort());
   assert.deepEqual([...catalog.values()].filter((entry) => entry.definition.effect === "read").map((entry) => entry.definition.id).sort(),
-    ["build_uploads", "builds", "list_apps", "read_app", "read_upload", "read_version", "reviews", "screenshot_specs", "screenshots", "status"]);
+    ["build_uploads", "builds", "crash_log", "feedback", "list_apps", "read_app", "read_certificate", "read_profile", "read_upload", "read_version", "reviews",
+      "screenshot_specs", "screenshots", "signing", "status", "testflight"]);
 });
