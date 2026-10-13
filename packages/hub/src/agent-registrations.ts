@@ -3,7 +3,7 @@ import { PostgresAgentRegistrationRepository, PostgresRegistrationAccessReposito
   readRegistrationQuotaProbeTargets,
   type AuthorityDatabase } from "@xmatrix/db";
 import type { parseAgentEnvironmentCommand, parseAgentRegistrationCommand, parseAgentRegistrationKey,
-  parseSpaceAgentRegistrationKey } from "@xmatrix/protocol";
+  parseSpaceAgentRegistrationKey, HarnessProfileCommand } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import { issueRegistrationQuotaProbes, type QuotaProbeIssueDependencies } from "./agent-routing-quota-refresh";
 import type { Env } from "./types";
@@ -106,6 +106,16 @@ export function controlAgentRegistration(env: RegistrationEnv, input: {
     await wakeRegistrationChannels(env, session, { spaceId });
     return result;
   });
+}
+
+/** Rewrites what the Space says a harness is for; the next automatic routing reads it. */
+export function describeAgentHarness(env: RegistrationEnv, input: {
+  actorUserId: string; spaceId: string; command: HarnessProfileCommand;
+}, databases: RegistrationDatabases = {}) {
+  const requestId = crypto.randomUUID();
+  return withPlacedRegistrations(env, input.spaceId, requestId, databases, (session, placement) =>
+    new PostgresAgentRegistrationRepository(session, placement).describe({ ...input.command,
+      spaceId: input.spaceId, actorUserId: input.actorUserId, requestId }));
 }
 
 /** One open session on the Machine environment shard, closed when the work is done. */

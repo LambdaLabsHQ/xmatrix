@@ -147,8 +147,19 @@ Jev judges only semantic fit, in one call:
 2. Which location the work is about, among every eligible environment's.
 3. How well each harness suits the work, one `score` question per harness on
    four levels: unsuitable, capable, strong fit, asked for. Each question holds
-   only that harness's owners' descriptions and models, so no harness is first
-   in a list. A harness known only by its name is capable. A call holds at most
+   only that harness's description and models, so no harness is first in a
+   list. The description is the Space's profile of the harness
+   (`data.space_harness_profiles`): one free text per Space and harness, at
+   most 1000 characters, with no fields or format, passed to Jev as it was
+   written and treated as background data. A Space owner or admin writes it,
+   and so does anyone with an Agent of that harness in the Space
+   (`POST /api/spaces/:spaceId/agent-registrations/profiles`, with an optional
+   `expectedRevision`); the registration catalog returns it on every location
+   of the harness. A registration's own `routing.description` is retired: it
+   was copied into the profile once and is no longer read. The recorded
+   placement says per environment whether its harness was `described`, so the
+   receipt can tell a reading of the description from a reading of the name.
+   A harness known only by its name is capable. A call holds at most
    eight questions; further fit questions go out in parallel calls. With one
    harness there is nothing to compare and no fit is asked.
 

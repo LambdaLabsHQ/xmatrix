@@ -18,10 +18,10 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
     let run_owner = if access::inside_agent_run() {
         if !matches!(
             command,
-            AgentCommand::List { .. } | AgentCommand::Add { .. }
+            AgentCommand::List { .. } | AgentCommand::Add { .. } | AgentCommand::Describe { .. }
         ) {
             return Err(CliError::Launch(
-                "Inside an Agent Run, `xmatrix agent` lists and adds Agents; the owner changes or removes them".into(),
+                "Inside an Agent Run, `xmatrix agent` lists, adds and describes Agents; the owner changes or removes them".into(),
             ));
         }
         Some(run_owner_user_id().ok_or_else(|| {
@@ -141,6 +141,21 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
             println!("{}", serde_json::to_string_pretty(&value)?);
             Ok(())
         }
+        AgentCommand::Describe {
+            harness,
+            text,
+            space,
+            stdin,
+        } => {
+            let text = if stdin {
+                let mut input = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)?;
+                Some(input)
+            } else {
+                text
+            };
+            describe(hub_url, token, &space, &harness, text).await
+        }
         AgentCommand::Remove {
             harness,
             space,
@@ -213,6 +228,73 @@ async fn list(hub_url: &str, token: &str, space: &str) -> error::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Prints what the Space says a harness is for, or rewrites it with `text`.
+async fn describe(
+    hub_url: &str,
+    token: &str,
+    space: &str,
+    harness: &str,
+    text: Option<String>,
+) -> error::Result<()> {
+    let Some(text) = text else {
+        let value: Value = http::request_json(
+            &with_route(hub_url, &protocol::space_agent_registrations_route(space)),
+            "GET",
+            Some(token),
+            None,
+        )
+        .await?;
+        let profile = harness_profile(&value, harness)
+            .ok_or_else(|| CliError::Launch(format!("No {harness} Agent in Space {space}")))?;
+        match profile["description"]
+            .as_str()
+            .filter(|text| !text.is_empty())
+        {
+            Some(description) => println!("{description}"),
+            None => println!(
+                "No description yet. Write one with `xmatrix agent describe {harness} \"<text>\" --space {space}`."
+            ),
+        }
+        return Ok(());
+    };
+    let saved: Value = http::request_json(
+        &with_route(
+            hub_url,
+            &protocol::space_harness_profile_command_route(space),
+        ),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({"harness": harness, "description": text})),
+    )
+    .await?;
+    let cleared = saved["description"].as_str().is_none_or(str::is_empty);
+    println!(
+        "{} {} {} in Space {}",
+        "✓".green(),
+        if cleared {
+            "Cleared the description of"
+        } else {
+            "Described"
+        },
+        saved["harness"].as_str().unwrap_or(harness).bold(),
+        space
+    );
+    Ok(())
+}
+
+/// The harness's profile, which every one of its registrations in the catalog carries.
+fn harness_profile<'a>(catalog: &'a Value, harness: &str) -> Option<&'a Value> {
+    catalog["registrations"]
+        .as_array()?
+        .iter()
+        .find(|registration| {
+            registration["key"]["harness"]
+                .as_str()
+                .is_some_and(|value| value.eq_ignore_ascii_case(harness))
+        })
+        .map(|registration| &registration["profile"])
 }
 
 /// Disabled in the Space, or (before disabling was per Space) on its machine.
@@ -401,6 +483,19 @@ async fn command_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_harness_profile_is_read_from_any_of_its_registrations() {
+        let catalog = serde_json::json!({"registrations": [
+            {"key": {"harness": "claude"}, "profile": {"description": "", "revision": 0}},
+            {"key": {"harness": "codex"}, "profile": {"description": "Audits code.", "revision": 2}},
+        ]});
+        assert_eq!(
+            harness_profile(&catalog, "Codex").unwrap()["description"],
+            "Audits code."
+        );
+        assert!(harness_profile(&catalog, "gemini").is_none());
+    }
 
     #[test]
     fn add_declares_launch_settings_and_an_optional_default_directory() {

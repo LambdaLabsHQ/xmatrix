@@ -341,7 +341,8 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
         harness: item.candidate.key.harness, machineId: item.candidate.key.machineId,
         ...(item.candidate.machineName ? { machineName: item.candidate.machineName } : {}),
         fit: round(item.fit), ...(item.headroom !== undefined ? { headroom: round(item.headroom) } : {}),
-        quotaPace: round(item.quotaPace), frontier: item.frontier, utility: round(item.utility) })) },
+        quotaPace: round(item.quotaPace), frontier: item.frontier, utility: round(item.utility),
+        described: Boolean(item.candidate.description) })) },
       ...(intent ? { intent: { source: "jev" as const, selected: "summon" as const, probabilities: intent.probabilities } }
         : summon?.readInDraft && tags.launch !== "force" ? { intent: { source: "draft" as const } }
         : summon ? { intent: { source: "author" as const } } : {}),

@@ -1,11 +1,11 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { ControlError } from "@xmatrix/db";
-import { parseAgentRegistrationCommand, parseSpaceAgentRegistrationKey, groupAgentRegistrationCatalog,
+import { parseAgentRegistrationCommand, parseSpaceAgentRegistrationKey, groupAgentRegistrationCatalog, parseHarnessProfileCommand,
   parseAgentEnvironmentCommand, parseAgentRegistrationKey, type AgentRegistrationSummary } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestFailure } from "./index-shared";
 import { failureResponse } from "./error-contract";
-import { changeAgentEnvironment, controlAgentRegistration, getAgentEnvironment, getAgentRegistration,
+import { changeAgentEnvironment, controlAgentRegistration, describeAgentHarness, getAgentEnvironment, getAgentRegistration,
   listAgentRegistrations, refreshAgentRegistrationQuota } from "./agent-registrations";
 
 const NO_STORE = { "cache-control": "private, no-store" };
@@ -13,7 +13,7 @@ const NO_STORE = { "cache-control": "private, no-store" };
 const CATALOG_LIMIT = 500;
 
 const REGISTRATIONS = { list: listAgentRegistrations, refreshQuota: refreshAgentRegistrationQuota,
-  get: getAgentRegistration, control: controlAgentRegistration,
+  get: getAgentRegistration, control: controlAgentRegistration, describe: describeAgentHarness,
   getEnvironment: getAgentEnvironment, changeEnvironment: changeAgentEnvironment };
 
 /**
@@ -30,38 +30,48 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
   typeof REGISTRATIONS & { authenticate: typeof requireAuth }> = {}): void {
   const authenticate = dependencies.authenticate ?? requireAuth;
   const port = { ...REGISTRATIONS, ...dependencies };
-  app.get("/api/spaces/:spaceId/agent-registrations", async c => {
+  // Who reads a Space's Agents or describes its harnesses: a person, or an
+  // Agent Run in its own Space as its owner. A Run of another Space finds nothing.
+  const inSpace = (unavailable: string, work: (c: Context<{ Bindings: Env }>, user: { id: string }, spaceId: string) =>
+  Promise<Response>) => async (c: Context<{ Bindings: Env }>) => {
     try {
       const authenticated = await authenticate(c.req.raw, c.env);
-      const spaceId = c.req.param("spaceId");
-      // An Agent Run reads its own Space's Agents as its owner.
-      if (authenticated.agentRun && authenticated.agentRun.spaceId !== spaceId) {
-        return c.json({ error: "Registration not found" }, 404);
-      }
-      const user = authenticated.agentRun ? { id: authenticated.agentRun.ownerUserId } : requireHumanAuth(authenticated);
-      const registrations: AgentRegistrationSummary[] = [];
-      let cursor: string | null = null;
-      do {
-        const page = await port.list(c.env, { actorUserId: user.id, spaceId, cursor, limit: 200 });
-        registrations.push(...page.registrations as AgentRegistrationSummary[]);
-        cursor = page.cursor ?? null;
-      } while (cursor && registrations.length <= CATALOG_LIMIT);
-      if (registrations.length > CATALOG_LIMIT) {
-        return c.json({ error: `Registration catalog exceeds ${CATALOG_LIMIT} locations` }, 409);
-      }
-      if (c.req.query("quota") === "refresh") {
-        // The Agents page is open: ask the Space's daemons to read quota again
-        // after answering. Each daemon is probed at most once a minute.
-        const refresh = port.refreshQuota(c.env, { actorUserId: user.id, spaceId })
-          .catch((error: unknown) => console.warn("Registration quota refresh failed", {
-            error: error instanceof Error ? error.message : String(error) }));
-        try { c.executionCtx.waitUntil(refresh); } catch { /* no ExecutionContext outside Workers */ }
-      }
-      return c.json({ registrations, capabilities: groupAgentRegistrationCatalog(spaceId, registrations) }, 200, NO_STORE);
+      const spaceId = c.req.param("spaceId")!, run = authenticated.agentRun;
+      if (run && run.spaceId !== spaceId) return c.json({ error: "Registration not found" }, 404);
+      return await work(c, run ? { id: run.ownerUserId } : requireHumanAuth(authenticated), spaceId);
     } catch (error) {
-      return registrationFailure(error, "Registration catalog unavailable");
+      return registrationFailure(error, unavailable);
     }
-  });
+  };
+  app.get("/api/spaces/:spaceId/agent-registrations", inSpace("Registration catalog unavailable", async (c, user, spaceId) => {
+    const registrations: AgentRegistrationSummary[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await port.list(c.env, { actorUserId: user.id, spaceId, cursor, limit: 200 });
+      registrations.push(...page.registrations as AgentRegistrationSummary[]);
+      cursor = page.cursor ?? null;
+    } while (cursor && registrations.length <= CATALOG_LIMIT);
+    if (registrations.length > CATALOG_LIMIT) {
+      return c.json({ error: `Registration catalog exceeds ${CATALOG_LIMIT} locations` }, 409);
+    }
+    if (c.req.query("quota") === "refresh") {
+      // The Agents page is open: ask the Space's daemons to read quota again
+      // after answering. Each daemon is probed at most once a minute.
+      const refresh = port.refreshQuota(c.env, { actorUserId: user.id, spaceId })
+        .catch((error: unknown) => console.warn("Registration quota refresh failed", {
+          error: error instanceof Error ? error.message : String(error) }));
+      try { c.executionCtx.waitUntil(refresh); } catch { /* no ExecutionContext outside Workers */ }
+    }
+    return c.json({ registrations, capabilities: groupAgentRegistrationCatalog(spaceId, registrations) }, 200, NO_STORE);
+  }));
+  app.post("/api/spaces/:spaceId/agent-registrations/profiles", inSpace("Harness description unavailable", async (c, user, spaceId) => {
+    const bytes = await readBoundedRequestBody(c.req.raw, 8_192);
+    if (!bytes) return c.json({ error: "Harness description too large" }, 413);
+    let command;
+    try { command = parseHarnessProfileCommand(JSON.parse(new TextDecoder().decode(bytes))); }
+    catch { return c.json({ error: "Invalid harness description" }, 400); }
+    return c.json(await port.describe(c.env, { actorUserId: user.id, spaceId, command }), 200, NO_STORE);
+  }));
   for (const scope of ["space", "physical"] as const) for (const action of ["commands", "query"] as const) {
     const prefix = scope === "space" ? "/api/spaces/:spaceId/agent-registrations" : "/api/agent-environments";
     app.post(`${prefix}/${action}`, async c => {

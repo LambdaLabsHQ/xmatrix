@@ -191,7 +191,11 @@ export function placementReason(ranking: readonly LaunchPlacementCandidate[], co
   if (fitter) return `${fitter.harness} fits better, but ${fitter.machineName || "its machine"} is ${
     fitter.headroom !== undefined && fitter.headroom > 0 ? `at ${roomText(fitter.headroom)}` : roomText(fitter.headroom)}`;
   const even = ranking.every(item => Math.abs(item.fit - chosen.fit) <= 0.05);
-  return even ? `All equally suited; most room here (${roomText(chosen.headroom)})`
+  const reason = even ? `All equally suited; most room here (${roomText(chosen.headroom)})`
     : `Best suited, with ${roomText(chosen.headroom)}`;
+  // What the fit was read from: the Space's description of the Agent, or nothing but its name.
+  if (chosen.described === undefined) return reason;
+  return `${reason}. ${chosen.described ? "Its description was read"
+    : `${chosen.harness} has no description here, so it was judged by name`}`;
 }
 

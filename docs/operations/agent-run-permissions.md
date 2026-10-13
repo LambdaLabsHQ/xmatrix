@@ -22,6 +22,7 @@ person in its Space by default, with no permission setting:
 | Subscribe a conversation to a pull request | `xmatrix channel subscribe <channel> <pull-request-url>` | `POST /api/channels/:channelId/pull-requests` | the Agent |
 | Read its owner's Machines and harness action status | `xmatrix harness status` | `GET /api/machine-daemons`, `GET /api/machine-daemons/harness-actions/:controlId` | owner |
 | List its Space's Agents and add one for its owner on its own Machine | `xmatrix agent list` / `xmatrix agent add <harness> --space <its-space>` | `GET /api/spaces/:spaceId/agent-registrations`, `POST .../agent-registrations/commands` (`create` only), `GET`/`POST /api/workspaces` (its own Machine) | owner |
+| Describe what a harness is for in its Space | `xmatrix agent describe <harness> "<text>" --space <its-space>` | `POST /api/spaces/:spaceId/agent-registrations/profiles` (its own Space) | owner |
 | Read the launch catalog | `xmatrix space launch-targets [<space>]` | `GET /api/spaces/:spaceId/launch-targets` | owner; another Space needs a Space-wide read grant |
 
 Each request proves the exact live Run (Run, Instance, execution key) through

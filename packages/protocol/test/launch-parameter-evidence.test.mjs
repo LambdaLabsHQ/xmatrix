@@ -109,11 +109,15 @@ test('v10 keeps per-harness fit and the joint placement, and rejects malformed o
   assert.deepEqual(parsed.fit, input.fit);
   assert.equal(parsed.placement.ranking.length, 3);
   assert.equal(parsed.placement.ranking[2].headroom, undefined);
+  assert.equal(parsed.placement.ranking[0].described, undefined, 'older decisions did not record it');
+  const described = structuredClone(input);
+  described.placement.ranking[0].described = false;
+  assert.equal(parseLaunchParameterEvidence(described).placement.ranking[0].described, false);
   assert.doesNotMatch(JSON.stringify(parsed), /private/);
   for (const change of [e => e.fit.scores.codex.score = 4, e => e.fit.scores.codex.probabilities = { 4: 1 },
     e => e.fit.scores['Not A Harness'] = { score: 1, probabilities: {} }, e => e.fit.inputDigest = 'bad',
     e => e.placement.profile = 'greedy', e => e.placement.ranking = [], e => e.placement.ranking[0].fit = 1.5,
-    e => e.placement.ranking[0].frontier = 'yes', e => e.placement.ranking[0].machineId = '',
+    e => e.placement.ranking[0].frontier = 'yes', e => e.placement.ranking[0].described = 'yes', e => e.placement.ranking[0].machineId = '',
     e => e.placement.ranking = Array.from({ length: 9 }, () => e.placement.ranking[0])]) {
     const malformed = structuredClone(input); change(malformed);
     assert.equal(parseLaunchParameterEvidence(malformed), undefined);

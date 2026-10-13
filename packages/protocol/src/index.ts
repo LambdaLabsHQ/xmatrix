@@ -421,6 +421,12 @@ export type {
   AgentRegistrationCommand,
 } from "./agent-registration-command.js";
 export {
+  HARNESS_PROFILE_DESCRIPTION_LIMIT, harnessProfileSummary, parseHarnessProfileCommand,
+} from "./agent-harness-profile.js";
+export type {
+  HarnessProfileCommand, SpaceHarnessProfile,
+} from "./agent-harness-profile.js";
+export {
   groupAgentRegistrationCatalog,
 } from "./agent-registration-catalog.js";
 export type {

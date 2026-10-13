@@ -25,7 +25,7 @@ export function AgentRoutingDeclarationEditor({ value, disabled, onChange }: {
     <legend className="px-1 text-sm font-bold">Automatic routing</legend>
     {/* Whether the agent takes work is its owner's Disable/Enable on the Agents page. */}
     <>
-      <p className="text-xs text-muted-foreground">Describe this environment’s capabilities and limits. Machine reachability, resource usage and startup timing are measured separately.</p>
+      <p className="text-xs text-muted-foreground">Describe this environment’s capabilities and limits. Machine reachability, resource usage and startup timing are measured separately. What the agent is good at is written on its page in Agents, once it is added.</p>
       <label className="block text-sm">Supported model IDs, one per line<Textarea className="mt-1" rows={2}
         value={modelText} onChange={event => { setModelText(event.target.value);
           const models = event.target.value.split("\n").map(item => item.trim()).filter(Boolean);
@@ -38,8 +38,6 @@ export function AgentRoutingDeclarationEditor({ value, disabled, onChange }: {
             else delete aliases[model];
             update({ modelAliases: aliases });
           }} /></label>)}
-      <label className="block text-sm">Suitable work and limitations<Textarea className="mt-1" maxLength={1000} rows={3}
-        value={declaration.description} onChange={event => update({ description: event.target.value })} /></label>
       <label className="block text-sm">Availability<GlassSelect aria-label="Availability" value={declaration.availability}
         onChange={value => update({ availability: value as AgentRoutingDeclaration["availability"] })}
         options={[{ value: "unknown", label: "Not specified" }, { value: "interactive", label: "While I am here" },

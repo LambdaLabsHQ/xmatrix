@@ -943,11 +943,12 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     catalog?.catch(() => undefined); // awaited below, after the registrations are read
     const rows = await this.database.transaction({ requestId: `registration-candidates:${target.harness ?? "auto"}`,
       operation: "registration.launch.candidates", placement: this.placement }, tx => tx.query({
-      name: "registration_launch_candidates_v2", text: `SELECT r.owner_user_id,r.machine_id,r.harness,r.configuration_json,
-        a.grant_limits,a.policy_limits FROM data.space_agent_registrations r
+      name: "registration_launch_candidates_v3", text: `SELECT r.owner_user_id,r.machine_id,r.harness,r.configuration_json,
+        a.grant_limits,a.policy_limits,p.description AS profile_description FROM data.space_agent_registrations r
         JOIN data.space_members m ON m.space_id=r.space_id AND m.user_id=r.owner_user_id
         JOIN data.space_agent_registration_access a ON a.space_id=r.space_id AND a.owner_user_id=r.owner_user_id
           AND a.machine_id=r.machine_id AND a.harness=r.harness
+        LEFT JOIN data.space_harness_profiles p ON p.space_id=r.space_id AND p.harness=r.harness
         WHERE r.space_id=$1 AND ($2::text IS NULL OR r.harness=$2) AND a.grant_state='active' AND a.policy_state='enabled'
           AND ($3::text IS NULL OR r.owner_user_id=$3) AND ($4::text IS NULL OR r.machine_id=$4)
         ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT 101`,
@@ -969,7 +970,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         ...(repositoryCatalog?.repositories ?? []).map(repo => `repo:${repo}`)])];
       if (!workspaceReferences.length && !target.managedWorkspace) return [];
       return [{ key: parseSpaceAgentRegistrationKey({ spaceId: this.placement.spaceId, ownerUserId: row.owner_user_id,
-        machineId: row.machine_id, harness: row.harness }), description: configuration.routing?.description ?? "",
+        machineId: row.machine_id, harness: row.harness }),
+        // The Space's profile of the harness is the one description routing reads.
+        description: typeof row.profile_description === "string" ? row.profile_description : "",
         models, workspaceReferences }];
     });
     const observed = await this.database.transaction({ requestId: `registration-models:${target.harness ?? "auto"}`,

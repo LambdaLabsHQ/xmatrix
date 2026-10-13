@@ -4,6 +4,7 @@ import type { LlmQuotaAccount } from "./authority-runtime.js";
 import { parseSpaceAgentRegistrationKey, type SpaceAgentRegistrationKey } from "./agent-registration.js";
 import type { SpaceAgentConfiguration } from "./agent-registration-configuration.js";
 import type { RegistrationOwnerGrant, RegistrationSpacePolicy } from "./agent-registration-access.js";
+import type { SpaceHarnessProfile } from "./agent-harness-profile.js";
 
 export interface AgentRegistrationDetails {
   key: SpaceAgentRegistrationKey;
@@ -36,6 +37,11 @@ export interface AgentRegistrationSummary {
   canManageOwnerGrant: boolean;
   canConfigureSpace: boolean;
   canRemoveFromSpace: boolean;
+  /** What the Space says its harness is for; the same on every location of the harness.
+   * Absent from a Hub that does not report it. */
+  profile?: SpaceHarnessProfile;
+  /** The reader may rewrite that profile: a Space owner/admin, or someone with an Agent of this harness here. */
+  canDescribe?: boolean;
   /** Where it stands right now. Absent from a Hub that does not report it. */
   live?: AgentRegistrationLiveState;
 }
