@@ -91,6 +91,8 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
     space_app_connection_dingtalk_install: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/dingtalk/install`,
     connector_dingtalk_install_prepare: `${api}/connectors/dingtalk/install/prepare` as const,
+    space_app_connection_gmail_mailboxes: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/mailboxes`,
     space_app_connection_google_picker: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/google/picker`,
     space_app_connection_teams_link: (spaceId: string) =>
