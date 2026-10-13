@@ -163,20 +163,19 @@ jobs:
               core.setFailed("Production request does not authorize this exact main revision");
               return;
             }
-            // The request dispatches this run as its last step, so GitHub can
-            // still report its dispatcher's steps as pending for a few seconds.
-            // Re-read for a bounded minute; the evidence required is unchanged.
-            const markerName = `Record successful ${scope} production authorization`;
+            // Scope is durable job evidence, not optional step metadata. The
+            // dispatcher cannot run until this exact authorization succeeds.
+            // Re-read boundedly while GitHub publishes the job conclusion.
+            const authorityName = `authorize ${scope} production`;
             let jobs = [];
-            let marker;
+            let authorities = [];
             for (let attempt = 0; attempt < 12; attempt += 1) {
               if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
               jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-                ...context.repo, run_id: requestRun.id, per_page: 100,
+                ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
               });
-              const dispatcher = jobs.find((job) => job.name === "authorize-and-dispatch");
-              marker = dispatcher?.steps?.find((step) => step.name === markerName);
-              if (marker?.conclusion || dispatcher?.status === "completed") break;
+              authorities = jobs.filter((job) => job.name === authorityName);
+              if (authorities.length > 1 || authorities[0]?.conclusion) break;
             }
             // The request's `gates` job passes only when every gate its scope
             // selects passed (ci.yml's aggregate and the iOS gate).
@@ -186,8 +185,8 @@ jobs:
                 return;
               }
             }
-            if (marker?.conclusion !== "success") {
-              core.setFailed("Production request is missing its successful scope authorization marker");
+            if (authorities.length !== 1 || authorities[0].status !== "completed" || authorities[0].conclusion !== "success") {
+              core.setFailed("Production request is missing its successful exact-scope authorization job");
             }
 
   verify-production-postgres:
@@ -486,7 +485,7 @@ jobs:
     secrets: inherit
 
   deployment-receipt:
-    name: deployment receipt
+    name: deployment receipt (${{ needs.preflight.outputs.scope }})
     needs: [preflight, verify-production-postgres, hub, web, client-readiness, cli, desktop, android, ios]
     if: >-
       always() && needs.preflight.result == 'success' &&

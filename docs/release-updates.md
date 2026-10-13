@@ -19,6 +19,42 @@ syncs the package manifests, Rust crate metadata, and native release metadata)
 is what the request runs; use it on a branch only to make local builds report a
 specific version.
 
+## Scope evidence without job step metadata
+
+Production request authorization is the completed successful job named
+`authorize <canonical scope> production`, which depends on the frozen plan and
+all selected gates. The dispatcher depends on this job. Production preflight
+and the independent Hub/Web reuse checks require exactly one such job, its
+completed/success conclusion, successful plan/gates, the authorizing workflow
+identity, and the same verified main/release SHA. A caller-supplied scope or a
+successful dispatcher alone cannot authorize a deployment. Step logs and an
+empty `steps` array supply no authorization evidence.
+
+Deployment receipt jobs similarly carry their scope in
+`deployment receipt (<canonical scope>)`. Archival requires the completed
+successful exact-scope job plus its existing exact run/SHA/attempt, selected
+component results and finalizer checks. Historical immutable tags retain their
+old receipt label and exact successful step marker; archival still accepts that
+historical proof only when no new scoped receipt exists. Missing step metadata
+never authorizes an old tag, and a failed/ambiguous new receipt cannot fall back.
+
+Migration evidence: v1.0.367's production request and its plan/gates/dispatcher
+succeeded, but the jobs and per-job APIs returned `steps: []`. Production
+preflight failed on the missing marker in three attempts; every build/deploy
+job was skipped and the live Web build stayed unchanged. The writer and all
+request-proof readers migrate together in a new reviewed main revision. The
+scope-specific job preserves the former marker's exact selection while using
+job conclusion evidence that remained available. Runtime workflow tests cover
+empty steps, missing/wrong/duplicate scope, failed/skipped/cancelled/incomplete
+jobs, selected-gate failures, different SHA and delayed evidence.
+
+Recovery: keep the failed immutable v1.0.367 tag unchanged. After the fix passes
+CI and merges, request a new Release Intent. The train reopens the failed train's
+intent and chooses a higher immutable version containing both the performance
+change and this fix. No provider mutation, manual tag move, direct deployment or
+credential expansion is needed. Existing production serialization and recovery
+conditions remain in force.
+
 ## Shared release workflow definitions
 
 The immutable Production Release train calls `server-release.yml` with an explicit `hub`, `web-build`, or `web` target. The former `hub-deploy.yml`, `web-build.yml`, and `web-deploy.yml` had no other callers. Their original steps now live in separate target-selected jobs in the shared workflow. Hub and Web retain independent production concurrency groups, exact-request authorization, read-only GitHub permissions, the same production environments, and unchanged credential bindings. The build job explicitly keeps `contents: read` only. Web still builds beside Hub after PostgreSQL readiness; only Web deployment waits for Hub and the verified build handoff. Selected jobs keep the historical `hub / deploy`, `web-build / build`, and `web / deploy` evidence names; inactive jobs have distinct names. Unknown targets select no production job.

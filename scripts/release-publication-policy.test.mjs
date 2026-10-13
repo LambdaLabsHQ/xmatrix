@@ -207,10 +207,10 @@ test("archival proves old or nested Android publication and rejects ambiguous or
   const script = Object.values(workflow.jobs).flatMap((job) => job.steps ?? [])
     .find((step) => step.name === "Require the completed exact-scope production train").with.script;
   const execute = new (Object.getPrototypeOf(async function () {}).constructor)("github", "context", "core", "process", script);
-  async function authorize(names, overrides = {}) {
+  async function authorize(names, overrides = {}, receipt = { name: "deployment receipt (android)", status: "completed", conclusion: "success", steps: [] }) {
     const errors = [], outputs = {};
     const jobs = [
-      { name: "deployment receipt", steps: [{ name: "Record successful android component deployment", conclusion: "success" }] },
+      ...[receipt].flat(),
       { name: "verify-production-postgres", conclusion: "skipped" },
       { name: "selected train receipt", conclusion: "success" },
       ...names.map((name) => ({ name, conclusion: "success" })),
@@ -227,6 +227,19 @@ test("archival proves old or nested Android publication and rejects ambiguous or
     assert.deepEqual(result.errors, []);
     assert.equal(result.outputs.recover_receipt, "false");
   }
+  const historical = { name: "deployment receipt", steps: [{ name: "Record successful android component deployment", conclusion: "success" }] };
+  assert.deepEqual((await authorize(["android / release"], {}, historical)).errors, []);
+  const scoped = { name: "deployment receipt (android)", status: "completed", conclusion: "success", steps: [] };
+  assert.equal((await authorize(["android / release"], {}, [scoped, scoped])).errors.length, 1);
+  assert.equal((await authorize(["android / release"], {}, [{ ...scoped, name: "deployment receipt (web)" }, historical])).errors.length, 1);
+  assert.equal((await authorize(["android / release"], {}, [{ ...scoped, conclusion: "failure" }, historical])).errors.length, 1);
+  for (const receipt of [
+    { name: "deployment receipt ()", status: "completed", conclusion: "skipped", steps: [] },
+    { name: "deployment receipt (web)", status: "completed", conclusion: "success", steps: [] },
+    { name: "deployment receipt (android)", status: "completed", conclusion: "failure", steps: [] },
+    { name: "deployment receipt (android)", status: "in_progress", conclusion: "success", steps: [] },
+    { name: "deployment receipt", steps: [] },
+  ]) assert.equal((await authorize(["android / release"], {}, receipt)).errors.length, 1);
   for (const [names, overrides] of [
     [["android / release", "android / release / release"], {}],
     [["android / release / release", "cli / release"], {}],

@@ -1,5 +1,18 @@
 # Guardrail Review Sources
 
+- 2026-10-13 scope authorization evidence: production preflight correctly failed
+  closed for v1.0.367 when successful request jobs exposed no step metadata, in
+  three attempts before any production build/deploy. Reviewed the request writer,
+  tagged preflight, independent Hub/Web reuse proofs and archival receipt reader.
+  Scope authorization moves atomically to a dedicated scope-named successful job
+  gated by plan and selected tests; every SHA/workflow/selection check remains.
+  Deployment receipt names carry scope too, with exact historical step evidence
+  retained only for immutable old tags. Negative runtime workflow tests preserve
+  fail-closed behavior for absent, failed, ambiguous or widened evidence.
+  Migration and forward recovery through a new main revision, normal Release
+  Intent and higher immutable tag are documented in
+  [Release Updates](../release-updates.md#scope-evidence-without-job-step-metadata).
+
 - 2026-10-13 Hub-owned capacity recovery: maintainer direction moved classification,
   retry budgets, waiting and visible state from CLI to Hub. Reviewed exact Run
   credentials, current Channel/registration grants, Run lifecycle fencing,
