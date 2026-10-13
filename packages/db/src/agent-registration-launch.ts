@@ -580,12 +580,16 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       if (!input.aboutSession) await tx.query({ name: "registration_launch_instance_v1", text: `INSERT INTO data.instances
         (instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
         VALUES ($1,$2,$3,$4,'offline',1,$5,$5)`, values: [row.instance_id,row.run_id,input.channelId,ordinal,at], maxRows: 0 });
-      await tx.query({ name: "registration_launch_delivery_v1", text: `INSERT INTO data.agent_launches
+      // Delivery reads the source only from this column and drops the copy in
+      // the payload, so a Launch without it starts a turn tied to no message.
+      await tx.query({ name: "registration_launch_delivery_v2", text: `INSERT INTO data.agent_launches
         (launch_id,space_id,channel_id,trigger_id,launch_kind,owner_user_id,run_id,instance_id,
-         execution_key,control_id,machine_id,hostname,state,spawn_payload_json,next_attempt_at,created_at,updated_at,prepared_at)
-        VALUES ($1,$2,$3,$4,'registration',$5,$6,$7,$8,$9,$10,$11,'prepared',$12::jsonb,$13,$13,$13,$13)`,
+         execution_key,control_id,machine_id,hostname,state,spawn_payload_json,next_attempt_at,created_at,updated_at,prepared_at,
+         initial_source_json)
+        VALUES ($1,$2,$3,$4,'registration',$5,$6,$7,$8,$9,$10,$11,'prepared',$12::jsonb,$13,$13,$13,$13,$14::jsonb)`,
       values: [row.launch_id,input.key.spaceId,input.channelId,input.sourceMessageId ?? input.presentationMessageId ?? input.commandId,input.key.ownerUserId,row.run_id,row.instance_id,
-        row.execution_key,row.control_id,input.key.machineId,workspace.hostname,JSON.stringify(payload),at], maxRows: 0 });
+        row.execution_key,row.control_id,input.key.machineId,workspace.hostname,JSON.stringify(payload),at,
+        messageSource ? JSON.stringify(messageSource) : null], maxRows: 0 });
       await tx.query({ name: "registration_launch_committed_v1", text: `UPDATE data.registration_launch_intents SET
         state='committed',updated_at=clock_timestamp() WHERE actor_user_id=$1 AND command_id=$2`, values: [input.actorUserId,input.commandId], maxRows: 0 });
       await commitRuntime(tx, input.key.spaceId, { commandId: input.commandId, kind: "registration_launch", entityId: row.run_id,
