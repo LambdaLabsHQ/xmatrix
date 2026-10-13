@@ -127,6 +127,64 @@ integration('without a session the app is sent to sign in on the Web app', async
   } finally { await f.close(); }
 });
 
+integration('open registration cannot bypass member consent or obtain a client-credentials token', async () => {
+  const f = await fixture(); try {
+    const metadata = { redirect_uris: [REDIRECT], client_name: 'xMatrix Security' };
+    const bypass = await f.call('/oauth2/register', { method: 'POST', body: { ...metadata, skip_consent: true } });
+    assert.equal(bypass.status, 400);
+    const service = await f.call('/oauth2/register', { method: 'POST', body: {
+      ...metadata, grant_types: ['client_credentials'] } });
+    assert.equal(service.status, 400);
+    assert.equal((await f.run('SELECT count(*)::int n FROM control.auth_oauth_clients'))[0].n, 0);
+
+    const clientId = await register(f, 'xmatrix:read');
+    const { next } = await authorize(f, clientId, 'xmatrix:read');
+    assert.equal(next.pathname, '/oauth/consent');
+    assert.equal(next.searchParams.get('code'), null);
+    const unsigned = new URLSearchParams(next.search);
+    unsigned.delete('sig');
+    const tampered = new URLSearchParams(next.search);
+    tampered.set('redirect_uri', 'https://attacker.example/callback');
+    for (const oauthQuery of [unsigned.toString(), tampered.toString()]) {
+      const consent = await f.call('/oauth2/consent', { method: 'POST', session: f.session,
+        body: { accept: true, oauth_query: oauthQuery } });
+      assert.equal(consent.status, 400);
+      assert.equal((await consent.json()).error, 'invalid_signature');
+    }
+    const anonymous = await f.call('/oauth2/consent', { method: 'POST',
+      body: { accept: true, oauth_query: next.search.slice(1) } });
+    assert.equal(anonymous.status, 401);
+    const token = await f.call('/oauth2/token', { method: 'POST', form: {
+      grant_type: 'client_credentials', client_id: clientId } });
+    assert.notEqual(token.status, 200);
+    assert.equal((await f.run('SELECT count(*)::int n FROM control.auth_oauth_consents'))[0].n, 0);
+    assert.equal((await f.run('SELECT count(*)::int n FROM control.auth_oauth_access_tokens'))[0].n, 0);
+  } finally { await f.close(); }
+});
+
+integration('public clients need an exact registered redirect and S256 PKCE before a code can be redeemed', async () => {
+  const f = await fixture(); try {
+    const clientId = await register(f, 'xmatrix:read');
+    const query = new URLSearchParams({ response_type: 'code', client_id: clientId, redirect_uri: REDIRECT,
+      scope: 'xmatrix:read', state: 'state-1' });
+    const missingPkce = new URL((await (await f.call(`/oauth2/authorize?${query}`, { session: f.session })).json()).url);
+    assert.equal(missingPkce.searchParams.get('error'), 'invalid_request');
+    assert.equal(missingPkce.searchParams.get('code'), null);
+    query.set('redirect_uri', 'https://attacker.example/callback');
+    const wrongRedirect = new URL((await (await f.call(`/oauth2/authorize?${query}`, { session: f.session })).json()).url);
+    assert.equal(wrongRedirect.origin, f.env.HUB_URL, 'invalid redirects never receive authorization responses');
+    assert.equal(wrongRedirect.searchParams.get('code'), null);
+
+    const back = await answer(f, (await authorize(f, clientId, 'xmatrix:read')).next, true);
+    const token = await f.call('/oauth2/token', { method: 'POST', form: { grant_type: 'authorization_code',
+      code: back.searchParams.get('code'), code_verifier: randomBytes(32).toString('base64url'),
+      client_id: clientId, redirect_uri: REDIRECT } });
+    assert.equal(token.status, 401);
+    assert.equal((await token.json()).error, 'invalid_request');
+    assert.equal((await f.run('SELECT count(*)::int n FROM control.auth_oauth_access_tokens'))[0].n, 0);
+  } finally { await f.close(); }
+});
+
 integration('removing an app ends its grant: its refresh token no longer works', async () => {
   const f = await fixture(); try {
     const { clientId, refresh_token: refreshToken } = await connect(f);

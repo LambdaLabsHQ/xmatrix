@@ -34,13 +34,19 @@ export function OAuthConsent() {
   const scopes = Object.keys(SCOPE_TEXT).filter((scope) => requested.has(scope));
 
   useEffect(() => {
+    let current = true;
+    setClient(null);
     if (!user || !clientId) return;
-    readOAuthClient(clientId).then(setClient).catch((reason: unknown) =>
-      setError(userErrorMessage(reason, "Couldn't read the app's request") ?? ""));
+    readOAuthClient(clientId).then((loaded) => {
+      if (current) setClient(loaded);
+    }).catch((reason: unknown) => {
+      if (current) setError(userErrorMessage(reason, "Couldn't read the app's request") ?? "");
+    });
+    return () => { current = false; };
   }, [clientId, user]);
 
   async function answer(accept: boolean) {
-    if (!query) return;
+    if (!query || (accept && (!client || !returnHost))) return;
     setPending(true);
     setError("");
     try {
@@ -62,10 +68,12 @@ export function OAuthConsent() {
         <p className="text-sm">Signed in as {user.email}. {appName} will be able to:</p>
         <ul className="list-disc space-y-1 pl-5 text-sm">{scopes.map((scope) => <li key={scope}>{SCOPE_TEXT[scope]}</li>)}</ul>
         <p className="text-sm text-muted-foreground">It acts as you, with only the access you have. You can remove it at any time.</p>
-        {/* The app names itself when it registers; where the grant goes is what can be trusted. */}
-        {returnHost ? <p className="text-xs text-muted-foreground">Allowing sends you back to {returnHost}.</p> : null}
+        <p className="text-sm">This app supplied its own name. xMatrix has not verified its identity.
+          Only allow access if you started this connection from an app you trust.</p>
+        {returnHost ? <p className="text-sm">Access will be returned to <strong className="break-all"><bdi>{returnHost}</bdi></strong>.</p>
+          : <p role="alert" className="text-sm text-destructive">The return address is missing or invalid. Start again from the app.</p>}
         <div className="flex gap-3">
-          <Button disabled={pending} onClick={() => void answer(true)}>Allow</Button>
+          <Button disabled={pending || !client || !returnHost} onClick={() => void answer(true)}>Allow</Button>
           <Button variant="outline" disabled={pending} onClick={() => void answer(false)}>Deny</Button>
         </div>
       </>}

@@ -22,6 +22,9 @@ preserves rejection and never replays a potentially partial broadcast. See
 
 Outside AI applications can read and write a person's Pages and Channels
 through the remote OAuth MCP server, using the person's existing access.
+Open client registration supports outside MCP apps; consent explicitly labels
+their names as unverified, shows the return host, and blocks approval when
+the app details or return address are unavailable.
 The `show_page` tool supplies a sandboxed MCP Apps card and a source link;
 text-only clients receive the same page data. The ChatGPT/Codex submission
 package and remaining portal prerequisites live in `deploy/chatgpt-plugin`.
