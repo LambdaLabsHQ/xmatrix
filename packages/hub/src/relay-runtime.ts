@@ -49,7 +49,7 @@ import { createProductionRelayRuntimeProductPortFactory } from "./runtime-transp
 import {
   AGENT_HOST_TRACE_MAX_EVENTS,
   AGENT_HOST_TRACE_MAX_WAIT_MS,
-  agentHostTraceTimestampEpochNanoseconds,
+  validAgentHostTraceSince,
   parseAgentHostTraceCursor,
 } from "./agent-host-trace";
 
@@ -267,13 +267,14 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       }
       const instanceId = boundedId(url.searchParams.get("instanceId"));
       const maxEvents = Number(url.searchParams.get("limit") || "100");
+      const receivedOrder = url.searchParams.get("order") === "received";
       const since = url.searchParams.get("since") || undefined;
       const before = url.searchParams.get("before") || undefined;
       const waitMs = url.searchParams.has("waitMs") ? Number(url.searchParams.get("waitMs")) : undefined;
-      if (!instanceId || !Number.isSafeInteger(maxEvents) || maxEvents < 1 ||
+      if ((url.searchParams.has("order") && !receivedOrder) || !instanceId || !Number.isSafeInteger(maxEvents) || maxEvents < 1 ||
           maxEvents > AGENT_HOST_TRACE_MAX_EVENTS ||
-          (since !== undefined && agentHostTraceTimestampEpochNanoseconds(since) === undefined) ||
-          (before !== undefined && parseAgentHostTraceCursor(before) === undefined) ||
+          (since !== undefined && !validAgentHostTraceSince(since, receivedOrder)) ||
+          (before !== undefined && parseAgentHostTraceCursor(before, receivedOrder) === undefined) ||
           (waitMs !== undefined && (!Number.isSafeInteger(waitMs) || waitMs < 0 ||
             waitMs > AGENT_HOST_TRACE_MAX_WAIT_MS))) {
         return Response.json({ error: "Invalid Agent host trace request" }, {
@@ -282,7 +283,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
         });
       }
       return Response.json(
-        await this.productAdapter.requestAgentTraceHistory(instanceId, { maxEvents, since, before, waitMs }),
+        await this.productAdapter.requestAgentTraceHistory(instanceId, { maxEvents, since, before, waitMs, receivedOrder }),
         { headers: { "cache-control": "private, no-store" } },
       );
     }

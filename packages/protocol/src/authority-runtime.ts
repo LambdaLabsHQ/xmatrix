@@ -1,3 +1,4 @@
+import type { AgentTraceOrder } from "./trace-order.js";
 import type { AgentStatusChip } from "./agent-status-tags.js";
 import type { AgentRegistrationKey } from "./agent-registration.js";
 import type { ChannelMessage } from "./channel-message.js";
@@ -942,6 +943,8 @@ export interface TraceAccessGrant {
 }
 
 export interface ObservabilityEvent {
+  /** Present only for negotiated host receive-order trace reads. */
+  traceOrder?: AgentTraceOrder;
   id: string;
   type: ObservabilityEventType;
   workspaceUserId: string;

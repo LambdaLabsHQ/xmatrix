@@ -566,3 +566,5 @@ export type { AccountDeletionState, AccountDeletionBlocker, AccountDeletionRecei
 export { ACCOUNT_REVOKED_STATES, isAccountRevoked } from "./account-deletion.js";
 
 export { erasedAccountMessageSender } from "./account-message-sender.js";
+
+export { agentTraceOrderCursor, parseAgentTraceOrder, parseAgentTraceOrderCursor, type AgentTraceOrder } from "./trace-order.js";

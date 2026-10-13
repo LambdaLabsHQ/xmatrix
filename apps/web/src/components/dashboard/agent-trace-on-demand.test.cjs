@@ -672,3 +672,26 @@ test("live trace watermark uses the latest instant across offsets and fractional
   sync.cancel();
   assert.equal(reads[1], latest);
 });
+
+test("live trace reads keep the newest host position while filling a multi-page gap", async () => {
+  const reads = [];
+  const streamId = "11111111-1111-4111-8111-111111111111";
+  const position = (sequence) => `received:${streamId}:${sequence}`;
+  const sync = startAgentTraceHistorySync({
+    instanceIds: ["instance:one"], refreshIntervalMs: 250,
+    fetchHistory: async (instanceId, options) => {
+      reads.push({ since: options.since, before: options.before });
+      const positions = options.before ? [3, 2] : !options.since ? [2, 1] : reads.length === 2 ? [5, 4] : [];
+      const events = positions.map((sequence) => ({
+        ...trace(instanceId, `event:${sequence}`, `2026-10-13T08:00:0${6 - sequence}Z`),
+        traceOrder: { streamId, sequence },
+      }));
+      return historyResponse(instanceId, events, reads.length === 2 ? { complete: false, nextCursor: position(4) } : {});
+    }, onState: () => undefined, onEvents: () => undefined,
+  });
+  await waitForTraceReads(sync, reads, 4);
+  sync.cancel();
+  assert.equal(reads[1].since, position(2));
+  assert.equal(reads[2].before, position(4));
+  assert.equal(reads[3].since, position(5));
+});

@@ -1,4 +1,4 @@
-import { plainRecord } from "@xmatrix/protocol";
+import { agentTraceOrderCursor, parseAgentTraceOrder, parseAgentTraceOrderCursor, plainRecord } from "@xmatrix/protocol";
 import type { AgentInstanceTraceHistoryResultMessage } from "@xmatrix/protocol/connections/agent-instance";
 import { rfc3339TimestampEpochNanoseconds, type ObservabilityEvent , utf8ByteLength } from "@xmatrix/protocol";
 
@@ -88,7 +88,7 @@ export interface AgentHostTraceReadResult {
   availability: AgentHostTraceAvailability;
   /** No older retained event remains and nothing was evicted. */
   complete: boolean;
-  /** Newest first by (instant, id). */
+  /** Newest first in the negotiated order. */
   events: ObservabilityEvent[];
   /** Cursor for the next older page; null on the oldest or an unpaged read. */
   nextCursor?: string | null;
@@ -98,6 +98,7 @@ export interface AgentHostTraceReadResult {
 
 export interface AgentHostTraceReadRequest {
   maxEvents: number;
+  receivedOrder?: boolean;
   since?: string;
   before?: string;
   /** Only with `since` and without `before`: wait up to this long for news. */
@@ -125,16 +126,17 @@ export function sanitizeAgentHostTraceHistory(
   request: AgentHostTraceReadRequest,
 ): AgentHostTraceReadResult | undefined {
   try {
-    const { maxEvents, since, before } = request;
+    const { maxEvents, since, before, receivedOrder } = request;
+    const sinceOrder = receivedOrder ? parseAgentTraceOrderCursor(since) : undefined;
     if (message.instanceId !== binding.instanceId) return undefined;
     if (!Number.isSafeInteger(maxEvents) || maxEvents < 1) return undefined;
     if (!Array.isArray(message.events)) return undefined;
-    const sinceEpochNanoseconds = since === undefined
+    const sinceEpochNanoseconds = since === undefined || sinceOrder
       ? undefined
       : boundedTimestamp(since)?.epochNanoseconds;
-    if (since !== undefined && sinceEpochNanoseconds === undefined) return undefined;
-    const beforeKey = before === undefined ? undefined : parseAgentHostTraceCursor(before);
-    if (before !== undefined && beforeKey === undefined) return undefined;
+    if (since !== undefined && !sinceOrder && sinceEpochNanoseconds === undefined) return undefined;
+    const beforeKey = before === undefined ? undefined : parseAgentHostTraceCursor(before, receivedOrder ?? false);
+    if (before !== undefined && (beforeKey === undefined || (!receivedOrder && beforeKey.traceOrder))) return undefined;
     if (message.availability !== "available") {
       if (message.complete || message.events.length !== 0) return undefined;
       return message.availability === "expired"
@@ -169,7 +171,11 @@ export function sanitizeAgentHostTraceHistory(
           (!binding.deferChannelAuthorization && !allowedChannelIds.has(channelId))) continue;
       if (sinceEpochNanoseconds !== undefined &&
           timestamp.epochNanoseconds < sinceEpochNanoseconds) continue;
-      const key = { epochNanoseconds: timestamp.epochNanoseconds, id };
+      const traceOrder = receivedOrder ? parseAgentTraceOrder(candidate.traceOrder) : undefined;
+      if (receivedOrder && candidate.traceOrder !== undefined && !traceOrder) return undefined;
+      if (sinceOrder && (!traceOrder || traceOrder.streamId !== sinceOrder.streamId || traceOrder.sequence < sinceOrder.sequence)) return undefined;
+      const key = { epochNanoseconds: timestamp.epochNanoseconds, id, traceOrder };
+      if (beforeKey?.traceOrder && (!traceOrder || traceOrder.streamId !== beforeKey.traceOrder.streamId)) return undefined;
       if (beforeKey && compareAgentHostTraceCursorKeys(key, beforeKey) >= 0) continue;
       const metadata = plainRecord(candidate.metadata);
       const payload = plainRecord(metadata?.payload);
@@ -178,6 +184,7 @@ export function sanitizeAgentHostTraceHistory(
         key,
         event: {
           id,
+          ...(traceOrder ? { traceOrder } : {}),
           type: "event_published",
           workspaceUserId: binding.ownerUserId,
           agentId: binding.agentId,
@@ -191,7 +198,18 @@ export function sanitizeAgentHostTraceHistory(
         },
       });
     }
-    candidates.sort((left, right) => compareAgentHostTraceCursorKeys(right.key, left.key));
+    const ordered = candidates.some(({ key }) => key.traceOrder !== undefined);
+    if (ordered) {
+      const stream = candidates[0]?.key.traceOrder?.streamId;
+      for (let index = 0; index < candidates.length; index += 1) {
+        const order = candidates[index]!.key.traceOrder;
+        if (!order || order.streamId !== stream || (index > 0 && order.sequence >= candidates[index - 1]!.key.traceOrder!.sequence)) return undefined;
+      }
+    } else {
+      if (sinceOrder || beforeKey?.traceOrder) return undefined;
+      // Compatibility for hosts that ignore the receive-order request.
+      candidates.sort((left, right) => compareAgentHostTraceCursorKeys(right.key, left.key));
+    }
     // Cut the page at an event boundary instead of rejecting it: an oversized
     // response used to make a busy Agent's whole trace unreadable.
     const pageLimit = Math.min(maxEvents, AGENT_HOST_TRACE_MAX_EVENTS);
@@ -233,14 +251,17 @@ export function sanitizeAgentHostTraceHistory(
 interface AgentHostTraceCursorKey {
   epochNanoseconds: bigint;
   id: string;
+  traceOrder?: NonNullable<ObservabilityEvent["traceOrder"]>;
 }
 
-/** Same shape the Rust host emits: the oldest event of a page, `<timestamp>|<id>`. */
-export function agentHostTraceCursor(event: Pick<ObservabilityEvent, "timestamp" | "id">): string {
-  return `${event.timestamp}|${event.id}`;
+/** Same cursor shape as the host: received stream position, or legacy `<timestamp>|<id>`. */
+export function agentHostTraceCursor(event: Pick<ObservabilityEvent, "timestamp" | "id" | "traceOrder">): string {
+  return event.traceOrder ? agentTraceOrderCursor(event.traceOrder) : `${event.timestamp}|${event.id}`;
 }
 
-export function parseAgentHostTraceCursor(value: unknown): AgentHostTraceCursorKey | undefined {
+export function parseAgentHostTraceCursor(value: unknown, receivedOrder?: boolean): AgentHostTraceCursorKey | undefined {
+  const traceOrder = parseAgentTraceOrderCursor(value);
+  if (traceOrder) return receivedOrder === false ? undefined : { epochNanoseconds: 0n, id: "", traceOrder };
   if (typeof value !== "string" || value.length > 240) return undefined;
   const separator = value.indexOf("|");
   if (separator < 0) return undefined;
@@ -255,6 +276,10 @@ function compareAgentHostTraceCursorKeys(
   left: AgentHostTraceCursorKey,
   right: AgentHostTraceCursorKey,
 ): number {
+  if (left.traceOrder && right.traceOrder) {
+    if (left.traceOrder.streamId !== right.traceOrder.streamId) return 0;
+    return left.traceOrder.sequence - right.traceOrder.sequence;
+  }
   if (left.epochNanoseconds !== right.epochNanoseconds) {
     return left.epochNanoseconds < right.epochNanoseconds ? -1 : 1;
   }
@@ -322,4 +347,9 @@ function boundedTimestamp(
 /** Exact timestamp profile shared with the Rust Agent host trace store. */
 export function agentHostTraceTimestampEpochNanoseconds(value: unknown): bigint | undefined {
   return rfc3339TimestampEpochNanoseconds(value);
+}
+
+/** A live watermark is a host position for new reads, or a legacy timestamp. */
+export function validAgentHostTraceSince(value: string, receivedOrder?: boolean): boolean {
+  return (receivedOrder === true && parseAgentTraceOrderCursor(value) !== undefined) || agentHostTraceTimestampEpochNanoseconds(value) !== undefined;
 }

@@ -47,3 +47,21 @@ test("a full budget of reads that do not wait is still overloaded", async () => 
   assert.equal((await runtime.requestTraceHistory("instance-1", { maxEvents: 100 })).reason,
     "host_overloaded");
 });
+
+test("receive-order and legacy readers do not share a coalesced host request", async () => {
+  const { runtime, socket } = liveTransport();
+  const legacy = runtime.requestTraceHistory("instance-1", { maxEvents: 100 });
+  const received = runtime.requestTraceHistory("instance-1", { maxEvents: 100, receivedOrder: true });
+  const requests = socket.sent.filter((message) => message.type === "trace_history_requested");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].receivedOrder, undefined);
+  assert.equal(requests[1].receivedOrder, true);
+  for (const request of requests) {
+    await runtime.handleFrame(socket, JSON.stringify({
+      type: "trace_history_result", requestId: request.requestId, instanceId: "instance-1",
+      availability: "available", complete: true, events: [], nextCursor: null,
+    }));
+  }
+  assert.equal((await legacy).complete, true);
+  assert.equal((await received).complete, true);
+});

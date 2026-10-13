@@ -1,4 +1,4 @@
-import { rfc3339TimestampEpochNanoseconds } from "@xmatrix/protocol";
+import { agentTraceOrderCursor, parseAgentTraceOrder, parseAgentTraceOrderCursor, rfc3339TimestampEpochNanoseconds } from "@xmatrix/protocol";
 import type { ObservabilityEvent } from "@xmatrix/protocol";
 
 export const AGENT_TRACE_ON_DEMAND_LIMIT = 500;
@@ -455,7 +455,7 @@ export function startAgentTraceHistorySync(
       input.onState(state);
     },
     onEvents: (instanceId: string, events: ObservabilityEvent[]) => {
-      const newest = newestTraceTimestamp(events);
+      const newest = newestTraceWatermark(events, sinceByInstance.get(instanceId));
       if (newest) sinceByInstance.set(instanceId, newest);
       input.onEvents(instanceId, events);
     },
@@ -705,7 +705,17 @@ export function agentTraceOlderPageErrorCopy(
   return "Earlier trace could not be loaded. Try again.";
 }
 
-function newestTraceTimestamp(events: readonly ObservabilityEvent[]): string | undefined {
+function newestTraceWatermark(events: readonly ObservabilityEvent[], previous?: string): string | undefined {
+  let received: ReturnType<typeof parseAgentTraceOrder>;
+  for (const event of events) {
+    const order = parseAgentTraceOrder(event.traceOrder);
+    if (order && (!received || order.sequence > received.sequence)) received = order;
+  }
+  if (received) {
+    const prior = parseAgentTraceOrderCursor(previous);
+    return prior && prior.streamId === received.streamId && prior.sequence > received.sequence
+      ? previous : agentTraceOrderCursor(received);
+  }
   let newest: { timestamp: string; instant: bigint } | undefined;
   for (const event of events) {
     const instant = rfc3339TimestampEpochNanoseconds(event.timestamp);
@@ -713,7 +723,8 @@ function newestTraceTimestamp(events: readonly ObservabilityEvent[]): string | u
       newest = { timestamp: event.timestamp, instant };
     }
   }
-  return newest?.timestamp;
+  const priorInstant = rfc3339TimestampEpochNanoseconds(previous);
+  return newest && priorInstant !== undefined && priorInstant > newest.instant ? previous : newest?.timestamp;
 }
 
 function isExactAgentTraceEvent(candidate: unknown, expectedInstanceId: string): candidate is ObservabilityEvent {
@@ -736,7 +747,8 @@ function isExactAgentTraceEvent(candidate: unknown, expectedInstanceId: string):
       agent?.instanceId === expectedInstanceId &&
       typeof event.timestamp === "string" &&
       event.timestamp.length <= 64 &&
-      Number.isFinite(Date.parse(event.timestamp))
+      Number.isFinite(Date.parse(event.timestamp)) &&
+      (event.traceOrder === undefined || parseAgentTraceOrder(event.traceOrder) !== undefined)
   );
 }
 
