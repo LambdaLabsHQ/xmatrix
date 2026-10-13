@@ -1,4 +1,5 @@
 "use client";
+import type { UnsentMessageAction } from "./message-unsent-notice";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
 import { timelineLayoutMoved } from "./timeline-send-rise";
 
@@ -668,6 +669,7 @@ export type MessageRowComparableProps = {
   onReact: (message: TimelineItem, emoji: string) => void;
   onEdit: (message: TimelineItem, body: string) => void;
   onRecall: (message: TimelineItem) => void;
+  onUnsentAction: (message: TimelineItem, action: UnsentMessageAction) => void;
   onReply: (message: TimelineItem) => void;
   onOpenThread: (message: TimelineItem) => void;
   onMentionSender: (message: TimelineItem) => void;
@@ -693,6 +695,7 @@ export function areMessageRowPropsEqual(
     previous.onReact === next.onReact &&
     previous.onEdit === next.onEdit &&
     previous.onRecall === next.onRecall &&
+    previous.onUnsentAction === next.onUnsentAction &&
     previous.onReply === next.onReply &&
     previous.onOpenThread === next.onOpenThread &&
     previous.onMentionSender === next.onMentionSender &&

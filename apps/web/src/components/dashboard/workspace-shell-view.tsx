@@ -236,6 +236,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     handleTimelineReact,
     handleTimelineEdit,
     handleTimelineRecall,
+    handleTimelineUnsentAction,
     handleTimelineReply,
     handleTimelineJumpToMessage,
     handleTimelineOpenThread,
@@ -940,6 +941,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onReact={handleTimelineReact}
         onEdit={handleTimelineEdit}
         onRecall={handleTimelineRecall}
+        onUnsentAction={handleTimelineUnsentAction}
         onReply={handleTimelineReply}
         onOpenThread={handleTimelineOpenThread}
         onDiscussPassage={handleTimelineDiscussPassage}
