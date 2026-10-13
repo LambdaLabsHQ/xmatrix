@@ -11,6 +11,7 @@ import { useLayoutEffect, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
+import { isImeKeyDown } from "@/lib/ime-keydown";
 import { cn } from "@/lib/utils";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { useEscapeDismiss } from "./use-overlay-dismiss";
@@ -174,6 +175,8 @@ export function SearchPanel({
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
               onKeyDown={(event) => {
+                // A composing input method owns Enter, the arrows and Escape.
+                if (isImeKeyDown(event.nativeEvent)) return;
                 if (event.key === "ArrowDown" && resultCount > 0) {
                   event.preventDefault();
                   onActiveIndexChange((activeIndex + 1) % resultCount);
