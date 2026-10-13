@@ -1,3 +1,4 @@
+import type { AgentRegistrationIdentity } from "./agent-caller";
 import type { Env } from "../types";
 
 /**
@@ -41,6 +42,11 @@ export interface ConnectorActionStatement {
 export interface ConnectorActionContext {
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
+  /**
+   * Who runs the action: the Human, or an Agent and the user whose Run it is.
+   * `agent` resolves the Agent's registration only when an action needs it.
+   */
+  caller?: { userId: string; agent?: () => Promise<AgentRegistrationIdentity | undefined> };
   /** Hub-authorized native app capability, scoped to one confirmed Google Chat room. */
   teams?: { postMessage(text: string): Promise<void> };
   googleChat?: { postMessage(text: string): Promise<void> };
@@ -81,6 +87,8 @@ export interface ConnectorCommandInput {
   actorUserId: string;
   /** Who wrote the message; an Agent runs write actions only where the Channel allows it. */
   senderKind?: "user" | "agent";
+  /** The Agent Instance when an Agent wrote it. */
+  senderId?: string;
 }
 
 export interface ConnectorCommandHandler {
