@@ -7188,6 +7188,50 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   animation: app-message-sending-in 160ms ease-out 700ms backwards;
 }
 @keyframes app-message-sending-in { from { opacity: 0; } }
+
+/* A message of the reader's own that did not go out. Its text steps back, since
+   it is not in the conversation, and the line under it leads with the filled
+   badge chat apps use for this: red "!" when the send failed, brass "?" when
+   nobody knows whether it was written. Its actions are links in the text's ink. */
+.xmatrix-app .app-message-unsent-body {
+  opacity: 0.5;
+}
+.xmatrix-app .app-message-unsent {
+  --app-unsent-ink: var(--m-ink-alert, var(--destructive));
+}
+.xmatrix-app .app-message-unsent[data-message-unsent="unconfirmed"] {
+  --app-unsent-ink: var(--m-ink-attention, var(--accent));
+}
+.xmatrix-app .app-message-unsent-ink {
+  color: var(--app-unsent-ink);
+}
+.xmatrix-app .app-message-unsent-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--app-unsent-ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+.xmatrix-app .app-message-unsent-action {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+}
+.xmatrix-app .app-message-unsent-action:hover {
+  text-decoration-color: currentColor;
+}
+.xmatrix-app .app-message-unsent-action:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
 .app-invocation-positioner { z-index: 80; }
 .app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; color: var(--foreground); font-size: 13px; line-height: 1.5; }
 .app-invocation-heading { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
