@@ -53,6 +53,7 @@ import {
   type ChannelAgentPresenceRecipient,
 } from "./channel-agent-presence-delivery";
 import { publishRuntimeChannelAgentPresence } from "./runtime-route-directory-delivery";
+import { RuntimeClientOperationError, runtimeFailureOrigin } from "./runtime-operation-failure";
 import {
   PRESENCE_AUDIENCE_TTL_MS, PresenceAudiences, type PresenceAudience, type PresenceStorage,
 } from "./presence-audiences";
@@ -433,7 +434,7 @@ function createSignalPort(
       fanout.connected(session, deliver);
     },
     disconnected(session) {
-      if (fanout.disconnected(session)) router.disconnected(session.run.instanceId);
+      fanout.disconnected(session);
     },
   };
 }
@@ -454,10 +455,8 @@ class LiveAgentInstanceFanout implements AgentInstanceRuntimeFanout {
     this.targets.set(session.run.instanceId, { session, deliver });
   }
 
-  disconnected(session: Readonly<AgentInstanceRuntimeSession>): boolean {
-    const current = this.targets.get(session.run.instanceId);
-    if (current?.session !== session) return false;
-    return this.targets.delete(session.run.instanceId);
+  disconnected(session: Readonly<AgentInstanceRuntimeSession>): void {
+    if (this.targets.get(session.run.instanceId)?.session === session) this.targets.delete(session.run.instanceId);
   }
 
   sessions(): readonly Readonly<AgentInstanceRuntimeSession>[] {
@@ -474,10 +473,23 @@ class LiveAgentInstanceFanout implements AgentInstanceRuntimeFanout {
       candidate.principal.ownerUserId === session.principal.ownerUserId &&
       candidate.principal.channelId === session.principal.channelId
     );
-    const results = await Promise.allSettled(recipients.map(({ deliver }) => deliver(outbound)));
-    if (results.some((result) => result.status === "rejected")) {
-      throw new Error("Agent Instance live signal fanout failed");
-    }
+    // Best-effort live fanout: a peer that cannot be reached is that peer's
+    // state, never the sender's failure.
+    await Promise.all(recipients.map(async (recipient) => {
+      try {
+        await recipient.deliver(outbound);
+      } catch (error) {
+        const instanceId = recipient.session.run.instanceId;
+        if (error instanceof RuntimeClientOperationError && error.failure.code === "agent_delivery_binding_stale") {
+          // Its transport gave the socket up without releasing the binding,
+          // which the rejection has already reported; nothing can reach it again.
+          if (this.targets.get(instanceId) === recipient) this.targets.delete(instanceId);
+          return;
+        }
+        // A socket that refused the frame is closing; its close releases the binding.
+        console.warn("Agent Instance live signal was not delivered", { instanceId, ...runtimeFailureOrigin(error) });
+      }
+    }));
   }
 }
 
