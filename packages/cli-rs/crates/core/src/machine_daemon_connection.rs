@@ -1305,6 +1305,16 @@ impl MachineDaemonConnectionClient {
     }
 
     pub async fn register(&mut self) -> Result<SerializedMachineDaemon> {
+        let dial = HubDial {
+            connection_url: self.connection_url.clone(),
+        };
+        self.register_with(dial).await
+    }
+
+    async fn register_with<Dial: MachineDaemonDial>(
+        &mut self,
+        dial: Dial,
+    ) -> Result<SerializedMachineDaemon> {
         self.disconnect();
         if let Ok(mut receipt) = self.activation_receipt.write() {
             *receipt = None;
@@ -1316,7 +1326,7 @@ impl MachineDaemonConnectionClient {
         let connected = Arc::new(AtomicBool::new(false));
         let connection_epoch = Arc::new(AtomicU64::new(0));
         let task = tokio::spawn(run_machine_daemon_connection(
-            self.connection_url.clone(),
+            dial,
             self.enrollment_token.clone(),
             self.identity.clone(),
             instruction_rx,
@@ -1831,32 +1841,230 @@ impl Drop for MachineDaemonConnectionClient {
     }
 }
 
-async fn handle_machine_daemon_connection_failure(
-    ready: &mut Option<oneshot::Sender<std::result::Result<SerializedMachineDaemon, String>>>,
-    events: &mpsc::UnboundedSender<MachineDaemonConnectionEvent>,
-    reason: String,
-    fatal: bool,
-    backoff: &mut Backoff,
-) -> bool {
-    // Before the first registration completes, a transient failure is waited
-    // out here instead of failing it; `register`'s ready timeout bounds that.
-    if !fatal && ready.is_some() {
-        crate::websocket::retry_initial_transient(&reason, backoff).await;
-        return false;
-    }
-    crate::websocket::handle_connection_failure(
-        ready,
-        events,
-        reason,
-        fatal,
-        backoff,
-        machine_daemon_reconnect_events(),
-    )
-    .await
+/// The Hub's answer to the name check and credential mint that open every
+/// connection attempt. Those requests carry no bound of their own, so a reply
+/// that never arrives would hold the reconnect loop for as long as the
+/// operating system keeps the socket.
+const ENROLLMENT_TIMEOUT: Duration = Duration::from_secs(20);
+/// One dial, connect frame and handshake reply. Each step is bounded on its
+/// own (15 s, 10 s, 15 s); this holds whatever a later change puts between
+/// them, so no attempt can outlive it.
+const DIAL_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(45);
+
+type MachineDaemonSocketError = tokio_tungstenite::tungstenite::Error;
+
+/// How the connection actor reaches the Hub. Production dials the network; a
+/// test supplies a scripted Hub so every reconnect path runs on paused time.
+trait MachineDaemonDial: Send + Sync + 'static {
+    type Socket: futures_util::Stream<Item = std::result::Result<Message, MachineDaemonSocketError>>
+        + futures_util::Sink<Message, Error = MachineDaemonSocketError>
+        + Send
+        + Unpin
+        + 'static;
+
+    fn enroll(
+        &self,
+        enrollment_token: &str,
+        identity: &MachineDaemonIdentity,
+    ) -> impl std::future::Future<Output = Result<MachineDaemonCredentialResponse>> + Send;
+
+    fn connect(
+        &self,
+    ) -> impl std::future::Future<
+        Output = std::result::Result<Self::Socket, crate::websocket::ConnectionFailure>,
+    > + Send;
 }
 
-async fn run_machine_daemon_connection(
+struct HubDial {
     connection_url: String,
+}
+
+impl MachineDaemonDial for HubDial {
+    type Socket = crate::websocket::ClientWebSocket;
+
+    async fn enroll(
+        &self,
+        enrollment_token: &str,
+        identity: &MachineDaemonIdentity,
+    ) -> Result<MachineDaemonCredentialResponse> {
+        // A reconnect usually follows a lost network path, and the pooled Hub
+        // connections were on that path too.
+        http::on_fresh_connections(mint_machine_daemon_credential(
+            &self.connection_url,
+            enrollment_token,
+            identity,
+        ))
+        .await?
+    }
+
+    async fn connect(
+        &self,
+    ) -> std::result::Result<Self::Socket, crate::websocket::ConnectionFailure> {
+        crate::websocket::connect_domain(
+            &self.connection_url,
+            ClientComponent::Daemon,
+            CONNECT_TIMEOUT,
+            "Machine Daemon connection timed out",
+        )
+        .await
+    }
+}
+
+enum AttemptFailureKind {
+    /// The network or the Hub may recover on its own.
+    Transient,
+    /// The Hub answered and refused this daemon.
+    Refused,
+    /// This CLI is too old for the Hub; another attempt repeats the refusal.
+    UpgradeRequired,
+}
+
+/// Why one connection attempt did not produce a session.
+struct AttemptFailure {
+    reason: String,
+    kind: AttemptFailureKind,
+}
+
+impl AttemptFailure {
+    fn transient(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            kind: AttemptFailureKind::Transient,
+        }
+    }
+}
+
+type OpenedMachineDaemonSession<Socket> = (
+    Socket,
+    SerializedMachineDaemon,
+    u64,
+    Option<MachineDaemonActivationReceipt>,
+);
+
+/// Dials the Hub and authenticates one socket, each step under its own bound.
+async fn open_machine_daemon_session<Dial: MachineDaemonDial>(
+    dial: &Dial,
+    machine_credential: &str,
+    identity: &MachineDaemonIdentity,
+) -> std::result::Result<OpenedMachineDaemonSession<Dial::Socket>, AttemptFailure> {
+    let mut socket = dial.connect().await.map_err(|failure| AttemptFailure {
+        kind: if failure.upgrade_required {
+            AttemptFailureKind::UpgradeRequired
+        } else if failure.transient {
+            AttemptFailureKind::Transient
+        } else {
+            AttemptFailureKind::Refused
+        },
+        reason: failure.reason,
+    })?;
+    let connect_message = machine_daemon_connect_message(machine_credential, identity);
+    match tokio::time::timeout(
+        WRITE_TIMEOUT,
+        socket.send(Message::Text(connect_message.to_string().into())),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            return Err(AttemptFailure::transient(format!(
+                "Failed to authenticate Machine Daemon: {error}"
+            )));
+        }
+        Err(_) => {
+            return Err(AttemptFailure::transient(format!(
+                "Failed to authenticate Machine Daemon: write timed out after {}s",
+                WRITE_TIMEOUT.as_secs()
+            )));
+        }
+    }
+    let first_text = match tokio::time::timeout(INITIAL_HANDSHAKE_TIMEOUT, socket.next()).await {
+        Ok(Some(Ok(message))) => {
+            message
+                .into_text()
+                .map(|text| text.to_string())
+                .map_err(|error| {
+                    AttemptFailure::transient(format!(
+                        "Machine Daemon returned a non-text handshake: {error}"
+                    ))
+                })?
+        }
+        Ok(Some(Err(error))) => {
+            return Err(AttemptFailure::transient(format!(
+                "Machine Daemon handshake failed: {error}"
+            )));
+        }
+        Ok(None) => {
+            return Err(AttemptFailure::transient(
+                "Machine Daemon connection closed before authentication completed",
+            ));
+        }
+        Err(_) => {
+            return Err(AttemptFailure::transient(format!(
+                "Machine Daemon handshake timed out; the Hub did not answer the connect frame within {}s",
+                INITIAL_HANDSHAKE_TIMEOUT.as_secs()
+            )));
+        }
+    };
+    match parse_machine_daemon_connected(&first_text) {
+        Ok((daemon, epoch, receipt)) => Ok((socket, daemon, epoch, receipt)),
+        Err(refusal) if refusal.retryable => Err(AttemptFailure::transient(format!(
+            "Machine Daemon Hub briefly unavailable: {}",
+            refusal.described()
+        ))),
+        Err(refusal) => Err(AttemptFailure {
+            reason: refusal.described(),
+            kind: AttemptFailureKind::Refused,
+        }),
+    }
+}
+
+/// Reports a failed attempt and waits out the backoff. Returns true when the
+/// actor must stop: the first registration was refused, or this CLI is too old.
+///
+/// Before the first registration completes a transient failure is waited out
+/// instead of failing it; `register`'s ready timeout bounds that. Afterwards
+/// every failure is reported with its own reason, so the daemon host always
+/// shows what the connection is stuck on now rather than what broke it first.
+async fn after_failed_attempt(
+    ready: &mut Option<oneshot::Sender<std::result::Result<SerializedMachineDaemon, String>>>,
+    events: &mpsc::UnboundedSender<MachineDaemonConnectionEvent>,
+    failure: AttemptFailure,
+    backoff: &mut Backoff,
+    offline_announced: &mut bool,
+) -> bool {
+    if ready.is_some() {
+        if matches!(failure.kind, AttemptFailureKind::Transient) {
+            crate::websocket::retry_initial_transient(&failure.reason, backoff).await;
+            return false;
+        }
+        crate::websocket::fail_initial_ready(ready, &failure.reason);
+        return true;
+    }
+    let reason = match failure.kind {
+        AttemptFailureKind::UpgradeRequired => {
+            let _ = events.send(MachineDaemonConnectionEvent::Error {
+                message: failure.reason,
+                correlation: None,
+            });
+            return true;
+        }
+        AttemptFailureKind::Refused => {
+            format!(
+                "Hub refused the Machine Daemon connection: {}",
+                failure.reason
+            )
+        }
+        AttemptFailureKind::Transient => failure.reason,
+    };
+    let _ = events.send(MachineDaemonConnectionEvent::Disconnected { reason });
+    *offline_announced = true;
+    backoff.wait().await;
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
+    dial: Dial,
     enrollment_token: Arc<RwLock<String>>,
     identity: MachineDaemonIdentity,
     mut instruction_rx: mpsc::UnboundedReceiver<ConnectionInstruction>,
@@ -1868,7 +2076,11 @@ async fn run_machine_daemon_connection(
     activation_receipt: Arc<RwLock<Option<MachineDaemonActivationReceipt>>>,
 ) {
     let mut ready_tx = Some(ready_tx);
-    let mut connected_once = false;
+    // Whether the daemon host has been told the connection is down. Every
+    // session ends with such a report, so this only stays false for a first
+    // session that no failure preceded: any other session is announced as
+    // restored, including a first one that followed a failed attempt.
+    let mut offline_announced = false;
     let mut backoff = Backoff::new(RECONNECT_BASE, RECONNECT_MAX);
 
     loop {
@@ -1887,13 +2099,18 @@ async fn run_machine_daemon_connection(
                 return;
             }
         };
-        let enrollment = match mint_machine_daemon_credential(
-            &connection_url,
-            &current_enrollment_token,
-            &identity,
+        let enrolled = tokio::time::timeout(
+            ENROLLMENT_TIMEOUT,
+            dial.enroll(&current_enrollment_token, &identity),
         )
         .await
-        {
+        .unwrap_or_else(|_| {
+            Err(CliError::RelayTransient(format!(
+                "the Hub did not answer within {}s",
+                ENROLLMENT_TIMEOUT.as_secs()
+            )))
+        });
+        let enrollment = match enrolled {
             Ok(value) => value,
             Err(error) => {
                 let upgrade_required = matches!(&error, CliError::UpgradeRequired(_));
@@ -1922,6 +2139,7 @@ async fn run_machine_daemon_connection(
                     return;
                 }
                 let _ = event_tx.send(MachineDaemonConnectionEvent::Disconnected { reason });
+                offline_announced = true;
                 backoff.wait().await;
                 continue;
             }
@@ -1942,47 +2160,27 @@ async fn run_machine_daemon_connection(
         {
             let _ = sender.send(Ok(daemon));
         }
-        let Ok(stream) = crate::websocket::connect_with_reconnect(
-            &connection_url,
-            crate::websocket::ConnectionOptions {
-                component: ClientComponent::Daemon,
-                timeout: CONNECT_TIMEOUT,
-                timeout_reason: "Machine Daemon connection timed out",
-                retry_initial_transient: true,
-            },
-            &mut ready_tx,
-            &event_tx,
-            &mut backoff,
-            machine_daemon_reconnect_events(),
+
+        let opened = tokio::time::timeout(
+            DIAL_ATTEMPT_TIMEOUT,
+            open_machine_daemon_session(&dial, &machine_credential, &identity),
         )
         .await
-        else {
-            return;
-        };
-        let Some(stream) = stream else {
-            continue;
-        };
-
-        let (mut write, mut read) = stream.split();
-        let connect_message = machine_daemon_connect_message(&machine_credential, &identity);
-        let handshake_send = tokio::time::timeout(
-            WRITE_TIMEOUT,
-            write.send(Message::Text(connect_message.to_string().into())),
-        )
-        .await;
-        if let Err(error) = match handshake_send {
-            Ok(result) => result,
-            Err(_) => {
-                let reason = format!(
-                    "Failed to authenticate Machine Daemon: write timed out after {}s",
-                    WRITE_TIMEOUT.as_secs()
-                );
-                if handle_machine_daemon_connection_failure(
+        .unwrap_or_else(|_| {
+            Err(AttemptFailure::transient(format!(
+                "Machine Daemon connection attempt did not finish within {}s",
+                DIAL_ATTEMPT_TIMEOUT.as_secs()
+            )))
+        });
+        let (socket, daemon, epoch, receipt) = match opened {
+            Ok(session) => session,
+            Err(failure) => {
+                if after_failed_attempt(
                     &mut ready_tx,
                     &event_tx,
-                    reason,
-                    false,
+                    failure,
                     &mut backoff,
+                    &mut offline_announced,
                 )
                 .await
                 {
@@ -1990,71 +2188,8 @@ async fn run_machine_daemon_connection(
                 }
                 continue;
             }
-        } {
-            let reason = format!("Failed to authenticate Machine Daemon: {error}");
-            if handle_machine_daemon_connection_failure(
-                &mut ready_tx,
-                &event_tx,
-                reason,
-                false,
-                &mut backoff,
-            )
-            .await
-            {
-                return;
-            }
-            continue;
-        }
-
-        let first_text = match crate::websocket::receive_handshake_text(
-            &mut read,
-            INITIAL_HANDSHAKE_TIMEOUT,
-            "Machine Daemon",
-            "Machine Daemon connection closed before authentication completed",
-        )
-        .await
-        {
-            Ok(text) => text,
-            Err(reason) => {
-                // The socket closed or went quiet before the Hub answered: an
-                // outage, retried even before the first registration.
-                if ready_tx.is_some() {
-                    crate::websocket::retry_initial_transient(&reason, &mut backoff).await;
-                } else {
-                    backoff.wait().await;
-                }
-                continue;
-            }
         };
-
-        let (daemon, epoch, receipt) = match parse_machine_daemon_connected(&first_text) {
-            Ok(handshake) => handshake,
-            Err(refusal) if refusal.retryable => {
-                let reason = format!(
-                    "Machine Daemon Hub briefly unavailable: {}",
-                    refusal.message
-                );
-                if ready_tx.is_some() {
-                    crate::websocket::retry_initial_transient(&reason, &mut backoff).await;
-                } else {
-                    let _ = event_tx.send(MachineDaemonConnectionEvent::Disconnected { reason });
-                    backoff.wait().await;
-                }
-                continue;
-            }
-            Err(refusal) => {
-                let reason = refusal.message;
-                if crate::websocket::fail_initial_ready(&mut ready_tx, &reason) {
-                    return;
-                }
-                let _ = event_tx.send(MachineDaemonConnectionEvent::Error {
-                    message: reason,
-                    correlation: None,
-                });
-                backoff.wait().await;
-                continue;
-            }
-        };
+        let (write, mut read) = socket.split();
 
         connection_epoch.store(epoch, Ordering::Release);
         connected.store(true, Ordering::Release);
@@ -2069,12 +2204,11 @@ async fn run_machine_daemon_connection(
         let connected_at = Instant::now();
         if let Some(sender) = ready_tx.take() {
             let _ = sender.send(Ok(daemon.clone()));
-        } else if connected_once {
+        } else if offline_announced {
             let _ = event_tx.send(MachineDaemonConnectionEvent::Reconnected {
                 daemon: daemon.clone(),
             });
         }
-        connected_once = true;
 
         let (out_tx, out_rx) = mpsc::channel(WRITE_QUEUE_CAPACITY);
         let (fail_tx, mut fail_rx) = mpsc::channel(1);
@@ -2415,6 +2549,7 @@ async fn run_machine_daemon_connection(
         let _ = event_tx.send(MachineDaemonConnectionEvent::Disconnected {
             reason: disconnect_reason,
         });
+        offline_announced = true;
         backoff.reset_if_healthy(connected_at.elapsed());
         backoff.wait().await;
     }
@@ -2431,6 +2566,8 @@ fn enrollment_retry_waits_out(error: &CliError, initial: bool) -> bool {
 #[derive(Debug)]
 struct HandshakeRefusal {
     message: String,
+    /// The Hub's failure code and diagnostic id, when its refusal carried them.
+    cause: Option<String>,
     /// The Hub's error frame said a later attempt may succeed.
     retryable: bool,
 }
@@ -2439,9 +2576,31 @@ impl From<String> for HandshakeRefusal {
     fn from(message: String) -> Self {
         Self {
             message,
+            cause: None,
             retryable: false,
         }
     }
+}
+
+impl HandshakeRefusal {
+    /// The refusal as a person reads it: the Hub's copy, then what identifies
+    /// the failure on the Hub.
+    fn described(&self) -> String {
+        match &self.cause {
+            Some(cause) => format!("{} ({cause})", self.message),
+            None => self.message.clone(),
+        }
+    }
+}
+
+/// `code=…, diagnosticId=…` from a Hub error frame's `failure`, naming whichever
+/// of the two it carries.
+fn hub_failure_cause(code: Option<&str>, diagnostic_id: Option<&str>) -> Option<String> {
+    let parts: Vec<String> = [("code", code), ("diagnosticId", diagnostic_id)]
+        .into_iter()
+        .filter_map(|(name, value)| Some(format!("{name}={}", value?)))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(", "))
 }
 
 fn machine_daemon_enrollment_token(source: &Arc<RwLock<String>>) -> Result<String> {
@@ -2581,9 +2740,14 @@ fn parse_machine_daemon_connected(
     HandshakeRefusal,
 > {
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct FailureVerdict {
         #[serde(default)]
         retryable: bool,
+        #[serde(default)]
+        code: Option<String>,
+        #[serde(default)]
+        diagnostic_id: Option<String>,
     }
     #[derive(Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
@@ -2616,6 +2780,9 @@ fn parse_machine_daemon_connected(
         }
         Ok(Handshake::Error { message, failure }) => Err(HandshakeRefusal {
             message,
+            cause: failure.as_ref().and_then(|failure| {
+                hub_failure_cause(failure.code.as_deref(), failure.diagnostic_id.as_deref())
+            }),
             retryable: failure.is_some_and(|failure| failure.retryable),
         }),
         Ok(Handshake::ShutdownRequested { reason }) => Err(reason
@@ -2899,12 +3066,17 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
             let diagnostic_id = value
                 .pointer("/failure/diagnosticId")
                 .and_then(serde_json::Value::as_str);
+            let code = value
+                .pointer("/failure/code")
+                .and_then(serde_json::Value::as_str);
             let correlation = match (request_id, diagnostic_id) {
-                (None, None) => None,
+                (None, None) => code.map(|code| format!("code={code}")),
                 (request_id, diagnostic_id) => Some(format!(
-                    "requestId={}, diagnosticId={}",
+                    "requestId={}, diagnosticId={}{}",
                     request_id.unwrap_or("-"),
-                    diagnostic_id.unwrap_or("-")
+                    diagnostic_id.unwrap_or("-"),
+                    code.map(|code| format!(", code={code}"))
+                        .unwrap_or_default()
                 )),
             };
             Some(match request_id {
@@ -2954,16 +3126,9 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
     }
 }
 
-fn machine_daemon_reconnect_events()
--> crate::websocket::ReconnectEvents<MachineDaemonConnectionEvent> {
-    crate::websocket::ReconnectEvents {
-        disconnected: |reason| MachineDaemonConnectionEvent::Disconnected { reason },
-        error: |reason| MachineDaemonConnectionEvent::Error {
-            message: reason,
-            correlation: None,
-        },
-    }
-}
+#[cfg(test)]
+#[path = "tests/machine_daemon_reconnect.rs"]
+mod reconnect_tests;
 
 #[cfg(test)]
 mod tests {
@@ -3401,6 +3566,19 @@ mod tests {
         .expect_err("not connected");
         assert!(restarting.retryable);
         assert_eq!(restarting.message, "Registration failed");
+        assert_eq!(
+            restarting.described(),
+            "Registration failed (code=service_restarting)"
+        );
+        // The Hub's generic copy alone names no cause; its failure does.
+        let unclassified = parse_machine_daemon_connected(
+            r#"{"type":"error","message":"The Hub could not complete this Machine Daemon connect","failure":{"code":"runtime.session_failed","diagnosticId":"diag_7","retryable":false}}"#,
+        )
+        .expect_err("not connected");
+        assert_eq!(
+            unclassified.described(),
+            "The Hub could not complete this Machine Daemon connect (code=runtime.session_failed, diagnosticId=diag_7)"
+        );
         for refused in [
             r#"{"type":"error","message":"Machine Daemon credential does not match its enrolled identity","failure":{"code":"machine_credential_mismatch","retryable":false}}"#,
             r#"{"type":"error","message":"Durable Object reset because its code was updated."}"#,

@@ -783,6 +783,7 @@ fn profile_completion_disposition(
 type SharedSupervisorControl = Arc<AsyncMutex<Option<SupervisorControlSession>>>;
 
 async fn cmd_daemon(token_override: Option<&str>) -> error::Result<()> {
+    xmatrix_cli_core::daemon_log::stamp_diagnostics();
     #[cfg(windows)]
     if std::env::var("XMATRIX_DAEMON_PREFLIGHT").ok().as_deref() == Some("1") {
         let executable = std::fs::canonicalize(std::env::current_exe()?)?;
@@ -1290,6 +1291,24 @@ async fn run_profile_runtime(
 
 fn bounded_daemon_host_detail(value: &str) -> String {
     value.chars().take(240).collect()
+}
+
+/// How long the control connection may stay down before this profile's runtime
+/// is rebuilt. The connection actor redials by itself for as long as it takes;
+/// this is the outer bound for what it cannot repair from inside, such as a
+/// saved session, broker or journal that went stale with the outage. The
+/// daemon host restarts the runtime in this process, so the bound holds with
+/// or without a service manager.
+const CONTROL_OFFLINE_RUNTIME_RESTART: Duration = Duration::from_secs(10 * 60);
+
+/// Resolves once the control connection has been down for the restart bound,
+/// and never while it is up. Armed by a disconnect and disarmed by a reconnect,
+/// so nothing polls the connection.
+async fn control_offline_deadline(offline_since: Option<tokio::time::Instant>) {
+    match offline_since {
+        Some(since) => tokio::time::sleep_until(since + CONTROL_OFFLINE_RUNTIME_RESTART).await,
+        None => std::future::pending().await,
+    }
 }
 
 #[cfg(windows)]
@@ -2319,6 +2338,7 @@ async fn cmd_daemon_connected(
         request_broker.clone(),
         run_report_maintenance_active.clone(),
     );
+    let mut control_offline_since: Option<tokio::time::Instant> = None;
     let exit = loop {
         tokio::select! {
             changed = shutdown.changed() => {
@@ -2326,6 +2346,17 @@ async fn cmd_daemon_connected(
                     relay.disconnect();
                     break ProfileRuntimeExit::LocalShutdown;
                 }
+            }
+            _ = control_offline_deadline(control_offline_since) => {
+                let minutes = CONTROL_OFFLINE_RUNTIME_RESTART.as_secs() / 60;
+                eprintln!(
+                    "{} daemon control connection stayed offline for {minutes} minutes; restarting this profile runtime",
+                    "⚠".yellow().bold()
+                );
+                relay.disconnect();
+                return Err(CliError::RelayTransient(format!(
+                    "Machine Daemon control connection stayed offline for {minutes} minutes"
+                )));
             }
             event = event_rx.recv() => {
                 let Some(event) = event else {
@@ -2753,6 +2784,7 @@ async fn cmd_daemon_connected(
                             daemon_auth_refresh_requested.notify_one();
                         }
                         eprintln!("{} daemon disconnected: {reason}", "⚠".yellow().bold());
+                        control_offline_since.get_or_insert_with(tokio::time::Instant::now);
                         if let Some(profile) = config::active_profile_context() {
                             profile_manager.set_runtime_state(
                                 &profile.id,
@@ -2763,7 +2795,11 @@ async fn cmd_daemon_connected(
                         }
                     }
                     MachineDaemonConnectionEvent::Reconnected { daemon: agent } => {
-                        println!(
+                        control_offline_since = None;
+                        // On the diagnostic stream, beside the disconnect it
+                        // ends: the two are read together and only this
+                        // stream carries times.
+                        eprintln!(
                             "{} daemon reconnected as {} ({})",
                             "✓".green().bold(),
                             agent.name,
