@@ -5,7 +5,7 @@
     "bodyLength": 131072,
     "statements": 8,
     "targets": 2048,
-    "operations": 32,
+    "operations": 64,
     "rules": 32,
     "terms": 32,
     "depth": 4

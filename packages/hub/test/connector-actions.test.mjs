@@ -6,7 +6,7 @@ import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "../../protocol/src/app-connect
 import { parseActionCommand, parsePolicyCommand } from "../src/connectors/action-parse.ts";
 import { actionRefusal, connectorCommands, isPolicyAction } from "../src/connectors/connector-commands.ts";
 import { providerUrl } from "../src/connectors/http.ts";
-import { connectorForCommand, connectorProvider } from "../src/connectors/registry.ts";
+import { connectorForCommand, connectorInteractionRegistry, connectorProvider } from "../src/connectors/registry.ts";
 
 function stubFetch(responses) {
   const calls = [];
@@ -48,6 +48,19 @@ test("every manifest write action has an executor that declares it, and every ex
     }
     if (declared.length > 0) assert.ok(manifest.actions.some((action) => action.id === "policy"), `${manifest.id} policy`);
   }
+});
+
+/* The registry keeps a bounded number of operations per connector and leaves the rest out without a word: a
+   command past the bound was accepted as a message and then never ran, `policy` included. */
+test("every command a connector declares resolves to it, however many it declares", () => {
+  const registry = connectorInteractionRegistry();
+  for (const manifest of APP_CONNECTOR_PROVIDER_MANIFESTS.filter((candidate) => connectorProvider(candidate.id)?.commands)) {
+    for (const action of manifest.actions) {
+      assert.equal(registry.resolve(manifest.id, action.id).status, "resolved", `@${manifest.id}:${action.id}`);
+    }
+  }
+  assert.equal(connectorForCommand("@appstoreconnect:policy:release deny")?.id, "appstoreconnect");
+  assert.equal(connectorForCommand("@appstoreconnect:read_profile:9663S6W4AA")?.id, "appstoreconnect");
 });
 
 test("action commands take one statement whose text spans the following lines", () => {
