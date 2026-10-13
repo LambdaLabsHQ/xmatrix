@@ -80,6 +80,43 @@ function anonymousKey(request: Request): string | undefined {
 }
 
 /**
+ * Sign-in endpoints whose allowance per client IP is a security limit rather
+ * than a measured one: it is always enforced, whatever RATE_LIMIT_ENFORCED
+ * says. Better Auth's own limiter keeps its counts in one isolate's memory,
+ * which on Workers spreads a caller across many independent counters, so
+ * these limits live here at the edge instead.
+ */
+export const AUTH_ROUTE_LIMITERS: Readonly<Record<string, AuthRouteLimiterName>> = {
+  "/api/auth/oauth2/register": "RATE_LIMIT_OAUTH_REGISTER",
+  "/api/auth/sign-in/email": "RATE_LIMIT_SIGN_IN",
+  "/api/auth/request-password-reset": "RATE_LIMIT_AUTH_EMAIL",
+  "/api/auth/email-otp/send-verification-otp": "RATE_LIMIT_AUTH_EMAIL",
+};
+
+export type AuthRouteLimiterName = "RATE_LIMIT_OAUTH_REGISTER" | "RATE_LIMIT_SIGN_IN" | "RATE_LIMIT_AUTH_EMAIL";
+
+/**
+ * Whether one more request to a limited sign-in endpoint is admitted. A
+ * request with no client IP is one of our own Workers' or a local test's and
+ * is not counted. A deployment that reaches the endpoint from a client
+ * without the limiter bound refuses it rather than leaving it unlimited.
+ */
+async function admitAuthRoute(env: Env, request: Request, path: string): Promise<Response | undefined> {
+  const binding = request.method === "POST" ? AUTH_ROUTE_LIMITERS[path] : undefined;
+  const key = binding ? anonymousKey(request) : undefined;
+  if (!binding || !key) return undefined;
+  const limiter = env[binding];
+  if (!limiter) {
+    console.error("xMatrix auth rate limiter is not bound", { binding, path });
+    return Response.json({ error: `${binding} is not configured`, code: "rate_limiter_unavailable" }, { status: 503 });
+  }
+  const { success } = await limiter.limit({ key: `${path}:${key}` });
+  if (success) return undefined;
+  console.warn("xMatrix rate limit exceeded", { rateClass: binding, enforced: true, path });
+  return rateLimitedResponse();
+}
+
+/**
  * Refuse a caller over its allowance before the request reaches any route,
  * and so before it can cost a database round trip.
  */
@@ -91,7 +128,8 @@ export function registerRequestRateLimit(app: Hono<{ Bindings: Env }>): void {
     const admitted = credential
       ? await admitRequest(context.env, "credential", await credentialKey(credential), { path })
       : await admitAnonymous(context.env, request, path);
-    return admitted ? next() : rateLimitedResponse();
+    if (!admitted) return rateLimitedResponse();
+    return await admitAuthRoute(context.env, request, path) ?? next();
   });
 }
 

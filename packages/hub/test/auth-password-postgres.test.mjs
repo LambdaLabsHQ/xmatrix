@@ -76,13 +76,6 @@ integration('expired reset tokens and unverified mail cannot obtain a password s
 });
 
 
-integration('password guesses are rate limited before additional credential checks', async () => {
-  const f=await fixture();try{
-    for(let i=0;i<5;i++)assert.equal((await f.request('/sign-in/email',{email:'reviewer@example.test',password})).status,401);
-    assert.equal((await f.request('/sign-in/email',{email:'reviewer@example.test',password})).status,429);
-  }finally{await f.close();}
-});
-
 test('password email escapes its private link in HTML and includes expiry without placing secrets in the subject', () => {
   const link = 'https://auth.example.test/reset?token=fake&next="quoted"';
   const mail = passwordResetEmail(link);

@@ -135,6 +135,11 @@ integration('open registration cannot bypass member consent or obtain a client-c
     const service = await f.call('/oauth2/register', { method: 'POST', body: {
       ...metadata, grant_types: ['client_credentials'] } });
     assert.equal(service.status, 400);
+    for (const client_name of ['x'.repeat(101), 'Chat\u202Egpt', 'Chat\nGPT']) {
+      const named = await f.call('/oauth2/register', { method: 'POST', body: { ...metadata, client_name } });
+      assert.equal(named.status, 400, 'a name that could hide the consent warning is refused');
+      assert.equal((await named.json()).error, 'invalid_client_metadata');
+    }
     assert.equal((await f.run('SELECT count(*)::int n FROM control.auth_oauth_clients'))[0].n, 0);
 
     const clientId = await register(f, 'xmatrix:read');

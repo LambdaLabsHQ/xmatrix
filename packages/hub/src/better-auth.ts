@@ -226,14 +226,10 @@ function createAuthWithDatabase(
         catch (error) { observeEmailOtpFailure?.(error); throw error; }
       },
     },
-    rateLimit: {
-      enabled: true,
-      customRules: {
-        "/sign-in/email": { window: 60, max: 5 },
-        "/request-password-reset": { window: 60, max: 3 },
-        "/oauth2/register": { window: 60, max: 10 },
-      },
-    },
+    // Its limiter counts in one isolate's memory, which on Workers is no
+    // limit at all; sign-in allowances are enforced at the edge instead
+    // (request-rate-limit.ts AUTH_ROUTE_LIMITERS).
+    rateLimit: { enabled: false },
     account: {
       ...(postgres ? AUTH_POSTGRES_MODELS.account : {}),
       accountLinking: {

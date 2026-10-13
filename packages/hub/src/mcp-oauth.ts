@@ -1,6 +1,6 @@
 import { oauthProvider } from "@better-auth/oauth-provider";
 import type { BetterAuthPlugin } from "better-auth";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { appOrigin, hubAuthBaseUrl } from "./deployment-origins";
 import type { Env } from "./types";
 
@@ -51,6 +51,32 @@ function mcpDefaultResource(env: Env): BetterAuthPlugin {
     },
   };
 }
+
+/** Longest app name a registration may declare. */
+export const MCP_CLIENT_NAME_MAX = 100;
+const HIDDEN_TEXT = /[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+
+/**
+ * An app names itself, and that name heads the consent page and signs its
+ * edits. A bounded name of visible text cannot push the consent page's
+ * unverified-identity warning out of view or reorder what is shown around it.
+ */
+const mcpClientName: BetterAuthPlugin = {
+  id: "xmatrix-mcp-client-name",
+  hooks: {
+    before: [{
+      matcher: (ctx) => ctx.path === "/oauth2/register",
+      handler: createAuthMiddleware(async (ctx) => {
+        const name = (ctx.body as Record<string, unknown> | undefined)?.client_name;
+        if (typeof name !== "string") return;
+        if ([...name].length > MCP_CLIENT_NAME_MAX || HIDDEN_TEXT.test(name)) throw new APIError("BAD_REQUEST", {
+          error: "invalid_client_metadata",
+          error_description: `client_name must be at most ${MCP_CLIENT_NAME_MAX} characters of visible text`,
+        });
+      }),
+    }],
+  },
+};
 
 /**
  * Removing an app ends its grant, not only the record that it was allowed:
@@ -107,5 +133,5 @@ export function mcpOAuthPlugins(env: Env): BetterAuthPlugin[] {
     fields: Object.fromEntries(Object.entries(definition.fields).map(([field, attribute]) =>
       [field, { ...attribute, fieldName: snake(field) }])),
   }]));
-  return [{ ...provider, schema } as BetterAuthPlugin, mcpDefaultResource(env), mcpRevokeOnRemoval];
+  return [{ ...provider, schema } as BetterAuthPlugin, mcpDefaultResource(env), mcpClientName, mcpRevokeOnRemoval];
 }
