@@ -1,5 +1,14 @@
 # Guardrail Review Sources
 
+- 2026-10-13 Codex model-capacity recovery: reviewed the reported exact capacity
+  message, official app-server failed-turn and error contracts, the owning stdio
+  adapter, its interruptible control future and Channel lifecycle reporting.
+  Recovery waits for a failed terminal receipt, refuses execution/output replay,
+  preserves the thread and settings, and stops after three delayed retries.
+  Provider-managed retries remain provider-owned; a missing receipt fails closed.
+  Focused adapter tests cover these boundaries; see
+  [capacity recovery](../operations/codex-capacity-retry.md).
+
 - 2026-10-12 external MCP page cards and directory package: reviewed current
   OpenAI packaging/submission documentation and the MCP Apps handshake.
   Page cards re-read through the existing page authority; the static UI
