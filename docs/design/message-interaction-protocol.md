@@ -44,6 +44,12 @@ execution contract and presentation contract. `MessageInteractionRegistry` takes
 snapshot of these domain projections, rejects invalid/reserved entries, and refuses
 ambiguous aliases rather than picking whichever target was inserted first.
 
+A target carries at most 64 operations (`limits.operations` in the grammar
+artifact). A connector's projection lists `policy`, `subscribe` and
+`unsubscribe` first, so the operations that control a connector always fit, and
+a Hub test fails when any manifest declares more than the registry resolves: an
+operation past the bound is accepted as a message and then never runs.
+
 Connector dispatch builds its catalog from installed executors and manifests.
 An operation must resolve in that catalog and be accepted by the installed domain
 handler. Connector policy, connection scope and credentials are still checked at

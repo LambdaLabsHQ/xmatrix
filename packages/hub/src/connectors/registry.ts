@@ -12,8 +12,10 @@ const CONNECTOR_PROVIDERS: readonly ConnectorProvider[] = [githubConnectorProvid
 export function connectorInteractionRegistry(): MessageInteractionRegistry {
   return new MessageInteractionRegistry(CONNECTOR_PROVIDERS.filter(provider => provider.commands).map(provider => {
     const manifest = getAppConnectorProvider(provider.id);
-    const operations = new Set([...(manifest?.actions.map(action => action.id) ?? []),
-      ...(manifest?.events ? ["subscribe", "unsubscribe"] : []), "policy"]);
+    /* The registry keeps a bounded number of operations per target. The ones that control a connector come
+       first, so no number of actions can push a Space admin's `policy` out of reach. */
+    const operations = new Set(["policy", ...(manifest?.events ? ["subscribe", "unsubscribe"] : []),
+      ...(manifest?.actions.map(action => action.id) ?? [])]);
     return connectorInteractionTarget(provider.id, [...operations]);
   }));
 }
