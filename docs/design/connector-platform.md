@@ -1,6 +1,14 @@
 # Connector Platform
 
-Status: proposed (2026-10-02). Owner: claude (Space channel "你怎么看 connector").
+Google Ads advertising configuration, selected-customer scoping, activation
+budget checks and stable native acceptance are specified in
+[Google Ads connector](../connectors/google-ads.md). Its separate `adwords`
+grant reuses the company Google client; API access is held by that Cloud project,
+not by a retired developer token. Both advertising write actions default to ask.
+
+Status: implemented platform. Each provider's registration, production release
+and native acceptance are tracked separately; availability in the registry does
+not imply a passed native acceptance test.
 
 ## 1. Goal
 
@@ -28,24 +36,27 @@ agent cannot do alone:
 Non-goals: a general iPaaS, user-authored provider code, or storing provider
 tokens anywhere except the connector credential store.
 
-## 2. Current state (main @ ab314090c)
+## 2. Current implementation
 
-The data model is already mostly neutral, but the code paths are GitHub-only.
+The shared platform registers providers through protocol manifests and Hub-side
+modules. GitHub retains its typed repository authority adapter; other providers
+use the connector registry. The later sections define provider-specific bounds.
 
-| Layer | Today | Problem |
+| Layer | Owner | Current contract |
 | --- | --- | --- |
-| Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | `AppConnectorProviderId = "github"`; actions carry no input schema |
-| Executor | `executeAppConnectorProviderAction` | one `if github` chain that parses free text per action |
-| Command path | `product-github-connector-authority-adapter.ts` | only `@github:` is recognised; only 5 of 12 declared actions are reachable (`comment`, `create_issue`, `close_issue`, `reopen_issue`, `review` are declared but never executed from a message) |
-| Write policy | `connectionMetadata.*WriteChannelId` | one metadata field per write action, which does not scale to a second provider |
-| Credentials | Worker secrets (`GITHUB_APP_*`) | no per-connection credential store, so an API-token provider has nowhere to live |
-| Inbound | `POST /api/apps/github/webhook` → `dispatchProductGitHubWebhook` | GitHub-specific route, feature mapping and route directory |
-| Relations | `data.app_source_relations` | `source_kind IN ('repository','issue')` CHECK |
-| Automations | `AutomationTrigger = merged \| ci-failed \| owed` | GitHub events are hard-coded in the protocol type |
+| Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and default policies are shared with clients |
+| Executor | `ConnectorProvider` and `platform-providers.ts` | Provider-owned parse/prepare/execute, authenticated Check and bounded outbound HTTP |
+| Commands and MCP | `connector-commands.ts`, `connectors/mcp.ts` | Both paths resolve the current Space/Channel/Run authority and use the same action policy |
+| Policy and approval | Scoped connector repositories and approval routes | Channel allow/ask/disallow, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
+| Credentials | Encrypted connector credential repository | Per-Space provider grants; company app secrets remain Hub-held, and OAuth refresh failures do not become wider grants |
+| Inbound | Generic event ingress plus provider-specific native routes | Authenticated deliveries normalize to typed source/event identities and route through explicit subscriptions |
+| Automations | Provider event triggers | Normalized connector events can wake linked page Automations; a scheduled report is not a native provider webhook |
+| Google Ads | Separate `googleads` grant and selected advertiser | Bounded reads, atomic advertising configuration, validation-only calls and explicit, policy-controlled activation |
 
-The storage layer is reusable as is: `data.app_connector_connections` (one
-connection per Space per provider), `data.app_connector_executions`, the
-relation table, and the capability derivation from scopes.
+Connection records and execution receipts contain metadata and bounded outcome
+evidence, not raw credentials. Production changes follow the normal immutable
+release train. Provider registration, Check, actual writes, revocation and
+native event/serving evidence remain distinct acceptance requirements.
 
 ## 3. Architecture
 
