@@ -49,6 +49,7 @@ const MAX_PAGE = 200;
 const IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const CHANNEL_TREE_MAX = 10_000;
 const ARCHIVE_STOP_TARGET_MAX = 200;
+const SERIALIZATION_RETRIES = 5;
 const CHANNEL_MOVE_FACT_SQL = `SET space_id = $2
           WHERE space_id = $1 AND channel_id = ANY($3::text[])`;
 export type SpaceControlPrincipal = { kind: "user" | "agent"; id: string };
@@ -800,11 +801,13 @@ export class PostgresSpaceControlRepository {
     for (let attempt = 0; ; attempt++) {
       try { return await this.database.transaction(context, operation); }
       catch (error) {
-        if (attempt >= 2 || !error || typeof error !== "object" ||
+        if (attempt >= SERIALIZATION_RETRIES || !error || typeof error !== "object" ||
             !("code" in error) || error.code !== "40001") throw error;
       }
-      // Writers of one Space advance the same control head; an immediate replay meets them again.
-      await new Promise(resolve => setTimeout(resolve, (attempt + 1) * (20 + Math.random() * 40)));
+      // Writers of one Space advance the same control head, and Run state commits
+      // there in bursts (2026-10-13: eight in 670 ms), so the wait doubles until
+      // it outlasts one: up to about 1.9 s in all.
+      await new Promise(resolve => setTimeout(resolve, 2 ** attempt * (20 + Math.random() * 40)));
     }
   }
 
