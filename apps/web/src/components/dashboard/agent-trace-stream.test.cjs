@@ -1208,3 +1208,26 @@ test("buildAgentTraceHeaderStatus tracks reconnecting, failure, and clears on th
   ];
   assert.equal(buildAgentTraceHeaderStatus(nextTurn), null);
 });
+
+// Protect the host-to-timeline ordering boundary: Date truncation previously
+// scrambled rapid ACP chunks even though the host retained their exact instants.
+test("Cursor ACP deltas retain nanosecond order across history and live merges", () => {
+  const { mergeAgentTraceReplicas } = require("./agent-trace-replica.ts");
+  const chunk = (id, timestamp, delta) => {
+    const event = turnTrace(id, timestamp, "assistant_delta", { delta });
+    event.channelId = "channel:cursor";
+    event.agentId = "agent:cursor";
+    event.metadata.payload.source = "cursor_acp";
+    event.metadata.payload.agent = { instanceId: "cursor:3" };
+    return event;
+  };
+  const first = chunk("z-first", "2026-10-13T08:00:00.123000001Z", "first ");
+  const second = chunk("m-second", "2026-10-13T10:00:00.123000002+02:00", "second ");
+  const third = chunk("a-third", "2026-10-13T08:00:00.123000003Z", "third");
+  const live = mergeAgentTraceReplicas([], [third]);
+  const merged = mergeAgentTraceReplicas(live, [second, first], { source: "history" });
+  assert.deepEqual(merged[0].eventIds, [first.id, second.id, third.id]);
+  const target = { name: "cursor" };
+  assert.equal(onlyOutputBody(buildAgentConversationTraceTimeline([], target, [third, first, second])), "first second third");
+  assert.equal(onlyOutputBody(buildAgentConversationTraceTimeline([], target, merged[0].events)), "first second third");
+});

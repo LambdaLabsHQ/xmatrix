@@ -1,4 +1,4 @@
-import { timestampMillisOrZero as timestampMs } from "./time-display";
+import { rfc3339TimestampEpochNanoseconds } from "@xmatrix/protocol";
 import type { ObservabilityEvent } from "@xmatrix/protocol";
 
 type AgentTraceScope = {
@@ -79,7 +79,7 @@ export function mergeAgentTraceReplicas(
   }
 
   for (const [key, draft] of touched) {
-    const events = Array.from(draft.byId.values()).sort(compareTraceEvents);
+    const events = Array.from(draft.byId.values()).sort(compareAgentTraceEvents);
     replicas.set(key, trimAgentTraceReplica({
       scope: draft.scope,
       events,
@@ -183,10 +183,22 @@ export function traceEventChannelInstanceId(event: ObservabilityEvent): string |
   return typeof instanceId === "string" && instanceId.trim() ? instanceId : null;
 }
 
-function compareTraceEvents(left: ObservabilityEvent, right: ObservabilityEvent): number {
-  const byTime = timestampMs(left.timestamp) - timestampMs(right.timestamp);
-  if (byTime !== 0) return byTime;
+/** Match the host's (instant, id) order without truncating rapid stream chunks. */
+export function compareAgentTraceEvents(left: ObservabilityEvent, right: ObservabilityEvent): number {
+  const leftTime = traceEventInstant(left);
+  const rightTime = traceEventInstant(right);
+  if (leftTime !== rightTime) return leftTime < rightTime ? -1 : 1;
   return left.id.localeCompare(right.id);
+}
+
+const traceInstantCache = new WeakMap<ObservabilityEvent, bigint>();
+
+function traceEventInstant(event: ObservabilityEvent): bigint {
+  const cached = traceInstantCache.get(event);
+  if (cached !== undefined) return cached;
+  const instant = rfc3339TimestampEpochNanoseconds(event.timestamp) ?? 0n;
+  traceInstantCache.set(event, instant);
+  return instant;
 }
 
 function tracePayloadChannelId(event: ObservabilityEvent): string | undefined {

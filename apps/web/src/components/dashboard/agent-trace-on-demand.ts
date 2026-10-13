@@ -1,3 +1,4 @@
+import { rfc3339TimestampEpochNanoseconds } from "@xmatrix/protocol";
 import type { ObservabilityEvent } from "@xmatrix/protocol";
 
 export const AGENT_TRACE_ON_DEMAND_LIMIT = 500;
@@ -705,13 +706,11 @@ export function agentTraceOlderPageErrorCopy(
 }
 
 function newestTraceTimestamp(events: readonly ObservabilityEvent[]): string | undefined {
-  let newest: { timestamp: string; milliseconds: number } | undefined;
+  let newest: { timestamp: string; instant: bigint } | undefined;
   for (const event of events) {
-    const milliseconds = Date.parse(event.timestamp);
-    if (!Number.isFinite(milliseconds) ||
-        !newest || milliseconds > newest.milliseconds ||
-        (milliseconds === newest.milliseconds && event.timestamp > newest.timestamp)) {
-      newest = { timestamp: event.timestamp, milliseconds };
+    const instant = rfc3339TimestampEpochNanoseconds(event.timestamp);
+    if (instant !== undefined && (!newest || instant > newest.instant)) {
+      newest = { timestamp: event.timestamp, instant };
     }
   }
   return newest?.timestamp;
