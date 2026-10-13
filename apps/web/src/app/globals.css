@@ -8725,8 +8725,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app .app-handoff-arrow .app-handoff-comet,
-  .xmatrix-app .app-handoff-arrow .app-handoff-head { animation: none; }
+  .xmatrix-app .app-handoff-arrow[data-flowing="true"] .app-handoff-comet,
+  .xmatrix-app .app-handoff-arrow[data-flowing="true"] .app-handoff-head { animation: none; }
 }
 
 /* The ECG path is a static mask. Its moving, transparent break rides a
