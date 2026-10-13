@@ -1,13 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const fs = require("node:fs");
-const path = require("node:path");
 const { loadWorkspaceShellModuleMap, loadShellFunctions } = require("./workspace-shell-source-fixture.cjs");
 
-const shellModules = loadWorkspaceShellModuleMap(__dirname);
-for (const file of ["use-channel-catalog-paging.ts", "channel-viewer-state.ts"]) {
-  shellModules.set(file, fs.readFileSync(path.join(__dirname, file), "utf8"));
-}
+const shellModules = loadWorkspaceShellModuleMap(__dirname, ["use-channel-catalog-paging.ts", "channel-viewer-state.ts"]);
 
 // Pure helpers only — no React or workspace shell runtime.
 const ORDERING_FUNCTIONS = [

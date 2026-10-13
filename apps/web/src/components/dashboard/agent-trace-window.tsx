@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import {
   memo,
   useCallback,
@@ -270,7 +272,7 @@ export const AgentInstanceDetailWindow = memo(function AgentInstanceDetailWindow
           <AgentTraceTimeline rows={scroll.visibleRows} animateAfter={scroll.animateAfter} />
           {traceReconnecting ? (
             <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground" role="status">
-              <Loader2 className="size-3.5 animate-spin" />
+              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
               Reconnecting to the Agent host…
             </p>
           ) : traceLive ? (
@@ -933,4 +935,3 @@ export function AgentInstanceWindowShell({
     </CenteredDialogShell>
   );
 }
-

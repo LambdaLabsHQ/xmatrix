@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
 import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 
@@ -766,7 +767,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       >
         <LiquidGlassFilter />
         <div className="app-ambient pointer-events-none fixed inset-0" />
-        <Loader2 className="size-6 animate-spin" />
+        <AnimatedIcon icon={Loader2} className="size-6 animate-spin" />
       </div>
     );
   }

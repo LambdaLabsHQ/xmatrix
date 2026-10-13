@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ComponentType } from "react";
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
@@ -10,6 +11,7 @@ import {
   Plus,
   RotateCcw,
   Settings,
+  type LucideIcon,
 } from "lucide-react";
 import {
   WEB_PROXY_ROUTES,
@@ -60,7 +62,7 @@ import {
 } from "./tool-split";
 import { ErrorNotice } from "@/components/ui/error-notice";
 
-const ACTION_ICON: Record<MyAgentAction, ComponentType<{ className?: string }>> = {
+const ACTION_ICON: Record<MyAgentAction, LucideIcon> = {
   configure: Settings,
   restore: RotateCcw,
 };
@@ -206,7 +208,7 @@ export function MyAgentsView({
                 aria-label={`${MY_AGENT_ACTION_LABEL[action]}: ${registration.displayName}`}
                 aria-expanded={action === "configure" ? editingId === id : undefined}
                 title={ACTION_CONSEQUENCE[action]}>
-                <Icon className={cn(busy && action !== "configure" && "animate-spin")} />
+                <AnimatedIcon icon={Icon} className={cn(busy && action !== "configure" && "animate-spin")} />
                 {MY_AGENT_ACTION_LABEL[action]}
               </Button>
             );
@@ -460,7 +462,7 @@ function RegistrationEditorForm({
           Cancel
         </button>
         <button type="submit" disabled={busy || !displayName.trim()} className={actionClass({ variant: "primary", size: "md" })}>
-          {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
           Save
         </button>
       </div>

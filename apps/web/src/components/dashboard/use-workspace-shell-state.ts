@@ -166,7 +166,7 @@ import {
   loginPathWithNext,
   mergeObservabilityEvents,
   patchChannelAgentPresenceFromMessage,
-  patchChannelsAgentPresenceBatch,
+  createChannelPresenceBatch,
   persistWorkingSpace,
   pushBrowserPath,
   readChannelMentionClearedAt,
@@ -1447,21 +1447,56 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     const relayFrames = createRealtimeFrameBatcher<HumanServerMessage>({
       batchKey: humanFrameBatchKey,
       apply: (frames) => {
+        let channelBatch: ReturnType<typeof createChannelPresenceBatch> | null = null;
+        let agents: SerializedAgent[] = [];
         let presence: SerializedAgent[] = [];
         const events: ObservabilityEvent[] = [];
+        const channels = () => channelBatch ??= createChannelPresenceBatch(realtimeChannels.getSnapshot());
         const flushPresence = () => {
-          if (presence.length) applyPresence(presence);
+          const incoming = presence;
           presence = [];
+          if (incoming.length) channels().applyPresence(incoming);
+        };
+        const flushState = (kind: "live" | "catalog" = "live") => {
+          flushPresence();
+          if (agents.length) realtimeAgents.set(current => replaceAgents(current, agents), "live");
+          agents = [];
+          if (channelBatch) realtimeChannels.set(channelBatch.getSnapshot(), kind);
+          channelBatch = null;
         };
         for (const frame of frames) {
           try {
-            if (frame.type === "presence" || frame.type === "enhanced_presence") {
-              presence.push(frame.agent);
-            } else if (frame.type === "presence_digest") {
-              presence.push(...frame.agents);
-            } else {
-              // Messages, snapshots and lifecycle transitions retain socket order.
+            if (frame.type === "presence" || frame.type === "enhanced_presence" || frame.type === "presence_digest") {
+              const incoming = (frame.type === "presence_digest" ? frame.agents : [frame.agent])
+                .filter(agent => typeof agent?.id === "string" && agent.id.length > 0);
+              agents.push(...incoming);
+              presence.push(...incoming);
+            } else if (frame.type === "channel_updated") {
               flushPresence();
+              let presenceOnly = false;
+              const { previous, updated } = channels().applyChannel(frame.channel, (previous, updated) => {
+                const catalogPrevious = realtimeChannels.getCatalog(frame.channel.id);
+                presenceOnly = Boolean(previous && sameChannelCatalogState(previous, updated) &&
+                  (!catalogPrevious || sameChannelCatalogState(catalogPrevious, updated)));
+                if (!presenceOnly) invalidateAgentTraceChannels([frame.channel.id], "reload");
+                if (previous && (previous.mode !== updated.mode || previous.spaceId !== updated.spaceId)) {
+                  clearChannelHistory(frame.channel.id);
+                }
+              });
+              // Roster/access/catalog transitions publish before their side
+              // effects. Ordinary state pairs share one collection publication.
+              // An unloaded snapshot hydrates its live key, never the catalog.
+              if (previous && !presenceOnly) flushState("catalog");
+              if (previous && (previous.spaceId !== updated.spaceId || previous.name !== updated.name ||
+                  previous.mode !== updated.mode || previous.metadata?.kind !== updated.metadata?.kind)) {
+                window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
+                  detail: { kind: "structure", spaceId: updated.spaceId },
+                }));
+              }
+            } else {
+              // Every message, lifecycle note, history and access/control frame
+              // observes the preceding reports, including channelsRef readers.
+              flushState();
               if (frame.type === "observable_event" && !isLlmTraceEvent(frame.event)) events.push(frame.event);
               handleRelayMessage(frame);
             }
@@ -1469,15 +1504,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             // One bad frame must not drop the rest of its batch.
           }
         }
-        flushPresence();
+        flushState();
         if (events.length) setEvents(current => mergeObservabilityEvents(current, events, TRACE_EVENT_LIMIT));
       },
     });
-
-    function applyPresence(agents: SerializedAgent[]) {
-      realtimeAgents.set(current => replaceAgents(current, agents), "live");
-      realtimeChannels.set(current => patchChannelsAgentPresenceBatch(current, agents), "live");
-    }
 
     function handleRelayMessage(message: HumanServerMessage) {
       switch (message.type) {
@@ -1678,29 +1708,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             setSelectedChannelId(targetThread.id);
             pushBrowserPath(nextPath);
             setBrowserPath(nextPath);
-          }
-          break;
-        }
-        case "channel_updated": {
-          const previous = realtimeChannels.get(message.channel.id);
-          const next = replaceChannel(realtimeChannels.getSnapshot(), message.channel);
-          const updated = next.find(channel => channel.id === message.channel.id)!;
-          const catalogPrevious = realtimeChannels.getCatalog(message.channel.id);
-          const presenceOnly = previous && sameChannelCatalogState(previous, updated) &&
-            (!catalogPrevious || sameChannelCatalogState(catalogPrevious, updated));
-          if (!presenceOnly) invalidateAgentTraceChannels([message.channel.id], "reload");
-          if (previous && (previous.mode !== updated.mode || previous.spaceId !== updated.spaceId)) {
-            clearChannelHistory(message.channel.id);
-          }
-          // A status snapshot for an unloaded Channel hydrates its live key;
-          // it is not a new page of the navigation/reference catalog. The
-          // catalog's own reads and revision frames discover/reorder rows.
-          setChannels(next, !previous || presenceOnly ? "live" : "catalog");
-          if (previous && (previous.spaceId !== updated.spaceId || previous.name !== updated.name ||
-              previous.mode !== updated.mode || previous.metadata?.kind !== updated.metadata?.kind)) {
-            window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
-              detail: { kind: "structure", spaceId: updated.spaceId },
-            }));
           }
           break;
         }

@@ -57,12 +57,13 @@ const REQUIRED_SHELL_MODULES = Object.freeze([
 
 /**
  * @param {string} [dashboardDir]
+ * @param {string[]} [extraFiles] explicit local dependencies for the owner test
  * @returns {ReadonlyMap<string, string>} filename → source
  */
-function loadWorkspaceShellModuleMap(dashboardDir = __dirname) {
+function loadWorkspaceShellModuleMap(dashboardDir = __dirname, extraFiles = []) {
   const map = new Map();
   const missing = [];
-  for (const file of REQUIRED_SHELL_MODULES) {
+  for (const file of new Set([...REQUIRED_SHELL_MODULES, ...extraFiles])) {
     const full = path.join(dashboardDir, file);
     if (!fs.existsSync(full)) {
       missing.push(file);

@@ -49,9 +49,13 @@ export function HandoffArrowLabel({ sourceName, sourceOrdinal, successorName, su
       data-tone={view.successor.tone}>
       <svg viewBox="0 0 44 12" width="44" height="12">
         <path className="app-handoff-line" d="M2 6h38" pathLength="40" />
-        <path className="app-handoff-comet" d="M2 6h38" pathLength="40" />
-        <path className="app-handoff-head" d="M36 1.5l4.5 4.5-4.5 4.5" />
       </svg>
+      <span className="app-handoff-comet-window"><span className="app-handoff-comet" /></span>
+      <span className="app-handoff-head">
+        <svg viewBox="0 0 44 12" width="44" height="12">
+          <path d="M36 1.5l4.5 4.5-4.5 4.5" />
+        </svg>
+      </span>
     </span>
     <HandoffEnd name={successorName} avatarUrl={successorAvatarUrl} auto={auto} side={view.successor}
       filled={filled} fillKey={fillKey} />

@@ -45,7 +45,8 @@ dock panes, so tabs never reload or rebuild. See the [iOS shell](../../apps/ios/
 
 The shared shell subscribes to live Channel presence by Channel key; catalog
 and message-reference snapshots stay stable across presence-only changes.
-Batched Instance reports use member/global Instance routing, and a Run's
+Ordered Instance/card/snapshot batches share member/global Instance routing
+and publish once before message, history and control barriers. A Run's
 presentation stays in its own Channel while account quota remains shared.
 See [live Instance load](../performance/channel-startup.md#live-instance-load).
 

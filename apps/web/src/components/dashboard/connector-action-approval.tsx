@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2, Send, X } from "lucide-react";
@@ -74,7 +75,7 @@ export function ConnectorActionApproval({ request, token, userId }: {
       {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
       {!settled && <div className="mt-3 flex gap-2">
         <button type="button" disabled={busy} onClick={() => void decide("allow")} className={actionClass({ variant: "primary", size: "sm" })}>
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Allow once
+          {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Allow once
         </button>
         <button type="button" disabled={busy} onClick={() => void decide("disallow")} className={actionClass({ variant: "secondary", size: "sm" })}>
           <X className="size-3.5" /> Disallow

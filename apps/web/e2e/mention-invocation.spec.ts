@@ -312,6 +312,47 @@ test("a fresh @auto handoff stays on Picking until the picked launch arrives", a
   await expect(card.locator(".app-mention-invocation").nth(1)).not.toContainText("Picking");
 });
 
+test("a flowing handoff keeps its arrow geometry and motion on compositor surfaces", async ({ page }) => {
+  await page.clock.install({ time: new Date(E2E_NOW) });
+  await installInvocationFixture(page, [], "@claude:4:handoff:@auto continue");
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const arrow = page.locator('.app-handoff-arrow[data-flowing="true"]');
+  await expect(arrow).toBeVisible();
+  const geometry = await arrow.evaluate((element) => {
+    const animations = element.getAnimations({ subtree: true });
+    for (const animation of animations) animation.pause();
+    const comet = element.querySelector<HTMLElement>(".app-handoff-comet")!;
+    const head = element.querySelector<HTMLElement>(".app-handoff-head")!;
+    const cometAnimation = comet.getAnimations()[0];
+    const headAnimation = head.getAnimations()[0];
+    cometAnimation.currentTime = 0;
+    headAnimation.currentTime = 0;
+    const box = element.getBoundingClientRect();
+    const cometStart = comet.getBoundingClientRect();
+    const headStart = head.getBoundingClientRect();
+    cometAnimation.currentTime = 1299;
+    headAnimation.currentTime = 1040;
+    return {
+      aspect: box.width / box.height,
+      cometWidth: cometStart.width / box.width,
+      cometTravel: (comet.getBoundingClientRect().x - cometStart.x) / box.width,
+      headTravel: (head.getBoundingClientRect().x - headStart.x) / box.width,
+      durations: animations.map((animation) => animation.effect!.getTiming().duration),
+      htmlTargets: animations.every((animation) =>
+        (animation.effect as KeyframeEffect).target instanceof HTMLElement),
+    };
+  });
+  expect(geometry.aspect).toBeCloseTo(44 / 12, 1);
+  expect(geometry.cometWidth).toBeCloseTo(12.1 / 44, 2);
+  expect(geometry.cometTravel).toBeCloseTo(47.5 / 44, 2);
+  expect(geometry.headTravel).toBeCloseTo(1.5 / 44, 2);
+  expect(geometry.durations).toEqual([1300, 1300]);
+  expect(geometry.htmlTargets).toBe(true);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => arrow.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0);
+  await expect(arrow.locator(".app-handoff-head")).toHaveCSS("opacity", "1");
+});
+
 test("invalid workspace syntax remains on its own mention beside a valid call to the same Agent", async ({ page }) => {
   const invalidAddress = "＠codex pwd:workspace:missing";
   const valid = { ...codex, sourceMention: "@codex pwd:/tmp/project" };

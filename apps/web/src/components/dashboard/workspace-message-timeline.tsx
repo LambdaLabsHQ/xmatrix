@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { messageMachineIdentity, registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
 import { attachmentMediaType } from "./attachment-media-type";
@@ -1362,7 +1364,7 @@ function MessageSendingMark({ label = false }: { label?: boolean }) {
   return (
     <span role="status" aria-label="Sending"
       className="app-message-sending inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-      <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+      <AnimatedIcon icon={Loader2} className="size-3 animate-spin" aria-hidden="true" />
       {label && "Sending"}
     </span>
   );
@@ -2287,7 +2289,7 @@ export const MessageRow = memo(function MessageRow({
                 data-armed={rebornSenderArmed || undefined}
               >
                 {reborningSender ? (
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                  <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
                 ) : (
                   <RefreshCw className="size-3.5" aria-hidden="true" />
                 )}
@@ -3365,6 +3367,32 @@ export function AgentWorkDetailsDock({
   const dockRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLElement | null>(null);
+  // Activity replaces workItems frequently; only a roster change replaces
+  // the observer's targets. One observer owns the whole horizontal strip.
+  const animationRoster = JSON.stringify(workItems.map(item => item.key));
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || typeof IntersectionObserver === "undefined") return;
+    const items = Array.from(scroller.querySelectorAll<HTMLElement>(":scope > .app-agent-work-item"));
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const item = entry.target as HTMLElement;
+        const visible = entry.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
+        item.dataset.workVisible = String(visible);
+      }
+    }, { root: scroller, threshold: [0, Number.EPSILON] });
+    // Do not start an unpainted animation before the first observation. A
+    // positive-area intersection, including a partially visible island,
+    // resumes it. The second threshold distinguishes edge contact from ink.
+    for (const item of items) {
+      item.dataset.workVisible = "false";
+      observer.observe(item);
+    }
+    return () => {
+      observer.disconnect();
+      for (const item of items) delete item.dataset.workVisible;
+    };
+  }, [animationRoster]);
 
   /* The dock floats over the timeline and its scroller takes pointer events, so
      the timeline has to keep its tail clear of however much of it the dock
@@ -3914,7 +3942,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
             data-armed={armedAction === "reborn" || undefined}
           >
             {reborning ? (
-              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <RefreshCw className="size-3.5" aria-hidden="true" />
             )}
@@ -3937,7 +3965,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
             data-action="handoff"
           >
             {handingOff ? (
-              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <ArrowRightLeft className="size-3.5" aria-hidden="true" />
             )}
@@ -3958,7 +3986,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
           data-armed={stopArmed || undefined}
         >
           {stopping ? (
-            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
           ) : (
             <Trash2 className="size-3.5" aria-hidden="true" />
           )}

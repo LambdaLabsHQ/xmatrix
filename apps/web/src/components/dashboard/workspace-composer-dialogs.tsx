@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useRealtimeChannel } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
@@ -1593,7 +1595,7 @@ export function ChannelDetails({
                 onClick={() => void requestAboutSummary()}
                 className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
               >
-                <RefreshCw className={aboutSummaryBusy ? "size-3.5 animate-spin" : "size-3.5"} />
+                <AnimatedIcon icon={RefreshCw} className={aboutSummaryBusy ? "size-3.5 animate-spin" : "size-3.5"} />
               </button>
             }
           >
@@ -1790,7 +1792,7 @@ export function ChannelDetails({
                             className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                           >
                             {automationBusy === `toggle:${automation.id}` ? (
-                              <Loader2 className="size-3.5 animate-spin" />
+                              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
                             ) : automation.enabled ? (
                               <Pause className="size-3.5" />
                             ) : (
@@ -1805,7 +1807,7 @@ export function ChannelDetails({
                             className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
                           >
                             {automationBusy === `delete:${automation.id}` ? (
-                              <Loader2 className="size-3.5 animate-spin" />
+                              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
                             ) : (
                               <Trash2 className="size-3.5" />
                             )}

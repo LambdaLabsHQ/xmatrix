@@ -1,6 +1,7 @@
 "use client";
 
 import type { Sparkles } from "lucide-react";
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { cn } from "@/lib/utils";
 
 /* Shared frame for the first-run cards that stand in for an empty Space
@@ -33,7 +34,7 @@ export function SetupCardHeader({
     <div className="flex min-w-0 gap-4">
       {Icon && (
         <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted">
-          <Icon className={cn("size-5 text-muted-foreground", iconClassName)} />
+          <AnimatedIcon icon={Icon} className={cn("size-5 text-muted-foreground", iconClassName)} />
         </span>
       )}
       <div className="min-w-0">
