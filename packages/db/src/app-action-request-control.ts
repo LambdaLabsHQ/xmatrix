@@ -1,5 +1,6 @@
 import type { QueryResultRow } from "pg";
 import { utf8ByteLength } from "@xmatrix/protocol";
+import { requireChannelCapability } from "./channel-capability-policy.js";
 import { AppControlError } from "./app-control.js";
 import { appRequestText as text } from "./app-request-text.js";
 import { decryptSecretValue, encryptSecretValue } from "./secret-value-control.js";
@@ -32,14 +33,16 @@ export class PostgresAppActionRequestRepository {
     return this.database.transaction({ requestId: crypto.randomUUID(), operation: `app.action-request.${operation}` }, run);
   }
 
-  private async snapshot(tx: DatabaseTransaction, connectionId: string, channelId: string) {
+  private async snapshot(tx: DatabaseTransaction, connectionId: string, channelId: string, actorUserId: string) {
+    const channel = await requireChannelCapability(tx, { channelId, principal: { kind: "user", id: actorUserId },
+      capability: "app_new_work", error: failure => new AppControlError(failure.code, failure.status, failure.message) });
     const rows = await tx.query<QueryResultRow>({ name: "app_action_request_scope_v1", text: `SELECT
       c.space_id,c.search_rank_sequence AS generation,coalesce(k.version,0) AS credential_version
-      FROM data.app_connector_connections c JOIN data.channels h ON h.space_id=c.space_id AND h.channel_id=$2
+      FROM data.app_connector_connections c
       LEFT JOIN data.app_connector_credentials k ON k.connection_id=c.connection_id
-      WHERE c.connection_id=$1 AND c.status='configured'
+      WHERE c.connection_id=$1 AND c.space_id=$2 AND c.status='configured'
         AND NOT EXISTS (SELECT 1 FROM data.space_deletions d WHERE d.space_id=c.space_id)
-      LIMIT 1 FOR SHARE OF c,h`, values: [connectionId, channelId], maxRows: 1 });
+      LIMIT 1 FOR SHARE OF c`, values: [connectionId, channel.spaceId], maxRows: 1 });
     if (!rows[0]) throw new AppControlError("action_request_scope_changed", 409, "Action approval access changed");
     return rows[0];
   }
@@ -69,7 +72,7 @@ export class PostgresAppActionRequestRepository {
     const envelope = await encryptSecretValue(this.material, `app-action-request:${requestId}`, "input", 1,
       JSON.stringify(input.payload));
     return this.transaction("create", async tx => {
-      const scope = await this.snapshot(tx, input.connectionId, input.channelId);
+      const scope = await this.snapshot(tx, input.connectionId, input.channelId, input.requestedBy);
       // Bounded expiry maintenance piggybacks on new requests, preserving outcome evidence.
       await tx.query({ name: "app_action_request_expire_v1", text: `UPDATE data.app_connector_action_requests
         SET encrypted_value_json=NULL,status=CASE WHEN status='pending' THEN 'expired' ELSE status END,updated_at=now()
@@ -98,18 +101,20 @@ export class PostgresAppActionRequestRepository {
   }
 
   /** Only current Space admins receive the sensitive preview or may decide. Hub also checks Channel read access. */
-  private async requireAdmin(tx: DatabaseTransaction, spaceId: string, actorUserId: string) {
+  private async requireAdmin(tx: DatabaseTransaction, spaceId: string, actorUserId: string, channelId: string) {
     const rows = await tx.query<QueryResultRow>({ name: "app_action_request_admin_v1", text: `SELECT role
       FROM data.space_members WHERE space_id=$1 AND user_id=$2 LIMIT 1 FOR SHARE`,
     values: [spaceId, actorUserId], maxRows: 1 });
     if (rows[0]?.role !== "owner" && rows[0]?.role !== "admin") {
       throw new AppControlError("action_request_forbidden", 403, "A Space admin answers action approvals");
     }
+    await requireChannelCapability(tx, { channelId, spaceId, principal: { kind: "user", id: actorUserId },
+      capability: "app_history_read", error: failure => new AppControlError(failure.code, failure.status, failure.message) });
   }
 
   async pending(input: { channelId: string; spaceId: string; actorUserId: string }) {
     return this.transaction("pending", async tx => {
-      await this.requireAdmin(tx, input.spaceId, input.actorUserId);
+      await this.requireAdmin(tx, input.spaceId, input.actorUserId, input.channelId);
       const rows = await tx.query<QueryResultRow>({ name: "app_action_request_pending_v1", text: `SELECT *
         FROM data.app_connector_action_requests WHERE channel_id=$1 AND space_id=$2 AND status='pending'
           AND expires_at>now() ORDER BY created_at LIMIT 50`, values: [input.channelId, input.spaceId], maxRows: 50 });
@@ -120,9 +125,9 @@ export class PostgresAppActionRequestRepository {
   /** A durable executing marker precedes provider I/O. Replayed or concurrent approvals never dispatch again. */
   async decide(input: { requestId: string; channelId: string; spaceId: string; actorUserId: string; allow: boolean }) {
     return this.transaction("decide", async tx => {
-      await this.requireAdmin(tx, input.spaceId, input.actorUserId);
+      await this.requireAdmin(tx, input.spaceId, input.actorUserId, input.channelId);
       const rows = await tx.query<QueryResultRow>({ name: "app_action_request_decide_v1", text: `SELECT *
-        FROM data.app_connector_action_requests WHERE request_id=$1 AND channel_id=$2 AND space_id=$3 FOR UPDATE`,
+        FROM data.app_connector_action_requests WHERE request_id=$1 AND channel_id=$2 AND space_id=$3 LIMIT 1`,
       values: [input.requestId, input.channelId, input.spaceId], maxRows: 1 });
       const row = rows[0];
       if (!row) throw new AppControlError("action_request_not_found", 404, "Action approval not found");
@@ -130,10 +135,15 @@ export class PostgresAppActionRequestRepository {
       if (input.allow && new Date(row.expires_at as string).getTime() <= Date.now()) {
         throw new AppControlError("action_request_expired", 409, "Action approval expired; ask again");
       }
-      const scope = input.allow ? await this.snapshot(tx, String(row.connection_id), input.channelId) : undefined;
+      const scope = input.allow ? await this.snapshot(tx, String(row.connection_id), input.channelId, String(row.requested_by)) : undefined;
       if (scope && (scope.generation !== row.connection_generation || Number(scope.credential_version) !== Number(row.credential_version))) {
         throw new AppControlError("action_request_scope_changed", 409, "Connected account changed; ask again");
       }
+      const locked = await tx.query<QueryResultRow>({ name: "app_action_request_claim_lock_v1", text: `SELECT *
+        FROM data.app_connector_action_requests WHERE request_id=$1 AND channel_id=$2 AND space_id=$3 FOR UPDATE`,
+      values: [input.requestId, input.channelId, input.spaceId], maxRows: 1 });
+      if (!locked[0]) throw new AppControlError("action_request_not_found", 404, "Action approval not found");
+      if (locked[0].status !== "pending") return { request: view(locked[0]), claimed: false as const };
       const payload = input.allow ? await this.decrypt(row) : undefined;
       const status = input.allow ? "executing" : "denied";
       await tx.query({ name: "app_action_request_claim_v1", text: `UPDATE data.app_connector_action_requests
@@ -151,8 +161,8 @@ export class PostgresAppActionRequestRepository {
           AND status='executing' AND expires_at>now() LIMIT 1`, values: [requestId, connectionId, channelId], maxRows: 1 });
       const row = rows[0];
       if (!row) throw new AppControlError("action_request_not_executing", 409, "This approval cannot execute");
-      await this.requireAdmin(tx, String(row.space_id), String(row.decided_by));
-      const scope = await this.snapshot(tx, connectionId, channelId);
+      await this.requireAdmin(tx, String(row.space_id), String(row.decided_by), channelId);
+      const scope = await this.snapshot(tx, connectionId, channelId, String(row.requested_by));
       if (scope.generation !== row.connection_generation || Number(scope.credential_version) !== Number(row.credential_version)) {
         throw new AppControlError("action_request_scope_changed", 409, "Connected account changed; ask again");
       }
