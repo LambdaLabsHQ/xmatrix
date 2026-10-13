@@ -254,6 +254,7 @@ export function AppWindowPreview() {
                 onReact={noop}
                 onEdit={noop}
                 onRecall={noop}
+                onUnsentAction={noop}
                 onReply={noop}
                 onOpenThread={noop}
                 onMentionSender={noop}

@@ -162,6 +162,7 @@ import {
   useStableCallback,
   viewLabels,
 } from "./workspace-shell-modules";
+import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
 import { shareTimelineItems } from "./workspace-shell-message-model";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
@@ -325,6 +326,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   const handleTimelineRecall = useStableCallback((message: TimelineItem) => {
     void recallMessage(message);
+  });
+
+  const handleTimelineUnsentAction = useStableCallback((message: TimelineItem, action: UnsentMessageAction) => {
+    resolveUnsentMessage(message, action);
   });
 
   const handleTimelineReply = useStableCallback((message: TimelineItem) => {
@@ -2452,7 +2457,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       attachments,
     });
     setOutgoingMessages((current) => [...current, outgoing]);
+    await attemptOutgoingSend(channel, outgoing);
+  }
 
+  /** One attempt at appending a pending row. Sending again runs it under the same clientMessageId. */
+  async function attemptOutgoingSend(channel: SerializedChannel, outgoing: OutgoingMessage) {
+    const { clientMessageId, body, invocationSelections, summonIntents, attachments, replyToMessageId, appMentions, sentAt } = outgoing;
+    const channelId = channel.id;
     try {
       const payload = await appendChannelMessageWithAttachments({
         token: s.token,
@@ -2527,7 +2538,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       // POST may have committed. Only a determinate error is a failure, and an
       // unknown result is carried by the row rather than the channel banner.
       const unknownResult = isMessageSendDeadlineError(err);
-      const message = unknownResult ? "Result unconfirmed" : userErrorMessage(err, "Couldn't send the message") ?? undefined;
+      const message = unknownResult ? "Result unconfirmed" : userErrorMessage(err, MESSAGE_SEND_FAILED_FALLBACK) ?? undefined;
       setOutgoingMessages((current) =>
         current.map((item) =>
           item.clientMessageId === clientMessageId
@@ -2541,6 +2552,26 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         setHistoryError(message ?? null);
       }
     }
+  }
+
+  /** Send again, or drop, a row of the reader's own that did not go out. */
+  function resolveUnsentMessage(message: TimelineItem, action: UnsentMessageAction) {
+    const outgoing = s.outgoingMessagesRef.current.find((item) => item.clientMessageId === message.clientMessageId);
+    if (!outgoing || outgoing.status === "pending") return;
+    if (action === "discard") {
+      s.outboundPreviewByClientIdRef.current.delete(outgoing.clientMessageId);
+      setOutgoingMessages((current) => current.filter((item) => item.clientMessageId !== outgoing.clientMessageId));
+      setHistoryError(null);
+      return;
+    }
+    const channel = s.channelsRef.current.find((candidate) => candidate.id === outgoing.channelId);
+    if (!channel || !s.token) return;
+    const retried: OutgoingMessage = { ...outgoing, status: "pending", error: undefined };
+    setHistoryError(null);
+    setOutgoingMessages((current) =>
+      current.map((item) => item.clientMessageId === retried.clientMessageId ? retried : item)
+    );
+    void attemptOutgoingSend(channel, retried);
   }
 
   /** Whether the answer was posted; a card stays open when it was not. */
@@ -2724,6 +2755,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     handleTimelineReact,
     handleTimelineEdit,
     handleTimelineRecall,
+    handleTimelineUnsentAction,
     handleTimelineReply,
     handleTimelineJumpToMessage,
     handleTimelineOpenThread,
