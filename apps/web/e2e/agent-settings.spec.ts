@@ -45,8 +45,10 @@ test("whoever may describe a harness writes what it is for in place, as free tex
   await page.goto("/app/personal-sspaceperso/agents");
   /* The text is the agent's, whichever machine runs it: a machine's page does not carry it. */
   const text = page.getByLabel("When to pick codex");
-  await page.getByTestId("agent-row").filter({ hasText: "Remote server" }).click();
-  await expect(page.getByRole("button", { name: "Configure: codex" })).toBeVisible();
+  const machine = page.getByTestId("agent-row").filter({ hasText: "Remote server" });
+  await machine.click();
+  await expect(machine).toHaveAttribute("aria-current", "true");
+  await expect(page.getByText("Runtime", { exact: true })).toBeVisible();
   await expect(text).toHaveCount(0);
   const agent = page.getByRole("region", { name: "codex" }).locator(".app-tool-list-group-title");
   await agent.click();
