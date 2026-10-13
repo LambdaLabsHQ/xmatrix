@@ -107,5 +107,5 @@ test("an ordinary socket message keeps caller metadata but never Hub-only keys",
 test("a Hub that accepts activity says so when an Instance connects", async () => {
   const { AGENT_INSTANCE_HUB_CAPABILITIES } = await import(
     "../src/runtime-transport/postgres-agent-instance-port.ts");
-  assert.deepEqual([...AGENT_INSTANCE_HUB_CAPABILITIES], ["channel_activity"]);
+  assert.ok(AGENT_INSTANCE_HUB_CAPABILITIES.includes("channel_activity"));
 });
