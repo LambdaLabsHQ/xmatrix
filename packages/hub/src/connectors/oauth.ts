@@ -28,6 +28,7 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   googlesearchconsole: { scope: "https://www.googleapis.com/auth/webmasters", name: "Search Console" },
   googleadsense: { scope: "https://www.googleapis.com/auth/adsense.readonly", name: "AdSense" },
   googleanalytics: { scope: "https://www.googleapis.com/auth/analytics.readonly", name: "Google Analytics" },
+  googleads: { scope: "https://www.googleapis.com/auth/adwords", name: "Google Ads" },
   googlebusinessprofile: { scope: "https://www.googleapis.com/auth/business.manage", name: "Business Profile" },
   gcp: { scope: "https://www.googleapis.com/auth/cloud-platform", name: "Google Cloud" },
 };
@@ -43,7 +44,7 @@ export function grantFieldsForgottenOnDisconnect(providerId: string): Record<str
 }
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googlebusinessprofile: "google", gcp: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
@@ -309,9 +310,10 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     }
   }
   const afterNotionUnauthorized = providerId === "notion" && options.unauthorized === true;
-  if (providerId === "gcp" && values.oauthToken &&
+  const completeGoogleGrant = providerId === "gcp" || providerId === "googleads";
+  if (completeGoogleGrant && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
-    throw new ProviderRequestError(401, "Google Cloud OAuth requires a complete expiring grant; reconnect");
+    throw new ProviderRequestError(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`);
   }
   if (providerId === "bitbucket" && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
@@ -321,7 +323,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
       (!Number.isFinite(expiresAt) || expiresAt - now > REFRESH_MARGIN_MS))) return undefined;
   const client = oauthClient(env, providerId);
   if (!client) {
-    if (providerId === "gcp") throw new ProviderRequestError(503, "Google Cloud OAuth application is unavailable for refresh; reconnect");
+    if (completeGoogleGrant) throw new ProviderRequestError(503, `${GOOGLE_GRANTS[providerId]!.name} OAuth application is unavailable for refresh; reconnect`);
     if (providerId === "bitbucket") throw new ProviderRequestError(503, "Bitbucket OAuth consumer is unavailable for refresh");
     if (providerId === "sentry") throw new ProviderRequestError(503, "Sentry user OAuth is unavailable for refresh; reconnect");
     return undefined;

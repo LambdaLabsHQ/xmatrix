@@ -85,6 +85,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, sitemaps, properties, verification |
 | Google Analytics | `googleanalytics` | | `list_properties`, `report` |
+| Google Ads | `googleads` | | `list_accounts`, `read_account`, `query`, `validate_mutations`; `mutate`, `set_campaign_status` (ask by default) |
 | Google Business Profile | `googlebusinessprofile` | | `list_accounts`, `list_locations`, `performance`, `reviews`, `reply_review` |
 | Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `report` |
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
@@ -114,6 +115,34 @@ A few examples:
 @google:create_doc:new Launch notes
 @slack:post:C0123456789 Deploy finished.
 ```
+
+## Managing Google Ads
+
+Connect Google Ads in **Apps**, choose the advertiser customer ID in Credentials
+and run Check. This Google connection is separate from Analytics, Search Console
+and Drive. A read or mutation cannot target another advertiser.
+
+```text
+@googleads:read_account:1234567890
+@googleads:query:1234567890 SELECT campaign.id, campaign.name, campaign.status, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date DURING LAST_7_DAYS LIMIT 50
+@googleads:set_campaign_status:1234567890/987654321 {"status":"PAUSED"}
+```
+
+`validate_mutations` checks proposed advertising changes without applying them.
+`mutate` creates or updates budgets, campaigns, creatives and targeting together;
+new campaigns must be paused. Both `mutate` and campaign status changes ask a
+Space admin to approve each request by default. To enable a campaign, explicitly
+give its currency and expected current average daily budget in integer micros:
+
+```text
+@googleads:set_campaign_status:1234567890/987654321 {"status":"ENABLED","currencyCode":"USD","expectedDailyBudgetMicros":"1000000"}
+```
+
+One million micros is one unit of the account currency. Average daily budgets
+are not hard spending caps; Google can spend above the average on a day. Native
+ad review/serving is asynchronous. Query before repeating any write whose
+outcome was not confirmed. The complete configuration and stable acceptance
+contract is in the [Google Ads connector documentation](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-ads.md).
 
 ## Shipping an app to the App Store
 
