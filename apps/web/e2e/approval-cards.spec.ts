@@ -73,12 +73,14 @@ const ACCESS_ASKED = {
 };
 
 /** Opens the Channel on these cards; `pending` is what the Hub lists for the dock. */
-async function openCards(page: Page, messages: unknown[], pending: unknown[], secret = VALUE_ASKED) {
+async function openCards(page: Page, messages: unknown[], pending: unknown[], secret = VALUE_ASKED, connectorRequests: unknown[] = []) {
   await installWorkspaceStubs(page, {
     spaces: [E2E_SPACE],
     channels: [{ ...E2E_CHANNEL, messageCount: messages.length, lastMessageSequence: messages.length }],
   });
   const stubs: Array<[string, string, unknown, string?]> = [
+    ["connector-asks", "**/api/xmatrix/channels/channel-general/connector-action-requests", { requests: connectorRequests }],
+    ["connector-answer", "**/api/xmatrix/channels/channel-general/connector-action-requests/email-request", { request: { status: "completed" } }, "POST"],
     ["cards-history", "**/api/xmatrix/channels/channel-general/history**", { messages, hasMore: false }],
     ["cards-pending", "**/api/xmatrix/channels/channel-general/cross-space-read-grants/pending**", { grants: pending }],
     ["cards-grant", GRANT_URL, { grant }],
@@ -225,4 +227,22 @@ test("the Pending approvals dock is one block of colour, its asks unframed insid
   await expect(docked).toHaveCount(0);
   await expect(dock.getByText("read another Space")).toBeVisible();
   await expect(dock.getByRole("button", { name: "Show" })).toHaveAttribute("aria-expanded", "false");
+});
+
+
+// The card owns the concrete preview and one-shot decision shape; server tests cannot
+// catch hidden recipients or a browser that posts a persistent allow policy instead.
+test("Gmail approval shows the frozen email and allows only that request", async ({ page }) => {
+  const request = { requestId: "email-request", channelId: E2E_CHANNEL.id, providerId: "gmail", actionId: "reply",
+    requestedBy: "e2e-user", expiresAt: "2026-10-14T00:00:00.000Z", preview: {
+      from: "sender@example.test", to: "recipient@example.test", subject: "Re: Review this", body: "Only this approved body" } };
+  await openCards(page, [], [], VALUE_ASKED, [request]);
+  const approval = page.getByRole("region", { name: "Pending approvals" });
+  await expect(approval.getByRole("heading", { name: "Send this email?" })).toBeVisible();
+  for (const value of Object.values(request.preview)) await expect(approval.getByText(value, { exact: true })).toBeVisible();
+  await expect(approval.getByText("Your answer covers this request only. The next request asks again.")).toBeVisible();
+  await approval.getByRole("button", { name: "Allow once", exact: true }).click();
+  await expect(approval.getByText("completed", { exact: true })).toBeVisible();
+  await expect(approval.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(0);
+  expect(await fixtureRequestBodies(page, "connector-answer")).toEqual([{ decision: "allow" }]);
 });

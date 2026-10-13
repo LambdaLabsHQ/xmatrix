@@ -371,8 +371,8 @@ is not: every Gmail call passes an endpoint list in `actions/gmail.ts`
 (GET profile, message list and one message; POST messages/send) and any
 other endpoint is refused before Composio is called. The only write, POST
 messages/send, belongs to `send` and `reply`, whose manifest
-`defaultPolicy: "deny"` keeps them off in every Channel until a Space admin
-allows them there (§3.5). A read-only grant would need the company's own
+`defaultPolicy: "ask"` stages an immutable email for a Space admin to approve
+once in that Channel (§3.5). A read-only grant would need the company's own
 Google app verified for `gmail.readonly` (OAuth verification and CASA).
 One Gmail connection holds up to ten mailboxes. Its only credential,
 `mailboxes`, lists each mailbox's Composio account, address and owner: a
@@ -788,15 +788,40 @@ GitHub triggers may use either spelling.
 
 ### 3.5 Outbound actions and policy
 
-- New `data.app_connector_action_policies (connection_id, channel_id, action_id, mode CHECK IN ('allow','approve','deny'), version)`.
-- Default when no row exists: every action, read or write, runs for a Human or
-  an Agent. Connectors do not stand in the way; a Space admin's Channel `deny`
-  row is the only xMatrix policy that blocks an action, and the provider's own
-  permissions still apply.
-- The one exception is an action whose manifest declares
-  `defaultPolicy: "deny"`: a write the provider's grant permits but xMatrix
-  holds back. It runs only in a Channel with an `allow` row. Only Gmail's
-  `send` and `reply` declare it, because Gmail's grant is the full mailbox.
+- Per-Channel action policy has three values: `allow` executes immediately,
+  `ask` stages each request for a Human Space admin, and `disallow` refuses it.
+  The legacy command/API spelling `deny` remains a restrictive `disallow` alias.
+  Only current Space owners/admins change a policy or decide a request; an Agent
+  Run cannot approve its own call.
+- No override uses the manifest default: Gmail `send`/`reply` default to `ask`,
+  while other actions retain `allow`. Existing explicit allow/deny rows keep
+  their meaning. GitHub's specialized dispatcher retains allow/disallow; it
+  rejects ask instead of suggesting that an unsupported approval will appear.
+- The existing policy row stays the sole authority. The additive `ask_version`
+  column identifies ask only when it equals that row's version and its legacy
+  mode is deny. Old executors therefore fail closed; old writers advance the
+  version and invalidate ask. This avoids rewriting rows or relaxing constraints.
+- `data.app_connector_action_requests` owns encrypted, immutable request input
+  and its 24-hour expiry, account generation and credential version. Channel
+  commands and MCP stage the same flow. The Pending approvals card fetches
+  previews through a current Human admin session and displays Gmail's actual
+  from/to/subject/body, including a reply's resolved recipient and headers.
+  None of that private payload enters the approval receipt or caller metadata.
+- A Human decision atomically changes pending to executing before provider I/O;
+  only the winning claim dispatches. Concurrent clicks, repeated decisions,
+  denial and terminal outcomes cannot send again. Account changes, expiry,
+  removed Channel access, current disallow, and lost admin/mailbox ownership
+  refuse execution. Approval covers the frozen request only, never the next call.
+  Gmail rechecks authorization immediately before messages/send. A crash or
+  uncertain write keeps its consumed state and must not be retried automatically.
+  Settling clears the encrypted payload; each new request also clears at most
+  50 expired payloads in its Space while retaining outcome evidence; removing the connection or moving or
+  purging its Channel/Space removes the associated requests.
+- Hub API: `GET /api/channels/:channelId/connector-action-requests` lists at most
+  50 unexpired pending previews for a current admin. `POST .../:requestId` accepts
+  only `{decision: "allow"|"disallow"}`; content is read from the frozen request,
+  never from the decision body. Both require current Channel access and return
+  private/no-store. Web proxies use the corresponding `/api/xmatrix` routes.
 - Migration: each `*WriteChannelId` metadata value becomes one
   `(connection, channel, action, allow)` row.
   - The migration is idempotent and bounded per connection.
@@ -813,8 +838,8 @@ GitHub triggers may use either spelling.
   - Tool inputs are `target` and optional `text`, parsed by the same executor
     as a Channel command. Channel access, connection credentials and live
     action policy are checked at execution; a listed tool grants no authority.
-- Every request, whatever its entry point, writes one
-  `app_connector_executions` row and one Channel receipt.
+- Staging ask writes one request and a Channel receipt. The approved dispatch
+  writes the normal `app_connector_executions` row and a separate terminal receipt.
 
 ## 4. Providers
 

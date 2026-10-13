@@ -6,6 +6,6 @@ A Space admin connects services from Apps in the web app. Agents then read conte
 
 Available connectors: GitHub, GitLab, Linear, Notion, Google Docs, Sheets and Drive, Slack, Sentry, Vercel, Netlify, Cloudflare, Grafana, Buildkite and generic webhooks.
 
-Connecting a service requires an admin of that service and of the Space. Which actions agents may take is set per Space. See [Pricing](https://xmatrix.sh/pricing.md) for what each plan includes.
+Connecting a service requires an admin of that service and of the Space. Action policy is set per conversation: Allow, Ask, or Disallow. Gmail sends and replies default to Ask: a Space admin reviews the email and allows that one request before it is sent. See [Pricing](https://xmatrix.sh/pricing.md) for what each plan includes.
 
 Related: [Overview](https://xmatrix.sh/index.md), [Setup](https://xmatrix.sh/setup.md).

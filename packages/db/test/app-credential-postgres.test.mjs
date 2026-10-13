@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   AppControlError,
   PostgresAppActionPolicyRepository,
+  PostgresAppActionRequestRepository,
   PostgresAppCredentialRepository,
   PostgresAppRepository,
   PostgresSpaceControlRepository,
@@ -26,7 +27,7 @@ async function withDatabase(run) {
   const { client, database, sql } = await connectorDatabase("app-credential-test");
   const space = `credential-space-${crypto.randomUUID()}`;
   const cleanup = async () => {
-    for (const table of ["app_connector_action_policies", "app_connector_credentials", "app_source_relations",
+    for (const table of ["app_connector_action_requests", "app_connector_action_policies", "app_connector_credentials", "app_source_relations",
       "app_connector_connections",
       "channels", "space_members"]) await sql(`DELETE FROM data.${table} WHERE space_id=$1`, [space]);
   };
@@ -227,17 +228,21 @@ integration("action policy is admin-written per Channel, read at execution, and 
     assert.equal(await read(), null);
     await policies.set({ ...base, requestId: "p1", mode: "allow", actorUserId: "owner" });
     assert.equal(await read(), "allow");
-    await policies.set({ ...base, requestId: "p2", mode: "deny", actorUserId: "owner" });
-    assert.equal(await read(), "deny");
+    await policies.set({ ...base, requestId: "p2", mode: "disallow", actorUserId: "owner" });
+    assert.equal(await read(), "disallow");
     await assert.rejects(policies.set({ ...base, requestId: "p3", mode: "allow", actorUserId: "member" }),
       (error) => error instanceof AppControlError && error.status === 404);
     await assert.rejects(policies.set({ ...base, requestId: "p4", channelId: "elsewhere", mode: "allow", actorUserId: "owner" }),
       (error) => error instanceof AppControlError && error.code === "channel_not_found");
     assert.deepEqual((await policies.list({ requestId: "l1", spaceId: space, providerId: "webhook", actorUserId: "member" }))
       .map(({ channelId, actionId, mode }) => ({ channelId, actionId, mode })),
-    [{ channelId: `${space}:a`, actionId: "post", mode: "deny" }], "members see the Channel overrides");
+    [{ channelId: `${space}:a`, actionId: "post", mode: "disallow" }], "members see the Channel overrides");
     await assert.rejects(policies.list({ requestId: "l2", spaceId: space, providerId: "webhook", actorUserId: "stranger" }),
       (error) => error instanceof AppControlError && error.status === 404);
+    await policies.set({ ...base, requestId: "ask", mode: "ask", actorUserId: "owner" });
+    assert.equal(await read(), "ask");
+    await sql("UPDATE data.app_connector_action_policies SET mode='deny',version=version+1 WHERE space_id=$1", [space]);
+    assert.equal(await read(), "disallow", "legacy deny remains restrictive");
     await policies.set({ ...base, requestId: "p5", mode: null, actorUserId: "owner" });
     assert.equal(await read(), null);
     await policies.set({ ...base, requestId: "p6", mode: "allow", actorUserId: "owner" });
@@ -944,5 +949,59 @@ integration("an imported PR subscription keeps its identity through update, rout
     assert.equal((await apps.command(input, "remove-relation")).reused, true);
     assert.equal((await sql("SELECT relation_id FROM data.app_source_relations WHERE channel_id=$1", [channelId]))
       .rows.length, 0);
+  });
+});
+
+
+// The owning PostgreSQL boundary must freeze private input, enforce current admin/account authority,
+// and consume once under concurrent decisions. Mocked provider tests cannot protect these durable facts.
+integration("action approvals freeze encrypted input and consume exactly once under concurrent decisions", async () => {
+  await withDatabase(async ({ sql, database, space }) => {
+    await sql(`INSERT INTO data.channels (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,
+      created_at,updated_at) VALUES ($2||':approval',$2,'approval','approval','open',$2||':approval-rank',1,$1,$1)`, [at, space]);
+    const requests = new PostgresAppActionRequestRepository(database, material);
+    const scope = { spaceId: space, channelId: `${space}:approval`, actorUserId: "owner" };
+    const payload = { messageId: "m1", senderKind: "user", statement: { target: "ops@example.test", text: "Private subject\nPrivate body" },
+      prepared: { to: "ops@example.test", subject: "Private subject", body: "Private body" }, preview: { to: "ops@example.test", body: "Private body" } };
+    const create = { requestId: `approval:${space}`, connectionId: `${space}:webhook`, channelId: scope.channelId,
+      providerId: "webhook", actionId: "post", requestedBy: "owner", payload };
+    const request = await requests.create(create);
+    assert.equal(request.status, "pending");
+    assert.equal((await requests.create(create)).requestId, request.requestId, "the same request does not enqueue twice");
+    const stored = (await sql("SELECT * FROM data.app_connector_action_requests WHERE request_id=$1", [request.requestId])).rows[0];
+    assert.doesNotMatch(JSON.stringify(stored), /Private body|Private subject|ops@example/u);
+    await assert.rejects(requests.create({ ...create, payload: { ...payload, preview: { body: "changed" } } }), /content changed/);
+    await assert.rejects(requests.pending({ ...scope, actorUserId: "member" }), /Space admin/);
+    assert.deepEqual((await requests.pending(scope))[0].preview, payload.preview);
+    const decide = { ...scope, requestId: request.requestId, allow: true };
+    await assert.rejects(requests.decide({ ...decide, actorUserId: "member" }), /Space admin/);
+    await assert.rejects(requests.decide({ ...decide, channelId: "another" }), /not found/);
+    const results = await Promise.all([requests.decide(decide), requests.decide(decide)]);
+    assert.equal(results.filter(result => result.claimed).length, 1, "one decision wins before provider I/O");
+    assert.deepEqual(results.find(result => result.claimed).payload, payload);
+    await requests.authorize(request.requestId, create.connectionId, create.channelId);
+    await requests.settle(request.requestId, "completed");
+    assert.equal((await requests.decide(decide)).claimed, false, "completed requests cannot dispatch again");
+    await assert.rejects(requests.authorize(request.requestId, create.connectionId, create.channelId), /cannot execute/);
+    assert.equal((await sql("SELECT encrypted_value_json FROM data.app_connector_action_requests WHERE request_id=$1", [request.requestId])).rows[0].encrypted_value_json, null);
+    const next = { ...create, requestId: `${create.requestId}:next`, payload: { ...payload, messageId: "m2" } };
+    await requests.create(next);
+    assert.equal((await requests.pending(scope)).length, 1, "the next request still asks");
+    await requests.decide({ ...decide, requestId: next.requestId, allow: false });
+    assert.equal((await requests.decide({ ...decide, requestId: next.requestId })).claimed, false, "denial is final");
+    const changed = { ...create, requestId: `${create.requestId}:changed` };
+    await requests.create(changed);
+    await sql("UPDATE data.app_connector_connections SET search_rank_sequence=search_rank_sequence||'-reconnected' WHERE connection_id=$1", [create.connectionId]);
+    await assert.rejects(requests.decide({ ...decide, requestId: changed.requestId }), /Connected account changed/);
+    await requests.decide({ ...decide, requestId: changed.requestId, allow: false });
+    const expired = { ...create, requestId: `${create.requestId}:expired` };
+    await requests.create(expired);
+    await sql("UPDATE data.app_connector_action_requests SET created_at=now()-interval '2 days',expires_at=now()-interval '1 day' WHERE request_id=$1", [expired.requestId]);
+    await assert.rejects(requests.decide({ ...decide, requestId: expired.requestId }), /expired/);
+    const revoked = { ...create, requestId: `${create.requestId}:revoked` };
+    await requests.create(revoked);
+    await requests.decide({ ...decide, requestId: revoked.requestId });
+    await sql("UPDATE data.space_members SET role='member' WHERE space_id=$1 AND user_id='owner'", [space]);
+    await assert.rejects(requests.authorize(revoked.requestId, create.connectionId, create.channelId), /Space admin/);
   });
 });

@@ -318,3 +318,5 @@ export { PostgresAccountDeletionRepository, AccountDeletionError, accountIdentit
 export type { AccountMessageProfileRow, PrepareErasedMessageProfile } from "./account-message-profile-erasure.js";
 export type { AccountDeletionBlocker, AccountDeletionState } from "./account-deletion.js";
 export type { AccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";
+
+export { PostgresAppActionRequestRepository, type AppActionRequestPayload } from "./app-action-request-control.js";

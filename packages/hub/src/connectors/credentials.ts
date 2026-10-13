@@ -1,4 +1,4 @@
-import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppActionPolicyRepository, PostgresAppCredentialRepository,
+import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppActionPolicyRepository, PostgresAppActionRequestRepository, PostgresAppCredentialRepository,
   PostgresAppRepository, PostgresWeComSuiteRepository, PostgresTelegramRoomRepository, PostgresFeishuAppRepository, PostgresFeishuRoomRepository, PostgresSentryEventRepository, PostgresGoogleChatRoomRepository, PostgresTeamsRoomRepository, type AuthorityDatabase } from "@xmatrix/db";
 import { postgresDatabaseObservers } from "../postgres-observability";
 import type { Env } from "../types";
@@ -97,4 +97,8 @@ export function connectorDiscordLifecycleRepository(env: Env): PostgresDiscordLi
 
 export function connectorTeamsRoomRepository(env: Env): PostgresTeamsRoomRepository {
   return new PostgresTeamsRoomRepository(appPolicyDatabase(env));
+}
+
+export function connectorActionRequestRepository(env: Env): PostgresAppActionRequestRepository {
+  return new PostgresAppActionRequestRepository(appPolicyDatabase(env), env.XMATRIX_SECRET_CATALOG_KEY?.trim() ?? "");
 }

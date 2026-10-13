@@ -82,11 +82,13 @@ test("policy: every action runs for a Human or an Agent until the Channel denies
   for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
     for (const action of provider.actions.filter((candidate) => candidate.effect)) {
       const id = `${provider.id}:${action.id}`;
-      assert.equal(action.defaultPolicy, gated.has(id) ? "deny" : undefined, `${id} default`);
+      assert.equal(action.defaultPolicy, gated.has(id) ? "ask" : undefined, `${id} default`);
       const refusal = (mode) => actionRefusal({ actionId: action.id, mode, defaultPolicy: action.defaultPolicy });
-      if (gated.has(id)) assert.match(refusal(null), /off in this channel until a Space admin allows it/u, id);
+      if (gated.has(id)) assert.match(refusal(null), /needs approval/u, id);
       else assert.equal(refusal(null), undefined, id);
       assert.equal(refusal("allow"), undefined, id);
+      assert.match(refusal("disallow"), /denied/u, id);
+      assert.match(refusal("ask"), /needs approval/u, id);
       assert.match(refusal("deny"), /denied/u, id);
     }
   }

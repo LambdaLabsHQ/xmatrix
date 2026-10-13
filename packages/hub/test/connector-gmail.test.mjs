@@ -56,7 +56,7 @@ test("Connect signs in through Composio as a per-attempt user and stores only th
     const entry = manifest.actions.find(candidate => candidate.id === id);
     const write = id === "send" || id === "reply";
     assert.deepEqual([action.effect, entry?.effect, entry?.defaultPolicy],
-      write ? ["write", "write", "deny"] : ["read", "read", undefined], id);
+      write ? ["write", "write", "ask"] : ["read", "read", undefined], id);
   }
 });
 
@@ -328,4 +328,31 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
   stored = Array.from({ length: 10 }, (_, index) => ({ account: `ca_full${index}`, address: `m${index}@example.com`, owner: "user:user-1" }));
   await assert.rejects(addConnectedMailbox({}, { ...input, account: "ca_new2" }), /at most 10/u);
   assert.equal(deleted.at(-1), "ca_new2");
+});
+
+// Approval must show the actual reply destination and hold it stable: a later metadata
+// fetch must not silently redirect an approved email. The provider tests above do not freeze it.
+test("approval freezes reply headers before any send and revalidates the mailbox before writing", async () => {
+  const original = gmail({ id: "18f2a9c0d1e2b3a4", threadId: "18f2a9c0d1e2b300", payload: { headers: [
+    { name: "From", value: "Sender <sender@example.test>" }, { name: "Reply-To", value: "Approved <approved@example.test>" },
+    { name: "Subject", value: "Frozen subject" }, { name: "Message-ID", value: "<frozen@example.test>" }] } });
+  const staged = await fetched([original], () => ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "Approved body" }));
+  assert.equal(staged.calls.length, 1);
+  assert.equal(staged.calls[0].body.method, "GET", "preparing never sends");
+  const frozen = staged.result;
+  assert.deepEqual([frozen.from, frozen.to, frozen.subject, frozen.body],
+    ["me@example.com", "approved@example.test", "Re: Frozen subject", "Approved body"]);
+  let checks = 0;
+  const sent = await fetched([gmail({ id: "19a0b1c2d3e4f5a6" })], () => ACTIONS.reply.execute({ ...ctx,
+    authorizeWrite: async () => { checks++; } }, frozen));
+  assert.equal(checks, 1, "policy is checked immediately before the write");
+  assert.equal(sent.calls.length, 1, "sending the approved reply never resolves new headers");
+  assert.match(decodedRaw(sent.calls[0].body.body.raw), /^To: approved@example\.test\r\nSubject: Re: Frozen subject\r\n/u);
+  const changed = { ...ctx, credentials: { ...ctx.credentials,
+    mailboxes: JSON.stringify([{ ...mailbox, account: "ca_reconnected" }]) } };
+  const blocked = await fetched([], () => assert.rejects(ACTIONS.reply.execute(changed, frozen), /mailbox changed/));
+  assert.deepEqual(blocked.calls, []);
+  const revoked = await fetched([], () => assert.rejects(ACTIONS.reply.execute({ ...ctx,
+    authorizeWrite: async () => { throw new Error("disallowed now"); } }, frozen), /disallowed now/));
+  assert.deepEqual(revoked.calls, []);
 });

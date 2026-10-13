@@ -28,6 +28,7 @@ import {
 import { canInviteToSpace } from "@/components/dashboard/workspace-shell-recovered";
 import { issueReportUrl } from "@/lib/issue-report";
 import { channelSidebarError } from "@/components/dashboard/workspace-sidebar-error";
+import { ConnectorActionApproval, useConnectorActionApprovals } from "./connector-action-approval";
 import { ChannelApprovalsDock } from "./channel-approvals-dock";
 import { humanProfileFromSpaceMember } from "@/components/dashboard/human-profile-summary";
 
@@ -727,6 +728,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // list; that change is the signal to re-read this Channel's pending cards.
   const pendingCrossSpaceReadRequests = useChannelPendingCrossSpaceReads(model.authenticatedUserId ?? "",
     selectedChannel?.id, token, canUseSelectedChannel);
+  const pendingConnectorActions = useConnectorActionApprovals(model.authenticatedUserId ?? "", selectedChannel?.id,
+    token, canUseSelectedChannel && Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
+      ["owner", "admin"].includes(transferSpaceRole(space, model.authenticatedUserId ?? "") || ""))));
 
 
   if (loading || !user) {
@@ -808,7 +812,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </div>
   );
   const pendingCrossSpaceReads = canUseSelectedChannel ? pendingCrossSpaceReadRequests : [];
-  const channelHasPendingApprovals = pendingCrossSpaceReads.length > 0;
+  const channelHasPendingApprovals = pendingCrossSpaceReads.length > 0 || pendingConnectorActions.length > 0;
   const newConversationSurface = (
     <NewConversation
       space={currentSpace}
@@ -960,9 +964,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       <AgentWorkDetailsDock
         approvals={channelHasPendingApprovals ? (
           <ChannelApprovalsDock
-            summaries={pendingCrossSpaceReads.map((request) => ({ key: `read:${request.grantId}`,
-                agent: request.agentName || "Agent", what: "read another Space" }))}
+            summaries={[...pendingCrossSpaceReads.map((request) => ({ key: `read:${request.grantId}`,
+                agent: request.agentName || "Agent", what: "read another Space" })),
+              ...pendingConnectorActions.map(request => ({ key: request.requestId, agent: request.providerId, what: request.actionId }))]}
           >
+            {pendingConnectorActions.map(request => <ConnectorActionApproval key={request.requestId} request={request}
+              token={token} userId={model.authenticatedUserId ?? ""} />)}
             {pendingCrossSpaceReads.map((request) => (
               <CrossSpaceReadCard key={request.grantId} request={request} token={token}
                 userId={model.authenticatedUserId ?? ""} />

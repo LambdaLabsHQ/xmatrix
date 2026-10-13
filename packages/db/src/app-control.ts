@@ -747,6 +747,9 @@ export class PostgresAppRepository {
     await tx.query({ name: "app_credential_delete_connection_v1",
       text: "DELETE FROM data.app_connector_credentials WHERE connection_id=$1",
       values: [rows[0].connection_id], maxRows: 0 });
+    await tx.query({ name: "app_action_request_delete_connection_v1",
+      text: "DELETE FROM data.app_connector_action_requests WHERE connection_id=$1",
+      values: [rows[0].connection_id], maxRows: 0 });
     await tx.query({ name: "app_action_policy_delete_connection_v1",
       text: "DELETE FROM data.app_connector_action_policies WHERE connection_id=$1",
       values: [rows[0].connection_id], maxRows: 0 });

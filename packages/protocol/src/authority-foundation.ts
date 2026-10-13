@@ -78,6 +78,10 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/check`,
     space_app_connection_credentials: (spaceId: string, providerId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/credentials`,
+    channel_connector_action_requests: (channelId: string) =>
+      `${api}/channels/${encodeURIComponent(channelId)}/connector-action-requests`,
+    channel_connector_action_request: (channelId: string, requestId: string) =>
+      `${api}/channels/${encodeURIComponent(channelId)}/connector-action-requests/${encodeURIComponent(requestId)}`,
     space_app_connection_policies: (spaceId: string, providerId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/policies`,
     space_app_connection_oauth_start: (spaceId: string, providerId: string) =>

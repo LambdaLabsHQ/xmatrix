@@ -5,6 +5,7 @@ import type {
   CommandCompletionArgumentSchema,
   CommandCompletionDelimiter,
 } from "./authority.js";
+import type { ConnectorActionPolicy } from "./app-connector-policy.js";
 import { EVENT_CONNECTOR_MANIFESTS } from "./app-connector-event-manifests.js";
 
 // Public Integration Issue Read & Write includes both event scopes in Sentry's native UI.
@@ -105,10 +106,10 @@ export interface AppConnectorProviderManifest {
      */
     effect?: "read" | "write";
     /**
-     * `deny`: the action is off in every Channel until a Space admin allows it
-     * there (a write the provider's grant permits but xMatrix holds back).
+     * `ask` requires approval of each request; `disallow` refuses the action.
+     * Missing means `allow`. Overrides are set by a Space admin.
      */
-    defaultPolicy?: "deny";
+    defaultPolicy?: ConnectorActionPolicy;
     /** How to write the command after `@<provider>:<action>`, shown in completion and help. */
     usage?: string;
     completion?: {
