@@ -13,7 +13,8 @@ import {
 /* A message that did not go out used to say so in one small label beside the
    time, and not at all under the sender's previous message, so it was typed
    again (user 2026-10-13: "这个很难看出来是我消息没发出去，要更显眼一点"). The row
-   now carries a notice under its body with the two things left to do. */
+   now carries the filled badge chat apps use, on a line under its body with
+   the two things left to do. */
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -39,7 +40,7 @@ async function sendRefused(page: Page, body: string) {
   return row;
 }
 
-test("a message that failed to send says so under its body, in a block of its own", async ({ page }) => {
+test("a message that failed to send says so under its greyed body, behind a filled badge", async ({ page }) => {
   const row = await sendRefused(page, "Did this go out?");
   const notice = row.locator("[data-message-unsent]");
   await expect(notice).toContainText("Not sent");
@@ -49,13 +50,14 @@ test("a message that failed to send says so under its body, in a block of its ow
   const drawn = await row.evaluate((element) => {
     const body = element.querySelector(".app-message-unsent-body")!;
     const slip = element.querySelector("[data-message-unsent]")!;
+    const badge = getComputedStyle(slip.querySelector(".app-message-unsent-badge")!);
     return {
       bodyOpacity: Number(getComputedStyle(body).opacity),
-      slipFilled: getComputedStyle(slip).backgroundColor !== "rgba(0, 0, 0, 0)",
+      badgeFilled: badge.backgroundColor !== "rgba(0, 0, 0, 0)" && badge.width === "18px",
       slipBelowBody: slip.getBoundingClientRect().top >= body.getBoundingClientRect().bottom,
     };
   });
-  expect(drawn).toEqual({ bodyOpacity: 0.5, slipFilled: true, slipBelowBody: true });
+  expect(drawn).toEqual({ bodyOpacity: 0.5, badgeFilled: true, slipBelowBody: true });
 });
 
 test("Send again posts the same message and the notice goes once it is written", async ({ page }) => {

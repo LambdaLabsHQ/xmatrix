@@ -7190,32 +7190,47 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 @keyframes app-message-sending-in { from { opacity: 0; } }
 
 /* A message of the reader's own that did not go out. Its text steps back, since
-   it is not in the conversation, and the slip under it is the paper cards'
-   flat block of colour (.app-ask-card) at the size of a line: red ink when the
-   send failed, brass on the wood tint when nobody knows whether it was written. */
+   it is not in the conversation, and the line under it leads with the filled
+   badge chat apps use for this: red "!" when the send failed, brass "?" when
+   nobody knows whether it was written. Its actions are links in the text's ink. */
 .xmatrix-app .app-message-unsent-body {
   opacity: 0.5;
 }
 .xmatrix-app .app-message-unsent {
   --app-unsent-ink: var(--m-ink-alert, var(--destructive));
-  --app-unsent-tint: color-mix(in oklab, var(--app-unsent-ink) 9%, var(--app-panel-paper, oklch(0.976 0.005 85)));
-  padding: 4px 6px 4px 12px;
-  border-radius: 10px;
-  background: var(--app-unsent-tint);
 }
 .xmatrix-app .app-message-unsent[data-message-unsent="unconfirmed"] {
   --app-unsent-ink: var(--m-ink-attention, var(--accent));
-  --app-unsent-tint: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 35%, var(--app-panel-paper, oklch(0.976 0.005 85)));
 }
 .xmatrix-app .app-message-unsent-ink {
   color: var(--app-unsent-ink);
 }
+.xmatrix-app .app-message-unsent-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--app-unsent-ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+.xmatrix-app .app-message-unsent-action {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+}
 .xmatrix-app .app-message-unsent-action:hover {
-  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+  text-decoration-color: currentColor;
 }
 .xmatrix-app .app-message-unsent-action:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 1px;
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 .app-invocation-positioner { z-index: 80; }
 .app-invocation-popup { --invocation-color: var(--primary); width: min(360px, calc(100vw - 24px)); max-height: var(--available-height); overflow-y: auto; padding: 18px; color: var(--foreground); font-size: 13px; line-height: 1.5; }
