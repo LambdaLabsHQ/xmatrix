@@ -7,7 +7,7 @@ import { getChannel } from "./spaces";
 import { connectorActionRequestRepository } from "./connectors/credentials";
 import { connectorProvider } from "./connectors/registry";
 import { connectorActionCatalog } from "./connectors/action-catalog";
-import { runConnectorAction } from "./connectors/connector-commands";
+import { announceActionRequests, runConnectorAction } from "./connectors/connector-commands";
 import type { Env } from "./types";
 
 /** Decisions accept only a request reference; provider input always comes from the frozen encrypted request. */
@@ -43,6 +43,8 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
       }
       const repository = connectorActionRequestRepository(c.env);
       const result = await repository.decide({ ...scope, requestId: c.req.param("requestId"), allow: decision.decision === "allow" });
+      // Answered either way, it no longer waits: every admin's dock drops it.
+      await announceActionRequests(c.env, scope.spaceId, scope.channelId);
       if (!result.claimed || !result.payload) {
         const manifest = getAppConnectorProvider(result.request.providerId);
         if (manifest && result.request.status === "denied") {

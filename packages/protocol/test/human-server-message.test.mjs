@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  WORKSPACE_RESOURCE_KINDS,
   parseHumanChannelCatalogChangedMessage,
   parseHumanWorkspaceResourceChangedMessage,
   parseHumanTraceAccessServerMessage,
@@ -37,6 +38,11 @@ test("workspace resource wake-ups name one list and an optional channel", () => 
   assert.deepEqual(parseHumanWorkspaceResourceChangedMessage({
     ...input, resource: "cross_space_reads", channelId: "channel-1",
   }), { ...input, resource: "cross_space_reads", channelId: "channel-1" });
+  // The announced lists are named once; every one of them is a frame the socket carries.
+  assert.ok(WORKSPACE_RESOURCE_KINDS.includes("connector_action_requests"));
+  for (const resource of WORKSPACE_RESOURCE_KINDS) {
+    assert.deepEqual(parseHumanWorkspaceResourceChangedMessage({ ...input, resource }), { ...input, resource });
+  }
   for (const candidate of [
     { ...input, revision: 0 },
     { ...input, resource: "pages" },

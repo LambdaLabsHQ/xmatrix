@@ -31,7 +31,8 @@ function fixture() {
     "./connectors/credentials": { connectorActionRequestRepository: () => repository },
     "./connectors/registry": { connectorProvider: () => ({ id: "gmail" }) },
     "./connectors/action-catalog": { connectorActionCatalog: () => new Map([["send", { executor: {} }]]) },
-    "./connectors/connector-commands": { runConnectorAction: async (...args) => { calls.push(["run", ...args]); return "Gmail send: completed; sent"; } },
+    "./connectors/connector-commands": { runConnectorAction: async (...args) => { calls.push(["run", ...args]); return "Gmail send: completed; sent"; },
+      announceActionRequests: async (_env, spaceId, channelId) => { calls.push(["announce", spaceId, channelId]); } },
   };
   const app = new Hono(); load(name => imports[name]).registerConnectorApprovalRoutes(app);
   return { calls, frozen, agent: () => { agent = true; }, request: (method, body) => app.request(
@@ -58,6 +59,8 @@ test("a decision cannot replace the recipient, text, or frozen provider input", 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(f.calls[0], ["decide", { channelId: "channel", spaceId: "space", actorUserId: "admin", requestId: "request", allow: true }]);
+  // The answered request leaves every admin's dock before the provider is called.
+  assert.deepEqual(f.calls[1], ["announce", "space", "channel"]);
   const run = f.calls.find(call => call[0] === "run");
   assert.equal(run[2].actorUserId, "original-owner", "approval does not substitute the admin's mailbox");
   assert.equal(run[2].messageId, "original:approved");

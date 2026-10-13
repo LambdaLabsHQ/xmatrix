@@ -8,7 +8,9 @@ import {
   E2E_SPACE,
   fixtureJson,
   fixtureRequestBodies,
+  fixtureRequests,
   installWorkspaceStubs,
+  routeHumanSocket,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -72,6 +74,15 @@ const ACCESS_ASKED = {
   fulfilled: { canApprove: true, secrets: ACCESS_REFS.map((secretRef) => ({ secretRef, access: "auto" })) },
 };
 
+const CONNECTOR_ASKS_URL = "**/api/xmatrix/channels/channel-general/connector-action-requests";
+
+/** A Gmail request waiting for a Space admin, as the Hub lists it with its frozen preview. */
+function emailRequest(actionId: "send" | "reply", subject: string, body: string) {
+  return { requestId: "email-request", channelId: E2E_CHANNEL.id, providerId: "gmail", actionId,
+    requestedBy: "e2e-user", expiresAt: "2026-10-14T00:00:00.000Z",
+    preview: { from: "sender@example.test", to: "recipient@example.test", subject, body } };
+}
+
 /** Opens the Channel on these cards; `pending` is what the Hub lists for the dock. */
 async function openCards(page: Page, messages: unknown[], pending: unknown[], secret = VALUE_ASKED, connectorRequests: unknown[] = []) {
   await installWorkspaceStubs(page, {
@@ -79,7 +90,7 @@ async function openCards(page: Page, messages: unknown[], pending: unknown[], se
     channels: [{ ...E2E_CHANNEL, messageCount: messages.length, lastMessageSequence: messages.length }],
   });
   const stubs: Array<[string, string, unknown, string?]> = [
-    ["connector-asks", "**/api/xmatrix/channels/channel-general/connector-action-requests", { requests: connectorRequests }],
+    ["connector-asks", CONNECTOR_ASKS_URL, { requests: connectorRequests }],
     ["connector-answer", "**/api/xmatrix/channels/channel-general/connector-action-requests/email-request", { request: { status: "completed" } }, "POST"],
     ["cards-history", "**/api/xmatrix/channels/channel-general/history**", { messages, hasMore: false }],
     ["cards-pending", "**/api/xmatrix/channels/channel-general/cross-space-read-grants/pending**", { grants: pending }],
@@ -233,9 +244,7 @@ test("the Pending approvals dock is one block of colour, its asks unframed insid
 // The card owns the concrete preview and one-shot decision shape; server tests cannot
 // catch hidden recipients or a browser that posts a persistent allow policy instead.
 test("Gmail approval shows the frozen email and allows only that request", async ({ page }) => {
-  const request = { requestId: "email-request", channelId: E2E_CHANNEL.id, providerId: "gmail", actionId: "reply",
-    requestedBy: "e2e-user", expiresAt: "2026-10-14T00:00:00.000Z", preview: {
-      from: "sender@example.test", to: "recipient@example.test", subject: "Re: Review this", body: "Only this approved body" } };
+  const request = emailRequest("reply", "Re: Review this", "Only this approved body");
   await openCards(page, [], [], VALUE_ASKED, [request]);
   const approval = page.getByRole("region", { name: "Pending approvals" });
   await expect(approval.getByRole("heading", { name: "Send this email?" })).toBeVisible();
@@ -245,4 +254,33 @@ test("Gmail approval shows the frozen email and allows only that request", async
   await expect(approval.getByText("completed", { exact: true })).toBeVisible();
   await expect(approval.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(0);
   expect(await fixtureRequestBodies(page, "connector-answer")).toEqual([{ decision: "allow" }]);
+});
+
+// An open Channel reads its pending requests when the Hub announces a change of
+// them. Reading them on a timer instead costs the Hub a request every few
+// seconds from every admin with a Channel open, whether or not anything waits.
+test("a request staged while the Channel is open shows on the Hub's announcement, with no timer reading the list", async ({ page }) => {
+  const hub: { announce?: (message: unknown) => void } = {};
+  await routeHumanSocket(page, (frame, reply) => {
+    if (frame.type === "human_connect") hub.announce = reply;
+    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
+  });
+  await page.clock.install();
+  await openCards(page, [], [], VALUE_ASKED, []);
+  const reads = async () => (await fixtureRequests(page, "connector-asks")).length;
+  await expect.poll(async () => (hub.announce ? reads() : 0)).toBeGreaterThan(0);
+  // The socket is up and the list is read. Twelve quiet seconds then pass without
+  // another read: a fallback poll (socket down) or a fixed timer would read again.
+  await page.clock.runFor(2_000);
+  const settled = await reads();
+  await page.clock.runFor(12_000);
+  expect(await reads()).toBe(settled);
+
+  await fixtureJson(page, "connector-asks", CONNECTOR_ASKS_URL,
+    { requests: [emailRequest("send", "Staged later", "Announced, not polled")] });
+  hub.announce?.({ type: "workspace_resource_changed", spaceId: E2E_SPACE.id, resource: "connector_action_requests",
+    channelId: E2E_CHANNEL.id, revision: 1 });
+  const approval = page.getByRole("region", { name: "Pending approvals" });
+  await expect(approval.getByRole("heading", { name: "Send this email?" })).toBeVisible();
+  await expect(approval.getByText("Staged later", { exact: true })).toBeVisible();
 });
