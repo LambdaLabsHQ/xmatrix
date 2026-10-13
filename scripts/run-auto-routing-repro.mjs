@@ -83,7 +83,7 @@ try {
   if (!needsTcp) run("node", ["--test", "packages/db/test/agent-launch-postgres.test.mjs"], {
     XMATRIX_REQUIRE_POSTGRES_TEST: "true", XMATRIX_TEST_POSTGRES_URL: url.toString(),
   });
-  if (lifecycle) run("pnpm", ["--dir", "packages/hub", "exec", "node", ...hubTestImports, "--test", "test/agent-instance-connect-retry.e2e.mjs"], {
+  if (lifecycle) run("pnpm", ["--dir", "packages/hub", "exec", "node", ...hubTestImports, "--test", "test/agent-instance-connect-retry.e2e.mjs", "test/agent-turn-retry.e2e.mjs"], {
     ...hubPostgresEnv,
   });
   if (lifecycleTerminal) run("pnpm", ["--dir", "packages/hub", "exec", "node", ...hubTestImports, "--test", "test/agent-terminal-cleanup.e2e.mjs"], {

@@ -1,35 +1,53 @@
-# Codex model capacity recovery
+# Hub-owned Codex capacity recovery
 
-The Codex runtime retries `Selected model is at capacity.` failures up to three
-additional times on the same thread and model, after 5, 15 and 30 seconds plus
-up to 1.02 seconds of jitter. The failed turn's input and attachments remain in
-that thread; retries send a continuation instruction instead of replaying them.
-Model, effort, selected parameters and developer instructions stay in force.
+Model-capacity recovery is product policy owned by Hub. A host reports the
+provider's error, a failed terminal receipt, and whether execution or output
+was observed. Hub classifies the error and decides whether to retry. Only
+`Selected model is at capacity.` receives up to three additional attempts,
+after 5, 15 and 30 seconds, on the same thread and selected model.
 
-Recovery requires a matching `turn/completed` receipt with status `failed` and
-no observed execution or assistant output. An error notification alone is not
-permission to launch another turn. The adapter waits at most ten seconds for
-its terminal receipt; a missing receipt ends the wrapper turn and requires
-provider restart. Tool activity or output prevents automatic replay. Quota,
-authentication and other failures keep their existing handling. When Codex
-reports `willRetry: true`, it owns recovery and xMatrix keeps reading that turn.
-A failed or interrupted terminal receipt is never reported as success.
+Hub stores one recovery operation in the Run's dedicated `capacity_retry_json`
+and `capacity_retry_at` columns. These fields cannot be overwritten by provider
+Run metadata. A Channel coordinator alarm reads the indexed due work and issues
+an exact Run/Instance/owner/Channel permit after rechecking current registration
+and Channel authority. The alarm is a timer projection; PostgreSQL owns the
+attempt count, due time, outcome and request/permit identities.
 
-The retry budget belongs to one interruptible wrapper turn. New live input,
-model/effort switches and shutdown cancel its backoff through the existing
-control path. Intermediate attempts appear in runtime traces (the shared `runtime_event` retrying status);
-the Channel failure notice is emitted only if the wrapper exhausts recovery.
-The updated CLI is required; an already running Agent wrapper uses its original
-binary until reborn.
+The host has no retry delay, budget, error eligibility policy or fallback
+continuation text. It waits for a Hub permit, checks its operation/thread/turn
+binding, and executes the supplied continuation input once. Original input and
+attachments remain in the provider thread; selected model, effort, parameters
+and developer instructions stay in force. Transport report replay reuses its
+request identity. Hub's command replay ledger prevents a retired operation from
+reopening after later work replaced the current Run recovery.
 
-The owning stdio adapter tests in `tests_codex_capacity_retry.rs` protect recovery,
-settings and input preservation, exhaustion, execution refusal, native recovery,
-missing receipts and interruption. These cases previously ended at the first
-capacity notification or treated failed terminal receipts as success.
+Recovery requires a confirmed failed turn and a complete item receipt with no
+execution/output. A missing receipt waits at most ten seconds, then stops the
+uncertain provider without restarting/resuming it. Provider-declared native
+recovery remains a provider observation; xMatrix creates no competing attempt.
+Quota, authentication and other errors receive no Hub retry permit. Hub renders
+fixed notice text; originating provider diagnostics stay in the Run/Agent trace
+and cannot become Hub-authored message instructions.
 
-The [OpenAI app-server contract](https://developers.openai.com/codex/app-server)
-defines terminal failed turns and their errors. The
-[OpenAI error guidance](https://developers.openai.com/api/docs/guides/error-codes)
-recommends delayed retries for temporary model overload; this policy deliberately
-classifies only the capacity message observed by xMatrix rather than broadening
-all transport or quota errors.
+Every scheduled attempt and terminal outcome is a Hub-written, idempotent
+Channel system fact with its count and scheduled time. Hosts do not narrate
+retries. Successful recovery, cancellation, exhausted budget, unsafe replay and
+expiry have explicit outcomes. New input, parameter changes and shutdown cancel
+the host's pending permit wait and report that cancellation to Hub. Run stop,
+registration revocation and loss of execution authority also fence issuance.
+A recovery has a 120-second lifetime; pending delivery rechecks are bounded and
+reuse the same permit. A final notice whose audience is no longer available
+stops scheduling after a bounded grace period; its outcome remains in the Run.
+
+The protocol is capability-negotiated (`agent_turn_retry`). Updated hosts report
+failures normally to an older Hub and never perform autonomous capacity retry.
+Old host binaries retain their old implementation until updated and reborn.
+Rollout requires the additive Run-column/index migration before Hub deployment,
+then the updated CLI through the validated release train and stable promotion.
+Existing Runs remain readable; nullable columns leave old writers compatible.
+Run movement and deletion carry the recovery columns with their existing row.
+
+Focused coverage lives at the policy, exact socket delivery, real PostgreSQL /
+Channel alarm, and stdio/WebSocket host boundaries. It protects budget persistence,
+replay/reconnect, permit binding, revocation, cancellation, visible records and
+the absence of autonomous host retries.

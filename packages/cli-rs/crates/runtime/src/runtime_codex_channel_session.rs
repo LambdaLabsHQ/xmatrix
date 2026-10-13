@@ -644,6 +644,9 @@ impl CodexRun<'_> {
                         .failure_detail
                         .clone()
                         .unwrap_or_else(|| "Codex app-server turn failed".to_string());
+                    if turn.failure_reported_by_hub {
+                        write_current_run_status("turn_failed", false, Some(&failure_detail));
+                    } else {
                     report_turn_failure(
                         self.relay,
                         channel_id,
@@ -651,6 +654,7 @@ impl CodexRun<'_> {
                         &failure_detail,
                         turn.restart_after_turn,
                     );
+                    }
                     if codex_auth_failure_requires_exit(&failure_detail) {
                         return Ok(Some(CodexRunEnd::AuthFailure));
                     }

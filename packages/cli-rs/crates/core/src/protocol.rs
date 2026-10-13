@@ -1304,6 +1304,22 @@ pub enum AgentInstanceClientMessage {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
     },
+    AgentTurnRetry {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        request_id: Option<String>,
+        operation_id: String,
+        action: String,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        thread_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        turn_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        safe_to_continue: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        error_message: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        attempt_token: Option<String>,
+    },
     AgentLifecycle {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         request_id: Option<String>,
@@ -1507,6 +1523,18 @@ pub enum AgentInstanceServerMessage {
         /// A `since` read may wait up to this long for a newer event.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         wait_ms: Option<u32>,
+    },
+    AgentTurnRetryDecision {
+        request_id: String,
+        operation_id: String,
+        action: String,
+        thread_id: String,
+        turn_id: String,
+        attempt_token: String,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        input: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        reason: Option<String>,
     },
     AgentModelSwitchRequested {
         request_id: String,

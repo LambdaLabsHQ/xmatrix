@@ -184,6 +184,8 @@ function handleCodexTurnFailure(message) {
   ]) {
     send({ method: "error", params });
   }
+  send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "failed",
+    error: { message: "This request was blocked by our safety systems. Reason: Potentially unintended activity." }, items: [] } } });
 }
 
 let capacityStarts = 0;
@@ -207,7 +209,9 @@ function handleCodexCapacity(message) {
     const preserved = ["threadId", "model", "effort", "developerInstructions"]
       .every((key) => message.params[key] === capacityInitialParams[key]);
     const continuation = message.params.input.length === 1 &&
-      message.params.input[0].text.includes("Continue the previous request");
+      (provider === "codex-capacity-hub-recover"
+        ? message.params.input[0].text === "Continue the previous request approved by Hub."
+        : message.params.input[0].text.includes("Continue the previous request"));
     sendCodexTurnOutput(threadId, turnId, "capacity-answer",
       preserved && continuation ? "capacity recovered" : "retry contract broken");
     sendCodexTurnCompleted(threadId, turnId);
@@ -704,6 +708,7 @@ const handlers = {
   "codex-trace-order": handleCodexTraceOrder,
   "codex-turn-failure": handleCodexTurnFailure,
   "codex-capacity-recover": handleCodexCapacity,
+  "codex-capacity-hub-recover": handleCodexCapacity,
   "codex-capacity-exhausted": handleCodexCapacity,
   "codex-capacity-other-error": handleCodexCapacity,
   "codex-capacity-progress": handleCodexCapacity,

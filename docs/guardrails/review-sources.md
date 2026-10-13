@@ -1,5 +1,14 @@
 # Guardrail Review Sources
 
+- 2026-10-13 Hub-owned capacity recovery: maintainer direction moved classification,
+  retry budgets, waiting and visible state from CLI to Hub. Reviewed exact Run
+  credentials, current Channel/registration grants, Run lifecycle fencing,
+  Channel alarm scheduling, transport replay, hibernation and private trace
+  boundaries. Dedicated nullable Run columns and an indexed due time preserve
+  one authority; command replay prevents retired operations reopening. Hosts
+  only report observations and consume exact permits; see
+  [capacity recovery](../operations/codex-capacity-retry.md).
+
 - 2026-10-13 Codex model-capacity recovery: reviewed the reported exact capacity
   message, official app-server failed-turn and error contracts, the owning stdio
   adapter, its interruptible control future and Channel lifecycle reporting.
