@@ -77,12 +77,17 @@ test("action commands take one statement whose text spans the following lines", 
 });
 
 test("policy: every action runs for a Human or an Agent until the Channel denies it", () => {
+  /* The one exception: the full Gmail grant's writes stay off until a Space admin allows them. */
+  const gated = new Set(["gmail:send", "gmail:reply"]);
   for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
     for (const action of provider.actions.filter((candidate) => candidate.effect)) {
-      assert.equal("defaultPolicy" in action, false, `${provider.id}:${action.id} carries its own default`);
-      assert.equal(actionRefusal({ actionId: action.id, mode: null }), undefined, `${provider.id}:${action.id}`);
-      assert.equal(actionRefusal({ actionId: action.id, mode: "allow" }), undefined, `${provider.id}:${action.id}`);
-      assert.match(actionRefusal({ actionId: action.id, mode: "deny" }), /denied/u, `${provider.id}:${action.id}`);
+      const id = `${provider.id}:${action.id}`;
+      assert.equal(action.defaultPolicy, gated.has(id) ? "deny" : undefined, `${id} default`);
+      const refusal = (mode) => actionRefusal({ actionId: action.id, mode, defaultPolicy: action.defaultPolicy });
+      if (gated.has(id)) assert.match(refusal(null), /off in this channel until a Space admin allows it/u, id);
+      else assert.equal(refusal(null), undefined, id);
+      assert.equal(refusal("allow"), undefined, id);
+      assert.match(refusal("deny"), /denied/u, id);
     }
   }
 });

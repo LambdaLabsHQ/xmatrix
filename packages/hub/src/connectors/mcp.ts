@@ -11,7 +11,8 @@ import { serveMcp, type McpTool } from "../mcp-jsonrpc";
  * §3.5): `POST /api/connectors/mcp`, JSON-RPC over streamable HTTP without
  * server-sent streams. A tool call is the same execution as the Agent posting
  * `@<provider>:<action>:<target> <text>` in its Run's Channel: the Channel's
- * policy applies (an Agent's write needs `allow`), and the receipt is posted
+ * policy applies (a `deny` blocks it, and an action that is off by default
+ * needs `allow`), and the receipt is posted
  * there.
  */
 

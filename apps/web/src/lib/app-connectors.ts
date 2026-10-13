@@ -99,6 +99,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   gmail: [
     "Find a sign-up or login verification email and open its link without leaving the agent.",
     "Read receipts, alerts and replies from the connected mailbox as task context.",
+    "Send an email or reply in a thread, once a Space admin allows it in the channel.",
   ],
   appstoreconnect: [
     "Let an agent take an uploaded build to App Review: create the version, write the listing, attach the build and submit.",

@@ -17,6 +17,11 @@ function writeAction(id: string, label: string, description: string, usage: stri
   return { id, label, description, usage, effect: "write", completion: { trailingDelimiter: ":" } };
 }
 
+/* A write that stays off in every Channel until a Space admin allows it there. */
+function gatedWriteAction(id: string, label: string, description: string, usage: string): Action {
+  return { ...writeAction(id, label, description, usage), defaultPolicy: "deny" };
+}
+
 function readAction(id: string, label: string, description: string, usage: string): Action {
   return { id, label, description, usage, effect: "read", completion: { trailingDelimiter: ":" } };
 }
@@ -252,16 +257,18 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",
-      description: "Search and read the connected Google account's mail, with every link a message contains, so an Agent can find a verification email and open its link. Signs in through Composio. Read-only.",
+      description: "Search and read the connected Google account's mail, with every link a message contains, so an Agent can find a verification email and open its link. Signs in through Composio. Sending and replying stay off in every channel until a Space admin allows them there.",
       oauth: { authorizeUrl: "https://backend.composio.dev/api/v3.1/connected_accounts/link",
         tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "composioAccountId", flow: "composio" },
       credentials: [{ id: "composioAccountId", label: "Composio connected account", managed: true, description: "Set by Connect; never typed by hand." }],
       actions: [
         readAction("search", "Search mail", "The 10 newest messages matching a Gmail search (from:, subject:, newer_than:1h, is:unread …), with id, sender, subject and snippet.", "* [gmail search]"),
         readAction("read", "Read message", "Headers, text body and every link of one message; open a link yourself when the task needs it.", "<message id>"),
+        gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Off until a Space admin allows it in the channel.", "<to address> <subject>\n<body>"),
+        gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Off until a Space admin allows it in the channel.", "<message id> <body>"),
       ],
     }),
-    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/gmail.readonly"], secretRefs: [] },
+    auth: { type: "oauth", scopes: ["https://mail.google.com/"], secretRefs: [] },
   },
   {
     ...eventConnector({

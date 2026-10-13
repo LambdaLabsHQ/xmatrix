@@ -55,12 +55,23 @@ export async function composioConnectedAccount(client: ComposioClient, userId: s
 /** One GET to the provider's API through Composio as the stored account; returns the provider's JSON. */
 export async function composioGet(credentials: Readonly<Record<string, string>>, endpoint: string,
   query: Record<string, string | string[]> = {}): Promise<Record<string, unknown>> {
-  const account = credentials.composioAccountId ?? "";
-  if (!ACCOUNT_ID.test(account)) throw new ProviderRequestError(401, "Connect with Composio first");
   const parameters = Object.entries(query).flatMap(([name, values]) =>
     (Array.isArray(values) ? values : [values]).map(value => ({ name, value, type: "query" })));
+  return composioProxy(credentials, { endpoint, method: "GET", parameters });
+}
+
+/** One POST of a JSON body to the provider's API through Composio as the stored account. */
+export async function composioPost(credentials: Readonly<Record<string, string>>, endpoint: string,
+  body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return composioProxy(credentials, { endpoint, method: "POST", body });
+}
+
+async function composioProxy(credentials: Readonly<Record<string, string>>,
+  call: { endpoint: string; method: "GET" | "POST"; parameters?: unknown[]; body?: Record<string, unknown> }): Promise<Record<string, unknown>> {
+  const account = credentials.composioAccountId ?? "";
+  if (!ACCOUNT_ID.test(account)) throw new ProviderRequestError(401, "Connect with Composio first");
   const result = await providerJson(`${API}/tools/execute/proxy`, { method: "POST", headers: apiHeaders(credentials.composioApiKey ?? ""),
-    json: { connected_account_id: account, endpoint, method: "GET", parameters } });
+    json: { connected_account_id: account, ...call } });
   const status = Number(result.status);
   if (!Number.isInteger(status)) throw new ProviderRequestError(502, "Composio did not return the provider's answer");
   if (status < 200 || status > 299) {
