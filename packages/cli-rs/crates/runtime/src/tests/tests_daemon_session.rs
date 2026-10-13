@@ -602,6 +602,7 @@ fn acp_mid_turn_abort_is_not_a_successful_completion() {
     )
     .expect("cancelled ACP result");
     let turn = super::CodexTurnResult {
+        failure_reported_by_hub: false,
         local_output: String::new(),
         restart_after_turn: false,
         failed: true,

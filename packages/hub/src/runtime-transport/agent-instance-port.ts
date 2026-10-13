@@ -69,6 +69,7 @@ export const AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES = [
   "agent_model_switch_result",
   "agent_effort_switch_result",
   "agent_lifecycle",
+  "agent_turn_retry",
   "event_publish",
 ] as const;
 
@@ -125,6 +126,7 @@ export interface AgentInstanceRuntimeSession {
   lastSeenAt: string;
   clientVersion?: string;
   clientProtocolVersion?: number;
+  clientCapabilities?: string[];
   presentation?: AgentInstancePresentation;
 }
 
@@ -274,6 +276,7 @@ export class AgentInstanceRuntimeTransport {
       updatePresence: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportModelSwitch: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportEffortSwitch: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
+      reportTurnRetry: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportLifecycle: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       publishEvent: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       traceHistoryResult: (ws, message) => this.sockets.ordered.schedule(
@@ -422,6 +425,19 @@ export class AgentInstanceRuntimeTransport {
    * waits rather than recording an intent: an unanswered request is a failure,
    * not a silent switch.
    */
+  /** Exact-run Hub permit delivery; this live route creates no retry authority. */
+  deliverTurnRetry(input: { runId: string; instanceId: string; ownerUserId: string; channelId: string;
+    message: Extract<AgentInstanceServerMessage, { type: "agent_turn_retry_decision" }> }): boolean {
+    const targets = Array.from(this.sockets.entries()).filter(([, session]) =>
+      session.run.kind === "channel-instance" && session.run.runId === input.runId &&
+      session.run.instanceId === input.instanceId && session.principal.ownerUserId === input.ownerUserId &&
+      session.run.channelId === input.channelId &&
+      session.clientCapabilities?.includes("agent_turn_retry"));
+    if (targets.length !== 1) return false;
+    this.sockets.send(targets[0]![0], input.message);
+    return true;
+  }
+
   async switchInstanceControl(input: {
     channelId: string;
     target: string;
@@ -667,6 +683,7 @@ export class AgentInstanceRuntimeTransport {
           lastSeenAt: now,
           clientVersion: message.runtime.clientVersion,
           clientProtocolVersion: message.runtime.protocolVersion,
+          clientCapabilities: message.runtime.capabilities,
           ...(authentication.presentation ? { presentation: authentication.presentation } : {}),
         }, authentication.connected);
         failureStage = "relay.bind_delivery";

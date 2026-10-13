@@ -661,6 +661,7 @@ impl AcpSession {
                 Ok(None) => {
                     if self.inbox.has_failure() {
                         return Ok(CodexTurnResult {
+                            failure_reported_by_hub: false,
                             local_output: output,
                             restart_after_turn: self.inbox.retryable(),
                             failed: true,
@@ -681,6 +682,7 @@ impl AcpSession {
                         turn_timeout.as_secs()
                     );
                     return Ok(CodexTurnResult {
+                        failure_reported_by_hub: false,
                         local_output: output,
                         restart_after_turn: true,
                         failed: true,
@@ -721,6 +723,7 @@ impl AcpSession {
                         )
                         .await;
                     return Ok(CodexTurnResult {
+                        failure_reported_by_hub: false,
                         local_output: output,
                         restart_after_turn: false,
                         failed: true,
@@ -816,6 +819,7 @@ impl AcpSession {
                     )
                     .await;
                 return Ok(CodexTurnResult {
+                    failure_reported_by_hub: false,
                     local_output: output,
                     restart_after_turn: false,
                     failed: cancellation_detail.is_some(),
@@ -934,6 +938,7 @@ impl AcpSession {
         }
 
         Ok(CodexTurnResult {
+            failure_reported_by_hub: false,
             local_output: output,
             restart_after_turn: true,
             failed: true,

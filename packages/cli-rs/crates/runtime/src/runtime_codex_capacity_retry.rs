@@ -1,15 +1,6 @@
-// Capacity recovery belongs to the existing interruptible turn future, so a
-// stop, new message, or parameter switch cancels its backoff as well as work.
-const CODEX_CAPACITY_RETRY_DELAYS_SECS: [u64; 3] = [5, 15, 30];
-const CODEX_CAPACITY_TERMINAL_WAIT_SECS: u64 = 10;
-
-fn codex_is_model_capacity_error(error: &str) -> bool {
-    error
-        .trim()
-        .trim_start_matches("Codex error: ")
-        .to_ascii_lowercase()
-        .starts_with("selected model is at capacity.")
-}
+// The host observes provider terminal state. Policy, delays, permits and
+// visible retry records belong to Hub; the host never schedules a retry.
+const CODEX_FAILURE_TERMINAL_WAIT_SECS: u64 = 10;
 
 fn codex_event_shows_execution(method: Option<&str>, params: &Value) -> bool {
     match method {
@@ -25,58 +16,171 @@ fn codex_event_shows_execution(method: Option<&str>, params: &Value) -> bool {
     }
 }
 
+struct CodexCapacityRetryOffer {
+    thread_id: String,
+    turn_id: String,
+    safe_to_continue: bool,
+    error_message: String,
+}
+
+struct CodexHubRetryOperation {
+    relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
+    operation_id: String,
+    active: bool,
+}
+
+impl CodexHubRetryOperation {
+    fn finish(&mut self, action: &str) {
+        if !self.active {
+            return;
+        }
+        let request_id = uuid::Uuid::new_v4().to_string();
+        self.relay.send_report(
+            request_id.clone(),
+            protocol::AgentInstanceClientMessage::AgentTurnRetry {
+                request_id: Some(request_id),
+                operation_id: self.operation_id.clone(),
+                action: action.into(),
+                thread_id: None,
+                turn_id: None,
+                safe_to_continue: None,
+                error_message: None,
+                attempt_token: None,
+            },
+        );
+        self.active = false;
+    }
+}
+
+impl Drop for CodexHubRetryOperation {
+    fn drop(&mut self) {
+        // A new message, model switch, shutdown or dropped transport wait ends
+        // the pending operation at Hub; no detached host timer remains.
+        self.finish("cancelled");
+    }
+}
+
 impl CodexAppSession {
     async fn submit_turn(
         &mut self,
         request: CodexTurnRequest<'_>,
     ) -> error::Result<CodexTurnResult> {
-        let mut next_request = request;
-        for attempt in 0..=CODEX_CAPACITY_RETRY_DELAYS_SECS.len() {
-            let mut capacity_retry_allowed = false;
-            let result = self
-                .submit_turn_attempt(
-                    next_request,
-                    &mut capacity_retry_allowed,
-                    attempt < CODEX_CAPACITY_RETRY_DELAYS_SECS.len(),
-                )
+        let mut recovery = request
+            .trace_relay
+            .filter(|relay| relay.hub_accepts("agent_turn_retry"))
+            .map(|relay| CodexHubRetryOperation {
+                relay: relay.clone(),
+                operation_id: request
+                    .runtime_state
+                    .and_then(AgentRuntimeStateTracker::execution_id)
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                active: false,
+            });
+        let mut continuation = String::new();
+        let mut attempt_token = None;
+        loop {
+            let mut offer = None;
+            let next_request = if !continuation.is_empty() {
+                CodexTurnRequest {
+                    text: &continuation,
+                    attachments: None,
+                    ..request
+                }
+            } else {
+                request
+            };
+            let mut result = self
+                .submit_turn_attempt(next_request, &mut offer, recovery.is_some())
                 .await?;
-            let Some(delay_secs) = CODEX_CAPACITY_RETRY_DELAYS_SECS
-                .get(attempt)
-                .filter(|_| result.failed && capacity_retry_allowed)
-            else {
+            let Some((operation, offer)) = recovery.as_mut().zip(offer) else {
+                if let Some(operation) = recovery.as_mut() {
+                    operation.finish(if result.failed {
+                        "cancelled"
+                    } else {
+                        "completed"
+                    });
+                }
                 return Ok(result);
             };
-            // Spread concurrent Instances without an additional random source.
-            let jitter_ms = u64::from(uuid::Uuid::new_v4().as_bytes()[0]) * 4;
-            let delay = Duration::from_secs(*delay_secs) + Duration::from_millis(jitter_ms);
-            TurnTrace {
+            operation.active = true;
+            let answer = operation
+                .relay
+                .request_turn_retry(protocol::AgentInstanceClientMessage::AgentTurnRetry {
+                    request_id: None,
+                    operation_id: operation.operation_id.clone(),
+                    action: "failed".into(),
+                    thread_id: Some(offer.thread_id.clone()),
+                    turn_id: Some(offer.turn_id.clone()),
+                    safe_to_continue: Some(offer.safe_to_continue),
+                    error_message: Some(offer.error_message.clone()),
+                    attempt_token: attempt_token.clone(),
+                })
+                .await;
+            let authorized = match answer {
+                Ok(protocol::AgentInstanceServerMessage::AgentTurnRetryDecision {
+                    operation_id,
+                    action,
+                    thread_id,
+                    turn_id,
+                    attempt_token: token,
+                    input: Some(input),
+                    ..
+                }) if action == "retry"
+                    && offer.safe_to_continue
+                    && operation_id == operation.operation_id
+                    && thread_id == offer.thread_id
+                    && turn_id == offer.turn_id
+                    && attempt_token.as_deref() != Some(token.as_str())
+                    && !token.is_empty()
+                    && !input.is_empty() =>
+                {
+                    attempt_token = Some(token);
+                    continuation = input;
+                    true
+                }
+                Ok(protocol::AgentInstanceServerMessage::AgentTurnRetryDecision {
+                    operation_id,
+                    action,
+                    thread_id,
+                    turn_id,
+                    reason: Some(reason),
+                    ..
+                }) if action == "stop"
+                    && operation_id == operation.operation_id
+                    && thread_id == offer.thread_id
+                    && turn_id == offer.turn_id
+                    && matches!(
+                        reason.as_str(),
+                        "exhausted" | "unsafe" | "expired" | "cancelled" | "ineligible"
+                    ) =>
+                {
+                    result.failure_reported_by_hub = true;
+                    false
+                }
+                _ => false,
+            };
+            if authorized {
+                continue;
+            }
+            let trace = TurnTrace {
                 relay: request.trace_relay,
                 channel_id: request.trace_channel_id,
                 source: "codex_app_server",
                 agent: request.agent,
-            }
-            .send(
-                "runtime_event",
-                None,
-                result.model.clone(),
-                serde_json::json!({
-                    "category": "connection",
-                    "status": "retrying",
-                    "reason": "model_capacity",
-                    "attempt": attempt + 1,
-                    "delayMs": delay.as_millis(),
-                }),
+            };
+            send_codex_turn_failed_trace(
+                trace,
+                &offer.thread_id,
+                Some(&offer.turn_id),
+                result
+                    .failure_detail
+                    .as_deref()
+                    .unwrap_or("Hub did not authorize retry"),
+                result.usage.clone(),
             )
             .await;
-            tokio::time::sleep(delay).await;
-            // The failed turn already persisted its input, including local
-            // attachments. Continue that thread rather than duplicating it.
-            next_request = CodexTurnRequest {
-                text: "Continue the previous request that failed because the selected model was at capacity.",
-                attachments: None,
-                ..request
-            };
+            operation.finish("cancelled");
+            return Ok(result);
         }
-        unreachable!("capacity retry budget always returns its last result")
     }
 }

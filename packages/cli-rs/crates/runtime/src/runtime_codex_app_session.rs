@@ -323,6 +323,7 @@ fn codex_default_effort_for_model(
 }
 
 struct CodexTurnResult {
+    failure_reported_by_hub: bool,
     local_output: String,
     restart_after_turn: bool,
     failed: bool,
@@ -1710,8 +1711,8 @@ impl CodexAppSession {
                 self.questions.park(key, request_id);
             }
             _ => {
-                let _ = write_codex_question_answer(&self.write, request_id, &Default::default())
-                    .await;
+                let _ =
+                    write_codex_question_answer(&self.write, request_id, &Default::default()).await;
             }
         }
     }
@@ -2151,8 +2152,8 @@ impl CodexAppSession {
     async fn submit_turn_attempt(
         &mut self,
         request: CodexTurnRequest<'_>,
-        capacity_retry_allowed: &mut bool,
-        capacity_retries_remaining: bool,
+        capacity_retry_offer: &mut Option<CodexCapacityRetryOffer>,
+        hub_retry_available: bool,
     ) -> error::Result<CodexTurnResult> {
         let CodexTurnRequest {
             text,
@@ -2309,7 +2310,7 @@ impl CodexAppSession {
         let mut thread_activity = CodexThreadActivity::new(&thread_id, turn_id.as_deref());
         let mut completed_result: Option<CodexTurnResult> = None;
         let mut execution_observed = false;
-        let mut capacity_error: Option<(String, tokio::time::Instant)> = None;
+        let mut pending_error: Option<(String, tokio::time::Instant)> = None;
         // Commands and tool calls open in this turn (docs/design/agent-status.md).
         let mut tool_waits = crate::runtime_waiting::ToolWaits::default();
         loop {
@@ -2321,7 +2322,7 @@ impl CodexAppSession {
             let wait_timeout =
                 codex_reconnect_wait_timeout(transport_recovery.awaiting_https_fallback());
             let wait_deadline = tool_waits.deadline(Instant::now());
-            let next_message = if let Some((error, deadline)) = capacity_error.as_ref() {
+            let next_message = if let Some((error, deadline)) = pending_error.as_ref() {
                 match tokio::time::timeout_at(*deadline, self.next_message()).await {
                     Ok(message) => message,
                     Err(_) => {
@@ -2336,9 +2337,13 @@ impl CodexAppSession {
                             false,
                         )
                         .await;
+                        // Stop the uncertain provider without resuming it:
+                        // a restart could autonomously recover an interrupted
+                        // native turn before Hub authorized any continuation.
+                        self.shutdown().await;
                         return Ok(progress.into_failure(
                             format!("Codex error: {error}"),
-                            true,
+                            false,
                             latest_goal,
                         ));
                     }
@@ -2441,9 +2446,12 @@ impl CodexAppSession {
             // event is recorded, including a tool, error, or new turn/item.
             if (same_thread || method == Some("error"))
                 && (method != Some("item/agentMessage/delta")
-                    || params.get("itemId").and_then(Value::as_str) != progress.delta_item_id.as_deref())
+                    || params.get("itemId").and_then(Value::as_str)
+                        != progress.delta_item_id.as_deref())
             {
-                progress.flush_trace_delta(trace, &thread_id, thread_activity.active_turn_id()).await;
+                progress
+                    .flush_trace_delta(trace, &thread_id, thread_activity.active_turn_id())
+                    .await;
             }
             let activity_event = thread_activity.observe(method, params);
             let turn_id = thread_activity.active_turn_id().map(str::to_string);
@@ -2653,14 +2661,19 @@ impl CodexAppSession {
                             progress.fallback_output.push_str(delta);
                         }
                         if progress.delta_buffer.is_empty() {
-                            progress.delta_item_id = params.get("itemId").and_then(Value::as_str).map(str::to_string);
+                            progress.delta_item_id = params
+                                .get("itemId")
+                                .and_then(Value::as_str)
+                                .map(str::to_string);
                         }
                         progress.delta_buffer.push_str(delta);
                         if progress.delta_buffer.len() >= CODEX_TRACE_DELTA_FLUSH_BYTES
                             || last_delta_sent.elapsed()
                                 >= Duration::from_millis(CODEX_TRACE_DELTA_FLUSH_MS)
                         {
-                            progress.flush_trace_delta(trace, &thread_id, turn_id.as_deref()).await;
+                            progress
+                                .flush_trace_delta(trace, &thread_id, turn_id.as_deref())
+                                .await;
                             last_delta_sent = Instant::now();
                         }
                     }
@@ -2743,27 +2756,33 @@ impl CodexAppSession {
                     tool_waits.clear();
                     let terminal_turn = params.get("turn").unwrap_or(&Value::Null);
                     let status = terminal_turn.get("status").and_then(Value::as_str);
-                    if matches!(status, Some("failed" | "interrupted")) || capacity_error.is_some()
-                    {
+                    if matches!(status, Some("failed" | "interrupted")) || pending_error.is_some() {
                         let error = terminal_turn
                             .get("error")
                             .filter(|error| !error.is_null())
                             .map(codex_app_error_message)
-                            .or_else(|| capacity_error.as_ref().map(|(error, _)| error.clone()))
+                            .or_else(|| pending_error.as_ref().map(|(error, _)| error.clone()))
                             .unwrap_or_else(|| {
                                 format!("Codex turn {}", status.unwrap_or("failed"))
                             });
-                        *capacity_retry_allowed = capacity_retries_remaining
+                        if hub_retry_available
                             && status == Some("failed")
-                            && codex_is_model_capacity_error(&error)
-                            && !execution_observed
-                            && terminal_turn
-                                .get("items")
-                                .and_then(Value::as_array)
-                                .is_none_or(|items| {
-                                    items.iter().all(|item| item["type"] == "userMessage")
-                                });
-                        if *capacity_retry_allowed {
+                            && let Some(turn_id) = turn_id.as_deref()
+                        {
+                            *capacity_retry_offer = Some(CodexCapacityRetryOffer {
+                                thread_id: thread_id.clone(),
+                                turn_id: turn_id.to_string(),
+                                error_message: crate::truncate_chars(&error, 600),
+                                safe_to_continue: !execution_observed
+                                    && terminal_turn
+                                        .get("items")
+                                        .and_then(Value::as_array)
+                                        .is_some_and(|items| {
+                                            items.iter().all(|item| item["type"] == "userMessage")
+                                        }),
+                            });
+                        }
+                        if capacity_retry_offer.is_some() {
                             self.clear_active_turn(&thread_id, turn_id.as_deref());
                         } else {
                             self.abandon_turn(
@@ -2798,6 +2817,7 @@ impl CodexAppSession {
                         .await;
                     self.clear_active_turn(&thread_id, turn_id.as_deref());
                     completed_result = Some(CodexTurnResult {
+                        failure_reported_by_hub: false,
                         local_output,
                         restart_after_turn: false,
                         failed: false,
@@ -2826,30 +2846,16 @@ impl CodexAppSession {
                         if params.get("willRetry").and_then(Value::as_bool) == Some(true) {
                             continue;
                         }
-                        if codex_is_model_capacity_error(&error) {
-                            capacity_error.get_or_insert_with(|| {
+                        {
+                            pending_error.get_or_insert_with(|| {
                                 (
                                     error,
                                     tokio::time::Instant::now()
-                                        + Duration::from_secs(CODEX_CAPACITY_TERMINAL_WAIT_SECS),
+                                        + Duration::from_secs(CODEX_FAILURE_TERMINAL_WAIT_SECS),
                                 )
                             });
                             continue;
                         }
-                        self.abandon_turn(
-                            trace,
-                            &thread_id,
-                            turn_id.as_deref(),
-                            &progress,
-                            &error,
-                            false,
-                        )
-                        .await;
-                        return Ok(progress.into_failure(
-                            format!("Codex error: {error}"),
-                            false,
-                            latest_goal,
-                        ));
                     }
                 }
                 _ => {}
@@ -2917,7 +2923,15 @@ impl CodexAppSession {
         error: &str,
         recover_partial: bool,
     ) -> Option<CodexTurnResult> {
-        send_codex_assistant_delta(trace, thread_id, turn_id, &progress.delta_buffer, None, progress.delta_item_id.as_deref()).await;
+        send_codex_assistant_delta(
+            trace,
+            thread_id,
+            turn_id,
+            &progress.delta_buffer,
+            None,
+            progress.delta_item_id.as_deref(),
+        )
+        .await;
         let recovered = match recover_partial {
             true => {
                 progress
@@ -3044,8 +3058,21 @@ struct CodexTurnProgress {
 }
 
 impl CodexTurnProgress {
-    async fn flush_trace_delta(&mut self, trace: TurnTrace<'_>, thread_id: &str, turn_id: Option<&str>) {
-        send_codex_assistant_delta(trace, thread_id, turn_id, &std::mem::take(&mut self.delta_buffer), None, self.delta_item_id.as_deref()).await;
+    async fn flush_trace_delta(
+        &mut self,
+        trace: TurnTrace<'_>,
+        thread_id: &str,
+        turn_id: Option<&str>,
+    ) {
+        send_codex_assistant_delta(
+            trace,
+            thread_id,
+            turn_id,
+            &std::mem::take(&mut self.delta_buffer),
+            None,
+            self.delta_item_id.as_deref(),
+        )
+        .await;
     }
 
     /// A turn that broke off after streaming a visible answer restarts the
@@ -3073,6 +3100,7 @@ impl CodexTurnProgress {
             )
             .await;
         Some(CodexTurnResult {
+            failure_reported_by_hub: false,
             local_output,
             restart_after_turn: true,
             failed: true,
@@ -3090,6 +3118,7 @@ impl CodexTurnProgress {
         goal: Option<protocol::AgentGoalStatus>,
     ) -> CodexTurnResult {
         CodexTurnResult {
+            failure_reported_by_hub: false,
             local_output: String::new(),
             restart_after_turn,
             failed: true,

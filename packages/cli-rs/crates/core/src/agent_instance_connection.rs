@@ -373,6 +373,10 @@ struct PendingRequestGuard<'a> {
 
 impl Drop for PendingRequestGuard<'_> {
     fn drop(&mut self) {
+        // A cancelled request cannot be replayed as new work on reconnect.
+        if let Ok(mut reports) = self.client.unanswered_reports.lock() {
+            reports.retain(|(request_id, _)| request_id != &self.request_id);
+        }
         if let Ok(mut pending) = self.client.pending.try_lock() {
             pending.remove(&self.request_id);
         } else if let Ok(runtime) = tokio::runtime::Handle::try_current() {
@@ -1655,7 +1659,29 @@ impl AgentInstanceConnectionClient {
 
     async fn request(
         &self,
+        message: AgentInstanceClientMessage,
+    ) -> Result<AgentInstanceServerMessage> {
+        self.request_with_timeout(message, REQUEST_TIMEOUT_MS).await
+    }
+
+    /// Wait for a Hub-owned recovery decision; the timeout bounds transport,
+    /// never schedules or authorizes a model retry on the host.
+    pub async fn request_turn_retry(
+        &self,
+        message: AgentInstanceClientMessage,
+    ) -> Result<AgentInstanceServerMessage> {
+        if !matches!(message, AgentInstanceClientMessage::AgentTurnRetry { .. })
+            || !self.hub_accepts("agent_turn_retry")
+        {
+            return Err(CliError::Relay("Hub retry authority is unavailable".into()));
+        }
+        self.request_with_timeout(message, 150_000).await
+    }
+
+    async fn request_with_timeout(
+        &self,
         mut message: AgentInstanceClientMessage,
+        timeout_ms: u64,
     ) -> Result<AgentInstanceServerMessage> {
         let request_id = uuid::Uuid::new_v4().to_string();
 
@@ -1664,6 +1690,9 @@ impl AgentInstanceConnectionClient {
         let generation = self.generation.load(std::sync::atomic::Ordering::Acquire);
 
         match &mut message {
+            AgentInstanceClientMessage::AgentTurnRetry {
+                request_id: rid, ..
+            } => *rid = Some(request_id.clone()),
             AgentInstanceClientMessage::Ping {
                 request_id: rid, ..
             } => *rid = Some(request_id.clone()),
@@ -1697,6 +1726,13 @@ impl AgentInstanceConnectionClient {
             request_id: request_id.clone(),
         };
 
+        if matches!(message, AgentInstanceClientMessage::AgentTurnRetry { .. }) {
+            remember_unanswered_report(
+                &self.unanswered_reports,
+                request_id.clone(),
+                message.clone(),
+            );
+        }
         let sent = self.enqueue(message, presence_barrier.then_some(request_id.as_str()));
         if let Err(err) = sent {
             let mut guard = self.pending.lock().await;
@@ -1704,7 +1740,7 @@ impl AgentInstanceConnectionClient {
             return Err(err);
         }
 
-        match tokio::time::timeout(std::time::Duration::from_millis(REQUEST_TIMEOUT_MS), rx).await {
+        match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await {
             Ok(Ok(_))
                 if presence_barrier
                     && self.generation.load(std::sync::atomic::Ordering::Acquire) != generation =>
@@ -1719,7 +1755,7 @@ impl AgentInstanceConnectionClient {
                 let mut guard = self.pending.lock().await;
                 guard.remove(&request_id);
                 Err(CliError::Relay(format!(
-                    "Response timed out after {REQUEST_TIMEOUT_MS}ms"
+                    "Response timed out after {timeout_ms}ms"
                 )))
             }
         }
@@ -2471,6 +2507,9 @@ fn authority_compatible_channel_message(
 
 fn server_message_request_id(server_msg: &AgentInstanceServerMessage) -> Option<String> {
     match server_msg {
+        AgentInstanceServerMessage::AgentTurnRetryDecision { request_id, .. } => {
+            Some(request_id.clone())
+        }
         AgentInstanceServerMessage::Error { request_id, .. } => request_id.clone(),
         AgentInstanceServerMessage::Pong { request_id, .. } => request_id.clone(),
         AgentInstanceServerMessage::Unregistered { request_id, .. } => request_id.clone(),

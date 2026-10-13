@@ -45,6 +45,7 @@ export function serializeAgentInstanceHibernationAttachment(
       lastSeenAt: session.lastSeenAt,
       clientVersion: session.clientVersion,
       clientProtocolVersion: session.clientProtocolVersion,
+      clientCapabilities: session.clientCapabilities,
       ...(compactPresentation ? { presentation: compactPresentation } : {}),
   });
   const parsed = compact || parseSession({
@@ -54,6 +55,7 @@ export function serializeAgentInstanceHibernationAttachment(
       lastSeenAt: session.lastSeenAt,
       clientVersion: session.clientVersion,
       clientProtocolVersion: session.clientProtocolVersion,
+      clientCapabilities: session.clientCapabilities,
   });
   if (!parsed) throw new Error("Agent Instance session cannot be serialized as a bounded hibernation attachment");
   return parsed;
@@ -66,7 +68,7 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
   if (!hibernationRecord(session) ||
       !hibernationHasOnlyKeys(session, [
         "principal", "run", "connectedAt", "lastSeenAt", "clientVersion",
-        "clientProtocolVersion", "presentation",
+        "clientProtocolVersion", "clientCapabilities", "presentation",
       ]) ||
       !["principal", "run", "connectedAt", "lastSeenAt"].every((key) =>
         Object.prototype.hasOwnProperty.call(session, key)) ||
@@ -75,7 +77,9 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
     hibernationBoundedString(session.clientVersion, 64);
   const hasValidClientProtocol = session.clientProtocolVersion === undefined ||
     (Number.isSafeInteger(session.clientProtocolVersion) && (session.clientProtocolVersion as number) > 0);
-  if (!hasValidClientVersion || !hasValidClientProtocol) {
+  if (!hasValidClientVersion || !hasValidClientProtocol || (session.clientCapabilities !== undefined &&
+      (!Array.isArray(session.clientCapabilities) || session.clientCapabilities.length > 100 ||
+       !session.clientCapabilities.every(value => hibernationBoundedString(value, 100))))) {
     return undefined;
   }
   const principal = session.principal;
@@ -154,6 +158,7 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
       connectedAt: session.connectedAt,
       lastSeenAt: session.lastSeenAt,
       ...hibernationClientVersions(session),
+      ...(Array.isArray(session.clientCapabilities) ? { clientCapabilities: [...session.clientCapabilities] as string[] } : {}),
       ...(presentation ? { presentation } : {}),
     },
   };

@@ -438,6 +438,48 @@ export class PostgresRuntimeRepository {
     });
   }
 
+  /** An exact Run's Hub-owned retry control. Its separate columns cannot be
+   * overwritten by provider metadata or a Run lifecycle report. */
+  async capacityRetryTransaction<T>(input: {
+    requestId: string; actorUserId: string; runId: string; channelId: string;
+    instanceId?: string; executionKey?: string; operationId?: string; terminalRetryReport?: boolean;
+  }, work: (tx: DatabaseTransaction, run: QueryResultRow, mayContinue: boolean) => Promise<T>): Promise<T> {
+    const placement = await this.channelPlacement(input.requestId, input.channelId,
+      "runtime.retry.locate", "runtime.retry.placement");
+    return this.spaces.transaction(input.requestId, "runtime.retry.control", placement, async tx => {
+      const rows = await tx.query<QueryResultRow>({ name: "runtime_capacity_retry_run_lock_v1", text: `SELECT
+        r.*,i.instance_id,i.status AS instance_status FROM data.runs r LEFT JOIN data.instances i ON i.run_id=r.run_id
+        WHERE r.run_id=$1 AND r.channel_id=$2 AND r.owner_user_id=$3 FOR UPDATE OF r`,
+        values: [input.runId, input.channelId, input.actorUserId], maxRows: 1 });
+      const run = rows[0];
+      if (!run || input.instanceId && run.instance_id !== input.instanceId ||
+          input.executionKey && (run.metadata_json as Record<string, unknown>)?.executionKey !== input.executionKey)
+        throw new RuntimeControlError("agent_run_binding_mismatch", 403, "Retry Run binding is invalid");
+      let mayContinue = ["starting", "running"].includes(String(run.status)) &&
+        Boolean(run.instance_id) && !(run.metadata_json as Record<string, unknown>)?.stopRequest;
+      if (mayContinue) {
+        try {
+          await runtimeChannelCapability(tx, input.channelId, input.actorUserId, "runtime_new_work");
+          await requireRunRegistrationAccess(tx, { runId: input.runId, channelId: input.channelId,
+            phase: "continuation", error: (code, status) => new RuntimeControlError(code, status, code) });
+        } catch (error) {
+          if (!(error instanceof RuntimeControlError) || error.status >= 500) throw error;
+          mayContinue = false;
+        }
+      }
+      if (input.operationId) {
+        const commandId = `capacity-operation:${await digest([input.runId, input.operationId])}`;
+        const requestDigest = await digest([input.actorUserId, input.runId, input.channelId, input.operationId]);
+        const known = await replay(tx, placement.spaceId, commandId, "capacity_retry_operation", requestDigest);
+        if (known && !input.terminalRetryReport && (run.capacity_retry_json as Record<string, unknown>)?.operationId !== input.operationId)
+          throw new RuntimeControlError("conflict", 409, "Retired retry operation cannot be reopened");
+        if (!known) await storeReplay(tx, placement.spaceId, commandId, "capacity_retry_operation", requestDigest,
+          { operationId: input.operationId, retired: input.terminalRetryReport === true }, new Date().toISOString());
+      }
+      return work(tx, run, mayContinue);
+    });
+  }
+
   /** Bounded historical outcomes only. They neither reserve capacity nor authorize a launch. */
   async recordRoutingRejections(input: { channelId: string; sourceMessageId: string; actorUserId: string;
     rejected: Array<{ sourceMention: string; code: string; routingDecision?: unknown;

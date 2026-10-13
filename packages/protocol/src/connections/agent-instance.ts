@@ -148,6 +148,19 @@ export interface AgentInstanceLifecycleMessage {
   ts?: string;
 }
 
+/** Observed outcome only. Hub owns retry timing, permits and the attempt budget. */
+export interface AgentInstanceTurnRetryMessage {
+  type: "agent_turn_retry";
+  requestId?: string;
+  operationId: string;
+  action: "failed" | "completed" | "cancelled";
+  threadId?: string;
+  turnId?: string;
+  safeToContinue?: boolean;
+  errorMessage?: string;
+  attemptToken?: string;
+}
+
 export type AgentInstanceNetworkSampleMessage = ClientNetworkSample & {
   type: "client_network_sample";
   requestId?: string;
@@ -206,6 +219,7 @@ export type AgentInstanceClientMessage =
   | AgentInstanceModelSwitchResultMessage
   | AgentInstanceEffortSwitchResultMessage
   | AgentInstanceLifecycleMessage
+  | AgentInstanceTurnRetryMessage
   | AgentInstanceNetworkSampleMessage
   | AgentInstanceEventPublishMessage
   | AgentInstanceTraceHistoryResultMessage;
@@ -294,6 +308,9 @@ export type AgentInstanceServerMessage =
       /** With `since` only: the host may wait this long for a newer event. */
       waitMs?: number;
     }
+  | { type: "agent_turn_retry_decision"; requestId: string; operationId: string;
+      action: "retry" | "stop"; threadId: string; turnId: string;
+      attemptToken: string; input?: string; reason?: string }
   | { type: "agent_model_switch_requested"; requestId: string; model: string }
   | { type: "agent_effort_switch_requested"; requestId: string; effort: string }
   | { type: "channel_joined"; requestId?: string; channelId: string; agent: SerializedAgent }

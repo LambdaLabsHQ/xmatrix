@@ -345,6 +345,10 @@ export class RelayRuntimeProductCallbackAdapter {
     return this.agentInstance.terminateTraceSession(instanceId, reason);
   }
 
+  deliverAgentTurnRetry(input: Parameters<AgentInstanceRuntimeTransport["deliverTurnRetry"]>[0]): boolean {
+    return this.agentInstance.deliverTurnRetry(input);
+  }
+
   switchAgentInstanceControl(
     input: Parameters<AgentInstanceRuntimeTransport["switchInstanceControl"]>[0],
   ): ReturnType<AgentInstanceRuntimeTransport["switchInstanceControl"]> {
