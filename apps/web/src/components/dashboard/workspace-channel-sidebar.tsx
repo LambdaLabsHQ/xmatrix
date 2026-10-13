@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useRealtimeChannel } from "./realtime-channels";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { MobileInlineActions } from "./mobile-inline-actions";
@@ -720,7 +721,7 @@ export function SidebarSpaceHeader({
             disabled={renamingCurrentSpace || draftName.trim().length === 0}
             className="flex size-8 shrink-0 items-center justify-center rounded text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50"
           >
-            {renamingCurrentSpace ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            {renamingCurrentSpace ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
           </button>
         </form>
       ) : (

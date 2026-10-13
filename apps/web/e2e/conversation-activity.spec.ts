@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
@@ -154,18 +155,79 @@ test("a waiting Instance grows into an island that says what it waits on and for
     const own = getComputedStyle(node);
     const disc = getComputedStyle(node.querySelector(".app-agent-work-avatar")!);
     const face = getComputedStyle(node.querySelector(".identity-avatar-face")!);
-    const words = getComputedStyle(node.querySelector(".app-agent-work-intent-main > .truncate")!);
     return { islandImage: own.backgroundImage, islandBackdrop: own.backdropFilter,
-      discBackdrop: disc.backdropFilter, discShadow: disc.boxShadow, faceBackdrop: face.backdropFilter,
-      wordsImage: words.backgroundImage, wordsClip: words.backgroundClip, wordsAnimation: words.animationName };
+      discBackdrop: disc.backdropFilter, discShadow: disc.boxShadow, faceBackdrop: face.backdropFilter };
   });
   expect(material.islandImage).not.toContain("url(");
   expect(material.islandBackdrop).not.toBe("none");
-  expect(material).toMatchObject({ discBackdrop: "none", discShadow: "none", faceBackdrop: "none",
-    wordsClip: "text", wordsAnimation: "app-agent-work-intent-shimmer" });
-  expect(material.wordsImage).toContain("linear-gradient");
+  expect(material).toMatchObject({ discBackdrop: "none", discShadow: "none", faceBackdrop: "none" });
+
+  const words = island.locator(".app-agent-work-intent-main > .truncate");
+  await expect(words).toHaveText("Wait for CI on PR #3781");
+  const wordBox = await words.boundingBox();
+  const inkFrames = async () => {
+    const frames: Buffer[] = [];
+    for (const time of [550, 1100]) {
+      await words.evaluate((node, at) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = at;
+        }
+      }, time);
+      frames.push(await words.screenshot({ animations: "allow" }));
+    }
+    return frames;
+  };
+  // The illumination moves over stationary, clipped words. Its CSS/SVG
+  // mechanism is deliberately free to change without changing this behavior.
+  const [earlyInk, middleInk] = await inkFrames();
+  expect(earlyInk.equals(middleInk)).toBe(false);
+  expect(await words.boundingBox()).toEqual(wordBox);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const [steadyInk, laterInk] = await inkFrames();
+  expect(steadyInk.equals(laterInk)).toBe(true);
+  expect(await words.boundingBox()).toEqual(wordBox);
 
   await page.locator(".app-agent-work-dock").screenshot({ path: test.info().outputPath("waiting-island.png") });
+});
+
+test("off-strip work islands rest and resume as scrolling brings them into view", async ({ page }) => {
+  const space = workingAgentsSpace(10, "island-scroll", {
+    focusedInstances: 10, intent: "Review channel rendering and message performance",
+  });
+  await openWorkingAgentsSpace(page, space, channelHistory(40, "island-scroll", row => `Work message ${row}`),
+    "Work message 40");
+  const strip = page.locator(".app-agent-work-scroller");
+  const items = strip.locator(":scope > .app-agent-work-item");
+  await expect(items).toHaveCount(10);
+  const running = (index: number) => items.nth(index).evaluate(node =>
+    node.getAnimations({ subtree: true }).filter(animation => animation.playState === "running" &&
+      animation.effect?.getTiming().iterations === Infinity).length);
+  await expect.poll(() => running(0)).toBeGreaterThan(0);
+  await expect.poll(() => running(9)).toBe(0);
+  const stripBox = await strip.boundingBox();
+  const lastBox = await items.last().boundingBox();
+  if (!stripBox || !lastBox) throw new Error("work strip is not laid out");
+  expect(lastBox.x).toBeGreaterThanOrEqual(stripBox.x + stripBox.width);
+
+  // Reveal only half the last island. Partial paint is enough to run its
+  // motion, and the same clipped strip must retain its overflowing controls.
+  await strip.evaluate(node => {
+    const last = node.lastElementChild!.getBoundingClientRect();
+    node.scrollLeft += last.left - node.getBoundingClientRect().left - node.clientWidth + last.width / 2;
+  });
+  await expect.poll(() => running(9)).toBeGreaterThan(0);
+  await expect.poll(() => running(0)).toBe(0);
+  const partial = await items.last().boundingBox();
+  expect(partial!.x).toBeLessThan(stripBox.x + stripBox.width);
+  expect(partial!.x + partial!.width).toBeGreaterThan(stripBox.x + stripBox.width);
+  await items.last().locator(".app-agent-work-avatar").hover();
+  await expect(items.last().locator(".app-agent-work-actions")).toHaveCSS("visibility", "visible");
+
+  await page.mouse.move(0, 0);
+  await strip.evaluate(node => { node.scrollLeft = 0; });
+  await expect.poll(() => running(0)).toBeGreaterThan(0);
+  await expect.poll(() => running(9)).toBe(0);
 });
 
 test("a usage limit sits on the face, clear of the island's words", async ({ page }) => {

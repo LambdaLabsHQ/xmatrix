@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, Loader2, RefreshCw } from "lucide-react";
@@ -146,7 +147,7 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
             </label>
           ))}
           <Button size="sm" type="submit" disabled={pending || !Object.values(draft).some((value) => value.trim())}>
-            {save.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />} {connected ? "Save credentials" : "Save and connect"}
+            {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <KeyRound />} {connected ? "Save credentials" : "Save and connect"}
           </Button>
         </form>
       ) : null}
@@ -157,7 +158,7 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
             if (!window.confirm(`Rotate the ${connector.name} ingress URL and secrets? The provider stops delivering until you paste the new values.`)) return;
             save.mutate({ regenerate: [...(connector.events ? [INGRESS_KEY_FIELD] : []), ...generated.map((field) => field.id)] });
           }}>
-          {save.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <RefreshCw />}
           {missingIngress ? "Generate ingress URL" : "Rotate URL and secrets"}
         </Button>
       ) : null}

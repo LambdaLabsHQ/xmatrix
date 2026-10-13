@@ -1,5 +1,7 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+
 import { useLayoutEffect, useState, type RefObject } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { X, Zap } from "lucide-react";
@@ -20,14 +22,30 @@ export function ComposerSummonOptions({ readings, textareaRef, disabled, onStart
   const [positions, setPositions] = useState<PositionedReading[]>([]);
   useLayoutEffect(() => {
     const input = textareaRef.current;
-    const host = input?.parentElement;
-    if (!input || !host) return;
+    const currentReadings = () => readings.filter(reading => reading.choice !== "summon" &&
+      input?.value.slice(reading.start, reading.end) === reading.mention);
+    const clearPositions = () => setPositions(previous => previous.length ? [] : previous);
+    // An activity report can replace an empty readings array. There is no
+    // address to position in that case: do not read layout or observe the input.
+    if (!input || !currentReadings().length) {
+      clearPositions();
+      return;
+    }
+    const host = input.parentElement;
+    if (!host) {
+      clearPositions();
+      return;
+    }
     const sync = () => {
+      const declined = currentReadings();
+      if (!declined.length) {
+        clearPositions();
+        return;
+      }
       const hostBox = host.getBoundingClientRect();
       const inputBox = input.getBoundingClientRect();
       const scale = input.offsetWidth ? inputBox.width / input.offsetWidth || 1 : 1;
-      const next = readings.flatMap(reading => {
-        if (reading.choice === "summon" || input.value.slice(reading.start, reading.end) !== reading.mention) return [];
+      const next = declined.flatMap(reading => {
         const span = host.querySelector<HTMLElement>(`[data-mention][data-start="${reading.start}"]`);
         const text = span?.firstChild;
         if (!(text instanceof Text)) return [];
@@ -85,7 +103,7 @@ function DeclinedSummonOption({ position, disabled, onStartAnyway }: {
           <button type="button" className="app-intent-launch" disabled={disabled}
             aria-description="Start this Agent when you send the message"
             onClick={() => onStartAnyway(reading)}>
-            <Zap size={16} aria-hidden="true" />Start anyway
+            <AnimatedIcon icon={Zap} size={16} aria-hidden="true" />Start anyway
           </button>
         </Popover.Popup>
       </Popover.Positioner>

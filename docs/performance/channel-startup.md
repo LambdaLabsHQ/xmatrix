@@ -260,8 +260,13 @@ the rail's working indicator subscribes to its boolean result. Account changes
 clear the projections, and authoritative catalog changes still update every
 consumer. These are presentation caches, never authorization evidence.
 
-A flush routes Agent cards by member/global Instance id and merges the Agent
-catalog once. Each event batch is merged and sorted once. Messages, history replies and request answers remain immediate ordering
+A flush builds member/global Instance routing once and stages Agent cards and
+partial Channel snapshots in socket order. Interleaved card/snapshot pairs
+materialize and publish the live collections once per contiguous state run. A
+roster, catalog or access change publishes before its invalidation side effects;
+message/history/control handlers see all preceding state synchronously. Snapshot
+merges retain read cursors, quotas and omitted compatible fields. Each event
+batch is merged and sorted once. Messages, history replies and request answers remain immediate ordering
 barriers; lifecycle and Channel snapshots wait for the same flush but retain
 every frame, so omitted fields in compatible patch snapshots are not lost. Compatible whole-Channel
 snapshots that change only member presence notify their Channel key. Instance
@@ -289,9 +294,21 @@ Regression coverage counts workspace, conversation-row and message-row renders
 in `live-agent-load-render-scope.spec.ts`, including cards and whole-Channel
 snapshots. The presence owner tests cover sibling-Run isolation, unchanged quota,
 and a 1,000-report digest with a bounded number of Channel inspections. The
-existing thousand-Agent browser benchmark supplies script/style/layout and main
-thread utilization measurements; these are controlled browser results, not a
-claim about production device latency.
+thousand-Agent browser benchmark sends 100 legacy two-frame reports per second
+for 60 seconds, including ten working Instances with live intent text in the
+open Channel. It checks receipt counts, the final
+report, the last focused Instance activity in the real trace window, one
+uninterrupted socket and the delivery deadline, plus absolute renderer
+`TaskDuration / elapsed` below 10% overall and in every ten-second window. Normal
+animations remain enabled and idle work is included. Frames arrive through a
+real loopback TCP WebSocket and the browser's native message events. The fixture
+admits only that listener's exact origin to the navigation document's connect-src
+and its isolated browser context's loopback-network permission; product policy
+stays unchanged. Playwright DOM-snapshot recording is off during measurement so
+test instrumentation does not repeatedly walk the page. CDP measures absolute
+product script, style, layout and native work; `XMATRIX_PERF_TRANSPORT=cdp` keeps
+the former per-frame injected delivery available for diagnostic comparisons.
+These are controlled browser results, not a claim about every production device.
 
 Root search, page-conversation and mobile Channel-layout styles use explicit
 shell state classes. They do not inspect descendants with root/body `:has()`;
@@ -304,3 +321,37 @@ watermarks, including grants to newly visible private Channels; presence
 snapshots are not the discovery announcement. Revision delivery remains best
 effort. Reconnect, foreground refresh and a newer revision observed on a page
 read repair a missed watermark through the existing catalog path.
+
+The rail ECG uses its original path as a static mask while a transparent break
+crosses it on a transformed layer at the original two-second cadence. Composer
+summon glints also move a clipped gradient layer instead of repainting a CSS
+background position. Header/search clearance watches header geometry and header
+mounts; ordinary message and rotating-hint nodes do not trigger no-op padding
+writes.
+
+The empty composer retains one empty mention-span projection across presence
+updates. Its textarea mirror does not recopy font metrics or recreate its resize
+observer when Channel activity changes without changing the painted draft. The
+rotating hint crossfades a fixed blurred texture into sharp text, keeping the
+original rise and fade without animated filter bounds.
+
+Work-intent illumination uses a feathered moving window over fixed ink. Timer
+rings and the shared animated-icon helper animate their HTML container while
+the enclosed SVG stays static. This preserves the original glyph, dimensions,
+rotation, elapsed arc and motion preferences without animated SVG roots forcing
+full paint-artifact updates on unrelated main-thread frames. Handoff comets
+move a clipped HTML plane over their static track; the arrowhead animates its
+HTML container at the original cadence.
+
+Animation visibility follows clipping in production. The work dock observes
+its horizontal strip once per roster; fully clipped islands pause their
+animations and any positive-area intersection resumes them. Avatar and icon
+animation surfaces share a viewport observer, and inert mobile panels pause
+their descendants. This keeps invisible targets without compositor layers
+from forcing full paint-artifact updates during unrelated visible work. No
+content is hidden or paint-contained to achieve this, so hover cards and
+shadows retain their existing overflow.
+
+Empty/plain drafts also skip the mention display registry until an address is
+present. Textarea transitions cover field chrome explicitly: switching between
+native and soft carets does not animate the unsupported caret-color property.

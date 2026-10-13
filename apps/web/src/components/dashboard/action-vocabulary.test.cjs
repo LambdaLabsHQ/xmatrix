@@ -217,7 +217,7 @@ test("a dialog action outranks the chrome sweep and stays one glass", () => {
      button under the trace-access banner. The dialog actions must outrank the
      sweep and state their fill explicitly so a future `:not` cannot delete
      the action again. */
-  const sweep = /\.xmatrix-app \*((?::not\([^)]*\))+),/.exec(globals);
+  const sweep = /\.xmatrix-app \*([^\n,{]+),/.exec(globals);
   assert.ok(sweep, "the background-image sweep selector must exist");
   const sweepSpecificity = specificityOf(`.xmatrix-app *${sweep[1]}`);
 

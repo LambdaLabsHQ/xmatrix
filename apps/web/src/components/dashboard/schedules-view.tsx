@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
 import {
@@ -488,7 +489,7 @@ function ScheduleDetail({
           {canToggle && (
             <Button size="sm" variant="outline" onClick={onToggle}
               disabled={Boolean(busy) || (!automation.enabled && executionEnabled !== true)}>
-              {busy === `toggle:${automation.id}` ? <Loader2 className="animate-spin" />
+              {busy === `toggle:${automation.id}` ? <AnimatedIcon icon={Loader2} className="animate-spin" />
                 : automation.enabled ? <Pause /> : <Play />}
               {automation.enabled ? "Pause" : "Resume"}
             </Button>
@@ -496,7 +497,7 @@ function ScheduleDetail({
           {automation.capabilities.run && (
             <Button size="sm" variant="outline" onClick={onRun} title="Run it once now; its schedule stays"
               disabled={Boolean(busy) || executionEnabled !== true}>
-              {busy === `run:${automation.id}` ? <Loader2 className="animate-spin" /> : <Zap />} Run now
+              {busy === `run:${automation.id}` ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Zap />} Run now
             </Button>
           )}
           {automation.detachedAt && automation.pageId && (
@@ -511,7 +512,7 @@ function ScheduleDetail({
           {automation.capabilities.delete && (
             <Button size="sm" variant="ghost" disabled={Boolean(busy)} onClick={onDelete} title="Delete lineage"
               className="text-muted-foreground hover:text-destructive">
-              {busy === `delete:${automation.id}` ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete
+              {busy === `delete:${automation.id}` ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Trash2 />} Delete
             </Button>
           )}
           {readOnly && <span className="text-xs text-muted-foreground">Read only</span>}
@@ -620,7 +621,7 @@ function ScheduleEditor({ automation, busy, replacesOthers, memberMayCreate, spa
       )}
       <div className="flex gap-2">
         <Button size="sm" type="submit" disabled={!canSave}>
-          {saving && <Loader2 className="animate-spin" />} Save changes
+          {saving && <AnimatedIcon icon={Loader2} className="animate-spin" />} Save changes
         </Button>
         <Button size="sm" variant="ghost" type="button" disabled={saving} onClick={onCancel}>Cancel</Button>
       </div>
