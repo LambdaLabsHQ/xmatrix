@@ -18,7 +18,7 @@ async function withGrant(run) {
   const repository = new PostgresAppCredentialRepository(database, "test-secret-catalog-key");
   const input = { spaceId, providerId: "gmail", actorUserId: "owner" };
   const write = accountId => repository.put({ requestId: crypto.randomUUID(), ...input,
-    fields: { mailboxes: mailboxes(accountId) }, policy, at });
+    fields: { mailboxes: accountId === null ? null : mailboxes(accountId) }, policy, at });
   const read = () => repository.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "gmail" });
   const effects = [];
   let deleting = async () => {};
