@@ -20,10 +20,10 @@ adapters. Stream positions preserve upstream order independently of wall clocks;
 legacy hosts retain the timestamp compatibility path. See
 [Agent trace visibility](../architecture/agent-trace-visibility.md).
 
-Codex model-capacity failures recover with a bounded same-thread retry budget,
-only after a failed terminal receipt and before any execution or output.
-Backoff remains interruptible; the selected model stays in force. See
-[Codex capacity recovery](../operations/codex-capacity-retry.md).
+Hub owns Codex model-capacity retry policy, persisted Run state, Channel-alarm
+scheduling and visible outcomes. Hosts report terminal/execution observations
+and execute only exact Hub permits; they have no autonomous capacity retry.
+See [Codex capacity recovery](../operations/codex-capacity-retry.md).
 
 Runtime delivery errors retain the sending cause chain and report the original
 receiving exception before it crosses a Durable Object boundary. Reporting

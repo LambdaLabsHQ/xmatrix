@@ -1,3 +1,4 @@
+import { TURN_RETRY_RUNTIME_PATH } from "./agent-turn-retry-policy";
 import { plainDeliveryRecord as plainObject } from "./runtime-transport/delivery-record";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG } from "@xmatrix/protocol";
@@ -286,6 +287,18 @@ export class RelayRuntimeLive extends DurableObject<Env> {
         await this.productAdapter.requestAgentTraceHistory(instanceId, { maxEvents, since, before, waitMs, receivedOrder }),
         { headers: { "cache-control": "private, no-store" } },
       );
+    }
+    if (request.method === "POST" && url.pathname === TURN_RETRY_RUNTIME_PATH) {
+      const payload = plainObject(await request.json().catch(() => undefined));
+      const message = plainObject(payload?.message);
+      if (!payload || !["runId", "instanceId", "ownerUserId", "channelId"].every(key => boundedId(payload[key], 300)) ||
+          !message || message.type !== "agent_turn_retry_decision" ||
+          !["retry", "stop"].includes(String(message.action)) ||
+          !["requestId", "operationId", "threadId", "turnId", "attemptToken"].every(key => boundedId(message[key], 160)) ||
+          (message.action === "retry" && (typeof message.input !== "string" || message.input.length > 500)))
+        return Response.json({ error: "Invalid retry delivery" }, { status: 400 });
+      return Response.json({ delivered: this.productAdapter?.deliverAgentTurnRetry(payload as unknown as
+        Parameters<RelayRuntimeProductCallbackAdapter["deliverAgentTurnRetry"]>[0]) ?? false });
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH) {
       const payload = plainObject(await request.json().catch(() => undefined));

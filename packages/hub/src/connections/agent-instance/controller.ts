@@ -23,6 +23,7 @@ const AGENT_INSTANCE_MESSAGE_TYPES = new Set([
   "agent_model_switch_result",
   "agent_effort_switch_result",
   "agent_lifecycle",
+  "agent_turn_retry",
   "event_publish",
   "trace_history_result",
 ]);
@@ -74,6 +75,7 @@ export interface AgentInstanceConnectionPort extends SocketEndpointPort {
   updatePresence(ws: WebSocket, message: AgentInstanceMessage<"presence_update">): void | Promise<void>;
   reportModelSwitch(ws: WebSocket, message: AgentInstanceMessage<"agent_model_switch_result">): void;
   reportEffortSwitch(ws: WebSocket, message: AgentInstanceMessage<"agent_effort_switch_result">): void;
+  reportTurnRetry(ws: WebSocket, message: AgentInstanceMessage<"agent_turn_retry">): void;
   reportLifecycle(ws: WebSocket, message: AgentInstanceMessage<"agent_lifecycle">): void;
   publishEvent(ws: WebSocket, message: AgentInstanceMessage<"event_publish">): void;
   traceHistoryResult(ws: WebSocket, message: AgentInstanceMessage<"trace_history_result">): void;
@@ -145,6 +147,9 @@ export class AgentInstanceConnectionController {
         ws,
         message,
         () => this.port.reportEffortSwitch(ws, message),
+      ); return;
+      case "agent_turn_retry": this.port.authorityMutation(
+        ws, message, () => this.port.reportTurnRetry(ws, message),
       ); return;
       case "agent_lifecycle": this.port.authorityMutation(
         ws,

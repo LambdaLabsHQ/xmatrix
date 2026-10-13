@@ -171,6 +171,7 @@ async fn cmd_external_inner(
     );
     let mut runtime_capabilities = goal_runtime_capabilities(tool, cmd, cmd_args);
     runtime_capabilities.push("harness_parameters_v1".to_string());
+    if use_codex_app_backend(tool) { runtime_capabilities.push("agent_turn_retry".into()); }
     relay.set_runtime_capabilities(runtime_capabilities);
     let auto_join_channel_id = non_empty_env("XMATRIX_AUTO_JOIN_CHANNEL_ID");
     // Every backend receives the channel through its own delivery, so the join
@@ -1148,6 +1149,7 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                                 .await
                             } else {
                                 Ok(CodexTurnResult {
+                                    failure_reported_by_hub: false,
                                     local_output: outcome.response,
                                     restart_after_turn: false,
                                     failed: false,
@@ -1159,6 +1161,7 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                             }
                         }
                         Err(err) => Ok(CodexTurnResult {
+                            failure_reported_by_hub: false,
                             local_output: format!("ZCode goal command failed: {err}"),
                             restart_after_turn: false,
                             failed: true,
@@ -1807,6 +1810,7 @@ impl ZcodeAppSession {
         }
 
         Ok(CodexTurnResult {
+            failure_reported_by_hub: false,
             restart_after_turn: true,
             ..self.turn_result(
                 output,
@@ -1919,6 +1923,7 @@ impl ZcodeAppSession {
         }
 
         Ok(CodexTurnResult {
+            failure_reported_by_hub: false,
             restart_after_turn: true,
             ..self.turn_result(
                 output,
@@ -1942,6 +1947,7 @@ impl ZcodeAppSession {
         model: Option<String>,
     ) -> CodexTurnResult {
         CodexTurnResult {
+            failure_reported_by_hub: false,
             local_output,
             restart_after_turn: false,
             failed: failure_detail.is_some(),

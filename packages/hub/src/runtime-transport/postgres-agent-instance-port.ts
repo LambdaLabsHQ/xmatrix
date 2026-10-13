@@ -1,3 +1,4 @@
+import { reportAgentTurnRetry } from "../agent-turn-retry";
 import { subscribeConversationToPullRequest } from "../github-pull-request-subscription";
 import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
 import type {
@@ -79,7 +80,7 @@ type HistoryMessage = Message<"join_channel"> | Message<"leave_channel"> |
 type RuntimeSignalMessage = Exclude<
   PortMessage,
   HistoryMessage | Message<"unregister"> | Message<"channel_message"> | Message<"channel_activity"> |
-  Message<"channel_message_ack">
+  Message<"channel_message_ack"> | Message<"agent_turn_retry">
 >;
 type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServerMessage[] | undefined;
 
@@ -88,7 +89,7 @@ type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServer
  * connect: a Hub closes the socket on an unknown type, so a newer runtime
  * sends one only when its Hub lists it.
  */
-export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity"] as const;
+export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry"] as const;
 
 /** The card a Run posts when its harness asks its own question (runtime_harness_questions.rs). */
 const HARNESS_QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
@@ -130,6 +131,7 @@ export interface PostgresAgentInstancePortDependencies {
   /** Subscribe the conversation to a pull request its Run opened (conversation-activity.md §3.6). */
   pullRequestOpened?(input: { spaceId: string; channelId: string; ownerUserId: string; repository: string;
     number: number; commandId: string }): Promise<unknown>;
+  turnRetry?(session: Readonly<AgentInstanceRuntimeSession>, message: Message<"agent_turn_retry">): Promise<AuthorityOutput>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
 }
 
@@ -165,6 +167,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
           : runtimeRepository(input.env).mutate(command),
         holdUsageLimit: (hold) => holdRegistrationUsageLimit(input.env, hold),
       },
+      turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
       history: input.history,
       signals: input.signals,
       atomicInstanceConnect: true,
@@ -265,6 +268,9 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         // call that host directly, so Runtime never stores or forwards them.
         if (message.eventType === "llm_trace") return undefined;
         return this.dependencies.signals.publish(session, message);
+      case "agent_turn_retry":
+        if (!this.dependencies.turnRetry) throw new Error("Hub retry authority is unavailable");
+        return this.dependencies.turnRetry(session, message);
       case "agent_lifecycle": {
         const published = await this.dependencies.signals.publish(session, message);
         await this.persistTurnFailureNotice(session, message);
