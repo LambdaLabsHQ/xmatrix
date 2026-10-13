@@ -56,7 +56,9 @@ they do not verify a provider's identity.
 
 Registration is limited to ten requests per client IP per minute by the
 always-enforced `RATE_LIMIT_OAUTH_REGISTER` Workers limiter; Better Auth's own
-limiter counts per isolate and is off. Anonymous registration creates public clients;
+limiter counts per isolate and is off. A registered name is at most 100
+characters of visible text, so it cannot push the consent warning out of view.
+Anonymous registration creates public clients;
 it cannot request `client_credentials` or `skip_consent`. Authorization requires
 a signed-in person, approval for a new grant, a registered redirect URI
 (exact matching except OAuth's loopback-port exception), and S256 PKCE. The
