@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  answerHarnessReleaseWatch,
   fetchLatestVersion,
+  RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH,
   latestVersionFromBody,
   latestVersionUrl,
   watchHarnessReleases,
+  watchHarnessReleasesBesidePostgres,
 } from "../src/harness-release-watch.ts";
 
 const npm = { id: "claude", management: { latest: { kind: "npm", package: "@anthropic-ai/claude-code" } } };
@@ -96,4 +99,53 @@ test("a pass with no readable registry reads no targets", async () => {
   });
   assert.deepEqual(result, { issued: 0 });
   assert.equal(read, false);
+});
+
+/** A Runtime namespace that records which cell, at which location, received each request. */
+function runtimeNamespace(answer) {
+  const calls = [];
+  return {
+    calls,
+    idFromName: (name) => ({ name }),
+    get: (id, options) => ({
+      fetch: async (request) => {
+        calls.push({ name: id.name, locationHint: options?.locationHint, method: request.method,
+          path: new URL(request.url).pathname });
+        return answer(request);
+      },
+    }),
+  };
+}
+
+test("the cron runs the pass in the Runtime cell beside PostgreSQL, not at its own location", async () => {
+  const runtime = runtimeNamespace(() => Response.json({ issued: 3 }));
+  const result = await watchHarnessReleasesBesidePostgres({
+    RELAY_RUNTIME: runtime, XMATRIX_RUNTIME_LOCATION_HINT: "apac" });
+  assert.deepEqual(result, { issued: 3 });
+  assert.deepEqual(runtime.calls, [{ name: "cell-0@apac", locationHint: "apac", method: "POST",
+    path: RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH }]);
+});
+
+test("a database outage in the cell is answered as retryable; a defect still fails the pass", async () => {
+  const outage = Object.assign(new Error("Connection terminated unexpectedly"), { code: "ECONNRESET" });
+  const answered = await answerHarnessReleaseWatch({}, async () => { throw outage; });
+  assert.equal(answered.status, 503);
+  const body = await answered.json();
+  assert.equal(body.retryable, true);
+  const runtime = runtimeNamespace(() => Response.json(body, { status: 503 }));
+  assert.deepEqual(await watchHarnessReleasesBesidePostgres({ RELAY_RUNTIME: runtime }), { issued: 0 });
+
+  const defect = new TypeError("target.presetId is undefined");
+  await assert.rejects(answerHarnessReleaseWatch({}, async () => { throw defect; }), (error) => error === defect);
+  const refused = runtimeNamespace(() => Response.json({ error: "Not found" }, { status: 404 }));
+  await assert.rejects(watchHarnessReleasesBesidePostgres({ RELAY_RUNTIME: refused }), /answered 404: Not found/u);
+});
+
+test("the Runtime cell runs the release pass on its own database bindings", async () => {
+  const { RelayRuntimeLive } = await import("../src/relay-runtime.ts");
+  const runtime = Object.create(RelayRuntimeLive.prototype);
+  Object.assign(runtime, { env: {}, ctx: { waitUntil() {} } });
+  // The route reaches the pass, which opens the cell's own Machine database first.
+  await assert.rejects(runtime.fetch(new Request(`https://relay-runtime${RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH}`,
+    { method: "POST" })), /PostgreSQL Machine bindings are unavailable/u);
 });

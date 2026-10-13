@@ -2,7 +2,12 @@ import { AGENT_PRESETS, type AgentPreset } from "@xmatrix/protocol";
 import { readHarnessReleaseTargets, type AuthorityDatabaseSession, type HarnessReleaseTarget } from "@xmatrix/db";
 import { postgresAuthorityDatabase } from "./postgres-authority-http";
 import { machineDaemonCommand } from "./machines";
+import { relayRuntimeSingleCell } from "./relay-authority-locator";
+import { failureResponse, transientFailure } from "./error-contract";
 import type { Env } from "./types";
+
+/** The Runtime cell route that runs one release pass beside PostgreSQL. */
+export const RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH = "/internal/product-control/harness-release-watch";
 
 const FETCH_TIMEOUT_MS = 5_000;
 /** npm `latest` documents carry the readme and PyPI JSON lists every release. */
@@ -105,4 +110,39 @@ export async function watchHarnessReleases(env: Env, dependencies: HarnessReleas
     await database?.close();
   }
   return { issued };
+}
+
+/**
+ * A cron trigger is not placed: it runs wherever Cloudflare starts it, about
+ * 250 ms from PostgreSQL per round trip, while the Worker's requests run beside
+ * it. A release notice is an `issue` that holds the Machine's control lock for
+ * its ten round trips, so issued from there it held the lock for 2-3.5 s and
+ * the daemon's own claim or renew behind it failed with `lock_timeout`
+ * (XMATRIX-HUB-7K). The pass runs in a Runtime cell, which is created next to
+ * the database, so each notice holds the lock for milliseconds.
+ */
+export async function watchHarnessReleasesBesidePostgres(
+  env: Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT">,
+): Promise<{ issued: number }> {
+  const response = await relayRuntimeSingleCell(env).fetch(new Request(
+    `https://relay-runtime${RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH}`, { method: "POST" }));
+  const body = await response.json<Record<string, unknown>>();
+  if (response.ok && typeof body.issued === "number") return { issued: body.issued };
+  // The cell already logged an outage; a defect it threw rejects the fetch instead.
+  if (body.retryable === true) return { issued: 0 };
+  throw new Error(`Harness release watch answered ${response.status}: ${String(body.error ?? "no error")}`);
+}
+
+/** The Runtime cell's side: one pass, with an outage answered as retryable rather than thrown. */
+export async function answerHarnessReleaseWatch(
+  env: Env,
+  watch: (env: Env) => Promise<{ issued: number }> = watchHarnessReleases,
+): Promise<Response> {
+  try {
+    return Response.json(await watch(env), { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    const failure = transientFailure(error);
+    if (failure) return failureResponse(failure, { "cache-control": "no-store" });
+    throw error;
+  }
 }

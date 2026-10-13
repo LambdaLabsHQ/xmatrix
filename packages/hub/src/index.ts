@@ -3,7 +3,7 @@ import "./error-reporting";
 import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
-import { watchHarnessReleases } from "./harness-release-watch";
+import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
 import { connectorGoogleChatRoomRepository, connectorFeishuRoomRepository, connectorTelegramRoomRepository, connectorTeamsRoomRepository } from "./connectors/credentials";
 import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
@@ -137,7 +137,7 @@ export default {
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
     run("Account deletion maintenance", () => maintainAccountDeletions(env));
     run("Sentry event recovery", () => drainSentryEvents(env));
-    run("Harness release watch", () => watchHarnessReleases(env));
+    run("Harness release watch", () => watchHarnessReleasesBesidePostgres(env));
     run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
     for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
       run(`${provider} lifecycle maintenance`, () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }));
