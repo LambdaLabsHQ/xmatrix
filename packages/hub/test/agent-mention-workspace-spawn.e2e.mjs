@@ -130,6 +130,10 @@ test("tagged Auto workspace launch completes daemon spawn, mock Agent registrati
     );
     assert.ok(summoningMessage, "the summoning message should be in channel history");
     assert.equal(command.sourceMessageId, summoningMessage.messageId);
+    // The Instance ties its first turn to this message through the source. A
+    // spawn without it starts a turn whose missing reply nothing can report.
+    assert.deepEqual([command.context?.initialMessageSource?.channelId, command.context?.initialMessageSource?.messageId],
+      [channelId, summoningMessage.messageId]);
     const evidenceDatabase = new Client({ connectionString: testPostgresUrl() });
     await evidenceDatabase.connect();
     try {
