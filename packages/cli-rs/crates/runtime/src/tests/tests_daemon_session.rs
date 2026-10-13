@@ -2290,3 +2290,54 @@ fn assert_rejected_registration_spawn(value: serde_json::Value) {
         super::DaemonSpawnRequest::from_command(serde_json::from_value(value).unwrap()).unwrap();
     assert!(super::resolve_registration_spawn(&intent, "machine").is_err());
 }
+
+#[tokio::test(start_paused = true)]
+async fn the_offline_deadline_runs_only_while_the_control_connection_is_down() {
+    use super::{CONTROL_OFFLINE_RUNTIME_RESTART, control_offline_deadline};
+    use std::time::Duration;
+
+    // Connected: nothing is armed, however long the daemon runs.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(24 * 60 * 60), control_offline_deadline(None))
+            .await
+            .is_err()
+    );
+    // Down since `lost`: the bound is measured from the first disconnect, not
+    // from each failed attempt that follows it.
+    let lost = tokio::time::Instant::now();
+    tokio::time::advance(Duration::from_secs(4 * 60)).await;
+    control_offline_deadline(Some(lost)).await;
+    assert_eq!(lost.elapsed(), CONTROL_OFFLINE_RUNTIME_RESTART);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rebuilt_runtime_does_not_wait_forever_for_its_session_exchange() {
+    use tokio::io::AsyncReadExt;
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hub = format!("http://{}", listener.local_addr().unwrap());
+    let (received_tx, received) = tokio::sync::oneshot::channel();
+    // A Hub that takes the request, keeps the connection and never answers.
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0; 4096];
+        assert!(socket.read(&mut request).await.unwrap() > 0);
+        let _ = received_tx.send(());
+        std::future::pending::<()>().await;
+        drop(socket);
+    });
+    let session = tokio::spawn(async move {
+        super::resolve_daemon_session_state(&hub, Some("review-token")).await
+    });
+    received.await.expect("the Hub received the session exchange");
+    // This runs before the connection actor and the offline deadline exist,
+    // so nothing else would end the wait.
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+    let state = tokio::time::timeout(std::time::Duration::from_secs(5), session)
+        .await
+        .expect("the session exchange ends at its deadline")
+        .unwrap();
+    // An explicit token still starts the daemon, without a refreshable session.
+    assert!(matches!(state, Ok(None)));
+    server.abort();
+}

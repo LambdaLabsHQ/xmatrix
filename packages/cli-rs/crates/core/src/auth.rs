@@ -18,6 +18,23 @@ struct MeResponse {
 }
 
 const SESSION_REFRESH_LOCK_TIMEOUT: Duration = Duration::from_secs(15);
+/// One session exchange or refresh round trip. The Hub client has no request
+/// deadline, and a daemon runtime exchanges its session before it has a
+/// connection actor or an offline deadline: a reply that never arrives there
+/// would leave the runtime starting forever.
+const SESSION_ROUND_TRIP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A session request under its deadline; a late Hub is an outage, not a refusal.
+async fn session_round_trip<T>(request: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    tokio::time::timeout(SESSION_ROUND_TRIP_TIMEOUT, request)
+        .await
+        .unwrap_or_else(|_| {
+            Err(CliError::RelayTransient(format!(
+                "the Hub did not answer within {}s",
+                SESSION_ROUND_TRIP_TIMEOUT.as_secs()
+            )))
+        })
+}
 const SESSION_REFRESH_LOCK_RETRY_DELAY: Duration = Duration::from_millis(100);
 const SESSION_REFRESH_LOCK_STALE_SECS: u64 = 120;
 
@@ -433,12 +450,12 @@ async fn write_http_response(
 }
 
 pub async fn exchange_instance_session(hub_url: &str, token: &str) -> Result<AuthResponse> {
-    crate::http::request_json(
+    session_round_trip(crate::http::request_json(
         &with_route(hub_url, HubRoutes::EXCHANGE_SESSION),
         "POST",
         Some(token),
         None,
-    )
+    ))
     .await
     .map_err(|e| CliError::Auth(format!("Session exchange failed: {e}")))
 }
@@ -574,12 +591,12 @@ async fn refresh_auth_response(session: &CliSession) -> Result<AuthResponse> {
         CliError::Auth("Saved session cannot be refreshed. Run: xmatrix login".into())
     })?;
 
-    crate::http::request_json(
+    session_round_trip(crate::http::request_json(
         &with_route(&session.hub_url, HubRoutes::REFRESH),
         "POST",
         None,
         Some(serde_json::json!({ "refreshToken": refresh_token })),
-    )
+    ))
     .await
 }
 

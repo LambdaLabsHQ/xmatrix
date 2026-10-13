@@ -89,8 +89,37 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 static CLI_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static DAEMON_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
+tokio::task_local! {
+    /// The client requests inside [`on_fresh_connections`] are sent with.
+    static FRESH_CONNECTION_CLIENT: reqwest::Client;
+}
+
 pub fn client() -> Result<reqwest::Client> {
+    if let Ok(client) = FRESH_CONNECTION_CLIENT.try_with(Clone::clone) {
+        return Ok(client);
+    }
     client_for(process_client_component())
+}
+
+/// Runs `operation` with every Hub request on a connection of its own.
+///
+/// A request on a pooled connection waits for as long as the peer keeps
+/// acknowledging it, and work that recovers from a lost connection must not
+/// depend on the connections that may have been lost with it.
+pub async fn on_fresh_connections<T>(operation: impl std::future::Future<Output = T>) -> Result<T> {
+    let client = client_builder(process_client_component())
+        .pool_max_idle_per_host(0)
+        .build()?;
+    Ok(FRESH_CONNECTION_CLIENT.scope(client, operation).await)
+}
+
+fn client_builder(component: ClientComponent) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .default_headers(client_identity_headers(component))
+        .redirect(reqwest::redirect::Policy::none())
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+        .tcp_keepalive(TCP_KEEPALIVE)
+        .connect_timeout(CONNECT_TIMEOUT)
 }
 
 /// One pooled client per component, built once per process.
@@ -111,13 +140,7 @@ pub fn client_for(component: ClientComponent) -> Result<reqwest::Client> {
     }
     // Build outside `get_or_init` so a builder failure stays an error rather
     // than a panic; a lost race just drops the extra client.
-    let built = reqwest::Client::builder()
-        .default_headers(client_identity_headers(component))
-        .redirect(reqwest::redirect::Policy::none())
-        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-        .tcp_keepalive(TCP_KEEPALIVE)
-        .connect_timeout(CONNECT_TIMEOUT)
-        .build()?;
+    let built = client_builder(component).build()?;
     Ok(cell.get_or_init(|| built).clone())
 }
 
