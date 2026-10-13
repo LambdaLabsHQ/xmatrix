@@ -156,6 +156,7 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 
 
+import { MessageUnsentNotice } from "./message-unsent-notice";
 import { MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
 
 import {
@@ -447,6 +448,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onReact,
   onEdit,
   onRecall,
+  onUnsentAction,
   onReply,
   onOpenThread,
   onDiscussPassage,
@@ -496,7 +498,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   threadRootMessage?: TimelineItem;
   threadRootChannel?: SerializedChannel;
 } & Pick<MessageRowComparableProps,
-  "onReact" | "onEdit" | "onRecall" | "onReply" | "onOpenThread" | "onMentionSender" |
+  "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
@@ -642,6 +644,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   const stableOnReact = useStableCallback(onReact);
   const stableOnEdit = useStableCallback(onEdit);
   const stableOnRecall = useStableCallback(onRecall);
+  const stableOnUnsentAction = useStableCallback(onUnsentAction);
   const stableOnReply = useStableCallback(onReply);
   const stableOnOpenThread = useStableCallback(onOpenThread);
   const stableOnMentionSender = useStableCallback(onMentionSender);
@@ -1017,6 +1020,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 onReact={stableOnReact}
                 onEdit={stableOnEdit}
                 onRecall={stableOnRecall}
+                onUnsentAction={stableOnUnsentAction}
                 onReply={stableOnReply}
                 onOpenThread={stableOnOpenThread}
                 onMentionSender={stableOnMentionSender}
@@ -1088,6 +1092,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onReact={stableOnReact}
                   onEdit={stableOnEdit}
                   onRecall={stableOnRecall}
+                  onUnsentAction={stableOnUnsentAction}
                   onReply={stableOnReply}
                   onOpenThread={stableOnOpenThread}
                   onMentionSender={stableOnMentionSender}
@@ -1612,6 +1617,7 @@ export const MessageRow = memo(function MessageRow({
   onReact,
   onEdit,
   onRecall,
+  onUnsentAction,
   onReply,
   onOpenThread,
   onMentionSender,
@@ -1731,6 +1737,8 @@ export const MessageRow = memo(function MessageRow({
   const recalled = Boolean(message.recalledAt);
   const isOutboundPending = contextOnly || message.sendStatus === "pending" ||
     message.sendStatus === "unconfirmed" || message.sendStatus === "failed";
+  const unsentStatus = message.sendStatus === "unconfirmed" || message.sendStatus === "failed"
+    ? message.sendStatus : undefined;
   const canEditMessage = message.own && !recalled && !isOutboundPending && Boolean(message.messageId);
   const MessageHead: ElementType = message.continuation ? FloatingMessageActions : "div";
   const sourceApplication = messageExternalAppSource(message.metadata);
@@ -2308,21 +2316,6 @@ export const MessageRow = memo(function MessageRow({
           )}
           <MessageTimestamp value={message.sentAt} className={MESSAGE_HEADER_TIMESTAMP_CLASS_NAME} />
           {message.sendStatus === "pending" && <MessageSendingMark label />}
-          {message.sendStatus === "unconfirmed" && (
-            // Neither a spinner nor an error: the send passed its deadline and
-            // the result is genuinely unknown. No spinner, because nothing is
-            // still in flight; no error, because it may well have been written.
-            // The label stays static — a bounded probe runs and then stops, so
-            // promising ongoing "checking" would outlive the work being done.
-            <span className={statusInkClass("attention", "inline-flex shrink-0 items-center gap-1 text-[11px] font-medium")}>
-              Result unconfirmed
-            </span>
-          )}
-          {message.sendStatus === "failed" && (
-            <span className="shrink-0 text-[11px] font-medium text-destructive">
-              {message.sendError || "Failed to send"}
-            </span>
-          )}
           <span className="contents">
           {message.senderKind === "agent" && !message.reservedSystemAgent &&
             (!message.retagged || message.retagged.keys.some((key) => key === "owner" || key === "machine")) && (
@@ -2486,7 +2479,7 @@ export const MessageRow = memo(function MessageRow({
             </div>
           </form>
         ) : (
-          <div className="relative">
+          <div className={cn("relative", unsentStatus && "app-message-unsent-body")}>
             {message.replyTo && (
               <ReplyPreview reply={message.replyTo} onJump={onJumpToMessage} />
             )}
@@ -2775,6 +2768,13 @@ export const MessageRow = memo(function MessageRow({
             )}
             <span className="truncate">{threadChip.label}</span>
           </button>
+        )}
+        {unsentStatus && !contextOnly && (
+          // Neither a spinner nor a claim it failed when the result is unknown:
+          // nothing is in flight any more, and the write may have committed. The
+          // wording stays static, since the probe behind it is bounded and stops.
+          <MessageUnsentNotice status={unsentStatus} error={message.sendError}
+            onAction={(action) => onUnsentAction(message, action)} />
         )}
         {!recalled && !isOutboundPending && (
           <MessageReactions
