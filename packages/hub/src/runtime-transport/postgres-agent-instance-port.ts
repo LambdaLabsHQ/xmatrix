@@ -908,6 +908,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       // Agent unregisters retain their existing terminal semantics.
       terminal: agentInstanceUnregisterIsTerminal(metadata),
     });
+    // The transport forgets this socket without a close callback, so release
+    // the live binding here: a kept one fails every peer's next live signal.
+    this.persistedPresentationDigests.delete(session.run.instanceId);
+    await this.dependencies.signals.disconnected?.(session);
     return { type: "unregistered", requestId };
   }
 }
