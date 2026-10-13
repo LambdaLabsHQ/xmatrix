@@ -118,6 +118,11 @@ test("the placement reason names the trade-off routing made", () => {
     "All equally suited; most room here (85% room)");
   assert.equal(placementReason([at("claude", "warm", 0.68, 0.4), at("codex", "idle", 1 / 3, 0.85)], true), "Best suited, with 40% room");
   assert.equal(placementReason([at("codex", "idle", 1 / 3, 0.85)], false), "Most room for codex: 85% room");
+  const described = (item, value) => ({ ...item, described: value });
+  assert.equal(placementReason([described(at("claude", "warm", 0.68, 0.4), true), at("codex", "idle", 1 / 3, 0.85)], true),
+    "Best suited, with 40% room. Its description was read");
+  assert.equal(placementReason([described(at("codex", "idle", 1 / 3, 0.85), false), at("claude", "busy", 0.32, 0.1)], true),
+    "All equally suited; most room here (85% room). codex has no description here, so it was judged by name");
   assert.deepEqual([fitLevel(0.32), fitLevel(0.68), fitLevel(0), fitLevel(1)], ["Capable", "Strong fit", "Unsuitable", "Asked for"]);
   assert.deepEqual([roomText(undefined), roomText(-0.2), roomText(0.414)], ["room unknown", "overloaded", "41% room"]);
 });

@@ -4,7 +4,8 @@ import { ACTIVE_RUN_STATUS_SQL, digestCanonicalCloneCborV1, parseSpaceAgentRegis
   parseRegistrationResourceLimits, intersectRegistrationLimits,
   parseAgentRegistrationEnvironment, routingModelCatalogObservation,
   type AgentRegistrationEnvironment, type AgentRegistrationMachinePlatform, type AgentRegistrationRunningInstance, type AgentRegistrationSummary,
-  currentRoutingQuotaWindows, parseLlmQuotaAccount, type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength } from "@xmatrix/protocol";
+  currentRoutingQuotaWindows, parseLlmQuotaAccount, type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength,
+  parseHarnessProfileCommand, type HarnessProfileCommand, type SpaceHarnessProfile } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
@@ -268,6 +269,48 @@ export class PostgresAgentRegistrationRepository {
     });
   }
 
+  /**
+   * Rewrites what the Space says a harness is for. A Space owner or admin may,
+   * and so may anyone with an Agent of that harness here: they describe what
+   * their own Agent is good at. The text is free; saving the same text again
+   * changes nothing.
+   */
+  async describe(input: { spaceId: string; actorUserId: string; requestId: string } & HarnessProfileCommand):
+  Promise<{ harness: string } & SpaceHarnessProfile> {
+    const { harness, description, expectedRevision } = parseHarnessProfileCommand({ harness: input.harness,
+      description: input.description, ...(input.expectedRevision === undefined ? {} : { expectedRevision: input.expectedRevision }) });
+    if (!input.actorUserId || input.actorUserId.length > 300) throw new RegistrationAccessError("invalid_registration_command", 400);
+    return this.database.transaction(this.context(input, input.requestId, "registration.describe"), async tx => {
+      const role = await requireMember(tx, input.spaceId, input.actorUserId);
+      // The harness is described only where it is an Agent of the Space.
+      const offered = await tx.query({ name: "harness_profile_offered_v1", text: `SELECT
+        COALESCE(bool_or(owner_user_id=$3),FALSE) AS owns_harness,count(*)::int AS locations
+        FROM (SELECT owner_user_id FROM data.space_agent_registrations WHERE space_id=$1 AND harness=$2 LIMIT 501) offered`,
+      values: [input.spaceId, harness, input.actorUserId], maxRows: 1 });
+      if (!offered[0] || Number(offered[0].locations) === 0) throw new RegistrationAccessError("registration_not_found", 404);
+      if (!["owner", "admin"].includes(role) && offered[0].owns_harness !== true) {
+        throw new RegistrationAccessError("harness_profile_authority_required", 403);
+      }
+      // Writers of one profile take turns, including the first, which has no row to lock.
+      await tx.query({ name: "harness_profile_lock_v1", text: `SELECT pg_advisory_xact_lock(
+        hashtextextended(jsonb_build_array('harness-profile',$1::text,$2::text)::text,0))`,
+      values: [input.spaceId, harness], maxRows: 1 });
+      const rows = await tx.query({ name: "harness_profile_current_v1", text: `SELECT description,revision
+        FROM data.space_harness_profiles WHERE space_id=$1 AND harness=$2`, values: [input.spaceId, harness], maxRows: 1 });
+      const current = { description: String(rows[0]?.description ?? ""), revision: Number(rows[0]?.revision ?? 0) };
+      if (expectedRevision !== undefined && expectedRevision !== current.revision) {
+        throw new RegistrationAccessError("harness_profile_revision_conflict", 409);
+      }
+      if (description === current.description) return { harness, ...current };
+      await tx.query({ name: "harness_profile_write_v1", text: `INSERT INTO data.space_harness_profiles
+        (space_id,harness,description,revision,updated_at) VALUES ($1,$2,$3,$4,clock_timestamp())
+        ON CONFLICT (space_id,harness) DO UPDATE SET description=EXCLUDED.description,revision=EXCLUDED.revision,
+          updated_at=EXCLUDED.updated_at`,
+      values: [input.spaceId, harness, description, current.revision + 1], maxRows: 0 });
+      return { harness, description, revision: current.revision + 1 };
+    });
+  }
+
   /** A Space member may ask for the Space's quota to be read again. */
   async requireReader(input: { spaceId: string; actorUserId: string; requestId: string }): Promise<void> {
     await this.database.transaction(this.context(input, input.requestId, "registration.reader"),
@@ -296,8 +339,11 @@ export class PostgresAgentRegistrationRepository {
       // Running Instances come from the owner's live Runs on that machine (a
       // partial index keeps this to what is running now), bound to this
       // registration in this Space, in Channels the reader may read.
-      const rows = await tx.query({ name: "registration_catalog_page_v5", text: `SELECT
+      const rows = await tx.query({ name: "registration_catalog_page_v6", text: `SELECT
         r.owner_user_id,r.machine_id,r.harness,r.display_name,r.configuration_json,r.version,
+        profile.description AS profile_description,profile.revision AS profile_revision,
+        EXISTS (SELECT 1 FROM data.space_agent_registrations own WHERE own.space_id=r.space_id
+          AND own.harness=r.harness AND own.owner_user_id=$2) AS owns_harness,
         m.user_id AS current_owner,m.display_name AS owner_name,a.grant_state,a.policy_state,a.grant_limits,a.policy_limits, catalog.models AS catalog_models,catalog.observed_at AS catalog_observed_at,
         parameter_catalog.parameters AS catalog_parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,
         running.instances AS running
@@ -305,6 +351,7 @@ export class PostgresAgentRegistrationRepository {
         LEFT JOIN data.space_members m ON m.space_id=r.space_id AND m.user_id=r.owner_user_id
         LEFT JOIN data.space_agent_registration_access a ON a.space_id=r.space_id AND a.owner_user_id=r.owner_user_id
           AND a.machine_id=r.machine_id AND a.harness=r.harness
+        LEFT JOIN data.space_harness_profiles profile ON profile.space_id=r.space_id AND profile.harness=r.harness
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
           i.presentation_json->>'modelsObservedAt' AS observed_at
           FROM data.run_agent_registrations binding JOIN data.instances i ON i.run_id=binding.run_id
@@ -369,6 +416,8 @@ export class PostgresAgentRegistrationRepository {
             : row.grant_state === "revoked" ? "revoked" : spaceState(row.policy_state),
           canManageOwnerGrant: input.actorUserId === key.ownerUserId, canConfigureSpace: admin,
           canRemoveFromSpace: admin || input.actorUserId === key.ownerUserId,
+          profile: { description: String(row.profile_description ?? ""), revision: Number(row.profile_revision ?? 0) },
+          canDescribe: admin || row.owns_harness === true,
           live: { machine: { online: false }, running: runningInstances(row.running) } };
       });
       return { registrations, nextCursor: rows.length > limit && last

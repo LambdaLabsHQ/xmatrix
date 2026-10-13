@@ -13,7 +13,7 @@ function fixture(user = { id: "owner" }) {
   const calls = [], app = new Hono();
   const record = name => async (_env, input) => { calls.push({ name, input }); return { key }; };
   registerAgentRegistrationRoutes(app, { authenticate: async () => user,
-    control: record("control"), get: record("get"),
+    control: record("control"), get: record("get"), describe: record("describe"),
     changeEnvironment: record("changeEnvironment"), getEnvironment: record("getEnvironment") });
   return { calls, request: (payload = body, action = "commands", physical = false) => app.request(
     `${physical ? "/api/agent-environments" : "/api/spaces/space/agent-registrations"}/${action}`,
@@ -28,6 +28,26 @@ test("registration HTTP commands bind the authenticated human and structured Spa
   assert.deepEqual(route.calls, [{ name: "control", input: { actorUserId: "owner", command: body, byAgent: false } }]);
   assert.equal((await route.request(key, "query")).status, 200);
   assert.deepEqual(route.calls[1], { name: "get", input: { actorUserId: "owner", key } });
+});
+
+test("a harness description is free text, written by a person or by a Run as its owner in its own Space", async () => {
+  const text = "擅长代码审计。\n\nKeep UI work away from it: {\"not\": \"a schema\"}";
+  const route = fixture();
+  assert.equal((await route.request({ harness: "codex", description: text, expectedRevision: 3 }, "profiles")).status, 200);
+  assert.deepEqual(route.calls, [{ name: "describe", input: { actorUserId: "owner", spaceId: "space",
+    command: { harness: "codex", description: text, expectedRevision: 3 } } }]);
+  for (const payload of [{ harness: "codex" }, { harness: "codex", description: "x".repeat(1001) },
+    { harness: "codex", description: "ok", ownerUserId: "someone" }, { harness: "custom", description: "ok" }]) {
+    assert.equal((await route.request(payload, "profiles")).status, 400);
+  }
+  assert.equal(route.calls.length, 1);
+  const run = { ownerUserId: "owner", spaceId: "space", machineId: "machine" };
+  const agent = fixture({ id: "agent-run:run", agentRun: run });
+  assert.equal((await agent.request({ harness: "codex", description: "" }, "profiles")).status, 200);
+  assert.equal(agent.calls[0].input.actorUserId, "owner", "a Run has its owner's authority, no more");
+  const elsewhere = fixture({ id: "agent-run:run", agentRun: { ...run, spaceId: "other" } });
+  assert.equal((await elsewhere.request({ harness: "codex", description: "" }, "profiles")).status, 404);
+  assert.equal(elsewhere.calls.length, 0);
 });
 
 test("physical environment endpoints are owned by the authenticated machine owner, not Space administration", async () => {

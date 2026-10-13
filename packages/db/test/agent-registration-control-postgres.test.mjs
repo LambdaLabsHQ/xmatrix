@@ -22,7 +22,7 @@ integration("composite registration commands preserve identity, configuration an
         lease_until timestamptz,version bigint,updated_at timestamptz,finished_at timestamptz)`));
     for (const file of ["0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql", "0062_expand_registration_execution_revision.sql", "0067_expand_registration_grant_execution_revision.sql", "0063_expand_registration_authority.sql", "0064_expand_registration_enrollments.sql",
       "0061_expand_registration_commands.sql", "0065_expand_registration_environment.sql", "0068_expand_registration_run_bindings.sql",
-      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0069_expand_registration_stop_intents.sql", "0101_expand_registration_role.sql", "0102_contract_registration_create_command.sql"]) await client.query(sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
+      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0069_expand_registration_stop_intents.sql", "0101_expand_registration_role.sql", "0102_contract_registration_create_command.sql", "0185_expand_space_harness_profiles.sql"]) await client.query(sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
     await client.query(`INSERT INTO ${schema}.agent_registration_authority (space_id,mode,manifest_digest,version)
       VALUES ('a','composite',repeat('a',64),1),('b','composite',repeat('b',64),1)`);
     await client.query(`CREATE TABLE ${schema}.space_members (space_id text,user_id text,role text)`);
@@ -92,6 +92,25 @@ integration("composite registration commands preserve identity, configuration an
     assert.equal(catalog.registrations[0].ownerName, "Owner label");
     assert.equal(catalog.registrations[0].state, "enabled");
     assert.deepEqual(catalog.registrations[0].models, []);
+    // One free text per Space and harness. An owner or admin writes it, and so does whoever has an Agent of that harness here.
+    assert.deepEqual(catalog.registrations[0].profile, { description: "", revision: 0 });
+    assert.equal(catalog.registrations[0].canDescribe, true);
+    const describe = { spaceId: "a", harness: "codex", requestId: "describe" };
+    await rejects(() => repo.describe({ ...describe, actorUserId: "member", description: "mine" }), "harness_profile_authority_required");
+    await rejects(() => repo.describe({ ...describe, actorUserId: "outsider", description: "mine" }), "registration_not_found");
+    await rejects(() => repo.describe({ ...describe, harness: "claude", actorUserId: "admin", description: "none here" }), "registration_not_found");
+    const prose = "  擅长代码审计。\nKeep it away from UI work, it is slow there.  ";
+    assert.deepEqual(await repo.describe({ ...describe, actorUserId: "owner", description: prose, expectedRevision: 0 }),
+      { harness: "codex", description: prose.trim(), revision: 1 });
+    assert.deepEqual(await repo.describe({ ...describe, actorUserId: "admin", description: prose }),
+      { harness: "codex", description: prose.trim(), revision: 1 }, "saving the same text changes nothing");
+    await rejects(() => repo.describe({ ...describe, actorUserId: "admin", description: "stale", expectedRevision: 0 }),
+      "harness_profile_revision_conflict");
+    assert.equal((await repo.describe({ ...describe, actorUserId: "admin", description: "" })).revision, 2);
+    await repo.describe({ ...describe, actorUserId: "admin", description: prose, expectedRevision: 2 });
+    const described = (await repo.list({ ...listing, actorUserId: "member" })).registrations[0];
+    assert.deepEqual([described.profile, described.canDescribe], [{ description: prose.trim(), revision: 3 }, false]);
+    assert.equal((await other.list({ ...listing, spaceId: "b" })).registrations[0].profile.revision, 0, "a profile is its Space's alone");
     await new PostgresAgentEnvironmentRepository(database).change({
       key: { ownerUserId: "owner", machineId: "machine", harness: "codex" }, actorUserId: "owner", commandId: "physical",
       expectedVersion: 0, expectedMachineVersion: 0, machineMaxConcurrent: 2, environment: {

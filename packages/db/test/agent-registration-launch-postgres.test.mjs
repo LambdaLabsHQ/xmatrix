@@ -35,7 +35,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       "0083_expand_natural_key_reservations.sql",
       "0058_expand_reborn_intents.sql", "0073_expand_reborn_failure_notice.sql",
       "0001_expand_space_placement.sql", "0024_expand_global_space_routing.sql", "0057_expand_agent_display_names.sql",
-      "0117_expand_instance_rest_state.sql", "0160_expand_instance_wake.sql"]) {
+      "0117_expand_instance_rest_state.sql", "0160_expand_instance_wake.sql", "0185_expand_space_harness_profiles.sql"]) {
       await sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
     }
     await sql(`ALTER TABLE data.instances ADD COLUMN IF NOT EXISTS presentation_json jsonb NOT NULL DEFAULT '{}'::jsonb;
@@ -344,9 +344,12 @@ integration("launch survives a hostname change with stale Workspace metadata and
       $1::jsonb||jsonb_build_object('connectionEpoch',connection_epoch))`, [{
       observedAt: new Date(Date.now() - 3_600_000).toISOString(), cpuLogicalCount: 8, cpuUsagePercent: 97,
       memoryTotalBytes: 10000, memoryAvailableBytes: 100 }]);
+    await sql(`INSERT INTO data.space_harness_profiles VALUES ('space','codex','Reviews and audits.',2,now())`);
     const routed = await launches.dispatchFromMessage({ commandId: "capability", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "capability", body: capabilityBody }, async ({ candidates, tags }) => {
         assert.equal(Object.hasOwn(tags, "oneshot"), false);
+        // Routing reads the Space's profile of the harness, not the registration's retired description.
+        assert.equal(candidates[0].description, "Reviews and audits.");
         assert.equal(candidates[0].supportsRequestedEffort, true);
         assert.deepEqual(candidates[0].modelAliases, { model: "provider/model" });
         assert.equal(candidates[0].observations.quota.remainingPercent, 0);

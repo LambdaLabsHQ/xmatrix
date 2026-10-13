@@ -40,6 +40,7 @@ import { AgentListGroups, agentListGroups } from "./agent-list-groups";
 import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
+import { HarnessProfileSection } from "./harness-profile-section";
 import { HarnessSignInSection } from "./harness-sign-in";
 import { IdentityAvatar } from "./identity-avatar";
 import { MeterReadingList } from "./machine-load-panel";
@@ -247,6 +248,7 @@ export function MyAgentsView({
             />
           </ToolDetailSection>
         )}
+        <HarnessProfileSection registration={registration} token={token} onSaved={() => catalog.refetch()} />
         {running.length > 0 && (
           <ToolDetailSection title={`Running now · ${running.length}`}>
             <ul className="app-tool-lines">

@@ -45,6 +45,11 @@ test('Jev scores each harness on its own question and never sees load, quota or 
   assert.deepEqual([described('fit_0'), described('fit_1')], [
     { harness: 'codex', descriptions: ['first'], models: ['small', 'large'] },
     { harness: 'claude', descriptions: ['last'], models: ['small', 'large'] }]);
+  // The receipt can say whether the chosen Agent was judged from a description or from its name alone.
+  assert.deepEqual(result.parameterEvidence.placement.ranking.map(item => item.described), [true, true]);
+  const undescribed = await registrationLaunchChooser(async input => answer(input))({ message: 'review this design', tags: {},
+    candidates: twoHarnesses.map(candidate => ({ ...candidate, description: '' })) });
+  assert.deepEqual(undescribed.parameterEvidence.placement.ranking.map(item => item.described), [false, false]);
   assert.equal(calls[0].questions.fit_0.type, 'score');
   assert.equal(calls[0].questions.fit_0.criteria.length, 4);
   for (const call of calls) assert.doesNotMatch(JSON.stringify(call.questions), /observations|quota|Allocations|machineId/u);

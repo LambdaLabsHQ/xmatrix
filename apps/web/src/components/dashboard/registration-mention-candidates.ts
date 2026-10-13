@@ -1,4 +1,4 @@
-import { agentAvatarUrlFromMetadata, type AgentCapabilitySummary } from "@xmatrix/protocol";
+import { agentAvatarUrlFromMetadata, harnessProfileSummary, type AgentCapabilitySummary } from "@xmatrix/protocol";
 import { machineLabelText, ownerLabelText } from "./agent-identity-format";
 import type { MentionCandidate } from "./mention-complete";
 
@@ -29,7 +29,9 @@ export function registrationMentionCandidates(existing: readonly MentionCandidat
     group.locations.some(location => location.state === "enabled" && location.routingReady));
   return [...groups.map<MentionCandidate>(group => ({ id: `capability:${group.harness}`, name: group.harness,
     kind: "agent", status: "offline", mention: group.harness, completionSuffix: " ", avatarUrl: icon(group.harness),
-    description: `Choose automatically · @${group.harness}/ to choose a location`,
+    // What the Space says the harness is for, when it says so; otherwise how to address it.
+    description: harnessProfileSummary(group.locations.find(location => location.profile?.description)?.profile?.description ?? "")
+      || `Choose automatically · @${group.harness}/ to choose a location`,
     invocationTarget: { kind: "capability", harness: group.harness } })),
   ...existing.filter(candidate => !(candidate.kind === "agent" && !candidate.action && candidate.completionSuffix === ":"))];
 }

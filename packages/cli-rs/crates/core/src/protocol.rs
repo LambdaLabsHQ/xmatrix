@@ -81,6 +81,11 @@ pub fn space_agent_registration_command_route(space_id: &str) -> String {
     format!("{}/commands", space_agent_registrations_route(space_id))
 }
 
+/// What the Space says each harness is for; routing reads it.
+pub fn space_harness_profile_command_route(space_id: &str) -> String {
+    format!("{}/profiles", space_agent_registrations_route(space_id))
+}
+
 /// Cross-Space read grants (docs/cross-space-read-grants.md), addressed by the
 /// target Space that holds them.
 pub fn cross_space_read_grant_route(space_id: &str, grant_id: &str) -> String {

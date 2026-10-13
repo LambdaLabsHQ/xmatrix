@@ -33,3 +33,24 @@ test("a Space admin sets an Agent's working mode and instructions", async ({ pag
       instructions: "Review only. Ask before merging.", workspaceReferences: ["/repo"] } })]);
   expect(errors).toEqual([]);
 });
+
+test("whoever may describe a harness writes what it is for in place, as free text", async ({ page }) => {
+  const described = { ...registration, canConfigureSpace: false,
+    profile: { description: "Careful code review.", revision: 2 }, canDescribe: true };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
+  await fixtureJson(page, "catalog", CATALOG, { registrations: [described],
+    capabilities: [{ harness: "codex", models: [], locations: [described] }] });
+  await fixtureJson(page, "profile", "**/api/xmatrix/spaces/*/agent-registrations/profiles",
+    { harness: "codex", description: "saved", revision: 3 }, { method: "POST" });
+  await page.goto("/app/personal-sspaceperso/agents");
+  await page.getByTestId("agent-row").filter({ hasText: "Remote server" }).click();
+  const text = page.getByLabel("When to pick codex");
+  await expect(text).toHaveValue("Careful code review.");
+  await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+  const prose = "擅长代码审计。\nKeep UI work away from it: it is slow there.";
+  await text.fill(prose);
+  await page.screenshot({ path: test.info().outputPath("harness-profile.png") });
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "profile")).toEqual([
+    { harness: "codex", description: prose, expectedRevision: 2 }]);
+});

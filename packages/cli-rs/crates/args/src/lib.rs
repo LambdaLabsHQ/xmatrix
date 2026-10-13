@@ -1773,6 +1773,20 @@ pub enum AgentCommand {
         #[arg(long)]
         connections: bool,
     },
+    /// Say what a harness is for in a Space, in any words. Automatic routing
+    /// reads it when it decides which Agent suits a piece of work. Without
+    /// text, print the current description
+    Describe {
+        /// Harness id, for example codex or claude
+        harness: String,
+        /// The description: free text, up to 1000 characters. Empty clears it.
+        text: Option<String>,
+        #[arg(long)]
+        space: String,
+        /// Read the description from stdin
+        #[arg(long, conflicts_with = "text")]
+        stdin: bool,
+    },
     /// Remove an Agent from a Space
     #[command(alias = "rm")]
     Remove {
