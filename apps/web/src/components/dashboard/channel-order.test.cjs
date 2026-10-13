@@ -17,6 +17,8 @@ const channelLinksSource = fs.readFileSync(path.join(__dirname, "channel-links.t
 // is a self-contained pure function, so the extracted set needs no stubs.
 const ORDERING_FUNCTIONS = [
   "timestampMs",
+  "channelSortTimes",
+  "channelSortTimestamps",
   "channelRecentActivityMs",
   "channelPinnedAtMs",
   "channelIsPinned",
@@ -169,4 +171,30 @@ test("pinned catalog rows keep their pin order ahead of newer activity", () => {
     rankCatalogChannels(hubOrder, ["pin-a", "pin-b"]).map((channel) => channel.id),
     ["pin-a", "pin-b", "busy"]
   );
+});
+
+test("invalid and missing timestamps retain zero-time title and id fallbacks", () => {
+  const channels = [
+    { id: "z-last", name: "", createdAt: "invalid", updatedAt: "invalid" },
+    { id: "beta", name: "#beta", lastMessage: { sentAt: "invalid" } },
+    { id: "a-first", name: "" },
+    { id: "alpha", name: "#alpha", createdAt: "1960-01-01T00:00:00Z" },
+  ];
+  assert.deepEqual(channels.sort(compareChannelsForSidebar).map(channel => channel.id),
+    ["a-first", "alpha", "beta", "z-last"]);
+  const sameTitle = [{ id: "second", name: "same" }, { id: "first", name: "same" }];
+  assert.deepEqual(sameTitle.sort(compareChannelsForSidebar).map(channel => channel.id), ["second", "first"]);
+});
+
+test("replacement snapshots receive their new activity and pin times", () => {
+  const older = Object.freeze(channelWithMessage("older", "older", POSTED_YESTERDAY));
+  const newer = Object.freeze(channelWithMessage("newer", "newer", CREATED_JUST_NOW));
+  assert.ok(compareChannelsForSidebar(older, newer) > 0);
+  const updated = { ...older, lastMessage: { sentAt: "2026-08-07T12:00:00Z" } };
+  assert.ok(compareChannelsForSidebar(updated, newer) < 0);
+  const pinned = { ...newer, metadata: { pinned_at: CREATED_JUST_NOW } };
+  assert.ok(compareChannelsForSidebar(pinned, updated) < 0);
+  const invalidPin = { ...pinned, metadata: { pinnedAt: "invalid", pinned_at: CREATED_JUST_NOW } };
+  assert.ok(compareChannelsForSidebar(invalidPin, updated) > 0,
+    "an explicit invalid pinnedAt still takes precedence over the legacy field");
 });

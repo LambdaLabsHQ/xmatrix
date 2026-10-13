@@ -111,17 +111,33 @@ test.describe("desktop channel selection", () => {
     await expect(caret).toBeVisible();
     await expect.poll(() => textarea.evaluate((node) => getComputedStyle(node).caretColor)).toBe("rgba(0, 0, 0, 0)");
 
+    // The native caret switches immediately; the hint still has its visible entrance.
+    await page.locator(".app-composer-hint").evaluate(async (node) => {
+      const entrances = node.getAnimations({ subtree: true }).filter((animation) =>
+        Number.isFinite(animation.effect?.getTiming().iterations));
+      await Promise.all(entrances.map((animation) => animation.finished));
+    });
     const middles = await page.evaluate(() => {
       const middle = (element: Element | null) => {
         const box = element!.getBoundingClientRect();
         return { middle: (box.top + box.bottom) / 2, width: box.width };
       };
-      return {
+      const read = () => ({
         row: middle(document.querySelector(".composer-input-row")),
         attach: middle(document.querySelector(".composer-attach .app-composer-inline-icon")),
         chip: middle(document.querySelector(".app-composer-hint-trigger")),
         caret: middle(document.querySelector(".app-composer-caret")),
-      };
+      });
+      return new Promise<ReturnType<typeof read>>((resolve) => {
+        const painted = new MessageChannel();
+        painted.port1.onmessage = () => {
+          const result = read();
+          painted.port1.close();
+          painted.port2.close();
+          resolve(result);
+        };
+        requestAnimationFrame(() => painted.port2.postMessage(null));
+      });
     });
     expect(middles.caret.width).toBe(2);
     for (const part of [middles.attach, middles.chip, middles.caret]) {

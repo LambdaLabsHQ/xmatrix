@@ -315,11 +315,12 @@ function ComposerInputSurface({
             }}
             aria-label={ariaLabel}
             className={cn(
-              "composer-textarea flex-1 resize-none border-0 bg-transparent shadow-none outline-none transition-[background-color,border-color,box-shadow] duration-200 focus-visible:ring-0",
+              "composer-textarea flex-1 resize-none border-0 bg-transparent shadow-none outline-none transition-[background-color,border-color,box-shadow,opacity] duration-200 focus-visible:ring-0",
               compact ? "min-h-0 p-0 text-sm" : "min-h-9 px-0 py-1.5 text-sm sm:min-h-11 sm:py-2 sm:text-[15px]"
             )}
           />
-          {onSummonStartAnyway && <ComposerSummonOptions readings={summonReadings ?? []}
+          {onSummonStartAnyway && summonReadings?.some(reading => reading.choice !== "summon") &&
+            <ComposerSummonOptions readings={summonReadings}
             textareaRef={textareaRef} disabled={disabled || !enabled || sending} onStartAnyway={onSummonStartAnyway} />}
           </div>
           {inputTrailing}
