@@ -249,9 +249,9 @@ export function unexpectedResponse(what: string): XMatrixApiError {
 }
 
 /** A successful response's JSON; a failed one throws the classified error before its body is read. */
-export async function requireJson<T>(response: Response): Promise<T> {
+export async function requireJson<T>(response: Response, signal?: AbortSignal): Promise<T> {
   if (!response.ok) throw await errorFromResponse(response);
-  return readResponseJson<T>(response);
+  return readResponseJson<T>(response, signal);
 }
 
 /** The record a successful response promised under `field`; `what` names it if it is missing. */
