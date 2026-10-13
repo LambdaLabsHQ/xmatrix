@@ -9,7 +9,7 @@ import {
   type SerializedChannel,
 } from "@xmatrix/protocol";
 
-import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
+import { requireJson, xmatrixRawResponse } from "@/lib/query/api-client";
 import { fetchChannelCatalog } from "./workspace-admin-views";
 
 export interface NormalizedChannelCatalogQuery {
@@ -71,8 +71,7 @@ async function requestCatalogPage(input: {
       counts: { active: rows.length, unread: 0, mentions: 0 },
     };
   }
-  if (!response.ok) throw await errorFromResponse(response);
-  return response.json() as Promise<ChannelCatalogPage>;
+  return requireJson<ChannelCatalogPage>(response, input.signal);
 }
 
 export async function fetchChannelCatalogPage(input: {
@@ -136,8 +135,7 @@ export async function fetchChannelCatalogResolve(input: {
     cache: "no-store",
   });
   if (response.status !== 404 && response.status !== 426) {
-    if (!response.ok) throw await errorFromResponse(response);
-    return response.json() as Promise<ChannelCatalogResolveResult>;
+    return requireJson<ChannelCatalogResolveResult>(response, input.signal);
   }
   const legacy = await fetchChannelCatalog(input.token, { spaceId: input.spaceId });
   const byId = new Map(legacy.channels.map((channel) => [channel.id, channel]));

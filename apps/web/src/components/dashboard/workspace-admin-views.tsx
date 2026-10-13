@@ -179,7 +179,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { tagClass } from "./status-tag";
-import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField } from "@/lib/query/api-client";
+import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField, requireJson } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
@@ -1620,13 +1620,11 @@ export async function fetchChannelCatalog(
     throw error;
   }
 
-  if (!res.ok) throw await errorFromResponse(res);
-
-  const data = (await res.json()) as {
+  const data = await requireJson<{
     channels?: SerializedChannel[];
     catalogSync?: unknown;
     attentionSnapshot?: unknown;
-  };
+  }>(res, sequenceSignal);
   const catalogSync = parsedChannelCatalogSync(data.catalogSync);
   const attentionSnapshot = parsedChannelAttentionSnapshot(data.attentionSnapshot);
   if (data.catalogSync !== undefined && !catalogSync) {

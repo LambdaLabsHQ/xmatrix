@@ -79,8 +79,10 @@ This classification does not add retries or change notification routing.
   response defects; caller cancellation passes through unchanged. Successful
   JSON is parsed in JavaScript so WebKit failures keep a reader stack. Invalid
   JSON reports only HTTP status, empty/nonempty body and a closed media category,
-  never response snippets or arbitrary header values. Transfer proposal reads
-  use this typed transport so a dropped body reaches Query's bounded retries.
+  never response snippets or arbitrary header values. Transfer proposal and
+  Channel catalog reads (pages, counts, path resolution and the legacy list)
+  use this reader so a dropped body reaches Query's bounded retries. Catalog
+  readers pass their cancellation signal through to body classification.
   It reads a failed response into an
   `XMatrixApiError` carrying `retryable` and `retryAfterMs` (`errorFromResponse`).
   ESLint forbids the global `fetch` in client code; only the transport itself
