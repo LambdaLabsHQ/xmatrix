@@ -249,7 +249,8 @@ time:
   Space admin approves or denies it in the Channel's Pending approvals. Each
   approval covers one request only; duplicate clicks cannot dispatch twice.
 - **`disallow`.** Block the action. Legacy `deny` remains the same restrictive alias.
-- **Default.** Gmail send/reply use ask; other actions retain allow. Existing
+- **Default.** Gmail send/reply and Google Ads mutate/set_campaign_status use
+  ask; other actions retain allow. Existing
   explicit overrides keep their meaning. GitHub's specialized dispatcher does
   not support ask and rejects it.
 
