@@ -7,7 +7,7 @@ import { connectorAppRepository, connectorCredentialRepository, connectorSentryE
 import { connectionCredentials } from "./connection-credentials";
 import { connectorEvent, record } from "./event-format";
 import { deliverEvent } from "./event-ingress";
-import { providerJson } from "./http";
+import { providerJson, ProviderRequestError } from "./http";
 import { sentryInstallationClient, validateSentryInstallationCredentials, verifySentryInstallation } from "./sentry-installation";
 
 export interface SentryDrainDependencies {
@@ -25,6 +25,7 @@ const defaults: SentryDrainDependencies = { receipts: connectorSentryEventReposi
   append: dispatchProductMessageAppend, automations: fireConnectorAutomationTriggers };
 const ISSUE_FEATURES: Record<string, string> = { created: "issue.created", resolved: "issue.resolved", unresolved: "issue.regressed",
   assigned: "issue.assigned", ignored: "issue.ignored", archived: "issue.ignored" };
+type DrainStage = "binding" | "refresh" | "credentials" | "installation" | "project" | "channel" | "automation";
 
 /** Bounded, durable claim. Both post-commit wake and minute recovery use this same primary App owner. */
 export async function drainSentryEvents(env: Env, dependencies: SentryDrainDependencies = defaults): Promise<void> {
@@ -40,24 +41,31 @@ export async function drainSentryEvents(env: Env, dependencies: SentryDrainDepen
   } };
   await Promise.all(jobs.map(async job => {
     let outcome: "done" | "obsolete" | "retry" = "retry";
+    const progress: { stage: DrainStage } = { stage: "binding" };
     try {
-      outcome = await deliverSentryJob(env, job, shared) ? "done" : "obsolete";
-    } catch {
+      outcome = await deliverSentryJob(env, job, shared, progress) ? "done" : "obsolete";
+    } catch (error) {
       // Never log provider error strings, private responses, identities or credentials.
-      console.error("Sentry event attempt failed");
+      console.error("Sentry event attempt failed", { stage: progress.stage,
+        ...(error instanceof ProviderRequestError && Number.isInteger(error.status) && error.status >= 100 && error.status <= 599
+          ? { providerStatus: error.status } : {}) });
     }
     await receipts.finish({ ...job, requestId: crypto.randomUUID(), outcome });
   }));
 }
 
-async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: SentryDrainDependencies): Promise<boolean> {
+async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: SentryDrainDependencies,
+  progress: { stage: DrainStage }): Promise<boolean> {
   const receipts = dependencies.receipts(env);
   const current = () => receipts.current({ ...job, requestId: crypto.randomUUID() });
   if (!await current()) return false;
   // A refresh persists its complete rotated pair. It cannot create a new grant generation.
+  progress.stage = "refresh";
   await dependencies.refresh(env, job.spaceId, "sentry");
+  progress.stage = "binding";
   const binding = await current();
   if (!binding) return false;
+  progress.stage = "credentials";
   const resolved = await dependencies.credentials(env).resolve({ requestId: crypto.randomUUID(), spaceId: job.spaceId, providerId: "sentry" });
   if (!resolved || resolved.connectionId !== job.connectionId || resolved.status !== "configured" || resolved.version !== binding.credentialVersion) {
     throw new Error("Sentry grant changed during drain");
@@ -65,6 +73,7 @@ async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: Sen
   const fields = resolved.values;
   validateSentryInstallationCredentials(fields);
   if (fields.oauthClientId !== job.appClientId || fields.oauthAppUuid !== job.appUuid || fields.oauthInstallationId !== job.installationId) return false;
+  progress.stage = "installation";
   await dependencies.verify(fields);
   const identity = job.identity;
   if ((identity.organizationId && identity.organizationId !== fields.oauthOrganizationId) ||
@@ -73,6 +82,7 @@ async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: Sen
   // Current installed token must prove each named project in the verified organization.
   // URLs are built from typed references; no signed or unsigned payload URL is fetched.
   for (const slug of projects) {
+    progress.stage = "project";
     const project = await dependencies.request(`https://sentry.io/api/0/projects/${encodeURIComponent(fields.oauthOrganization!)}/${encodeURIComponent(slug)}/`,
       { headers: { authorization: `Bearer ${fields.oauthToken}` } });
     const organization = record(project.organization);
@@ -80,6 +90,7 @@ async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: Sen
         organization.slug !== fields.oauthOrganization || (identity.projectId && String(project.id) !== identity.projectId)) return false;
   }
   for (const slug of projects) {
+    progress.stage = "binding";
     const fresh = await current();
     if (!fresh) return false;
     // Provider proof used exactly this token version. A concurrent rotation retries before effects.
@@ -97,13 +108,16 @@ async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: Sen
       if (!live || live.credentialVersion !== resolved.version) return new Response(null, { status: 503 });
       return dependencies.append(...args);
     };
+    progress.stage = "channel";
     await deliverEvent(env, dependencies.apps(env), append, "sentry", job.connectionId, event, {
       providerId: "sentry", appClientId: job.appClientId, installationId: job.installationId,
       credentialVersion: fresh.credentialVersion, grantGeneration: job.grantGeneration });
+    progress.stage = "binding";
     const automationGrant = await current();
     if (!automationGrant) return false;
     if (automationGrant.credentialVersion !== resolved.version) throw new Error("Sentry credentials changed before Automation delivery");
     // Failure remains durable retry work; already committed Channel/Automation ids make repeats safe.
+    progress.stage = "automation";
     await dependencies.automations(env, { spaceId: job.spaceId, provider: "sentry", event });
   }
   return true;

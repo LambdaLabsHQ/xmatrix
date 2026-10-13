@@ -974,6 +974,13 @@ organization and projects before dispatch. Payload URLs are never fetched.
 Current grant generation and credential version fence subscription routing;
 current bindings are checked again before every individual Channel append and Automation dispatch.
 
+Drain failures retain their durable retry outcome and report only a finite stage
+(`binding`, `refresh`, `credentials`, `installation`, `project`, `channel`, or
+`automation`) and a valid HTTP status when the provider boundary supplies one.
+Error messages, response bodies, credentials and grant identities are excluded.
+An eventual successful retry does not establish the original failure's cause;
+incidents with no originating evidence stay unresolved until it is understood.
+
 The signed body digest deduplicates seven days of exact redelivery, independent
 of unsigned headers. Accepting a receipt freezes at most 50 current grant
 bindings, preventing a later reconnect from gaining earlier work. Admission is
