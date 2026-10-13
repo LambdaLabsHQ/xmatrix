@@ -2457,16 +2457,16 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       attachments,
     });
     setOutgoingMessages((current) => [...current, outgoing]);
-    await attemptOutgoingSend(channel, outgoing);
+    await attemptOutgoingSend(s.token, channel, outgoing);
   }
 
   /** One attempt at appending a pending row. Sending again runs it under the same clientMessageId. */
-  async function attemptOutgoingSend(channel: SerializedChannel, outgoing: OutgoingMessage) {
+  async function attemptOutgoingSend(token: string, channel: SerializedChannel, outgoing: OutgoingMessage) {
     const { clientMessageId, body, invocationSelections, summonIntents, attachments, replyToMessageId, appMentions, sentAt } = outgoing;
     const channelId = channel.id;
     try {
       const payload = await appendChannelMessageWithAttachments({
-        token: s.token,
+        token,
         channel,
         clientMessageId,
         body,
@@ -2571,7 +2571,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setOutgoingMessages((current) =>
       current.map((item) => item.clientMessageId === retried.clientMessageId ? retried : item)
     );
-    void attemptOutgoingSend(channel, retried);
+    void attemptOutgoingSend(s.token, channel, retried);
   }
 
   /** Whether the answer was posted; a card stays open when it was not. */
