@@ -79,3 +79,10 @@ test("short ASCII completion summaries remain unchanged", async () => {
   const { finalized } = await execute({ status: "completed", summary });
   assert.equal(finalized.resultSummary, summary);
 });
+
+test("a receipt ends its sentence once, whether or not the summary already did", async () => {
+  const line = async (summary) => (await execute({ status: "completed", summary })).result;
+  assert.equal(await line("Marked APP-1 resolved"), "Sentry read_issue: completed; Marked APP-1 resolved.");
+  assert.equal(await line("Marked APP-1 resolved."), "Sentry read_issue: completed; Marked APP-1 resolved.");
+  assert.equal(await line("Issue:\n```\ntext\n```"), "Sentry read_issue: completed; Issue:\n```\ntext\n```", "a fence is not followed by a stray full stop");
+});

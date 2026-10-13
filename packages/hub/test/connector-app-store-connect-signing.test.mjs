@@ -72,4 +72,7 @@ test("a profile ties the bundle ID's own resource to the named certificate", asy
   assert.deepEqual(created.calls.at(-1).body, { type: "profiles", attributes: { name: "xMatrix com.example.app IOS_APP_STORE", profileType: "IOS_APP_STORE" },
     relationships: { bundleId: { data: { type: "bundleIds", id: "bid-1" } }, certificates: { data: [{ type: "certificates", id: "cert-9" }] } } });
   assert.match(created.value.summary, /profile prof-9 .* UUID 0f6c\) for com\.example\.app, expires 2027-10-13\. .*@appstoreconnect:read_profile:prof-9/u);
+  /* Apple lists the profiles Xcode manages and then answers 404 for them; the receipt says what to do instead. */
+  await withApple({ "GET /v1/profiles/managed-1": { status: 404, errors: [{ code: "NOT_FOUND", detail: "There is no resource of type 'profiles' with id 'managed-1'." }] } },
+    () => assert.rejects(ACTIONS.read_profile.execute({ credentials }, { id: "managed-1" }), /with id 'managed-1'\. A profile Xcode manages .* create one with create_profile/u));
 });

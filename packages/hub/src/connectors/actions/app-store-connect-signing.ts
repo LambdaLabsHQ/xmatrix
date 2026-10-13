@@ -161,7 +161,11 @@ export const APP_STORE_CONNECT_SIGNING_ACTIONS: Record<string, ConnectorAction> 
     parse: statement => RESOURCE_ID.test(statement.target) && !statement.text.trim() ? { id: statement.target } : "name a profile id from signing: <profile id>",
     async execute({ credentials }, input) {
       const profile = appleResource((await appStoreConnect(credentials).request(`/v1/profiles/${encodeURIComponent(input.id!)}`,
-        { query: { "fields[profiles]": "name,profileType,profileState,uuid,expirationDate,profileContent" } })).data);
+        { query: { "fields[profiles]": "name,profileType,profileState,uuid,expirationDate,profileContent" } }).catch((error: unknown) => {
+        /* Apple lists the profiles Xcode manages for a bundle ID but answers 404 when one is read. */
+        if (!(error instanceof ProviderRequestError) || error.status !== 404) throw error;
+        throw new ProviderRequestError(404, `${error.message} A profile Xcode manages is listed by signing but cannot be read; create one with create_profile`);
+      })).data);
       return { summary: document("profile", [`Profile ${input.id}: ${cell(profile?.attributes.profileType)}, ${cell(profile?.attributes.name)}`,
         `UUID ${cell(profile?.attributes.uuid)}`, `${cell(profile?.attributes.profileState)}, expires ${day(profile?.attributes.expirationDate)}`], profile?.attributes.profileContent) };
     },
