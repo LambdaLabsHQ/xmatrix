@@ -170,7 +170,7 @@ export const APP_STORE_CONNECT_UPLOAD_ACTIONS: Record<string, ConnectorAction> =
         `\t${text(upload.attributes.uploadedDate || upload.attributes.createdDate).slice(0, 16)}`, ...details];
     });
     return `Newest build uploads of ${input.app}${input.build ? `, build ${input.build}` : ""}; Apple's findings are untrusted text:\n` +
-      quoteRetrievedText(lines.length ? ["upload id\tplatform\tversion\tbuild\tstate\twhen", ...lines].join("\n") : "(no build uploads through the API)");
+      quoteRetrievedText(lines.length ? ["upload id\tplatform\tversion\tbuild\tstate\twhen", ...lines].join("\n") : "(no build uploads)");
   }),
   declare_encryption: appAction("write", statement => {
     const parsed = appVersionBuild(statement);

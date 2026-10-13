@@ -4,6 +4,8 @@ import { APP_STORE_CONNECT_READ_ACTIONS } from "./actions/app-store-connect";
 import { APP_STORE_CONNECT_LISTING_ACTIONS } from "./actions/app-store-connect-listing";
 import { APP_STORE_CONNECT_MEDIA_ACTIONS } from "./actions/app-store-connect-media";
 import { APP_STORE_CONNECT_RELEASE_ACTIONS } from "./actions/app-store-connect-release";
+import { APP_STORE_CONNECT_SIGNING_ACTIONS } from "./actions/app-store-connect-signing";
+import { APP_STORE_CONNECT_TESTFLIGHT_ACTIONS } from "./actions/app-store-connect-testflight";
 import { APP_STORE_CONNECT_UPLOAD_ACTIONS } from "./actions/app-store-connect-uploads";
 import { APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "./app-store-connect-api";
 import { receiveAppStoreConnectDelivery } from "./app-store-connect-events";
@@ -71,7 +73,8 @@ const PROVIDERS: Record<string, {
   gcp: { receive: receiveGcpDelivery, actions: GCP_ACTIONS, verify: verifyGcp },
   appstoreconnect: { receive: (delivery) => receiveAppStoreConnectDelivery(delivery),
     actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS,
-      ...APP_STORE_CONNECT_UPLOAD_ACTIONS, ...APP_STORE_CONNECT_MEDIA_ACTIONS },
+      ...APP_STORE_CONNECT_UPLOAD_ACTIONS, ...APP_STORE_CONNECT_MEDIA_ACTIONS, ...APP_STORE_CONNECT_SIGNING_ACTIONS,
+      ...APP_STORE_CONNECT_TESTFLIGHT_ACTIONS },
     verify: verifyAppStoreConnect, subscriptions: APP_STORE_CONNECT_SUBSCRIPTIONS },
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },
