@@ -652,3 +652,23 @@ test("a failing live read backs off and a hidden tab asks rarely", () => {
   assert.equal(next(false, { held: true }), 0);
   assert.equal(next(false, { hidden: true }), 15_000);
 });
+
+test("live trace watermark uses the latest instant across offsets and fractional precision", async () => {
+  const reads = [];
+  const latest = "2026-10-13T08:00:00.123000003Z";
+  const sync = startAgentTraceHistorySync({
+    instanceIds: ["instance:one"], refreshIntervalMs: 250,
+    fetchHistory: async (instanceId, options) => {
+      reads.push(options.since);
+      return historyResponse(instanceId, options.since ? [] : [
+        trace(instanceId, "latest", latest),
+        trace(instanceId, "older-offset", "2026-10-13T10:00:00.123000002+02:00"),
+        trace(instanceId, "older-short-fraction", "2026-10-13T08:00:00.123Z"),
+      ]);
+    },
+    onState: () => undefined, onEvents: () => undefined,
+  });
+  await waitForTraceReads(sync, reads, 2);
+  sync.cancel();
+  assert.equal(reads[1], latest);
+});

@@ -1,4 +1,4 @@
-import { timestampMillisOrZero as timestampMs } from "./time-display";
+import { compareAgentTraceEvents } from "./agent-trace-replica";
 import type { ChannelMessage, ObservabilityEvent } from "@xmatrix/protocol";
 
 export type AgentTraceTargetLike = {
@@ -363,7 +363,7 @@ function traceEventRecords(events: ObservabilityEvent[]): TraceEventRecord[] {
   return events
     .map(traceEventRecord)
     .filter((record) => record.phase)
-    .sort((left, right) => left.timestamp - right.timestamp || left.event.id.localeCompare(right.event.id));
+    .sort((left, right) => compareAgentTraceEvents(left.event, right.event));
 }
 
 function traceEventRecord(event: ObservabilityEvent): TraceEventRecord {
@@ -380,7 +380,7 @@ function traceEventRecord(event: ObservabilityEvent): TraceEventRecord {
     event,
     // Cached, so an undated event keeps one position (and one card key)
     // instead of moving to "now" on every rebuild.
-    timestamp: timestampMs(event.timestamp) || Date.now(),
+    timestamp: Date.parse(event.timestamp) || Date.now(),
     phase: typeof payload?.phase === "string" ? payload.phase : "",
     payload,
     inner,

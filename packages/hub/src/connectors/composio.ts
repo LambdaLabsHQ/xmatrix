@@ -52,11 +52,13 @@ export async function composioConnectedAccount(client: ComposioClient, userId: s
   return id;
 }
 
-/** One GET to the provider's API through Composio as the stored account; returns the provider's JSON. */
+/**
+ * One GET to the provider's API through Composio as the stored account; returns the provider's JSON.
+ * Each query parameter appears once: Composio's proxy keeps only the last of a repeated name.
+ */
 export async function composioGet(credentials: Readonly<Record<string, string>>, endpoint: string,
-  query: Record<string, string | string[]> = {}): Promise<Record<string, unknown>> {
-  const parameters = Object.entries(query).flatMap(([name, values]) =>
-    (Array.isArray(values) ? values : [values]).map(value => ({ name, value, type: "query" })));
+  query: Record<string, string> = {}): Promise<Record<string, unknown>> {
+  const parameters = Object.entries(query).map(([name, value]) => ({ name, value, type: "query" }));
   return composioProxy(credentials, { endpoint, method: "GET", parameters });
 }
 

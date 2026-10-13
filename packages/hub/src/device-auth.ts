@@ -10,6 +10,7 @@ import {
   readBearerToken,
   verifyAuthToken,
 } from "./auth";
+import { ATTEMPT_WINDOW_MS, chargeAttempt, type AttemptLimit } from "./auth-attempt-limit";
 import { logAuthMetric } from "./auth-observability";
 import { postgresControlErrorResponse } from "./postgres-authority-http";
 import { transientError } from "./error-contract";
@@ -25,7 +26,6 @@ const DEVICE_AUTH_TTL_MS = 10 * 60 * 1000;
 const DEVICE_AUTH_REDEMPTION_REPLAY_MS = 2 * 60 * 1000;
 const DEVICE_AUTH_POLL_INTERVAL_SECONDS = 5;
 const USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const RATE_LIMIT_WINDOW_MS = 60_000;
 const DEVICE_START_RATE_LIMIT = 20;
 const DEVICE_TOKEN_RATE_LIMIT = 120;
 const SETUP_INTENT_TTL_MS = 30 * 60 * 1000;
@@ -95,6 +95,7 @@ interface StartDeviceAuthResponse {
 
 export class DeviceAuthBroker extends DurableObject<Env> {
   private readonly redemptionCoordinator = new DeviceAuthRedemptionCoordinator();
+  private attemptPruneCursor: string | undefined;
 
   async fetch(request: Request): Promise<Response> {
     await this.pruneExpiredSessions();
@@ -128,9 +129,25 @@ export class DeviceAuthBroker extends DurableObject<Env> {
         return this.handleApprove(request);
       case "/internal/device-auth/token":
         return this.handleToken(request);
+      case "/internal/attempts/admit":
+        return this.handleAttemptAdmit(request);
       default:
         return Response.json({ error: "Not found" }, { status: 404 });
     }
+  }
+
+  private async handleAttemptAdmit(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as { limits?: unknown };
+    const limits = Array.isArray(body.limits) ? body.limits as AttemptLimit[] : [];
+    if (limits.length === 0 || !limits.every((limit) => typeof limit?.key === "string" && limit.key
+      && Number.isInteger(limit.max) && limit.max > 0)) {
+      return Response.json({ error: "limits must name each counter and its allowance" }, { status: 400 });
+    }
+    const keys = limits.map((limit) => `attempts:${limit.key}`);
+    const stored = await this.ctx.storage.get<number[]>(keys);
+    const { admitted, next } = chargeAttempt(keys.map((key) => stored.get(key) ?? []), limits, Date.now());
+    await this.ctx.storage.put(Object.fromEntries(keys.map((key, index) => [key, next[index]])));
+    return Response.json({ admitted });
   }
 
   private async handleStart(request: Request): Promise<Response> {
@@ -592,6 +609,19 @@ export class DeviceAuthBroker extends DurableObject<Env> {
       if (Date.parse(intent.expiresAt) <= now) expiredKeys.push(key);
     }
 
+    // Attempt counters whose newest attempt has left the window, a bounded
+    // batch per request so a burst of distinct callers cannot stall one.
+    const attempts = await this.ctx.storage.list<number[]>({
+      prefix: "attempts:", limit: 128, startAfter: this.attemptPruneCursor });
+    this.attemptPruneCursor = attempts.size === 128 ? [...attempts.keys()].at(-1) : undefined;
+    for (const [key, times] of attempts.entries()) {
+      if ((times.at(-1) ?? 0) <= now - ATTEMPT_WINDOW_MS) expiredKeys.push(key);
+    }
+
+    // Device counters kept before "attempts:" were never removed.
+    const legacyCounters = await this.ctx.storage.list({ prefix: "rate:", limit: 128 });
+    expiredKeys.push(...legacyCounters.keys());
+
     if (expiredKeys.length > 0) {
       await Promise.all(expiredKeys.map((key) => this.ctx.storage.delete(key)));
     }
@@ -619,18 +649,11 @@ export class DeviceAuthBroker extends DurableObject<Env> {
   }
 
   private async isRateLimited(scope: string, key: string, maxAttempts: number): Promise<boolean> {
-    const storageKey = `rate:${scope}:${key}`;
-    const now = Date.now();
-    const windowStart = now - RATE_LIMIT_WINDOW_MS;
-    const existing = (await this.ctx.storage.get<number[]>(storageKey)) || [];
-    const timestamps = existing.filter((value) => value > windowStart);
-    if (timestamps.length >= maxAttempts) {
-      await this.ctx.storage.put(storageKey, timestamps);
-      return true;
-    }
-    timestamps.push(now);
-    await this.ctx.storage.put(storageKey, timestamps);
-    return false;
+    const storageKey = `attempts:device-${scope}:${key}`;
+    const { admitted, next } = chargeAttempt([(await this.ctx.storage.get<number[]>(storageKey)) ?? []],
+      [{ key: storageKey, max: maxAttempts }], Date.now());
+    await this.ctx.storage.put(storageKey, next[0]);
+    return !admitted;
   }
 
   private async issueDeviceSession(session: DeviceAuthSession): Promise<AuthSession> {

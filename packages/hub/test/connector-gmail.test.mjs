@@ -84,7 +84,7 @@ test("search lists the newest matches with their metadata", async () => {
     ["ca_mailbox1", "GET", "composio-project-key"]);
   assert.deepEqual(search.calls.map(proxied), [
     { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages", query: "maxResults=10&q=from:acme.test" },
-    { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4", query: "format=metadata&metadataHeaders=From&metadataHeaders=Subject" },
+    { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4", query: "format=metadata" },
   ]);
   assert.match(search.result.summary, /18f2a9c0d1e2b3a4\t2026-10-09T20:00:00\.000Z\tAcme <noreply@acme\.test>\tVerify your email\tConfirm your email & start/u);
   assert.match((await fetched([gmail({})], () => ACTIONS.search.execute({ credentials: token }, { query: "" }))).result.summary, /\(no messages\)/u);
@@ -230,7 +230,7 @@ test("reply answers the sender in the original thread", async () => {
   const replied = await fetched([original, gmail({ id: "19a0b1c2d3e4f5a7" })],
     () => ACTIONS.reply.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4", body: "Thanks" }));
   assert.deepEqual(proxied(replied.calls[0]), { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4",
-    query: "format=metadata&metadataHeaders=From&metadataHeaders=Reply-To&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=References" });
+    query: "format=metadata" });
   const post = replied.calls[1].body;
   assert.deepEqual([post.method, post.endpoint, post.body.threadId], ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", "18f2a9c0d1e2b300"]);
   assert.match(decodedRaw(post.body.raw), /^To: help@acme\.test\r\nSubject: Re: Your ticket\r\nIn-Reply-To: <m1@acme\.test>\r\nReferences: <m0@acme\.test> <m1@acme\.test>\r\n/u);
