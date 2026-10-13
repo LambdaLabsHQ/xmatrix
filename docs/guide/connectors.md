@@ -93,7 +93,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Gmail | `gmail` | | `search`, `read` |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
-| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_review_contact` |
+| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption` |
 | Discord | `discord` | | `post` |
 | Telegram | `telegram` | Messages | `send` |
 | Feishu / Lark | `feishu` | Messages | `send` |
@@ -130,7 +130,7 @@ With App Store Connect connected, an agent can take a build from upload to the s
 
 - `subscribe` registers the app's webhook at Apple for you. The conversation then hears when a build finishes processing and each time the version changes state: waiting for review, in review, rejected, approved, live. Use it as an [Automation trigger](pages.md#when-it-runs) to have an agent pick up a rejection.
 - `create_version` creates the next version with manual release; add `release=after_approval` to let Apple publish it as soon as it is approved. App Review contact and sign-in details carry over from the previous version without appearing in the conversation.
-- `set_build` takes the build number you uploaded, once Apple has processed it. Uploading needs Xcode, so it happens on the Mac or CI that built the app, for example `xcrun altool --upload-package` with the same API key kept as [Space secrets](agents.md#secrets).
+- `set_build` takes the build number you uploaded, once Apple has processed it. The agent that built the app can upload it without any Apple key on its machine: see [Uploading files](#uploading-files) below.
 - `submit` sends the version to App Review. If Apple refuses because the listing is incomplete, the receipt says what is missing.
 - `release` publishes an approved version that waits for developer release. It cannot be undone; a Space admin can turn it off in a conversation with `@appstoreconnect:policy:release deny`.
 
@@ -143,12 +143,44 @@ A new app needs a few things once before its first submission. `@appstoreconnect
 @appstoreconnect:set_app_info:com.example.app {"contentRightsDeclaration":"DOES_NOT_USE_THIRD_PARTY_CONTENT"}
 @appstoreconnect:set_age_rating:com.example.app {"gambling":false,"userGeneratedContent":true,"violenceRealistic":"NONE"}
 @appstoreconnect:set_price:com.example.app free
+@appstoreconnect:set_availability:com.example.app all
 @appstoreconnect:set_review_contact:com.example.app 1.0.0 {"contactFirstName":"Ada","contactLastName":"Lovelace","contactEmail":"ada@example.com","contactPhone":"+1 555 0100"}
 ```
 
 The age rating answers are your statements to Apple about the app, so nothing is filled in for you: give every answer the questionnaire asks, and `read_app` lists the ones still unanswered as `null`.
 
-Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, choosing the countries the app is sold in, uploading screenshots, entering the App Review sign-in password if reviewers need one, accepting agreements, and replying to App Review when it asks a question.
+### Uploading files
+
+A build or a screenshot goes to Apple in three steps, and the file itself never passes through xMatrix:
+
+```text
+@appstoreconnect:upload_build:com.example.app 1.2.0 412 Example.ipa 48211034
+@appstoreconnect:commit_upload:<upload id> build
+@appstoreconnect:build_uploads:com.example.app 412
+```
+
+1. `upload_build` reserves the upload. Give it the version and build number that are inside the file, the file's name and its exact size in bytes. The receipt lists one or more parts: a method, a URL, a byte range and headers.
+2. The agent on the machine that has the file sends each part's bytes to its URL with those headers. The URLs are Apple's, expire, and work only for this file.
+3. `commit_upload` tells Apple the file is complete. Apple then processes the build; a subscribed conversation hears when it finishes, and `build_uploads` shows any errors Apple found.
+
+Screenshots work the same way, then get placed on the listing:
+
+```text
+@appstoreconnect:screenshot_specs:* iphone
+@appstoreconnect:upload_screenshot:com.example.app home-6.9.png 1482113
+@appstoreconnect:commit_upload:<image id> image
+@appstoreconnect:set_screenshots:com.example.app 1.2.0 {"locale":"en-US","group":"<group>","images":["<image id>","<image id>"]}
+```
+
+`screenshot_specs` lists Apple's placement groups, one per device family, with the exact pixel sizes each accepts. `set_screenshots` makes that language and group show exactly the images you name, in that order; an image can be reused across languages. `screenshots` shows what a version has now.
+
+If Apple asks about export compliance, answer it for the build with `@appstoreconnect:declare_encryption:com.example.app 1.2.0 412 exempt`.
+
+### When App Review rejects a version
+
+The conversation hears the rejection, but Apple offers no way to read the reviewer's message or reply to it outside App Store Connect, so a person reads it there. Once the problem is fixed, `submit` sends the same submission back to review; `cancel_submission` followed by `submit` starts a new one.
+
+Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, entering the App Review sign-in password if reviewers need one, accepting agreements, and reading and replying to App Review's messages.
 
 ## Agents and apps
 

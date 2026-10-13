@@ -2,8 +2,8 @@ import { appStoreConnect, appleResource, relatedId, relation, type AppleResource
 import { text } from "../event-format";
 import { ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
-import { appAction, appVersion, appVersionFields, appVersions, bundleId, compareVersions, EDITABLE_STATES, LOCALE, openSubmissions, platformRef,
-  reviewDetail, textFieldProblem, versionAction, versionRef, versionState } from "./app-store-connect";
+import { appAction, appVersion, appVersionBuild, appVersionFields, appVersions, bundleId, compareVersions, EDITABLE_STATES, LOCALE, namedBuild,
+  openSubmissions, platformRef, reviewDetail, textFieldProblem, versionAction, versionRef, versionState } from "./app-store-connect";
 import { requireText } from "./common";
 import { keyedOptions } from "./google-report";
 
@@ -19,7 +19,6 @@ import { keyedOptions } from "./google-report";
  * version takes them from the app's previous version, Apple to Apple.
  */
 
-const BUILD = /^\d[\d.]{0,17}$/u;
 const REVIEW = /^[A-Za-z0-9._-]{1,128}$/u;
 const MAX_METADATA_TEXT = 16_000;
 const RELEASE_TYPES: Readonly<Record<string, string>> = { manual: "MANUAL", after_approval: "AFTER_APPROVAL" };
@@ -57,6 +56,27 @@ async function inheritReviewDetail(api: AppStoreConnectApi, version: AppleResour
 async function patchSubmission(api: AppStoreConnectApi, submission: AppleResource, attributes: { submitted: true } | { canceled: true }): Promise<string> {
   return text(appleResource((await api.request(`/v1/reviewSubmissions/${encodeURIComponent(submission.id)}`, { method: "PATCH",
     data: { type: "reviewSubmissions", id: submission.id, attributes } })).data)?.attributes.state);
+}
+
+/**
+ * A submission App Review rejected: its rejected items are marked resolved and it goes back to review, which is
+ * what "Resubmit to App Review" does once the version has been edited. Apple takes no new items on such a
+ * submission, and replying to the reviewer has no API.
+ */
+async function resubmit(api: AppStoreConnectApi, submission: AppleResource, items: AppleResource[], what: string): Promise<string> {
+  const rejected = items.filter(item => text(item.attributes.state) === "REJECTED");
+  try {
+    for (const item of rejected) {
+      await api.request(`/v1/reviewSubmissionItems/${encodeURIComponent(item.id)}`, { method: "PATCH",
+        data: { type: "reviewSubmissionItems", id: item.id, attributes: { resolved: true } } });
+    }
+    const sent = await patchSubmission(api, submission, { submitted: true });
+    return `Resubmitted ${what} to App Review with ${rejected.length} rejected item(s) marked resolved; the submission is ${sent || "accepted"}. ` +
+      "If App Review asked a question, answer it in App Store Connect: replies have no API.";
+  } catch (error) {
+    if (!(error instanceof ProviderRequestError)) throw error;
+    throw new ProviderRequestError(error.status, `${error.message}. To start over instead, run cancel_submission and then submit`);
+  }
 }
 
 /** `<version> {json}`: the listing fields to change, validated to Apple's limits before any call. */
@@ -129,21 +149,14 @@ export const APP_STORE_CONNECT_RELEASE_ACTIONS: Record<string, ConnectorAction> 
       `of ${input.app} ${input.version}.`;
   }),
   set_build: versionAction("write", statement => {
-    const app = bundleId(statement.target);
-    const [word = "", build = "", ...rest] = statement.text.trim().split(/\s+/u);
-    const ref = versionRef(word);
-    return app && ref && BUILD.test(build) && !rest.length ? { app, ...ref, build }
+    const parsed = appVersionBuild(statement);
+    return parsed && !parsed.rest.length ? { app: parsed.app, platform: parsed.platform, version: parsed.version, build: parsed.build }
       : "name an app, a version and the build number to ship: <com.example.app> <1.2.0> <build number>";
   }, async ({ api, app, input, version }) => {
     if (!EDITABLE_STATES.has(versionState(version))) {
       throw new ProviderRequestError(409, `Version ${input.version} is ${versionState(version)}; its build can no longer change`);
     }
-    const builds = (await api.list("/v1/builds", { "filter[app]": app.id, "filter[version]": input.build!, "filter[preReleaseVersion.version]": input.version!,
-      "filter[preReleaseVersion.platform]": input.platform!, "fields[builds]": "version,processingState,expired,usesNonExemptEncryption", limit: "10" }, 1))
-      .rows.filter(row => text(row.attributes.version) === input.build);
-    if (!builds.length) throw new ProviderRequestError(404, `Build ${input.build} of ${input.version} is not in App Store Connect; upload it, then wait for processing`);
-    if (builds.length > 1) throw new ProviderRequestError(409, `More than one build ${input.build} of ${input.version} exists`);
-    const build = builds[0]!, processing = text(build.attributes.processingState);
+    const build = await namedBuild(api, app.id, input), processing = text(build.attributes.processingState);
     if (build.attributes.expired === true) throw new ProviderRequestError(409, `Build ${input.build} has expired; upload a new one`);
     if (processing !== "VALID") {
       throw new ProviderRequestError(409, processing === "PROCESSING" ? `Build ${input.build} is still processing; try again in a few minutes`
@@ -156,7 +169,7 @@ export const APP_STORE_CONNECT_RELEASE_ACTIONS: Record<string, ConnectorAction> 
     if (bound?.id !== build.id) throw new ProviderRequestError(502, "App Store Connect did not attach the build");
     return `Attached build ${input.build} to ${input.app} ${input.version}.` + (build.attributes.usesNonExemptEncryption === null ||
       build.attributes.usesNonExemptEncryption === undefined
-      ? " The build does not declare export compliance (ITSAppUsesNonExemptEncryption); Apple will ask before review." : "");
+      ? " The build does not declare export compliance; run declare_encryption, or Apple will ask before review." : "");
   }),
   submit: versionAction("write", appVersion, async ({ api, app, input, version, buildNumber }) => {
     const state = versionState(version);
@@ -166,16 +179,15 @@ export const APP_STORE_CONNECT_RELEASE_ACTIONS: Record<string, ConnectorAction> 
     if (open.length > 1) throw new ProviderRequestError(409, "More than one review submission is open; settle them in App Store Connect first");
     let submission: AppleResource | undefined = open[0];
     const submissionState = text(submission?.attributes.state);
-    if (submissionState === "UNRESOLVED_ISSUES") {
-      throw new ProviderRequestError(409, "App Review is waiting for an answer on the open submission; reply in App Store Connect, or run cancel_submission and submit again");
-    }
-    if (submission && submissionState !== "READY_FOR_REVIEW") throw new ProviderRequestError(409, `Another review submission is ${submissionState}`);
+    const rejected = submissionState === "UNRESOLVED_ISSUES";
+    if (submission && !rejected && submissionState !== "READY_FOR_REVIEW") throw new ProviderRequestError(409, `Another review submission is ${submissionState}`);
     const items = submission ? (await api.list(`/v1/reviewSubmissions/${encodeURIComponent(submission.id)}/items`,
       { include: "appStoreVersion", limit: "200" }, 1)).rows : [];
     const versions = items.flatMap(item => relatedId(item, "appStoreVersion") ?? []);
     if (versions.some(id => id !== version.id)) {
-      throw new ProviderRequestError(409, "The open draft submission holds another version; finish or cancel it in App Store Connect first");
+      throw new ProviderRequestError(409, "The open submission holds another version; finish or cancel it in App Store Connect first");
     }
+    if (submission && rejected) return resubmit(api, submission, items, `${input.app} ${input.version}`);
     submission ??= appleResource((await api.request("/v1/reviewSubmissions", { method: "POST", data: { type: "reviewSubmissions",
       attributes: { platform: input.platform }, relationships: { app: relation("apps", app.id) } } })).data);
     if (!submission) throw new ProviderRequestError(502, "App Store Connect did not return the review submission");

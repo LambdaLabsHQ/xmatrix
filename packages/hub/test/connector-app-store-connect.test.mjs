@@ -171,7 +171,6 @@ test("submit sends one version to App Review and never disturbs a review in prog
   for (const [routes, reason] of [
     [{ ...apps, ...versions(version("v22", "1.2.0", "PREPARE_FOR_SUBMISSION")) }, /has no build; run set_build first/u],
     [{ ...apps, ...versions(version("v1", "1.1.0", "READY_FOR_DISTRIBUTION", "build-7")) }, /does not exist .* run create_version first/u],
-    [{ ...ready, "GET /v1/reviewSubmissions": { data: [submission("UNRESOLVED_ISSUES")] } }, /waiting for an answer/u],
     [{ ...ready, "GET /v1/reviewSubmissions": { data: [submission("IN_REVIEW")] } }, /Another review submission is IN_REVIEW/u],
     [{ ...ready, "GET /v1/reviewSubmissions": { data: [submission("READY_FOR_REVIEW")] }, "GET /v1/reviewSubmissions/sub-1/items": { data: [
       { type: "reviewSubmissionItems", id: "item-9", relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: "other" } } } }] } }, /holds another version/u],
@@ -179,6 +178,20 @@ test("submit sends one version to App Review and never disturbs a review in prog
     const refused = await withApple(routes, () => assert.rejects(execute(), reason));
     assert.deepEqual(writes(refused.calls), []);
   }
+
+  /* A rejected submission takes no new items: its rejected ones are marked resolved and it is sent back. */
+  const rejectedItems = { "GET /v1/reviewSubmissions": { data: [submission("UNRESOLVED_ISSUES")] }, "GET /v1/reviewSubmissions/sub-1/items": { data: [
+    { type: "reviewSubmissionItems", id: "item-1", attributes: { state: "REJECTED" }, relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: "v22" } } } },
+    { type: "reviewSubmissionItems", id: "item-2", attributes: { state: "APPROVED" }, relationships: { appStoreVersion: { data: null } } }] } };
+  const again = await run({ ...apps, ...versions(version("v22", "1.2.0", "REJECTED", "build-7")), ...rejectedItems,
+    "PATCH /v1/reviewSubmissionItems/item-1": { data: {} }, "PATCH /v1/reviewSubmissions/sub-1": { data: submission("WAITING_FOR_REVIEW") } },
+  `@appstoreconnect:submit:${BUNDLE} 1.2.0`);
+  assert.deepEqual(writes(again.calls), ["PATCH /v1/reviewSubmissionItems/item-1", "PATCH /v1/reviewSubmissions/sub-1"]);
+  assert.deepEqual(again.calls.at(-2).body.attributes, { resolved: true });
+  assert.match(again.value.summary, /Resubmitted com\.example\.app 1\.2\.0 .* 1 rejected item\(s\) marked resolved; the submission is WAITING_FOR_REVIEW/u);
+  await withApple({ ...apps, ...versions(version("v22", "1.2.0", "REJECTED", "build-7")), ...rejectedItems,
+    "PATCH /v1/reviewSubmissionItems/item-1": { status: 409, errors: [{ code: "STATE_ERROR", detail: "Item cannot be resolved." }] } },
+  () => assert.rejects(execute(), /Item cannot be resolved\.\. To start over instead, run cancel_submission and then submit/u));
 
   /* Apple names what the listing still lacks; the agent needs that text to fix it. */
   await withApple({ ...ready, "GET /v1/reviewSubmissions": { data: [] }, "POST /v1/reviewSubmissions": { data: submission("READY_FOR_REVIEW") },
@@ -270,5 +283,5 @@ test("every declared App Store Connect action has an executor with the declared 
   const catalog = connectorActionCatalog("appstoreconnect", ACTIONS);
   assert.deepEqual([...catalog.keys()].sort(), Object.keys(ACTIONS).sort());
   assert.deepEqual([...catalog.values()].filter((entry) => entry.definition.effect === "read").map((entry) => entry.definition.id).sort(),
-    ["builds", "list_apps", "read_app", "read_version", "reviews", "status"]);
+    ["build_uploads", "builds", "list_apps", "read_app", "read_upload", "read_version", "reviews", "screenshot_specs", "screenshots", "status"]);
 });

@@ -109,11 +109,18 @@ Apple's event id, so an Automation can use
 `--on appstoreconnect:version:com.example.app`.
 
 Apple gives no API for creating the app record, answering App Privacy,
-accepting agreements or replying to App Review; those stay in App Store
-Connect, as do availability by territory, screenshots and the App Review
-sign-in password. `read_app` shows what a new app still lacks. A first
-version's App Review contact is set with `set_review_contact`; later versions
-inherit it through `create_version`.
+accepting agreements, or reading and replying to App Review's messages; those
+stay in App Store Connect, as does the App Review sign-in password. `read_app`
+shows what a new app still lacks. A first version's App Review contact is set
+with `set_review_contact`; later versions inherit it through `create_version`.
+
+Uploads are reserve, send, commit. `upload_build` and `upload_screenshot`
+answer with the parts to send: each has a method, a URL at Apple's storage, a
+byte range and headers. Whoever has the file sends those bytes without an
+Authorization header, then runs `commit_upload`. The URLs appear in the
+Channel receipt; they expire, cover one file, and grant nothing else. If a
+build fails processing, `build_uploads` shows Apple's error codes. Screenshot
+sizes are exact: read them with `screenshot_specs` before exporting images.
 
 ### Outbound Actions And Policy
 
@@ -133,7 +140,7 @@ section, and none is ever shown again.
 | Jira | `read_issue:<ENG-9>` (read), `comment:<ENG-9>`, `transition:<ENG-9> <status>` |
 | Vercel | `redeploy:<deployment id>` |
 | Cloudflare | `query_logs:<worker> [minutes] [error\|warn\|log]` (read), `list_deployments:<worker>` (read), `rollback:<worker> [version id] [reason]` |
-| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `read_app:<bundle id>` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_review_contact:<bundle id> <version> {json}` |
+| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `read_app:<bundle id>` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]` |
 | Feishu | `send:<chat id>` |
 | Telegram | `send:<chat id>` |
 | Discord | `post:<channel id>` (mentions never ping) |

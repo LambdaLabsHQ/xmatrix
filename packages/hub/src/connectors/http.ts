@@ -21,12 +21,15 @@ export function providerUrl(base: string, path = ""): URL {
   } catch {
     throw new ProviderRequestError(400, "Provider URL is invalid");
   }
-  const host = url.hostname;
-  if (url.protocol !== "https:" || /^\[|^\d+\.\d+\.\d+\.\d+$/u.test(host) || host === "localhost" ||
-      host.endsWith(".localhost") || host.endsWith(".internal") || !host.includes(".")) {
-    throw new ProviderRequestError(400, "Provider URL must be a public https host");
-  }
+  if (!isPublicHttpsUrl(url)) throw new ProviderRequestError(400, "Provider URL must be a public https host");
   return url;
+}
+
+/** Whether a URL is https on a named public host: never an address literal, localhost or an internal name. */
+export function isPublicHttpsUrl(url: URL): boolean {
+  const host = url.hostname;
+  return url.protocol === "https:" && !/^\[|^\d+\.\d+\.\d+\.\d+$/u.test(host) && host !== "localhost" &&
+    !host.endsWith(".localhost") && !host.endsWith(".internal") && host.includes(".");
 }
 
 /*

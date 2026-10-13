@@ -4,7 +4,7 @@ import { ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { appAction, appVersionFields, bundleId, jsonFields, LOCALE, MAX_OUTPUT, reviewDetail, textFieldProblem, versionAction } from "./app-store-connect";
 import { quoteRetrievedText } from "./common";
-import { cell } from "./google-report";
+import { cell, keyedOptions } from "./google-report";
 
 /*
  * What a new app needs once before its first submission, and that App Store
@@ -23,6 +23,8 @@ import { cell } from "./google-report";
 const TERRITORY = /^[A-Z]{3}$/u;
 const CATEGORY = /^[A-Z][A-Z0-9_]{1,60}$/u;
 const MAX_FIELDS_TEXT = 6_000;
+/* An existing availability changes one territory per call to Apple; a statement may flip this many. */
+const MAX_TERRITORY_CHANGES = 25;
 const LIVE_INFO_STATES: ReadonlySet<string> = new Set(["READY_FOR_DISTRIBUTION", "READY_FOR_SALE", "REPLACED_WITH_NEW_INFO"]);
 const INFO_TEXT_LIMITS: Readonly<Record<string, number>> = { name: 30, subtitle: 30, privacyPolicyUrl: 1_000, privacyChoicesUrl: 1_000 };
 const CONTENT_RIGHTS = ["DOES_NOT_USE_THIRD_PARTY_CONTENT", "USES_THIRD_PARTY_CONTENT"];
@@ -35,7 +37,8 @@ const AGE_FLAGS = ["advertising", "gambling", "healthOrWellnessTopics", "lootBox
 const AGE_LEVELS = ["alcoholTobaccoOrDrugUseOrReferences", "contests", "gamblingSimulated", "gunsOrOtherWeapons", "medicalOrTreatmentInformation",
   "profanityOrCrudeHumor", "sexualContentGraphicAndNudity", "sexualContentOrNudity", "horrorOrFearThemes", "matureOrSuggestiveThemes",
   "violenceCartoonOrFantasy", "violenceRealisticProlongedGraphicOrSadistic", "violenceRealistic"];
-const LEVELS = ["NONE", "INFREQUENT_OR_MILD", "FREQUENT_OR_INTENSE", "INFREQUENT", "FREQUENT"];
+/* API 4.1 deprecated the two older spellings; they are still taken, and the hint names the current ones. */
+const LEVELS = ["NONE", "INFREQUENT", "FREQUENT", "INFREQUENT_OR_MILD", "FREQUENT_OR_INTENSE"];
 const AGE_CHOICES: Readonly<Record<string, readonly (string | null)[]>> = {
   kidsAgeBand: ["FIVE_AND_UNDER", "SIX_TO_EIGHT", "NINE_TO_ELEVEN", null],
   ageRatingOverrideV2: ["NONE", "NINE_PLUS", "THIRTEEN_PLUS", "SIXTEEN_PLUS", "EIGHTEEN_PLUS", "UNRATED"],
@@ -83,7 +86,7 @@ async function priceLines(api: AppStoreConnectApi, app: AppleResource): Promise<
 /** Why one questionnaire answer is refused, if it is: every answer is checked against Apple's own vocabulary. */
 function ageAnswerProblem(name: string, value: unknown): string | undefined {
   if (AGE_FLAGS.includes(name)) return typeof value === "boolean" ? undefined : `${name} is true or false`;
-  if (AGE_LEVELS.includes(name)) return LEVELS.includes(value as string) ? undefined : `${name} is one of ${LEVELS.join(", ")}`;
+  if (AGE_LEVELS.includes(name)) return LEVELS.includes(value as string) ? undefined : `${name} is one of ${LEVELS.slice(0, 3).join(", ")}`;
   if (Object.hasOwn(AGE_CHOICES, name)) return AGE_CHOICES[name]!.includes(value as string | null) ? undefined : `${name} is one of ${AGE_CHOICES[name]!.join(", ")}`;
   return name === "developerAgeRatingInfoUrl" ? textFieldProblem(name, value, 1_000) : `${name} is not an age rating answer; read_app lists them`;
 }
@@ -192,6 +195,46 @@ export const APP_STORE_CONNECT_LISTING_ACTIONS: Record<string, ConnectorAction> 
       included: [{ type: "appPrices", id: "${price}", attributes: { startDate: null, endDate: null },
         relationships: { appPricePoint: relation("appPricePoints", point.id) } }] });
     return `Set the price of ${input.app} to ${Number(input.price) === 0 ? "free" : `${input.price} in ${input.territory}`}; Apple derives the other territories' prices from it.`;
+  }),
+  set_availability: appAction("write", statement => {
+    const usage = "name an app and where it is sold: <com.example.app> all, or <com.example.app> USA,CAN,GBR [new=on|off]";
+    const app = bundleId(statement.target);
+    const [where = "", ...rest] = statement.text.trim().split(/\s+/u);
+    const options = keyedOptions(rest.join(" "), ["new"], usage);
+    const territories = where.toLowerCase() === "all" ? [] : where.split(",");
+    const future = typeof options === "string" ? undefined : { on: "true", off: "false" }[options.get("new") ?? "on"];
+    if (!app || !where || !future || territories.length > 250 || new Set(territories).size !== territories.length ||
+        territories.some(code => !TERRITORY.test(code))) return usage;
+    return { app, territories: territories.join(","), future };
+  }, async ({ api, app, input }) => {
+    const known = (await api.list("/v1/territories", { limit: "200" })).rows.map(row => row.id);
+    const chosen = input.territories ? input.territories.split(",") : known;
+    const unknown = chosen.filter(code => !known.includes(code));
+    if (unknown.length) throw new ProviderRequestError(400, `Apple has no territory ${unknown.slice(0, 10).join(", ")}; use its three-letter codes, such as USA`);
+    const existing = appleResource((await optional(api.request(`/v1/apps/${encodeURIComponent(app.id)}/appAvailabilityV2`)))?.data);
+    if (!existing) {
+      /* A first availability is one request naming every territory; nothing is left to Apple's default. */
+      const local = (code: string) => `\${territory-${code}}`;
+      await api.request("/v2/appAvailabilities", { method: "POST",
+        data: { type: "appAvailabilities", attributes: { availableInNewTerritories: input.future === "true" },
+          relationships: { app: relation("apps", app.id), territoryAvailabilities: { data: known.map(code => ({ type: "territoryAvailabilities", id: local(code) })) } } },
+        included: known.map(code => ({ type: "territoryAvailabilities", id: local(code), attributes: { available: chosen.includes(code) },
+          relationships: { territory: relation("territories", code) } })) });
+      return `Made ${input.app} available in ${chosen.length} of ${known.length} territories; new territories are ${input.future === "true" ? "" : "not "}added automatically.`;
+    }
+    const current = (await api.list(`/v2/appAvailabilities/${encodeURIComponent(existing.id)}/territoryAvailabilities`,
+      { include: "territory", "fields[territoryAvailabilities]": "available,territory", limit: "200" })).rows;
+    const changes = current.filter(row => relatedId(row, "territory") && (row.attributes.available === true) !== chosen.includes(relatedId(row, "territory")!));
+    if (changes.length > MAX_TERRITORY_CHANGES) {
+      throw new ProviderRequestError(409, `That changes ${changes.length} territories of an existing availability; change at most ${MAX_TERRITORY_CHANGES} per statement`);
+    }
+    for (const row of changes) {
+      await api.request(`/v1/territoryAvailabilities/${encodeURIComponent(row.id)}`, { method: "PATCH",
+        data: { type: "territoryAvailabilities", id: row.id, attributes: { available: row.attributes.available !== true } } });
+    }
+    return `${input.app} is now available in ${chosen.length} territories; changed ${changes.length}` +
+      (changes.length ? `: ${changes.map(row => `${relatedId(row, "territory")} ${row.attributes.available === true ? "off" : "on"}`).join(", ")}.` : ".") +
+      " Whether new territories are added automatically is set when the availability is first created.";
   }),
   set_review_contact: versionAction("write", statement => {
     const parsed = appVersionFields(statement,
