@@ -115,6 +115,10 @@ export interface Env {
   RATE_LIMIT_ANONYMOUS?: RequestRateLimiter;
   /** Per-user allowance of Human socket sign-ins. */
   RATE_LIMIT_HUMAN_CONNECT?: RequestRateLimiter;
+  /** Always-enforced per-IP allowances of sign-in endpoints (request-rate-limit.ts AUTH_ROUTE_LIMITERS). */
+  RATE_LIMIT_OAUTH_REGISTER?: RequestRateLimiter;
+  RATE_LIMIT_SIGN_IN?: RequestRateLimiter;
+  RATE_LIMIT_AUTH_EMAIL?: RequestRateLimiter;
   /** Over-limit requests are refused only when this is exactly "true"; otherwise only logged. */
   RATE_LIMIT_ENFORCED?: string;
   /** Observation writes only when this is exactly "true". */

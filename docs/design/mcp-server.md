@@ -54,8 +54,9 @@ phishing link can still persuade a person to authorize an untrusted app.
 The consent warning and return host help the person make that decision;
 they do not verify a provider's identity.
 
-Registration is configured for at most ten requests per IP per minute through
-Better Auth's rate limiter. Anonymous registration creates public clients;
+Registration is limited to ten requests per client IP per minute by the
+always-enforced `RATE_LIMIT_OAUTH_REGISTER` Workers limiter; Better Auth's own
+limiter counts per isolate and is off. Anonymous registration creates public clients;
 it cannot request `client_credentials` or `skip_consent`. Authorization requires
 a signed-in person, approval for a new grant, a registered redirect URI
 (exact matching except OAuth's loopback-port exception), and S256 PKCE. The

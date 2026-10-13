@@ -103,6 +103,25 @@ name = "RATE_LIMIT_HUMAN_CONNECT"
 namespace_id = "3803"
 simple = { limit = 30, period = 60 }
 
+# Sign-in endpoints, per client IP, always enforced (AUTH_ROUTE_LIMITERS).
+# OAuth dynamic client registration.
+[[ratelimits]]
+name = "RATE_LIMIT_OAUTH_REGISTER"
+namespace_id = "3804"
+simple = { limit = 10, period = 60 }
+
+# Password sign-in attempts.
+[[ratelimits]]
+name = "RATE_LIMIT_SIGN_IN"
+namespace_id = "3805"
+simple = { limit = 5, period = 60 }
+
+# Requests that send an email: password reset and sign-in codes.
+[[ratelimits]]
+name = "RATE_LIMIT_AUTH_EMAIL"
+namespace_id = "3806"
+simple = { limit = 3, period = 60 }
+
 # Native deploy identity, so a datapoint can be attributed to an exact version
 # instead of a guessed one. Read-only; never synthesised in code.
 [version_metadata]

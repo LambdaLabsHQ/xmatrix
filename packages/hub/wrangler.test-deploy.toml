@@ -69,6 +69,23 @@ dataset = "xmatrix_diagnostics_test"
 binding = "RELAY_AUTHORITY_OBSERVABILITY_AE"
 dataset = "xmatrix_relay_authority_observability_test"
 
+# Sign-in endpoints, per client IP, always enforced (AUTH_ROUTE_LIMITERS).
+# Namespaces are separate from production so the two never share counts.
+[[ratelimits]]
+name = "RATE_LIMIT_OAUTH_REGISTER"
+namespace_id = "3814"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "RATE_LIMIT_SIGN_IN"
+namespace_id = "3815"
+simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "RATE_LIMIT_AUTH_EMAIL"
+namespace_id = "3816"
+simple = { limit = 3, period = 60 }
+
 [version_metadata]
 binding = "CF_VERSION_METADATA"
 
