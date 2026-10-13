@@ -6,6 +6,8 @@ import { composerHintParts } from "./composer-hints";
 import type { DraftSummonIntent } from "@xmatrix/protocol";
 import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
+const NO_MENTION_SPANS: readonly ComposerMentionSpan[] = [];
+
 const MIRRORED_STYLE_KEYS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "fontStretch",
   "fontVariant", "fontFeatureSettings", "fontVariationSettings", "fontKerning", "fontOpticalSizing",
   "textRendering", "textTransform", "letterSpacing", "wordSpacing", "lineHeight", "textIndent", "tabSize",
@@ -35,11 +37,15 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
   // The ranges arrive as a fresh array each render; repaint only when they change.
   const referenceKey = (references ?? []).map((reference) => `${reference.start}:${reference.end}`).join(",");
   const spans = useMemo(() => {
+    // Live activity can refresh the mention index without changing a painted
+    // range. Keep the empty projection stable so it cannot restart style reads.
+    if (!value) return NO_MENTION_SPANS;
     const mentions = composerMentionSpans(value, mentionIndex, currentUserIdentityId);
     const picked = (references ?? []).filter((reference) => value.slice(reference.start, reference.end) === reference.text &&
       !mentions.some((span) => span.start < reference.end && reference.start < span.end))
       .map(({ start, end }): ComposerMentionSpan => ({ start, end, kind: "reference" }));
     const all = picked.length ? [...mentions, ...picked].sort((a, b) => a.start - b.start) : mentions;
+    if (!all.length) return NO_MENTION_SPANS;
     return all.map((span) => {
       if ((span.kind !== "summon" && span.kind !== "agent") || span.forced || span.invalid) return span;
       const reading = summonReadings?.find((item) => item.start === span.start && value.slice(item.start, item.end) === item.mention);
@@ -108,9 +114,16 @@ export function ComposerTextHighlight({ value, textareaRef, mentionIndex, curren
 function ComposerHint({ hint }: { hint: string }) {
   const parts = composerHintParts(hint);
   if (!parts) return <span data-testid="composer-hint" className="app-composer-hint">{hint}</span>;
-  return <span key={hint} data-testid="composer-hint" className="app-composer-hint" data-rotating="true"
+  const words = (glint: boolean) => <>
+    <span className="app-composer-hint-trigger">
+      {glint && parts.trigger === "@" && <span className="app-composer-hint-sweep" aria-hidden="true" />}
+      {parts.trigger}
+    </span>{parts.rest}
+  </>;
+  return <span key={hint} className="app-composer-hint" data-rotating="true"
     data-summon={parts.trigger === "@" ? "true" : undefined}>
-    <span className="app-composer-hint-trigger">{parts.trigger}</span>{parts.rest}
+    <span data-testid="composer-hint" className="app-composer-hint-sharp">{words(true)}</span>
+    <span className="app-composer-hint-blur" aria-hidden="true">{words(false)}</span>
   </span>;
 }
 
@@ -206,7 +219,7 @@ function caretBox(mirror: HTMLElement, layer: HTMLElement, index: number): { x: 
   const children = [...mirror.childNodes].slice(0, -1);
   for (const child of children) {
     if (child === layer) continue;
-    if (child instanceof HTMLElement && child.dataset.testid === "composer-hint") hint = child;
+    if (child instanceof HTMLElement && child.classList.contains("app-composer-hint")) hint = child;
     else if (child instanceof Text) draft.push(child);
     else if (child.firstChild instanceof Text) draft.push(child.firstChild);
   }

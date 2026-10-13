@@ -17,35 +17,58 @@ export function useGlobalSearchClearance(iconRef: RefObject<HTMLElement | null>)
     const iconElement = iconRef.current;
     if (!iconElement) return undefined;
     let frame = 0;
+    let measuredHeaders: HTMLElement[] = [];
+    let lastGeometry = "";
+    const originalPadding = new Map<HTMLElement, string>();
     const clear = () => {
-      for (const header of Array.from(document.querySelectorAll<HTMLElement>(`[${CLEARED}]`))) {
-        header.style.paddingRight = "";
+      for (const [header, padding] of originalPadding) {
+        header.style.paddingRight = padding;
         header.removeAttribute(CLEARED);
       }
+      originalPadding.clear();
     };
     const update = () => {
       frame = 0;
-      clear();
+      const headers = Array.from(document.querySelectorAll<HTMLElement>(BAND_HEADERS));
       const icon = iconElement.getBoundingClientRect();
+      const boxes = headers.map((header) => header.getBoundingClientRect());
+      const geometry = [icon, ...boxes].map((box) => `${box.left}:${box.top}:${box.right}:${box.bottom}`).join(";");
+      if (geometry === lastGeometry && headers.length === measuredHeaders.length &&
+        headers.every((header, index) => header === measuredHeaders[index])) return;
+      for (const header of measuredHeaders) if (!headers.includes(header)) resize.unobserve(header);
+      for (const header of headers) if (!measuredHeaders.includes(header)) resize.observe(header);
+      measuredHeaders = headers;
+      lastGeometry = geometry;
+      clear();
       if (!icon.width) return;
-      for (const header of Array.from(document.querySelectorAll<HTMLElement>(BAND_HEADERS))) {
+      const changes: Array<{ header: HTMLElement; padding: number }> = [];
+      for (const header of headers) {
         const box = header.getBoundingClientRect();
         if (!box.width || box.bottom <= icon.top || box.top >= icon.bottom) continue;
         if (box.right <= icon.left || box.left >= icon.right) continue;
         const padding = parseFloat(getComputedStyle(header).paddingRight) || 0;
-        header.style.paddingRight = `${padding + box.right - icon.left + 12}px`;
+        changes.push({ header, padding: padding + box.right - icon.left + 12 });
+      }
+      for (const { header, padding } of changes) {
+        originalPadding.set(header, header.style.paddingRight);
+        header.style.paddingRight = `${padding}px`;
         header.setAttribute(CLEARED, "");
       }
     };
     const schedule = () => {
       if (!frame) frame = window.requestAnimationFrame(update);
     };
-    update();
     const resize = new ResizeObserver(schedule);
     resize.observe(document.body);
+    resize.observe(iconElement);
+    update();
     const mutations = new MutationObserver((records) => {
-      // Our own padding writes are attribute changes on cleared headers; only structure re-measures.
-      if (records.some((record) => record.type === "childList")) schedule();
+      // A message or a rotating composer hint cannot add/remove a top-band
+      // header. Existing headers and the search icon report size changes
+      // directly; only newly mounted or removed headers need discovery.
+      const containsHeader = (node: Node) => node instanceof Element &&
+        (node.matches(BAND_HEADERS) || node.querySelector(BAND_HEADERS) !== null);
+      if (records.some((record) => [...record.addedNodes, ...record.removedNodes].some(containsHeader))) schedule();
     });
     mutations.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", schedule);

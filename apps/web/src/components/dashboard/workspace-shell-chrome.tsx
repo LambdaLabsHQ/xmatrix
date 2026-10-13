@@ -443,8 +443,9 @@ export function GlobalSearchBar({ searching, onOpenSearch }: {
   );
 }
 
-/** Lucide's Activity line, drawn by hand so its trace can run. */
+/** Lucide's Activity line, used as a static mask so its moving break can composite. */
 const STATUS_PULSE_PATH = "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2";
+const STATUS_PULSE_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${STATUS_PULSE_PATH}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`)}")`;
 
 /**
  * Status: a pulse line. While an Agent in the Space works, a break runs along
@@ -453,11 +454,11 @@ const STATUS_PULSE_PATH = "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 
  */
 export function StatusPulseIcon({ className, live = false }: { className?: string; live?: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"
-      strokeLinejoin="round" className={cn("app-status-pulse", className)} data-live={live || undefined}
+    <span className={cn("app-status-pulse", className)} data-live={live || undefined}
+      style={{ maskImage: STATUS_PULSE_MASK, WebkitMaskImage: STATUS_PULSE_MASK }}
       aria-hidden="true">
-      <path d={STATUS_PULSE_PATH} pathLength={1} />
-    </svg>
+      <span className="app-status-pulse-sweep" />
+    </span>
   );
 }
 

@@ -1761,8 +1761,8 @@
    the start, which is the entire reason they are the only wooden things on
    screen. A tool page is a board with glass cards on it too, so it belongs
    here as well. */
-.xmatrix-app *:not(.app-ambient):not(.app-rail):not(.app-sidebar):not(.app-details):not(.app-tool-surface),
-.xmatrix-app *:not(.app-ambient)::before,
+.xmatrix-app *:not(.app-ambient):not(.app-rail):not(.app-sidebar):not(.app-details):not(.app-tool-surface):not(:where(.app-status-pulse-sweep)),
+.xmatrix-app *:not(.app-ambient):not(:where(.app-composer-hint-sweep))::before,
 .xmatrix-app *:not(.app-ambient)::after {
   background-image: none !important;
 }
@@ -5736,7 +5736,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     overflow: hidden;
   }
 
-  .xmatrix-app.xmatrix-app-shell .app-mobile-tab-button svg {
+  .xmatrix-app.xmatrix-app-shell .app-mobile-tab-button :is(svg, .app-status-pulse) {
     width: 1.125rem;
     height: 1.125rem;
   }
@@ -7483,7 +7483,15 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    and @ wears the summon violet because typing it calls an Agent in. It starts
    a hair after the caret, so the caret never touches the chip. */
 .app-composer-hint { margin-left: 0.18em; color: color-mix(in oklab, var(--muted-foreground) 55%, transparent); }
-.app-composer-hint[data-rotating="true"] { display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
+.app-composer-hint[data-rotating="true"] { position: relative; display: inline-block; animation: composer-hint-in 420ms cubic-bezier(.2, .7, .2, 1) both; }
+/* Crossfade a fixed blur into the sharp ink while the hint rises. Changing
+   blur's radius on every frame rebuilt the workspace's compositing overlaps;
+   these fixed textures move and fade entirely on the compositor instead. */
+.app-composer-hint-sharp { display: inline-block; animation: composer-hint-sharpen 420ms cubic-bezier(.2, .7, .2, 1) both; }
+.app-composer-hint-blur {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0; filter: blur(3px);
+  animation: composer-hint-soften 420ms cubic-bezier(.2, .7, .2, 1) both;
+}
 .app-composer-hint-trigger {
   --hint-ink: var(--primary);
   position: relative; isolation: isolate;
@@ -7498,9 +7506,16 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 }
 .app-composer-hint[data-summon="true"] .app-composer-hint-trigger { --hint-ink: oklch(0.62 0.16 285); }
 .app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before {
-  background:
-    linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%) 0 0 / 240% 100% no-repeat,
-    color-mix(in oklab, var(--hint-ink) 11%, transparent);
+  background: color-mix(in oklab, var(--hint-ink) 11%, transparent);
+}
+/* Keep the chip's fill and gradient static. Moving a separate clipped layer
+   preserves the glint without repainting a background-position every frame. */
+.app-composer-hint-sweep {
+  position: absolute; z-index: -1; inset: 0; overflow: hidden; border-radius: 0.3em;
+}
+.app-composer-hint-sweep::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: -168%; width: 240%;
+  background: linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%);
   animation: composer-hint-summon 2.4s cubic-bezier(.45, 0, .25, 1) 300ms infinite;
 }
 /* The composer's own caret (ComposerTextHighlight draws it in the mirror):
@@ -7518,11 +7533,13 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 @media (prefers-reduced-motion: reduce) {
   .app-composer-caret { animation: none; }
 }
-@keyframes composer-hint-in { from { opacity: 0; transform: translateY(0.45em); filter: blur(3px); } }
-@keyframes composer-hint-summon { from { background-position: 120% 0, 0 0; } to { background-position: -120% 0, 0 0; } }
+@keyframes composer-hint-in { from { opacity: 0; transform: translateY(0.45em); } }
+@keyframes composer-hint-sharpen { from { opacity: 0; } to { opacity: 1; } }
+@keyframes composer-hint-soften { from { opacity: 1; } to { opacity: 0; } }
+@keyframes composer-hint-summon { from { transform: translateX(0); } to { transform: translateX(140%); } }
 @media (prefers-reduced-motion: reduce) {
-  .app-composer-hint[data-rotating="true"],
-  .app-composer-hint[data-summon="true"] .app-composer-hint-trigger::before { animation: none; }
+  .app-composer-hint[data-rotating="true"], .app-composer-hint-sharp { animation: none; }
+  .app-composer-hint-sweep, .app-composer-hint-blur { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -8639,22 +8656,51 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   .xmatrix-app .app-handoff-arrow .app-handoff-head { animation: none; }
 }
 
-/* Status pulse: while an Agent works, a break runs along the line left to
-   right. The path is drawn right to left and the dash period is its whole
-   length, so the climbing offset carries one gap across and wraps seamlessly.
-   At rest, and under reduced motion, the line is whole. */
-.xmatrix-app .app-status-pulse[data-live] path {
-  stroke-dasharray: 0.84 0.16;
+/* The ECG path is a static mask. Its moving, transparent break rides a
+   compositor transform inside that mask; animating SVG stroke-dashoffset
+   instead repainted the rail even when the whole workspace was idle. */
+.xmatrix-app .app-status-pulse {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+}
+
+.xmatrix-app .app-status-pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+}
+
+.xmatrix-app .app-status-pulse-sweep { display: none; }
+
+.xmatrix-app .app-status-pulse[data-live]::before { display: none; }
+
+.xmatrix-app .app-status-pulse[data-live] .app-status-pulse-sweep {
+  position: absolute;
+  display: block;
+  top: 0;
+  bottom: 0;
+  left: -140%;
+  width: 240%;
+  background: linear-gradient(to right,
+    currentColor 0% 46.666667%, transparent 46.666667% 53.333333%, currentColor 53.333333% 100%);
   animation: app-status-pulse-break 2s linear infinite;
 }
 
 @keyframes app-status-pulse-break {
-  from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: 1; }
+  from { transform: translateX(0); }
+  to { transform: translateX(58.333333%); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app .app-status-pulse[data-live] path { stroke-dasharray: none; animation: none; }
+  .xmatrix-app .app-status-pulse[data-live]::before { display: block; }
+  .xmatrix-app .app-status-pulse[data-live] .app-status-pulse-sweep { display: none; animation: none; }
 }
 
 /* First-message launch choice: a quiet brass card under a new conversation's

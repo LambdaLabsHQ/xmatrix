@@ -83,10 +83,13 @@ export async function openWorkingAgentsSpace(
   space: ReturnType<typeof workingAgentsSpace>,
   messages: unknown[],
   lastRowText: string,
-): Promise<(frame: unknown) => void> {
+): Promise<((frame: unknown) => void) & { connections(): number }> {
   let send: ((frame: unknown) => void) | null = null;
+  let connections = 0;
   await routeHumanSocket(page, (frame, reply) => {
+    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
     if (frame.type === "human_connect") {
+      connections += 1;
       reply({ type: "agent_list", agents: space.agents });
       send = reply;
     }
@@ -111,5 +114,5 @@ export async function openWorkingAgentsSpace(
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".app-message-timeline").getByText(lastRowText)).toBeVisible({ timeout: 60_000 });
   if (!send) throw new Error("the Human socket never connected");
-  return send;
+  return Object.assign(send, { connections: () => connections });
 }
