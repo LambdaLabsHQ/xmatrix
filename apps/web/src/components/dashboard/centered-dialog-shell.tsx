@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { createPortal } from "react-dom";
 import { Loader2 } from "lucide-react";
 
@@ -147,7 +148,7 @@ export function DialogButton({
       )}
       {...props}
     >
-      {busy ? <Loader2 className="size-4 animate-spin" /> : Icon ? <Icon className="size-4" /> : null}
+      {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : Icon ? <Icon className="size-4" /> : null}
       {children}
     </button>
   );

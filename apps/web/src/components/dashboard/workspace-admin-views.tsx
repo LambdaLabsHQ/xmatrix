@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { PrivateSignInEmail } from "./private-sign-in-email";
 
 import { actionClass } from "@/components/ui/action-tone";
@@ -271,7 +273,7 @@ function DesktopUpdateAction({
     const version = status.version ? ` ${status.version}` : "";
     return (
       <button type="button" onClick={onInstall} disabled={installing} className={className}>
-        {installing ? <Loader2 className="size-4 animate-spin" /> : <CircleArrowUp className="size-4" />}
+        {installing ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <CircleArrowUp className="size-4" />}
         {installing
           ? "Restarting"
           : status.state === "available"
@@ -283,7 +285,7 @@ function DesktopUpdateAction({
   const busy = checking || status.state === "checking" || status.state === "downloading";
   return (
     <button type="button" onClick={onCheck} disabled={busy} className={className}>
-      <RefreshCw className={cn("size-4", busy && "animate-spin")} />
+      <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy && "animate-spin")} />
       Check for updates
     </button>
   );
@@ -584,7 +586,7 @@ export function SettingsView({
               disabled={!token || secretCatalogLoading}
               className={actionClass({ variant: "quiet" })}
             >
-              <RefreshCw className={cn("size-4", secretCatalogLoading && "animate-spin")} />
+              <AnimatedIcon icon={RefreshCw} className={cn("size-4", secretCatalogLoading && "animate-spin")} />
               Refresh
             </button>
           </div>
@@ -670,7 +672,7 @@ export function SettingsView({
                   disabled={secretSaving}
                   className={actionClass({ variant: "primary" })}
                 >
-                  {secretSaving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+                  {secretSaving ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
                   Save secret
                 </button>
               </div>
@@ -710,7 +712,7 @@ export function SettingsView({
                           className={actionClass({ variant: "danger", size: "sm" })}
                         >
                           {deletingSecretRef === entry.secretRef ? (
-                            <Loader2 className="size-3.5 animate-spin" />
+                            <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
                           ) : (
                             <Trash2 className="size-3.5" />
                           )}
@@ -827,7 +829,7 @@ export function SettingsView({
                   disabled={!desktopAvailable || daemonBusy}
                   className={actionClass({ variant: "secondary" })}
                 >
-                  <RefreshCw className={cn("size-4", daemonBusy && "animate-spin")} />
+                  <AnimatedIcon icon={RefreshCw} className={cn("size-4", daemonBusy && "animate-spin")} />
                   Restart
                 </button>
               </>}
@@ -1159,7 +1161,7 @@ export function TeamView({
                     title={title}
                     description={`${open ? `Any member may ${verb}` : `Only owners and admins ${verb}`}. Existing ones keep working.`}
                     control={<>
-                      {permissionBusy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+                      {permissionBusy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin text-muted-foreground" /> : null}
                       <Switch
                         label={label}
                         checked={open}
@@ -1204,7 +1206,7 @@ export function TeamView({
                     disabled={invitingSpaceId === space.id}
                     className={actionClass({ variant: "primary", size: "md" }, "shrink-0")}
                   >
-                    {invitingSpaceId === space.id ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                    {invitingSpaceId === space.id ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Send className="size-4" />}
                     Invite
                   </button>
                 </form>
@@ -1279,7 +1281,7 @@ export function TeamView({
                             className={actionClass({ variant: "quiet", size: "icon" }, "shrink-0")}
                           >
                             {memberActionKey === removeActionKey ? (
-                              <Loader2 className="size-4 animate-spin" />
+                              <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />
                             ) : (
                               <Trash2 className="size-4" />
                             )}
@@ -1350,7 +1352,7 @@ export function TeamView({
                       onClick={() => void submitInviteCode(space)}
                       className={actionClass({ variant: "secondary", size: "md" })}
                     >
-                      {creatingCodeSpaceId === space.id ? <Loader2 className="size-3.5 animate-spin" /> : <LinkIcon className="size-3.5" />}
+                      {creatingCodeSpaceId === space.id ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <LinkIcon className="size-3.5" />}
                       Create link
                     </button>
                   }
@@ -2165,58 +2167,133 @@ export function mergeChannelMemberPresencePreferringQuotas(
   return merged;
 }
 
-/** Route a digest once by member and global Instance id. A report may name a
- * different principal from the catalog member that owns its Instance. */
-export function patchChannelsAgentPresenceBatch(
-  channels: SerializedChannel[], agents: readonly SerializedAgent[],
-): SerializedChannel[] {
-  if (!agents.length) return channels;
-  const byMember = new Map<string, number[]>();
-  const byChannelMember = new Map<string, number[]>();
-  const byInstance = new Map<string, number[]>();
-  const sharedQuotas = new Map<string, SerializedAgent>();
-  const index = (map: Map<string, number[]>, id: string, position: number) => {
-    const positions = map.get(id);
-    if (positions) positions.push(position);
-    else map.set(id, [position]);
-  };
-  agents.forEach((agent, position) => {
-    if (!agent.id) return;
-    if (!agent.instances?.length) index(byMember, agent.id, position);
-    else {
-      const usage = accountQuotaUsageFromCandidates(sharedQuotas.get(agent.id)?.usage, agent.usage);
-      if (usage) sharedQuotas.set(agent.id, { ...agent, usage, instances: [] });
-    }
-    for (const instance of agent.instances ?? []) {
-      index(byInstance, instance.id, position);
-      if (instance.channelId) index(byChannelMember, `${instance.channelId}\u0000${agent.id}`, position);
-    }
-  });
-  let changed = false;
-  const next = channels.map(channel => {
-    const positions = new Set<number>();
+/** Apply ordered presence and partial snapshots in one state-frame run. The
+ * Channel table and routing indices are built once, rather than once per
+ * alternating Agent/Channel pair. Snapshots still merge in their socket order. */
+export function createChannelPresenceBatch(channels: SerializedChannel[]) {
+  const byId = new Map(channels.map(channel => [channel.id, channel]));
+  const changed = new Set<string>();
+  const byMember = new Map<string, Set<string>>();
+  const byInstance = new Map<string, Set<string>>();
+  let indexed = false;
+  let needsSort = false;
+  const routes = (channel: SerializedChannel) => {
+    const members: string[] = [];
+    const instances: string[] = [];
     for (const [member, presence] of Object.entries(channel.memberPresence ?? {})) {
       if (presence.kind !== "agent") continue;
-      for (const position of byMember.get(member) ?? []) positions.add(position);
-      for (const position of byChannelMember.get(`${channel.id}\u0000${member}`) ?? []) positions.add(position);
-      for (const instance of presence.instances ?? []) {
-        for (const position of byInstance.get(instance.id) ?? []) positions.add(position);
+      members.push(member);
+      // Build every route before changing an index: a malformed snapshot must
+      // not remove the old Instance's route and poison the next good report.
+      const resident = presence.instances ?? [];
+      if (!Array.isArray(resident)) throw new Error("Invalid realtime Instance collection");
+      for (const instance of resident) {
+        if (typeof instance?.id !== "string" || !instance.id) throw new Error("Invalid realtime Instance id");
+        instances.push(instance.id);
       }
     }
-    let patched = channel;
-    for (const position of [...positions].sort((left, right) => left - right)) {
-      patched = patchChannelAgentPresenceFromAgent(patched, agents[position]);
-    }
-    // A thousand Instances of one Agent share one quota reading, rather than
-    // copying each Instance's card across every sibling Channel.
-    for (const member of Object.keys(channel.memberPresence ?? {})) {
-      const quota = sharedQuotas.get(member);
-      if (quota) patched = patchChannelAgentMemberFromAgent(patched, quota, true);
-    }
-    if (patched !== channel) changed = true;
-    return patched;
-  });
-  return changed ? next : channels;
+    return { members, instances };
+  };
+  const route = (id: string, keys: ReturnType<typeof routes>, add: boolean) => {
+    const update = (index: Map<string, Set<string>>, key: string) => {
+      if (add) {
+        let ids = index.get(key);
+        if (!ids) index.set(key, ids = new Set());
+        ids.add(id);
+      } else {
+        const ids = index.get(key);
+        ids?.delete(id);
+        if (!ids?.size) index.delete(key);
+      }
+    };
+    for (const member of keys.members) update(byMember, member);
+    for (const instance of keys.instances) update(byInstance, instance);
+  };
+  const put = (channel: SerializedChannel, rankMayChange = false) => {
+    const previous = byId.get(channel.id);
+    if (previous === channel) return;
+    // Validate the sort inputs too, including a new Channel: a later sort may
+    // otherwise fail outside this frame's error boundary after staging it.
+    if (rankMayChange) compareChannelsForSidebar(channel, channel);
+    const rankChanged = rankMayChange && (!previous || compareChannelsForSidebar(previous, channel) !== 0);
+    const before = indexed && previous ? routes(previous) : undefined;
+    const after = routes(channel);
+    if (before) route(channel.id, before, false);
+    if (indexed) route(channel.id, after, true);
+    // Presence leaves the sidebar rank alone. A new or renamed/reordered
+    // snapshot gets the same comparator as replaceChannel, once at publication.
+    if (rankChanged) needsSort = true;
+    byId.set(channel.id, channel);
+    changed.add(channel.id);
+  };
+  return {
+    applyChannel(channel: SerializedChannel,
+      beforeApply?: (previous: SerializedChannel | undefined, updated: SerializedChannel) => void) {
+      const previous = byId.get(channel.id);
+      const updated = mergeChannelListHydratedFields(previous, channel);
+      // Classification and access/history invalidation may fail. Keep the
+      // prior state in that case, as replaceChannel's unpublished array did.
+      beforeApply?.(previous, updated);
+      put(updated, true);
+      return { previous, updated };
+    },
+    applyPresence(agents: readonly SerializedAgent[]) {
+      if (!agents.length) return;
+      if (!indexed) {
+        for (const channel of byId.values()) {
+          try {
+            route(channel.id, routes(channel), true);
+          } catch {
+            // A malformed resident from an earlier hydration cannot block
+            // reports for unrelated, valid Channels.
+          }
+        }
+        indexed = true;
+      }
+      const positions = new Map<string, Set<number>>();
+      const sharedQuotas = new Map<string, SerializedAgent>();
+      const target = (id: string, position?: number) => {
+        if (!byId.has(id)) return;
+        let reports = positions.get(id);
+        if (!reports) positions.set(id, reports = new Set());
+        if (position !== undefined) reports.add(position);
+      };
+      agents.forEach((agent, position) => {
+        if (!agent.id) return;
+        if (!agent.instances?.length) {
+          for (const id of byMember.get(agent.id) ?? []) target(id, position);
+        } else {
+          const usage = accountQuotaUsageFromCandidates(sharedQuotas.get(agent.id)?.usage, agent.usage);
+          if (usage) sharedQuotas.set(agent.id, { ...agent, usage, instances: [] });
+          for (const instance of agent.instances) {
+            if (instance.channelId) target(instance.channelId, position);
+            for (const id of byInstance.get(instance.id) ?? []) target(id, position);
+          }
+        }
+      });
+      for (const member of sharedQuotas.keys()) {
+        for (const id of byMember.get(member) ?? []) target(id);
+      }
+      for (const [id, reports] of positions) {
+        const channel = byId.get(id)!;
+        let patched = channel;
+        // Set insertion order is the report order, including reports routed
+        // through a legacy member key or through a globally unique Instance.
+        for (const position of reports) patched = patchChannelAgentPresenceFromAgent(patched, agents[position]);
+        // Account quota is shared once per member, without sharing Run state.
+        for (const member of Object.keys(channel.memberPresence ?? {})) {
+          const quota = sharedQuotas.get(member);
+          if (quota) patched = patchChannelAgentMemberFromAgent(patched, quota, true);
+        }
+        put(patched);
+      }
+    },
+    getSnapshot() {
+      if (!changed.size) return channels;
+      const next = [...byId.values()];
+      return needsSort ? sortChannels(next) : next;
+    },
+  };
 }
 
 export function patchChannelAgentPresenceFromAgent(

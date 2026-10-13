@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { humanAvatarMimeType } from "@xmatrix/protocol";
 import { Camera, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -133,7 +134,7 @@ export function HumanAvatarPicker({
             busy && "opacity-100",
           )}
         >
-          {busy ? <Loader2 className="size-5 animate-spin" /> : <Camera className="size-5" />}
+          {busy ? <AnimatedIcon icon={Loader2} className="size-5 animate-spin" /> : <Camera className="size-5" />}
         </span>
       </button>
       {shown && onRemove ? (

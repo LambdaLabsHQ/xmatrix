@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Check, KeyRound, Loader2, Settings2 } from "lucide-react";
@@ -153,7 +154,7 @@ export function SecretRequestCardView({ request, messageId, token, userId }: {
             disabled={busy || (needsValue && !value.trim())}
             className={actionClass({ variant: "primary", size: "sm" })}
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
             {needsValue ? "Save" : "Let it use this secret"}
           </button>
           <ManageSecretsButton />
@@ -196,7 +197,7 @@ function SecretAsk({ who, kind, question, detail, settled, canApprove, query, er
       status={settled ? { tone: "settled", label: settled }
         : canApprove === false && { tone: "secondary", label: "A Space admin answers" }}
     >
-      {query.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
+      {query.isLoading && <AnimatedIcon icon={Loader2} className="mt-2 flex size-3.5 animate-spin text-muted-foreground" />}
       <AskError error={error} loadError={query.error} action="Couldn't load this secret request"
         onRetry={() => void query.refetch()} />
       {list}
@@ -337,7 +338,7 @@ export function SecretAccessRequestCardView({ request, messageId, token, userId 
             onClick={() => void approve()}
             className={actionClass({ variant: "primary", size: "sm" })}
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
             {chosen.length === 1 ? "Let Agents read it without asking"
               : `Let Agents read these ${chosen.length} without asking`}
           </button>

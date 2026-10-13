@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { Loader2, PlusCircle } from "lucide-react";
 import type { SerializedSpace } from "@xmatrix/protocol";
@@ -95,7 +96,7 @@ export function TeamNewSpace({
           disabled={creatingSpace || createName.trim().length === 0}
           className={actionClass({ variant: "primary" })}
         >
-          {creatingSpace ? <Loader2 className="size-4 animate-spin" /> : <PlusCircle className="size-4" />}
+          {creatingSpace ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <PlusCircle className="size-4" />}
           Create
         </button>
       </form>
