@@ -4,6 +4,7 @@ import { postgresAuthorityDatabase } from "./postgres-authority-http";
 import { machineDaemonCommand } from "./machines";
 import { relayRuntimeSingleCell } from "./relay-authority-locator";
 import { failureResponse, transientFailure } from "./error-contract";
+import { analyticsWorkerVersion } from "./analytics-sampling";
 import type { Env } from "./types";
 
 /** The Runtime cell route that runs one release pass beside PostgreSQL. */
@@ -122,7 +123,7 @@ export async function watchHarnessReleases(env: Env, dependencies: HarnessReleas
  * the database, so each notice holds the lock for milliseconds.
  */
 export async function watchHarnessReleasesBesidePostgres(
-  env: Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT">,
+  env: Pick<Env, "RELAY_RUNTIME" | "XMATRIX_RUNTIME_LOCATION_HINT" | "CF_VERSION_METADATA">,
 ): Promise<{ issued: number }> {
   const response = await relayRuntimeSingleCell(env).fetch(new Request(
     `https://relay-runtime${RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH}`, { method: "POST" }));
@@ -130,6 +131,16 @@ export async function watchHarnessReleasesBesidePostgres(
   if (response.ok && typeof body.issued === "number") return { issued: body.issued };
   // The cell already logged an outage; a defect it threw rejects the fetch instead.
   if (body.retryable === true) return { issued: 0 };
+  // A deploy reaches this Worker before the cell restarts on it, and a cell
+  // still on an earlier release has no such route (XMATRIX-HUB-7M). Its 404
+  // names that release, so only a rollout in progress waits for the next pass;
+  // a missing route on this same release is still a defect.
+  if (response.status === 404 && typeof body.workerVersion === "string" &&
+      body.workerVersion !== analyticsWorkerVersion(env)) {
+    console.warn("Harness release watch reached a Runtime cell on another release", {
+      cellVersion: body.workerVersion, workerVersion: analyticsWorkerVersion(env) });
+    return { issued: 0 };
+  }
   throw new Error(`Harness release watch answered ${response.status}: ${String(body.error ?? "no error")}`);
 }
 

@@ -141,6 +141,27 @@ test("a database outage in the cell is answered as retryable; a defect still fai
   await assert.rejects(watchHarnessReleasesBesidePostgres({ RELAY_RUNTIME: refused }), /answered 404: Not found/u);
 });
 
+test("a cell still on the previous release is waited out; a missing route on this release fails the pass", async () => {
+  const deployed = { CF_VERSION_METADATA: { id: "new-version" } };
+  const previous = runtimeNamespace(() => Response.json({ error: "Not found", workerVersion: "old-version" },
+    { status: 404 }));
+  assert.deepEqual(await watchHarnessReleasesBesidePostgres({ ...deployed, RELAY_RUNTIME: previous }), { issued: 0 });
+
+  const same = runtimeNamespace(() => Response.json({ error: "Not found", workerVersion: "new-version" },
+    { status: 404 }));
+  await assert.rejects(watchHarnessReleasesBesidePostgres({ ...deployed, RELAY_RUNTIME: same }),
+    /answered 404: Not found/u);
+});
+
+test("the Runtime cell's 404 names the release it runs", async () => {
+  const { RelayRuntimeLive } = await import("../src/relay-runtime.ts");
+  const runtime = Object.create(RelayRuntimeLive.prototype);
+  Object.assign(runtime, { env: { CF_VERSION_METADATA: { id: "cell-version" } }, ctx: { waitUntil() {} } });
+  const response = await runtime.fetch(new Request("https://relay-runtime/internal/no-such-route", { method: "POST" }));
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: "Not found", workerVersion: "cell-version" });
+});
+
 test("the Runtime cell runs the release pass on its own database bindings", async () => {
   const { RelayRuntimeLive } = await import("../src/relay-runtime.ts");
   const runtime = Object.create(RelayRuntimeLive.prototype);
