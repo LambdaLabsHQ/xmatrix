@@ -70,24 +70,28 @@ test("without limiter bindings every request is admitted", async () => {
   assert.equal((await call("/api/channels", { "CF-Connecting-IP": "203.0.113.7" })).status, 200);
 });
 
-test("sign-in endpoints refuse a client IP over its allowance even while general limits only measure", async () => {
-  const env = { RATE_LIMIT_OAUTH_REGISTER: limiter(2), RATE_LIMIT_ANONYMOUS: limiter(100) };
+test("a sign-in endpoint asks the attempt counter without the client IP and refuses when it is spent", async () => {
+  const asked = [];
+  let admitted = true;
+  const env = { DEVICE_AUTH: { idFromName: (name) => name, get: () => ({ async fetch(url, init) {
+    asked.push({ url, ...JSON.parse(init.body) });
+    return Response.json({ admitted });
+  } }) } };
   const app = new Hono();
   registerRequestRateLimit(app);
   app.all("*", (c) => c.json({ ok: true }));
-  const register = (ip) => app.request("https://xmatrix-hub.xmatrix.sh/api/auth/oauth2/register",
-    { method: "POST", headers: { "CF-Connecting-IP": ip } }, env);
-  assert.equal((await register("203.0.113.7")).status, 200);
-  assert.equal((await register("203.0.113.7")).status, 200);
-  const refused = await register("203.0.113.7");
+  const register = () => app.request("https://xmatrix-hub.xmatrix.sh/api/auth/oauth2/register",
+    { method: "POST", headers: { "CF-Connecting-IP": "203.0.113.7" } }, env);
+  assert.equal((await register()).status, 200);
+  admitted = false;
+  const refused = await register();
   assert.equal(refused.status, 429);
   assert.equal(refused.headers.get("Retry-After"), "60");
-  assert.equal((await register("203.0.113.8")).status, 200, "each client IP has its own allowance");
-
-  const unbound = await app.request("https://xmatrix-hub.xmatrix.sh/api/auth/sign-in/email",
-    { method: "POST", headers: { "CF-Connecting-IP": "203.0.113.7" } }, env);
-  assert.equal(unbound.status, 503, "a deployment without the limiter refuses rather than going unlimited");
-  assert.equal((await unbound.json()).error, "RATE_LIMIT_SIGN_IN is not configured");
+  assert.equal(asked[0].limits[0].max, 10);
+  assert.ok(asked.every(({ limits }) => !limits[0].key.includes("203.0.113.7")), "the counter never holds the IP");
+  assert.equal((await app.request("https://xmatrix-hub.xmatrix.sh/api/auth/get-session",
+    { headers: { "CF-Connecting-IP": "203.0.113.7" } }, env)).status, 200, "other auth routes are not counted");
+  assert.equal(asked.length, 2);
 });
 
 test("a Human socket over its sign-in allowance is refused after the token check", async () => {

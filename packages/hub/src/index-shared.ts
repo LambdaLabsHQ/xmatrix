@@ -67,7 +67,6 @@ export { privateResponse } from "./private-response";
 
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 export const MAX_INVITE_EMAILS_PER_REQUEST = 100;
-export const LOGIN_RATE_LIMIT_WINDOW_MS = 60_000;
 export const LOGIN_RATE_LIMIT_PER_EMAIL = 5;
 export const LOGIN_RATE_LIMIT_PER_CLIENT = 20;
 export const CLIENT_METRIC_RATE_LIMIT = 60;
@@ -76,7 +75,6 @@ export const CLIENT_METRIC_RATE_MAX_PRINCIPALS = 10_000;
 export const AUTH_CORS_ALLOW_METHODS = "GET, POST, OPTIONS";
 export const AUTH_CORS_ALLOW_HEADERS = "authorization, content-type";
 export const INSTANCE_ABANDON_RESULT_TIMEOUT_MS = 20_000;
-export const loginRateLimits = new Map<string, number[]>();
 export const clientMetricRateLimits = new Map<string, number[]>();
 export class AuthFailure extends Error {
   readonly name = "AuthFailure";
@@ -1079,19 +1077,6 @@ export function internalClientHeaders(request: Request, headers?: HeadersInit): 
     ...headers,
     "x-client-key": clientKey(request),
   };
-}
-
-export function isLoginRateLimited(key: string, maxAttempts: number): boolean {
-  const now = Date.now();
-  const windowStart = now - LOGIN_RATE_LIMIT_WINDOW_MS;
-  const timestamps = (loginRateLimits.get(key) || []).filter((value) => value > windowStart);
-  if (timestamps.length >= maxAttempts) {
-    loginRateLimits.set(key, timestamps);
-    return true;
-  }
-  timestamps.push(now);
-  loginRateLimits.set(key, timestamps);
-  return false;
 }
 
 export function getDeviceAuthBroker(env: Env) {

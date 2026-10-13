@@ -53,11 +53,8 @@ Leave unset to keep the feature off.
 | `JEV_AI_GATEWAY_API_KEY` | secret | Vercel AI Gateway key for Jev, the model that picks which Agent answers. Unset: message-triggered launches run without Jev's choice, while launches that need a choice (registration input dispatch) answer 503 `registration_selection_unconfigured`. |
 | `PUSH_CONFIG` | secret | JSON with the Hub's push identities, each optional: `vapid` (publicKey, privateKey, subject) for browsers, `apns` (keyP8, keyId, teamId, topic, and macTopic for the Mac app) for Apple devices, `fcm` (the Firebase service account key) for Android. Unset: nothing is pushed and notifications appear only while a client is open. |
 | `RATE_LIMIT_ANONYMOUS` | binding | Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted. |
-| `RATE_LIMIT_AUTH_EMAIL` | binding | Always-enforced allowance per client IP for password-reset and sign-in-code emails (3 per minute). Unset: those requests are refused with 503. |
 | `RATE_LIMIT_CREDENTIAL` | binding | Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted. |
 | `RATE_LIMIT_HUMAN_CONNECT` | binding | Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted. |
-| `RATE_LIMIT_OAUTH_REGISTER` | binding | Always-enforced allowance per client IP for OAuth dynamic client registration (10 per minute). Unset: registration is refused with 503. |
-| `RATE_LIMIT_SIGN_IN` | binding | Always-enforced allowance per client IP for password sign-in (5 per minute). Unset: password sign-in is refused with 503. |
 | `RELAY_AUTHORITY_OBSERVABILITY_AE` | binding | Analytics Engine dataset for authority and PostgreSQL timing. Unset: observation is off. |
 | `RELAY_POSTGRES_SHARD_1` | binding | Hyperdrive binding to a second database shard. Unset: every Space is placed on the primary shard. |
 | `RELAY_POSTGRES_SHARD_1_ID` | var | Shard id served by RELAY_POSTGRES_SHARD_1; set with it in the deployment profile. |

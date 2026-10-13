@@ -54,9 +54,11 @@ phishing link can still persuade a person to authorize an untrusted app.
 The consent warning and return host help the person make that decision;
 they do not verify a provider's identity.
 
-Registration is limited to ten requests per client IP per minute by the
-always-enforced `RATE_LIMIT_OAUTH_REGISTER` Workers limiter; Better Auth's own
-limiter counts per isolate and is off. A registered name is at most 100
+Registration is limited to ten requests per client IP per minute, always
+enforced and counted exactly in the device login broker's Durable Object
+(`request-rate-limit.ts` `AUTH_ROUTE_ATTEMPTS`). Better Auth's own limiter
+counts per isolate and is off; the Workers Rate Limiting binding was tried
+and refused nothing in production, so neither is relied on. A registered name is at most 100
 characters of visible text, so it cannot push the consent warning out of view.
 Anonymous registration creates public clients;
 it cannot request `client_credentials` or `skip_consent`. Authorization requires
