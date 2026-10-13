@@ -268,9 +268,34 @@ against Apple's vocabulary and none is defaulted. `set_review_contact`
 refuses a sign-in password, which is entered in App Store Connect, and its
 receipt names the fields it set and never their values. Out of reach of the
 API and left to a person: creating the app record, the App Privacy answers,
-agreements, and replying to App Review. Availability by territory and
-screenshots are not covered yet. Uploading the binary needs Xcode and stays
-with the machine or CI that built it.
+agreements, and reading or replying to App Review's messages; Apple's
+specification (4.5.1) has no resource for any of them.
+
+Files reach Apple in three steps, so the bytes never pass through the Hub and
+the machine that has the file needs no API key: a reservation
+(`upload_build`, `upload_screenshot`), whose receipt lists each part's method,
+URL, byte range and headers; the upload itself, straight to Apple's storage;
+and `commit_upload`. The part URLs are Apple's own time-limited capability for
+that one file. They are shown byte for byte as Apple signed them, after the
+Hub has checked that each is https on a public host with plain header lines;
+`read_upload` lists them again and pages a long plan, and `delete_upload`
+removes a reservation that will not be used. An upload is named by one id
+throughout: the build upload's or the library image's. `upload_build` uses the
+Build Uploads resource, which needs no `altool` or Transporter, and
+`build_uploads` reads Apple's processing verdict with the errors it would
+otherwise only email. `declare_encryption` answers export compliance for one
+build, explicitly. Screenshots use the App Asset Library, which API 4.5.1 made
+the replacement for the deprecated screenshot sets: an image is uploaded once
+into the app's library and `set_screenshots` makes one language and placement
+group of a version show exactly the named images in order, deleting placements
+before creating so a full group has room. Placement groups and their exact
+sizes are read from Apple's reference data (`screenshot_specs`) and never
+written down, because Apple adds device families without an API change.
+`set_availability` creates a first availability in one request that names
+every territory, and changes an existing one territory by territory, at most
+25 per statement. `submit` on a submission App Review rejected marks its
+rejected items resolved and sends it back, which is what Resubmit does in App
+Store Connect; `cancel_submission` followed by `submit` starts over instead.
 
 Google Business Profile (`googlebusinessprofile`) is another connection on the
 company Google client, holding only `https://www.googleapis.com/auth/business.manage`
@@ -763,7 +788,7 @@ or generates a webhook secret in the Apps view.
 | Notion | internal integration token | — (polling deferred) | read page, append block, create page |
 | Vercel | access token + webhook secret | deployment created/succeeded/error | redeploy |
 | Cloudflare | OAuth or API token; Hub-registered destination secret | notifications fired/resolved by alert type; subscriptions own the account's `xMatrix ·` policies | query logs, list deployments (read); rollback |
-| App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version, app record and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review; set app info, age rating, price and review contact |
+| App Store Connect | API key (Key ID, Issuer ID, `.p8`); Hub-registered webhook secret | version state, build upload, TestFlight review and feedback; subscriptions own the app's `xMatrix ·` webhook | status, builds, version, app record and reviews (read); create version, set listing, attach build, submit, cancel, release, reply to review; set app info, age rating, price, availability and review contact; upload builds and screenshots |
 | Discord | bot token | — | post message |
 | Feishu/Lark | custom app id/secret + verification token | message in linked chat | send message |
 

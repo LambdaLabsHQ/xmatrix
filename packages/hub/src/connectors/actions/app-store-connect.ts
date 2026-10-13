@@ -83,6 +83,26 @@ export async function reviewDetail(api: AppStoreConnectApi, version: AppleResour
   }
 }
 
+export const BUILD_NUMBER = /^\d[\d.]{0,17}$/u;
+
+/** The one uploaded build with this build number in a version's train, whatever its processing state. */
+export async function namedBuild(api: AppStoreConnectApi, appId: string, input: Record<string, string>): Promise<AppleResource> {
+  const builds = (await api.list("/v1/builds", { "filter[app]": appId, "filter[version]": input.build!, "filter[preReleaseVersion.version]": input.version!,
+    "filter[preReleaseVersion.platform]": input.platform!, "fields[builds]": "version,processingState,expired,usesNonExemptEncryption", limit: "10" }, 1))
+    .rows.filter(row => text(row.attributes.version) === input.build);
+  if (!builds.length) throw new ProviderRequestError(404, `Build ${input.build} of ${input.version} is not in App Store Connect; upload it, then wait for processing`);
+  if (builds.length > 1) throw new ProviderRequestError(409, `More than one build ${input.build} of ${input.version} exists`);
+  return builds[0]!;
+}
+
+/** `<bundle id> <version> <build number>`, then whatever words the action takes after them. */
+export function appVersionBuild(statement: ConnectorActionStatement): { app: string; platform: string; version: string; build: string; rest: string[] } | undefined {
+  const app = bundleId(statement.target);
+  const [word = "", build = "", ...rest] = statement.text.trim().split(/\s+/u);
+  const ref = versionRef(word);
+  return app && ref && BUILD_NUMBER.test(build) ? { app, ...ref, build, rest } : undefined;
+}
+
 /** Numeric order of dotted versions; a missing part counts as zero. */
 export function compareVersions(left: string, right: string): number {
   const a = left.split(".").map(Number), b = right.split(".").map(Number);
