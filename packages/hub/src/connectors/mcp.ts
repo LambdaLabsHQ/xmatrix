@@ -12,7 +12,8 @@ import { serveMcp, type McpTool } from "../mcp-jsonrpc";
  * server-sent streams. A tool call is the same execution as the Agent posting
  * `@<provider>:<action>:<target> <text>` in its Run's Channel: the Channel's
  * policy applies (allow executes, ask stages for approval, disallow blocks), and the receipt is posted
- * there.
+ * there. Caller-only results stay in the tool response; the Channel and
+ * execution history receive only the public receipt.
  */
 
 const TOOL_NAME = /^([a-z][a-z0-9-]*)__([a-z_]+)$/u;
@@ -48,8 +49,8 @@ function tools(connected: ReadonlySet<string>): McpTool[] {
       inputSchema: {
         type: "object",
         properties: {
-          target: { type: "string", description: "What the action applies to, the part after the action in its usage." },
-          text: { type: "string", description: "The text the action posts or writes, if it takes any." },
+          target: { type: "string", description: "Only what the action applies to: the part after the action in its usage, without the @command prefix or following text." },
+          text: { type: "string", description: "The rest of the command after target, including search queries, posted text or written content, if it takes any." },
         },
         required: ["target"],
         additionalProperties: false,

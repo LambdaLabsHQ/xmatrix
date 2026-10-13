@@ -259,8 +259,17 @@ for persistence, additive rollout and API contracts.
 Persisted completion summaries are limited to 1,000 UTF-8 bytes, and failure or
 blocked reasons to 500 UTF-8 bytes. The Hub truncates these excerpts at complete
 Unicode code points; the action's full bounded context remains in the tool
-result and Channel receipt. Multibyte issue titles and stack metadata therefore
+result and, for public actions, Channel receipt. Multibyte issue titles and stack metadata therefore
 do not prevent an otherwise successful read from finalizing.
+
+Gmail search/read are caller-only actions: Channel receipts and stored completion
+summaries or failure reasons contain only the action and status, never mail
+headers, snippets, bodies, links, query or provider error details. Use the Agent's
+MCP tool for the private answer; direct Channel read commands also emit status
+only. For search, MCP arguments are `{"target":"*","text":"<Gmail query>"}` or
+one connected mailbox address as target. Do not put the command prefix or query
+in target. Verify this boundary with synthetic mail, checking both the tool
+response and Channel receipt without copying real verification codes into logs.
 
 **Agents.**
 - An Agent can post the command itself with `xmatrix send`.

@@ -3,6 +3,7 @@ import test from "node:test";
 import * as protocol from "@xmatrix/protocol";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { ProviderRequestError } from "../src/connectors/http.ts";
+import { commandResult } from "../src/connectors/command-support.ts";
 
 // The execution boundary must stage ask without calling the provider, and recheck policy
 // at dispatch. PostgreSQL's consume-once test cannot detect a dispatcher bypass.
@@ -13,8 +14,8 @@ test("Gmail ask stages a request, allow executes, and disallow blocks before pro
     "../workspace-resource-notification": { notifyWorkspaceResource: async (_env, change) => { announced.push(change); } },
     "@xmatrix/protocol": protocol,
     "../app-connectors": { getAppConnectorProvider: () => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === "gmail") },
-    "./command-support": { commandScope: async () => ({ spaceId: "s", connectionId: "s:gmail" }),
-      withExecution: async (_m, _i, _s, _a, run) => { const r = await run(); return `Gmail send: ${r.status}; ${r.summary}`; },
+    "./command-support": { commandResult, commandScope: async () => ({ spaceId: "s", connectionId: "s:gmail" }),
+      withExecution: async (m, _i, _s, a, run) => commandResult(m.name, a, await run()),
       publishCommandStatus: async () => {} },
     "./connection-credentials": { connectionCredentials: async () => ({ mailboxes: "[]" }) },
     "./credentials": { connectorActionPolicyRepository: () => ({ mode: async () => mode }),

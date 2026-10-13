@@ -3,7 +3,7 @@ import type { AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, listAppConnections } from "../apps";
 import { getChannel } from "../spaces";
-import type { ConnectorCommandInput } from "./provider";
+import type { ConnectorAction, ConnectorCommandInput } from "./provider";
 
 /* What every connector command needs around its own work: the Channel's
    Space connection, an execution record, and one receipt per message. */
@@ -57,14 +57,27 @@ function executionExcerpt(value: string, maximum: number): string {
   return excerpt.trimEnd();
 }
 
-/** Records one execution, runs it, and finalizes it with what happened. */
+export interface ConnectorCommandResult {
+  toolResult: string;
+  receipt: string;
+}
+
+/** Separate the calling tool's private answer from the Channel's durable receipt. */
+export function commandResult(name: string, action: Pick<ConnectorAction, "resultVisibility"> & { id: string },
+  outcome: { status: "completed" | "failed" | "blocked"; summary: string }): ConnectorCommandResult {
+  const line = (summary: string) => `${name} ${action.id}: ${outcome.status}; ${summary}${/[.!?。`]$/u.test(summary.trimEnd()) ? "" : "."}`;
+  return { toolResult: line(outcome.summary), receipt: line(action.resultVisibility === "caller"
+    ? `Private result; use the ${name} MCP tool for details` : outcome.summary) };
+}
+
+/** Records one execution, runs it, and finalizes it with a public summary only. */
 export async function withExecution(
   manifest: AppConnectorProviderManifest,
   input: ConnectorCommandInput,
   scope: CommandScope,
-  action: { id: string; label: string; key: string },
+  action: Pick<ConnectorAction, "resultVisibility"> & { id: string; label: string; key: string },
   run: () => Promise<{ status: "completed" | "failed" | "blocked"; summary: string }>,
-): Promise<string> {
+): Promise<ConnectorCommandResult> {
   const executionId = `app-execution:${input.messageId}${action.key}:${manifest.id}:${action.id}`.slice(0, 240);
   await appCommand(input.env, "record-execution", {
     commandId: `product:${manifest.id}-record:${input.messageId}${action.key}`.slice(0, 200),
@@ -73,16 +86,17 @@ export async function withExecution(
     principal: scope.principal,
   });
   const outcome = await run();
+  const result = commandResult(manifest.name, action, outcome);
+  const publicSummary = action.resultVisibility === "caller" ? result.receipt : outcome.summary;
   await appCommand(input.env, "finalize-execution", {
     commandId: `product:${manifest.id}-finalize:${input.messageId}${action.key}`.slice(0, 200),
     executionId, expectedVersion: 1, status: outcome.status,
     ...(outcome.status === "completed"
-      ? { resultSummary: executionExcerpt(outcome.summary, 1_000), resultChannelId: input.channelId }
-      : { reason: executionExcerpt(outcome.summary, 500) }),
+      ? { resultSummary: executionExcerpt(publicSummary, 1_000), resultChannelId: input.channelId }
+      : { reason: executionExcerpt(publicSummary, 500) }),
     principal: scope.principal,
   });
-  /* A summary that already ends its own sentence, or in a fence, gets no second full stop. */
-  return `${manifest.name} ${action.id}: ${outcome.status}; ${outcome.summary}${/[.!?。`]$/u.test(outcome.summary.trimEnd()) ? "" : "."}`;
+  return result;
 }
 
 /* The receipt reports what the Hub already did, so it is a system fact:

@@ -7,7 +7,7 @@ import { connectorActionPolicy, sha256Hex, type ConnectorActionPolicy, type AppC
 import { getAppConnectorProvider } from "../app-connectors";
 import { parseActionCommand, parsePolicyCommand } from "./action-parse";
 import { connectorActionCatalog } from "./action-catalog";
-import { commandScope, publishCommandStatus, withExecution } from "./command-support";
+import { commandResult, commandScope, publishCommandStatus, withExecution, type ConnectorCommandResult } from "./command-support";
 import { connectionCredentials } from "./connection-credentials";
 import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
@@ -76,7 +76,7 @@ export function connectorCommands(providerId: string,
         const action = parsed ? catalog.get(parsed.actionId)?.executor : undefined;
         if (parsed?.actionId === "policy") lines.push(await runPolicy(providerId, input, parsed.statement, actions));
         else if (parsed && action) {
-          lines.push(await runAction(providerId, input, parsed.actionId, action, parsed.statement));
+          lines.push((await runAction(providerId, input, parsed.actionId, action, parsed.statement)).receipt);
         }
       }
       await publishCommandStatus(manifest, input, lines);
@@ -111,7 +111,7 @@ export async function runPolicy(providerId: string, input: ConnectorCommandInput
 }
 
 /**
- * Runs one action for a Channel and posts its receipt there, whoever asked:
+ * Runs one action and posts only its public receipt in the Channel, whoever asked:
  * a message's command or an Agent's tool call (connectors MCP).
  */
 export async function runConnectorAction(providerId: string, input: ConnectorCommandInput, actionId: string,
@@ -119,22 +119,24 @@ export async function runConnectorAction(providerId: string, input: ConnectorCom
   approved?: { requestId: string; prepared: Record<string, string> }): Promise<string> {
   const manifest = getAppConnectorProvider(providerId);
   if (!manifest) return `${providerId} ${actionId}: failed; unknown connector.`;
-  const line = await runAction(providerId, input, actionId, action, statement, approved);
-  await publishCommandStatus(manifest, input, [line]);
-  return line;
+  const result = await runAction(providerId, input, actionId, action, statement, approved);
+  await publishCommandStatus(manifest, input, [result.receipt]);
+  return result.toolResult;
 }
 
 async function runAction(providerId: string, input: ConnectorCommandInput, actionId: string,
   action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0],
-  approved?: { requestId: string; prepared: Record<string, string> }): Promise<string> {
+  approved?: { requestId: string; prepared: Record<string, string> }): Promise<ConnectorCommandResult> {
   const manifest = getAppConnectorProvider(providerId)!;
+  const result = (status: "completed" | "failed" | "blocked", summary: string) =>
+    commandResult(manifest.name, { id: actionId, resultVisibility: action.resultVisibility }, { status, summary });
   const entry = manifest.actions.find((candidate) => candidate.id === actionId);
   const label = entry?.label ?? actionId;
   const defaultPolicy = entry?.defaultPolicy;
   const parsed = approved?.prepared ?? action.parse(statement);
-  if (typeof parsed === "string") return `${manifest.name} ${actionId}: failed; ${parsed}.`;
+  if (typeof parsed === "string") return result("failed", parsed);
   const scope = await commandScope(manifest, input);
-  if (typeof scope === "string") return `${manifest.name} ${actionId}: blocked; ${scope}.`;
+  if (typeof scope === "string") return result("blocked", scope);
   const policyInput = { connectionId: scope.connectionId, channelId: input.channelId, actionId, defaultPolicy };
   const mode = await channelActionPolicy(input.env, policyInput);
   const requestId = `action-request:${await sha256Hex(JSON.stringify([scope.connectionId, input.channelId, input.messageId, actionId]))}`;
@@ -156,7 +158,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   if (mode === "ask" && !approved) {
     try {
       const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
-      if (typeof context === "string") return `${manifest.name} ${actionId}: blocked; ${context}.`;
+      if (typeof context === "string") return result("blocked", context);
       const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
       const preview = providerId === "gmail"
         ? Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]))
@@ -168,10 +170,10 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       await announceActionRequests(input.env, scope.spaceId, input.channelId);
       return approvalReceipt(manifest.name, actionId, request);
     } catch (error) {
-      return `${manifest.name} ${actionId}: failed; ${error instanceof ProviderRequestError ? error.message : "could not create an approval request"}.`;
+      return result("failed", error instanceof ProviderRequestError ? error.message : "could not create an approval request");
     }
   }
-  return withExecution(manifest, input, scope, { id: actionId, label, key: "" }, async () => {
+  return withExecution(manifest, input, scope, { id: actionId, label, key: "", resultVisibility: action.resultVisibility }, async () => {
     if (mode === "disallow") return { status: "blocked", summary: actionRefusal({ actionId, mode })! };
     try {
       const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
@@ -192,10 +194,11 @@ export function announceActionRequests(env: Env, spaceId: string, channelId: str
   return notifyWorkspaceResource(env, { spaceId, resource: "connector_action_requests", channelId });
 }
 
-function approvalReceipt(name: string, actionId: string, request: { requestId: string; status: string }): string {
-  return `${name} ${actionId}: ${request.status === "pending" ? "awaiting approval" : request.status}; ` +
+function approvalReceipt(name: string, actionId: string, request: { requestId: string; status: string }): ConnectorCommandResult {
+  const receipt = `${name} ${actionId}: ${request.status === "pending" ? "awaiting approval" : request.status}; ` +
     `request ${request.requestId}; a Space admin answers pending requests in this channel's Pending approvals. ` +
     "Approval covers this request only; repeating this call never sends it again.";
+  return { toolResult: receipt, receipt };
 }
 
 async function actionContext(providerId: string, input: ConnectorCommandInput, spaceId: string,
