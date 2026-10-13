@@ -17,9 +17,9 @@ function writeAction(id: string, label: string, description: string, usage: stri
   return { id, label, description, usage, effect: "write", completion: { trailingDelimiter: ":" } };
 }
 
-/* A write that stays off in every Channel until a Space admin allows it there. */
+/* A write that asks a Space admin to approve each individual request. */
 function gatedWriteAction(id: string, label: string, description: string, usage: string): Action {
-  return { ...writeAction(id, label, description, usage), defaultPolicy: "deny" };
+  return { ...writeAction(id, label, description, usage), defaultPolicy: "ask" };
 }
 
 function readAction(id: string, label: string, description: string, usage: string): Action {
@@ -31,8 +31,8 @@ function withPolicy(actions: Action[]): Action[] {
   return actions.length === 0 ? [] : [...actions, {
     id: "policy",
     label: "Set action policy",
-    description: "Space admins: allow Agents to run a write action in this channel, deny it for everyone, or reset it to the default.",
-    usage: "<action> allow|deny|default",
+    description: "Space admins: allow an action, ask for approval each time, disallow it, or reset its default in this channel.",
+    usage: "<action> allow|ask|disallow|default",
     completion: { trailingDelimiter: ":" },
   }];
 }
@@ -264,8 +264,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       actions: [
         readAction("search", "Search mail", "The 10 newest messages per mailbox matching a Gmail search (from:, subject:, newer_than:1h, is:unread …), with id, sender, subject and snippet; * searches every mailbox you may use.", "*|<mailbox> [gmail search]"),
         readAction("read", "Read message", "Headers, text body and every link of one message; open a link yourself when the task needs it.", "<message id>"),
-        gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Off until a Space admin allows it in the channel.", "<to address> [from:<mailbox>] <subject>\n<body>"),
-        gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Off until a Space admin allows it in the channel.", "<message id> <body>"),
+        gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Asks a Space admin to approve each request by default.", "<to address> [from:<mailbox>] <subject>\n<body>"),
+        gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Asks a Space admin to approve each request by default.", "<message id> <body>"),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://mail.google.com/"], secretRefs: [] },

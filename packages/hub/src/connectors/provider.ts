@@ -40,6 +40,8 @@ export interface ConnectorActionStatement {
 }
 
 export interface ConnectorActionContext {
+  /** Revalidates current Channel policy immediately before an outbound write. */
+  authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
   /**
@@ -75,6 +77,8 @@ export interface ConnectorAction {
   requires: readonly string[];
   /** Validates the statement before any provider call; a string is the reason it is invalid. */
   parse(statement: ConnectorActionStatement): Record<string, string> | string;
+  /** Freeze the provider destination and preview before asking a Human. */
+  prepare?: (context: ConnectorActionContext, input: Record<string, string>) => Promise<Record<string, string>>;
   execute(context: ConnectorActionContext, input: Record<string, string>): Promise<ConnectorActionResult>;
 }
 

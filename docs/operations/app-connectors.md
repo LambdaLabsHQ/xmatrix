@@ -156,7 +156,7 @@ section, and none is ever shown again.
 | Google Business Profile | `list_accounts:*`, `list_locations:<account>`, `performance:<location> [days=…]`, `reviews:<location>` (reads), `reply_review:<review> <text>` |
 | PageSpeed Insights | `audit:<page url> [strategy=mobile\|desktop]`, `field:<page url or origin> [form=phone\|desktop\|all] [scope=page\|origin]` (reads; Google API key) |
 | Yandex Webmaster | `list_hosts:*`, `summary:<host id>`, `queries:<host id>` (reads), `recrawl:<host id> <page url>` |
-| Gmail (via Composio) | `search:*\|<mailbox> [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub); `send:<address> [from:<mailbox>] <subject>\n<body>`, `reply:<message id> <body>` (off until a Space admin allows them in the channel). Each Connect adds a mailbox; each mailbox is used only by its owner, a member or an Agent, set in Apps → Gmail |
+| Gmail (via Composio) | `search:*\|<mailbox> [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub); `send:<address> [from:<mailbox>] <subject>\n<body>`, `reply:<message id> <body>` (ask for a Space admin’s approval each time by default). Each Connect adds a mailbox; each mailbox is used only by its owner, a member or an Agent, set in Apps → Gmail |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 
 xmatrix.sh publishes its own IndexNow key at `https://xmatrix.sh/71d38a28828cfa8a824127e9320a4668.txt` (`apps/web/public`), so the company's `bingwebmaster` connection can push xmatrix.sh URLs with that key. The key is public by design; a new key needs a new file.
@@ -238,16 +238,24 @@ of Gmail, Slack or any other third-party provider.
 Policy is stored in `data.app_connector_action_policies` and read at execution
 time:
 
-- **`deny`.** A Space admin's `@<provider>:policy:<action> deny` blocks the
-  action for everyone in that channel.
-- **`allow`.** A Space admin's `@<provider>:policy:<action> allow` turns on an
-  action that is off by default.
-- **Default.** Every other action, read or write, runs, whether a Human or an
-  Agent sent it. The provider's own permissions still apply. Gmail's `send`
-  and `reply` are the exception: they are off in every channel until allowed,
-  because the Gmail grant covers the whole mailbox.
+- **`allow`.** Execute immediately within the provider's existing permissions.
+- **`ask`.** Create a 24-hour, encrypted, immutable request. A current Human
+  Space admin approves or denies it in the Channel's Pending approvals. Each
+  approval covers one request only; duplicate clicks cannot dispatch twice.
+- **`disallow`.** Block the action. Legacy `deny` remains the same restrictive alias.
+- **Default.** Gmail send/reply use ask; other actions retain allow. Existing
+  explicit overrides keep their meaning. GitHub's specialized dispatcher does
+  not support ask and rejects it.
 
-Every attempt writes an execution record and a receipt in the channel.
+Ask stages before the normal execution record. Approved dispatch rechecks
+Channel access, policy, account generation, credentials and mailbox ownership.
+It freezes the actual Gmail reply recipient before approval and never fetches
+new headers to redirect the approved email. Expired or changed requests must
+be recreated. Consumed or uncertain writes are not automatically retried.
+The approval payload is cleared after settlement; ordinary receipts carry the
+request reference rather than the email body. See connector-platform.md §3.5
+for persistence, additive rollout and API contracts.
+
 Persisted completion summaries are limited to 1,000 UTF-8 bytes, and failure or
 blocked reasons to 500 UTF-8 bytes. The Hub truncates these excerpts at complete
 Unicode code points; the action's full bounded context remains in the tool

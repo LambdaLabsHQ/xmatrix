@@ -632,6 +632,11 @@ async function releaseChannelTreeForMove(
     values: [channelIds], maxRows: 0,
   });
   await transaction.query({
+    name: "channel_move_remove_app_action_requests_v1",
+    text: "DELETE FROM data.app_connector_action_requests WHERE channel_id=ANY($1::text[])",
+    values: [channelIds], maxRows: 0,
+  });
+  await transaction.query({
     name: "channel_move_remove_app_action_policies_v1",
     text: "DELETE FROM data.app_connector_action_policies WHERE channel_id=ANY($1::text[])",
     values: [channelIds], maxRows: 0,

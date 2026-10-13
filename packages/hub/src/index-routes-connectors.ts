@@ -1,3 +1,4 @@
+import { registerConnectorApprovalRoutes } from "./index-routes-connector-approvals";
 import { handleDiscordLifecycleDelivery } from "./connectors/discord-events";
 import { registerTeamsRoutes } from "./index-routes-teams";
 import { handleTeamsAppDelivery } from "./connectors/teams-ingress";
@@ -5,7 +6,7 @@ import { handleDingTalkSuiteCallback } from "./connectors/dingtalk-suite";
 import { handleDingTalkSyncHTTP } from "./connectors/dingtalk-synchttp-ingress";
 import { registerDingTalkRoutes } from "./index-routes-dingtalk";
 import type { Hono } from "hono";
-import { HUB_ROUTES } from "@xmatrix/protocol";
+import { connectorActionPolicy, HUB_ROUTES } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "./app-connectors";
 import { connectorActionPolicyRepository, connectorIngressUrl, connectorCredentialRepository, INGRESS_KEY_FIELD,
   mintConnectorSecret } from "./connectors/credentials";
@@ -23,6 +24,7 @@ import { registerFeishuRoutes } from "./index-routes-feishu";
 import { registerGoogleChatRoutes } from "./index-routes-googlechat";
 import { handleConnectorMcp } from "./connectors/mcp";
 import { isPolicyAction } from "./connectors/connector-commands";
+import { connectorActionCatalog } from "./connectors/action-catalog";
 import { connectorProvider } from "./connectors/registry";
 import { connectorHubOrigin, readBoundedRequestBody, requestErrorStatus, requireAuth, requireHumanAuth, requireLiveAgentRun } from "./index-shared";
 import type { AuthUser } from "./auth";
@@ -65,6 +67,7 @@ function errorResponse(error: unknown): Response {
 }
 
 export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
+  registerConnectorApprovalRoutes(app);
   registerDingTalkRoutes(app);
   registerTeamsRoutes(app);
   registerGoogleChatRoutes(app);
@@ -150,12 +153,15 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
       if (!isPolicyAction(manifest, actionId)) {
         return c.json({ error: `${actionId || "action"} is not a ${manifest.name} write action` }, 400);
       }
-      if (body.mode !== "allow" && body.mode !== "deny" && body.mode !== null) {
-        return c.json({ error: "mode is allow, deny or null" }, 400);
+      if (body.mode !== null && !connectorActionPolicy(body.mode)) {
+        return c.json({ error: "mode is allow, ask, disallow or null" }, 400);
+      }
+      if (body.mode === "ask" && !connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions).get(actionId)?.executor) {
+        return c.json({ error: "This action does not support per-request approval" }, 400);
       }
       const result = await connectorActionPolicyRepository(c.env).set({ requestId: crypto.randomUUID(),
         spaceId: c.req.param("spaceId"), providerId: manifest.id, channelId: String(body.channelId ?? ""), actionId,
-        mode: body.mode, actorUserId: user.id, at: new Date().toISOString() });
+        mode: body.mode === null ? null : connectorActionPolicy(body.mode)!, actorUserId: user.id, at: new Date().toISOString() });
       return c.json(result);
     } catch (error) {
       return errorResponse(error);

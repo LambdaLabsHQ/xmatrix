@@ -90,7 +90,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`, `traffic`, `queries`, `pages`, `crawl_stats`, `submit_urls`, `submit_sitemap`, `indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`, `summary`, `queries`, `recrawl` |
-| Gmail | `gmail` | | `search`, `read`; `send`, `reply` (off until a Space admin allows them in the channel). Several mailboxes, each used only by the member or Agent it belongs to |
+| Gmail | `gmail` | | `search`, `read`; `send`, `reply` (ask for a Space admin’s approval each time by default). Several mailboxes, each used only by the member or Agent it belongs to |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
 | App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
@@ -216,11 +216,24 @@ An agent in a conversation can use the Space's connected apps as tools, with the
 
 ## Limiting an action
 
-By default every action of a connected app is available in every conversation of the Space, to people and to agents; the service's own permissions still apply. A Space admin can turn an action off in a conversation:
+Gmail sends and replies default to **Ask**. Each request appears in the
+conversation's **Pending approvals** with its sender, recipient, subject and
+body. A Space admin chooses **Allow once** or **Disallow**. Approving one email
+does not approve the next one; nothing is sent while the request waits.
+
+In Apps → Gmail → Channel action policy, choose **Allow**, **Ask**, or
+**Disallow** for send and reply in each conversation:
 
 ```text
-@github:policy:merge deny
-@github:policy:merge default
+@gmail:policy:send ask
+@gmail:policy:reply ask
+@gmail:policy:send allow
+@gmail:policy:send disallow
+@gmail:policy:send default
 ```
 
-`deny` blocks the action in that conversation for everyone. `default` removes the rule.
+**Allow** runs immediately, **Ask** requests approval every time, and
+**Disallow** blocks the action. **Default** removes the override. Existing
+explicit Allow/Disallow rules remain in force; `deny` remains a Disallow alias.
+Other apps keep their current defaults; generic executable actions can also
+use Ask. GitHub's specialized commands support Allow/Disallow only.

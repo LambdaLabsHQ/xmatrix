@@ -3,7 +3,7 @@ import { teamsActionCapability } from "./teams-native";
 import { dingtalkActionCapability } from "./dingtalk-native";
 import { telegramActionCapability } from "./telegram-native";
 import { wecomActionCapability } from "./wecom-native";
-import type { AppConnectorProviderManifest } from "@xmatrix/protocol";
+import { connectorActionPolicy, sha256Hex, type ConnectorActionPolicy, type AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "../app-connectors";
 import { parseActionCommand, parsePolicyCommand } from "./action-parse";
 import { connectorActionCatalog } from "./action-catalog";
@@ -12,10 +12,10 @@ import { connectionCredentials } from "./connection-credentials";
 import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
-import { connectorActionPolicyRepository } from "./credentials";
+import { connectorActionPolicyRepository, connectorActionRequestRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
 import type { Env } from "../types";
-import type { ConnectorAction, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
+import type { ConnectorAction, ConnectorActionContext, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
 import { runSubscriptionStatement } from "./subscription-command";
 import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from "./subscription-parse";
 
@@ -23,25 +23,28 @@ import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from 
  * A provider's Channel commands (docs/design/connector-platform.md §3.3, §3.5):
  * subscriptions for event providers, one outbound action per message, and the
  * per-Channel action policy for Space admins. Policy is read at execution
- * time: every action runs for a Human or an Agent unless a Space admin denies
- * it in the Channel; an action whose manifest default is `deny` runs only where
- * a Space admin allows it.
+ * time: allow executes, ask stages an immutable request for a Human admin,
+ * and disallow refuses. Gmail send/reply default to ask.
  */
 
-/** Why the Channel's policy refuses an action, if it does (§3.5): `deny`, or no policy on an action that is off by default. */
-export function actionRefusal(input: { actionId: string; mode: "allow" | "deny" | null;
-  defaultPolicy?: "deny" }): string | undefined {
-  if (input.mode === "deny") return `${input.actionId} is denied in this channel`;
-  return input.mode === null && input.defaultPolicy === "deny"
-    ? `${input.actionId} is off in this channel until a Space admin allows it (policy:${input.actionId} allow)` : undefined;
+/** Effective policy is read from the owning uncached authority on every execution. */
+export async function channelActionPolicy(env: Env, input: { connectionId: string; channelId: string;
+  actionId: string; defaultPolicy?: ConnectorActionPolicy }): Promise<ConnectorActionPolicy> {
+  return await connectorActionPolicyRepository(env).mode({ requestId: crypto.randomUUID(),
+    connectionId: input.connectionId, channelId: input.channelId, actionId: input.actionId }) ?? input.defaultPolicy ?? "allow";
 }
 
-/** Why the Channel's policy refuses an action as it stands now. */
+/** Legacy callers that cannot ask must refuse ask as well as disallow. */
+export function actionRefusal(input: { actionId: string; mode: ConnectorActionPolicy | "deny" | null;
+  defaultPolicy?: ConnectorActionPolicy }): string | undefined {
+  const mode = input.mode === null ? input.defaultPolicy ?? "allow" : connectorActionPolicy(input.mode) ?? "disallow";
+  return mode === "disallow" ? `${input.actionId} is denied in this channel`
+    : mode === "ask" ? `${input.actionId} needs approval of this request by a Space admin` : undefined;
+}
+
 export async function channelActionRefusal(env: Env, input: { connectionId: string; channelId: string;
-  actionId: string; defaultPolicy?: "deny" }): Promise<string | undefined> {
-  const mode = await connectorActionPolicyRepository(env).mode({ requestId: crypto.randomUUID(),
-    connectionId: input.connectionId, channelId: input.channelId, actionId: input.actionId });
-  return actionRefusal({ actionId: input.actionId, mode, defaultPolicy: input.defaultPolicy });
+  actionId: string; defaultPolicy?: ConnectorActionPolicy }): Promise<string | undefined> {
+  return actionRefusal({ actionId: input.actionId, mode: await channelActionPolicy(env, input) });
 }
 
 /** Whether a Channel policy can name this action: one that acts on the provider. */
@@ -70,7 +73,7 @@ export function connectorCommands(providerId: string,
       } else {
         const parsed = parseActionCommand(providerId, input.body);
         const action = parsed ? catalog.get(parsed.actionId)?.executor : undefined;
-        if (parsed?.actionId === "policy") lines.push(await runPolicy(providerId, input, parsed.statement));
+        if (parsed?.actionId === "policy") lines.push(await runPolicy(providerId, input, parsed.statement, actions));
         else if (parsed && action) {
           lines.push(await runAction(providerId, input, parsed.actionId, action, parsed.statement));
         }
@@ -81,13 +84,16 @@ export function connectorCommands(providerId: string,
 }
 
 export async function runPolicy(providerId: string, input: ConnectorCommandInput,
-  statement: Parameters<typeof parsePolicyCommand>[0]): Promise<string> {
+  statement: Parameters<typeof parsePolicyCommand>[0], actions: Readonly<Record<string, ConnectorAction>> = {}): Promise<string> {
   const manifest = getAppConnectorProvider(providerId)!;
   if (input.senderKind !== "user") return `${manifest.name} policy: blocked; only a Space admin sets action policy.`;
   const parsed = parsePolicyCommand(statement);
   if ("error" in parsed) return `${manifest.name} policy: failed; ${parsed.error}.`;
   if (!isPolicyAction(manifest, parsed.actionId)) {
     return `${manifest.name} policy: failed; ${parsed.actionId} is not a ${manifest.name} action.`;
+  }
+  if (parsed.mode === "ask" && !connectorActionCatalog(providerId, actions).get(parsed.actionId)?.executor) {
+    return `${manifest.name} policy: failed; this action does not support per-request approval.`;
   }
   const scope = await commandScope(manifest, input);
   if (typeof scope === "string") return `${manifest.name} policy: blocked; ${scope}.`;
@@ -108,61 +114,68 @@ export async function runPolicy(providerId: string, input: ConnectorCommandInput
  * a message's command or an Agent's tool call (connectors MCP).
  */
 export async function runConnectorAction(providerId: string, input: ConnectorCommandInput, actionId: string,
-  action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0]): Promise<string> {
+  action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0],
+  approved?: { requestId: string; prepared: Record<string, string> }): Promise<string> {
   const manifest = getAppConnectorProvider(providerId);
   if (!manifest) return `${providerId} ${actionId}: failed; unknown connector.`;
-  const line = await runAction(providerId, input, actionId, action, statement);
+  const line = await runAction(providerId, input, actionId, action, statement, approved);
   await publishCommandStatus(manifest, input, [line]);
   return line;
 }
 
 async function runAction(providerId: string, input: ConnectorCommandInput, actionId: string,
-  action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0]): Promise<string> {
+  action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0],
+  approved?: { requestId: string; prepared: Record<string, string> }): Promise<string> {
   const manifest = getAppConnectorProvider(providerId)!;
   const entry = manifest.actions.find((candidate) => candidate.id === actionId);
   const label = entry?.label ?? actionId;
   const defaultPolicy = entry?.defaultPolicy;
-  const parsed = action.parse(statement);
+  const parsed = approved?.prepared ?? action.parse(statement);
   if (typeof parsed === "string") return `${manifest.name} ${actionId}: failed; ${parsed}.`;
   const scope = await commandScope(manifest, input);
   if (typeof scope === "string") return `${manifest.name} ${actionId}: blocked; ${scope}.`;
-  return withExecution(manifest, input, scope, { id: actionId, label, key: "" }, async () => {
-    const refusal = await channelActionRefusal(input.env, { connectionId: scope.connectionId,
-      channelId: input.channelId, actionId, defaultPolicy });
-    if (refusal) return { status: "blocked", summary: refusal };
+  const policyInput = { connectionId: scope.connectionId, channelId: input.channelId, actionId, defaultPolicy };
+  const mode = await channelActionPolicy(input.env, policyInput);
+  const requestId = `action-request:${await sha256Hex(JSON.stringify([scope.connectionId, input.channelId, input.messageId, actionId]))}`;
+  if (!approved && action.effect === "write") {
+    const staged = await connectorActionRequestRepository(input.env).find(requestId, scope.connectionId, input.channelId, input.actorUserId);
+    if (staged) return approvalReceipt(manifest.name, actionId, staged);
+  }
+  const authorizeWrite = async () => {
+    const liveScope = await commandScope(manifest, input);
+    if (typeof liveScope === "string" || liveScope.spaceId !== scope.spaceId || liveScope.connectionId !== scope.connectionId) {
+      throw new ProviderRequestError(409, `${manifest.name} Channel access changed before posting`);
+    }
+    if (approved) await connectorActionRequestRepository(input.env).authorize(approved.requestId, scope.connectionId, input.channelId);
+    const changed = await channelActionPolicy(input.env, policyInput);
+    if (changed === "disallow" || (changed === "ask" && !approved)) {
+      throw new ProviderRequestError(403, actionRefusal({ actionId, mode: changed })!);
+    }
+  };
+  if (mode === "ask" && !approved) {
     try {
-      const authorizeWrite = async () => {
-        const liveScope = await commandScope(manifest, input);
-        if (typeof liveScope === "string" || liveScope.spaceId !== scope.spaceId || liveScope.connectionId !== scope.connectionId) {
-          throw new ProviderRequestError(409, `${manifest.name} Channel access changed before posting`);
-        }
-        const changed = await channelActionRefusal(input.env, { connectionId: scope.connectionId,
-          channelId: input.channelId, actionId, defaultPolicy });
-        if (changed) throw new ProviderRequestError(403, changed);
-      };
-      const googleChat = providerId === "googlechat" && actionId === "post"
-        ? await googleChatActionCapability(input.env, scope.spaceId, authorizeWrite) : undefined;
-      const discord = providerId === "discord" && actionId === "post"
-        ? await discordActionCapability(input.env, scope.spaceId, authorizeWrite) : undefined;
-      const feishu = providerId === "feishu" && actionId === "send"
-        ? await feishuActionCapability(input.env, scope.spaceId, authorizeWrite) : undefined;
-      const telegram = providerId === "telegram" && actionId === "send"
-        ? await telegramActionCapability(input.env, scope.spaceId, authorizeWrite) : undefined;
-      const wecom = providerId === "wecom" && actionId === "send"
-        ? await wecomActionCapability(input.env, scope.spaceId, authorizeWrite) : undefined;
-      const teams = providerId === "teams" && actionId === "post"
-        ? await teamsActionCapability(input.env, scope.spaceId, authorizeWrite) : undefined;
-      const dingtalk = providerId === "dingtalk" && ["read", "send"].includes(actionId)
-        ? await dingtalkActionCapability(input.env, scope.spaceId, authorizeWrite) : undefined;
-      const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk;
-      const credentials = native ? {} : await connectionCredentials(input.env, scope.spaceId, providerId);
-      /* `a|b` requires either field: a pasted token or the one OAuth issued. */
-      const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
-      if (missing.length > 0) return { status: "blocked", summary: `save ${missing.join(", ")} in Apps → ${manifest.name} → Credentials` };
-      const instanceId = input.senderKind === "agent" ? input.senderId : undefined;
-      const caller = { userId: input.actorUserId,
-        ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };
-      const result = await action.execute({ credentials, caller, ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}), ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}), ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}) }, parsed);
+      const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
+      if (typeof context === "string") return `${manifest.name} ${actionId}: blocked; ${context}.`;
+      const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
+      const preview = providerId === "gmail"
+        ? Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]))
+        : { target: statement.target, text: statement.text };
+      const request = await connectorActionRequestRepository(input.env).create({ requestId,
+        connectionId: scope.connectionId, channelId: input.channelId, providerId, actionId, requestedBy: input.actorUserId,
+        payload: { messageId: input.messageId, senderKind: input.senderKind ?? "user", senderId: input.senderId,
+          statement, prepared, preview } });
+      return approvalReceipt(manifest.name, actionId, request);
+    } catch (error) {
+      return `${manifest.name} ${actionId}: failed; ${error instanceof ProviderRequestError ? error.message : "could not create an approval request"}.`;
+    }
+  }
+  return withExecution(manifest, input, scope, { id: actionId, label, key: "" }, async () => {
+    if (mode === "disallow") return { status: "blocked", summary: actionRefusal({ actionId, mode })! };
+    try {
+      const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
+      if (typeof context === "string") return { status: "blocked", summary: context };
+      await authorizeWrite();
+      const result = await action.execute(context, parsed);
       return { status: "completed", summary: result.url ? `${result.summary} — ${result.url}` : result.summary };
     } catch (error) {
       if (error instanceof ProviderRequestError) return { status: "failed", summary: error.message };
@@ -170,4 +183,39 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
         ? "the provider did not answer in time" : "the provider call failed" };
     }
   });
+}
+
+function approvalReceipt(name: string, actionId: string, request: { requestId: string; status: string }): string {
+  return `${name} ${actionId}: ${request.status === "pending" ? "awaiting approval" : request.status}; ` +
+    `request ${request.requestId}; a Space admin answers pending requests in this channel's Pending approvals. ` +
+    "Approval covers this request only; repeating this call never sends it again.";
+}
+
+async function actionContext(providerId: string, input: ConnectorCommandInput, spaceId: string,
+  actionId: string, action: ConnectorAction, authorizeWrite: () => Promise<void>): Promise<ConnectorActionContext | string> {
+  const googleChat = providerId === "googlechat" && actionId === "post"
+    ? await googleChatActionCapability(input.env, spaceId, authorizeWrite) : undefined;
+  const discord = providerId === "discord" && actionId === "post"
+    ? await discordActionCapability(input.env, spaceId, authorizeWrite) : undefined;
+  const feishu = providerId === "feishu" && actionId === "send"
+    ? await feishuActionCapability(input.env, spaceId, authorizeWrite) : undefined;
+  const telegram = providerId === "telegram" && actionId === "send"
+    ? await telegramActionCapability(input.env, spaceId, authorizeWrite) : undefined;
+  const wecom = providerId === "wecom" && actionId === "send"
+    ? await wecomActionCapability(input.env, spaceId, authorizeWrite) : undefined;
+  const teams = providerId === "teams" && actionId === "post"
+    ? await teamsActionCapability(input.env, spaceId, authorizeWrite) : undefined;
+  const dingtalk = providerId === "dingtalk" && ["read", "send"].includes(actionId)
+    ? await dingtalkActionCapability(input.env, spaceId, authorizeWrite) : undefined;
+  const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk;
+  const credentials = native ? {} : await connectionCredentials(input.env, spaceId, providerId);
+  /* `a|b` requires either field: a pasted token or the one OAuth issued. */
+  const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
+  if (missing.length > 0) return `save ${missing.join(", ")} in Apps → ${getAppConnectorProvider(providerId)!.name} → Credentials`;
+  const instanceId = input.senderKind === "agent" ? input.senderId : undefined;
+  const caller = { userId: input.actorUserId,
+    ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };
+  return { credentials, caller, authorizeWrite, ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+    ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
+    ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}) };
 }

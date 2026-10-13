@@ -11,8 +11,7 @@ import { serveMcp, type McpTool } from "../mcp-jsonrpc";
  * §3.5): `POST /api/connectors/mcp`, JSON-RPC over streamable HTTP without
  * server-sent streams. A tool call is the same execution as the Agent posting
  * `@<provider>:<action>:<target> <text>` in its Run's Channel: the Channel's
- * policy applies (a `deny` blocks it, and an action that is off by default
- * needs `allow`), and the receipt is posted
+ * policy applies (allow executes, ask stages for approval, disallow blocks), and the receipt is posted
  * there.
  */
 
@@ -75,7 +74,7 @@ export async function handleConnectorMcp(env: Env, caller: ConnectorMcpCaller, b
         env, channelId: caller.channelId, messageId: `mcp:${caller.runId}:${crypto.randomUUID()}`,
         body: `@${provider.id}:${match[2]}:${target} ${text}`.trim(), actorUserId: caller.ownerUserId, senderKind: "agent", senderId: caller.agentId,
       }, match[2]!, action, { target, text });
-      return { content: [{ type: "text", text: line }], isError: !/: completed;/u.test(line) };
+      return { content: [{ type: "text", text: line }], isError: !/: (completed|awaiting approval);/u.test(line) };
     },
   }, body);
 }
