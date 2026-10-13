@@ -1,3 +1,4 @@
+import { compareAgentTraceEvents } from "./agent-trace-replica";
 import { timestampMillisOrZero as timestampMs } from "./time-display";
 import type { ChannelMessage, ObservabilityEvent } from "@xmatrix/protocol";
 
@@ -363,7 +364,7 @@ function traceEventRecords(events: ObservabilityEvent[]): TraceEventRecord[] {
   return events
     .map(traceEventRecord)
     .filter((record) => record.phase)
-    .sort((left, right) => left.timestamp - right.timestamp || left.event.id.localeCompare(right.event.id));
+    .sort((left, right) => compareAgentTraceEvents(left.event, right.event));
 }
 
 function traceEventRecord(event: ObservabilityEvent): TraceEventRecord {
