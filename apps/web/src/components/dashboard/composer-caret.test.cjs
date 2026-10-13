@@ -9,10 +9,10 @@ const {
   composerPointerFocusSelection,
   emptyPasteAnchorSelection,
   isComposerImeBeforeInput,
-  isComposerImeKeyDown,
   scheduleTextareaSelection,
   stripEmptyPasteSentinel,
 } = require("./composer-caret.ts");
+const { isImeKeyDown } = require("../../lib/ime-keydown.ts");
 
 test("empty composer paste anchor keeps a collapsed caret instead of selecting the sentinel", () => {
   assert.equal(EMPTY_COMPOSER_PASTE_SENTINEL.length, 1);
@@ -133,11 +133,11 @@ test("composer IME beforeinput detection recognizes composition text", () => {
   assert.equal(isComposerImeBeforeInput({ inputType: "insertText" }), false);
 });
 
-test("composer IME keydown detection covers browsers that only report the IME key code", () => {
-  assert.equal(isComposerImeKeyDown({ isComposing: true }), true);
-  assert.equal(isComposerImeKeyDown({ keyCode: 229 }), true);
-  assert.equal(isComposerImeKeyDown({ isComposing: false, keyCode: 13 }), false);
-  assert.equal(isComposerImeKeyDown({}), false);
+test("IME keydown detection covers browsers that only report the IME key code", () => {
+  assert.equal(isImeKeyDown({ isComposing: true }), true);
+  assert.equal(isImeKeyDown({ keyCode: 229 }), true);
+  assert.equal(isImeKeyDown({ isComposing: false, keyCode: 13 }), false);
+  assert.equal(isImeKeyDown({}), false);
 });
 
 test("the completion list never takes a keystroke away from an input method", () => {

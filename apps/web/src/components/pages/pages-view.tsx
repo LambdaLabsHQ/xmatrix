@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
+import { isImeKeyDown } from "@/lib/ime-keydown";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
   PageLiveSession, pageApi, pageChildren,
@@ -905,6 +906,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const titleField = page && !documentOpensWithTitle(page.title, blocks, document.data?.body) ? (canEdit ? (
     <input ref={titleInput} key={`${page.pageId}:${page.title}`} defaultValue={page.title} aria-label="Page title"
       data-testid="page-title" placeholder={NEW_PAGE_TITLE} onKeyDown={(event) => {
+        if (isImeKeyDown(event.nativeEvent)) return;
         if (event.key === "Enter") event.currentTarget.blur();
         if (event.key === "Escape") { event.currentTarget.value = page.title; event.currentTarget.blur(); }
       }}

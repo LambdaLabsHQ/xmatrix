@@ -6,6 +6,7 @@ import { Loader2, RotateCcw, Trash2 } from "lucide-react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import { actionClass } from "@/components/ui/action-tone";
+import { isImeKeyDown } from "@/lib/ime-keydown";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -89,6 +90,7 @@ export function SpaceDangerZone({
                     value={confirmation}
                     onChange={(event) => setConfirmation(event.target.value)}
                     onKeyDown={(event) => {
+                      if (isImeKeyDown(event.nativeEvent)) return;
                       if (event.key === "Enter") void submit();
                       if (event.key === "Escape") close();
                     }}

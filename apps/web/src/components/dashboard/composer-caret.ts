@@ -1,3 +1,5 @@
+import { isImeKeyDown } from "../../lib/ime-keydown";
+
 export const EMPTY_COMPOSER_PASTE_SENTINEL = "\u200B";
 
 export type ComposerSelectionRange = {
@@ -43,20 +45,6 @@ export function isComposerImeBeforeInput(input: {
 }
 
 /**
- * Whether a keydown belongs to an input method rather than to the composer.
- * While an IME is composing, Enter and Tab commit its candidate and the arrows
- * walk its candidate list, so every one of those keys is already spoken for.
- */
-export function isComposerImeKeyDown(input: {
-  isComposing?: boolean;
-  keyCode?: number;
-}): boolean {
-  // Some WebKit builds clear `isComposing` on the very keydown that commits the
-  // candidate while still reporting the IME's own key code, so both are checked.
-  return Boolean(input.isComposing) || input.keyCode === 229;
-}
-
-/**
  * Whether the mention/launch-target list owns this keydown. It must not take an
  * IME keystroke: accepting a candidate on the Enter that commits composition
  * runs both, and the text the IME then commits lands after the mention the
@@ -68,7 +56,7 @@ export function composerCompletionHandlesKeyDown(input: {
   open: boolean;
   optionCount: number;
 }): boolean {
-  if (isComposerImeKeyDown(input)) return false;
+  if (isImeKeyDown(input)) return false;
   if (!input.open) return false;
   return input.optionCount > 0;
 }

@@ -10,6 +10,7 @@ import { EditorState, type Command } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey } from "y-prosemirror";
 import { gitHubFileReferenceFrom, gitHubFileReferenceHref, type SerializedAutomation } from "@xmatrix/protocol";
+import { isImeKeyDown } from "@/lib/ime-keydown";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
@@ -567,6 +568,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
               aria-label={asking.mode === "ask" ? "Your question" : "What to change"}
               placeholder={asking.mode === "ask" ? "Ask about this passage…" : "Say how it should change…"}
               onKeyDown={(event) => {
+                if (isImeKeyDown(event.nativeEvent)) return;
                 if (event.key === "Escape") setAsking(null);
                 if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
               }}
