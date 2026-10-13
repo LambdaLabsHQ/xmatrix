@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { APP_CONNECTOR_PROVIDER_MANIFESTS, agentAvatarUrlFromMetadata, agentLaunchExecutable } from "@xmatrix/protocol";
 import Image from "next/image";
 import { openRepositoryToStar } from "./star-prompt";
@@ -371,7 +372,7 @@ function DiscoveredAgentWorkspaceList({
               <span className="flex items-center gap-1 px-2 text-xs text-muted-foreground"><Check className="size-3.5" /> Added</span>
             ) : (
               <Button size="xs" variant="ghost" disabled={importing} onClick={() => onImportWorkspace(candidate)}>
-                {importing ? <Loader2 className="animate-spin" /> : <Plus />} Add
+                {importing ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add
               </Button>
             )}
           />
@@ -497,7 +498,7 @@ export function LocalMacView({
           title="Set up this machine"
           action={(
             <Button size="xs" disabled={!setupReady || busy === "setup:complete"} onClick={onCompleteSetup}>
-              {busy === "setup:complete" ? <Loader2 className="animate-spin" /> : <Check />}
+              {busy === "setup:complete" ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Check />}
               Complete setup
             </Button>
           )}
@@ -514,7 +515,7 @@ export function LocalMacView({
                   disabled={!desktopContext?.machineId || machineName === undefined || busy === "machine:name"} />
               </label>
               <Button type="submit" size="sm" disabled={!nameDraft.trim() || machineName === undefined || busy === "machine:name"}>
-                {busy === "machine:name" ? <Loader2 className="animate-spin" /> : null} Save name
+                {busy === "machine:name" ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null} Save name
               </Button>
             </form>
           )}
@@ -537,7 +538,7 @@ export function LocalMacView({
           <Button size="xs" variant="ghost" disabled={daemonStarting} onClick={onRestartDaemon}><RefreshCw /> Restart</Button>
         ) : (
           <Button size="xs" variant="outline" disabled={daemonStarting || !machineName} onClick={onStartDaemon}>
-            {daemonStarting ? <Loader2 className="animate-spin" /> : <Radio />}
+            {daemonStarting ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Radio />}
             {daemonStarting ? "Starting" : "Start"}
           </Button>
         )}
@@ -627,7 +628,7 @@ export function LocalMacView({
         concealAction={workspaces.length > 0}
         action={(
           <Button size="xs" variant="ghost" disabled={busy === "workspace:add"} onClick={onAddWorkspace}>
-            {busy === "workspace:add" ? <Loader2 className="animate-spin" /> : <Plus />} Add directory
+            {busy === "workspace:add" ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add directory
           </Button>
         )}
       >
@@ -657,7 +658,7 @@ export function LocalMacView({
                       </Button>
                       <Button size="icon-sm" variant="ghost" className={iconButton} title="Remove local directory"
                         aria-label="Remove local directory" disabled={removing} onClick={() => onRemoveWorkspace(workspace)}>
-                        {removing ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                        {removing ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Trash2 />}
                       </Button>
                     </>
                   )}
@@ -674,7 +675,7 @@ export function LocalMacView({
         action={(
           <Button size="icon-xs" variant="ghost" className={iconButton} onClick={onRefreshDiscoveries}
             disabled={loadingDiscoveries} title="Scan again" aria-label="Scan again">
-            <RefreshCw className={cn(loadingDiscoveries && "animate-spin")} />
+            <AnimatedIcon icon={RefreshCw} className={cn(loadingDiscoveries && "animate-spin")} />
           </Button>
         )}
       >
@@ -715,7 +716,7 @@ export function LocalMacView({
                         <span className="flex items-center gap-1 px-2 text-xs text-muted-foreground"><Check className="size-3.5" /> Added</span>
                       ) : (
                         <Button size="xs" variant="outline" disabled={importing} onClick={() => onImportAgent(discovery)}>
-                          {importing ? <Loader2 className="animate-spin" /> : <Plus />} Add agent
+                          {importing ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Add agent
                         </Button>
                       )}
                     />
@@ -979,14 +980,14 @@ export function MachinesView({
               aria-label={unnamed ? "Name it" : "Rename"}
               onClick={() => { setRenameError(null); setEditing({ machineId: machine.machineId!,
                 draft: unnamed ? "" : name, create: unnamed }); }}>
-              {renameBusy ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
+              {renameBusy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Pencil className="size-4" />}
             </button>
             <button type="button" className={cn(titleControl, "hover:text-destructive")}
               title={`Remove ${name}`}
               aria-label={`Remove ${name}`}
               disabled={Boolean(removingId)}
               onClick={() => void remove(machine)}>
-              {removingId === machine.machineId ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              {removingId === machine.machineId ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
             </button>
           </>
         ) : undefined}
@@ -1521,7 +1522,7 @@ export function AppsView({
                 <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id || configuring}
                   onClick={() => void configureConnector(connector)}
                   title={`Reconnect ${connector.name}`} aria-label={`Reconnect ${connector.name}`}>
-                  {updating ? <Loader2 className="animate-spin" /> : <PlugZap />} Reconnect
+                  {updating ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />} Reconnect
                 </Button>
               ) : null}
               <Button size="sm" variant="ghost" disabled={updating || checking}
@@ -1534,7 +1535,7 @@ export function AppsView({
           ) : state.available && (connector.id === "github" || oauthProviders.includes(connector.id) || nativeProviders.includes(connector.id)
             || connectorWritableCredentials(connector).length === 0) ? (
             <Button size="sm" variant="outline" disabled={updating || checking} onClick={() => void configureConnector(connector)}>
-              {updating ? <Loader2 className="animate-spin" /> : <PlugZap />}
+              {updating ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <PlugZap />}
               {state.connection ? "Reconnect" : connector.id === "github" ? "Connect GitHub"
                 : oauthProviders.includes(connector.id) ? `Connect with ${connector.name}` : "Connect"}
             </Button>
@@ -1543,7 +1544,7 @@ export function AppsView({
             <Button size="sm" variant="outline" disabled={updating || checking || savingProviderId === connector.id}
               onClick={() => void checkConnector(connector)}
               title={`Check ${connector.name} connection`} aria-label={`Check ${connector.name} connection`}>
-              {checking ? <Loader2 className="animate-spin" /> : <RefreshCw />} Check
+              {checking ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <RefreshCw />} Check
             </Button>
           ) : null}
         </div>
@@ -1638,7 +1639,7 @@ export function AppsView({
           <div className="mb-2 flex justify-end">
             <Button size="xs" variant="ghost" onClick={() => void loadExecutions()} disabled={loadingExecutions}
               title="Refresh connector activity">
-              <RefreshCw className={cn(loadingExecutions && "animate-spin")} /> Refresh
+              <AnimatedIcon icon={RefreshCw} className={cn(loadingExecutions && "animate-spin")} /> Refresh
             </Button>
           </div>
           {executionsError && <p className="mb-3 text-sm font-medium text-destructive">{executionsError}</p>}
@@ -1757,7 +1758,7 @@ export function ConnectorConfiguration({
           disabled={saving}
           className={actionClass({ variant: "primary" })}
         >
-          {saving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+          {saving ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
           {saving ? "Saving" : "Save configuration"}
         </button>
       </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -714,7 +715,7 @@ function LoginContent() {
                   ) : desktopLogin.status === "error" ? (
                     <AlertTriangle className="size-4 text-destructive" />
                   ) : (
-                    <Loader2 className="size-4 animate-spin text-primary" />
+                    <AnimatedIcon icon={Loader2} className="size-4 animate-spin text-primary" />
                   )}
                   <span className="font-medium">
                     {desktopLogin.status === "idle"
@@ -798,7 +799,7 @@ function LoginContent() {
               <Button type="submit" className="w-full" disabled={loading || Boolean(cliError)}>
                 {loading ? (
                   <>
-                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    <AnimatedIcon icon={Loader2} className="mr-2 size-4 animate-spin" />
                     Sending code…
                   </>
                 ) : (
@@ -872,7 +873,7 @@ function LoginContent() {
               >
                 {loading ? (
                   <>
-                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    <AnimatedIcon icon={Loader2} className="mr-2 size-4 animate-spin" />
                     Completing sign-in…
                   </>
                 ) : (

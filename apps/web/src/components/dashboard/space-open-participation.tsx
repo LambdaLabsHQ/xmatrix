@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
@@ -47,7 +48,7 @@ export function SpaceOpenParticipation({ spaceId, token }: { spaceId: string; to
         {error ? <span className="mt-1 block font-medium text-destructive">{error}</span> : null}
       </>}
       control={<>
-        {busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+        {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin text-muted-foreground" /> : null}
         <Switch label="Anyone with a linked GitHub account can join as a participant"
           checked={governance.data?.openParticipation ?? false} disabled={!governance.data || busy}
           onChange={(open) => void toggle(open)} />

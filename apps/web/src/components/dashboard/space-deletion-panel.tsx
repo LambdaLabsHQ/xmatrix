@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, RotateCcw, Trash2 } from "lucide-react";
@@ -109,7 +110,7 @@ export function SpaceDangerZone({
                   disabled={!confirmed || busy}
                   className={actionClass({ variant: "danger" })}
                 >
-                  {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
                   Delete Space
                 </button>
               </div>
@@ -179,7 +180,7 @@ export function DeletedSpacesList({
               className={actionClass({ variant: "secondary", size: "sm" })}
             >
               {restoringId === item.spaceId
-                ? <Loader2 className="size-3.5 animate-spin" />
+                ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
                 : <RotateCcw className="size-3.5" />}
               Restore
             </button>

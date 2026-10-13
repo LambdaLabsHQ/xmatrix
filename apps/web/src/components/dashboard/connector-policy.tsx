@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react";
@@ -89,7 +90,7 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
           options={[{ value: "allow", label: "Allow" }, ...(connector.id === "github" ? [] : [{ value: "ask", label: "Ask" }]), { value: "disallow", label: "Disallow" }]} />
         <Button size="sm" type="button" disabled={!actionId || !channelId || write.isPending}
           onClick={() => write.mutate({ channelId, actionId, mode })}>
-          {write.isPending ? <Loader2 className="animate-spin" /> : <Plus />} Set
+          {write.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <Plus />} Set
         </Button>
       </div>
     </div>

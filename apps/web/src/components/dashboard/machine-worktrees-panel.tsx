@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, FolderGit2, Loader2, RefreshCw, Trash2 } from "lucide-react";
@@ -133,7 +134,7 @@ export function MachineWorktreesPanel({ daemon, token }: { daemon?: SerializedMa
     {inventory && <span className="text-xs text-muted-foreground">Checked {relativeTime(inventory.capturedAt)}</span>}
     <Button size="icon-xs" variant="ghost" className="text-muted-foreground" title="Check again" aria-label="Check worktrees again"
       disabled={!state.canManage || listing.pending} onClick={() => listing.run({ action: "list" })}>
-      <RefreshCw className={cn(listing.pending && "animate-spin")} />
+      <AnimatedIcon icon={RefreshCw} className={cn(listing.pending && "animate-spin")} />
     </Button>
   </>}>
     <div className="space-y-2" data-testid="machine-worktrees-panel">
@@ -159,7 +160,7 @@ export function MachineWorktreesPanel({ daemon, token }: { daemon?: SerializedMa
           {idle.length > 0 && <Button size="xs" variant={armed === "*" ? "destructive" : "outline"} disabled={busy}
             onBlur={() => setArmed(null)}
             onClick={() => armed === "*" ? reclaim(idle.map((tree) => tree.path)) : setArmed("*")}>
-            {reclaiming && <Loader2 className="animate-spin" />}
+            {reclaiming && <AnimatedIcon icon={Loader2} className="animate-spin" />}
             {armed === "*" ? `Confirm: clean up ${idle.length} · ${formatBytes(totalBytes(idle))}` : `Clean up ${idle.length} idle`}
           </Button>}
         </div>
