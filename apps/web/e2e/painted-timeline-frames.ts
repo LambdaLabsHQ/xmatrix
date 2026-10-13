@@ -19,6 +19,8 @@ type PaintedTimelineFrame = {
   scrollTop: number;
   scrollHeight: number;
   tops: Record<string, number>;
+  /** Each visible message's bottom edge, by its row id. */
+  bottoms: Record<string, number>;
 };
 
 type RecordingWindow = Window & { __paintedTimelineFrames?: PaintedTimelineFrame[] };
@@ -33,11 +35,13 @@ export async function recordPaintedTimelineFrames(page: Page, openSelector = ".a
       const timeline = document.querySelector(".app-message-timeline");
       const view = timeline?.getBoundingClientRect();
       const tops: Record<string, number> = {};
+      const bottoms: Record<string, number> = {};
       for (const row of timeline?.querySelectorAll<HTMLElement>("[id^='message:']") ?? []) {
         const box = row.getBoundingClientRect();
         if (!view || box.height === 0 || box.bottom <= view.top || box.top >= view.bottom) continue;
         if (getComputedStyle(row).visibility === "hidden") continue;
         tops[row.id] = box.top;
+        bottoms[row.id] = box.bottom;
       }
       frames.push({
         at: performance.now(),
@@ -46,6 +50,7 @@ export async function recordPaintedTimelineFrames(page: Page, openSelector = ".a
         scrollTop: timeline?.scrollTop ?? 0,
         scrollHeight: timeline?.scrollHeight ?? 0,
         tops,
+        bottoms,
       });
     };
     const eachFrame = () => {
@@ -81,4 +86,23 @@ export function paintedRowMoves(frames: readonly PaintedTimelineFrame[]): Painte
     }
   });
   return moves;
+}
+
+/** A message drawn over the one above it in a painted frame. */
+type PaintedRowOverlap = { row: string; above: string; at: number; by: number };
+
+/** Every frame in which a message reaches more than a pixel into the next one down. */
+export function paintedRowOverlaps(frames: readonly PaintedTimelineFrame[]): PaintedRowOverlap[] {
+  const overlaps: PaintedRowOverlap[] = [];
+  for (const frame of frames) {
+    // Recorded in the order the page holds them, top to bottom.
+    const rows = Object.keys(frame.tops);
+    rows.forEach((row, index) => {
+      const above = rows[index - 1];
+      if (!above) return;
+      const by = frame.bottoms[above]! - frame.tops[row]!;
+      if (by > 1) overlaps.push({ row, above, at: frame.at, by });
+    });
+  }
+  return overlaps;
 }

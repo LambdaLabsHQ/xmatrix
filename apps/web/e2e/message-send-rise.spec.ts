@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import { fixtureJson } from "./in-page-api-fixtures";
-import { paintedRowMoves, paintedTimelineFrames, recordPaintedTimelineFrames } from "./painted-timeline-frames";
+import { paintedRowMoves, paintedRowOverlaps, paintedTimelineFrames, recordPaintedTimelineFrames } from "./painted-timeline-frames";
 import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
@@ -75,7 +75,9 @@ async function framesOfSend(page: Page, send: () => Promise<void>) {
   await recordPaintedTimelineFrames(page);
   await send();
   await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-row]").evaluateAll((rows) =>
-    rows.filter((row) => (row as HTMLElement).style.translate || row.getAnimations().length > 0).length)).toBe(0);
+    rows.filter((row) => row.getAnimations().length > 0).length)).toBe(0);
+  await expect.poll(() => page.locator(".app-message-timeline [data-viewport-type]").evaluate((list) =>
+    (list as HTMLElement).style.translate)).toBe("");
   return paintedTimelineFrames(page);
 }
 
@@ -135,6 +137,29 @@ test("a message from someone else comes in the same way", async ({ page }) => {
   }));
   expect(moves.length).toBeGreaterThan(3);
   expect(moves.filter((by) => by > 0)).toEqual([]);
+});
+
+/* A message that comes in while the last one is still rising goes on from
+   where the rows are drawn. The rows used to be offset one by one, and a row
+   the list mounted meanwhile stood apart from them: messages were drawn over
+   each other (user 2026-10-13: "这个渲染怎么回事"). */
+test("messages that come in while the rows are rising are never drawn over each other", async ({ page }) => {
+  await openChannelRecordingRises(page);
+  const draft = page.locator("textarea.composer-textarea").first();
+  await answerNextSend(page, HISTORY_LENGTH + 1, "One", 150);
+  await recordPaintedTimelineFrames(page);
+  await draft.fill("One");
+  await draft.press("Enter");
+  await expect(page.locator(".app-message-row").filter({ hasText: "One" }).last()).toBeVisible();
+  await answerNextSend(page, HISTORY_LENGTH + 2, "Two, which is a longer message than the one before it.", 150);
+  await draft.fill("Two, which is a longer message than the one before it.");
+  await draft.press("Enter");
+  await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 2}"]`)).toBeInViewport();
+  await expect.poll(() => page.locator(".app-message-timeline [data-viewport-type]").evaluate((list) =>
+    (list as HTMLElement).style.translate)).toBe("");
+  const frames = await paintedTimelineFrames(page);
+  expect(frames.length).toBeGreaterThan(10);
+  expect(paintedRowOverlaps(frames)).toEqual([]);
 });
 
 test("a sent message lands without motion when the reader asked for less of it", async ({ page }) => {
