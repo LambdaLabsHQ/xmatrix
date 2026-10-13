@@ -313,6 +313,24 @@ export function sortChannels(channels: SerializedChannel[]): SerializedChannel[]
   return [...channels].sort(compareChannelsForSidebar);
 }
 
+// Channel snapshots are immutable. Parse their ordering timestamps once even
+// when a catalog sort compares the same row many times; replaced snapshots get
+// fresh keys and discarded rows do not remain retained by this cache.
+const channelSortTimes = new WeakMap<SerializedChannel, { recent: number; pinned: number }>();
+
+function channelSortTimestamps(channel: SerializedChannel) {
+  let times = channelSortTimes.get(channel);
+  if (!times) {
+    const pinnedAt = channel.metadata?.pinnedAt ?? channel.metadata?.pinned_at;
+    times = {
+      recent: Math.max(timestampMs(channel.lastMessage?.sentAt), timestampMs(channel.updatedAt), timestampMs(channel.createdAt)),
+      pinned: typeof pinnedAt === "string" ? timestampMs(pinnedAt) : 0,
+    };
+    channelSortTimes.set(channel, times);
+  }
+  return times;
+}
+
 export function compareChannelsForSidebar(a: SerializedChannel, b: SerializedChannel): number {
   const leftPinned = channelIsPinned(a);
   const rightPinned = channelIsPinned(b);
@@ -360,11 +378,7 @@ export function rankCatalogChannels(
 }
 
 export function channelRecentActivityMs(channel: SerializedChannel): number {
-  return Math.max(
-    timestampMs(channel.lastMessage?.sentAt),
-    timestampMs(channel.updatedAt),
-    timestampMs(channel.createdAt)
-  );
+  return channelSortTimestamps(channel).recent;
 }
 
 export function channelIsPinned(channel: SerializedChannel): boolean {
@@ -377,9 +391,7 @@ export function channelIsPinned(channel: SerializedChannel): boolean {
 }
 
 export function channelPinnedAtMs(channel: SerializedChannel): number {
-  const metadata = channel.metadata;
-  const pinnedAt = metadata?.pinnedAt ?? metadata?.pinned_at;
-  return typeof pinnedAt === "string" ? timestampMs(pinnedAt) : 0;
+  return channelSortTimestamps(channel).pinned;
 }
 
 export function timestampMs(value: string | undefined): number {

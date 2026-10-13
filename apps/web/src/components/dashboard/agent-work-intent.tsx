@@ -31,12 +31,12 @@ export function useIntentSince(items: readonly AgentWorkItem[]): ReadonlyMap<str
       const previous = seen.current.get(item.key);
       next.set(item.key, previous?.intent === item.intent ? previous : { intent: item.intent, since: now });
     }
+    const changed = seen.current.size !== next.size ||
+      [...next].some(([key, value]) => seen.current.get(key)?.since !== value.since);
     seen.current = next;
-    setSince((current) => {
-      const changed = current.size !== next.size ||
-        [...next].some(([key, value]) => current.get(key) !== value.since);
-      return changed ? new Map([...next].map(([key, value]) => [key, value.since])) : current;
-    });
+    // An external-store update can leave work on this fiber's alternate, so
+    // even a setter returning the same state may schedule another commit.
+    if (changed) setSince(new Map([...next].map(([key, value]) => [key, value.since])));
   }, [items]);
   return since;
 }

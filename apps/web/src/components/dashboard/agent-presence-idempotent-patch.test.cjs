@@ -6,6 +6,8 @@ const shellModules = loadWorkspaceShellModuleMap(__dirname, ["channel-viewer-sta
 
 const PRESENCE_FUNCTIONS = [
   "timestampMs",
+  "channelSortTimes",
+  "channelSortTimestamps",
   "earliestTimestamp",
   "latestTimestamp",
   "mergeLlmUsagePreferringQuotas",

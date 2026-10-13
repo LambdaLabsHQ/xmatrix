@@ -281,6 +281,9 @@ A Run's activity, intent, token counters and last-seen clock stay in its Channel
 Only account quota travels to sibling Channels, and repeated quota readings
 reuse unchanged objects. The work dock shares unchanged item references and
 memoizes Instance cards, so a sibling's report leaves those controls intact.
+Unchanged intents retain their age without dispatching a no-op state update.
+Channel ordering parses timestamps once per immutable snapshot; replacements
+receive fresh keys and discarded snapshots are held only weakly.
 The selected Channel's subscription belongs to its header, composer and work
 dock. Message avatars select only their visible status; trace opening and
 lifecycle controls read the current Channel/Agent projections on demand.
