@@ -132,8 +132,8 @@ export function IdentityAvatar({
             draggable={false}
             className={cn(
               "aspect-square size-full",
-              // App marks are full logos and stay inside the disc.
-              kind === "app" ? "object-contain" : "object-cover"
+              // Inset full App marks so their corners fit inside a circular disc.
+              kind === "app" ? "object-contain p-[18%]" : "object-cover"
             )}
             fallback={imageFallback}
             onContextMenu={(event) => event.preventDefault()}
