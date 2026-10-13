@@ -103,8 +103,15 @@ export type AuthRouteLimiterName = "RATE_LIMIT_OAUTH_REGISTER" | "RATE_LIMIT_SIG
  */
 async function admitAuthRoute(env: Env, request: Request, path: string): Promise<Response | undefined> {
   const binding = request.method === "POST" ? AUTH_ROUTE_LIMITERS[path] : undefined;
-  const key = binding ? anonymousKey(request) : undefined;
-  if (!binding || !key) return undefined;
+  if (!binding) return undefined;
+  const key = anonymousKey(request);
+  if (!key) {
+    // Only our own Workers and local tests should arrive here; anything else
+    // is a client this limit fails to count.
+    console.warn("xMatrix auth request not counted", { path, connectingIp: request.headers.has("CF-Connecting-IP"),
+      worker: request.headers.get("CF-Worker") ?? "" });
+    return undefined;
+  }
   const limiter = env[binding];
   if (!limiter) {
     console.error("xMatrix auth rate limiter is not bound", { binding, path });
