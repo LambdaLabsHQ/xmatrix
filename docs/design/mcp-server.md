@@ -28,8 +28,10 @@ which is how clients discover where to sign in.
 - **Sign-in and consent are Web pages.** Without a session the Hub sends the
   person to `/oauth/authorize`, which signs them in as usual and resumes the
   request; consent is `/oauth/consent`. The consent page shows the app's
-  self-declared name and, as the trustworthy part, the host the grant returns
-  to.
+  self-declared name, explicitly says that xMatrix has not verified the app's
+  identity, and prominently shows the host the grant returns to. Users should
+  approve only a connection they started from an app they trust. Approval is
+  unavailable when the app lookup fails or the return address is missing.
 - **Access tokens are short-lived ES256 JWTs whose audience is `…/mcp`.**
   The Hub's own API requires its own audience, so an MCP token never works
   there and a session token never works on `/mcp`. A token request that
@@ -41,6 +43,29 @@ which is how clients discover where to sign in.
 - **Removing an app** (profile → AI apps) deletes its consent and every
   refresh token it holds; its last access token expires within 15 minutes.
   A revoked account identity is refused on every call.
+
+### Open registration and phishing
+
+Open registration is an intentional compatibility choice for outside MCP
+clients ([RFC 7591 Appendix A.1.1](https://www.rfc-editor.org/rfc/rfc7591.html#appendix-A.1.1)).
+A registered client id is not a verified application identity or an account
+grant. A caller can supply another app's name and its own callback, so a
+phishing link can still persuade a person to authorize an untrusted app.
+The consent warning and return host help the person make that decision;
+they do not verify a provider's identity.
+
+Registration is configured for at most ten requests per IP per minute through
+Better Auth's rate limiter. Anonymous registration creates public clients;
+it cannot request `client_credentials` or `skip_consent`. Authorization requires
+a signed-in person, approval for a new grant, a registered redirect URI
+(exact matching except OAuth's loopback-port exception), and S256 PKCE. The
+Hub signs the query passed to the consent page and rejects altered or unsigned
+queries when the person answers. The existing PostgreSQL OAuth owner tests
+exercise these refusals as well as denial, audience isolation and revocation.
+
+Requiring an initial access token or a curated redirect allowlist would change
+the documented client onboarding contract. Clients currently using open DCR
+would need another supported registration path before that policy could ship.
 
 ## Tools
 
