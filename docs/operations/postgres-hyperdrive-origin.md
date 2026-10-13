@@ -57,6 +57,28 @@ unsupported; do not add session-level ones. `max_prepared_transactions` is 0, so
 `PREPARE TRANSACTION` is unavailable (see
 `docs/design/dingtalk-cross-database-effects.md`).
 
+## Weekly index recommendations
+
+The 5–12 October 2026 PlanetScale report recommends removing the archive's
+redundant object index twice. Migration 0174 already retired that entire table
+and its indexes on both databases. Its COPY traffic in the report is historical
+import work, not a recurring application query. Migration 0164 already restored
+the machine-command claim and dispatch indexes after hostname retirement;
+verify their presence before adding overlapping provider recommendations.
+
+Migration 0184 adds an ordered partial index for unfinished launch cancellations
+on `(channel_id, updated_at, run_id)`. The existing Channel open-work index serves
+preparation and due-time reads but retains completed aborts and cannot supply
+cancellation order. Keep both: the cancellation index excludes completed aborts,
+while the existing reconciliation still checks that no Run committed before
+releasing a reservation. No lifecycle or authorization behavior changes.
+
+Verify both logical databases after release with `pg_stat_user_indexes` and
+`EXPLAIN (ANALYZE, BUFFERS)` on the cancellation read in a bounded read-only
+transaction. Check ordering and buffer work with accumulated completed history
+using `registration-launch-cancel-index-postgres.test.mjs`; do not infer future
+weekly CPU or latency improvements from a single empty-queue probe.
+
 ## Watching the pool
 
 `hyperdrivePoolSizesAdaptiveGroups` in the Cloudflare GraphQL API reports
