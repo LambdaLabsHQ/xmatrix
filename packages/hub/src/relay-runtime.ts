@@ -54,6 +54,7 @@ import {
   parseAgentHostTraceCursor,
 } from "./agent-host-trace";
 import { answerHarnessReleaseWatch, RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH } from "./harness-release-watch";
+import { analyticsWorkerVersion } from "./analytics-sampling";
 
 const MAX_COMMITTED_EVENT_BYTES = 64 * 1024;
 const MAX_EVENT_RECIPIENTS = 1_000;
@@ -475,7 +476,8 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     if (request.method === "POST" && url.pathname === "/internal/committed-event") {
       return this.deliverCommittedEvent(request);
     }
-    return Response.json({ error: "Not found" }, { status: 404 });
+    // The release lets a caller tell a cell not yet restarted on its deploy from a missing route.
+    return Response.json({ error: "Not found", workerVersion: analyticsWorkerVersion(this.env) }, { status: 404 });
   }
 
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
