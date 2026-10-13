@@ -4,12 +4,13 @@ use std::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::backoff::Backoff;
@@ -27,8 +28,9 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// Silence that makes the cheap protocol ping inconclusive, so liveness has to
 /// be settled by a reply this repository actually guarantees.
 const HEARTBEAT_PROBE_AFTER: Duration = Duration::from_secs(4);
-/// Silence budget for the definitive probe. Past this the socket is dead.
-const HEARTBEAT_PROBE_TIMEOUT: Duration = Duration::from_secs(4);
+/// A written probe gets the same response budget as connection admission.
+/// Four seconds mistook brief network/edge delays for a dead control socket.
+const HEARTBEAT_PROBE_TIMEOUT: Duration = CONNECT_TIMEOUT;
 const COMMAND_LEASE_RENEW_SOCKET_TIMEOUT: Duration = Duration::from_secs(10);
 /// Hub leases a pushed command for ten seconds when this daemon advertises
 /// `machine_command_admission_ack_v1`. Socket admission and its HTTP fallback
@@ -42,9 +44,67 @@ const RECONNECT_MAX: Duration = Duration::from_secs(30);
 /// that runs heartbeats, so a half-open Hub link could sit silent for minutes.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const WRITE_QUEUE_CAPACITY: usize = 64;
+/// Bound queueing separately from waiting for the Hub's response. A probe may
+/// follow an in-flight write, but a backed-up writer cannot postpone recovery.
+const HEARTBEAT_QUEUE_TIMEOUT: Duration = Duration::from_secs(20);
 
-type MachineDaemonWsWrite =
-    futures_util::stream::SplitSink<crate::websocket::ClientWebSocket, Message>;
+struct MachineDaemonWrite {
+    frame: Message,
+    probe_written: Option<oneshot::Sender<Instant>>,
+}
+
+impl From<Message> for MachineDaemonWrite {
+    fn from(frame: Message) -> Self {
+        Self {
+            frame,
+            probe_written: None,
+        }
+    }
+}
+
+struct MachineDaemonProbe {
+    queued_at: Instant,
+    written: oneshot::Receiver<Instant>,
+    sent_at: Option<Instant>,
+}
+
+impl MachineDaemonProbe {
+    fn queued() -> (MachineDaemonWrite, Self) {
+        let (written_tx, written) = oneshot::channel();
+        (
+            MachineDaemonWrite {
+                frame: machine_daemon_liveness_probe_frame(),
+                probe_written: Some(written_tx),
+            },
+            Self {
+                queued_at: Instant::now(),
+                written,
+                sent_at: None,
+            },
+        )
+    }
+
+    fn failure(&mut self, now: Instant) -> Option<String> {
+        if self.sent_at.is_none() {
+            match self.written.try_recv() {
+                Ok(sent_at) => self.sent_at = Some(sent_at),
+                Err(oneshot::error::TryRecvError::Empty) => {
+                    return (now.duration_since(self.queued_at) >= HEARTBEAT_QUEUE_TIMEOUT).then(|| {
+                        "Machine Daemon heartbeat could not be written before its queue deadline".into()
+                    });
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    return Some("Machine Daemon heartbeat writer closed".into());
+                }
+            }
+        }
+        let waited = now.duration_since(self.sent_at?);
+        (waited >= HEARTBEAT_PROBE_TIMEOUT).then(|| format!(
+            "Machine Daemon heartbeat timed out; the Hub did not answer a liveness probe written {}s ago",
+            waited.as_secs()
+        ))
+    }
+}
 
 fn machine_report_at_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
@@ -88,7 +148,7 @@ const HEARTBEAT_WRITE_RESERVE: usize = 1;
 /// queue full. When it does not, instructions wait in their own queue until
 /// the writer drains: a backlog built up while offline is backpressure, not a
 /// reason to drop the connection and rebuild the same backlog (#3208).
-fn machine_daemon_accepts_instruction(out_tx: &mpsc::Sender<Message>) -> bool {
+fn machine_daemon_accepts_instruction(out_tx: &mpsc::Sender<MachineDaemonWrite>) -> bool {
     out_tx.capacity() > HEARTBEAT_WRITE_RESERVE
 }
 
@@ -96,8 +156,8 @@ fn machine_daemon_accepts_instruction(out_tx: &mpsc::Sender<Message>) -> bool {
 /// already on their way; a writer that is actually stuck is ended by
 /// `WRITE_TIMEOUT`, not here. Returns whether the frame was queued.
 fn enqueue_machine_daemon_heartbeat(
-    out_tx: &mpsc::Sender<Message>,
-    frame: Message,
+    out_tx: &mpsc::Sender<MachineDaemonWrite>,
+    frame: MachineDaemonWrite,
 ) -> std::result::Result<bool, String> {
     match out_tx.try_send(frame) {
         Ok(()) => Ok(true),
@@ -107,17 +167,17 @@ fn enqueue_machine_daemon_heartbeat(
 }
 
 fn enqueue_machine_daemon_write(
-    out_tx: &mpsc::Sender<Message>,
+    out_tx: &mpsc::Sender<MachineDaemonWrite>,
     frame: Message,
 ) -> std::result::Result<(), String> {
-    out_tx.try_send(frame).map_err(|error| match error {
+    out_tx.try_send(frame.into()).map_err(|error| match error {
         mpsc::error::TrySendError::Full(_) => "Machine Daemon write queue is backed up".to_string(),
         mpsc::error::TrySendError::Closed(_) => "Machine Daemon writer closed".to_string(),
     })
 }
 
 fn enqueue_machine_daemon_request<T>(
-    out_tx: &mpsc::Sender<Message>,
+    out_tx: &mpsc::Sender<MachineDaemonWrite>,
     request_id: String,
     message: serde_json::Value,
     reply: oneshot::Sender<std::result::Result<T, String>>,
@@ -134,7 +194,7 @@ fn enqueue_machine_daemon_request<T>(
 }
 
 fn enqueue_replied_write<T>(
-    out_tx: &mpsc::Sender<Message>,
+    out_tx: &mpsc::Sender<MachineDaemonWrite>,
     text: String,
     reply: oneshot::Sender<std::result::Result<T, String>>,
 ) -> std::result::Result<oneshot::Sender<std::result::Result<T, String>>, String> {
@@ -145,13 +205,21 @@ fn enqueue_replied_write<T>(
     Ok(reply)
 }
 
-async fn run_machine_daemon_writer(
-    mut write: MachineDaemonWsWrite,
-    mut out_rx: mpsc::Receiver<Message>,
-) -> std::result::Result<(), String> {
+async fn run_machine_daemon_writer<Write>(
+    mut write: Write,
+    mut out_rx: mpsc::Receiver<MachineDaemonWrite>,
+) -> std::result::Result<(), String>
+where
+    Write: futures_util::Sink<Message> + Unpin,
+    Write::Error: std::fmt::Display,
+{
     while let Some(frame) = out_rx.recv().await {
-        match tokio::time::timeout(WRITE_TIMEOUT, write.send(frame)).await {
-            Ok(Ok(())) => {}
+        match tokio::time::timeout(WRITE_TIMEOUT, write.send(frame.frame)).await {
+            Ok(Ok(())) => {
+                if let Some(written) = frame.probe_written {
+                    let _ = written.send(Instant::now());
+                }
+            }
             Ok(Err(error)) => return Err(format!("Machine Daemon write failed: {error}")),
             Err(_) => {
                 return Err(format!(
@@ -2022,7 +2090,7 @@ async fn run_machine_daemon_connection(
         // inbound traffic proves the Hub is still there. Writes run on a dedicated
         // task so a hung send cannot stall that read/heartbeat select.
         let mut last_server_activity = Instant::now();
-        let mut probe_sent_at: Option<Instant> = None;
+        let mut pending_probe: Option<MachineDaemonProbe> = None;
         let mut pending_renews: HashMap<
             String,
             oneshot::Sender<std::result::Result<String, String>>,
@@ -2249,7 +2317,7 @@ async fn run_machine_daemon_connection(
                             // Any frame at all — including a pong the edge answers
                             // below the Durable Object — proves the socket is live.
                             last_server_activity = Instant::now();
-                            probe_sent_at = None;
+                            pending_probe = None;
                             if let Message::Close(frame) = &message
                                 && http::is_upgrade_required_close(frame.as_ref())
                             {
@@ -2316,28 +2384,22 @@ async fn run_machine_daemon_connection(
                     }
                 }
                 _ = heartbeat.tick() => {
-                    if let Some(sent_at) = probe_sent_at {
-                        // The probe is answered by clearing `probe_sent_at`, so
-                        // reaching here with one outstanding means the Hub never
-                        // replied to a frame it always replies to.
-                        let waited = sent_at.elapsed();
-                        if waited >= HEARTBEAT_PROBE_TIMEOUT {
-                            break format!(
-                                "Machine Daemon heartbeat timed out; the Hub did not answer a liveness probe sent {}s ago",
-                                waited.as_secs()
-                            );
+                    if let Some(probe) = pending_probe.as_mut() {
+                        if let Some(reason) = probe.failure(Instant::now()) {
+                            break reason;
                         }
                         continue;
                     }
                     let silence = last_server_activity.elapsed();
                     let probe = silence >= HEARTBEAT_PROBE_AFTER;
-                    let frame = if probe {
-                        machine_daemon_liveness_probe_frame()
+                    let (frame, queued_probe) = if probe {
+                        let (frame, queued) = MachineDaemonProbe::queued();
+                        (frame, Some(queued))
                     } else {
-                        machine_daemon_heartbeat_frame()
+                        (machine_daemon_heartbeat_frame().into(), None)
                     };
                     match enqueue_machine_daemon_heartbeat(&out_tx, frame) {
-                        Ok(true) if probe => probe_sent_at = Some(Instant::now()),
+                        Ok(true) => pending_probe = queued_probe,
                         Ok(_) => {}
                         Err(error) => break format!("Machine Daemon heartbeat failed: {error}"),
                     }
@@ -3106,11 +3168,11 @@ mod tests {
         // The reserved slot still takes the heartbeat; after that it is skipped,
         // not a disconnect.
         assert_eq!(
-            enqueue_machine_daemon_heartbeat(&tx, machine_daemon_heartbeat_frame()),
+            enqueue_machine_daemon_heartbeat(&tx, machine_daemon_heartbeat_frame().into()),
             Ok(true)
         );
         assert_eq!(
-            enqueue_machine_daemon_heartbeat(&tx, machine_daemon_heartbeat_frame()),
+            enqueue_machine_daemon_heartbeat(&tx, machine_daemon_heartbeat_frame().into()),
             Ok(false)
         );
         // As the writer drains, instructions flow again.
@@ -3118,7 +3180,9 @@ mod tests {
         rx.recv().await.expect("queued frame");
         assert!(machine_daemon_accepts_instruction(&tx));
         drop(rx);
-        assert!(enqueue_machine_daemon_heartbeat(&tx, machine_daemon_heartbeat_frame()).is_err());
+        assert!(
+            enqueue_machine_daemon_heartbeat(&tx, machine_daemon_heartbeat_frame().into()).is_err()
+        );
     }
 
     #[tokio::test]
@@ -3130,8 +3194,95 @@ mod tests {
         assert!(error.contains("writer closed"), "{error}");
     }
 
+    struct ProbeWriterFixture {
+        tx: mpsc::Sender<MachineDaemonWrite>,
+        probe: MachineDaemonProbe,
+        writer: tokio::task::JoinHandle<std::result::Result<(), String>>,
+    }
+
+    async fn probe_writer_fixture(delay: Option<Duration>) -> ProbeWriterFixture {
+        let (tx, rx) = mpsc::channel(1);
+        let (frame, probe) = MachineDaemonProbe::queued();
+        enqueue_machine_daemon_heartbeat(&tx, frame).expect("queue probe");
+        let sink = Box::pin(futures_util::sink::unfold(
+            (),
+            move |(), _frame: Message| async move {
+                match delay {
+                    Some(delay) => tokio::time::sleep(delay).await,
+                    None => std::future::pending::<()>().await,
+                }
+                Ok::<(), std::convert::Infallible>(())
+            },
+        ));
+        let writer = tokio::spawn(run_machine_daemon_writer(sink, rx));
+        tokio::task::yield_now().await;
+        ProbeWriterFixture { tx, probe, writer }
+    }
+
+    async fn assert_probe_deadline(probe: &mut MachineDaemonProbe, budget: Duration, reason: &str) {
+        tokio::time::advance(budget - Duration::from_secs(1)).await;
+        assert_eq!(probe.failure(Instant::now()), None);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(
+            probe
+                .failure(Instant::now())
+                .expect("probe expires")
+                .contains(reason)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn probe_response_deadline_starts_after_a_delayed_write_flushes() {
+        let ProbeWriterFixture {
+            tx,
+            mut probe,
+            writer,
+        } = probe_writer_fixture(Some(Duration::from_secs(6))).await;
+
+        // The old four-second clock began at enqueue, while this healthy write
+        // is still flushing. There is no unanswered Hub probe yet.
+        tokio::time::advance(Duration::from_secs(5)).await;
+        assert_eq!(probe.failure(Instant::now()), None);
+        assert!(probe.sent_at.is_none());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(probe.failure(Instant::now()), None);
+        assert!(probe.sent_at.is_some());
+
+        assert_probe_deadline(&mut probe, HEARTBEAT_PROBE_TIMEOUT, "written 15s ago").await;
+        drop(tx);
+        writer.await.expect("writer task").expect("healthy writer");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unwritten_probe_has_a_separate_bounded_queue_deadline() {
+        let (_frame, mut probe) = MachineDaemonProbe::queued();
+        assert_probe_deadline(&mut probe, HEARTBEAT_QUEUE_TIMEOUT, "queue deadline").await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stalled_probe_write_still_fails_at_the_write_deadline() {
+        let ProbeWriterFixture {
+            mut probe, writer, ..
+        } = probe_writer_fixture(None).await;
+        tokio::time::advance(WRITE_TIMEOUT).await;
+        assert!(
+            writer
+                .await
+                .expect("writer task")
+                .expect_err("stalled writer")
+                .contains("write timed out after 10s")
+        );
+        assert!(
+            probe
+                .failure(Instant::now())
+                .expect("failed writer")
+                .contains("writer closed")
+        );
+    }
+
     #[test]
-    fn half_open_detection_is_bounded_in_ten_seconds() {
+    fn half_open_detection_remains_bounded_with_queue_and_response_budgets() {
         // Both thresholds are only ever sampled on the heartbeat tick, so the
         // bound is not their plain sum.
         //
@@ -3149,7 +3300,8 @@ mod tests {
         // threshold moves this bound instead of silently invalidating it. The
         // defect this replaces let a half-open socket survive for tens of
         // minutes, until TCP writes finally failed.
-        assert_eq!(escalation + probe, Duration::from_secs(10));
+        let queue = HEARTBEAT_QUEUE_TIMEOUT + HEARTBEAT_INTERVAL;
+        assert_eq!(escalation + queue + probe, Duration::from_secs(44));
     }
 
     #[test]
