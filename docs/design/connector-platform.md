@@ -818,8 +818,9 @@ GitHub triggers may use either spelling.
   The legacy command/API spelling `deny` remains a restrictive `disallow` alias.
   Only current Space owners/admins change a policy or decide a request; an Agent
   Run cannot approve its own call.
-- No override uses the manifest default: Gmail `send`/`reply` default to `ask`,
-  while other actions retain `allow`. Existing explicit allow/deny rows keep
+- No override uses the manifest default: Gmail `send`/`reply` and Google Ads
+  `mutate`/`set_campaign_status` default to `ask`, while other actions retain
+  `allow`. Existing explicit allow/deny rows keep
   their meaning. GitHub's specialized dispatcher retains allow/disallow; it
   rejects ask instead of suggesting that an unsupported approval will appear.
 - The existing policy row stays the sole authority. The additive `ask_version`
