@@ -26,10 +26,6 @@ const ADDRESS = /^[^\s@<>(),;:"\\[\]]{1,64}@[^\s@<>(),;:"\\[\]]{1,189}$/u;
 const OWNER = /^(?:user:[A-Za-z0-9_.:-]{1,128}|agent:[^/\s]{1,300}\/[^/\s]{1,300}\/[^/\s]{1,300})$/u;
 const PROFILE = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 
-export function isMailboxOwner(value: string): boolean {
-  return OWNER.test(value);
-}
-
 /** The stored list; a malformed value fails closed rather than being read in part. */
 export function parseMailboxes(value: string | undefined): GmailMailbox[] {
   if (!value) throw new ProviderRequestError(401, "Connect a Gmail mailbox first");
