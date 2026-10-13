@@ -37,7 +37,9 @@ import {
 import { productMessageSenderPresentation } from "./message-sender-presentation";
 import { compactMessageBodyPreview } from "./message-body-preview";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { postgresRetryAfterSeconds, retryablePostgresFailure } from "./postgres-error-classification";
+import {
+  postgresRetryAfterSeconds, postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONFLICT,
+} from "./postgres-error-classification";
 import {
   logSlowMessageCoordination,
   recordMessageCoordination,
@@ -333,7 +335,7 @@ async function postgresMessageQueryContextFromDependencies(
 export function postgresMessageFailure(error: unknown): {
   status: number;
   body: { error: string; code: string; retryable: boolean };
-  /** A transient outage, answered as a retryable 503 with `Retry-After`, rather than a decided rejection. */
+  /** A transient outage or lost conflict, answered as a retryable 503 with `Retry-After`, rather than a decided rejection. */
   outage: boolean;
 } {
   // Every message operation first resolves its Channel through Space control,
@@ -346,6 +348,9 @@ export function postgresMessageFailure(error: unknown): {
       outage: error.retryable && error.status === 503 };
   }
   console.error("PostgreSQL message authority failed", error);
+  if (postgresTransactionConflict(error)) {
+    return { status: 503, outage: true, body: { ...TRANSACTION_CONFLICT, retryable: true } };
+  }
   const outage = retryablePostgresFailure(error);
   return outage
     ? { status: 503, outage, body: { error: "PostgreSQL message authority is unavailable",

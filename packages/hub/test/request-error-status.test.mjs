@@ -46,6 +46,22 @@ test("route failures never echo a database's own message", async () => {
   assert.deepEqual(await defect.json(), { error: "Internal error", code: "internal_error", retryable: false });
 });
 
+test("a transaction that lost a conflict is answered and logged as one, never as an outage", async (t) => {
+  const logged = t.mock.method(console, "error", () => {});
+  const app = await answering({
+    "/serialization": Object.assign(new Error("could not serialize access due to concurrent update"), { code: "40001" }),
+    "/deadlock": Object.assign(new Error("deadlock detected"), { code: "40P01" }),
+  });
+  for (const path of ["/serialization", "/deadlock"]) {
+    const response = await app.request(path);
+    assert.deepEqual([response.status, response.headers.get("retry-after")], [503, "1"], path);
+    assert.deepEqual(await response.json(),
+      { error: "xMatrix was busy with a conflicting change; try again", code: "transaction_conflict", retryable: true }, path);
+  }
+  assert.deepEqual(logged.mock.calls.map((call) => call.arguments[0]),
+    ["PostgreSQL transaction lost a conflict", "PostgreSQL transaction lost a conflict"]);
+});
+
 test("a Durable Object reset or dropped by a deploy answers a retryable 503", async () => {
   const paths = ["/reset", "/lost", "/flagged", "/overloaded"];
   const app = await answering({

@@ -17,6 +17,7 @@ const LAUNCH_FAILURE_MESSAGES: Record<string, string> = {
   machine_spawn_failed: "The machine could not start the agent process. Inspect the recorded startup steps and machine diagnostics.",
   directory_publish_unavailable: "Startup routing could not be confirmed. The launch may already exist; refresh its status before retrying.",
   postgres_runtime_unavailable: "The startup service is temporarily unavailable. Refresh status before retrying.",
+  transaction_conflict: "Startup met a conflicting change. Refresh status before retrying.",
   runtime_transaction_retry_exhausted: "Startup could not acquire its required state after bounded retries. Refresh status before retrying.",
   runtime_sql_contract_error: "The startup service encountered an internal error. Use the diagnostic reference to investigate.",
   machine_offline: "The selected machine is offline. Reconnect it and check the original invocation.",

@@ -1,7 +1,7 @@
 import { ControlError } from "@xmatrix/db";
 
 import { transientDurableObjectFailure } from "../durable-object-failure";
-import { retryablePostgresFailure } from "../postgres-error-classification";
+import { postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONFLICT } from "../postgres-error-classification";
 import { safeServerDiagnosticId } from "../server-error-diagnostic";
 
 import type { RuntimeOperationFailure } from "@xmatrix/protocol";
@@ -14,7 +14,7 @@ export type { RuntimeOperationFailure } from "@xmatrix/protocol";
 const PUBLIC_CODES = new Set([
   "conflict", "forbidden", "not_found", "channel_not_found", "run_not_found", "agent_run_forbidden",
   "invalid_runtime_request", "postgres_runtime_unavailable", "postgres_runtime_internal_error",
-  "runtime_transaction_retry_exhausted", "runtime_sql_contract_error",
+  "runtime_transaction_retry_exhausted", "runtime_sql_contract_error", TRANSACTION_CONFLICT.code,
   "request_expired", "request_not_found", "request_already_decided", "request_machine_mismatch", "secret_not_found",
   "secret_not_admitted",
   "invalid_remember_policy", "persistent_secret_approval_forbidden", "unsafe_request_prefix",
@@ -53,17 +53,33 @@ export class RuntimeAuthorityOperationError extends Error {
 }
 
 /**
- * A repository rejection or database outage met on a socket, classified as the
- * authority rejection it is: its own code when that is public, retryable only
- * for an outage.
+ * A repository rejection, lost conflict or database outage met on a socket,
+ * classified as the authority rejection it is: its own code when that is
+ * public, retryable only for a conflict or an outage.
  */
 function authorityOperationError(error: unknown): RuntimeAuthorityOperationError | undefined {
   if (error instanceof RuntimeAuthorityOperationError) return error;
+  if (!error || typeof error !== "object") return undefined;
+  const known = rejections.get(error);
+  if (known) return known;
+  const rejection = authorityRejection(error);
+  if (rejection) rejections.set(error, rejection);
+  return rejection;
+}
+
+// A thrown error is one rejection: its failure and its copy are read
+// separately, and a second one would log it again under another diagnostic id.
+const rejections = new WeakMap<object, RuntimeAuthorityOperationError>();
+
+function authorityRejection(error: object): RuntimeAuthorityOperationError | undefined {
   if (error instanceof ControlError) {
     const body = { code: error.code, retryable: error.retryable };
     return Object.hasOwn(APPROVAL_MESSAGES, error.code)
       ? new RuntimeApprovalOperationError(error.name, error.status, body)
       : new RuntimeAuthorityOperationError(error.name, error.status, body);
+  }
+  if (postgresTransactionConflict(error)) {
+    return new RuntimeAuthorityOperationError("postgres", 503, { code: TRANSACTION_CONFLICT.code, retryable: true });
   }
   if (retryablePostgresFailure(error)) {
     return new RuntimeAuthorityOperationError("postgres", 503, { code: "postgres_runtime_unavailable", retryable: true });

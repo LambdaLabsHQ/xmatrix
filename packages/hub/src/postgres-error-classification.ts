@@ -20,8 +20,12 @@ const RETRYABLE_NETWORK_CODES = new Set([
 const DEFAULT_RETRY_AFTER_SECONDS = 2;
 const MAX_RETRY_AFTER_SECONDS = 30;
 
-/** `Retry-After` for a retryable failure: the breaker's own cooldown when it refused. */
+/**
+ * `Retry-After` for a retryable failure: the breaker's own cooldown when it
+ * refused, and at once for a lost conflict, whose winner has already committed.
+ */
 export function postgresRetryAfterSeconds(error: unknown): number {
+  if (postgresTransactionConflict(error)) return 1;
   const retryAfterMs = error && typeof error === "object" && "retryAfterMs" in error
     ? Number((error as { retryAfterMs: unknown }).retryAfterMs) : NaN;
   if (!Number.isFinite(retryAfterMs) || retryAfterMs <= 0) return DEFAULT_RETRY_AFTER_SECONDS;
@@ -36,6 +40,20 @@ function errorField(error: unknown, field: "code" | "message"): string {
   if (!error || typeof error !== "object" || !(field in error)) return "";
   const value = (error as Record<string, unknown>)[field];
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** The public code and sentence of a lost transaction conflict, on every route and socket. */
+export const TRANSACTION_CONFLICT = {
+  error: "xMatrix was busy with a conflicting change; try again", code: "transaction_conflict",
+} as const;
+
+/**
+ * A transaction PostgreSQL rolled back in favour of a concurrent one: a
+ * serialization failure or a deadlock. The database is up and a replay can
+ * succeed, so it is a conflict, never an outage.
+ */
+export function postgresTransactionConflict(error: unknown): boolean {
+  return RETRYABLE_TRANSACTION_CODES.has(errorField(error, "code").toUpperCase());
 }
 
 /**
