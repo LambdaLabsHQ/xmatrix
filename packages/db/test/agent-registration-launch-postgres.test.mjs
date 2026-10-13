@@ -11,6 +11,7 @@ import { cleanLifecycleData, launchRequestDigest } from "../scripts/agent-lifecy
 import { RegistrationAccessError } from "../dist/agent-registration-errors.js";
 import { DatabaseCommitUnknownError } from "../dist/errors.js";
 import { PostgresRegistrationRebornRepository } from "../dist/registration-reborn.js";
+import { loadChannelAgentPresence } from "../dist/channel-agent-presence.js";
 
 
 integration("launch survives a hostname change with stale Workspace metadata and recovers unknown commits exactly", async () => {
@@ -115,6 +116,14 @@ integration("launch survives a hostname change with stale Workspace metadata and
     await sql("UPDATE data.registration_launch_intents SET launch_request_json=$1,request_digest=$2 WHERE command_id='launch'",
       [cleanedRequest, await launchRequestDigest(cleanedRequest, originalIntent.source_body_hash)]);
     assert.equal((await launches.prepare(request)).runId, replay.runId);
+    // Until it connects, the launched Instance is the Channel's, waking: a
+    // catalog read taken now must not omit what the live socket adds next.
+    await sql("ALTER TABLE data.space_members ADD COLUMN IF NOT EXISTS email text");
+    const presenceReader = { query: async ({ text, values }) => (await sql(text, values)).rows };
+    const launching = Object.values((await loadChannelAgentPresence(presenceReader, "space", ["channel"])).get("channel") ?? {})
+      .flatMap((member) => member.instances ?? []);
+    assert.deepEqual(launching.map(({ id, status, rest }) => ({ id, status, rest })),
+      [{ id: replay.instanceId, status: "offline", rest: "waking" }]);
 
     for (const table of ["runs", "instances", "agent_launches", "run_agent_registrations", "registration_execution_allocations"]) {
       assert.equal((await sql(`SELECT count(*)::int AS count FROM data.${table}`)).rows[0].count, 1, table);

@@ -117,6 +117,17 @@ function mergeChannels(current: SerializedChannel[], incoming: readonly Serializ
   return [...byId.values()];
 }
 
+/** Merges catalog Channels not applied before, and any the entity table lost since. */
+function commitCatalogChannels(
+  current: SerializedChannel[],
+  incoming: readonly SerializedChannel[],
+  unapplied: ReadonlySet<SerializedChannel>,
+): SerializedChannel[] {
+  const present = new Set(current.map((channel) => channel.id));
+  const next = incoming.filter((channel) => unapplied.has(channel) || !present.has(channel.id));
+  return next.length > 0 ? mergeChannels(current, next) : current;
+}
+
 function catalogOptions(input: {
   token: string;
   userId: string;
@@ -231,8 +242,17 @@ export function useChannelCatalogPaging(input: {
   );
   const loadedSpaceIdSet = useMemo(() => new Set(loadedSpaceIds), [loadedSpaceIds]);
 
+  // Every cache write hands over all of a Space's cached rows, and a message
+  // only moves its row, keeping the Channel it was read with. Applying such a
+  // row again would roll its presence back to that read, dropping an Instance
+  // that connected since. A row is applied once, unless it is the only copy.
+  const appliedChannelsRef = useRef(new WeakSet<SerializedChannel>());
   const commitRows = useCallback((rows: readonly ChannelCatalogPageRow[]) => {
-    setChannels((current) => mergeChannels(current, rows.map((row) => row.channel)));
+    const incoming = rows.map((row) => row.channel);
+    const applied = appliedChannelsRef.current;
+    const unapplied = new Set(incoming.filter((channel) => !applied.has(channel)));
+    for (const channel of incoming) applied.add(channel);
+    setChannels((current) => commitCatalogChannels(current, incoming, unapplied));
   }, [setChannels]);
 
   const roots = useMemo(() => createElement(

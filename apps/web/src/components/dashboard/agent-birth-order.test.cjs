@@ -12,6 +12,7 @@ for (const file of ["use-channel-catalog-paging.ts", "channel-viewer-state.ts"])
 // Pure helpers only — no React or workspace shell runtime.
 const ORDERING_FUNCTIONS = [
   "mergeChannels",
+  "commitCatalogChannels",
   "mergeChannelViewerState",
   "mergeChannelMemberReadSequences",
   "mergeChannelListHydratedFields",
@@ -46,7 +47,7 @@ const ORDERING_FUNCTIONS = [
 ];
 
 
-const functions = loadShellFunctions(shellModules, ORDERING_FUNCTIONS, "exports.mergeChannels = mergeChannels;");
+const functions = loadShellFunctions(shellModules, ORDERING_FUNCTIONS, "exports.mergeChannels = mergeChannels; exports.commitCatalogChannels = commitCatalogChannels;");
 const {
   mergeChannels,
   compareChannelAgentAvatarBirthOrder,
@@ -58,7 +59,26 @@ const {
   historicalSenderAvatarUrl,
   patchChannelAgentPresenceFromMessage,
   agentMessageInstanceIdentityIncomplete,
+  commitCatalogChannels,
 } = functions;
+
+test("a cached catalog row replayed after a message never drops an Instance that connected since", () => {
+  // Read at page load, before the summon: no Instance yet.
+  const cached = { id: "channel-1", memberPresence: { "agent-1": { kind: "agent", instances: [] } } };
+  let channels = commitCatalogChannels([], [cached], new Set([cached]));
+  // The summoned Instance connects and channel_updated shows it.
+  const connected = { id: "instance-1", channelInstanceId: "1", status: "online",
+    connectedAt: "2026-10-13T07:45:58Z", lastSeenAt: "2026-10-13T07:45:58Z" };
+  channels = mergeChannels(channels, [{ id: "channel-1",
+    memberPresence: { "agent-1": { kind: "agent", instances: [connected] } } }]);
+  // Its first message moves the cached row, the same Channel object, to the top.
+  channels = commitCatalogChannels(channels, [cached], new Set());
+  assert.deepEqual(channels[0].memberPresence["agent-1"].instances.map((instance) => instance.id), ["instance-1"]);
+  // A fresh read is applied, and a Channel the entity table lost comes back.
+  const fresh = { id: "channel-1", memberPresence: { "agent-1": { kind: "agent", instances: [] } } };
+  assert.deepEqual(commitCatalogChannels(channels, [fresh], new Set([fresh]))[0].memberPresence["agent-1"].instances, []);
+  assert.deepEqual(commitCatalogChannels([], [cached], new Set()).map((channel) => channel.id), ["channel-1"]);
+});
 
 test("paged catalog refresh retains live labels and busy state, then accepts idle and removal", () => {
   const initial = { id: "instance-1", channelInstanceId: "1", status: "idle",

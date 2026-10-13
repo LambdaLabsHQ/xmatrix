@@ -135,7 +135,7 @@ export async function loadChannelAgentPresence(
   // wakes it (docs/instance-sleep.md §5). Newest first, a bounded few per
   // Channel; unlike live Instances, a Channel with more simply shows fewer.
   const resting = await transaction.query<ChannelAgentPresenceRow>({
-    name: "channel_agent_resting_presence_v5",
+    name: "channel_agent_resting_presence_v6",
     text: `SELECT * FROM (SELECT i.instance_id,i.channel_id,i.channel_instance_id,i.status,i.rest_state,i.rest_reason,
         i.created_at,i.updated_at,i.presentation_json->'usage' AS instance_usage,${DURABLE_PRESENTATION_SQL},
         r.workspace_machine_id,
@@ -153,7 +153,10 @@ export async function loadChannelAgentPresence(
         AND s.machine_id=b.machine_id AND s.harness=b.harness
       LEFT JOIN data.space_members owner ON owner.space_id=$1 AND owner.user_id=b.owner_user_id
       WHERE i.channel_id=ANY($2::text[]) AND i.status='offline'
-        AND i.rest_state IN ('sleeping','interrupted','wake_failed')) resting
+        AND (i.rest_state IN ('sleeping','interrupted','wake_failed')
+          OR (i.rest_state IS NULL AND r.status IN ('starting','running') AND EXISTS (
+            SELECT 1 FROM data.agent_launches launch WHERE launch.instance_id=i.instance_id
+              AND launch.state IN ('prepared','queued','admitted','spawned'))))) resting
       WHERE resting.rest_rank<=$3
       ORDER BY resting.channel_id,resting.channel_instance_id,resting.instance_id
       LIMIT 2048`,
@@ -161,6 +164,12 @@ export async function loadChannelAgentPresence(
     maxRows: MAX_RESTING_AGENT_INSTANCES,
   });
   for (const row of resting) {
+    // A launched Instance that has not connected yet has no rest; it is waking
+    // for the first time, and the Channel shows it from the summon onwards.
+    if (row.status === "offline" && (row.rest_state === null || row.rest_state === undefined)) {
+      addPresenceRow(byChannel, selectedSet, row, "waking");
+      continue;
+    }
     if (row.status !== "offline" || (row.rest_state !== "sleeping" && row.rest_state !== "interrupted" &&
         row.rest_state !== "wake_failed")) {
       throw new DatabaseContractError("Resting Agent presence state is invalid");
