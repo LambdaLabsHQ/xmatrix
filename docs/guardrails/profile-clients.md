@@ -43,6 +43,12 @@ hash-named JS/CSS only. See [Channel startup performance](../performance/channel
 The iOS shell is one WKWebView. Native tab taps switch the web shell's mounted
 dock panes, so tabs never reload or rebuild. See the [iOS shell](../../apps/ios/README.md).
 
+The shared shell subscribes to live Channel presence by Channel key; catalog
+and message-reference snapshots stay stable across presence-only changes.
+Batched Instance reports use member/global Instance routing, and a Run's
+presentation stays in its own Channel while account quota remains shared.
+See [live Instance load](../performance/channel-startup.md#live-instance-load).
+
 ### Markdown autolinks
 
 Web message bodies, Markdown attachments and page previews use the same GFM

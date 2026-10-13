@@ -235,7 +235,6 @@ export type TimelineItem = {
   senderInstanceId?: string;
   senderMention?: string;
   senderStatus?: string;
-  senderActivity?: string;
   senderInstanceStale?: boolean;
   /** Set when the message arrived over a cross-Channel link. */
   linkOrigin?: MessageLinkOrigin;
@@ -398,7 +397,6 @@ export function timelineMessagesEqual(previous: TimelineItem, next: TimelineItem
     previous.senderInstanceId === next.senderInstanceId &&
     previous.senderMention === next.senderMention &&
     previous.senderStatus === next.senderStatus &&
-    previous.senderActivity === next.senderActivity &&
     previous.senderInstanceStale === next.senderInstanceStale &&
     previous.linkOrigin?.channelId === next.linkOrigin?.channelId &&
     previous.linkOrigin?.messageId === next.linkOrigin?.messageId &&

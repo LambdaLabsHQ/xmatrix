@@ -54,5 +54,7 @@ test("presence coalesces per Agent and Instance set; events and messages do not"
   assert.notEqual(presence, humanFrameBatchKey({ type: "enhanced_presence", agent: agent(["i3"]) }));
   const event = { type: "observable_event", event: { id: "e" } };
   assert.notEqual(humanFrameBatchKey(event), humanFrameBatchKey(event));
+  const snapshot = { type: "channel_updated", channel: { id: "a" } };
+  assert.notEqual(humanFrameBatchKey(snapshot), humanFrameBatchKey(snapshot), "snapshots wait but preserve every patch");
   assert.equal(humanFrameBatchKey({ type: "channel_message_received" }), null);
 });

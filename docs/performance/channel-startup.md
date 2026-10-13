@@ -248,3 +248,59 @@ creation and message paint under an Electron-shaped bridge that rejects native
 reads, and absence of readiness/sync requests before a legacy native read starts.
 These are behavioral checks, not a measured production speedup. Measure cold and
 warm opens separately before attributing the reported macOS delay to storage.
+
+## Live Instance load
+
+The shared Web, Desktop and native WebView shell keeps Channel and Agent live
+projections in session-owned external stores. Conversations subscribe to their
+own Channel key; mounted desktop and mobile list rows do the same. Presence
+reports do not replace the catalog snapshot used for navigation and message
+reference names. Fleet destinations subscribe to the complete live projection;
+the rail's working indicator subscribes to its boolean result. Account changes
+clear the projections, and authoritative catalog changes still update every
+consumer. These are presentation caches, never authorization evidence.
+
+A flush routes Agent cards by member/global Instance id and merges the Agent
+catalog once. Each event batch is merged and sorted once. Messages, history replies and request answers remain immediate ordering
+barriers; lifecycle and Channel snapshots wait for the same flush but retain
+every frame, so omitted fields in compatible patch snapshots are not lost. Compatible whole-Channel
+snapshots that change only member presence notify their Channel key. Instance
+roster additions/removals also update the catalog so offline message badges and
+reborn controls cannot lag behind avatars; any other
+field change for a known Channel still updates the catalog and revalidates trace
+access. Snapshots of unloaded Channels hydrate live keys without repeatedly
+refetching the entire catalog; its own pages, create/delete frames and revision
+watermarks discover navigation rows.
+
+A Run's activity, intent, token counters and last-seen clock stay in its Channel.
+Only account quota travels to sibling Channels, and repeated quota readings
+reuse unchanged objects. The work dock shares unchanged item references and
+memoizes Instance cards, so a sibling's report leaves those controls intact.
+The selected Channel's subscription belongs to its header, composer and work
+dock. Message avatars select only their visible status; trace opening and
+lifecycle controls read the current Channel/Agent projections on demand.
+Activity never becomes a historical message-row dependency. Timeline building
+indexes thread roots and origin Channels once and consumes a structurally
+shared Channel event slice instead of scanning the catalog for each message.
+Head catch-up still probes the socket after successfully applying missed rows,
+even when that application synchronously commits and cleans up the read effect.
+
+Regression coverage counts workspace, conversation-row and message-row renders
+in `live-agent-load-render-scope.spec.ts`, including cards and whole-Channel
+snapshots. The presence owner tests cover sibling-Run isolation, unchanged quota,
+and a 1,000-report digest with a bounded number of Channel inspections. The
+existing thousand-Agent browser benchmark supplies script/style/layout and main
+thread utilization measurements; these are controlled browser results, not a
+claim about production device latency.
+
+Root search, page-conversation and mobile Channel-layout styles use explicit
+shell state classes. They do not inspect descendants with root/body `:has()`;
+the retired inline-thread-draft selector is removed. The existing timeline
+scroll style-scope regression counts `UpdateLayoutTree.elementCount` to guard
+against whole-app restyling when virtual rows mount.
+
+Channel visibility changes still publish authorized Space catalog revision
+watermarks, including grants to newly visible private Channels; presence
+snapshots are not the discovery announcement. Revision delivery remains best
+effort. Reconnect, foreground refresh and a newer revision observed on a page
+read repair a missed watermark through the existing catalog path.

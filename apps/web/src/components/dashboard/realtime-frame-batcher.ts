@@ -91,6 +91,7 @@ export function humanFrameBatchKey(frame: HumanServerMessage): string | null {
     }
     case "observable_event":
     case "agent_lifecycle":
+    case "channel_updated":
       unkeyedFrame += 1;
       return `${frame.type}:${unkeyedFrame}`;
     default:

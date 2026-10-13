@@ -33,6 +33,9 @@ import {
   type AgentTraceTarget,
 } from "./workspace-shell-message-model";
 
+import { RealtimeMessageAvatar } from "./realtime-message-avatar";
+import { useRealtimeChannel } from "./realtime-channels";
+import { sameReportedPresenceValue } from "./workspace-admin-views";
 import { agentInstanceDisplayStatus } from "./workspace-shell-presence";
 
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
@@ -2212,7 +2215,10 @@ export const MessageRow = memo(function MessageRow({
           }
         }}
       >
-        <IdentityAvatar
+        <RealtimeMessageAvatar
+          channelId={message.channelId}
+          instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
+          senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
           kind={
             message.reservedSystemAgent
               ? "system"
@@ -2243,7 +2249,6 @@ export const MessageRow = memo(function MessageRow({
                   channelId: channel?.id,
                   name: message.author,
                   status: message.senderStatus,
-                  activity: message.senderActivity,
                   goal: message.senderGoal,
                 })
               : humanSenderUserId
@@ -3297,7 +3302,7 @@ import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 
 export function AgentWorkDetailsDock({
   approvals,
-  channel,
+  channel: catalogChannel,
   token,
   timeline,
   events,
@@ -3335,10 +3340,19 @@ export function AgentWorkDetailsDock({
   ) => void;
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
 }) {
+  const channel = useRealtimeChannel(catalogChannel);
   const launchQuery = useChannelAgentLaunches(channel, token, timeline);
   const launches = launchQuery.data?.launches ?? NO_LAUNCHES;
-  const workItems = useMemo(() => buildAgentWorkItems(channel, events, launches),
-    [channel, events, launches]);
+  const workItemsRef = useRef<AgentWorkItem[]>([]);
+  const workItems = useMemo(() => {
+    const previous = new Map(workItemsRef.current.map(item => [item.key, item]));
+    const next = buildAgentWorkItems(channel, events, launches).map(item => {
+      const before = previous.get(item.key);
+      return before && sameReportedPresenceValue(before, item) ? before : item;
+    });
+    workItemsRef.current = next;
+    return next;
+  }, [channel, events, launches]);
   const intentSince = useIntentSince(workItems);
   const now = useNow();
   // Handoff successors are the harnesses this Space registered — the same
@@ -3446,7 +3460,7 @@ export function AgentWorkDetailsDock({
 
 
 
-export function AgentWorkAvatar({
+export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   item,
   intentSince,
   now,
@@ -3954,7 +3968,7 @@ export function AgentWorkAvatar({
       </div>
     );
   }
-}
+});
 
 
 

@@ -1,4 +1,7 @@
 "use client";
+import { channelEventViews } from "./workspace-shell-presence";
+import type { ChannelEventView } from "./realtime-channels";
+import { createRealtimeCollection } from "./realtime-collection";
 import { useMachineDaemonLoad } from "./use-machine-daemon-load";
 
 import type { ComposerInvocationDraft } from "./composer-invocation-bindings";
@@ -35,6 +38,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -162,7 +166,7 @@ import {
   loginPathWithNext,
   mergeObservabilityEvents,
   patchChannelAgentPresenceFromMessage,
-  patchChannelsAgentPresenceFromAgent,
+  patchChannelsAgentPresenceBatch,
   persistWorkingSpace,
   pushBrowserPath,
   readChannelMentionClearedAt,
@@ -171,7 +175,8 @@ import {
   resolveCurrentSpaceId,
   spacesAuthorityReady,
   channelsAfterAgentInstanceOffline,
-  replaceAgent,
+  replaceAgents,
+  sameChannelCatalogState,
   replaceBrowserPath,
   replaceChannel,
   replaceSpace,
@@ -420,7 +425,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     settleMessageJump,
   } = useMessageJump({ timelineScrollRef, setBrowserHash });
 
-  const [channels, setChannels] = useState<SerializedChannel[]>(() => mobileListFixture?.channels ?? []);
+  const [realtimeChannels] = useState(() => createRealtimeCollection<SerializedChannel>(mobileListFixture?.channels ?? []));
+  const channels = useSyncExternalStore(
+    view === "messages" || view === "pages" ? realtimeChannels.subscribeCatalog : realtimeChannels.subscribe,
+    view === "messages" || view === "pages" ? realtimeChannels.getCatalogSnapshot : realtimeChannels.getSnapshot,
+    realtimeChannels.getCatalogSnapshot,
+  );
+  const setChannels = realtimeChannels.set;
   const [spaces, setSpaces] = useState<SerializedSpace[]>(() => mobileListFixture?.spaces ?? []);
 
   // Who `spaces` is the answer for. An authoritative empty list is still an
@@ -437,10 +448,16 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const [scheduleFocusId, setScheduleFocusId] = useState<string | null>(null);
 
   const [events, setEvents] = useState<ObservabilityEvent[]>([]);
+  const [realtimeEventViews] = useState(() => createRealtimeCollection<ChannelEventView>());
 
   const [agentTraceReplicas, setAgentTraceReplicas] = useState<AgentTraceReplica[]>([]);
 
-  const [agents, setAgents] = useState<SerializedAgent[]>([]);
+  const [realtimeAgents] = useState(() => createRealtimeCollection<SerializedAgent>());
+  const agents = useSyncExternalStore(
+    view === "messages" || view === "pages" ? realtimeAgents.subscribeCatalog : realtimeAgents.subscribe,
+    view === "messages" || view === "pages" ? realtimeAgents.getCatalogSnapshot : realtimeAgents.getSnapshot,
+    realtimeAgents.getCatalogSnapshot,
+  );
 
   const [machineDaemons, setMachineDaemons] = useState<SerializedMachineDaemon[]>([]);
 
@@ -833,7 +850,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       });
       return changed ? sortChannels(next) : current;
     });
-  }, []);
+  }, [setChannels]);
 
   const bumpHistoryCacheRevision = useCallback(() => {
     setHistoryCacheRevision((current) => current + 1);
@@ -1073,8 +1090,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     : routeInfo.conversationKey;
 
   const selectedChannel = useMemo(
-    () => channels.find((channel) => channel.id === selectedChannelId) || null,
-    [channels, selectedChannelId]
+    () => channels.find(channel => channel.id === selectedChannelId) ?? null,
+    [channels, selectedChannelId],
   );
 
   const resolvedSpaceId = resolveCurrentSpaceId({
@@ -1120,8 +1137,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   }, [desktopBridge]);
 
   useEffect(() => {
-    channelsRef.current = channels;
-  }, [channels]);
+    const sync = () => { channelsRef.current = realtimeChannels.getSnapshot(); };
+    sync();
+    return realtimeChannels.subscribe(sync);
+  }, [realtimeChannels]);
 
   useEffect(() => {
     spacesRef.current = spaces;
@@ -1372,6 +1391,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   });
 
   useEffect(() => {
+    realtimeAgents.set([]);
+    setEvents([]);
+    setAgentTraceReplicas([]);
     if (!authenticatedUserId) {
       channelReadStateUserIdRef.current = null;
       resetChannelReadSync();
@@ -1390,7 +1412,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setChannelReadCountsBaselineReady(false);
     setChannelReadCounts(readChannelReadCounts(authenticatedUserId));
     setChannelMentionClearedAt(readChannelMentionClearedAt(authenticatedUserId));
-  }, [authenticatedUserId, resetChannelReadSync]);
+  }, [authenticatedUserId, resetChannelReadSync, realtimeAgents, setChannels]);
 
   const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, setHistoryError, setLoadingHistory });
 
@@ -1425,15 +1447,37 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     const relayFrames = createRealtimeFrameBatcher<HumanServerMessage>({
       batchKey: humanFrameBatchKey,
       apply: (frames) => {
+        let presence: SerializedAgent[] = [];
+        const events: ObservabilityEvent[] = [];
+        const flushPresence = () => {
+          if (presence.length) applyPresence(presence);
+          presence = [];
+        };
         for (const frame of frames) {
           try {
-            handleRelayMessage(frame);
+            if (frame.type === "presence" || frame.type === "enhanced_presence") {
+              presence.push(frame.agent);
+            } else if (frame.type === "presence_digest") {
+              presence.push(...frame.agents);
+            } else {
+              // Messages, snapshots and lifecycle transitions retain socket order.
+              flushPresence();
+              if (frame.type === "observable_event" && !isLlmTraceEvent(frame.event)) events.push(frame.event);
+              handleRelayMessage(frame);
+            }
           } catch {
             // One bad frame must not drop the rest of its batch.
           }
         }
+        flushPresence();
+        if (events.length) setEvents(current => mergeObservabilityEvents(current, events, TRACE_EVENT_LIMIT));
       },
     });
+
+    function applyPresence(agents: SerializedAgent[]) {
+      realtimeAgents.set(current => replaceAgents(current, agents), "live");
+      realtimeChannels.set(current => patchChannelsAgentPresenceBatch(current, agents), "live");
+    }
 
     function handleRelayMessage(message: HumanServerMessage) {
       switch (message.type) {
@@ -1506,9 +1550,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           // Trace history is read directly from the exact Agent host only
           // when its detail is opened. Never turn a realtime relay event into
           // an alternate trace source.
-          if (!isLlmTraceEvent(message.event)) {
-            setEvents((current) => mergeObservabilityEvents(current, [message.event], TRACE_EVENT_LIMIT));
-          }
           if (message.event.type === "channel_attention_updated" && message.event.channelId) {
             const attention = attentionSummaryFromEvent(message.event);
             const readSequence = channelReadSequenceFromEvent(message.event);
@@ -1603,18 +1644,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           break;
         }
         case "agent_list":
-          setAgents(message.agents);
+          realtimeAgents.set(message.agents);
           setAgentsError(null);
-          break;
-        case "presence":
-        case "enhanced_presence":
-          setAgents((current) => replaceAgent(current, message.agent));
-          setChannels((current) => patchChannelsAgentPresenceFromAgent(current, message.agent));
-          break;
-        case "presence_digest":
-          // The same cards as enhanced_presence, a second's worth at once.
-          setAgents((current) => message.agents.reduce(replaceAgent, current));
-          setChannels((current) => message.agents.reduce(patchChannelsAgentPresenceFromAgent, current));
           break;
         case "registration_quota":
           setChannels((current) => patchChannelsRegistrationQuota(current, message.registration, message.usage));
@@ -1650,39 +1681,29 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           }
           break;
         }
-        case "channel_updated":
-          invalidateAgentTraceChannels([message.channel.id], "reload");
-          {
-            const previousChannel = channelsRef.current.find(
-              (channel) => channel.id === message.channel.id,
-            );
-            // A visibility change re-reads history under the new audience.
-            if (
-              previousChannel && (
-                previousChannel.mode !== message.channel.mode ||
-                previousChannel.spaceId !== message.channel.spaceId
-              )
-            ) {
-              clearChannelHistory(message.channel.id);
-            }
+        case "channel_updated": {
+          const previous = realtimeChannels.get(message.channel.id);
+          const next = replaceChannel(realtimeChannels.getSnapshot(), message.channel);
+          const updated = next.find(channel => channel.id === message.channel.id)!;
+          const catalogPrevious = realtimeChannels.getCatalog(message.channel.id);
+          const presenceOnly = previous && sameChannelCatalogState(previous, updated) &&
+            (!catalogPrevious || sameChannelCatalogState(catalogPrevious, updated));
+          if (!presenceOnly) invalidateAgentTraceChannels([message.channel.id], "reload");
+          if (previous && (previous.mode !== updated.mode || previous.spaceId !== updated.spaceId)) {
+            clearChannelHistory(message.channel.id);
           }
-          setChannels((current) => replaceChannel(current, message.channel));
-          {
-            const previousChannel = channelsRef.current.find(
-              (channel) => channel.id === message.channel.id,
-            );
-            const structureChanged = !previousChannel ||
-              previousChannel.spaceId !== message.channel.spaceId ||
-              previousChannel.name !== message.channel.name ||
-              previousChannel.mode !== message.channel.mode ||
-              previousChannel.metadata?.kind !== message.channel.metadata?.kind;
-            if (structureChanged) {
-              window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
-                detail: { kind: "structure", spaceId: message.channel.spaceId },
-              }));
-            }
+          // A status snapshot for an unloaded Channel hydrates its live key;
+          // it is not a new page of the navigation/reference catalog. The
+          // catalog's own reads and revision frames discover/reorder rows.
+          setChannels(next, !previous || presenceOnly ? "live" : "catalog");
+          if (previous && (previous.spaceId !== updated.spaceId || previous.name !== updated.name ||
+              previous.mode !== updated.mode || previous.metadata?.kind !== updated.metadata?.kind)) {
+            window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
+              detail: { kind: "structure", spaceId: updated.spaceId },
+            }));
           }
           break;
+        }
         case "channel_deleted":
           invalidateAgentTraceChannels([message.channelId], "close");
           historyCacheRef.current.delete(message.channelId);
@@ -1976,6 +1997,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     relaySocketGenerationRef,
     historyTailBaseGenerationRef,
     queryClient,
+    realtimeAgents,
+    realtimeChannels,
+    setChannels,
     hasToken,
     user, markNativeMessageNotified,
   ]);
@@ -2115,6 +2139,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     }));
   }, [
     authenticatedUserId,
+    setChannels,
     eventsQuery.data,
     mobileListFixture,
     projectsQuery.data,
@@ -2686,6 +2711,17 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     () => [...events, ...agentTraceReplicas.flatMap((replica) => replica.events)],
     [agentTraceReplicas, events]
   );
+  useLayoutEffect(() => {
+    const ids = new Set(["", ...agentStatusEvents.flatMap(event => event.channelId ? [event.channelId] : [])]);
+    const previousRows = new Map(realtimeEventViews.getSnapshot().map(view => [view.id, view]));
+    const previous = new Map([...previousRows].map(([id, view]) => [id, view.events]));
+    const views = channelEventViews(agentStatusEvents, [...ids], previous);
+    realtimeEventViews.set([...views].map(([id, events]) => {
+      const before = previousRows.get(id);
+      return before?.events === events ? before : { id, events };
+    }), "live");
+  }, [agentStatusEvents, realtimeEventViews]);
+
 
   const logoutAndClearDeviceData = useCallback(async () => {
     setCachedCatalogChannels([]);
@@ -2779,6 +2815,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     armMessageJumpHighlight,
     queueMessageJump,
     channels,
+    realtimeChannels,
+    realtimeAgents,
+    realtimeEventViews,
     setChannels,
     spaces,
     setSpaces,

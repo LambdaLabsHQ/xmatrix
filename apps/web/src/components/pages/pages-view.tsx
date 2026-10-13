@@ -454,7 +454,7 @@ type PageDialogState =
   | { kind: "attach"; blockId: string };
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
-  renderConversation, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
+  renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
   freshPageId = null }: {
   spaceId: string | null;
   token: string;
@@ -469,6 +469,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   activeConversationId?: string | null;
   /** The open conversation itself, the product's one conversation surface, for where the page shows it. */
   renderConversation?: (placement: "margin" | "dock") => ReactNode;
+  /** Lets shell chrome follow the actual layout rather than inspect descendant DOM. */
+  onConversationDockChange?: (docked: boolean) => void;
   /** Closes the open conversation, or gives it the whole window. */
   onCloseConversation?: () => void;
   onExpandConversation?: (conversationId: string) => void;
@@ -925,6 +927,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
 
+  const marginOn = !phone && mode === "page" && articleWidth >= MARGIN_ROOM_PX;
+  const openInMargin = Boolean(activeConversationId) && marginOn;
+  const docked = Boolean(activeConversationId) && !phone && !openInMargin;
+  useEffect(() => {
+    onConversationDockChange?.(Boolean(spaceId && page && docked));
+    return () => onConversationDockChange?.(false);
+  }, [spaceId, page, docked, onConversationDockChange]);
+
   if (!spaceId) return <div className="p-6 text-sm text-muted-foreground">Choose a Space to see its pages.</div>;
   if (canMigrate && tree.data && (!page || reviewing === spaceId)) {
     return (
@@ -1035,10 +1045,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   ];
   // Beside the document on a wide screen, as comments are in Google Docs; the open conversation
   // expands in place there, and docks beside the page only when the margin has no room for it (§4.4).
-  const marginRoom = !phone && mode === "page";
-  const marginOn = marginRoom && articleWidth >= MARGIN_ROOM_PX;
-  const openInMargin = Boolean(activeConversationId) && marginOn;
-  const docked = Boolean(activeConversationId) && !phone && !openInMargin;
   const marginCards = withOpenConversation(conversations, openInMargin ? activeConversationId : null,
     activeConversationId ? conversation(activeConversationId)?.name ?? null : null);
   const liveCount = conversations.filter((item) => item.live).length;

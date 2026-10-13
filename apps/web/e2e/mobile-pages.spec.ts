@@ -4,6 +4,7 @@ import * as syncProtocol from "y-protocols/sync";
 
 import { encodePageSync } from "../src/lib/pages/page-sync-codec";
 import { pageDocument } from "./page-document-fixture";
+import { paintedMainTop } from "./painted-timeline-frames";
 
 import { E2E_CHANNEL, E2E_MOBILE_CONTEXT, E2E_SPACE, installWorkspaceStubs } from "./workspace-fixtures";
 import { expect, test } from "./fixtures";
@@ -52,6 +53,8 @@ test("a phone lists the pages, opens one as a pushed screen, with its controls o
   await expect(page).toHaveURL(/page=p-xm/u);
   await expect(page.getByTestId("page-preview")).toContainText("Shipping.");
   await expect(page.locator(".app-topbar")).toContainText("xMatrix");
+  const painted = await paintedMainTop(page);
+  expect(painted.contentTop).toBeGreaterThanOrEqual(painted.titleBottom);
   await expect(dock).toBeHidden();
 
   const controls = page.getByTestId("page-controls");

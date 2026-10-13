@@ -1,5 +1,6 @@
 "use client";
 
+import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { discussionDraft, discussionTitle } from "./selection-discussion";
@@ -112,6 +113,7 @@ import {
   buildLocalManagedAgents,
   buildMachineSummaries,
   buildTimeline,
+  agentBusyTraceStaleActivity,
   canInviteToSpace,
   clearBrowserHash,
   copyTextToClipboard,
@@ -163,6 +165,7 @@ import {
   viewLabels,
 } from "./workspace-shell-modules";
 import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
+import { channelEventViews } from "./workspace-shell-presence";
 import { shareTimelineItems } from "./workspace-shell-message-model";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
@@ -172,6 +175,8 @@ import type { WorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";
 import { questionnaireAnswerPayload, type QuestionnaireAnswer } from "./questionnaire-card";
+
+const NO_TIMELINE_EVENTS: readonly ObservabilityEvent[] = [];
 
 export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const queryClient = useQueryClient();
@@ -401,6 +406,18 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     });
   }, [s.outgoingMessages, s.renderableHistory]);
 
+  const timelineEventViewsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
+  const timelineEventViews = useMemo(() => {
+    const ids = s.selectedChannel ? [s.selectedChannel.id,
+      metadataString(s.selectedChannel.metadata, "threadRootChannelId")].filter(Boolean) : [];
+    const views = channelEventViews(s.agentStatusEvents, ids, timelineEventViewsRef.current);
+    timelineEventViewsRef.current = views;
+    return views;
+  }, [s.agentStatusEvents, s.selectedChannel]);
+  const timelineEvents = timelineEventViews.get(s.selectedChannel?.id ?? "") ?? NO_TIMELINE_EVENTS;
+  const parentTimelineEvents = timelineEventViews.get(
+    metadataString(s.selectedChannel?.metadata, "threadRootChannelId")) ?? NO_TIMELINE_EVENTS;
+
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
@@ -409,7 +426,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           s.renderableHistory,
           s.selectedChannel,
           s.channels,
-          s.agentStatusEvents,
+          timelineEvents,
           s.user,
           s.channelReadCounts,
           renderableHistoryCache,
@@ -425,7 +442,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       return shared;
     },
     [
-      s.agentStatusEvents,
+      timelineEvents,
       s.currentSpace?.members,
       s.channelReadCounts,
       s.channels,
@@ -460,7 +477,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       [rootMessage],
       parentChannel,
       s.channels,
-      s.agentStatusEvents,
+      parentTimelineEvents,
       s.user,
       s.channelReadCounts,
       renderableHistoryCache,
@@ -471,7 +488,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const message = rootTimeline[0];
     return message ? { message, channel: parentChannel } : null;
   }, [
-    s.agentStatusEvents,
+    parentTimelineEvents,
     s.currentSpace?.members,
     s.channelReadCounts,
     s.channels,
@@ -725,13 +742,28 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }, [s.history, s.latestHistorySequenceRef]);
 
 
+  const liveTraceActivity = useStableCallback((target: AgentTraceTarget) => {
+    const channel = target.channelId ? s.realtimeChannels.get(target.channelId) : undefined;
+    for (const presence of Object.values(channel?.memberPresence ?? {})) {
+      if (presence.kind !== "agent") continue;
+      const instance = presence.instances?.find(instance => instance.id === target.instanceId);
+      if (!instance) continue;
+      return agentBusyTraceStaleActivity({ agentId: target.id, channelId: target.channelId,
+        events: s.agentStatusEvents, instance, name: target.name }) ||
+        instance.activity || presence.activity || (instance.status === "busy" ? "Processing" : undefined);
+    }
+    return target.instanceId ? "Instance is no longer live" : undefined;
+  });
+
   const openAgentTrace = useCallback(
     (target: AgentTraceTarget) => {
       cancelAgentTraceHistoryBootstrap();
       setAgentTraceHistoryPanelState(null);
-      setAgentTraceTarget(resolveAgentTraceTargetOwner(target, s.agents));
+      setAgentTraceTarget(resolveAgentTraceTargetOwner({ ...target,
+        activity: target.activity ?? liveTraceActivity(target),
+      }, s.realtimeAgents.getSnapshot()));
     },
-    [s.agents, cancelAgentTraceHistoryBootstrap, setAgentTraceHistoryPanelState, setAgentTraceTarget]
+    [s.realtimeAgents, liveTraceActivity, cancelAgentTraceHistoryBootstrap, setAgentTraceHistoryPanelState, setAgentTraceTarget]
   );
 
   const closeAgentTrace = useCallback(() => {
@@ -1352,7 +1384,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   });
 
   function navigateToChannel(channelId: string, messageId?: string, sequence?: number) {
-    const channelInState = s.channels.find((current) => current.id === channelId);
+    const channelInState = s.realtimeChannels.get(channelId);
     const channel = channelInState || s.channelsRef.current.find((current) => current.id === channelId);
     if (!channel) return;
     setComposingConversation(false);
@@ -2104,7 +2136,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     agentLabel?: string
   ) {
     if (!s.token || s.stoppingAgentInstanceId || s.reborningAgentInstanceId || s.handingOffAgentInstanceId) return;
-    const liveAgent = s.agents.find((candidate) => candidate.id === agentId);
+    const liveAgent = s.realtimeAgents.get(agentId);
     const body = agentInstanceStopBody(liveAgent, instance, agentLabel);
     if (!body) {
       const message = "This instance has no channel address to stop.";
@@ -2142,7 +2174,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   /** The Agent name a lifecycle mention addresses, without a leading @. */
   function lifecycleMentionName(agentId: string, agentLabel: string): string {
-    const agent = s.agents.find((candidate) => candidate.id === agentId);
+    const agent = s.realtimeAgents.get(agentId);
     return (agent?.name || agentLabel).trim().replace(/^[@＠]/, "");
   }
 

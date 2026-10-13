@@ -729,7 +729,7 @@ function preferredQuotaUsage(...candidates: Array<LlmUsage | undefined>): LlmUsa
 }
 
 /** The server supplies whole pool readings; select by observation time, never by usage magnitude. */
-function accountQuotaUsageFromCandidates(...candidates: Array<LlmUsage | undefined>): LlmUsage | undefined {
+export function accountQuotaUsageFromCandidates(...candidates: Array<LlmUsage | undefined>): LlmUsage | undefined {
   let latest: LlmUsage | undefined;
   for (const usage of candidates) {
     if (usage?.quotaState !== "unknown" && (usage?.quotaSource !== "provider_api" || !usage.quotaUsages?.length)) continue;

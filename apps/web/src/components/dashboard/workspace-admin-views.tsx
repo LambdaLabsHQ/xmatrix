@@ -23,6 +23,7 @@ import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
 
 import {
+  accountQuotaUsageFromCandidates,
   agentPresetOrCustom,
   formatVersion,
   hasQuotaMeterUsage,
@@ -2111,6 +2112,19 @@ export function mergeChannelMemberReadSequences(
   return merged;
 }
 
+/** Presence-only snapshots do not change the conversation catalog, reference
+ * names, history audience or trace access. Every other field still does. */
+export function sameChannelCatalogState(left: SerializedChannel, right: SerializedChannel): boolean {
+  const { memberPresence: _leftPresence, ...leftState } = left;
+  const { memberPresence: _rightPresence, ...rightState } = right;
+  if (!sameReportedPresenceValue(leftState, rightState)) return false;
+  const ids = (channel: SerializedChannel) => new Set(Object.values(channel.memberPresence ?? {})
+    .flatMap(presence => presence.kind === "agent" ? (presence.instances ?? []).map(instance => instance.id) : []));
+  const before = ids(left);
+  const after = ids(right);
+  return before.size === after.size && [...after].every(id => before.has(id));
+}
+
 export function mergeChannelMemberPresencePreferringQuotas(
   prior: SerializedChannel["memberPresence"] | undefined,
   next: SerializedChannel["memberPresence"] | undefined
@@ -2151,14 +2165,54 @@ export function mergeChannelMemberPresencePreferringQuotas(
   return merged;
 }
 
-export function patchChannelsAgentPresenceFromAgent(
-  channels: SerializedChannel[],
-  agent: SerializedAgent
+/** Route a digest once by member and global Instance id. A report may name a
+ * different principal from the catalog member that owns its Instance. */
+export function patchChannelsAgentPresenceBatch(
+  channels: SerializedChannel[], agents: readonly SerializedAgent[],
 ): SerializedChannel[] {
-  if (!agent.id) return channels;
+  if (!agents.length) return channels;
+  const byMember = new Map<string, number[]>();
+  const byChannelMember = new Map<string, number[]>();
+  const byInstance = new Map<string, number[]>();
+  const sharedQuotas = new Map<string, SerializedAgent>();
+  const index = (map: Map<string, number[]>, id: string, position: number) => {
+    const positions = map.get(id);
+    if (positions) positions.push(position);
+    else map.set(id, [position]);
+  };
+  agents.forEach((agent, position) => {
+    if (!agent.id) return;
+    if (!agent.instances?.length) index(byMember, agent.id, position);
+    else {
+      const usage = accountQuotaUsageFromCandidates(sharedQuotas.get(agent.id)?.usage, agent.usage);
+      if (usage) sharedQuotas.set(agent.id, { ...agent, usage, instances: [] });
+    }
+    for (const instance of agent.instances ?? []) {
+      index(byInstance, instance.id, position);
+      if (instance.channelId) index(byChannelMember, `${instance.channelId}\u0000${agent.id}`, position);
+    }
+  });
   let changed = false;
-  const next = channels.map((channel) => {
-    const patched = patchChannelAgentPresenceFromAgent(channel, agent);
+  const next = channels.map(channel => {
+    const positions = new Set<number>();
+    for (const [member, presence] of Object.entries(channel.memberPresence ?? {})) {
+      if (presence.kind !== "agent") continue;
+      for (const position of byMember.get(member) ?? []) positions.add(position);
+      for (const position of byChannelMember.get(`${channel.id}\u0000${member}`) ?? []) positions.add(position);
+      for (const instance of presence.instances ?? []) {
+        for (const position of byInstance.get(instance.id) ?? []) positions.add(position);
+      }
+    }
+    let patched = channel;
+    for (const position of [...positions].sort((left, right) => left - right)) {
+      patched = patchChannelAgentPresenceFromAgent(patched, agents[position]);
+    }
+    // A thousand Instances of one Agent share one quota reading, rather than
+    // copying each Instance's card across every sibling Channel.
+    for (const member of Object.keys(channel.memberPresence ?? {})) {
+      const quota = sharedQuotas.get(member);
+      if (quota) patched = patchChannelAgentMemberFromAgent(patched, quota, true);
+    }
     if (patched !== channel) changed = true;
     return patched;
   });
@@ -2202,7 +2256,8 @@ export function patchChannelInstancesById(
 
 function patchChannelAgentMemberFromAgent(
   channel: SerializedChannel,
-  agent: SerializedAgent
+  agent: SerializedAgent,
+  quotaOnly = false,
 ): SerializedChannel {
   const presence = channel.memberPresence?.[agent.id];
   if (!presence || presence.kind !== "agent") return channel;
@@ -2218,6 +2273,9 @@ function patchChannelAgentMemberFromAgent(
       .map((instance) => [instance.channelInstanceId!, instance])
   );
   const priorInstances = presence.instances || [];
+  const hasChannelReport = !quotaOnly && (!agentInstances.length || agentInstances.some(instance =>
+    instance.channelId === channel.id || priorInstances.some(prior => prior.id === instance.id)));
+  const sharedUsage = accountQuotaUsageFromCandidates(agent.usage);
   let instanceChanged = false;
   // enhanced_presence often omits instances (workspace-wide broadcast). Still
   // push agent-level usage onto every known channel instance so quota chips stay live.
@@ -2233,9 +2291,9 @@ function patchChannelAgentMemberFromAgent(
       if (merged !== instance) instanceChanged = true;
       return merged;
     }
-    if (agent.usage) {
-      const mergedUsage = mergeAccountLevelLlmUsage(instance.usage, agent.usage);
-      if (mergedUsage !== instance.usage) {
+    if (sharedUsage) {
+      const mergedUsage = mergeAccountLevelLlmUsage(instance.usage, sharedUsage);
+      if (!sameReportedPresenceValue(mergedUsage, instance.usage)) {
         instanceChanged = true;
         return { ...instance, usage: mergedUsage };
       }
@@ -2243,8 +2301,18 @@ function patchChannelAgentMemberFromAgent(
     return instance;
   });
 
-  const nextUsage = mergeAccountLevelLlmUsage(presence.usage, agent.usage);
+  const mergedUsage = mergeAccountLevelLlmUsage(presence.usage, hasChannelReport ? agent.usage : sharedUsage);
+  const nextUsage = sameReportedPresenceValue(mergedUsage, presence.usage) ? presence.usage : mergedUsage;
   const usageChanged = nextUsage !== presence.usage;
+  // The card reports one Run. Its activity/intent/clock must not leak into
+  // sibling Channels of the same Agent; only account quota is shared there.
+  if (!hasChannelReport) {
+    return instanceChanged || usageChanged
+      ? replaceChannelMemberPresence(channel, agent.id, {
+        ...presence, usage: nextUsage, instances: instanceChanged ? nextInstances : presence.instances,
+      })
+      : channel;
+  }
   if (!instanceChanged && !usageChanged && priorInstances.length > 0) {
     const activity = agent.activity || presence.activity;
     const lastSeenAt = latestTimestamp([presence.lastSeenAt, agent.lastSeenAt]);
@@ -2528,12 +2596,14 @@ export function replaceSpace(spaces: SerializedSpace[], space: SerializedSpace):
   return sortSpaces(next);
 }
 
-export function replaceAgent(agents: SerializedAgent[], agent: SerializedAgent): SerializedAgent[] {
-  const exists = agents.some((current) => current.id === agent.id);
-  const next = exists
-    ? agents.map((current) => (current.id === agent.id ? agent : current))
-    : [...agents, agent];
-  return next.sort((left, right) => left.name.localeCompare(right.name));
+export function replaceAgents(agents: SerializedAgent[], incoming: readonly SerializedAgent[]): SerializedAgent[] {
+  if (!incoming.length) return agents;
+  const byId = new Map(agents.map(agent => [agent.id, agent]));
+  for (const agent of incoming) byId.set(agent.id, agent);
+  const next = [...byId.values()];
+  return byId.size !== agents.length || agents.some(agent => byId.get(agent.id)!.name !== agent.name)
+    ? next.sort((left, right) => left.name.localeCompare(right.name))
+    : next;
 }
 
 export function replaceWorkspace(

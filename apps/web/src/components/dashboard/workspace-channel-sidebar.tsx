@@ -1,5 +1,6 @@
 "use client";
 
+import { useRealtimeChannel } from "./realtime-channels";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { MobileInlineActions } from "./mobile-inline-actions";
 import { useAndroidBackDismiss } from "./use-android-back";
@@ -1059,7 +1060,7 @@ function ChannelRowSecondLine({
 }
 
 export const MobileChannelChatRow = memo(function MobileChannelChatRow({
-  displayChannel,
+  displayChannel: catalogChannel,
   events,
   active,
   badgeCount,
@@ -1077,6 +1078,7 @@ export const MobileChannelChatRow = memo(function MobileChannelChatRow({
   onOpen: (channel: SerializedChannel) => void;
   onOpenActions: (channel: SerializedChannel) => void;
 }) {
+  const displayChannel = useRealtimeChannel(catalogChannel)!;
   const rowRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressPointerRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -1529,7 +1531,7 @@ function ChannelCatalogPageSentinel({
 /* ChannelNavItemProps owned by message-model */
 
 export const ChannelNavItem = memo(function ChannelNavItem({
-  channel,
+  channel: catalogChannel,
   events,
   active,
   unreadCount = 0,
@@ -1540,6 +1542,7 @@ export const ChannelNavItem = memo(function ChannelNavItem({
   onMarkDone,
   onOpenContextMenu,
 }: ChannelNavItemProps) {
+  const channel = useRealtimeChannel(catalogChannel)!;
   const { onRowPointerDown, onRowClick } = usePointerFirstSelect(() => onSelect(channel));
   const focusedHumanMembers = channelFocusedHumanMembers(channel);
   const agentAvatarItems = channelOnlineAgentAvatarItems(channel);
