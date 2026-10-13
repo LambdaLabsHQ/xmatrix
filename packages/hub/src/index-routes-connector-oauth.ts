@@ -18,6 +18,7 @@ import { connectorHubOrigin, requireAuth, requireHumanAuth, jsonErrors } from ".
 import { ControlError } from "@xmatrix/db";
 import { getAppConnection, upsertAppConnection } from "./apps";
 import type { Env } from "./types";
+import { addConnectedMailbox } from "./connectors/gmail-mailboxes";
 
 /*
  * One-click OAuth routes (docs/design/connector-platform.md §3.2): which
@@ -54,6 +55,9 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
           current.connectionGeneration !== original.connectionGeneration) throw new Error("Discord connection changed before installation");
     }
     const grant = await exchangeOAuthGrant(verified.client, input.code ?? "", oauthRedirectUri(connectorHubOrigin(env, request)), state);
+    /* A Gmail Connect adds one mailbox to the connection's list. */
+    if (providerId === "gmail") grant.fields = await addConnectedMailbox(env, { spaceId: verified.spaceId,
+      actorUserId: verified.userId, account: String(grant.fields.mailboxes ?? "") });
     const integration = verified.client.manifest.oauth.flow === "vercel-integration";
     const completion = integration ? vercelCompletionUrl({ configurationId: input.configurationId,
       teamId: input.teamId, next: input.next }, grant.fields) : undefined;

@@ -374,16 +374,31 @@ messages/send, belongs to `send` and `reply`, whose manifest
 `defaultPolicy: "deny"` keeps them off in every Channel until a Space admin
 allows them there (§3.5). A read-only grant would need the company's own
 Google app verified for `gmail.readonly` (OAuth verification and CASA).
-The `gmail` manifest uses `oauth.flow: "composio"`;
+One Gmail connection holds up to ten mailboxes. Its only credential,
+`mailboxes`, lists each mailbox's Composio account, address and owner: a
+Space member (`user:<id>`) or an Agent registration
+(`agent:<owner>/<machine>/<harness>`, each part URI-encoded). A member's
+mailbox serves that member and their Agents' Runs; an Agent's serves only
+Runs of that registration, resolved from the calling Instance through its
+Run's admission, never from the Instance id. Every Connect adds a mailbox
+owned by the connecting admin; connecting an address again replaces its
+Composio account (the old one is deleted) and keeps its owner. Space admins
+reassign or remove mailboxes in Apps → Gmail
+(`/api/spaces/:spaceId/app-connections/gmail/mailboxes`); removing one deletes
+its Composio account, and Disconnect deletes every one. Actions see only the
+caller's mailboxes: `search:*` searches each (labelled by mailbox when there
+are several) and `search:<address>` one; `read` and `reply` find the message
+among them; `send` takes `from:<address>` when the caller has more than one.
+Check reads every mailbox's profile. The `gmail` manifest uses `oauth.flow: "composio"`;
 `CONNECTOR_GMAIL_CLIENT_ID` is the Composio auth config (Composio-managed
 Gmail auth requesting only `https://mail.google.com/`) and the shared
 `CONNECTOR_COMPOSIO_API_KEY` is the Composio project API key. Connect creates a Composio Connect Link for the
 user id `xmatrix:<space>:<state nonce>` with the Hub callback carrying the
-signed state; completion ignores redirect parameters and stores the single
-ACTIVE account that per-attempt user id holds under that auth config, as the
-only credential (`composioAccountId`). The API key never enters the
+signed state; completion ignores redirect parameters and adds the single
+ACTIVE account that per-attempt user id holds under that auth config to the
+`mailboxes` credential. The API key never enters the
 credential store; the Hub adds it when it resolves the connection. Every
-Gmail call goes through Composio's proxy and names the stored account, never
+Gmail call goes through Composio's proxy and names one stored account, never
 the project default. Reads: `search:* [Gmail search]` returns the ten newest
 matching messages (id, received time, sender, subject, snippet) and
 `read:<message id>` returns the headers, the text body (plain text, else HTML
