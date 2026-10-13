@@ -401,21 +401,24 @@ Auto and bare harness shouts select from the persisted quota observation.
 The quota probe runs after that read and writes the observation the next
 selection will see; it does not delay this decision. Refresh targets come only
 from an authorized Channel query.
-The owning machine command authority issues a `quota_probe` lease to the exact
-online daemon epoch advertising `machine_quota_probe_v1`; older daemons never
-claim this command. Each command contains at most 32 Profile/configuration
-bindings, expires after 15 seconds, and grants neither a Run nor filesystem
-execution. The Hub refresh uses at most four concurrent batches and a 12-second
-polling budget; database operations retain their separate bounded timeouts.
+The owning machine command authority issues a `quota_probe` to the exact online
+Daemon epoch advertising `machine_quota_probe_v2`; older Daemons never claim it.
+Each command contains at most 32 authorized registration/configuration bindings
+and grants neither a Run nor filesystem execution. Unclaimed probes expire
+15 seconds after issue. Successful claim starts a separate 15-second result
+window, leaving room for the Daemon's ten-second total provider-read budget and
+result delivery even when admission was delayed. Renewal does not extend that
+window. PostgreSQL still rejects expired results, superseded lease generations
+and changed Daemon epochs. The Hub issues at most four concurrent batches and
+does not wait for their results; database operations keep their bounded timeouts.
 
 After completion, the Hub validates every result against its original target,
-rechecks Channel access and current Profile/connection bindings, and writes only
-usable provider observations to the existing directory quota observation table.
-It does not create a second quota authority. A private pool is derived from the
-Profile identity and version; an explicitly declared shared pool remains scoped
-by owner. Configuration changes invalidate private-pool readings. Unknown,
-expired, unavailable and timed-out readings never become an invented balance.
-Provider observation time, not poll completion time, governs ordering/freshness.
+rechecks current registration configuration, and writes only usable provider
+observations to the existing registration quota authority. Private pools derive
+from the owner, machine and harness; explicitly declared shared pools remain
+scoped by owner. Configuration changes invalidate readings. Unknown, expired,
+unavailable and timed-out readings never become an invented balance. Provider
+observation time, rather than completion time, governs ordering and freshness.
 
 Candidate selection, allocation and first Instance acceptance use the same
 directory observations, through a separate directory database boundary rather

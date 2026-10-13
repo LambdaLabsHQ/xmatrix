@@ -256,7 +256,7 @@ test("Machine claim leases queued PostgreSQL commands with exact epoch evidence"
       ? [{ command_id: "spawn-1", command_type: "spawn", version: 1, lease_generation: null,
           payload_json: { type: "machine_spawn_agent", requestId: "spawn-1",
             spaceId: "space-1", channelId: "channel-1" } }]
-      : query.name === "machine_control_claim_v2"
+      : query.name === "machine_control_claim_v3"
         ? [{ version: 2, lease_generation: 1,
             lease_until: new Date("2099-08-30T00:01:00.000Z") }]
         : []);
@@ -277,9 +277,9 @@ test("Machine claim leases queued PostgreSQL commands with exact epoch evidence"
   const candidates = db.calls.find((call) => call.name === "machine_control_claim_candidates_v8");
   assert.match(candidates.text, /LEFT JOIN data\.agent_launches launch/u);
   assert.match(candidates.text, /'spaceId',launch\.space_id/u);
-  const claim = db.calls.find((call) => call.name === "machine_control_claim_v2");
+  const claim = db.calls.find((call) => call.name === "machine_control_claim_v3");
   assert.match(claim.text, /lease_until=clock_timestamp\(\)\+\(\$2::integer\*interval '1 millisecond'\)/u);
-  assert.deepEqual(claim.values.slice(1), [30_000, "spawn-1", 1]);
+  assert.deepEqual(claim.values.slice(1), [30_000, "spawn-1", 1, 15_000]);
   assert.equal(db.calls.some((call) => call.name === "machine_control_replay_write_v1"), false);
 });
 

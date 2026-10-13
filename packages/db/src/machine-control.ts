@@ -39,6 +39,7 @@ const RESULT_TYPES: Record<string, string> = {
 };
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const COMMAND_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+const QUOTA_PROBE_WINDOW_MS = 15_000;
 /**
  * A connected daemon claims a command within a second of its wake and renews a
  * held lease every 15 s. Work left unclaimed, or a lease left lapsed, this long
@@ -1087,7 +1088,7 @@ export class PostgresMachineControlRepository {
       VALUES ($1,$2,$3,$4,$5,$6::jsonb,'pending',0,NULL,NULL,1,$7,$7,NULL,0,$7,$8,NULL)
       ON CONFLICT (command_id) DO NOTHING RETURNING command_id`, values: [controlId, ownerUserId,
       machineId, hostId, commandType, JSON.stringify(payload), at,
-      new Date(Date.parse(at) + (commandType === "quota_probe" ? 15_000
+      new Date(Date.parse(at) + (commandType === "quota_probe" ? QUOTA_PROBE_WINDOW_MS
         : commandType === "harness_action" ? HARNESS_ACTION_CLAIM_TTL_MS
           : commandType === "worktree_action" ? WORKTREE_ACTION_CLAIM_TTL_MS
             : commandType === "text_task" ? TEXT_TASK_CLAIM_TTL_MS : COMMAND_TTL_MS)).toISOString()], maxRows: 1 });
@@ -1253,13 +1254,19 @@ export class PostgresMachineControlRepository {
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {
-      const updated = await tx.query<QueryResultRow>({ name: "machine_control_claim_v2", text: `UPDATE
+      // Intake may consume most of the probe's fifteen seconds. Once admitted,
+      // its ten-second daemon read needs its own bounded result window. Neither
+      // renewal nor completion extends it, and expired intake is filtered above.
+      const updated = await tx.query<QueryResultRow>({ name: "machine_control_claim_v3", text: `UPDATE
         data.machine_daemon_commands SET status='leased',attempts=attempts+1,lease_owner=$1,
         lease_generation=COALESCE(lease_generation,0)+1,
         lease_until=clock_timestamp()+($2::integer*interval '1 millisecond'),
+        expires_at=CASE WHEN command_type='quota_probe'
+          THEN clock_timestamp()+($5::integer*interval '1 millisecond') ELSE expires_at END,
         version=version+1,updated_at=clock_timestamp()
-        WHERE command_id=$3 AND version=$4 RETURNING version,lease_generation,lease_until`,
-      values: [leaseOwner, leaseMs, row.command_id, row.version], maxRows: 1 });
+        WHERE command_id=$3 AND version=$4 AND (expires_at IS NULL OR expires_at>clock_timestamp())
+        RETURNING version,lease_generation,lease_until`,
+      values: [leaseOwner, leaseMs, row.command_id, row.version, QUOTA_PROBE_WINDOW_MS], maxRows: 1 });
       const lease = updated[0];
       if (!lease) throw new MachineControlError("machine_command_stale_lease", 409,
         "Machine claim lost its compare-and-swap race");
