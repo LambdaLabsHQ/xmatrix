@@ -3194,20 +3194,50 @@ mod tests {
         assert!(error.contains("writer closed"), "{error}");
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn probe_response_deadline_starts_after_a_delayed_write_flushes() {
+    struct ProbeWriterFixture {
+        tx: mpsc::Sender<MachineDaemonWrite>,
+        probe: MachineDaemonProbe,
+        writer: tokio::task::JoinHandle<std::result::Result<(), String>>,
+    }
+
+    async fn probe_writer_fixture(delay: Option<Duration>) -> ProbeWriterFixture {
         let (tx, rx) = mpsc::channel(1);
-        let (frame, mut probe) = MachineDaemonProbe::queued();
+        let (frame, probe) = MachineDaemonProbe::queued();
         enqueue_machine_daemon_heartbeat(&tx, frame).expect("queue probe");
         let sink = Box::pin(futures_util::sink::unfold(
             (),
-            |(), _frame: Message| async {
-                tokio::time::sleep(Duration::from_secs(6)).await;
+            move |(), _frame: Message| async move {
+                match delay {
+                    Some(delay) => tokio::time::sleep(delay).await,
+                    None => std::future::pending::<()>().await,
+                }
                 Ok::<(), std::convert::Infallible>(())
             },
         ));
         let writer = tokio::spawn(run_machine_daemon_writer(sink, rx));
         tokio::task::yield_now().await;
+        ProbeWriterFixture { tx, probe, writer }
+    }
+
+    async fn assert_probe_deadline(probe: &mut MachineDaemonProbe, budget: Duration, reason: &str) {
+        tokio::time::advance(budget - Duration::from_secs(1)).await;
+        assert_eq!(probe.failure(Instant::now()), None);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(
+            probe
+                .failure(Instant::now())
+                .expect("probe expires")
+                .contains(reason)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn probe_response_deadline_starts_after_a_delayed_write_flushes() {
+        let ProbeWriterFixture {
+            tx,
+            mut probe,
+            writer,
+        } = probe_writer_fixture(Some(Duration::from_secs(6))).await;
 
         // The old four-second clock began at enqueue, while this healthy write
         // is still flushing. There is no unanswered Hub probe yet.
@@ -3219,15 +3249,7 @@ mod tests {
         assert_eq!(probe.failure(Instant::now()), None);
         assert!(probe.sent_at.is_some());
 
-        tokio::time::advance(HEARTBEAT_PROBE_TIMEOUT - Duration::from_secs(1)).await;
-        assert_eq!(probe.failure(Instant::now()), None);
-        tokio::time::advance(Duration::from_secs(1)).await;
-        assert!(
-            probe
-                .failure(Instant::now())
-                .expect("unanswered written probe expires")
-                .contains("written 15s ago")
-        );
+        assert_probe_deadline(&mut probe, HEARTBEAT_PROBE_TIMEOUT, "written 15s ago").await;
         drop(tx);
         writer.await.expect("writer task").expect("healthy writer");
     }
@@ -3235,31 +3257,14 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn an_unwritten_probe_has_a_separate_bounded_queue_deadline() {
         let (_frame, mut probe) = MachineDaemonProbe::queued();
-        tokio::time::advance(HEARTBEAT_QUEUE_TIMEOUT - Duration::from_secs(1)).await;
-        assert_eq!(probe.failure(Instant::now()), None);
-        tokio::time::advance(Duration::from_secs(1)).await;
-        assert!(
-            probe
-                .failure(Instant::now())
-                .expect("queue expires")
-                .contains("queue deadline")
-        );
+        assert_probe_deadline(&mut probe, HEARTBEAT_QUEUE_TIMEOUT, "queue deadline").await;
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_stalled_probe_write_still_fails_at_the_write_deadline() {
-        let (tx, rx) = mpsc::channel(1);
-        let (frame, mut probe) = MachineDaemonProbe::queued();
-        enqueue_machine_daemon_heartbeat(&tx, frame).expect("queue probe");
-        let sink = Box::pin(futures_util::sink::unfold(
-            (),
-            |(), _frame: Message| async {
-                std::future::pending::<()>().await;
-                Ok::<(), std::convert::Infallible>(())
-            },
-        ));
-        let writer = tokio::spawn(run_machine_daemon_writer(sink, rx));
-        tokio::task::yield_now().await;
+        let ProbeWriterFixture {
+            mut probe, writer, ..
+        } = probe_writer_fixture(None).await;
         tokio::time::advance(WRITE_TIMEOUT).await;
         assert!(
             writer
