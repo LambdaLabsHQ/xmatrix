@@ -84,6 +84,10 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
     "Read sessions, users and key events by landing page, channel or country, or only organic search traffic.",
     "Follow a page from Search Console clicks to Google Analytics sessions and conversions.",
   ],
+  googleads: [
+    "Create paused advertising campaigns, budgets, creatives and targeting, then enable or pause them under the Channel's action policy.",
+    "Read spend and conversions for the selected advertiser and use them to adjust future campaigns.",
+  ],
   googlebusinessprofile: [
     "Read each location's search and Maps views, website clicks, calls and direction requests.",
     "Read new reviews and post a reply once a Space admin allows it in the channel.",
