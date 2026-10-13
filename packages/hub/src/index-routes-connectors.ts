@@ -114,7 +114,7 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
       try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch {
         return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
       }
-      return await handleConnectorMcp(c.env, { ownerUserId: run.ownerUserId, channelId: run.channelId,
+      return await handleConnectorMcp(c.env, { ownerUserId: run.ownerUserId, agentId: run.agentId, channelId: run.channelId,
         runId: run.runId, spaceId: run.spaceId }, body);
     } catch (error) {
       return errorResponse(error);

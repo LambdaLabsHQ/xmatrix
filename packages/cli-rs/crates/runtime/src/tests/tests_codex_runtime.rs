@@ -3322,7 +3322,7 @@ fn write_foreign_status_marker(path: &std::path::Path, mut marker: DaemonRunStat
 async fn codex_trace_flushes_text_before_later_tools_and_preserves_message_ids() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let agent = test_serialized_agent("codex-trace");
-        let (url, _, traces, _) = claude_cli_turn_fake_hub(agent.clone()).await;
+        let (url, _, traces, _) = trace_fixture_hub(agent.clone()).await;
         let mut relay = AgentInstanceConnectionClient::new(
             url,
             "token".into(),

@@ -135,6 +135,7 @@ import {
 import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { ConnectorCredentials, connectorGeneratesCredentials, connectorTakesCredentials, connectorWritableCredentials } from "./connector-credentials";
 import { ConnectorPolicy, connectorWriteActions } from "./connector-policy";
+import { GmailMailboxes } from "./gmail-mailboxes";
 
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest, unexpectedResponse } from "@/lib/query/api-client";
@@ -1584,6 +1585,13 @@ export function AppsView({
             onAuthorize={() => void configureConnector(connector, { mode: "add" })}
             onInstall={() => void configureConnector(connector, { mode: "account" })}
             onChanged={async () => { await connectionsQuery.refetch(); }} />
+        </ToolDetailSection>
+      ) : null}
+      {connector.id === "gmail" && state.configured && token && currentSpace && user?.id ? (
+        <ToolDetailSection title="Gmail mailboxes">
+          <GmailMailboxes key={currentSpace.id} spaceId={currentSpace.id} token={token} userId={user.id}
+            members={currentSpace.members} adding={updatingProviderId === connector.id}
+            onAdd={() => void configureConnector(connector)} />
         </ToolDetailSection>
       ) : null}
       {configuring && selectedConnection && configurationDraft ? (

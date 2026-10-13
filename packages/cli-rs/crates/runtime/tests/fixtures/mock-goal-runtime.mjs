@@ -186,6 +186,57 @@ function handleCodexTurnFailure(message) {
   }
 }
 
+let capacityStarts = 0;
+let capacityInitialParams;
+function handleCodexCapacity(message) {
+  if (handleCodexSessionRequest(message)) return;
+  if (message.method === "thread/goal/get") {
+    response(message, { goal: null, capacityStarts });
+    return;
+  }
+  if (message.method !== "turn/start") {
+    if (message.id !== undefined) response(message, {});
+    return;
+  }
+  capacityStarts += 1;
+  const threadId = message.params.threadId;
+  const turnId = `capacity-turn-${capacityStarts}`;
+  response(message, { turn: { id: turnId } });
+  sendCodexTurnStarted(threadId, turnId);
+  if (capacityStarts > 1 && provider !== "codex-capacity-exhausted") {
+    const preserved = ["threadId", "model", "effort", "developerInstructions"]
+      .every((key) => message.params[key] === capacityInitialParams[key]);
+    const continuation = message.params.input.length === 1 &&
+      message.params.input[0].text.includes("Continue the previous request");
+    sendCodexTurnOutput(threadId, turnId, "capacity-answer",
+      preserved && continuation ? "capacity recovered" : "retry contract broken");
+    sendCodexTurnCompleted(threadId, turnId);
+    return;
+  }
+  capacityInitialParams = message.params;
+  const error = { message: "Selected model is at capacity. Please try a different model." };
+  if (provider === "codex-capacity-other-error") error.message = "Usage limit exceeded";
+  if (provider === "codex-capacity-progress") {
+    send({ method: "item/started", params: { threadId, turnId,
+      item: { id: "command", type: "commandExecution", command: "do work" } } });
+  }
+  if (provider !== "codex-capacity-terminal-only") {
+    send({ method: "error", params: { threadId: "unrelated-thread", turnId, error } });
+    send({ method: "error", params: { threadId, turnId, error,
+      willRetry: provider === "codex-capacity-provider-retry" } });
+  }
+  if (provider === "codex-capacity-no-terminal") return;
+  setTimeout(() => {
+    if (provider === "codex-capacity-provider-retry") {
+      sendCodexTurnOutput(threadId, turnId, "capacity-answer", "provider recovered");
+      sendCodexTurnCompleted(threadId, turnId);
+    } else {
+      send({ method: "turn/completed", params: { threadId,
+        turn: { id: turnId, status: "failed", error, items: [] } } });
+    }
+  }, 50);
+}
+
 function handleCodexInterruptWithoutCompletion(message) {
   if (handleCodexSessionRequest(message)) return;
   switch (message.method) {
@@ -652,6 +703,14 @@ const handlers = {
   "codex-turn-order": handleCodexTurnOrder,
   "codex-trace-order": handleCodexTraceOrder,
   "codex-turn-failure": handleCodexTurnFailure,
+  "codex-capacity-recover": handleCodexCapacity,
+  "codex-capacity-exhausted": handleCodexCapacity,
+  "codex-capacity-other-error": handleCodexCapacity,
+  "codex-capacity-progress": handleCodexCapacity,
+  "codex-capacity-terminal-only": handleCodexCapacity,
+  "codex-capacity-provider-retry": handleCodexCapacity,
+  "codex-capacity-no-terminal": handleCodexCapacity,
+
   "codex-interrupt-no-completion": handleCodexInterruptWithoutCompletion,
   "codex-interrupt-no-ack": handleCodexInterruptWithoutAck,
   "codex-session-rate-limit-turn": handleCodexSessionRateLimitTurn,

@@ -5,13 +5,16 @@ import { GMAIL_ACTIONS as ACTIONS, verifyGmail } from "../src/connectors/actions
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
+import { agentMailboxOwner, mayUseMailbox, parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { grantFieldsForgottenOnDisconnect } from "../src/connectors/oauth.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { verifyGitHubAppState } from "../src/index-shared.ts";
 
 const composio = { CONNECTOR_GMAIL_CLIENT_ID: "ac_gmailreadonly", CONNECTOR_COMPOSIO_API_KEY: "composio-project-key" };
-const token = { composioAccountId: "ca_mailbox1", composioApiKey: "composio-project-key" };
+const mailbox = { account: "ca_mailbox1", address: "me@example.com", owner: "user:user-1" };
+const token = { mailboxes: JSON.stringify([mailbox]), composioApiKey: "composio-project-key" };
+const ctx = { credentials: token, caller: { userId: "user-1" } };
 const base64url = value => Buffer.from(value).toString("base64url");
 /* Composio's proxy wraps the Gmail answer. */
 const gmail = (data, status = 200) => ({ body: { status, data } });
@@ -39,7 +42,7 @@ test("Connect signs in through Composio as a per-attempt user and stores only th
 
   const account = { id: "ca_mailbox1", status: "ACTIVE", auth_config: { id: "ac_gmailreadonly" } };
   const exchanged = await fetched([{ body: { items: [account] } }], () => exchangeOAuthGrant(client, "", "https://hub.test/cb", state));
-  assert.deepEqual(exchanged.result.fields, { composioAccountId: "ca_mailbox1" });
+  assert.deepEqual(exchanged.result.fields, { mailboxes: "ca_mailbox1" });
   const lookup = new URL(exchanged.calls[0].url);
   assert.deepEqual([lookup.searchParams.get("user_ids"), lookup.searchParams.get("auth_config_ids"), lookup.searchParams.get("statuses")],
     [`xmatrix:space-1:${claims.nonce}`, "ac_gmailreadonly", "ACTIVE"]);
@@ -58,11 +61,14 @@ test("Connect signs in through Composio as a per-attempt user and stores only th
 });
 
 test("statements are validated before any request", () => {
-  assert.deepEqual(statement("@gmail:search:* from:noreply@example.com newer_than:1h"), { query: "from:noreply@example.com newer_than:1h" });
-  assert.deepEqual(statement("@gmail:search:*"), { query: "" });
+  assert.deepEqual(statement("@gmail:search:* from:noreply@example.com newer_than:1h"), { query: "from:noreply@example.com newer_than:1h", mailbox: "" });
+  assert.deepEqual(statement("@gmail:search:*"), { query: "", mailbox: "" });
+  assert.deepEqual(statement("@gmail:search:ops@example.com is:unread"), { query: "is:unread", mailbox: "ops@example.com" });
+  assert.deepEqual(statement("@gmail:send:ops@example.com from:me@example.com Weekly\nAll green."),
+    { to: "ops@example.com", from: "me@example.com", subject: "Weekly", body: "All green." });
   assert.deepEqual(statement("@gmail:read:18f2a9c0d1e2b3a4"), { id: "18f2a9c0d1e2b3a4" });
   assert.deepEqual(statement("@gmail:send:ops@example.com Weekly report\nAll green."),
-    { to: "ops@example.com", subject: "Weekly report", body: "All green." });
+    { to: "ops@example.com", from: "", subject: "Weekly report", body: "All green." });
   assert.deepEqual(statement("@gmail:reply:18f2a9c0d1e2b3a4 Thanks,\nreceived."), { id: "18f2a9c0d1e2b3a4", body: "Thanks,\nreceived." });
   for (const bad of ["@gmail:send:not-an-address Hi", "@gmail:send:a@b.test,c@d.test Hi", "@gmail:send:ops@example.com",
     "@gmail:reply:18f2a9c0d1e2b3a4", "@gmail:reply:../send hi"]) {
@@ -78,7 +84,7 @@ test("search lists the newest matches with their metadata", async () => {
     gmail({ messages: [{ id: "18f2a9c0d1e2b3a4" }, { id: "bad/id" }] }),
     gmail({ id: "18f2a9c0d1e2b3a4", internalDate: String(Date.UTC(2026, 9, 9, 20)), snippet: "Confirm your email &amp; start",
       payload: { headers: [{ name: "From", value: "Acme <noreply@acme.test>" }, { name: "Subject", value: "Verify\nyour email" }] } }),
-  ], () => ACTIONS.search.execute({ credentials: token }, { query: "from:acme.test" }));
+  ], () => ACTIONS.search.execute(ctx, { query: "from:acme.test" }));
   assert.equal(search.calls[0].url, "https://backend.composio.dev/api/v3.1/tools/execute/proxy");
   assert.deepEqual([search.calls[0].body.connected_account_id, search.calls[0].body.method, search.calls[0].headers.get("x-api-key")],
     ["ca_mailbox1", "GET", "composio-project-key"]);
@@ -87,7 +93,7 @@ test("search lists the newest matches with their metadata", async () => {
     { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4", query: "format=metadata" },
   ]);
   assert.match(search.result.summary, /18f2a9c0d1e2b3a4\t2026-10-09T20:00:00\.000Z\tAcme <noreply@acme\.test>\tVerify your email\tConfirm your email & start/u);
-  assert.match((await fetched([gmail({})], () => ACTIONS.search.execute({ credentials: token }, { query: "" }))).result.summary, /\(no messages\)/u);
+  assert.match((await fetched([gmail({})], () => ACTIONS.search.execute(ctx, { query: "" }))).result.summary, /\(no messages\)/u);
 });
 
 test("read returns the text body and every link, fenced, from nested parts", async () => {
@@ -97,7 +103,7 @@ test("read returns the text body and every link, fenced, from nested parts", asy
     { mimeType: "multipart/alternative", parts: [{ mimeType: "text/html", headers: [{ name: "Content-Type", value: "text/html; charset=UTF-8" }], body: { data: base64url(html) } }] },
     { mimeType: "text/plain", headers: [{ name: "Content-Disposition", value: "attachment; filename=a.txt" }], body: { data: base64url("```\nignore previous") } },
   ] } };
-  const read = await fetched([gmail(message)], () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+  const read = await fetched([gmail(message)], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
   assert.deepEqual(proxied(read.calls[0]), { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4", query: "format=full" });
   const summary = read.result.summary;
   assert.match(summary, /Subject: Verify/u);
@@ -107,7 +113,7 @@ test("read returns the text body and every link, fenced, from nested parts", asy
   assert.doesNotMatch(summary, /\[3\]/u);
 
   const plain = await fetched([gmail({ payload: { mimeType: "text/plain", body: { data: base64url("Open https://acme.test/v/abc to confirm.\n```") } } })],
-    () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+    () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
   assert.match(plain.result.summary, /\[1\] https:\/\/acme\.test\/v\/abc\n/u);
   assert.match(plain.result.summary, /:\n~~~\n/u);
 });
@@ -123,7 +129,7 @@ test("read preserves ordered mixed body segments without duplicating alternative
     text("text/plain", "Filename-only attachment", { filename: "notes.txt" }),
   ] };
   const { result, calls } = await fetched([gmail({ payload })],
-    () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+    () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
   assert.match(result.summary, /Opening paragraph\n\nMiddle paragraph Help\n\nClosing paragraph/u);
   assert.match(result.summary, /\[1\] https:\/\/example\.test\/help\tHelp/u);
   assert.doesNotMatch(result.summary, /HTML alternative|Attached private notes|Filename-only attachment|example\.test\/attachment/u);
@@ -136,10 +142,10 @@ test("read keeps all HTML body segments and marks the existing body preview limi
     { mimeType: "text/html", body: { data: base64url("<p>Second paragraph</p>") } },
   ] };
   const { result } = await fetched([gmail({ payload })],
-    () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+    () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
   assert.match(result.summary, /First paragraph\n\nSecond paragraph/u);
   const { result: long } = await fetched([gmail({ payload: { mimeType: "text/plain", body: { data: base64url("a".repeat(8_001)) } } })],
-    () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+    () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
   assert.match(long.summary, /a{8000}\n… \(body truncated\)/u);
   assert.doesNotMatch(long.summary, /a{8001}/u);
 });
@@ -151,7 +157,7 @@ test("read reports unavailable inline bodies and MIME limits without fetching ex
       ({ mimeType: "text/plain", body: { data: base64url(`Paragraph ${index}`) } })) },
   ]) {
     const { result, calls } = await fetched([gmail({ payload })],
-      () => ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }));
+      () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
     assert.match(result.summary, /some body parts unavailable or omitted at the MIME part limit/u);
     assert.doesNotMatch(result.summary, /Paragraph 199|Paragraph 200/u);
     assert.equal(calls.length, 1);
@@ -159,13 +165,15 @@ test("read reports unavailable inline bodies and MIME limits without fetching ex
 });
 
 test("Gmail fails closed without its Composio account, on Gmail refusals and on bad data", async () => {
-  await assert.rejects(ACTIONS.search.execute({ credentials: { composioApiKey: "composio-project-key" } }, { query: "" }), /Connect with Composio/u);
-  await assert.rejects(ACTIONS.search.execute({ credentials: { composioAccountId: "ca_mailbox1" } }, { query: "" }), /Composio is not configured/u);
+  await assert.rejects(ACTIONS.search.execute({ credentials: { composioApiKey: "composio-project-key" }, caller: { userId: "user-1" } }, { query: "" }), /Connect a Gmail mailbox/u);
+  await assert.rejects(ACTIONS.search.execute({ credentials: { mailboxes: "[{" }, caller: { userId: "user-1" } }, { query: "" }), /unreadable/u);
+  await assert.rejects(ACTIONS.search.execute({ credentials: { mailboxes: token.mailboxes }, caller: { userId: "user-1" } }, { query: "" }), /Composio is not configured/u);
+  await assert.rejects(ACTIONS.search.execute({ credentials: token }, { query: "" }), /who is asking/u);
   await fetched([gmail({ error: { message: "Requested entity was not found." } }, 404)],
-    () => assert.rejects(ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }), /not found/u));
+    () => assert.rejects(ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }), /none of your Gmail mailboxes has message/u));
   await fetched([{ body: { data: {} } }], () => assert.rejects(verifyGmail(token), /provider's answer/u));
-  await fetched([gmail({ messages: {} })], () => assert.rejects(ACTIONS.search.execute({ credentials: token }, { query: "" }), /message list/u));
-  await fetched([gmail({})], () => assert.rejects(ACTIONS.read.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4" }), /Gmail message/u));
+  await fetched([gmail({ messages: {} })], () => assert.rejects(ACTIONS.search.execute(ctx, { query: "" }), /message list/u));
+  await fetched([gmail({})], () => assert.rejects(ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }), /Gmail message/u));
   await fetched([gmail({})], () => assert.rejects(verifyGmail(token), /confirm Gmail/u));
   await fetched([gmail({ emailAddress: "me@example.com" })], () => verifyGmail(token));
 });
@@ -186,12 +194,13 @@ test("forgetting a Gmail grant deletes the Composio account before clearing the 
   const effects = [];
   const repository = {
     resolveForAdmin: async () => ({ version: 1, connectionVersion: 2, connectionGeneration: "generation",
-      values: { composioAccountId: "ca_mailbox1" } }),
+      values: { mailboxes: JSON.stringify([mailbox, { ...mailbox, account: "ca_mailbox2", address: "two@example.com" }]) } }),
     put: async (input) => { effects.push(["put", input.providerId, input.fields]); },
   };
   const dependencies = {
     "../app-connectors": { getAppConnectorProvider },
     "./composio": { deleteComposioAccount: async (key, id) => { effects.push(["delete", key, id]); } },
+    "./gmail-mailboxes": { parseMailboxes },
     "./credentials": { connectorCredentialRepository: () => repository },
     "./oauth": { grantFieldsForgottenOnDisconnect, oauthClient },
   };
@@ -202,7 +211,8 @@ test("forgetting a Gmail grant deletes the Composio account before clearing the 
   await forgetConnectionGrant(composio, { ...input, providerId: "notion" });
   assert.deepEqual(effects, [
     ["delete", "composio-project-key", "ca_mailbox1"],
-    ["put", "gmail", { composioAccountId: null }],
+    ["delete", "composio-project-key", "ca_mailbox2"],
+    ["put", "gmail", { mailboxes: null }],
     ["put", "gcp", { oauthToken: null, oauthRefreshToken: null, oauthExpiresAt: null }],
   ]);
 });
@@ -211,7 +221,7 @@ const decodedRaw = raw => Buffer.from(raw, "base64url").toString("utf8");
 
 test("send posts one plain-text message to messages/send, the only write endpoint", async () => {
   const sent = await fetched([gmail({ id: "19a0b1c2d3e4f5a6" })],
-    () => ACTIONS.send.execute({ credentials: token }, { to: "ops@example.com", subject: "Bericht für\r\nBcc: x@evil.test", body: "Zeile 1\nZeile 2" }));
+    () => ACTIONS.send.execute(ctx, { to: "ops@example.com", subject: "Bericht für\r\nBcc: x@evil.test", body: "Zeile 1\nZeile 2" }));
   const call = sent.calls[0];
   assert.deepEqual([call.body.method, call.body.endpoint, call.body.parameters],
     ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", undefined]);
@@ -220,7 +230,7 @@ test("send posts one plain-text message to messages/send, the only write endpoin
   assert.doesNotMatch(raw, /\r\nBcc:/u);
   assert.equal(Buffer.from(raw.match(/=\?UTF-8\?B\?([^?]+)\?=/u)[1], "base64").toString(), "Bericht für Bcc: x@evil.test");
   assert.equal(Buffer.from(raw.split("\r\n\r\n")[1], "base64").toString(), "Zeile 1\r\nZeile 2");
-  assert.equal(sent.result.summary, "Sent Gmail message 19a0b1c2d3e4f5a6 to ops@example.com.");
+  assert.equal(sent.result.summary, "Sent Gmail message 19a0b1c2d3e4f5a6 from me@example.com to ops@example.com.");
 });
 
 test("reply answers the sender in the original thread", async () => {
@@ -228,21 +238,94 @@ test("reply answers the sender in the original thread", async () => {
     { name: "From", value: "Acme <noreply@acme.test>" }, { name: "Reply-To", value: "Support <help@acme.test>" },
     { name: "Subject", value: "Your ticket" }, { name: "Message-ID", value: "<m1@acme.test>" }, { name: "References", value: "<m0@acme.test>" }] } });
   const replied = await fetched([original, gmail({ id: "19a0b1c2d3e4f5a7" })],
-    () => ACTIONS.reply.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4", body: "Thanks" }));
+    () => ACTIONS.reply.execute(ctx, { id: "18f2a9c0d1e2b3a4", body: "Thanks" }));
   assert.deepEqual(proxied(replied.calls[0]), { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4",
     query: "format=metadata" });
   const post = replied.calls[1].body;
   assert.deepEqual([post.method, post.endpoint, post.body.threadId], ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", "18f2a9c0d1e2b300"]);
   assert.match(decodedRaw(post.body.raw), /^To: help@acme\.test\r\nSubject: Re: Your ticket\r\nIn-Reply-To: <m1@acme\.test>\r\nReferences: <m0@acme\.test> <m1@acme\.test>\r\n/u);
-  assert.equal(replied.result.summary, "Replied to Gmail message 18f2a9c0d1e2b3a4 as 19a0b1c2d3e4f5a7, to help@acme.test.");
+  assert.equal(replied.result.summary, "Replied to Gmail message 18f2a9c0d1e2b3a4 from me@example.com as 19a0b1c2d3e4f5a7, to help@acme.test.");
   const noAddress = gmail({ payload: { headers: [{ name: "From", value: "Mailer Daemon" }] } });
-  await fetched([noAddress], () => assert.rejects(ACTIONS.reply.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4", body: "x" }), /no address/u));
+  await fetched([noAddress], () => assert.rejects(ACTIONS.reply.execute(ctx, { id: "18f2a9c0d1e2b3a4", body: "x" }), /no address/u));
 });
 
 test("the Hub calls no Gmail endpoint outside its list, whatever the grant allows", async () => {
   const source = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/connectors/actions/gmail.ts", import.meta.url), "utf8"));
   assert.doesNotMatch(source, /composio(Get|Post)\(credentials, `\$\{API\}/u, "every Gmail call goes through gmailPath");
   assert.equal((source.match(/composioPost\(/gu) ?? []).length, 1, "one write call site");
-  const blocked = await fetched([], () => assert.rejects(ACTIONS.read.execute({ credentials: token }, { id: "../../settings" }), /does not call Gmail GET/u));
+  const blocked = await fetched([], () => assert.rejects(ACTIONS.read.execute(ctx, { id: "../../settings" }), /does not call Gmail GET/u));
   assert.deepEqual(blocked.calls, []);
+});
+
+const agentKey = { ownerUserId: "user-2", machineId: "machine-1", harness: "claude" };
+const two = [mailbox, { account: "ca_mailbox2", address: "bot@example.com", owner: agentMailboxOwner(agentKey) },
+  { account: "ca_mailbox3", address: "other@example.com", owner: "user:user-3" }];
+const shared = { mailboxes: JSON.stringify(two), composioApiKey: "composio-project-key" };
+
+test("a mailbox serves only its owner: the member and their Agents, or the one Agent registration", () => {
+  assert.equal(mayUseMailbox(two[0], { userId: "user-1" }), true);
+  assert.equal(mayUseMailbox(two[0], { userId: "user-1", agent: { ...agentKey, ownerUserId: "user-1" } }), true);
+  assert.equal(mayUseMailbox(two[0], { userId: "user-2" }), false);
+  assert.equal(mayUseMailbox(two[1], { userId: "user-2" }), false, "the Agent's owner is not the Agent");
+  assert.equal(mayUseMailbox(two[1], { userId: "user-2", agent: agentKey }), true);
+  assert.equal(mayUseMailbox(two[1], { userId: "user-2", agent: { ...agentKey, machineId: "machine-2" } }), false);
+  assert.equal(agentMailboxOwner({ ownerUserId: "u/1", machineId: "m 1", harness: "claude" }), "agent:u%2F1/m%201/claude");
+});
+
+test("actions use only the caller's mailboxes, and search labels each one", async () => {
+  const human = { credentials: shared, caller: { userId: "user-1" } };
+  const agent = { credentials: shared, caller: { userId: "user-2", agent: async () => agentKey } };
+  const searched = await fetched([gmail({ messages: [] })], () => ACTIONS.search.execute(human, { query: "", mailbox: "" }));
+  assert.deepEqual(searched.calls.map(call => call.body.connected_account_id), ["ca_mailbox1"]);
+  await fetched([], () => assert.rejects(ACTIONS.search.execute(human, { query: "", mailbox: "bot@example.com" }), /not a connected Gmail mailbox you may use/u));
+  await fetched([], () => assert.rejects(ACTIONS.search.execute({ credentials: shared, caller: { userId: "user-9" } }, { query: "" }), /no connected Gmail mailbox belongs to you/u));
+  await fetched([], () => assert.rejects(ACTIONS.search.execute({ credentials: shared, caller: { userId: "user-2", agent: async () => undefined } }, { query: "" }), /no longer authorizes/u));
+  const both = { credentials: { ...shared, mailboxes: JSON.stringify([two[0], { ...two[1], owner: "user:user-1" }]) }, caller: { userId: "user-1" } };
+  const listed = await fetched([gmail({ messages: [{ id: "18f2a9c0d1e2b3a4" }] }), gmail({ messages: [] }), gmail({ id: "18f2a9c0d1e2b3a4", payload: { headers: [] } })],
+    () => ACTIONS.search.execute(both, { query: "", mailbox: "" }));
+  assert.match(listed.result.summary, /\(mailbox, id, received UTC/u);
+  assert.match(listed.result.summary, /me@example\.com\t18f2a9c0d1e2b3a4/u);
+  const read = await fetched([gmail({ error: { message: "Requested entity was not found." } }, 404),
+    gmail({ id: "18f2a9c0d1e2b3a4", payload: { mimeType: "text/plain", body: { data: base64url("hi") } } })],
+  () => ACTIONS.read.execute(both, { id: "18f2a9c0d1e2b3a4" }));
+  assert.deepEqual(read.calls.map(call => call.body.connected_account_id), ["ca_mailbox1", "ca_mailbox2"]);
+  assert.match(read.result.summary, /Mailbox: bot@example\.com/u);
+  await fetched([], () => assert.rejects(ACTIONS.send.execute(both, { to: "x@example.com", from: "", subject: "s", body: "" }), /name the sending mailbox/u));
+  const sent = await fetched([gmail({ id: "19a0b1c2d3e4f5a6" })], () => ACTIONS.send.execute(agent, { to: "x@example.com", from: "", subject: "s", body: "" }));
+  assert.deepEqual([sent.calls[0].body.connected_account_id, sent.result.summary], ["ca_mailbox2", "Sent Gmail message 19a0b1c2d3e4f5a6 from bot@example.com to x@example.com."]);
+});
+
+test("Check reads every mailbox's profile", async () => {
+  const checked = await fetched([gmail({ emailAddress: "me@example.com" }), gmail({ emailAddress: "bot@example.com" }), gmail({ emailAddress: "other@example.com" })],
+    () => verifyGmail(shared));
+  assert.deepEqual(checked.calls.map(call => call.body.connected_account_id), ["ca_mailbox1", "ca_mailbox2", "ca_mailbox3"]);
+});
+
+test("Connect adds a mailbox: a repeat replaces its account and keeps its owner, and the list is bounded", async () => {
+  const load = await compileCommonJsSourceModule(new URL("../src/connectors/gmail-mailboxes.ts", import.meta.url));
+  let stored = [{ ...mailbox, owner: "user:user-7" }, { account: "ca_mailbox2", address: "two@example.com", owner: "user:user-1" }];
+  const deleted = [];
+  const profiles = { ca_new1: "ME@example.com", ca_new2: "three@example.com" };
+  const http = await import("../src/connectors/http.ts");
+  const dependencies = {
+    "./composio": {
+      composioGet: async (credentials) => ({ emailAddress: profiles[credentials.composioAccountId] }),
+      deleteComposioAccount: async (_key, id) => { deleted.push(id); },
+    },
+    "./credentials": { connectorCredentialRepository: () => ({
+      resolveForAdmin: async () => ({ values: { mailboxes: JSON.stringify(stored) } }) }) },
+    "./http": http,
+    "./oauth": { oauthClient: () => ({ clientSecret: "composio-project-key" }) },
+  };
+  const { addConnectedMailbox } = load(name => { assert.ok(dependencies[name], name); return dependencies[name]; },
+    { crypto, Date, Object, JSON, encodeURIComponent });
+  const input = { spaceId: "space-1", actorUserId: "user-1" };
+  const again = JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new1" })).mailboxes);
+  assert.deepEqual(again, [stored[1], { account: "ca_new1", address: "me@example.com", owner: "user:user-7" }]);
+  assert.deepEqual(deleted, ["ca_mailbox1"]);
+  const added = JSON.parse((await addConnectedMailbox({}, { ...input, account: "ca_new2" })).mailboxes);
+  assert.deepEqual(added.at(-1), { account: "ca_new2", address: "three@example.com", owner: "user:user-1" });
+  stored = Array.from({ length: 10 }, (_, index) => ({ account: `ca_full${index}`, address: `m${index}@example.com`, owner: "user:user-1" }));
+  await assert.rejects(addConnectedMailbox({}, { ...input, account: "ca_new2" }), /at most 10/u);
+  assert.equal(deleted.at(-1), "ca_new2");
 });

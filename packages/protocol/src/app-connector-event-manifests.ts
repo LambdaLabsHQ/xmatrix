@@ -257,14 +257,14 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   {
     ...actionConnector({
       id: "gmail", name: "Gmail", kind: "docs",
-      description: "Search and read the connected Google account's mail, with every link a message contains, so an Agent can find a verification email and open its link. Signs in through Composio. Sending and replying stay off in every channel until a Space admin allows them there.",
+      description: "Search and read the connected Google account's mail, with every link a message contains, so an Agent can find a verification email and open its link. Signs in through Composio. Connect several mailboxes; each is used only by the member or Agent it belongs to. Sending and replying stay off in every channel until a Space admin allows them there.",
       oauth: { authorizeUrl: "https://backend.composio.dev/api/v3.1/connected_accounts/link",
-        tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "composioAccountId", flow: "composio" },
-      credentials: [{ id: "composioAccountId", label: "Composio connected account", managed: true, description: "Set by Connect; never typed by hand." }],
+        tokenUrl: "https://backend.composio.dev/api/v3.1/connected_accounts", scopes: [], tokenField: "mailboxes", flow: "composio" },
+      credentials: [{ id: "mailboxes", label: "Mailboxes", managed: true, description: "Each Connect adds a mailbox; a Space admin assigns each one to a member or an Agent. Never typed by hand." }],
       actions: [
-        readAction("search", "Search mail", "The 10 newest messages matching a Gmail search (from:, subject:, newer_than:1h, is:unread …), with id, sender, subject and snippet.", "* [gmail search]"),
+        readAction("search", "Search mail", "The 10 newest messages per mailbox matching a Gmail search (from:, subject:, newer_than:1h, is:unread …), with id, sender, subject and snippet; * searches every mailbox you may use.", "*|<mailbox> [gmail search]"),
         readAction("read", "Read message", "Headers, text body and every link of one message; open a link yourself when the task needs it.", "<message id>"),
-        gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Off until a Space admin allows it in the channel.", "<to address> <subject>\n<body>"),
+        gatedWriteAction("send", "Send email", "Send a plain-text email from the connected account; the first line is the subject. Off until a Space admin allows it in the channel.", "<to address> [from:<mailbox>] <subject>\n<body>"),
         gatedWriteAction("reply", "Reply", "Reply in the thread of one message, to its sender. Off until a Space admin allows it in the channel.", "<message id> <body>"),
       ],
     }),

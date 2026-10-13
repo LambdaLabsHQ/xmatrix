@@ -191,7 +191,7 @@ fn acp_trace_retains_upstream_message_ids_and_receipt_order() {
     run_acp_resume_fixture_test(async {
         tokio::time::timeout(Duration::from_secs(10), async {
             let agent = test_serialized_agent("acp-trace");
-            let (url, _, traces, _) = claude_cli_turn_fake_hub(agent.clone()).await;
+            let (url, _, traces, _) = trace_fixture_hub(agent.clone()).await;
             let mut relay = AgentInstanceConnectionClient::new(
                 url,
                 "token".into(),
