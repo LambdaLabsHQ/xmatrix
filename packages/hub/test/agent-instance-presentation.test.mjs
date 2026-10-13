@@ -820,7 +820,7 @@ test("registration catalog and live presence retain one card per Instance throug
     profile_name: "Claude", profile_runtime: "claude", profile_metadata_json: {}, owner_email: null,
   }));
   const catalog = await loadChannelAgentPresence({ async query(statement) {
-    return statement.name === "channel_agent_resting_presence_v5" ? [] : rows;
+    return statement.name === "channel_agent_resting_presence_v6" ? [] : rows;
   } }, "space-1", ["channel-1"]);
   let channel = { id: "channel-1", memberPresence: catalog.get("channel-1") };
   const sessions = rows.map(row => ({
