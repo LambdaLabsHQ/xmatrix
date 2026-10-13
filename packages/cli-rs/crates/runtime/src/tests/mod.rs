@@ -16,6 +16,7 @@ include!("tests_channel_history_cache.rs");
 include!("tests_codex_typed_channel_controls.rs");
 include!("tests_codex_runtime.rs");
 include!("tests_codex_capacity_retry.rs");
+include!("tests_trace_history_hub.rs");
 include!("tests_acp_resume.rs");
 include!("tests_harness_parameters.rs");
 // The fake Claude is a POSIX shell script.

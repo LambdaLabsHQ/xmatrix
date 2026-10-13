@@ -2307,6 +2307,7 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
                 break;
             }
             if let AgentInstanceServerMessage::TraceHistoryRequested {
+                received_order,
                 request_id,
                 instance_id,
                 max_events,
@@ -2317,6 +2318,7 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
             } = &server_msg
             {
                 let read = TraceHistoryRead {
+                    received_order: received_order.unwrap_or(false),
                     request_id: request_id.clone(),
                     instance_id: instance_id.clone(),
                     max_events: *max_events as usize,
@@ -3434,6 +3436,7 @@ pub(crate) mod tests {
             .await;
             let request =
                 serde_json::to_string(&AgentInstanceServerMessage::TraceHistoryRequested {
+                    received_order: None,
                     request_id: "request:wait".into(),
                     instance_id: "instance:1".into(),
                     max_events: 500,

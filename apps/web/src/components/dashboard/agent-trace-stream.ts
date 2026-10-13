@@ -12,6 +12,7 @@ export type AgentTraceTargetLike = {
 };
 
 type AgentTraceStreamSection = {
+  position?: number;
   timestamp: number;
   title: string;
   body: string;
@@ -37,9 +38,11 @@ type AgentTraceTurn = {
   updatedAt: number;
   sections: AgentTraceStreamSection[];
   toolCalls: Map<string, AgentTraceStreamSection>;
+  pendingOutputPosition?: number;
   pendingOutput: string;
   pendingOutputStartedAt: number;
   pendingOutputSegmentKey: string;
+  pendingRuntimeDeltaPosition?: number;
   pendingRuntimeDelta: string;
   pendingRuntimeDeltaStartedAt: number;
   pendingRuntimeDeltaSegmentKey: string;
@@ -127,6 +130,7 @@ function buildAgentTraceSections(events: ObservabilityEvent[]): AgentTraceStream
   for (const turn of buildAgentTraceTurns(events)) {
     sections.push(...turn.sections);
   }
+  if (events.some((event) => event.traceOrder)) sections.sort((left, right) => (left.position ?? 0) - (right.position ?? 0));
   return sections;
 }
 
@@ -168,6 +172,7 @@ function buildAgentTraceTurnsUncached(events: ObservabilityEvent[]): AgentTraceT
       if (input) {
         turn.sections.push({
           timestamp: record.timestamp,
+          position: record.event.traceOrder?.sequence,
           title: "Input",
           body: input,
           kind: "input",
@@ -191,7 +196,10 @@ function buildAgentTraceTurnsUncached(events: ObservabilityEvent[]): AgentTraceT
       if (turn.pendingOutput && segmentKey && turn.pendingOutputSegmentKey && segmentKey !== turn.pendingOutputSegmentKey) {
         flushTraceOutput(turn);
       }
-      if (!turn.pendingOutputStartedAt) turn.pendingOutputStartedAt = record.timestamp;
+      if (!turn.pendingOutputStartedAt) {
+        turn.pendingOutputStartedAt = record.timestamp;
+        turn.pendingOutputPosition = record.event.traceOrder?.sequence;
+      }
       if (segmentKey) turn.pendingOutputSegmentKey = segmentKey;
       turn.pendingOutput = appendTraceDelta(turn.pendingOutput, readableTraceDelta(traceDeltaValue(record.inner)));
       continue;
@@ -214,6 +222,7 @@ function buildAgentTraceTurnsUncached(events: ObservabilityEvent[]): AgentTraceT
       if (error && !failureConsumedByConnectionSection) {
         turn.sections.push({
           timestamp: record.timestamp,
+          position: record.event.traceOrder?.sequence,
           title: "Error",
           body: error,
           kind: "error",
@@ -229,6 +238,7 @@ function buildAgentTraceTurnsUncached(events: ObservabilityEvent[]): AgentTraceT
       if (cancelled) {
         turn.sections.push({
           timestamp: record.timestamp,
+          position: record.event.traceOrder?.sequence,
           title: "Cancelled",
           body: cancelled,
           kind: "status",
@@ -256,7 +266,8 @@ function buildAgentTraceTurnsUncached(events: ObservabilityEvent[]): AgentTraceT
     }
   }
 
-  const orderedTurns = Array.from(turns.values()).sort((left, right) => left.startedAt - right.startedAt);
+  const orderedTurns = Array.from(turns.values());
+  if (!events.some((event) => event.traceOrder)) orderedTurns.sort((left, right) => left.startedAt - right.startedAt);
   for (const turn of orderedTurns) {
     flushTraceRuntimeDelta(turn);
     flushTraceOutput(turn);
@@ -293,6 +304,7 @@ function flushTraceOutput(turn: AgentTraceTurn): void {
   if (output) {
     turn.sections.push({
       timestamp: turn.pendingOutputStartedAt || turn.updatedAt,
+      position: turn.pendingOutputPosition,
       title: "Output",
       body: output,
       kind: "output",
@@ -300,6 +312,7 @@ function flushTraceOutput(turn: AgentTraceTurn): void {
   }
   turn.pendingOutput = "";
   turn.pendingOutputStartedAt = 0;
+  turn.pendingOutputPosition = undefined;
   turn.pendingOutputSegmentKey = "";
 }
 
@@ -313,7 +326,10 @@ function appendTraceRuntimeDelta(turn: AgentTraceTurn, record: TraceEventRecord)
   ) {
     flushTraceRuntimeDelta(turn);
   }
-  if (!turn.pendingRuntimeDeltaStartedAt) turn.pendingRuntimeDeltaStartedAt = record.timestamp;
+  if (!turn.pendingRuntimeDeltaStartedAt) {
+    turn.pendingRuntimeDeltaStartedAt = record.timestamp;
+    turn.pendingRuntimeDeltaPosition = record.event.traceOrder?.sequence;
+  }
   if (segmentKey) turn.pendingRuntimeDeltaSegmentKey = segmentKey;
   const structured = structuredRuntimeDeltaTrace(record);
   turn.pendingRuntimeDeltaTitle = tracePhaseTitle(record);
@@ -327,6 +343,7 @@ function flushTraceRuntimeDelta(turn: AgentTraceTurn): void {
   if (body) {
     turn.sections.push({
       timestamp: turn.pendingRuntimeDeltaStartedAt || turn.updatedAt,
+      position: turn.pendingRuntimeDeltaPosition,
       title: turn.pendingRuntimeDeltaTitle || "Runtime update",
       body,
       kind: turn.pendingRuntimeDeltaKind,
@@ -335,6 +352,7 @@ function flushTraceRuntimeDelta(turn: AgentTraceTurn): void {
   }
   turn.pendingRuntimeDelta = "";
   turn.pendingRuntimeDeltaStartedAt = 0;
+  turn.pendingRuntimeDeltaPosition = undefined;
   turn.pendingRuntimeDeltaSegmentKey = "";
   turn.pendingRuntimeDeltaTitle = "";
   turn.pendingRuntimeDeltaKind = "runtime";
@@ -360,10 +378,12 @@ function traceTurnKey(record: TraceEventRecord, currentUnkeyedTurn: string): str
 }
 
 function traceEventRecords(events: ObservabilityEvent[]): TraceEventRecord[] {
-  return events
-    .map(traceEventRecord)
-    .filter((record) => record.phase)
-    .sort((left, right) => compareAgentTraceEvents(left.event, right.event));
+  const records = events.map(traceEventRecord).filter((record) => record.phase);
+  // Receive-order replicas already preserve the host's stream. Only old hosts
+  // need the bounded timestamp compatibility path.
+  return events.some((event) => event.traceOrder)
+    ? records
+    : records.sort((left, right) => compareAgentTraceEvents(left.event, right.event));
 }
 
 function traceEventRecord(event: ObservabilityEvent): TraceEventRecord {
@@ -469,6 +489,7 @@ function traceRecordSection(record: TraceEventRecord): AgentTraceStreamSection |
   if (!body) return null;
   return {
     timestamp: record.timestamp,
+    position: record.event.traceOrder?.sequence,
     title: tracePhaseTitle(record),
     body,
     kind: traceRecordKind(record),
@@ -561,6 +582,7 @@ function appendConnectionRetrySection(
   }
   const section: AgentTraceStreamSection = {
     timestamp: record.timestamp,
+    position: record.event.traceOrder?.sequence,
     title: "Connection reconnecting",
     body,
     kind: "status",
@@ -1100,6 +1122,7 @@ function traceRuntimeDeltaSegmentKey(record: TraceEventRecord): string {
   const inner = record.inner || {};
   const details = traceObjectValue(inner.details);
   return [
+    stringTraceField(inner.messageId),
     stringTraceField(inner.runtimeMethod),
     stringTraceField(inner.itemId) || stringTraceField(details?.itemId),
     stringTraceField(inner.itemType) || stringTraceField(inner.category),

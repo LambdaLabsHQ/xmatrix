@@ -16,6 +16,7 @@ pub(crate) const TRACE_HISTORY_MAX_WAIT_MS: u32 = 25_000;
 pub(crate) const TRACE_HISTORY_MAX_WAITS: usize = 16;
 
 pub(crate) struct TraceHistoryRead {
+    pub(crate) received_order: bool,
     pub(crate) request_id: String,
     pub(crate) instance_id: String,
     pub(crate) max_events: usize,
@@ -42,6 +43,7 @@ pub(crate) fn read_trace_history(
     read: &TraceHistoryRead,
 ) -> AgentHostTraceHistory {
     let query = AgentHostTraceHistoryQuery {
+        received_order: read.received_order,
         max_events: read.max_events,
         max_bytes: read.max_bytes,
         since: read.since.as_deref(),
@@ -128,6 +130,7 @@ mod tests {
 
     fn waiting_trace_read(since: &str) -> TraceHistoryRead {
         TraceHistoryRead {
+            received_order: false,
             request_id: "request:1".into(),
             instance_id: "instance:1".into(),
             max_events: 500,

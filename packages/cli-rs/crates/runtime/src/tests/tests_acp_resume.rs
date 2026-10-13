@@ -185,3 +185,56 @@ fn run_acp_resume_fixture_test(operation: impl std::future::Future<Output = ()>)
         .expect("runtime")
         .block_on(operation);
 }
+
+#[test]
+fn acp_trace_retains_upstream_message_ids_and_receipt_order() {
+    run_acp_resume_fixture_test(async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let agent = test_serialized_agent("acp-trace");
+            let (url, _, traces, _) = trace_fixture_hub(agent.clone()).await;
+            let mut relay = AgentInstanceConnectionClient::new(
+                url,
+                "token".into(),
+                "acp-trace".into(),
+                "grok".into(),
+                None,
+            );
+            relay.register().await.unwrap();
+            let relay = Arc::new(relay);
+            let (key, mut session) = spawn_acp_resume_fixture("trace-identities").await;
+            session
+                .initialize(Some(env!("CARGO_MANIFEST_DIR")), Some(&key), true, None)
+                .await
+                .unwrap();
+            std::fs::remove_file(grok_resume_session_path(&key)).unwrap();
+            let turn = session
+                .submit_turn(
+                    "work",
+                    vec![serde_json::json!({"type":"text","text":"work"})],
+                    None,
+                    None,
+                    &agent,
+                    Some(&relay),
+                    Some("channel-1"),
+                )
+                .await
+                .unwrap();
+            assert_eq!(turn.local_output, "firstsecond");
+            let events = completed_trace_events(&traces).await;
+            let ids = events
+                .iter()
+                .filter_map(|event| event["metadata"]["payload"]["payload"]["messageId"].as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(ids, ["message-1", "thought-1", "message-2", "thought-2"]);
+            let sequences = events
+                .iter()
+                .map(|event| event["traceOrder"]["sequence"].as_u64().unwrap())
+                .collect::<Vec<_>>();
+            assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
+            session.shutdown().await;
+            relay.disconnect();
+        })
+        .await
+        .expect("ACP trace fixture completes");
+    });
+}

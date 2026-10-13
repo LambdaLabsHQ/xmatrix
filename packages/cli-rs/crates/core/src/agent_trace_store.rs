@@ -22,7 +22,16 @@ const HOST_TRACE_TERMINAL_TOMBSTONES: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentTraceOrder {
+    pub stream_id: String,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentHostTraceEvent {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub trace_order: Option<AgentTraceOrder>,
     pub id: String,
     #[serde(rename = "type")]
     pub event_type: String,
@@ -56,7 +65,7 @@ pub struct AgentHostTraceHistory {
     pub availability: AgentHostTraceAvailability,
     /// No older retained event remains and nothing was ever evicted.
     pub complete: bool,
-    /// Newest first, ordered by (instant, id).
+    /// Newest first in the requested receive order, or legacy (instant, id) order.
     pub events: Vec<AgentHostTraceEvent>,
     /// Pass back as `before` to read the next older page.
     pub next_cursor: Option<String>,
@@ -66,6 +75,7 @@ pub struct AgentHostTraceHistory {
 /// the oldest side (exclusive cursor from a previous page).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AgentHostTraceHistoryQuery<'a> {
+    pub received_order: bool,
     pub max_events: usize,
     pub max_bytes: Option<usize>,
     pub since: Option<&'a str>,
@@ -74,6 +84,8 @@ pub struct AgentHostTraceHistoryQuery<'a> {
 
 #[derive(Debug, Clone)]
 struct BoundTraceSession {
+    stream_id: String,
+    next_sequence: u64,
     instance_id: String,
     owner_user_id: String,
     agent_id: String,
@@ -140,6 +152,8 @@ impl AgentHostTraceStore {
             return;
         }
         self.session = Some(BoundTraceSession {
+            stream_id: uuid::Uuid::new_v4().to_string(),
+            next_sequence: 1,
             instance_id: instance_id.to_string(),
             owner_user_id: agent.user_id.clone(),
             agent_id: agent.id.clone(),
@@ -173,6 +187,10 @@ impl AgentHostTraceStore {
         };
         let payload = force_session_agent(payload, &session);
         let event = AgentHostTraceEvent {
+            trace_order: Some(AgentTraceOrder {
+                stream_id: session.stream_id,
+                sequence: session.next_sequence,
+            }),
             id: event_id,
             event_type: "event_published".to_string(),
             workspace_user_id: session.owner_user_id,
@@ -197,6 +215,11 @@ impl AgentHostTraceStore {
             self.truncated = true;
             return;
         }
+        if session.next_sequence >= 9_007_199_254_740_991 {
+            self.truncated = true;
+            return;
+        }
+        self.session.as_mut().unwrap().next_sequence += 1;
         self.encoded_bytes = self.encoded_bytes.saturating_add(encoded.len());
         self.events.push_back(StoredTraceEvent {
             timestamp_epoch_nanos,
@@ -230,31 +253,60 @@ impl AgentHostTraceStore {
         if self.history_expired && self.events.is_empty() {
             return empty_history(AgentHostTraceAvailability::Expired);
         }
-        let since = match query.since.map(trace_timestamp_epoch_nanos) {
+        let received_since = query
+            .since
+            .filter(|_| query.received_order)
+            .and_then(parse_received_cursor);
+        let received_before = query
+            .before
+            .filter(|_| query.received_order)
+            .and_then(parse_received_cursor);
+        for cursor in [&received_since, &received_before].into_iter().flatten() {
+            if cursor.0 != session.stream_id {
+                return empty_history(AgentHostTraceAvailability::Expired);
+            }
+        }
+        let since = match query
+            .since
+            .filter(|_| received_since.is_none())
+            .map(trace_timestamp_epoch_nanos)
+        {
             Some(None) => return empty_history(AgentHostTraceAvailability::Available),
             since => since.flatten(),
         };
-        let before = match query.before.map(parse_trace_cursor) {
+        let before = match query
+            .before
+            .filter(|_| received_before.is_none())
+            .map(parse_trace_cursor)
+        {
             Some(None) => return empty_history(AgentHostTraceAvailability::Available),
             before => before.flatten(),
         };
         let mut eligible = self
             .events
             .iter()
+            .rev()
             .filter(|stored| {
-                since.is_none_or(|waterline| stored.timestamp_epoch_nanos >= waterline)
-            })
-            .filter(|stored| {
-                before.as_ref().is_none_or(|(timestamp, id)| {
-                    (stored.timestamp_epoch_nanos, stored.event.id.as_str())
-                        < (*timestamp, id.as_str())
-                })
+                let sequence = stored.event.trace_order.as_ref().unwrap().sequence;
+                received_since
+                    .as_ref()
+                    .is_none_or(|(_, since)| sequence >= *since)
+                    && received_before
+                        .as_ref()
+                        .is_none_or(|(_, before)| sequence < *before)
+                    && since.is_none_or(|waterline| stored.timestamp_epoch_nanos >= waterline)
+                    && before.as_ref().is_none_or(|(timestamp, id)| {
+                        (stored.timestamp_epoch_nanos, stored.event.id.as_str())
+                            < (*timestamp, id.as_str())
+                    })
             })
             .collect::<Vec<_>>();
-        eligible.sort_by(|left, right| {
-            (right.timestamp_epoch_nanos, right.event.id.as_str())
-                .cmp(&(left.timestamp_epoch_nanos, left.event.id.as_str()))
-        });
+        if !query.received_order {
+            eligible.sort_by(|left, right| {
+                (right.timestamp_epoch_nanos, right.event.id.as_str())
+                    .cmp(&(left.timestamp_epoch_nanos, left.event.id.as_str()))
+            });
+        }
         let max_events = query.max_events.clamp(1, HOST_TRACE_PAGE_MAX_EVENTS);
         let max_bytes = query
             .max_bytes
@@ -273,14 +325,28 @@ impl AgentHostTraceStore {
             page.push(*stored);
         }
         let next_cursor = (page.len() < eligible.len())
-            .then(|| page.last().map(|stored| trace_cursor(&stored.event)))
+            .then(|| {
+                page.last().map(|stored| {
+                    if query.received_order {
+                        received_cursor(stored.event.trace_order.as_ref().unwrap())
+                    } else {
+                        trace_cursor(&stored.event)
+                    }
+                })
+            })
             .flatten();
         AgentHostTraceHistory {
             availability: AgentHostTraceAvailability::Available,
             complete: !self.truncated && next_cursor.is_none(),
             events: page
                 .into_iter()
-                .map(|stored| stored.event.clone())
+                .map(|stored| {
+                    let mut event = stored.event.clone();
+                    if !query.received_order {
+                        event.trace_order = None;
+                    }
+                    event
+                })
                 .collect(),
             next_cursor,
         }
@@ -430,6 +496,22 @@ fn trace_timestamp_has_supported_rfc3339_shape(value: &str) -> bool {
 /// same shape from any event it stops at, so both sides must agree on it.
 fn trace_cursor(event: &AgentHostTraceEvent) -> String {
     format!("{}|{}", event.timestamp, event.id)
+}
+
+fn received_cursor(order: &AgentTraceOrder) -> String {
+    format!("received:{}:{}", order.stream_id, order.sequence)
+}
+
+fn parse_received_cursor(cursor: &str) -> Option<(String, u64)> {
+    let (stream, sequence) = cursor.strip_prefix("received:")?.split_once(':')?;
+    if uuid::Uuid::parse_str(stream).ok()?.to_string() != stream || sequence.starts_with('0') {
+        return None;
+    }
+    if sequence.len() > 16 || !sequence.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let sequence = sequence.parse::<u64>().ok()?;
+    (sequence > 0 && sequence <= 9_007_199_254_740_991).then(|| (stream.into(), sequence))
 }
 
 fn parse_trace_cursor(cursor: &str) -> Option<(i128, String)> {
@@ -937,5 +1019,75 @@ mod tests {
         assert_eq!(store.retained_event_count(), 0);
         assert!(store.has_expired_history());
         assert_eq!(store.current_instance_id(), Some("instance:one"));
+    }
+    #[test]
+    fn received_order_preserves_stream_through_clock_reversal_and_paging() {
+        let mut store = AgentHostTraceStore::default();
+        store.bind_session(&agent("instance:one"), 0);
+        for (id, at) in [
+            ("z-first", "2026-07-20T00:00:02Z"),
+            ("a-second", "2026-07-20T00:00:02Z"),
+            ("m-third", "2026-07-20T00:00:01Z"),
+        ] {
+            record_at(&mut store, id, at, 1_000);
+        }
+        let query = AgentHostTraceHistoryQuery {
+            received_order: true,
+            max_events: 1,
+            ..Default::default()
+        };
+        let newest = store.history("instance:one", query, 1_000);
+        assert_eq!(newest.events[0].id, "m-third");
+        let before = newest.next_cursor.unwrap();
+        let older = store.history(
+            "instance:one",
+            AgentHostTraceHistoryQuery {
+                before: Some(&before),
+                ..query
+            },
+            1_000,
+        );
+        assert_eq!(older.events[0].id, "a-second");
+        let waterline = format!(
+            "received:{}:2",
+            older.events[0].trace_order.as_ref().unwrap().stream_id
+        );
+        let delta = store.history(
+            "instance:one",
+            AgentHostTraceHistoryQuery {
+                max_events: 10,
+                since: Some(&waterline),
+                ..query
+            },
+            1_000,
+        );
+        assert_eq!(
+            delta
+                .events
+                .iter()
+                .map(|event| event.id.as_str())
+                .collect::<Vec<_>>(),
+            ["m-third", "a-second"]
+        );
+        store.bind_session(&agent("instance:one"), 2_000);
+        assert_eq!(
+            store.history("instance:one", query, 2_000).events[0].trace_order,
+            newest.events[0].trace_order
+        );
+        store.bind_session(&agent("instance:two"), 3_000);
+        record_at(&mut store, "new-stream", "2026-07-20T00:00:03Z", 3_000);
+        assert_eq!(
+            store
+                .history(
+                    "instance:two",
+                    AgentHostTraceHistoryQuery {
+                        since: Some(&waterline),
+                        ..query
+                    },
+                    3_000
+                )
+                .availability,
+            AgentHostTraceAvailability::Expired
+        );
     }
 }

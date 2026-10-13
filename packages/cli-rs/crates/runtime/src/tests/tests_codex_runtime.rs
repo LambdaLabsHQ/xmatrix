@@ -3317,3 +3317,59 @@ fn write_foreign_status_marker(path: &std::path::Path, mut marker: DaemonRunStat
     marker.pid = marker.pid.saturating_add(1);
     std::fs::write(path, serde_json::to_vec(&marker).unwrap()).unwrap();
 }
+
+#[tokio::test]
+async fn codex_trace_flushes_text_before_later_tools_and_preserves_message_ids() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let agent = test_serialized_agent("codex-trace");
+        let (url, _, traces, _) = trace_fixture_hub(agent.clone()).await;
+        let mut relay = AgentInstanceConnectionClient::new(
+            url,
+            "token".into(),
+            "codex-trace".into(),
+            "codex".into(),
+            None,
+        );
+        relay.register().await.unwrap();
+        let relay = Arc::new(relay);
+        let mut session = initialized_codex_fixture("codex-trace-order").await;
+        let turn = session
+            .submit_turn(CodexTurnRequest {
+                trace_relay: Some(&relay),
+                trace_channel_id: Some("channel-1"),
+                ..CodexTurnRequest::new("work", &agent)
+            })
+            .await
+            .unwrap();
+        assert_eq!(turn.local_output, "firstsecond");
+        let events = completed_trace_events(&traces).await;
+        let text = events
+            .iter()
+            .position(|event| event["metadata"]["payload"]["phase"] == "assistant_delta")
+            .unwrap();
+        let tool = events
+            .iter()
+            .position(|event| {
+                event["metadata"]["payload"]["payload"]["runtimeMethod"] == "item/started"
+            })
+            .unwrap();
+        assert!(
+            text < tool,
+            "received text must precede the tool that follows it"
+        );
+        let messages = events
+            .iter()
+            .filter(|event| event["metadata"]["payload"]["phase"] == "assistant_delta")
+            .map(|event| {
+                event["metadata"]["payload"]["payload"]["messageId"]
+                    .as_str()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(messages, ["message-1", "message-2"]);
+        session.shutdown().await;
+        relay.disconnect();
+    })
+    .await
+    .expect("Codex trace fixture completes");
+}

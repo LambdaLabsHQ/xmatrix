@@ -113,7 +113,7 @@ export function useAgentTraceHistorySync({
       headLimit: AGENT_TRACE_HEAD_PAGE_LIMIT,
       waitMs: AGENT_TRACE_LIVE_WAIT_MS,
       fetchHistory: (instanceId, options) => {
-        const params = new URLSearchParams({ limit: String(options.limit) });
+        const params = new URLSearchParams({ limit: String(options.limit), order: "received" });
         if (options.since) params.set("since", options.since);
         if (options.before) params.set("before", options.before);
         if (options.waitMs) params.set("waitMs", String(options.waitMs));

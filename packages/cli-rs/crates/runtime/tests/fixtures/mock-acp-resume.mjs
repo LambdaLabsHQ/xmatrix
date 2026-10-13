@@ -44,6 +44,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         params: { sessionId, options: [{ optionId: "approve", kind: "allow_once" }] } });
       break;
     case "session/prompt":
+      if (mode === "trace-identities") {
+        for (const [kind, messageId, text] of [
+          ["agent_message_chunk", "message-1", "first"],
+          ["agent_thought_chunk", "thought-1", "think"],
+          ["agent_message_chunk", "message-2", "second"],
+          ["agent_thought_chunk", "thought-2", "again"],
+        ]) update({ sessionUpdate: kind, messageId, content: { type: "text", text } }, message.params.sessionId);
+        reply(message, { stopReason: "end_turn" });
+        break;
+      }
       update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "live reply" } }, message.params.sessionId);
       reply(message, { stopReason: "end_turn" });
       break;

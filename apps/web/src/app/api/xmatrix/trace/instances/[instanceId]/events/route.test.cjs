@@ -9,7 +9,7 @@ test("trace proxy forwards the older-page cursor and drops unknown parameters", 
   let forwarded;
   const get = loadRoute((input) => { forwarded = input; return new Response("{}"); });
   const params = new URLSearchParams({
-    limit: "500", since: "2026-07-01T00:00:14.000Z", before: "2026-07-01T00:00:10.000Z|trace-10",
+    order: "received", limit: "500", since: "2026-07-01T00:00:14.000Z", before: "2026-07-01T00:00:10.000Z|trace-10",
     waitMs: "25000",
     principalId: "other-user",
   });

@@ -180,7 +180,7 @@ export interface AgentInstanceTraceHistoryResultMessage {
   availability: AgentInstanceTraceAvailability;
   /** No older retained event remains and nothing was evicted. */
   complete: boolean;
-  /** Newest first by (instant, id). */
+  /** Newest first in the negotiated order. */
   events: ObservabilityEvent[];
   /**
    * Cursor for the next older page, null on the oldest page. A host that pages
@@ -281,6 +281,8 @@ export type AgentInstanceServerMessage =
   | { type: "shutdown_requested"; reason?: string }
   | {
       type: "trace_history_requested";
+      /** Ask a supporting host to preserve receipt order and return positions. */
+      receivedOrder?: boolean;
       requestId: string;
       instanceId: string;
       maxEvents: number;

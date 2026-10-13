@@ -1,106 +1,3 @@
-mod agent_socket_fixture {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../core/tests/support/agent_socket_fixture.rs"
-    ));
-}
-
-// Turns Claude starts by itself (a background task finished), driven end to end:
-// a real ClaudeStreamSession, reader and watchdog talk to a fake Claude that
-// replays the stream-json shapes observed from Claude 2.1.280, and publish to a
-// fake Hub that records every frame the relay client sends.
-
-type ClaudeCliTurnLog = Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
-type ClaudeCommitGate = Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>;
-
-/// Accepts one relay connection, confirms registration, and records every frame
-/// after it. Traces never ride the socket unasked (the Agent host retains them
-/// until a Human opens the instance), so the fake Hub keeps asking for trace
-/// history the way the real one does and keeps the latest answer.
-async fn claude_cli_turn_fake_hub(
-    agent: SerializedAgent,
-) -> (String, ClaudeCliTurnLog, ClaudeCliTurnLog, ClaudeCommitGate) {
-    use futures_util::{SinkExt as _, StreamExt as _};
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let frames: ClaudeCliTurnLog = Arc::default();
-    let traces: ClaudeCliTurnLog = Arc::default();
-    let commit_gate: ClaudeCommitGate = Arc::default();
-    let held_commit = commit_gate.clone();
-    let recorded = frames.clone();
-    let retained = traces.clone();
-    let instance_id = agent.instance_id.clone().unwrap_or_default();
-    tokio::spawn(async move {
-        let mut socket = agent_socket_fixture::registered_agent_socket(
-            &listener,
-            AgentInstanceServerMessage::AgentInstanceConnected {
-                agent,
-                peers: Vec::new(),
-                hub_capabilities: None,
-            },
-        )
-        .await;
-        let mut poll = tokio::time::interval(Duration::from_millis(50));
-        loop {
-            tokio::select! {
-                _ = poll.tick() => {
-                    let request = serde_json::to_string(&AgentInstanceServerMessage::TraceHistoryRequested {
-                        request_id: uuid::Uuid::new_v4().to_string(),
-                        instance_id: instance_id.clone(),
-                        max_events: 1000,
-                        since: None,
-                        before: None,
-                        max_bytes: None,
-                        wait_ms: None,
-                    })
-                    .unwrap();
-                    if socket.send(tokio_tungstenite::tungstenite::Message::Text(request.into())).await.is_err() {
-                        break;
-                    }
-                }
-                message = socket.next() => {
-                    let Some(Ok(message)) = message else { break };
-                    let Ok(text) = message.into_text() else { continue };
-                    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
-                    if value["type"] == "trace_history_result" {
-                        // History is newest first; keep it in publication order.
-                        let mut events = value["events"].as_array().cloned().unwrap_or_default();
-                        events.reverse();
-                        events.sort_by(|a, b| a["timestamp"].as_str().cmp(&b["timestamp"].as_str()));
-                        let mut retained = retained.lock().unwrap();
-                        if events.len() >= retained.len() {
-                            *retained = events;
-                        }
-                    } else {
-                        recorded.lock().unwrap().push(value.clone());
-                        if value["type"] == "ping" {
-                            if value["requestId"].is_string() {
-                                // The real Hub completes the preceding durable
-                                // presence write before answering this fence.
-                                let gate = held_commit.lock().unwrap().take();
-                                if let Some(gate) = gate {
-                                    tokio::time::timeout(Duration::from_secs(10), gate)
-                                        .await.expect("test releases the commit fence").unwrap();
-                                }
-                            }
-                            let pong = serde_json::json!({"type":"pong", "requestId":value["requestId"], "ts":"2026-10-03T23:00:00Z"});
-                            if socket.send(tokio_tungstenite::tungstenite::Message::Text(pong.to_string().into())).await.is_err() {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
-    (
-        format!("ws://{address}/ws/agent-instances"),
-        frames,
-        traces,
-        commit_gate,
-    )
-}
-
 struct ClaudeCliTurnFixture {
     // Readers persist observed model/effort through the process environment.
     // Keep other tests from redirecting those writes until shutdown completes.
@@ -109,9 +6,9 @@ struct ClaudeCliTurnFixture {
     session: ClaudeStreamSession,
     relay: Arc<AgentInstanceConnectionClient>,
     agent: SerializedAgent,
-    frames: ClaudeCliTurnLog,
-    traces: ClaudeCliTurnLog,
-    commit_gate: ClaudeCommitGate,
+    frames: TraceFixtureLog,
+    traces: TraceFixtureLog,
+    commit_gate: TraceFixtureCommitGate,
     /// How long a turn or an expected frame may take.
     patience: Duration,
 }
@@ -141,7 +38,7 @@ impl ClaudeCliTurnFixture {
     ) -> Self {
         let mut agent = test_serialized_agent("claude-cli-turn");
         agent.agent_type = "claude_code".into();
-        let (url, frames, traces, commit_gate) = claude_cli_turn_fake_hub(agent.clone()).await;
+        let (url, frames, traces, commit_gate) = trace_fixture_hub(agent.clone()).await;
         let mut relay = AgentInstanceConnectionClient::new(
             url,
             "token".into(),
@@ -206,7 +103,7 @@ impl ClaudeCliTurnFixture {
     }
 
     async fn wait_in(
-        log: &ClaudeCliTurnLog,
+        log: &TraceFixtureLog,
         from: usize,
         patience: Duration,
         pred: impl Fn(&serde_json::Value) -> bool,

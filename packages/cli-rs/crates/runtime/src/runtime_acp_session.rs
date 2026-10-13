@@ -853,7 +853,7 @@ impl AcpSession {
                                 "assistant_delta",
                                 None,
                                 latest_model.clone(),
-                                turn_ids.payload(serde_json::json!({ "delta": delta })),
+                                turn_ids.chunk_payload(update, serde_json::json!({ "delta": delta })),
                             )
                             .await;
                     }
@@ -898,7 +898,7 @@ impl AcpSession {
                                 "runtime_event",
                                 None,
                                 latest_model.clone(),
-                                turn_ids.payload(serde_json::json!({
+                                turn_ids.chunk_payload(update, serde_json::json!({
                                     "category": "reasoning",
                                     "status": "delta",
                                     "delta": redact_data_urls(delta),
@@ -1001,6 +1001,14 @@ mod session_notice_tests {
 }
 
 impl AcpTurnIds<'_> {
+    fn chunk_payload(&self, update: &Value, fields: Value) -> Value {
+        let mut payload = self.payload(fields);
+        if let Some(message_id) = update.get("messageId").and_then(Value::as_str) {
+            payload["messageId"] = serde_json::json!(message_id);
+        }
+        payload
+    }
+
     fn payload(&self, fields: Value) -> Value {
         let mut payload = serde_json::json!({
             "sessionId": self.session_id,

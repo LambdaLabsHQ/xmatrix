@@ -9,7 +9,7 @@ import { clientNetworkSampleAnalytics, parseClientNetworkSample } from "./client
 import { authorizedTraceChannelIds, traceAuthorizationChecksForChannels } from "./trace-authorization-batch";
 import { RELAY_RUNTIME_AGENT_TRACE_PATH } from "./relay-runtime";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
-import { AGENT_HOST_TRACE_MAX_WAIT_MS, agentHostTraceTimestampEpochNanoseconds, parseAgentHostTraceCursor, type AgentHostTraceReadResult } from "./agent-host-trace";
+import { AGENT_HOST_TRACE_MAX_WAIT_MS, validAgentHostTraceSince, parseAgentHostTraceCursor, type AgentHostTraceReadResult } from "./agent-host-trace";
 import { createChannel, createSpace } from "./spaces";
 import { postgresMessageAppend } from "./postgres-message-authority";
 import {
@@ -219,15 +219,16 @@ export function registerObservabilityMemoryRoutes(app: Hono<{ Bindings: Env }>):
       const since = c.req.query("since") || undefined;
       // `before` pages older retained history with a previous `nextCursor`.
       // `cursor` stays rejected: responses keep `cursor: null` for older Web.
+      const receivedOrder = c.req.query("order") === "received";
       const before = c.req.query("before") || undefined;
       // A live `since` delta may wait on the Agent host for a newer event
       // (long-poll). Authorization is still checked before and after the wait.
       const waitMs = c.req.query("waitMs") !== undefined ? Number(c.req.query("waitMs")) : undefined;
-      if (!instanceId.trim() || instanceId.length > 160 ||
+      if ((c.req.query("order") !== undefined && !receivedOrder) || !instanceId.trim() || instanceId.length > 160 ||
           !Number.isSafeInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 500 ||
           c.req.query("cursor") !== undefined ||
-          (since !== undefined && agentHostTraceTimestampEpochNanoseconds(since) === undefined) ||
-          (before !== undefined && parseAgentHostTraceCursor(before) === undefined) ||
+          (since !== undefined && !validAgentHostTraceSince(since, receivedOrder)) ||
+          (before !== undefined && parseAgentHostTraceCursor(before, receivedOrder) === undefined) ||
           (waitMs !== undefined && (!Number.isSafeInteger(waitMs) || waitMs < 0 ||
             waitMs > AGENT_HOST_TRACE_MAX_WAIT_MS || since === undefined || before !== undefined))) {
         return c.json({ error: "trace pagination is invalid", code: "invalid_trace_cursor" }, 400);
@@ -257,6 +258,7 @@ export function registerObservabilityMemoryRoutes(app: Hono<{ Bindings: Env }>):
       const internalUrl = new URL(RELAY_RUNTIME_AGENT_TRACE_PATH, c.req.url);
       internalUrl.searchParams.set("instanceId", instanceId);
       internalUrl.searchParams.set("limit", String(requestedLimit));
+      if (receivedOrder) internalUrl.searchParams.set("order", "received");
       if (since) internalUrl.searchParams.set("since", since);
       if (before) internalUrl.searchParams.set("before", before);
       if (waitMs) internalUrl.searchParams.set("waitMs", String(waitMs));

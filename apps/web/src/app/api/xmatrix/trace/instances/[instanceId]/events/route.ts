@@ -8,6 +8,8 @@ export async function GET(
   const { instanceId } = await context.params;
   const url = new URL(request.url);
   const params = new URLSearchParams();
+  const order = url.searchParams.get("order");
+  if (order) params.set("order", order);
   const limit = url.searchParams.get("limit");
   const since = url.searchParams.get("since");
   const before = url.searchParams.get("before");

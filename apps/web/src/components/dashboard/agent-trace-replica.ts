@@ -1,4 +1,4 @@
-import { rfc3339TimestampEpochNanoseconds } from "@xmatrix/protocol";
+import { parseAgentTraceOrder, rfc3339TimestampEpochNanoseconds } from "@xmatrix/protocol";
 import type { ObservabilityEvent } from "@xmatrix/protocol";
 
 type AgentTraceScope = {
@@ -72,6 +72,13 @@ export function mergeAgentTraceReplicas(
         liveEventIds: new Set(replica.liveEventIds || []),
       };
       touched.set(key, draft);
+    }
+    const order = parseAgentTraceOrder(event.traceOrder);
+    const retainedOrder = parseAgentTraceOrder(draft.byId.values().next().value?.traceOrder);
+    if (retainedOrder && (!order || retainedOrder.streamId !== order.streamId)) continue;
+    if (order && !retainedOrder && draft.byId.size > 0) {
+      draft.byId.clear();
+      draft.liveEventIds.clear();
     }
     if (draft.byId.has(event.id) && (source === "history" || draft.liveEventIds.has(event.id))) continue;
     draft.byId.set(event.id, event);
@@ -185,6 +192,9 @@ export function traceEventChannelInstanceId(event: ObservabilityEvent): string |
 
 /** Match the host's (instant, id) order without truncating rapid stream chunks. */
 export function compareAgentTraceEvents(left: ObservabilityEvent, right: ObservabilityEvent): number {
+  const leftOrder = parseAgentTraceOrder(left.traceOrder);
+  const rightOrder = parseAgentTraceOrder(right.traceOrder);
+  if (leftOrder && rightOrder && leftOrder.streamId === rightOrder.streamId) return leftOrder.sequence - rightOrder.sequence;
   const leftTime = traceEventInstant(left);
   const rightTime = traceEventInstant(right);
   if (leftTime !== rightTime) return leftTime < rightTime ? -1 : 1;

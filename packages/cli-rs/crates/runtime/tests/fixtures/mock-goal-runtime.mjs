@@ -155,16 +155,22 @@ function handleCodexTurnOrder(message) {
   }
 }
 
-function handleCodexTurnFailure(message) {
+function beginCodexFixtureTurn(message, turnId) {
   if (handleCodexSessionRequest(message)) return;
   if (message.method !== "turn/start") {
     if (message.id !== undefined) response(message, {});
     return;
   }
   const threadId = message.params.threadId;
-  const turnId = "codex-fixture-failed-turn";
   response(message, { turn: { id: turnId } });
   sendCodexTurnStarted(threadId, turnId);
+  return threadId;
+}
+
+function handleCodexTurnFailure(message) {
+  const threadId = beginCodexFixtureTurn(message, "codex-fixture-failed-turn");
+  if (threadId === undefined) return;
+  const turnId = "codex-fixture-failed-turn";
   for (const params of [
     { message: "Reconnecting... 1/5" },
     { threadId: "unrelated-thread", turnId, message: "Unrelated failure" },
@@ -682,9 +688,20 @@ function handleAcp(message) {
   }
 }
 
+function handleCodexTraceOrder(message) {
+  const turnId = "trace-order-turn";
+  const threadId = beginCodexFixtureTurn(message, turnId);
+  if (threadId === undefined) return;
+  send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "first" } });
+  send({ method: "item/started", params: { threadId, turnId, item: { id: "tool-1", type: "commandExecution", command: "echo test", status: "inProgress" } } });
+  send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-2", delta: "second" } });
+  sendCodexTurnCompleted(threadId, turnId);
+}
+
 const handlers = {
   codex: handleCodex,
   "codex-turn-order": handleCodexTurnOrder,
+  "codex-trace-order": handleCodexTraceOrder,
   "codex-turn-failure": handleCodexTurnFailure,
   "codex-capacity-recover": handleCodexCapacity,
   "codex-capacity-exhausted": handleCodexCapacity,
