@@ -1,6 +1,7 @@
 import { getAppConnectorProvider } from "../app-connectors";
 import type { Env } from "../types";
 import { deleteComposioAccount } from "./composio";
+import { parseMailboxes } from "./gmail-mailboxes";
 import { connectorCredentialRepository } from "./credentials";
 import { grantFieldsForgottenOnDisconnect, oauthClient } from "./oauth";
 
@@ -16,8 +17,8 @@ export async function forgetConnectionGrant(env: Env, input: { spaceId: string; 
   const stored = await repository.resolveForAdmin({ requestId: crypto.randomUUID(), ...input });
   if (!stored) return;
   if (getAppConnectorProvider(input.providerId)?.oauth?.flow === "composio") {
-    const accountId = stored.values.composioAccountId;
-    if (accountId) await deleteComposioAccount(oauthClient(env, input.providerId)?.clientSecret ?? "", accountId);
+    const accounts = stored.values.mailboxes ? parseMailboxes(stored.values.mailboxes).map((mailbox) => mailbox.account) : [];
+    for (const account of accounts) await deleteComposioAccount(oauthClient(env, input.providerId)?.clientSecret ?? "", account);
   }
   await repository.put({ requestId: crypto.randomUUID(), ...input, fields,
     expectedGrant: stored, policy: { allowed: Object.keys(fields) }, at: new Date().toISOString() });

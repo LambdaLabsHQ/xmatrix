@@ -41,6 +41,8 @@ export interface ConnectorActionStatement {
 export interface ConnectorActionContext {
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
+  /** Who runs the action: the Human, or the Agent identity and the user whose Run it is. */
+  caller?: { userId: string; agentId?: string };
   /** Hub-authorized native app capability, scoped to one confirmed Google Chat room. */
   teams?: { postMessage(text: string): Promise<void> };
   googleChat?: { postMessage(text: string): Promise<void> };
@@ -81,6 +83,8 @@ export interface ConnectorCommandInput {
   actorUserId: string;
   /** Who wrote the message; an Agent runs write actions only where the Channel allows it. */
   senderKind?: "user" | "agent";
+  /** The Agent identity when an Agent wrote it. */
+  senderId?: string;
 }
 
 export interface ConnectorCommandHandler {

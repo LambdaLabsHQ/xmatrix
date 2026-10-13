@@ -20,6 +20,7 @@ const TOOL_NAME = /^([a-z][a-z0-9-]*)__([a-z_]+)$/u;
 
 export interface ConnectorMcpCaller {
   ownerUserId: string;
+  agentId: string;
   channelId: string;
   runId: string;
   spaceId: string;
@@ -71,7 +72,7 @@ export async function handleConnectorMcp(env: Env, caller: ConnectorMcpCaller, b
       const text = typeof args.text === "string" ? args.text.trim() : "";
       const line = await run(provider.id, {
         env, channelId: caller.channelId, messageId: `mcp:${caller.runId}:${crypto.randomUUID()}`,
-        body: `@${provider.id}:${match[2]}:${target} ${text}`.trim(), actorUserId: caller.ownerUserId, senderKind: "agent",
+        body: `@${provider.id}:${match[2]}:${target} ${text}`.trim(), actorUserId: caller.ownerUserId, senderKind: "agent", senderId: caller.agentId,
       }, match[2]!, action, { target, text });
       return { content: [{ type: "text", text: line }], isError: !/: completed;/u.test(line) };
     },
