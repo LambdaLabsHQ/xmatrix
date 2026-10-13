@@ -1,4 +1,5 @@
 import type { Env } from "../types";
+import type { AgentRegistrationIdentity } from "./agent-caller";
 import { composioGet, deleteComposioAccount } from "./composio";
 import { connectorCredentialRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
@@ -16,13 +17,13 @@ import { oauthClient } from "./oauth";
 
 export interface GmailMailbox { account: string; address: string; owner: string }
 
-/** Who runs an action: the Human, or the Agent identity and the user whose Run it is. */
-export interface GmailCaller { userId: string; agentId?: string }
+/** Who runs an action: the Human, or an Agent (its registration) and the user whose Run it is. */
+export interface GmailCaller { userId: string; agent?: AgentRegistrationIdentity }
 
 export const MAX_MAILBOXES = 10;
 const ACCOUNT_ID = /^[A-Za-z0-9_-]{4,128}$/u;
 const ADDRESS = /^[^\s@<>(),;:"\\[\]]{1,64}@[^\s@<>(),;:"\\[\]]{1,189}$/u;
-const OWNER = /^(user|agent):[A-Za-z0-9_.:-]{1,128}$/u;
+const OWNER = /^(?:user:[A-Za-z0-9_.:-]{1,128}|agent:[^/\s]{1,300}\/[^/\s]{1,300}\/[^/\s]{1,300})$/u;
 const PROFILE = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 
 export function isMailboxOwner(value: string): boolean {
@@ -51,10 +52,15 @@ export function serializeMailboxes(mailboxes: readonly GmailMailbox[]): string {
   return JSON.stringify(mailboxes.map(({ account, address, owner }) => ({ account, address, owner })));
 }
 
-/** A member's mailbox serves that member and their Agent Runs; an Agent's serves only that Agent. */
+/** An Agent owner: `agent:` and its registration's owner, machine and harness, each URI-encoded. */
+export function agentMailboxOwner(agent: AgentRegistrationIdentity): string {
+  return `agent:${[agent.ownerUserId, agent.machineId, agent.harness].map(encodeURIComponent).join("/")}`;
+}
+
+/** A member's mailbox serves that member and their Agents' Runs; an Agent's serves only that Agent registration. */
 export function mayUseMailbox(mailbox: GmailMailbox, caller: GmailCaller): boolean {
-  const [kind, id] = [mailbox.owner.slice(0, mailbox.owner.indexOf(":")), mailbox.owner.slice(mailbox.owner.indexOf(":") + 1)];
-  return kind === "user" ? caller.userId === id : kind === "agent" && caller.agentId === id;
+  if (mailbox.owner.startsWith("user:")) return caller.userId === mailbox.owner.slice("user:".length);
+  return caller.agent !== undefined && agentMailboxOwner(caller.agent) === mailbox.owner;
 }
 
 /** One mailbox's credentials for a proxied call. */
@@ -111,7 +117,9 @@ export async function listMailboxes(env: Env, input: { spaceId: string; actorUse
 /** Reassigns a mailbox (`owner`) or removes it with its Composio account (`owner: null`). */
 export async function updateMailbox(env: Env, input: { spaceId: string; actorUserId: string; address: string; owner: string | null }):
   Promise<{ address: string; owner: string }[]> {
-  if (input.owner !== null && !OWNER.test(input.owner)) throw new ProviderRequestError(400, "owner is user:<member id> or agent:<agent id>");
+  if (input.owner !== null && !OWNER.test(input.owner)) {
+    throw new ProviderRequestError(400, "owner is user:<member id> or agent:<owner>/<machine>/<harness>");
+  }
   const repository = connectorCredentialRepository(env);
   const stored = await repository.resolveForAdmin({ requestId: crypto.randomUUID(),
     spaceId: input.spaceId, providerId: "gmail", actorUserId: input.actorUserId });

@@ -1,3 +1,4 @@
+import { agentRegistrationOf } from "./agent-caller";
 import { teamsActionCapability } from "./teams-native";
 import { dingtalkActionCapability } from "./dingtalk-native";
 import { telegramActionCapability } from "./telegram-native";
@@ -158,7 +159,9 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       /* `a|b` requires either field: a pasted token or the one OAuth issued. */
       const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
       if (missing.length > 0) return { status: "blocked", summary: `save ${missing.join(", ")} in Apps → ${manifest.name} → Credentials` };
-      const caller = { userId: input.actorUserId, ...(input.senderKind === "agent" && input.senderId ? { agentId: input.senderId } : {}) };
+      const instanceId = input.senderKind === "agent" ? input.senderId : undefined;
+      const caller = { userId: input.actorUserId,
+        ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };
       const result = await action.execute({ credentials, caller, ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}), ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}), ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}) }, parsed);
       return { status: "completed", summary: result.url ? `${result.summary} — ${result.url}` : result.summary };
     } catch (error) {

@@ -20,6 +20,7 @@ const TOOL_NAME = /^([a-z][a-z0-9-]*)__([a-z_]+)$/u;
 
 export interface ConnectorMcpCaller {
   ownerUserId: string;
+  /** The Run's Agent Instance. */
   agentId: string;
   channelId: string;
   runId: string;

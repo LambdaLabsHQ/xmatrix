@@ -175,8 +175,12 @@ async function sendRaw(credentials: Readonly<Record<string, string>>, raw: strin
 type Context = Parameters<ConnectorAction["execute"]>[0];
 
 /** The connected mailboxes this caller owns (or, named by `only`, that one); none is a refusal. */
-function usableMailboxes({ credentials, caller }: Context, only?: string): GmailMailbox[] {
-  const usable = parseMailboxes(credentials.mailboxes).filter(mailbox => caller && mayUseMailbox(mailbox, caller));
+async function usableMailboxes({ credentials, caller }: Context, only?: string): Promise<GmailMailbox[]> {
+  const mailboxes = parseMailboxes(credentials.mailboxes);
+  if (!caller) throw new ProviderRequestError(403, "Gmail needs to know who is asking");
+  const agent = caller.agent ? await caller.agent() : undefined;
+  if (caller.agent && !agent) throw new ProviderRequestError(403, "this Agent's registration no longer authorizes its Run");
+  const usable = mailboxes.filter(mailbox => mayUseMailbox(mailbox, { userId: caller.userId, ...(agent ? { agent } : {}) }));
   const chosen = only ? usable.filter(mailbox => mailbox.address === only.toLowerCase()) : usable;
   if (chosen.length === 0) {
     throw new ProviderRequestError(403, only ? `${only} is not a connected Gmail mailbox you may use`
@@ -209,7 +213,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       return query.length <= MAX_QUERY ? { query, mailbox } : `keep the search under ${MAX_QUERY} characters`;
     },
     async execute(context, input) {
-      const mailboxes = usableMailboxes(context, input.mailbox || undefined);
+      const mailboxes = await usableMailboxes(context, input.mailbox || undefined);
       const lines = await Promise.all(mailboxes.map(async (mailbox) => {
         const credentials = mailboxCredentials(context.credentials, mailbox);
         const result = await gmailGet(credentials, "/messages",
@@ -234,7 +238,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
         ? { id: statement.target } : "name a message id from @gmail:search";
     },
     async execute(context, input) {
-      const mailboxes = usableMailboxes(context);
+      const mailboxes = await usableMailboxes(context);
       const { mailbox, message } = await findMessage(context.credentials, mailboxes, input.id, "full");
       const payload = record(message.payload);
       if (!payload.mimeType) throw new ProviderRequestError(502, "Google did not return a Gmail message");
@@ -266,7 +270,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       return title ? { to, from: from?.[1] ?? "", subject: title, body } : "write the subject after the recipient";
     },
     async execute(context, input) {
-      const mailboxes = usableMailboxes(context, input.from || undefined);
+      const mailboxes = await usableMailboxes(context, input.from || undefined);
       if (mailboxes.length > 1) throw new ProviderRequestError(400, "name the sending mailbox: from:<address> before the subject");
       const mailbox = mailboxes[0]!;
       const id = await sendRaw(mailboxCredentials(context.credentials, mailbox),
@@ -282,7 +286,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       return body ? { id: statement.target, body } : "write the reply after the message id";
     },
     async execute(context, input) {
-      const { mailbox, message: original } = await findMessage(context.credentials, usableMailboxes(context), input.id, "metadata");
+      const { mailbox, message: original } = await findMessage(context.credentials, await usableMailboxes(context), input.id, "metadata");
       const payload = record(original.payload);
       const to = address(header(payload, "reply-to")) ?? address(header(payload, "from"));
       if (!to) throw new ProviderRequestError(422, "the message has no address to reply to");
