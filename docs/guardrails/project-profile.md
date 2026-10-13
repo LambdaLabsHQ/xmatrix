@@ -46,7 +46,9 @@ updating a first project wiki with Claude Code or Codex, linked from the homepag
 Its source is [the project wiki guide](../guide/project-wiki.md).
 
 The Gmail connector preserves ordered inline mixed body segments, excludes
-attachment subtrees, and marks incomplete MIME previews. Its read-only
+attachment subtrees, and marks incomplete MIME previews. Native availability
+requires Google to approve the configured client's `gmail.readonly` grant.
+Its read-only
 Composio path is independent of runtime-provided Gmail plugins; see
 [connector platform](../design/connector-platform.md).
 

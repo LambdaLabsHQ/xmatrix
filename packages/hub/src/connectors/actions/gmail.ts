@@ -6,7 +6,7 @@ import { quoteRetrievedText } from "./common";
 
 /*
  * Gmail (API v1), read-only, through Composio: the Google account signs in to
- * Composio's verified Google app under the single `gmail.readonly` scope of
+ * Composio's managed Google app under the single `gmail.readonly` scope of
  * the Composio auth config, and each call is proxied as the stored account. `read` lists every link in the
  * message so an Agent can open one itself (a sign-up verification link, for
  * example); the Hub never fetches a link found in mail.
