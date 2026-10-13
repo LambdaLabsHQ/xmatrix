@@ -3,11 +3,14 @@ import { connectorDatabase, integration } from "../../db/test/postgres-database.
 import { AppControlError, PostgresAppCredentialRepository, PostgresAppRepository } from "../../db/dist/index.js";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { grantFieldsForgottenOnDisconnect, oauthClient } from "../src/connectors/oauth.ts";
+import { parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
 const load = await compileCommonJsSourceModule(new URL("../src/connectors/forget-grant.ts", import.meta.url));
 const at = "2026-10-09T00:00:00.000Z";
-const policy = { allowed: ["composioAccountId"] };
+const policy = { allowed: ["mailboxes"] };
+const mailboxes = account => JSON.stringify([{ account, address: "me@example.com", owner: "user:owner" }]);
+const accountOf = values => values.mailboxes ? parseMailboxes(values.mailboxes)[0].account : values.mailboxes;
 
 async function withGrant(run) {
   const { client, database, sql } = await connectorDatabase("connector-disconnect-test");
@@ -15,7 +18,7 @@ async function withGrant(run) {
   const repository = new PostgresAppCredentialRepository(database, "test-secret-catalog-key");
   const input = { spaceId, providerId: "gmail", actorUserId: "owner" };
   const write = accountId => repository.put({ requestId: crypto.randomUUID(), ...input,
-    fields: { composioAccountId: accountId }, policy, at });
+    fields: { mailboxes: mailboxes(accountId) }, policy, at });
   const read = () => repository.resolve({ requestId: crypto.randomUUID(), spaceId, providerId: "gmail" });
   const effects = [];
   let deleting = async () => {};
@@ -24,6 +27,7 @@ async function withGrant(run) {
     "./credentials": { connectorCredentialRepository: () => repository },
     "./oauth": { grantFieldsForgottenOnDisconnect, oauthClient },
     "./composio": { deleteComposioAccount: async (key, id) => { effects.push([key, id]); await deleting(); } },
+    "./gmail-mailboxes": { parseMailboxes },
   };
   const { forgetConnectionGrant } = load(name => {
     assert.ok(dependencies[name], name);
@@ -61,7 +65,7 @@ integration("disconnect proves current admin authority before deleting an extern
     await sql("UPDATE data.space_members SET role='member' WHERE space_id=$1 AND user_id='owner'", [spaceId]);
     await assert.rejects(disconnect("owner"), error => error instanceof AppControlError && error.status === 404);
     assert.deepEqual(effects, [], "no provider deletion precedes authorization");
-    assert.equal((await read()).values.composioAccountId, "ca_original");
+    assert.equal(accountOf((await read()).values), "ca_original");
     await sql("UPDATE data.space_members SET role='admin' WHERE space_id=$1 AND user_id='owner'", [spaceId]);
     await sql(`INSERT INTO data.space_deletions(space_id,space_name,owner_user_id,requested_at,purge_after,state,
       members_json,automations_json,version,updated_at) VALUES($1,'test','owner',$2,$2::timestamptz+interval '1 day',
@@ -82,7 +86,7 @@ integration("disconnect cannot clear a recreated grant whose credential version 
     await assert.rejects(disconnect("owner"), error => error instanceof AppControlError && error.status === 409);
     const fresh = await read();
     assert.equal(fresh.version, original.version, "credential deletion resets its counter");
-    assert.equal(fresh.values.composioAccountId, "ca_recreated");
+    assert.equal(accountOf(fresh.values), "ca_recreated");
   });
 });
 
@@ -90,10 +94,10 @@ integration("disconnect preserves the stored grant on provider failure and a new
   await withGrant(async ({ disconnect, effects, read, write, onDelete }) => {
     onDelete(async () => { throw new Error("provider unavailable"); });
     await assert.rejects(disconnect("owner"), /provider unavailable/u);
-    assert.equal((await read()).values.composioAccountId, "ca_original", "failed retirement remains retryable");
+    assert.equal(accountOf((await read()).values), "ca_original", "failed retirement remains retryable");
     onDelete(async () => { await write("ca_reconnected"); });
     await assert.rejects(disconnect("owner"), error => error instanceof AppControlError && error.status === 409);
-    assert.equal((await read()).values.composioAccountId, "ca_reconnected", "an old disconnect cannot clear a new grant");
+    assert.equal(accountOf((await read()).values), "ca_reconnected", "an old disconnect cannot clear a new grant");
     assert.deepEqual(effects, [["project-key", "ca_original"], ["project-key", "ca_original"]]);
     onDelete(async () => {});
     await disconnect("owner");

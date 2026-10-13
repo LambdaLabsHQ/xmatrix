@@ -200,7 +200,7 @@ test("disconnecting a Google or Composio connection forgets its grant but keeps 
     assert.deepEqual(grantFieldsForgottenOnDisconnect(id), tokens, id);
   }
   assert.deepEqual(grantFieldsForgottenOnDisconnect("googlesearchconsole"), { ...tokens, oauthScopes: null });
-  assert.deepEqual(grantFieldsForgottenOnDisconnect("gmail"), { composioAccountId: null });
+  assert.deepEqual(grantFieldsForgottenOnDisconnect("gmail"), { mailboxes: null });
   assert.equal(grantFieldsForgottenOnDisconnect("notion"), undefined);
   assert.equal(grantFieldsForgottenOnDisconnect("github"), undefined);
 });
