@@ -8,7 +8,8 @@ import {
   relayRuntimeOwnerCellName,
   relayRuntimeSingleCell,
 } from "./relay-authority-locator";
-import { HUB_ROUTES, REPOSITORY_ACCESS_UNAVAILABLE, deriveHumanConnectionUrl, githubRepositoryReference, repositoryAccessUnavailableDetail, stableMachineDaemonId, withMachineSpawnHarness, hasControlCharacter } from "@xmatrix/protocol";
+import { HUB_ROUTES, REPOSITORY_ACCESS_UNAVAILABLE, deriveHumanConnectionUrl, githubRepositoryReference, repositoryAccessUnavailableDetail, stableMachineDaemonId, withMachineSpawnHarness, hasControlCharacter, sha256Hex } from "@xmatrix/protocol";
+import { admitAttempt } from "./auth-attempt-limit";
 import { launchTargetRepos } from "./launch-target-repositories";
 import type { Env } from "./types";
 import { platformAdminForRequest, testEnvironmentForRequest } from "./index-routes-admin";
@@ -30,7 +31,7 @@ import { machineHostnameObservation } from "./machine-hostname-observation";
 import { signMachineDaemonCredential } from "./connections/machine-daemon/auth";
 import { applyMachineDaemonSpawnLaunchResult, dispatchMachineDaemonRunLifecycleReplica, machineSpawnRegistryEvidenceMatches } from "./index-routes-machine-daemon-admission";
 import { RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH } from "./runtime-transport/relay-runtime-product-adapter";
-import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, isLoginRateLimited, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
+import { LOGIN_RATE_LIMIT_PER_EMAIL, LOGIN_RATE_LIMIT_PER_CLIENT, hubOrigin, betterAuthRouteGroup, logBetterAuthHandlerMetrics, authCorsPreflight, withAuthCors, parseCliRedirectUri, requireAuth, requireMachineDaemonAuth, machineRouteIdentityMatches, appendMachinePrincipal, requireHumanAuth, requestFailure, productCommandId, clientKey, internalClientHeaders, getDeviceAuthBroker, jsonErrors, requestErrorResponse, machineDaemonControl } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
 import { registerIndexRoutesAuthSpaceInstances } from "./index-routes-auth-space-instances";
 import { linkGitHubInstallation, registerIndexRoutesAuthSpaceManagement } from "./index-routes-auth-space-management";
@@ -146,10 +147,10 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     }
 
     const client = clientKey(c.req.raw);
-    if (
-      isLoginRateLimited(`login:client:${client}`, LOGIN_RATE_LIMIT_PER_CLIENT) ||
-      isLoginRateLimited(`login:email:${email.toLowerCase()}`, LOGIN_RATE_LIMIT_PER_EMAIL)
-    ) {
+    if (!await admitAttempt(c.env, [
+      { key: `login:client:${await sha256Hex(client)}`, max: LOGIN_RATE_LIMIT_PER_CLIENT },
+      { key: `login:email:${await sha256Hex(email.toLowerCase())}`, max: LOGIN_RATE_LIMIT_PER_EMAIL },
+    ])) {
       await logAuthMetric({ routeGroup: "login_code_send", status: 429, outcome: "rate_limited" });
       return c.json({ error: "Too many login attempts. Try again later." }, 429);
     }

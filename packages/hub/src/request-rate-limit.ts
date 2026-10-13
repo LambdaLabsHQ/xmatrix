@@ -1,5 +1,6 @@
 import { sha256Hex } from "@xmatrix/protocol";
 import type { Hono } from "hono";
+import { admitAttempt } from "./auth-attempt-limit";
 import type { Env } from "./types";
 
 /** A Workers Rate Limiting binding: a per-key counter over a fixed window. */
@@ -82,28 +83,23 @@ function anonymousKey(request: Request): string | undefined {
 /**
  * Sign-in endpoints whose allowance per client IP is a security limit rather
  * than a measured one: it is always enforced, whatever RATE_LIMIT_ENFORCED
- * says. Better Auth's own limiter keeps its counts in one isolate's memory,
- * which on Workers spreads a caller across many independent counters, so
- * these limits live here at the edge instead.
+ * says, and counted exactly (auth-attempt-limit.ts).
  */
-export const AUTH_ROUTE_LIMITERS: Readonly<Record<string, AuthRouteLimiterName>> = {
-  "/api/auth/oauth2/register": "RATE_LIMIT_OAUTH_REGISTER",
-  "/api/auth/sign-in/email": "RATE_LIMIT_SIGN_IN",
-  "/api/auth/request-password-reset": "RATE_LIMIT_AUTH_EMAIL",
-  "/api/auth/email-otp/send-verification-otp": "RATE_LIMIT_AUTH_EMAIL",
+export const AUTH_ROUTE_ATTEMPTS: Readonly<Record<string, number>> = {
+  "/api/auth/oauth2/register": 10,
+  "/api/auth/sign-in/email": 5,
+  "/api/auth/request-password-reset": 3,
+  "/api/auth/email-otp/send-verification-otp": 3,
 };
 
-export type AuthRouteLimiterName = "RATE_LIMIT_OAUTH_REGISTER" | "RATE_LIMIT_SIGN_IN" | "RATE_LIMIT_AUTH_EMAIL";
-
 /**
- * Whether one more request to a limited sign-in endpoint is admitted. A
+ * A refusal when a limited sign-in endpoint's client is over its allowance. A
  * request with no client IP is one of our own Workers' or a local test's and
- * is not counted. A deployment that reaches the endpoint from a client
- * without the limiter bound refuses it rather than leaving it unlimited.
+ * is not counted.
  */
 async function admitAuthRoute(env: Env, request: Request, path: string): Promise<Response | undefined> {
-  const binding = request.method === "POST" ? AUTH_ROUTE_LIMITERS[path] : undefined;
-  if (!binding) return undefined;
+  const max = request.method === "POST" ? AUTH_ROUTE_ATTEMPTS[path] : undefined;
+  if (!max) return undefined;
   const key = anonymousKey(request);
   if (!key) {
     // Only our own Workers and local tests should arrive here; anything else
@@ -112,14 +108,8 @@ async function admitAuthRoute(env: Env, request: Request, path: string): Promise
       worker: request.headers.get("CF-Worker") ?? "" });
     return undefined;
   }
-  const limiter = env[binding];
-  if (!limiter) {
-    console.error("xMatrix auth rate limiter is not bound", { binding, path });
-    return Response.json({ error: `${binding} is not configured`, code: "rate_limiter_unavailable" }, { status: 503 });
-  }
-  const { success } = await limiter.limit({ key: `${path}:${key}` });
-  if (success) return undefined;
-  console.warn("xMatrix rate limit exceeded", { rateClass: binding, enforced: true, path });
+  if (await admitAttempt(env, [{ key: `${path}:${await sha256Hex(key)}`, max }])) return undefined;
+  console.warn("xMatrix rate limit exceeded", { rateClass: "auth_route", enforced: true, path });
   return rateLimitedResponse();
 }
 

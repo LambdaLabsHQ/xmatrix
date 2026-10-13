@@ -227,8 +227,8 @@ function createAuthWithDatabase(
       },
     },
     // Its limiter counts in one isolate's memory, which on Workers is no
-    // limit at all; sign-in allowances are enforced at the edge instead
-    // (request-rate-limit.ts AUTH_ROUTE_LIMITERS).
+    // limit at all; sign-in allowances are counted exactly instead
+    // (request-rate-limit.ts AUTH_ROUTE_ATTEMPTS).
     rateLimit: { enabled: false },
     account: {
       ...(postgres ? AUTH_POSTGRES_MODELS.account : {}),
