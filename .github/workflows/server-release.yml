@@ -143,7 +143,7 @@ jobs:
               return;
             }
             const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              ...context.repo, run_id: requestRun.id, per_page: 100,
+              ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
             });
             // The request's `gates` job passes only when every gate its scope
             // selects passed, and the scope selects Hub.
@@ -153,11 +153,9 @@ jobs:
                 return;
               }
             }
-            const dispatch = jobs.find(job => job.name === "authorize-and-dispatch");
-            if (!dispatch?.steps?.some(step =>
-                step.name === `Record successful ${scope} production authorization` &&
-                step.conclusion === "success")) {
-              core.setFailed("Hub gate reuse is missing the request authorization marker");
+            const authorities = jobs.filter(job => job.name === `authorize ${scope} production`);
+            if (authorities.length !== 1 || authorities[0].status !== "completed" || authorities[0].conclusion !== "success") {
+              core.setFailed("Hub gate reuse is missing the exact-scope authorization job");
             }
 
       - name: Install dependencies
@@ -730,7 +728,7 @@ jobs:
               return;
             }
             const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              ...context.repo, run_id: requestRun.id, per_page: 100,
+              ...context.repo, run_id: requestRun.id, filter: "latest", per_page: 100,
             });
             // The request's `gates` job passes only when every gate its scope
             // selects passed, and the scope selects Web.
@@ -740,11 +738,9 @@ jobs:
                 return;
               }
             }
-            const dispatch = jobs.find(job => job.name === "authorize-and-dispatch");
-            if (!dispatch?.steps?.some(step =>
-                step.name === `Record successful ${scope} production authorization` &&
-                step.conclusion === "success")) {
-              core.setFailed("Web gate reuse is missing the request authorization marker");
+            const authorities = jobs.filter(job => job.name === `authorize ${scope} production`);
+            if (authorities.length !== 1 || authorities[0].status !== "completed" || authorities[0].conclusion !== "success") {
+              core.setFailed("Web gate reuse is missing the exact-scope authorization job");
             }
 
       # The build target built this exact commit in this run, alongside the Hub

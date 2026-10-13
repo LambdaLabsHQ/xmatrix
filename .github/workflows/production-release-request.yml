@@ -150,19 +150,25 @@ jobs:
       - name: Record the passed ${{ needs.plan.outputs.scope }} gates
         run: echo "Every ${{ needs.plan.outputs.scope }} gate passed on ${{ needs.plan.outputs.deploy_sha }}"
 
-  authorize-and-dispatch:
+  authorization:
+    name: authorize ${{ needs.plan.outputs.scope }} production
     needs: [plan, gates]
+    if: always() && needs.plan.result == 'success' && needs.gates.result == 'success'
+    runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["xmatrix-ci-offload"]') || 'ubuntu-24.04' }}
+    steps:
+      - name: Record the exact selected authorization
+        run: echo "Selected ${{ needs.plan.outputs.scope }} production gates passed for ${{ needs.plan.outputs.deploy_sha }}"
+
+  authorize-and-dispatch:
+    needs: [plan, gates, authorization]
     # A gate skipped outside the scope (iOS) sits upstream of `gates`, and the
     # default success() would skip this job too; `gates` already decided.
-    if: always() && needs.plan.result == 'success' && needs.gates.result == 'success'
+    if: always() && needs.plan.result == 'success' && needs.gates.result == 'success' && needs.authorization.result == 'success'
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
     permissions:
       actions: write
       contents: read
     steps:
-      - name: Record successful ${{ needs.plan.outputs.scope }} production authorization
-        run: echo "Selected production gates passed for ${{ needs.plan.outputs.deploy_sha }}"
-
       # One train deploys at a time: this one's gates may run while the previous
       # train deploys, but it tags and dispatches only once no Production
       # Release, PostgreSQL contract migration, or lifecycle cleanup is active, so the
