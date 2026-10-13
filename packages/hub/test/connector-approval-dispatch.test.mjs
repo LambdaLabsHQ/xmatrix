@@ -8,7 +8,9 @@ import { ProviderRequestError } from "../src/connectors/http.ts";
 // at dispatch. PostgreSQL's consume-once test cannot detect a dispatcher bypass.
 test("Gmail ask stages a request, allow executes, and disallow blocks before provider I/O", async () => {
   let mode = null, writes = 0, prepared = 0, requests = 0, staged = null;
+  const announced = [];
   const dependencies = {
+    "../workspace-resource-notification": { notifyWorkspaceResource: async (_env, change) => { announced.push(change); } },
     "@xmatrix/protocol": protocol,
     "../app-connectors": { getAppConnectorProvider: () => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === "gmail") },
     "./command-support": { commandScope: async () => ({ spaceId: "s", connectionId: "s:gmail" }),
@@ -30,6 +32,9 @@ test("Gmail ask stages a request, allow executes, and disallow blocks before pro
   const input = { env: {}, channelId: "c", messageId: "m", actorUserId: "human", senderKind: "user" };
   assert.match(await commands.runConnectorAction("gmail", input, "send", action, { target: "to@example.test", text: "Subject\nBody" }), /awaiting approval/);
   assert.deepEqual([writes, prepared, requests], [0, 1, 1]);
+  // The staged request is announced, so an admin's open Channel shows it without polling for it.
+  const announcement = { spaceId: "s", resource: "connector_action_requests", channelId: "c" };
+  assert.deepEqual(announced, [announcement]);
   mode = "allow";
   assert.match(await commands.runConnectorAction("gmail", input, "send", action, { target: "to@example.test", text: "Subject\nBody" }), /awaiting approval/);
   assert.equal(writes, 0, "re-delivery after allow cannot bypass the pending approval");
@@ -39,4 +44,5 @@ test("Gmail ask stages a request, allow executes, and disallow blocks before pro
   mode = "allow";
   assert.match(await commands.runConnectorAction("gmail", { ...input, messageId: "m3" }, "send", action, { target: "to@example.test", text: "" }), /completed/);
   assert.equal(writes, 1);
+  assert.deepEqual(announced, [announcement], "only a newly staged request changes what waits");
 });

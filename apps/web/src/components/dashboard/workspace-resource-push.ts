@@ -1,6 +1,5 @@
-import type { QueryClient } from "@tanstack/react-query";
-
-export type WorkspaceResourceKind = "automations" | "channel_transfers" | "cross_space_reads";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { WORKSPACE_RESOURCE_KINDS, type WorkspaceResourceKind } from "@xmatrix/protocol";
 
 export interface WorkspaceResourceChange {
   spaceId?: string;
@@ -31,41 +30,28 @@ export function refetchUnlessHumanPush(intervalMs: number): number | false {
   return intervalMs;
 }
 
-/** Re-read the lists whose fixed polls stop while the Human socket is up. */
-export function invalidateWorkspaceResources(client: QueryClient, change?: WorkspaceResourceChange): void {
-  const resource = change?.resource;
-  const spaceId = change?.spaceId;
-  const channelId = change?.channelId;
-  if (!resource || resource === "automations") {
-    void client.invalidateQueries({
-      predicate: (query) => {
-        const key = query.queryKey;
-        if (key[0] !== "xmatrix") return false;
-        if (key[3] !== "automations" && key[3] !== "page-automations") return false;
-        return !spaceId || key[4] === spaceId;
-      },
-    });
-  }
-  if (!resource || resource === "channel_transfers") {
-    void client.invalidateQueries({
-      predicate: (query) => {
-        const key = query.queryKey;
-        if (key[0] !== "channel-transfers") return false;
-        if (spaceId && key[2] !== spaceId) return false;
-        // A space-wide queue (empty channel slot) still includes this channel.
-        if (channelId && key[3] && key[3] !== channelId) return false;
-        return true;
-      },
-    });
-  }
-  if (!resource || resource === "cross_space_reads") {
-    void client.invalidateQueries({
-      predicate: (query) => {
-        const key = query.queryKey;
-        if (key[0] === "channel-pending-cross-space-reads") return !channelId || key[2] === channelId;
-        if (key[0] === "cross-space-read-grant") return !spaceId || key[2] === spaceId;
-        return false;
-      },
-    });
-  }
+/**
+ * Which cached queries hold each announced list, within the Space and Channel
+ * a change names. A list the Hub announces has its row here, so its query
+ * reads `refetchUnlessHumanPush` instead of a fixed timer.
+ */
+const HOLDS_RESOURCE: Record<WorkspaceResourceKind, (key: QueryKey, change: WorkspaceResourceChange) => boolean> = {
+  automations: (key, { spaceId }) => key[0] === "xmatrix" &&
+    (key[3] === "automations" || key[3] === "page-automations") && (!spaceId || key[4] === spaceId),
+  // A space-wide queue (empty channel slot) still includes this channel.
+  channel_transfers: (key, { spaceId, channelId }) => key[0] === "channel-transfers" &&
+    (!spaceId || key[2] === spaceId) && (!channelId || !key[3] || key[3] === channelId),
+  cross_space_reads: (key, { spaceId, channelId }) =>
+    key[0] === "channel-pending-cross-space-reads" ? !channelId || key[2] === channelId
+      : key[0] === "cross-space-read-grant" && (!spaceId || key[2] === spaceId),
+  connector_action_requests: (key, { channelId }) => key[0] === "connector-action-approvals" &&
+    (!channelId || key[2] === channelId),
+};
+
+/** Re-read the lists whose fixed polls stop while the Human socket is up: the named one, or all of them. */
+export function invalidateWorkspaceResources(client: QueryClient, change: WorkspaceResourceChange = {}): void {
+  const kinds: readonly WorkspaceResourceKind[] = change.resource ? [change.resource] : WORKSPACE_RESOURCE_KINDS;
+  void client.invalidateQueries({
+    predicate: (query) => kinds.some((kind) => HOLDS_RESOURCE[kind](query.queryKey, change)),
+  });
 }

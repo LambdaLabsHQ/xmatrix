@@ -8,6 +8,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { AskCard } from "./ask-card";
+import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
 interface ActionApproval {
   requestId: string;
@@ -21,11 +22,17 @@ interface ActionApproval {
 
 function queryKey(userId: string, channelId?: string) { return ["connector-action-approvals", userId, channelId]; }
 
+/**
+ * The requests waiting in one Channel for this admin's answer. The Hub
+ * announces a request staged or answered (`connector_action_requests`), so an
+ * open Channel reads the list then, and on a timer only while the socket is down.
+ */
 export function useConnectorActionApprovals(userId: string, channelId: string | undefined,
   token: string | null | undefined, enabled: boolean): ActionApproval[] {
   const query = useQuery({
     queryKey: queryKey(userId, channelId), enabled: Boolean(enabled && token && channelId && userId), retry: false,
-    refetchInterval: 5_000,
+    refetchInterval: () => refetchUnlessHumanPush(10_000),
+    refetchOnWindowFocus: true,
     queryFn: ({ signal }) => xmatrixApiRequest<{ requests: ActionApproval[] }>({
       url: WEB_PROXY_ROUTES.channel_connector_action_requests(channelId!), token: token!, signal,
     }).then(result => result.requests ?? []),

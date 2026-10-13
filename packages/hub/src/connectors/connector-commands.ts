@@ -14,6 +14,7 @@ import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
 import { connectorActionPolicyRepository, connectorActionRequestRepository } from "./credentials";
 import { ProviderRequestError } from "./http";
+import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
 import type { ConnectorAction, ConnectorActionContext, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
 import { runSubscriptionStatement } from "./subscription-command";
@@ -164,6 +165,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
         connectionId: scope.connectionId, channelId: input.channelId, providerId, actionId, requestedBy: input.actorUserId,
         payload: { messageId: input.messageId, senderKind: input.senderKind ?? "user", senderId: input.senderId,
           statement, prepared, preview } });
+      await announceActionRequests(input.env, scope.spaceId, input.channelId);
       return approvalReceipt(manifest.name, actionId, request);
     } catch (error) {
       return `${manifest.name} ${actionId}: failed; ${error instanceof ProviderRequestError ? error.message : "could not create an approval request"}.`;
@@ -183,6 +185,11 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
         ? "the provider did not answer in time" : "the provider call failed" };
     }
   });
+}
+
+/** A Channel's pending requests changed: its admins' open Channels read the list again instead of polling it. */
+export function announceActionRequests(env: Env, spaceId: string, channelId: string): Promise<void> {
+  return notifyWorkspaceResource(env, { spaceId, resource: "connector_action_requests", channelId });
 }
 
 function approvalReceipt(name: string, actionId: string, request: { requestId: string; status: string }): string {
