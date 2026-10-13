@@ -145,6 +145,15 @@ test("an outside app connects over OAuth and reads the member's pages through MC
       .metadata?.xmatrixMcpApplication, undefined, "public metadata cannot impersonate an MCP application's source");
     assert.equal(await mcp("tools/call", { name: "send_message", arguments: { channelId: channel.id, body: "x" } }),
       undefined, "a read grant has no writing tool to call");
+
+    // Registration is counted per client across the whole Hub: with the
+    // apps registered above, only the rest of ten a minute still fit.
+    const { rows: [{ n: registered }] } = await db.query("SELECT count(*)::int n FROM control.auth_oauth_clients");
+    const statuses = [];
+    for (let attempt = registered; attempt <= 10; attempt += 1) {
+      statuses.push((await call("/oauth2/register", { method: "POST", body: { client_name: "Probe" } })).status);
+    }
+    assert.deepEqual(statuses, [...Array(10 - registered).fill(400), 429], "the eleventh registration in a minute is refused");
   } finally {
     await db.end();
     await worker.stop();
