@@ -94,6 +94,7 @@ include!("runtime_daemon_spawn_state.rs");
 include!("runtime_daemon_run_registry.rs");
 include!("runtime_daemon_agent_runtime.rs");
 include!("runtime_codex_app_session.rs");
+include!("runtime_codex_capacity_retry.rs");
 include!("runtime_codex_app_transport.rs");
 include!("runtime_codex_typed_channel_controls.rs");
 include!("runtime_codex_channel_delivery.rs");

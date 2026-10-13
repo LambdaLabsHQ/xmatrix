@@ -2148,9 +2148,11 @@ impl CodexAppSession {
         Ok(())
     }
 
-    async fn submit_turn(
+    async fn submit_turn_attempt(
         &mut self,
         request: CodexTurnRequest<'_>,
+        capacity_retry_allowed: &mut bool,
+        capacity_retries_remaining: bool,
     ) -> error::Result<CodexTurnResult> {
         let CodexTurnRequest {
             text,
@@ -2306,6 +2308,8 @@ impl CodexAppSession {
         let mut transport_recovery = CodexTransportRecoveryState::Healthy;
         let mut thread_activity = CodexThreadActivity::new(&thread_id, turn_id.as_deref());
         let mut completed_result: Option<CodexTurnResult> = None;
+        let mut execution_observed = false;
+        let mut capacity_error: Option<(String, tokio::time::Instant)> = None;
         // Commands and tool calls open in this turn (docs/design/agent-status.md).
         let mut tool_waits = crate::runtime_waiting::ToolWaits::default();
         loop {
@@ -2317,63 +2321,91 @@ impl CodexAppSession {
             let wait_timeout =
                 codex_reconnect_wait_timeout(transport_recovery.awaiting_https_fallback());
             let wait_deadline = tool_waits.deadline(Instant::now());
-            let next_message = match wait_timeout {
-                Some(wait_timeout) => match tokio::time::timeout(wait_timeout, self.next_message())
-                    .await
-                {
+            let next_message = if let Some((error, deadline)) = capacity_error.as_ref() {
+                match tokio::time::timeout_at(*deadline, self.next_message()).await {
                     Ok(message) => message,
                     Err(_) => {
-                        let error = codex_reconnect_wait_timeout_error(
-                            transport_recovery
-                                .last_exhausted_error()
-                                .expect("reconnect timeout requires an exhausted reconnect error"),
-                            wait_timeout.as_secs().max(1),
-                        );
-                        if let (Some(relay), Some(channel_id)) = (trace_relay, trace_channel_id) {
-                            let relay = relay.clone();
-                            send_agent_lifecycle(
-                                &relay,
-                                Some(channel_id),
-                                agent,
-                                "application",
-                                "failed",
-                                Some("codex_connection_lost"),
-                                Some(&error),
-                                Some(protocol::AgentLifecycleSnapshot {
-                                    presence: Some("online".to_string()),
-                                    run: Some("failed".to_string()),
-                                    process: Some("online".to_string()),
-                                }),
-                            );
-                        }
-                        if let Some(result) = self
-                            .abandon_turn(
-                                trace,
-                                &thread_id,
-                                turn_id.as_deref(),
-                                &progress,
-                                &error,
-                                true,
-                            )
-                            .await
-                        {
-                            return Ok(result);
-                        }
-                        return Err(CliError::Launch(error));
+                        // No terminal receipt means the provider may still be
+                        // running. Fail visibly; never start overlapping work.
+                        self.abandon_turn(
+                            trace,
+                            &thread_id,
+                            turn_id.as_deref(),
+                            &progress,
+                            error,
+                            false,
+                        )
+                        .await;
+                        return Ok(progress.into_failure(
+                            format!("Codex error: {error}"),
+                            true,
+                            latest_goal,
+                        ));
                     }
-                },
-                // Wake when the oldest open command turns into a wait, unless
-                // an event comes first; the inbox is a channel, so this is
-                // cancellation safe.
-                None => match wait_deadline {
-                    Some(deadline) => {
-                        match tokio::time::timeout_at(deadline.into(), self.next_message()).await {
+                }
+            } else {
+                match wait_timeout {
+                    Some(wait_timeout) => {
+                        match tokio::time::timeout(wait_timeout, self.next_message()).await {
                             Ok(message) => message,
-                            Err(_) => continue,
+                            Err(_) => {
+                                let error = codex_reconnect_wait_timeout_error(
+                                    transport_recovery.last_exhausted_error().expect(
+                                        "reconnect timeout requires an exhausted reconnect error",
+                                    ),
+                                    wait_timeout.as_secs().max(1),
+                                );
+                                if let (Some(relay), Some(channel_id)) =
+                                    (trace_relay, trace_channel_id)
+                                {
+                                    let relay = relay.clone();
+                                    send_agent_lifecycle(
+                                        &relay,
+                                        Some(channel_id),
+                                        agent,
+                                        "application",
+                                        "failed",
+                                        Some("codex_connection_lost"),
+                                        Some(&error),
+                                        Some(protocol::AgentLifecycleSnapshot {
+                                            presence: Some("online".to_string()),
+                                            run: Some("failed".to_string()),
+                                            process: Some("online".to_string()),
+                                        }),
+                                    );
+                                }
+                                if let Some(result) = self
+                                    .abandon_turn(
+                                        trace,
+                                        &thread_id,
+                                        turn_id.as_deref(),
+                                        &progress,
+                                        &error,
+                                        true,
+                                    )
+                                    .await
+                                {
+                                    return Ok(result);
+                                }
+                                return Err(CliError::Launch(error));
+                            }
                         }
                     }
-                    None => self.next_message().await,
-                },
+                    // Wake when the oldest open command turns into a wait, unless
+                    // an event comes first; the inbox is a channel, so this is
+                    // cancellation safe.
+                    None => match wait_deadline {
+                        Some(deadline) => {
+                            match tokio::time::timeout_at(deadline.into(), self.next_message())
+                                .await
+                            {
+                                Ok(message) => message,
+                                Err(_) => continue,
+                            }
+                        }
+                        None => self.next_message().await,
+                    },
+                }
             };
             let Some(message) = next_message else {
                 if self.inbox.has_failure() {
@@ -2409,6 +2441,9 @@ impl CodexAppSession {
             let turn_id = thread_activity.active_turn_id().map(str::to_string);
             let same_active_turn =
                 codex_app_event_matches_active_turn(params, &thread_id, turn_id.as_deref());
+            if same_active_turn && codex_event_shows_execution(method, params) {
+                execution_observed = true;
+            }
             if same_active_turn
                 && let (Some(relay), Some(channel_id)) = (trace_relay, trace_channel_id)
             {
@@ -2706,6 +2741,47 @@ impl CodexAppSession {
                 }
                 Some("turn/completed") if same_active_turn => {
                     tool_waits.clear();
+                    let terminal_turn = params.get("turn").unwrap_or(&Value::Null);
+                    let status = terminal_turn.get("status").and_then(Value::as_str);
+                    if matches!(status, Some("failed" | "interrupted")) || capacity_error.is_some()
+                    {
+                        let error = terminal_turn
+                            .get("error")
+                            .filter(|error| !error.is_null())
+                            .map(codex_app_error_message)
+                            .or_else(|| capacity_error.as_ref().map(|(error, _)| error.clone()))
+                            .unwrap_or_else(|| {
+                                format!("Codex turn {}", status.unwrap_or("failed"))
+                            });
+                        *capacity_retry_allowed = capacity_retries_remaining
+                            && status == Some("failed")
+                            && codex_is_model_capacity_error(&error)
+                            && !execution_observed
+                            && terminal_turn
+                                .get("items")
+                                .and_then(Value::as_array)
+                                .is_none_or(|items| {
+                                    items.iter().all(|item| item["type"] == "userMessage")
+                                });
+                        if *capacity_retry_allowed {
+                            self.clear_active_turn(&thread_id, turn_id.as_deref());
+                        } else {
+                            self.abandon_turn(
+                                trace,
+                                &thread_id,
+                                turn_id.as_deref(),
+                                &progress,
+                                &error,
+                                false,
+                            )
+                            .await;
+                        }
+                        return Ok(progress.into_failure(
+                            format!("Codex error: {error}"),
+                            false,
+                            latest_goal,
+                        ));
+                    }
                     if !progress.delta_buffer.is_empty() {
                         trace
                             .send(
@@ -2761,6 +2837,19 @@ impl CodexAppSession {
                             .map(|(left, right)| left == right)
                             .unwrap_or(true);
                     if scoped_to_current_turn {
+                        if params.get("willRetry").and_then(Value::as_bool) == Some(true) {
+                            continue;
+                        }
+                        if codex_is_model_capacity_error(&error) {
+                            capacity_error.get_or_insert_with(|| {
+                                (
+                                    error,
+                                    tokio::time::Instant::now()
+                                        + Duration::from_secs(CODEX_CAPACITY_TERMINAL_WAIT_SECS),
+                                )
+                            });
+                            continue;
+                        }
                         self.abandon_turn(
                             trace,
                             &thread_id,
