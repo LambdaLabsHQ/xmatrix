@@ -31,7 +31,6 @@ import {
 } from "@xmatrix/protocol";
 import {
   composerCompletionHandlesKeyDown,
-  isComposerImeKeyDown,
   scheduleTextareaSelection,
 } from "@/components/dashboard/composer-caret";
 import {
@@ -72,6 +71,7 @@ import {
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMentionCandidates } from "./registration-mention-candidates";
 import { APP_CONNECTORS } from "@/lib/app-connectors";
+import { isImeKeyDown } from "@/lib/ime-keydown";
 import { pageApi } from "@/lib/pages/page-client";
 import type { ComposerReferenceBinding } from "./composer-invocation-bindings";
 import { useMessageReferenceCatalog } from "./message-reference-catalog";
@@ -161,10 +161,7 @@ export function handleComposerTextareaKeyDown(
   if (options.handleCompletionKeyDown(event)) return true;
   // An IME keystroke is the input method's: Escape cancels the composition and
   // Enter commits it, so neither may cancel a draft or send a message here.
-  const composing = isComposerImeKeyDown({
-    isComposing: event.nativeEvent.isComposing,
-    keyCode: event.nativeEvent.keyCode,
-  });
+  const composing = isImeKeyDown(event.nativeEvent);
   if (event.key === "Escape" && options.onEscape && !composing) {
     event.preventDefault();
     options.onEscape();
@@ -747,12 +744,7 @@ export function useComposerCompletion({
     // First layer, before anything else can claim a key: during IME composition
     // the arrows walk the candidate list, Enter and Tab commit it, and Escape
     // cancels it. Every one of those belongs to the input method.
-    if (
-      isComposerImeKeyDown({
-        isComposing: event.nativeEvent.isComposing,
-        keyCode: event.nativeEvent.keyCode,
-      })
-    ) {
+    if (isImeKeyDown(event.nativeEvent)) {
       return false;
     }
     if (!open) return false;

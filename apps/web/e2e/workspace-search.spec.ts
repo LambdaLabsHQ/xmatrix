@@ -80,7 +80,17 @@ test("Enter opens every result at an address that names the search", async ({ pa
   await page.goto(`/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Search", exact: true }).filter({ visible: true }).click();
   await page.keyboard.type("deploy");
-  await expect(page.getByRole("dialog", { name: "Search workspace" }).getByText("deploy the hub (1)")).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "Search workspace" });
+  await expect(dialog.getByText("deploy the hub (1)")).toBeVisible();
+  // The Enter that commits an input method's candidate is not the field's.
+  const address = page.url();
+  for (const ime of [{ isComposing: true, keyCode: 229 }, { isComposing: false, keyCode: 229 }]) {
+    const claimed = await dialog.getByRole("textbox").evaluate((node, init) => !node.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", ...init })), ime);
+    expect(claimed).toBe(false);
+  }
+  await expect(dialog).toBeVisible();
+  expect(page.url()).toBe(address);
   await page.keyboard.press("Enter");
 
   await expect(page).toHaveURL(/\/search\?q=deploy$/u);
