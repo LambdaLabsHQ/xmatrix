@@ -39,7 +39,7 @@ function gmailPath(method: "GET" | "POST", path: string): string {
 }
 
 function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
-  query: Record<string, string | string[]> = {}): Promise<Record<string, unknown>> {
+  query: Record<string, string> = {}): Promise<Record<string, unknown>> {
   return composioGet(credentials, gmailPath("GET", path), query);
 }
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
@@ -186,7 +186,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const ids = ((result.messages as unknown[] | undefined) ?? []).slice(0, SEARCH_LIMIT)
         .map(value => String(record(value).id)).filter(id => MESSAGE_ID.test(id));
       const messages = await Promise.all(ids.map(id => gmailGet(credentials,
-        `/messages/${id}`, { format: "metadata", metadataHeaders: ["From", "Subject"] })));
+        `/messages/${id}`, { format: "metadata" })));
       return { summary: `Newest Gmail messages${input.query ? ` matching ${line(input.query)}` : ""} (id, received UTC, from, subject, snippet); ` +
         "read one with @gmail:read:<id>:\n" + quoteRetrievedText(messages.map(messageLine).join("\n") || "(no messages)") };
     },
@@ -240,7 +240,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     },
     async execute({ credentials }, input) {
       const original = await gmailGet(credentials, `/messages/${input.id}`,
-        { format: "metadata", metadataHeaders: ["From", "Reply-To", "Subject", "Message-ID", "References"] });
+        { format: "metadata" });
       const payload = record(original.payload);
       const to = address(header(payload, "reply-to")) ?? address(header(payload, "from"));
       if (!to) throw new ProviderRequestError(422, "the message has no address to reply to");
