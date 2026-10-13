@@ -238,3 +238,26 @@ fn acp_trace_retains_upstream_message_ids_and_receipt_order() {
         .expect("ACP trace fixture completes");
     });
 }
+
+#[test]
+fn an_acp_agent_is_signed_in_with_the_method_it_listed() {
+    // Cursor lists its own method and rejects any other: answering its
+    // authRequired with `login` failed every start with "Unknown
+    // authentication method: login. Supported method: cursor_login".
+    let cursor = serde_json::json!({
+        "protocolVersion": 1,
+        "authMethods": [{ "id": "cursor_login", "name": "Cursor Login" }],
+    });
+    assert_eq!(
+        super::acp_advertised_auth_method(&cursor).as_deref(),
+        Some("cursor_login")
+    );
+    // An agent that lists none keeps the generic `login`.
+    for silent in [
+        serde_json::json!({ "protocolVersion": 1 }),
+        serde_json::json!({ "authMethods": [] }),
+        serde_json::json!({ "authMethods": [{ "name": "unnamed" }, { "id": "  " }] }),
+    ] {
+        assert_eq!(super::acp_advertised_auth_method(&silent), None, "{silent}");
+    }
+}

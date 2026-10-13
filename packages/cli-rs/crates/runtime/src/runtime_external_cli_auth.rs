@@ -2999,6 +2999,8 @@ struct AcpSession {
     child: Child,
     next_id: u64,
     session_id: Option<String>,
+    /// The first sign-in method the agent listed in its `initialize` reply.
+    advertised_auth_method: Option<String>,
     /// Latest structured goal from a successful session/load history replay.
     loaded_goal: Option<protocol::AgentGoalStatus>,
     presentation: AgentPresentationFacts,
@@ -3044,6 +3046,20 @@ fn acp_initialize_params() -> Value {
             "version": xmatrix_cli_core::version::current(),
         },
     })
+}
+
+/// The sign-in method an agent accepts, from the `authMethods` of its
+/// `initialize` reply. Each vendor names its own (`cursor_login`, `login`,
+/// `cached_token`), and an agent rejects a method it did not list.
+fn acp_advertised_auth_method(initialized: &Value) -> Option<String> {
+    initialized
+        .get("authMethods")?
+        .as_array()?
+        .iter()
+        .find_map(|method| method.get("id")?.as_str())
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
 }
 
 /// JSON-RPC error with its numeric code preserved so callers can react to

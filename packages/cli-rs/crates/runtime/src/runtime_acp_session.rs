@@ -153,6 +153,7 @@ impl AcpSession {
             child,
             next_id: 1,
             session_id: None,
+            advertised_auth_method: None,
             loaded_goal: None,
             presentation: AgentPresentationFacts::default(),
             config,
@@ -283,7 +284,8 @@ impl AcpSession {
     }
 
     /// Generic vendors skip `authenticate` up front; when the agent still
-    /// answers authRequired (-32000), retry once after `methodId: "login"`.
+    /// answers authRequired (-32000), retry once after signing in with the
+    /// method it listed, or `login` when it listed none.
     async fn request_with_login_retry(
         &mut self,
         method: &str,
@@ -295,9 +297,10 @@ impl AcpSession {
                 if self.config.authenticate.is_none()
                     && err.code == Some(ACP_AUTH_REQUIRED_CODE) =>
             {
+                let method_id = self.advertised_auth_method.as_deref().unwrap_or("login");
                 self.request(
                     "authenticate",
-                    Some(serde_json::json!({ "methodId": "login" })),
+                    Some(serde_json::json!({ "methodId": method_id })),
                 )
                 .await?;
                 self.request(method, Some(params)).await
@@ -328,9 +331,10 @@ impl AcpSession {
         resume_requested: bool,
         trusted_rules: Option<&str>,
     ) -> error::Result<AgentPresentationSnapshot> {
-        let _ = self
+        let initialized = self
             .request_with_login_retry("initialize", acp_initialize_params())
             .await?;
+        self.advertised_auth_method = acp_advertised_auth_method(&initialized);
         self.notify("notifications/initialized", None).await?;
 
         if let Some(authenticate) = self.config.authenticate.clone() {
