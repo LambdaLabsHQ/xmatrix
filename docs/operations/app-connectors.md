@@ -156,7 +156,7 @@ section, and none is ever shown again.
 | Google Business Profile | `list_accounts:*`, `list_locations:<account>`, `performance:<location> [days=…]`, `reviews:<location>` (reads), `reply_review:<review> <text>` |
 | PageSpeed Insights | `audit:<page url> [strategy=mobile\|desktop]`, `field:<page url or origin> [form=phone\|desktop\|all] [scope=page\|origin]` (reads; Google API key) |
 | Yandex Webmaster | `list_hosts:*`, `summary:<host id>`, `queries:<host id>` (reads), `recrawl:<host id> <page url>` |
-| Gmail (via Composio) | `search:* [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub) |
+| Gmail (via Composio) | `search:* [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub); `send:<address> <subject>\n<body>`, `reply:<message id> <body>` (off until a Space admin allows them in the channel) |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 
 xmatrix.sh publishes its own IndexNow key at `https://xmatrix.sh/71d38a28828cfa8a824127e9320a4668.txt` (`apps/web/public`), so the company's `bingwebmaster` connection can push xmatrix.sh URLs with that key. The key is public by design; a new key needs a new file.
@@ -240,8 +240,12 @@ time:
 
 - **`deny`.** A Space admin's `@<provider>:policy:<action> deny` blocks the
   action for everyone in that channel.
+- **`allow`.** A Space admin's `@<provider>:policy:<action> allow` turns on an
+  action that is off by default.
 - **Default.** Every other action, read or write, runs, whether a Human or an
-  Agent sent it. The provider's own permissions still apply.
+  Agent sent it. The provider's own permissions still apply. Gmail's `send`
+  and `reply` are the exception: they are off in every channel until allowed,
+  because the Gmail grant covers the whole mailbox.
 
 Every attempt writes an execution record and a receipt in the channel.
 Persisted completion summaries are limited to 1,000 UTF-8 bytes, and failure or

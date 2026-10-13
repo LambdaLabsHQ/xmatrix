@@ -43,6 +43,7 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: key }),
   });
   const actions = connectorWriteActions(connector);
+  const offByDefault = actions.filter((candidate) => candidate.defaultPolicy === "deny");
   const [actionId, setActionId] = useState(actions[0]?.id ?? "");
   const [channelId, setChannelId] = useState("");
   const [mode, setMode] = useState<"allow" | "deny">("allow");
@@ -53,7 +54,9 @@ export function ConnectorPolicy({ connector, channels, spaceId, token, userId }:
   return (
     <div className="space-y-3">
       <p className="text-xs leading-5 text-muted-foreground">
-        Every action runs for people and Agents by default. Deny an action here to turn it off in one channel.
+        {offByDefault.length > 0
+          ? `${offByDefault.map((candidate) => candidate.label).join(" and ")} stay off until you allow them in a channel. Every other action runs for people and Agents by default; deny it here to turn it off in one channel.`
+          : "Every action runs for people and Agents by default. Deny an action here to turn it off in one channel."}
       </p>
       {write.error || policies.error ? (
         <p className="text-sm font-medium text-destructive">{(write.error ?? policies.error)?.message}</p>

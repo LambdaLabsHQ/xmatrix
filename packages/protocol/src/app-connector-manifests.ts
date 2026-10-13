@@ -104,6 +104,11 @@ export interface AppConnectorProviderManifest {
      * means a Channel-local action such as subscribe.
      */
     effect?: "read" | "write";
+    /**
+     * `deny`: the action is off in every Channel until a Space admin allows it
+     * there (a write the provider's grant permits but xMatrix holds back).
+     */
+    defaultPolicy?: "deny";
     /** How to write the command after `@<provider>:<action>`, shown in completion and help. */
     usage?: string;
     completion?: {

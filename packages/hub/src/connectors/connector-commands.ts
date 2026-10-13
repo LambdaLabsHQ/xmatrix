@@ -23,20 +23,24 @@ import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from 
  * subscriptions for event providers, one outbound action per message, and the
  * per-Channel action policy for Space admins. Policy is read at execution
  * time: every action runs for a Human or an Agent unless a Space admin denies
- * it in the Channel.
+ * it in the Channel; an action whose manifest default is `deny` runs only where
+ * a Space admin allows it.
  */
 
-/** Why the Channel's policy refuses an action, if it does (§3.5): only `deny` blocks it. */
-export function actionRefusal(input: { actionId: string; mode: "allow" | "deny" | null }): string | undefined {
-  return input.mode === "deny" ? `${input.actionId} is denied in this channel` : undefined;
+/** Why the Channel's policy refuses an action, if it does (§3.5): `deny`, or no policy on an action that is off by default. */
+export function actionRefusal(input: { actionId: string; mode: "allow" | "deny" | null;
+  defaultPolicy?: "deny" }): string | undefined {
+  if (input.mode === "deny") return `${input.actionId} is denied in this channel`;
+  return input.mode === null && input.defaultPolicy === "deny"
+    ? `${input.actionId} is off in this channel until a Space admin allows it (policy:${input.actionId} allow)` : undefined;
 }
 
 /** Why the Channel's policy refuses an action as it stands now. */
 export async function channelActionRefusal(env: Env, input: { connectionId: string; channelId: string;
-  actionId: string }): Promise<string | undefined> {
+  actionId: string; defaultPolicy?: "deny" }): Promise<string | undefined> {
   const mode = await connectorActionPolicyRepository(env).mode({ requestId: crypto.randomUUID(),
     connectionId: input.connectionId, channelId: input.channelId, actionId: input.actionId });
-  return actionRefusal({ actionId: input.actionId, mode });
+  return actionRefusal({ actionId: input.actionId, mode, defaultPolicy: input.defaultPolicy });
 }
 
 /** Whether a Channel policy can name this action: one that acts on the provider. */
@@ -114,14 +118,16 @@ export async function runConnectorAction(providerId: string, input: ConnectorCom
 async function runAction(providerId: string, input: ConnectorCommandInput, actionId: string,
   action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0]): Promise<string> {
   const manifest = getAppConnectorProvider(providerId)!;
-  const label = manifest.actions.find((candidate) => candidate.id === actionId)?.label ?? actionId;
+  const entry = manifest.actions.find((candidate) => candidate.id === actionId);
+  const label = entry?.label ?? actionId;
+  const defaultPolicy = entry?.defaultPolicy;
   const parsed = action.parse(statement);
   if (typeof parsed === "string") return `${manifest.name} ${actionId}: failed; ${parsed}.`;
   const scope = await commandScope(manifest, input);
   if (typeof scope === "string") return `${manifest.name} ${actionId}: blocked; ${scope}.`;
   return withExecution(manifest, input, scope, { id: actionId, label, key: "" }, async () => {
     const refusal = await channelActionRefusal(input.env, { connectionId: scope.connectionId,
-      channelId: input.channelId, actionId });
+      channelId: input.channelId, actionId, defaultPolicy });
     if (refusal) return { status: "blocked", summary: refusal };
     try {
       const authorizeWrite = async () => {
@@ -130,7 +136,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
           throw new ProviderRequestError(409, `${manifest.name} Channel access changed before posting`);
         }
         const changed = await channelActionRefusal(input.env, { connectionId: scope.connectionId,
-          channelId: input.channelId, actionId });
+          channelId: input.channelId, actionId, defaultPolicy });
         if (changed) throw new ProviderRequestError(403, changed);
       };
       const googleChat = providerId === "googlechat" && actionId === "post"

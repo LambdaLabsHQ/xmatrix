@@ -360,18 +360,23 @@ problems by severity), `queries:<host>` (top 50 popular queries by clicks).
 The write `recrawl:<host> <page url>` queues one page of that exact scheme,
 host and port, under the Channel's action policy.
 
-Gmail signs in through Composio rather than the company Google client:
-`gmail.readonly` is a restricted Google scope. The configured OAuth client
-must have Google's approval for that exact scope; managed auth alone is not
-evidence that a narrower override is approved. Composio's
-[Gmail FAQ](https://docs.composio.dev/toolkits/gmail) identifies unverified
-client scopes as a cause of Google's app-blocked screen. Native acceptance
-requires successful consent and the connection's real API Check. If consent
-is blocked, confirm the client's scope coverage with Composio while keeping
-the read-only grant; a broader default grant does not satisfy this contract.
+Gmail signs in through Composio rather than the company Google client.
+Composio's managed Google app is approved by Google only for its default
+Gmail scope, the full `https://mail.google.com/` grant; requesting the
+narrower `gmail.readonly` on it is what Google's app-blocked screen refuses
+([Composio Gmail FAQ](https://docs.composio.dev/toolkits/gmail)). The auth
+config therefore requests `https://mail.google.com/` alone, without the
+default profile and contacts scopes, and the Hub is the boundary the grant
+is not: every Gmail call passes an endpoint list in `actions/gmail.ts`
+(GET profile, message list and one message; POST messages/send) and any
+other endpoint is refused before Composio is called. The only write, POST
+messages/send, belongs to `send` and `reply`, whose manifest
+`defaultPolicy: "deny"` keeps them off in every Channel until a Space admin
+allows them there (§3.5). A read-only grant would need the company's own
+Google app verified for `gmail.readonly` (OAuth verification and CASA).
 The `gmail` manifest uses `oauth.flow: "composio"`;
 `CONNECTOR_GMAIL_CLIENT_ID` is the Composio auth config (Composio-managed
-Gmail auth limited to `gmail.readonly`) and the shared
+Gmail auth requesting only `https://mail.google.com/`) and the shared
 `CONNECTOR_COMPOSIO_API_KEY` is the Composio project API key. Connect creates a Composio Connect Link for the
 user id `xmatrix:<space>:<state nonce>` with the Hub callback carrying the
 signed state; completion ignores redirect parameters and stores the single
@@ -391,8 +396,11 @@ Attachment parts and their descendants are excluded. Reads visit at most
 an inline text body is stored externally; they do not fetch attachments.
 The Hub never
 requests a link found in mail; an Agent that needs to confirm a sign-up opens
-the link itself. There is no send, label or delete action and no inbound
-event. Composio is a subprocessor for connected mailboxes.
+the link itself. `send:<address> <subject>\n<body>` sends one plain-text
+message to one recipient, and `reply:<message id> <body>` answers the
+message's Reply-To (else From) in its thread with In-Reply-To and References
+set; header values are single-line and non-ASCII ones RFC 2047 encoded. There
+is no label, delete, draft or settings action and no inbound event. Composio is a subprocessor for connected mailboxes.
 
 Disconnect reads the grant through the credential authority's live Space
 owner/admin check before any provider deletion. Member-visible connection
@@ -770,6 +778,10 @@ GitHub triggers may use either spelling.
   an Agent. Connectors do not stand in the way; a Space admin's Channel `deny`
   row is the only xMatrix policy that blocks an action, and the provider's own
   permissions still apply.
+- The one exception is an action whose manifest declares
+  `defaultPolicy: "deny"`: a write the provider's grant permits but xMatrix
+  holds back. It runs only in a Channel with an `allow` row. Only Gmail's
+  `send` and `reply` declare it, because Gmail's grant is the full mailbox.
 - Migration: each `*WriteChannelId` metadata value becomes one
   `(connection, channel, action, allow)` row.
   - The migration is idempotent and bounded per connection.

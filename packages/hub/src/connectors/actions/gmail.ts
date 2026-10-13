@@ -1,15 +1,19 @@
 import type { ConnectorAction } from "../provider";
 import { record } from "../command-support";
 import { ProviderRequestError } from "../http";
-import { composioGet } from "../composio";
-import { quoteRetrievedText } from "./common";
+import { composioGet, composioPost } from "../composio";
+import { quoteRetrievedText, requireText, titleAndBody } from "./common";
 
 /*
- * Gmail (API v1), read-only, through Composio: the Google account signs in to
- * Composio's managed Google app under the single `gmail.readonly` scope of
- * the Composio auth config, and each call is proxied as the stored account. `read` lists every link in the
- * message so an Agent can open one itself (a sign-up verification link, for
- * example); the Hub never fetches a link found in mail.
+ * Gmail (API v1) through Composio: the Google account signs in to Composio's
+ * managed Google app, whose only Gmail scope Google approves is the full
+ * `https://mail.google.com/` grant, and each call is proxied as the stored
+ * account. The Hub, not the grant, is the boundary: it calls only the
+ * endpoints `GMAIL_CALLS` lists, and the only write, messages/send, belongs to
+ * `send` and `reply`, which the manifest keeps off in every Channel until a
+ * Space admin allows them there. `read` lists every link in the message so an
+ * Agent can open one itself (a sign-up verification link, for example); the
+ * Hub never fetches a link found in mail.
  */
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -20,6 +24,24 @@ const MAX_BODY = 8_000;
 const MAX_LINKS = 50;
 const MAX_LINK = 2_000;
 const MAX_PARTS = 200;
+const MAX_ADDRESS = 254;
+const ADDRESS = /^[^\s@<>(),;:"\\[\]]+@[^\s@<>(),;:"\\[\]]+\.[^\s@<>(),;:"\\[\]]+$/u;
+
+/* Every Gmail endpoint the Hub calls; anything else the full grant would allow is refused before Composio sees it. */
+const GMAIL_CALLS: Record<"GET" | "POST", RegExp> = {
+  GET: /^\/(?:profile|messages|messages\/[0-9a-f]{8,32})$/u,
+  POST: /^\/messages\/send$/u,
+};
+
+function gmailPath(method: "GET" | "POST", path: string): string {
+  if (!GMAIL_CALLS[method].test(path)) throw new ProviderRequestError(403, `xMatrix does not call Gmail ${method} ${path}`);
+  return `${API}${path}`;
+}
+
+function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
+  query: Record<string, string | string[]> = {}): Promise<Record<string, unknown>> {
+  return composioGet(credentials, gmailPath("GET", path), query);
+}
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
 
 
@@ -115,6 +137,38 @@ function messageLine(message: Record<string, unknown>): string {
     line(header(payload, "subject")), line(decodeEntities(String(message.snippet ?? "")), 200)].join("\t");
 }
 
+function base64(text: string): string {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/** One header value on one line; non-ASCII as an RFC 2047 encoded word. */
+function mimeHeader(value: string): string {
+  const flat = value.replace(/[\r\n\t]+/gu, " ").trim();
+  return /^[\x20-\x7e]*$/u.test(flat) ? flat : `=?UTF-8?B?${base64(flat)}?=`;
+}
+
+/** A plain-text message as Gmail's base64url `raw`. */
+function gmailRaw(headers: [string, string][], body: string): string {
+  const encoded = base64(body.replace(/\r?\n/gu, "\r\n")).replace(/.{1,76}/gu, "$&\r\n");
+  const message = [...headers.map(([name, value]) => `${name}: ${mimeHeader(value)}`),
+    "MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64", "", encoded].join("\r\n");
+  return base64(message).replace(/\+/gu, "-").replace(/\//gu, "_").replace(/=+$/u, "");
+}
+
+/** The bare address of a header such as `Name <a@b.c>`, if it names exactly one valid address. */
+function address(value: string): string | undefined {
+  const bare = (value.match(/<([^<>]*)>\s*$/u)?.[1] ?? value).trim();
+  return bare.length <= MAX_ADDRESS && ADDRESS.test(bare) ? bare : undefined;
+}
+
+async function sendRaw(credentials: Readonly<Record<string, string>>, raw: string, threadId?: string): Promise<string> {
+  const sent = await composioPost(credentials, gmailPath("POST", "/messages/send"), { raw, ...(threadId ? { threadId } : {}) });
+  if (typeof sent.id !== "string") throw new ProviderRequestError(502, "Google did not confirm the sent message");
+  return line(sent.id, 32);
+}
+
 export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
   search: {
     effect: "read", requires: ["composioAccountId"],
@@ -124,15 +178,15 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       return query.length <= MAX_QUERY ? { query } : `keep the search under ${MAX_QUERY} characters`;
     },
     async execute({ credentials }, input) {
-      const result = await composioGet(credentials, `${API}/messages`,
+      const result = await gmailGet(credentials, "/messages",
         { maxResults: String(SEARCH_LIMIT), ...(input.query ? { q: input.query } : {}) });
       if (result.messages !== undefined && !Array.isArray(result.messages)) {
         throw new ProviderRequestError(502, "Google did not return a Gmail message list");
       }
       const ids = ((result.messages as unknown[] | undefined) ?? []).slice(0, SEARCH_LIMIT)
         .map(value => String(record(value).id)).filter(id => MESSAGE_ID.test(id));
-      const messages = await Promise.all(ids.map(id => composioGet(credentials,
-        `${API}/messages/${id}`, { format: "metadata", metadataHeaders: ["From", "Subject"] })));
+      const messages = await Promise.all(ids.map(id => gmailGet(credentials,
+        `/messages/${id}`, { format: "metadata", metadataHeaders: ["From", "Subject"] })));
       return { summary: `Newest Gmail messages${input.query ? ` matching ${line(input.query)}` : ""} (id, received UTC, from, subject, snippet); ` +
         "read one with @gmail:read:<id>:\n" + quoteRetrievedText(messages.map(messageLine).join("\n") || "(no messages)") };
     },
@@ -144,7 +198,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
         ? { id: statement.target } : "name a message id from @gmail:search";
     },
     async execute({ credentials }, input) {
-      const message = await composioGet(credentials, `${API}/messages/${input.id}`, { format: "full" });
+      const message = await gmailGet(credentials, `/messages/${input.id}`, { format: "full" });
       const payload = record(message.payload);
       if (!payload.mimeType) throw new ProviderRequestError(502, "Google did not return a Gmail message");
       const bodies = gmailBodies(payload);
@@ -162,10 +216,47 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
         quoteRetrievedText(lines.join("\n")) };
     },
   },
+  send: {
+    effect: "write", requires: ["composioAccountId"],
+    parse(statement) {
+      const to = address(statement.target);
+      if (!to || to !== statement.target) return "name one recipient: @gmail:send:<to address> <subject>\\n<body>";
+      const text = requireText(statement);
+      if (!text) return "write the subject after the recipient";
+      const { title, body } = titleAndBody(text);
+      return title ? { to, subject: title, body } : "write the subject after the recipient";
+    },
+    async execute({ credentials }, input) {
+      const id = await sendRaw(credentials, gmailRaw([["To", input.to], ["Subject", input.subject]], input.body));
+      return { summary: `Sent Gmail message ${id} to ${input.to}.` };
+    },
+  },
+  reply: {
+    effect: "write", requires: ["composioAccountId"],
+    parse(statement) {
+      if (!MESSAGE_ID.test(statement.target)) return "name a message id from @gmail:search";
+      const body = requireText(statement);
+      return body ? { id: statement.target, body } : "write the reply after the message id";
+    },
+    async execute({ credentials }, input) {
+      const original = await gmailGet(credentials, `/messages/${input.id}`,
+        { format: "metadata", metadataHeaders: ["From", "Reply-To", "Subject", "Message-ID", "References"] });
+      const payload = record(original.payload);
+      const to = address(header(payload, "reply-to")) ?? address(header(payload, "from"));
+      if (!to) throw new ProviderRequestError(422, "the message has no address to reply to");
+      const threadId = typeof original.threadId === "string" && MESSAGE_ID.test(original.threadId) ? original.threadId : undefined;
+      const subject = header(payload, "subject");
+      const messageId = line(header(payload, "message-id"), 998).trim();
+      const references = [line(header(payload, "references"), 998).trim(), messageId].filter(Boolean).join(" ");
+      const id = await sendRaw(credentials, gmailRaw([["To", to], ["Subject", /^re:/iu.test(subject) ? subject : `Re: ${subject}`],
+        ...(messageId ? [["In-Reply-To", messageId], ["References", references]] as [string, string][] : [])], input.body), threadId);
+      return { summary: `Replied to Gmail message ${input.id} as ${id}, to ${to}.` };
+    },
+  },
 };
 
 /** Confirm the grant with a real read; the profile is not stored. */
 export async function verifyGmail(credentials: Readonly<Record<string, string>>): Promise<void> {
-  const profile = await composioGet(credentials, `${API}/profile`);
+  const profile = await gmailGet(credentials, "/profile");
   if (typeof profile.emailAddress !== "string") throw new ProviderRequestError(502, "Google did not confirm Gmail access");
 }

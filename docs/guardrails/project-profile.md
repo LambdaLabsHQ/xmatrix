@@ -50,7 +50,9 @@ Its source is [the project wiki guide](../guide/project-wiki.md).
 
 The Gmail connector preserves ordered inline mixed body segments, excludes
 attachment subtrees, and marks incomplete MIME previews. Native availability
-requires Google to approve the configured client's `gmail.readonly` grant.
+uses Composio's managed client with its approved full-mailbox grant; the Hub
+limits calls to an endpoint list, and `send`/`reply` stay off per Channel
+until a Space admin allows them.
 Its read-only
 Composio path is independent of runtime-provided Gmail plugins; see
 [connector platform](../design/connector-platform.md).

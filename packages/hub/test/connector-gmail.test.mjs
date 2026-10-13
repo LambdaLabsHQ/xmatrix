@@ -48,13 +48,26 @@ test("Connect signs in through Composio as a per-attempt user and stores only th
   }
   await assert.rejects(exchangeOAuthGrant(client, "", "https://hub.test/cb", `${state}x`), /restart Connect/u);
   const manifest = getAppConnectorProvider("gmail");
-  for (const [id, action] of Object.entries(ACTIONS)) assert.deepEqual([action.effect, manifest.actions.find(entry => entry.id === id)?.effect], ["read", "read"], id);
+  assert.deepEqual(manifest.auth.scopes, ["https://mail.google.com/"]);
+  for (const [id, action] of Object.entries(ACTIONS)) {
+    const entry = manifest.actions.find(candidate => candidate.id === id);
+    const write = id === "send" || id === "reply";
+    assert.deepEqual([action.effect, entry?.effect, entry?.defaultPolicy],
+      write ? ["write", "write", "deny"] : ["read", "read", undefined], id);
+  }
 });
 
 test("statements are validated before any request", () => {
   assert.deepEqual(statement("@gmail:search:* from:noreply@example.com newer_than:1h"), { query: "from:noreply@example.com newer_than:1h" });
   assert.deepEqual(statement("@gmail:search:*"), { query: "" });
   assert.deepEqual(statement("@gmail:read:18f2a9c0d1e2b3a4"), { id: "18f2a9c0d1e2b3a4" });
+  assert.deepEqual(statement("@gmail:send:ops@example.com Weekly report\nAll green."),
+    { to: "ops@example.com", subject: "Weekly report", body: "All green." });
+  assert.deepEqual(statement("@gmail:reply:18f2a9c0d1e2b3a4 Thanks,\nreceived."), { id: "18f2a9c0d1e2b3a4", body: "Thanks,\nreceived." });
+  for (const bad of ["@gmail:send:not-an-address Hi", "@gmail:send:a@b.test,c@d.test Hi", "@gmail:send:ops@example.com",
+    "@gmail:reply:18f2a9c0d1e2b3a4", "@gmail:reply:../send hi"]) {
+    assert.equal(typeof statement(bad), "string", bad);
+  }
   for (const bad of ["@gmail:search:inbox", `@gmail:search:* ${"x".repeat(501)}`, "@gmail:read:../profile", "@gmail:read:18f2a9c0d1e2b3a4 extra"]) {
     assert.equal(typeof statement(bad), "string", bad);
   }
@@ -192,4 +205,44 @@ test("forgetting a Gmail grant deletes the Composio account before clearing the 
     ["put", "gmail", { composioAccountId: null }],
     ["put", "gcp", { oauthToken: null, oauthRefreshToken: null, oauthExpiresAt: null }],
   ]);
+});
+
+const decodedRaw = raw => Buffer.from(raw, "base64url").toString("utf8");
+
+test("send posts one plain-text message to messages/send, the only write endpoint", async () => {
+  const sent = await fetched([gmail({ id: "19a0b1c2d3e4f5a6" })],
+    () => ACTIONS.send.execute({ credentials: token }, { to: "ops@example.com", subject: "Bericht für\r\nBcc: x@evil.test", body: "Zeile 1\nZeile 2" }));
+  const call = sent.calls[0];
+  assert.deepEqual([call.body.method, call.body.endpoint, call.body.parameters],
+    ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", undefined]);
+  const raw = decodedRaw(call.body.body.raw);
+  assert.match(raw, /^To: ops@example\.com\r\nSubject: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=\r\nMIME-Version: 1\.0\r\n/u);
+  assert.doesNotMatch(raw, /\r\nBcc:/u);
+  assert.equal(Buffer.from(raw.match(/=\?UTF-8\?B\?([^?]+)\?=/u)[1], "base64").toString(), "Bericht für Bcc: x@evil.test");
+  assert.equal(Buffer.from(raw.split("\r\n\r\n")[1], "base64").toString(), "Zeile 1\r\nZeile 2");
+  assert.equal(sent.result.summary, "Sent Gmail message 19a0b1c2d3e4f5a6 to ops@example.com.");
+});
+
+test("reply answers the sender in the original thread", async () => {
+  const original = gmail({ id: "18f2a9c0d1e2b3a4", threadId: "18f2a9c0d1e2b300", payload: { headers: [
+    { name: "From", value: "Acme <noreply@acme.test>" }, { name: "Reply-To", value: "Support <help@acme.test>" },
+    { name: "Subject", value: "Your ticket" }, { name: "Message-ID", value: "<m1@acme.test>" }, { name: "References", value: "<m0@acme.test>" }] } });
+  const replied = await fetched([original, gmail({ id: "19a0b1c2d3e4f5a7" })],
+    () => ACTIONS.reply.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4", body: "Thanks" }));
+  assert.deepEqual(proxied(replied.calls[0]), { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4",
+    query: "format=metadata&metadataHeaders=From&metadataHeaders=Reply-To&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=References" });
+  const post = replied.calls[1].body;
+  assert.deepEqual([post.method, post.endpoint, post.body.threadId], ["POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", "18f2a9c0d1e2b300"]);
+  assert.match(decodedRaw(post.body.raw), /^To: help@acme\.test\r\nSubject: Re: Your ticket\r\nIn-Reply-To: <m1@acme\.test>\r\nReferences: <m0@acme\.test> <m1@acme\.test>\r\n/u);
+  assert.equal(replied.result.summary, "Replied to Gmail message 18f2a9c0d1e2b3a4 as 19a0b1c2d3e4f5a7, to help@acme.test.");
+  const noAddress = gmail({ payload: { headers: [{ name: "From", value: "Mailer Daemon" }] } });
+  await fetched([noAddress], () => assert.rejects(ACTIONS.reply.execute({ credentials: token }, { id: "18f2a9c0d1e2b3a4", body: "x" }), /no address/u));
+});
+
+test("the Hub calls no Gmail endpoint outside its list, whatever the grant allows", async () => {
+  const source = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/connectors/actions/gmail.ts", import.meta.url), "utf8"));
+  assert.doesNotMatch(source, /composio(Get|Post)\(credentials, `\$\{API\}/u, "every Gmail call goes through gmailPath");
+  assert.equal((source.match(/composioPost\(/gu) ?? []).length, 1, "one write call site");
+  const blocked = await fetched([], () => assert.rejects(ACTIONS.read.execute({ credentials: token }, { id: "../../settings" }), /does not call Gmail GET/u));
+  assert.deepEqual(blocked.calls, []);
 });
