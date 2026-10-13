@@ -10,6 +10,7 @@ import {
 } from "@xmatrix/protocol";
 
 import {
+  decodeMachineDaemonConnectionInput,
   MachineDaemonConnectionController,
   type MachineDaemonConnectionPort,
 } from "../connections/machine-daemon/controller";
@@ -240,6 +241,15 @@ export class MachineDaemonRuntimeTransport {
   }
 
   handleFrame(ws: WebSocket, frame: string | ArrayBuffer): Promise<void> {
+    // Liveness must not wait for Authority I/O: an ordinary ordered operation
+    // may take longer than the daemon's probe timeout. Only authenticated ping
+    // frames bypass ordering; the controller still checks the live session and
+    // records activity. Every control and lifecycle operation stays ordered.
+    const input = decodeMachineDaemonConnectionInput(frame, this.controller.socket.isConnected(ws));
+    if (input.ok && input.message.type === "ping") {
+      this.controller.handleFrame(ws, frame);
+      return Promise.resolve();
+    }
     return this.sockets.ordered.run(ws, () => this.controller.handleFrame(ws, frame));
   }
 
