@@ -36,6 +36,14 @@ do not establish native acceptance.
    confirm this exact advertiser's ID, currency and time zone. A successful
    accessible-account listing or another account does not prove that check.
 
+An External OAuth app left in **Testing** issues these refresh tokens with a
+seven-day lifetime. This can support an explicitly recorded native acceptance
+session, but it is not durable authorization for unattended advertising.
+Production automation needs the app's publishing/verification prerequisites
+completed and fresh consent; even production tokens can later be revoked.
+Expired or revoked credentials fail closed and cannot guarantee a later
+automatic pause. Do not present Testing consent as permanent campaign control.
+
 OAuth uses the existing canonical `CONNECTOR_GOOGLE_CLIENT_ID` and
 `CONNECTOR_GOOGLE_CLIENT_SECRET` and normal company callback. Tokens remain
 managed encrypted credentials. `customerId` and the optional `loginCustomerId`
@@ -200,6 +208,7 @@ acceptance, actual ad serving and any outstanding prerequisites distinct.
 - [Current API access and developer-token retirement](https://developers.google.com/google-ads/api/docs/api-policy/developer-token)
 - [Cloud-project access levels](https://developers.google.com/google-ads/api/docs/api-policy/access-levels)
 - [Google Ads access model](https://developers.google.com/google-ads/api/docs/oauth/access-model)
+- [OAuth refresh-token expiration](https://developers.google.com/identity/protocols/oauth2#expiration)
 - [Atomic bulk mutations](https://developers.google.com/google-ads/api/docs/mutating/overview)
 - [v25 mutation request](https://developers.google.com/google-ads/api/reference/rpc/v25/MutateGoogleAdsRequest)
 - [GAQL](https://developers.google.com/google-ads/api/docs/query/overview)
