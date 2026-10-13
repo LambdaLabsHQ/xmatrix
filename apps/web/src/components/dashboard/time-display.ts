@@ -167,10 +167,3 @@ export function mobileChatTimeLabel(iso: string | undefined): string {
   if (ms >= startOfToday - 6 * 86400000) return dateTimeFormat(undefined, { weekday: "short" }).format(date);
   return dateTimeFormat(undefined, { month: "numeric", day: "numeric" }).format(date);
 }
-
-/** Milliseconds used for trace ordering; absent or invalid timestamps sort at zero. */
-export function timestampMillisOrZero(value: string | undefined): number {
-  if (!value) return 0;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : 0;
-}
