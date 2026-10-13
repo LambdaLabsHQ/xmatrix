@@ -109,12 +109,16 @@ export function ToolList({ title, action, create, createLead, toolbar, children 
  * name does (its padding, 2rem icon and gap), so they read as its children. */
 const IdentityIndent = createContext(false);
 
-export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity, limit, children }: {
+export function ToolListGroup({ title, icon, count, onTitle, titleHint, selected, shownBeside, identity, limit, children }: {
   title: string;
   icon?: ReactNode;
   count?: number;
   onTitle?: () => void;
   titleHint?: string;
+  /** The heading opens the thing its rows belong to, and that is what is open now. */
+  selected?: boolean;
+  /** As on a row: shown on the paper beside the list without being chosen. */
+  shownBeside?: boolean;
   /** The heading is the thing the rows belong to, so its icon and name use the
    * row's scale. A section label (the default) stays small and quiet. */
   identity?: boolean;
@@ -148,6 +152,7 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
       ? "app-list-row gap-2.5 py-2 text-base font-semibold text-foreground"
       : "gap-1.5 py-1.5 text-xs font-bold text-muted-foreground",
     (onTitle || headingToggles) && "w-full hover:text-foreground",
+    onTitle && selected && "app-tool-list-row-selected", onTitle && shownBeside && "app-tool-list-row-beside",
   );
   return (
     <section className="app-tool-list-group mt-2 first:mt-0" aria-label={title}>
@@ -156,7 +161,8 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, identity
           {label}
         </button>
       ) : onTitle ? (
-        <button type="button" onClick={onTitle} title={titleHint} className={titleClass}>
+        <button type="button" onClick={onTitle} title={titleHint} aria-current={selected ? "true" : undefined}
+          className={titleClass}>
           {label}
         </button>
       ) : (
