@@ -38,7 +38,7 @@ test("published policies identify the operator, contact, version, and language",
   assert.match(legalDocumentSource, /contact@madebyrobot\.net/);
   assert.match(legalDocumentSource, /LEGAL_VERSION = "2026-10-12"/);
   assert.match(legalDocumentSource, /LEGAL_EFFECTIVE_DATE = "12 October 2026"/);
-  assert.match(legalDocumentSource, /Version \{LEGAL_VERSION\}/);
+  assert.match(legalDocumentSource, /Version \{version\}/);
   assert.doesNotMatch(legalDocumentSource, /not yet effective|Pre-launch draft|Formal public launch date/);
   assert.doesNotMatch(legalDocumentSource, /August 10, 2026|hello@madebyrobot\.net/);
   assert.match(privacySource, /English is the controlling version/);

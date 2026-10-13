@@ -111,6 +111,14 @@ arbitrary service/URL dispatch are excluded. Actual campaign activation cannot
 be smuggled into `mutate`: use `set_campaign_status`. Validation can check a
 proposed activation, but its provider request always fixes `validateOnly=true`.
 
+Advertising configuration and account reports are used for the connected
+account's visible management features. Do not use Gmail, Drive or other
+connected Google user data to build advertising audiences, target ads or
+produce retargeting/personalized advertising inputs. Connecting Google Ads
+does not authorize that secondary use. The public privacy policy describes
+the Ads features, charges, data handling and continued Google Limited Use
+commitment; each Ads connection obtains its own fresh, contextual consent.
+
 Writes are sent once. A timeout, server failure or incomplete/mismatched receipt
 is an **unconfirmed outcome**, not proof nothing happened. Query the relevant
 resources before another create request; the connector never retries an

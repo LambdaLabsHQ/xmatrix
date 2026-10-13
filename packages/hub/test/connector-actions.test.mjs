@@ -76,9 +76,9 @@ test("action commands take one statement whose text spans the following lines", 
   assert.ok("error" in parsePolicyCommand({ target: "post", text: "maybe" }));
 });
 
-test("policy: every action runs for a Human or an Agent until the Channel denies it", () => {
-  /* The one exception: the full Gmail grant's writes stay off until a Space admin allows them. */
-  const gated = new Set(["gmail:send", "gmail:reply"]);
+test("policy: actions follow their defaults and the Channel's explicit approval or denial", () => {
+  /* Gmail sends and advertising changes need approval until a Space admin allows them. */
+  const gated = new Set(["gmail:send", "gmail:reply", "googleads:mutate", "googleads:set_campaign_status"]);
   for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
     for (const action of provider.actions.filter((candidate) => candidate.effect)) {
       const id = `${provider.id}:${action.id}`;
