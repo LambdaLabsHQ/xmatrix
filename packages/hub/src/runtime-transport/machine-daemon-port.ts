@@ -443,7 +443,7 @@ export class MachineDaemonRuntimeTransport {
       ws.close(CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, "Client upgrade required");
       return;
     }
-    await this.sockets.answerOperation(ws, message.requestId, "Workstation request could not be completed", async () => {
+    await this.sockets.answerOperation(ws, message.requestId, MACHINE_DAEMON_FAILURE_COPY.connect, async () => {
       const authentication = await this.backend.authenticate(message);
       assertMachineBinding(message, authentication);
       const now = new Date().toISOString();
@@ -475,7 +475,7 @@ export class MachineDaemonRuntimeTransport {
 
   private async dispatch(ws: WebSocket, message: ExecutableMachineDaemonMessage): Promise<void> {
     const requestId = "requestId" in message ? message.requestId : undefined;
-    await this.sockets.authenticatedOperation(ws, requestId, "Machine Daemon", "Workstation request could not be completed", async (session) => {
+    await this.sockets.authenticatedOperation(ws, requestId, "Machine Daemon", MACHINE_DAEMON_FAILURE_COPY.report, async (session) => {
       const activationMessage = message.type === "machine_activation_prepare" ||
         message.type === "machine_activation_advance";
       if (session.activationPhase && !activationMessage) {
@@ -524,7 +524,7 @@ export class MachineDaemonRuntimeTransport {
   }
 
   private async refresh(ws: WebSocket, message: Message<"refresh_auth">): Promise<void> {
-    await this.sockets.authenticatedOperation(ws, message.requestId, "Machine Daemon", "Workstation request could not be completed", async (session) => {
+    await this.sockets.authenticatedOperation(ws, message.requestId, "Machine Daemon", MACHINE_DAEMON_FAILURE_COPY.refresh, async (session) => {
       const principal = await this.backend.refresh(message.token, session);
       assertSamePrincipal(session.principal, principal);
       session.principal = { ...principal, hostId: session.principal.hostId, hostName: session.principal.hostName };
@@ -670,6 +670,19 @@ function isWebSocketOpen(ws: WebSocket): boolean {
   const state = (ws as { readyState?: number }).readyState;
   return state === undefined || state === 1;
 }
+
+/**
+ * What a daemon reads when one of its own frames fails for a reason that has no
+ * public copy. Each names the operation that failed: the earlier single line,
+ * "Workstation request could not be completed", read on a daemon as a request
+ * meant for a machine called Workstation. The cause is in the frame's
+ * `failure.code` and `failure.diagnosticId`.
+ */
+export const MACHINE_DAEMON_FAILURE_COPY = {
+  connect: "The Hub could not complete this Machine Daemon connect",
+  report: "The Hub could not complete this Machine Daemon report",
+  refresh: "The Hub could not complete this Machine Daemon credential refresh",
+} as const;
 
 function assertMachineBinding(
   message: MachineDaemonConnectMessage,

@@ -1735,14 +1735,47 @@ fn spawn_unmanaged_daemon(install_path: &Path, hub_url: &str) -> error::Result<(
         .env("XMATRIX_HUB_URL", hub_url)
         .env("XMATRIX_DAEMON_RESTART_WAIT_LOCK", "1")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(unmanaged_daemon_log("daemon.out"))
+        .stderr(unmanaged_daemon_log("daemon.err"));
     use std::os::unix::process::CommandExt;
     command.process_group(0);
     command.spawn().map_err(|err| {
         CliError::Launch(format!("Could not start unmanaged updated daemon: {err}"))
     })?;
     Ok(())
+}
+
+/// An unmanaged daemon's log grows until it is restarted; past this the
+/// previous file is kept once and a new one started.
+#[cfg(not(windows))]
+const UNMANAGED_DAEMON_LOG_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Where a daemon this update starts writes its output: `logs/` in the config
+/// directory. No terminal or service manager captures it, and discarding it
+/// left a daemon that had updated itself with no record of its own outages.
+#[cfg(not(windows))]
+fn unmanaged_daemon_log(name: &str) -> Stdio {
+    let directory = xmatrix_cli_core::config::config_dir().join("logs");
+    open_unmanaged_daemon_log(&directory, name, UNMANAGED_DAEMON_LOG_MAX_BYTES)
+        .map(Stdio::from)
+        .unwrap_or_else(|_| Stdio::null())
+}
+
+#[cfg(not(windows))]
+fn open_unmanaged_daemon_log(
+    directory: &Path,
+    name: &str,
+    max_bytes: u64,
+) -> std::io::Result<std::fs::File> {
+    std::fs::create_dir_all(directory)?;
+    let path = directory.join(name);
+    if std::fs::metadata(&path).is_ok_and(|log| log.len() >= max_bytes) {
+        std::fs::rename(&path, directory.join(format!("{name}.1")))?;
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
 }
 
 #[cfg(not(windows))]
@@ -2562,6 +2595,38 @@ fn observe_update_handoff_child(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(windows))]
+    #[test]
+    fn an_updated_unmanaged_daemon_keeps_writing_to_its_log() {
+        use std::io::Write as _;
+        let directory = std::env::temp_dir().join(format!(
+            "xmatrix-unmanaged-daemon-log-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let logs = directory.join("logs");
+        // Each daemon the update starts appends to the same file.
+        for line in ["first daemon\n", "second daemon\n"] {
+            let mut log = super::open_unmanaged_daemon_log(&logs, "daemon.err", 64).unwrap();
+            log.write_all(line.as_bytes()).unwrap();
+        }
+        let path = logs.join("daemon.err");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "first daemon\nsecond daemon\n"
+        );
+        // At the size bound the file is kept once and a new one started.
+        std::fs::write(&path, vec![b'x'; 64]).unwrap();
+        let mut log = super::open_unmanaged_daemon_log(&logs, "daemon.err", 64).unwrap();
+        log.write_all(b"third daemon\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "third daemon\n");
+        assert_eq!(std::fs::read(logs.join("daemon.err.1")).unwrap().len(), 64);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn staged_windows_probe_is_gated_by_current_publisher() {
         // This cross-platform wiring regression complements native signature

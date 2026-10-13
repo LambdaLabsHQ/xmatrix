@@ -42,6 +42,38 @@ clears the outstanding probe; explicit read/write failures still reconnect
 immediately. These transport budgets do not extend command admission leases or
 change Run authorization.
 
+A Machine Daemon reconnect is a sequence of bounded attempts. Each attempt
+enrolls (name check and credential mint, 20 seconds), dials (15 seconds), writes
+the connect frame (10 seconds) and reads the handshake reply (15 seconds); the
+dial through the handshake also sits under one 45-second bound, so a step added
+later cannot hold the loop. Enrollment runs on a connection of its own: a
+reconnect usually follows a lost network path, and a pooled Hub connection that
+went half-open with it accepts the request and never answers. Pooled Hub
+connections carry TCP keepalive with a probe interval and count, and on Linux a
+30-second `TCP_USER_TIMEOUT`, so a request written onto a dead connection fails
+in about half a minute instead of waiting out the kernel's retransmission
+timeout of about fifteen.
+
+After registration every failed attempt is reported to the daemon host with its
+own reason, including a handshake the Hub never answers and a connect the Hub
+refuses, and a session that follows any such report is announced as restored.
+`daemon-ready.json` therefore shows what the connection is stuck on now; a
+`reconnecting` state with an old reason no longer means anything. The daemon
+host arms a ten-minute deadline when the control connection goes down and
+disarms it when it returns. If the deadline passes, the profile runtime exits
+with an error and the host restarts it in the same process, which rebuilds the
+saved session, brokers and connection actor without a service manager.
+
+Daemon diagnostics start with their UTC time. A daemon that an update starts
+without a service manager appends its output to `logs/daemon.out` and
+`logs/daemon.err` in the configuration directory rather than discarding it.
+
+A Machine Daemon frame that fails without public copy is answered with the
+operation that failed (connect, report or credential refresh), and the daemon
+prints the frame's `failure.code` and `failure.diagnosticId` beside it. The
+word Workstation in older daemon logs is the same fallback and never meant a
+request for another machine.
+
 Unclassified socket failures include their error class and at most four filtered
 function names as the scalar `origin` field. The scalar survives Sentry's console
 argument normalization; an array would become `[Array]` before the event title

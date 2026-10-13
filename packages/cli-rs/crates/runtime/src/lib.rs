@@ -1,5 +1,14 @@
 #![deny(warnings)]
 
+/// Diagnostics this crate prints carry their time once the daemon asks for it
+/// (`xmatrix_cli_core::daemon_log`); the name shadows the standard macro for
+/// everything below.
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        xmatrix_cli_core::daemon_log::eprintln(format_args!($($arg)*))
+    };
+}
+
 // Domain-oriented include sections (same module scope via include!).
 // Self-contained helpers use mod; remaining include! peels still share crate-root scope.
 include!("runtime_process_utf8.rs");

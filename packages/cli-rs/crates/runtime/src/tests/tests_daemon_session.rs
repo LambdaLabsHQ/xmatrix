@@ -2290,3 +2290,22 @@ fn assert_rejected_registration_spawn(value: serde_json::Value) {
         super::DaemonSpawnRequest::from_command(serde_json::from_value(value).unwrap()).unwrap();
     assert!(super::resolve_registration_spawn(&intent, "machine").is_err());
 }
+
+#[tokio::test(start_paused = true)]
+async fn the_offline_deadline_runs_only_while_the_control_connection_is_down() {
+    use super::{CONTROL_OFFLINE_RUNTIME_RESTART, control_offline_deadline};
+    use std::time::Duration;
+
+    // Connected: nothing is armed, however long the daemon runs.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(24 * 60 * 60), control_offline_deadline(None))
+            .await
+            .is_err()
+    );
+    // Down since `lost`: the bound is measured from the first disconnect, not
+    // from each failed attempt that follows it.
+    let lost = tokio::time::Instant::now();
+    tokio::time::advance(Duration::from_secs(4 * 60)).await;
+    control_offline_deadline(Some(lost)).await;
+    assert_eq!(lost.elapsed(), CONTROL_OFFLINE_RUNTIME_RESTART);
+}
