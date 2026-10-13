@@ -209,6 +209,30 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   },
   {
     ...actionConnector({
+      id: "googleads", name: "Google Ads", kind: "observability",
+      description: "Create and manage advertising campaigns, budgets, targeting and creatives; enable or pause campaigns and read spend and conversions for the selected advertiser account.",
+      oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
+        scopes: ["https://www.googleapis.com/auth/adwords"], tokenField: "oauthToken",
+        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+      credentials: [...OAUTH_TOKEN_CREDENTIALS,
+        { id: "customerId", label: "Selected advertiser customer ID", required: true,
+          description: "The ten-digit Google Ads advertiser account this connection may act on, with or without dashes. Every query and mutation is restricted to it." },
+        { id: "loginCustomerId", label: "Manager login customer ID",
+          description: "Optional ten-digit manager ID, only when the consenting Google user accesses the advertiser through that manager. Leave empty for direct access." },
+      ],
+      actions: [
+        readAction("list_accounts", "List accessible accounts", "List at most 100 directly accessible customer IDs. Does not traverse manager accounts or change the selected advertiser.", "*"),
+        readAction("read_account", "Read selected account", "Confirm the selected advertiser, currency and report time zone.", "<customer ID>"),
+        readAction("query", "Query campaigns and performance", "Read campaigns, budgets, creatives, targeting, spend and conversions with a bounded SELECT GAQL query. LIMIT is 1-250 (default 250); dates use the account time zone and Micros are integer millionths of its currency.", "<customer ID> <SELECT GAQL query>"),
+        readAction("validate_mutations", "Validate advertising changes", "Validate 1-25 linked Google Ads configuration operations without changing resources or enabling ads. Uses the selected customer and explicit currency.", '<customer ID> {"currencyCode":"USD","mutateOperations":[…]}'),
+        gatedWriteAction("mutate", "Configure advertising", "Atomically create or update budgets, campaigns, ad groups, creatives, assets and targeting. New campaigns must be PAUSED; no account, payer or access changes, removal or campaign activation. Monetary Micros fields are decimal strings in the explicit account currency. Unconfirmed writes are never automatically retried.", '<customer ID> {"currencyCode":"USD","mutateOperations":[…]}'),
+        gatedWriteAction("set_campaign_status", "Enable or pause campaign", "Enable or pause one campaign. Enabling binds the explicit currency and current non-shared average daily budget. Google can spend above the average on a day; it is not a hard daily spending cap.", '<customer ID>/<campaign ID> {"status":"PAUSED"} or {"status":"ENABLED","currencyCode":"USD","expectedDailyBudgetMicros":"10000000"}'),
+      ],
+    }),
+    auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/adwords"], secretRefs: [] },
+  },
+  {
+    ...actionConnector({
       id: "googlebusinessprofile", name: "Google Business Profile", kind: "observability",
       description: "Read Business Profile accounts, locations, search and Maps performance and reviews, and reply to reviews under the channel's action policy.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
