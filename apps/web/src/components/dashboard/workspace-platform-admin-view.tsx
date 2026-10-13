@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 /**
  * Platform admin overview.
  *
@@ -73,7 +74,7 @@ export function AdminRefresh({ loading, onRefresh, generatedAt }: {
   return (
     <>
       <AdminPaperAction onClick={onRefresh} disabled={loading} title={generatedAt ? `Updated ${generatedAt}` : undefined}>
-        {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+        {loading ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
         Refresh
       </AdminPaperAction>
       {generatedAt && (

@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -46,7 +47,7 @@ export function SpaceJoinClient({ spaceId }: { spaceId: string }) {
           bring them to the right place. Your merged pull requests make you a contributor.
         </p>
         <Button className="w-full" disabled={loading || busy} onClick={() => void join()}>
-          {busy && <Loader2 className="size-4 animate-spin" />} Join
+          {busy && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />} Join
         </Button>
         {error && (
           <p role="alert" className="text-sm text-destructive">

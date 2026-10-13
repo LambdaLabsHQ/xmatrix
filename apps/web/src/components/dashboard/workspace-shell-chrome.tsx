@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useRealtimeChannel } from "./realtime-channels";
 
 import { normalizeChannelSearchText } from "./workspace-shell-search-model";
@@ -855,7 +857,7 @@ export function MobileSpaceSheet({
 }
 
 function SpinningLoader({ className }: { className?: string }) {
-  return <Loader2 className={cn(className, "animate-spin")} />;
+  return <AnimatedIcon icon={Loader2} className={cn(className, "animate-spin")} />;
 }
 
 /**
@@ -899,7 +901,7 @@ export function DesktopUpdateRailButton({
         ? <SpinningLoader className="size-[18px]" />
         : (
           <span className="app-rail-update-window">
-            <ArrowUp className="app-rail-update-arrow size-[18px]" strokeWidth={2.25} />
+            <AnimatedIcon icon={ArrowUp} className="app-rail-update-arrow size-[18px]" strokeWidth={2.25} />
           </span>
         )}
     </LiquidGlassPill>
@@ -1053,7 +1055,7 @@ export function ChannelActionsMenu({
         onClick={() => setOpen((next) => !next)}
         className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
       >
-        {updatingVisibility ? <Loader2 className="size-5 animate-spin" /> : <MoreHorizontal className="size-5" />}
+        {updatingVisibility ? <AnimatedIcon icon={Loader2} className="size-5 animate-spin" /> : <MoreHorizontal className="size-5" />}
       </button>
       {open && typeof document !== "undefined" && pos &&
         createPortal(
@@ -1072,7 +1074,7 @@ export function ChannelActionsMenu({
                 onClick={() => runAction(onMove)}
                 className={itemClassName}
               >
-                {moving ? <Loader2 className="size-4 shrink-0 animate-spin" /> : <MoveRight className="size-4 shrink-0 text-muted-foreground" />}
+                {moving ? <AnimatedIcon icon={Loader2} className="size-4 shrink-0 animate-spin" /> : <MoveRight className="size-4 shrink-0 text-muted-foreground" />}
                 <span>Move to another Space</span>
               </button>
               <button
@@ -1100,7 +1102,7 @@ export function ChannelActionsMenu({
                     className={cn(itemClassName, channel.mode === "open" && "bg-muted")}
                   >
                     {updatingVisibility && channel.mode === "open" ? (
-                      <Loader2 className="size-4 shrink-0 animate-spin" />
+                      <AnimatedIcon icon={Loader2} className="size-4 shrink-0 animate-spin" />
                     ) : (
                       <Hash className="size-4 shrink-0 text-muted-foreground" />
                     )}
@@ -1116,7 +1118,7 @@ export function ChannelActionsMenu({
                     className={cn(itemClassName, channel.mode === "closed" && "bg-muted")}
                   >
                     {updatingVisibility && channel.mode === "closed" ? (
-                      <Loader2 className="size-4 shrink-0 animate-spin" />
+                      <AnimatedIcon icon={Loader2} className="size-4 shrink-0 animate-spin" />
                     ) : (
                       <Lock className="size-4 shrink-0 text-muted-foreground" />
                     )}
@@ -1235,7 +1237,7 @@ export function ChannelMoveDialog({
             disabled={busy || !targetSpaceId}
             className="flex h-9 items-center gap-2 rounded bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <MoveRight className="size-4" />}
+            {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <MoveRight className="size-4" />}
             {targetSpaceId !== channel.spaceId ? "Create transfer proposal" : "Move"}
           </button>
         </div>
@@ -1341,7 +1343,7 @@ export function ChannelHeader({
               disabled={renaming || draftName.trim().length === 0}
               className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
             >
-              {renaming ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+              {renaming ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
             </button>
           </form>
         ) : (
@@ -1374,7 +1376,7 @@ export function ChannelHeader({
                 disabled={renaming || moving}
                 className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:opacity-0 md:group-hover:opacity-100"
               >
-                {renaming ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
+                {renaming ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Pencil className="size-4" />}
               </button>
             )}
           </div>

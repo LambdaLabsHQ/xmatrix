@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import Link from "next/link";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { AppleSpaceBillingSection } from "./settings-apple-billing";
@@ -158,7 +159,7 @@ function StripeSpaceBillingSection({ userId, space }: {
       )}
       {returned.spaceNotice === "cancelled" && <p className={noticeClass("settled")}>Checkout was cancelled; nothing was changed.</p>}
       {!billing ? (
-        !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Loading plan…</div>
+        !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><AnimatedIcon icon={Loader2} className="size-4 animate-spin" />Loading plan…</div>
       ) : billing.plan === "pro" ? (
         <>
           <PlanCard
@@ -177,11 +178,11 @@ function StripeSpaceBillingSection({ userId, space }: {
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {subscription?.billingProvider === "apple" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://apps.apple.com/account/subscriptions">Manage in App Store</a> : <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("portal")}>
-                {busy === "portal" ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
+                {busy === "portal" ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
                 Manage subscription
               </button>}
               <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run(subscription?.billingProvider === "apple" ? "apple-reconcile" : "reconcile")}>
-                <RefreshCw className={cn("size-4", busy === "reconcile" && "animate-spin")} />
+                <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy === "reconcile" && "animate-spin")} />
                 Refresh from {subscription?.billingProvider === "apple" ? "App Store" : "Stripe"}
               </button>
             </div>
@@ -222,7 +223,7 @@ function StripeSpaceBillingSection({ userId, space }: {
                 </div>
                 <button type="button" className={actionClass({ variant: "primary", size: "lg" }, "w-full")} disabled={busy !== null}
                   onClick={() => void run("checkout", { interval, seatQuantity: seats })}>
-                  {busy === "checkout" && <Loader2 className="size-4 animate-spin" />}
+                  {busy === "checkout" && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />}
                   Upgrade to Pro for ${price * seats} a {interval === "year" ? "year" : "month"}
                 </button>
                 <p className="text-xs text-muted-foreground">

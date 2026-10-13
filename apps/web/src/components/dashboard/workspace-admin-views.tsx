@@ -1,4 +1,6 @@
 "use client";
+
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { PrivateSignInEmail } from "./private-sign-in-email";
 
 import { actionClass } from "@/components/ui/action-tone";
@@ -271,7 +273,7 @@ function DesktopUpdateAction({
     const version = status.version ? ` ${status.version}` : "";
     return (
       <button type="button" onClick={onInstall} disabled={installing} className={className}>
-        {installing ? <Loader2 className="size-4 animate-spin" /> : <CircleArrowUp className="size-4" />}
+        {installing ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <CircleArrowUp className="size-4" />}
         {installing
           ? "Restarting"
           : status.state === "available"
@@ -283,7 +285,7 @@ function DesktopUpdateAction({
   const busy = checking || status.state === "checking" || status.state === "downloading";
   return (
     <button type="button" onClick={onCheck} disabled={busy} className={className}>
-      <RefreshCw className={cn("size-4", busy && "animate-spin")} />
+      <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy && "animate-spin")} />
       Check for updates
     </button>
   );
@@ -584,7 +586,7 @@ export function SettingsView({
               disabled={!token || secretCatalogLoading}
               className={actionClass({ variant: "quiet" })}
             >
-              <RefreshCw className={cn("size-4", secretCatalogLoading && "animate-spin")} />
+              <AnimatedIcon icon={RefreshCw} className={cn("size-4", secretCatalogLoading && "animate-spin")} />
               Refresh
             </button>
           </div>
@@ -670,7 +672,7 @@ export function SettingsView({
                   disabled={secretSaving}
                   className={actionClass({ variant: "primary" })}
                 >
-                  {secretSaving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+                  {secretSaving ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
                   Save secret
                 </button>
               </div>
@@ -710,7 +712,7 @@ export function SettingsView({
                           className={actionClass({ variant: "danger", size: "sm" })}
                         >
                           {deletingSecretRef === entry.secretRef ? (
-                            <Loader2 className="size-3.5 animate-spin" />
+                            <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
                           ) : (
                             <Trash2 className="size-3.5" />
                           )}
@@ -827,7 +829,7 @@ export function SettingsView({
                   disabled={!desktopAvailable || daemonBusy}
                   className={actionClass({ variant: "secondary" })}
                 >
-                  <RefreshCw className={cn("size-4", daemonBusy && "animate-spin")} />
+                  <AnimatedIcon icon={RefreshCw} className={cn("size-4", daemonBusy && "animate-spin")} />
                   Restart
                 </button>
               </>}
@@ -1159,7 +1161,7 @@ export function TeamView({
                     title={title}
                     description={`${open ? `Any member may ${verb}` : `Only owners and admins ${verb}`}. Existing ones keep working.`}
                     control={<>
-                      {permissionBusy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+                      {permissionBusy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin text-muted-foreground" /> : null}
                       <Switch
                         label={label}
                         checked={open}
@@ -1204,7 +1206,7 @@ export function TeamView({
                     disabled={invitingSpaceId === space.id}
                     className={actionClass({ variant: "primary", size: "md" }, "shrink-0")}
                   >
-                    {invitingSpaceId === space.id ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                    {invitingSpaceId === space.id ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Send className="size-4" />}
                     Invite
                   </button>
                 </form>
@@ -1279,7 +1281,7 @@ export function TeamView({
                             className={actionClass({ variant: "quiet", size: "icon" }, "shrink-0")}
                           >
                             {memberActionKey === removeActionKey ? (
-                              <Loader2 className="size-4 animate-spin" />
+                              <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />
                             ) : (
                               <Trash2 className="size-4" />
                             )}
@@ -1350,7 +1352,7 @@ export function TeamView({
                       onClick={() => void submitInviteCode(space)}
                       className={actionClass({ variant: "secondary", size: "md" })}
                     >
-                      {creatingCodeSpaceId === space.id ? <Loader2 className="size-3.5 animate-spin" /> : <LinkIcon className="size-3.5" />}
+                      {creatingCodeSpaceId === space.id ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <LinkIcon className="size-3.5" />}
                       Create link
                     </button>
                   }
@@ -2215,9 +2217,9 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
     if (rankMayChange) compareChannelsForSidebar(channel, channel);
     const rankChanged = rankMayChange && (!previous || compareChannelsForSidebar(previous, channel) !== 0);
     const before = indexed && previous ? routes(previous) : undefined;
-    const after = indexed ? routes(channel) : undefined;
+    const after = routes(channel);
     if (before) route(channel.id, before, false);
-    if (after) route(channel.id, after, true);
+    if (indexed) route(channel.id, after, true);
     // Presence leaves the sidebar rank alone. A new or renamed/reordered
     // snapshot gets the same comparator as replaceChannel, once at publication.
     if (rankChanged) needsSort = true;
@@ -2238,7 +2240,14 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
     applyPresence(agents: readonly SerializedAgent[]) {
       if (!agents.length) return;
       if (!indexed) {
-        for (const channel of byId.values()) route(channel.id, routes(channel), true);
+        for (const channel of byId.values()) {
+          try {
+            route(channel.id, routes(channel), true);
+          } catch {
+            // A malformed resident from an earlier hydration cannot block
+            // reports for unrelated, valid Channels.
+          }
+        }
         indexed = true;
       }
       const positions = new Map<string, Set<number>>();

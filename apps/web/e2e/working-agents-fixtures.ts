@@ -25,9 +25,11 @@ export function channelHistory(count: number, idPrefix: string, body: (row: numb
   }));
 }
 
-/** A Space of `count` conversations, each with one busy Agent; conversation 0 is #general. */
-export function workingAgentsSpace(count: number, prefix: string) {
-  const channelId = (index: number) => (index ? `channel-${prefix}-${index}` : E2E_CHANNEL.id);
+/** A Space of busy Agents; optionally share #general among several working Instances. */
+export function workingAgentsSpace(count: number, prefix: string, options: { focusedInstances?: number; intent?: string } = {}) {
+  const focused = Math.max(1, Math.min(count, options.focusedInstances ?? 1));
+  const activities = new Map<number, string>();
+  const channelId = (index: number) => (index >= focused ? `channel-${prefix}-${index}` : E2E_CHANNEL.id);
   const instance = (index: number, activity: string) => ({
     id: `instance-${prefix}-${index}`,
     channelInstanceId: "1",
@@ -37,6 +39,7 @@ export function workingAgentsSpace(count: number, prefix: string) {
     lastSeenAt: E2E_NOW,
     status: "busy",
     activity,
+    ...(index < focused && options.intent ? { intent: options.intent } : {}),
   });
   const agents = Array.from({ length: count }, (_, index) => ({
     id: `agent:${prefix}-${index}`,
@@ -55,23 +58,30 @@ export function workingAgentsSpace(count: number, prefix: string) {
   const channel = (index: number, activity: string) => ({
     ...E2E_CHANNEL,
     id: channelId(index),
-    name: index ? `${prefix}-${index}` : E2E_CHANNEL.name,
+    name: index >= focused ? `${prefix}-${index}` : E2E_CHANNEL.name,
     messageCount: 40,
     historyHeadSequence: 40,
     lastMessageSequence: 40,
-    updatedAt: new Date(Date.parse(E2E_NOW) - index * 60_000).toISOString(),
-    memberPresence: {
-      [agents[index].id]: {
-        kind: "agent", status: "busy", label: agents[index].name, activity, instances: [instance(index, activity)],
-      },
-    },
+    updatedAt: new Date(Date.parse(E2E_NOW) - (index >= focused ? index : 0) * 60_000).toISOString(),
+    memberPresence: Object.fromEntries((index < focused ? agents.slice(0, focused).map((_, slot) => slot) : [index])
+      .map(slot => {
+        const currentActivity = slot === index ? activity : activities.get(slot) ?? "Working";
+        return [agents[slot].id, {
+          kind: "agent", status: "busy", label: agents[slot].name, activity: currentActivity,
+          instances: [instance(slot, currentActivity)],
+        }];
+      })),
   });
   /** What the Hub sends for one status report: the Agent card and the whole Channel. */
-  const report = (index: number, activity: string) => [
-    { type: "enhanced_presence", agent: { ...agents[index], activity, instances: [instance(index, activity)] } },
-    { type: "channel_updated", channel: channel(index, activity) },
-  ];
-  return { channelId, agents, channels: agents.map((_, index) => channel(index, "Working")), report };
+  const report = (index: number, activity: string) => {
+    activities.set(index, activity);
+    return [
+      { type: "enhanced_presence", agent: { ...agents[index], activity, instances: [instance(index, activity)] } },
+      { type: "channel_updated", channel: channel(index, activity) },
+    ];
+  };
+  return { channelId, agents, channels: agents.flatMap((_, index) =>
+    index === 0 || index >= focused ? [channel(index, "Working")] : []), report };
 }
 
 /**
@@ -83,10 +93,11 @@ export async function openWorkingAgentsSpace(
   space: ReturnType<typeof workingAgentsSpace>,
   messages: unknown[],
   lastRowText: string,
+  options: { routeSocket?: typeof routeHumanSocket } = {},
 ): Promise<((frame: unknown) => void) & { connections(): number }> {
   let send: ((frame: unknown) => void) | null = null;
   let connections = 0;
-  await routeHumanSocket(page, (frame, reply) => {
+  await (options.routeSocket ?? routeHumanSocket)(page, (frame, reply) => {
     if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
     if (frame.type === "human_connect") {
       connections += 1;
@@ -113,6 +124,7 @@ export async function openWorkingAgentsSpace(
   });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".app-message-timeline").getByText(lastRowText)).toBeVisible({ timeout: 60_000 });
+  await expect.poll(() => send !== null, { message: "the Human socket connects before measuring", timeout: 10_000 }).toBe(true);
   if (!send) throw new Error("the Human socket never connected");
   return Object.assign(send, { connections: () => connections });
 }

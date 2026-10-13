@@ -1,13 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const fs = require("node:fs");
-const path = require("node:path");
 const { loadWorkspaceShellModuleMap, loadShellFunctions } = require("./workspace-shell-source-fixture.cjs");
 
-const shellModules = loadWorkspaceShellModuleMap(__dirname);
-for (const file of ["channel-viewer-state.ts", "channel-links.ts"]) {
-  shellModules.set(file, fs.readFileSync(path.join(__dirname, file), "utf8"));
-}
+const shellModules = loadWorkspaceShellModuleMap(__dirname, ["channel-viewer-state.ts", "channel-links.ts"]);
 
 const PRESENCE_FUNCTIONS = [
   "timestampMs",
@@ -173,10 +168,11 @@ test("one Run's presentation cannot change sibling Channels of the same Agent", 
   assert.equal(patchChannelAgentPresenceFromAgent(updated, other), updated, "the same quota is a no-op");
 });
 
-for (const sameAgent of [false, true]) test(`a thousand reports route once (${sameAgent ? "one Agent" : "independent Agents"})`, () => {
+function countedChannelSpace(sameAgent = false) {
   let reads = 0;
   const channels = Array.from({ length: 1000 }, (_, index) => ({
     id: `channel-${index}`,
+    name: `conversation-${index}`,
     get memberPresence() {
       reads += 1;
       return { [`agent:${sameAgent ? 0 : index}`]: { kind: "agent", instances: [{
@@ -184,6 +180,12 @@ for (const sameAgent of [false, true]) test(`a thousand reports route once (${sa
       }] } };
     },
   }));
+  return { channels, reads: () => reads };
+}
+
+for (const sameAgent of [false, true]) test(`a thousand reports route once (${sameAgent ? "one Agent" : "independent Agents"})`, () => {
+  const counted = countedChannelSpace(sameAgent);
+  const { channels } = counted;
   const reports = channels.map((channel, index) => ({
     ...heartbeatAgent(), id: `agent:${sameAgent ? 0 : index}`,
     usage: { quotaSource: "provider_api", quotaObservedAt: "2026-09-19T12:01:00.000Z",
@@ -192,24 +194,15 @@ for (const sameAgent of [false, true]) test(`a thousand reports route once (${sa
     }],
   }));
   const updated = patchChannelsAgentPresenceBatch(channels, reports);
-  assert.ok(reads < 20_000, `unrelated Channels were inspected ${reads} times`);
+  assert.ok(counted.reads() < 20_000, `unrelated Channels were inspected ${counted.reads()} times`);
   updated.forEach((channel, index) => assert.equal(
     channel.memberPresence[`agent:${sameAgent ? 0 : index}`].instances[0].activity, "New activity"));
 });
 
 
 test("alternating cards and snapshots reuse routing without revisiting unrelated Channels", () => {
-  let reads = 0;
-  const channels = Array.from({ length: 1000 }, (_, index) => ({
-    id: `channel-${index}`,
-    name: `conversation-${index}`,
-    get memberPresence() {
-      reads += 1;
-      return { [`agent:${index}`]: { kind: "agent", instances: [{
-        ...workingInstance(), id: `instance-${index}`, channelId: `channel-${index}`,
-      }] } };
-    },
-  }));
+  const counted = countedChannelSpace();
+  const { channels } = counted;
   const batch = createChannelPresenceBatch(channels);
   for (let index = 0; index < 100; index += 1) {
     const instance = { ...workingInstance(), id: `instance-${index}`, channelId: `channel-${index}`,
@@ -220,7 +213,7 @@ test("alternating cards and snapshots reuse routing without revisiting unrelated
     } });
   }
   const updated = batch.getSnapshot();
-  assert.ok(reads < 5_000, `the alternating stream inspected unrelated presence ${reads} times`);
+  assert.ok(counted.reads() < 5_000, `the alternating stream inspected unrelated presence ${counted.reads()} times`);
   for (let index = 0; index < 100; index += 1) {
     assert.equal(updated[index].memberPresence[`agent:${index}`].instances[0].activity, `Step ${index}`);
   }
@@ -316,4 +309,22 @@ test("a rejected snapshot cannot leak through the later flush or damage the next
   batch.applyPresence([{ ...heartbeatAgent(), id: "another-principal", instances: [report] }]);
   assert.equal(batch.getSnapshot()[0].memberPresence["agent:claude"].instances[0].activity,
     "Good after rejected snapshots", "a rejected snapshot cannot poison global Instance routing");
+});
+
+
+test("malformed snapshots are rejected before indexing and cannot poison later batches", () => {
+  const channel = channelsWithAgentPresence()[0];
+  const malformed = { id: "malformed-channel", name: "Malformed", memberPresence: {
+    malformed: { kind: "agent", instances: {} },
+  } };
+  const first = createChannelPresenceBatch([channel]);
+  assert.throws(() => first.applyChannel(malformed), /Invalid realtime Instance collection/);
+  assert.deepEqual(first.getSnapshot(), [channel]);
+  const later = createChannelPresenceBatch(first.getSnapshot());
+  const report = { ...workingInstance(), activity: "Next batch still works" };
+  later.applyPresence([{ ...heartbeatAgent(), instances: [report] }]);
+  assert.equal(later.getSnapshot()[0].memberPresence["agent:claude"].instances[0].activity, report.activity);
+  const legacy = createChannelPresenceBatch([malformed, channel]);
+  legacy.applyPresence([{ ...heartbeatAgent(), instances: [report] }]);
+  assert.equal(legacy.getSnapshot()[1].memberPresence["agent:claude"].instances[0].activity, report.activity);
 });

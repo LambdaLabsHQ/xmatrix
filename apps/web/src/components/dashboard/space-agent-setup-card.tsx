@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { actionClass } from "@/components/ui/action-tone";
 import { agentPresetAvatarUrl } from "@xmatrix/protocol";
@@ -76,7 +77,7 @@ export function SpaceAgentSetupCard({
     <InstalledHarnessSwitchList fleet={fleet} />
     <button type="button" disabled={!fleet.ready || Boolean(fleet.pending) || fleet.enablingAll}
       onClick={onBringAll} className={actionClass({ variant: "primary", size: "md" }, "mt-4")}>
-      {fleet.enablingAll ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+      {fleet.enablingAll ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <Check className="size-4" />}
       {fleet.enablingAll ? "Enabling…" : "Bring them in"}
     </button>
     <button type="button" onClick={onManageMachines} className={actionClass({ variant: "secondary", size: "md" }, "mt-4 ml-2")}>Manage machines</button>
@@ -334,7 +335,7 @@ function ConnectStepLine({ step, busy, centered, onApprove, onDecline }: {
   onApprove: (userCode: string) => void; onDecline: () => void;
 }) {
   const row = cn("flex min-w-0 flex-wrap items-center gap-2 text-sm", centered && "justify-center");
-  const waiting = <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />;
+  const waiting = <AnimatedIcon icon={Loader2} className="size-4 shrink-0 animate-spin text-muted-foreground" />;
   const done = <Check className="size-4 shrink-0 text-primary" />;
   switch (step.kind) {
     case "waiting":

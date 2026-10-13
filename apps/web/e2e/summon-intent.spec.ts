@@ -190,4 +190,11 @@ test("declined options anchor to the exact mobile mention and Start anyway chang
   await page.screenshot({ path: "test-results/summon-intent-composer-options-mobile.png" });
   await options.getByRole("button", { name: "Start anyway" }).click();
   await expect(input).toHaveValue("@claude fix it; @claude launch:force was the heading");
+  await expect(trigger).toHaveCount(0);
+  await input.fill("A plain sentence without an address");
+  await expect(trigger).toHaveCount(0);
+  // Positioning starts again when an applicable declined address returns.
+  await input.fill(body);
+  await expect(trigger).toHaveCount(1);
+  await expect(trigger).toHaveAttribute("data-start", String(start));
 });

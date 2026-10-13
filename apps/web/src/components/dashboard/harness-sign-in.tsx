@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, ExternalLink, Loader2, LogIn } from "lucide-react";
@@ -137,7 +138,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
           {!prompt && (
             <Button size="sm" variant="outline" disabled={busy || Boolean(view.blocker)}
               onClick={() => queue.mutate({ step: "start" })}>
-              {starting ? <Loader2 className="animate-spin" /> : <LogIn />}
+              {starting ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <LogIn />}
               {starting ? "Starting sign-in…" : view.state === "signed_in" ? "Sign in again" : "Sign in"}
             </Button>
           )}
@@ -173,13 +174,13 @@ export function HarnessSignInSection({ registration, token, userId }: {
                 <Input value={code} onChange={(event) => setCode(event.target.value)} placeholder="Paste the code"
                   aria-label="Sign-in code" autoComplete="off" spellCheck={false} disabled={busy} />
                 <Button size="sm" type="submit" disabled={busy || !code.trim()}>
-                  {busy ? <Loader2 className="animate-spin" /> : null}Finish
+                  {busy ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}Finish
                 </Button>
               </form>
             )}
             <div className="flex items-center justify-between gap-2">
               {waitingForDevice && <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2 className="size-3 animate-spin" />Waiting for you to finish in the browser…
+                <AnimatedIcon icon={Loader2} className="size-3 animate-spin" />Waiting for you to finish in the browser…
               </p>}
               <Button size="sm" variant="ghost" className="ml-auto"
                 disabled={queue.isPending || operation?.step === "cancel"}

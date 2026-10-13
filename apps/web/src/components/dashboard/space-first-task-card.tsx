@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
 import { useState } from "react";
 import { ArrowUp, Check, FolderPlus, Loader2, Sparkles } from "lucide-react";
@@ -76,7 +77,7 @@ export function SpaceFirstTaskCard({
           onClick={onChooseWorkspace}
           className={actionClass({ variant: "secondary", size: "md" }, "mt-3")}
         >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <FolderPlus className="size-4" />}
+          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <FolderPlus className="size-4" />}
           {workspace ? "Choose a different folder" : "Choose or create a folder"}
         </button>
         <p className="mt-3 text-xs text-muted-foreground">
@@ -99,7 +100,7 @@ export function SpaceFirstTaskCard({
           onClick={() => onLaunch(message)}
           className={actionClass({ variant: "primary", size: "md" }, "shrink-0")}
         >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : workspace ? <ArrowUp className="size-4" strokeWidth={2.5} /> : <Check className="size-4" />}
+          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : workspace ? <ArrowUp className="size-4" strokeWidth={2.5} /> : <Check className="size-4" />}
           Start
         </button>
       </div>

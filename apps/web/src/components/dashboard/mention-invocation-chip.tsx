@@ -1,5 +1,7 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
@@ -245,7 +247,7 @@ export function MentionIntentDeclinedChip({ rejection, category, labelContent, o
     </div>}
     {onLaunchAnyway && <button type="button" className="app-intent-launch" data-state={launching}
       disabled={launching === "launching" || launching === "sent"} onClick={() => void launch()}>
-      <Zap aria-hidden="true" size={14} />
+      <AnimatedIcon icon={Zap} aria-hidden="true" size={14} />
       {launching === "launching" ? "Starting…" : launching === "sent" ? "Launch requested" : "Launch anyway"}
     </button>}
     {launching === "failed" && <p role="alert" className="app-invocation-action-error">The launch was not accepted. Refresh the message and try again.</p>}
@@ -385,7 +387,7 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
           already, so the `→ @target` summary lives only in the popover title. */}
       {variant === "handoff" ? labelContent : <span className="app-mention-chip-label">{labelContent ?? <>@{label}</>}</span>}
       {variant !== "handoff" && <span className="app-mention-invocation-status" contentEditable={false}>
-        <span aria-hidden="true">·</span><Icon aria-hidden="true" className={view.animate ? "app-invocation-spinner" : undefined} />
+        <span aria-hidden="true">·</span><AnimatedIcon icon={Icon} aria-hidden="true" className={view.animate ? "size-[.9em] app-invocation-spinner" : "size-[.9em]"} />
         {liveStage
           ? <span className="app-mention-invocation-step" data-state={liveStage.state}>{statusText}</span>
           : <span>{view.label}</span>}

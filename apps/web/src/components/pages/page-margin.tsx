@@ -1,5 +1,7 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
+
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Maximize2, Sparkles, X } from "lucide-react";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
@@ -36,7 +38,7 @@ function WorkingLine({ agents, className }: { agents: MarginConversation["agents
   if (shown.length === 0) return null;
   return (
     <span className={cn("page-margin-working flex items-center gap-1.5 text-[12px] text-muted-foreground", className)}>
-      <Sparkles className={cn("size-3 shrink-0", working.length > 0 && "animate-pulse text-primary")} />
+      <AnimatedIcon icon={Sparkles} className={cn("size-3 shrink-0", working.length > 0 && "animate-pulse text-primary")} />
       <span className="truncate">
         {shown.map((agent) => agent.name).join(", ")} · {agentState(shown[0]!.status)}
       </span>

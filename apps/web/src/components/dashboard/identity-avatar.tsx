@@ -4,6 +4,7 @@ import { type MouseEvent } from "react";
 import { AlertTriangle, Boxes, Bot, Moon, Server, UserRound } from "lucide-react";
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { useAnimationVisibility } from "@/components/ui/animation-visibility";
 import { cn } from "@/lib/utils";
 
 type IdentityKind = "agent" | "app" | "human" | "machine" | "system";
@@ -91,12 +92,14 @@ export function IdentityAvatar({
   const imageSrc = avatarImageSrc(imageUrl);
   const tone = avatarTone(label);
   const rest = identityRestStatus(status);
+  const animationRef = useAnimationVisibility(status === "busy" || rest === "waking");
   const imageFallback = initials
     ? initials
     : <Icon className={iconSizeClasses[size]} />;
 
   return (
     <AvatarRoot
+      ref={animationRef}
       type={onClick ? "button" : undefined}
       onClick={onClick}
       onContextMenu={(event) => event.preventDefault()}

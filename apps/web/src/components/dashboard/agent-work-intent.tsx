@@ -120,13 +120,13 @@ export function AgentWorkIntent({
             <span className="app-agent-work-intent-caption">Waiting</span>
             <span className="app-agent-work-intent-main">
               <subject.icon className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">{subject.word}</span>
+              <IntentInk text={subject.word} />
             </span>
           </>
         ) : (
           <>
             {busy && <span className="app-agent-work-intent-caption">Working on</span>}
-            <span className="app-agent-work-intent-main"><span className="truncate">{intent}</span></span>
+            <span className="app-agent-work-intent-main"><IntentInk text={intent} /></span>
           </>
         )}
       </span>
@@ -138,6 +138,17 @@ export function AgentWorkIntent({
       )}
     </span>
   );
+}
+
+/** The ink stays in place while a feathered window carries the highlight.
+ * Its duplicate is a hidden paint layer, never a second accessible label. */
+function IntentInk({ text }: { text: string | undefined }) {
+  return <span className="app-agent-work-intent-ink truncate">
+    <span className="app-agent-work-intent-ink-base">{text}</span>
+    <span className="app-agent-work-intent-ink-window" aria-hidden="true">
+      <span className="app-agent-work-intent-ink-shine" data-ink={text} />
+    </span>
+  </span>;
 }
 
 /**
@@ -196,11 +207,13 @@ function TimerRing({ fraction }: { fraction: number }) {
   // Arc length is the elapsed share of the attention threshold. The ring
   // itself turns (CSS); reduced motion leaves the arc parked at 12 o'clock.
   return (
-    <svg className="app-agent-work-intent-ring" viewBox="0 0 18 18" aria-hidden="true">
-      <circle cx="9" cy="9" r={TIMER_RADIUS} />
-      <circle cx="9" cy="9" r={TIMER_RADIUS} transform="rotate(-90 9 9)"
-        strokeDasharray={`${fraction * TIMER_CIRCUMFERENCE} ${TIMER_CIRCUMFERENCE}`} />
-    </svg>
+    <span className="app-agent-work-intent-ring" aria-hidden="true">
+      <svg className="app-agent-work-intent-ring-face" viewBox="0 0 18 18">
+        <circle cx="9" cy="9" r={TIMER_RADIUS} />
+        <circle cx="9" cy="9" r={TIMER_RADIUS} transform="rotate(-90 9 9)"
+          strokeDasharray={`${fraction * TIMER_CIRCUMFERENCE} ${TIMER_CIRCUMFERENCE}`} />
+      </svg>
+    </span>
   );
 }
 

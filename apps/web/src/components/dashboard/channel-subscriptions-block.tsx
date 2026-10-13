@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 /* The channel rail's Subscriptions block: what outside events this channel
  * receives. Each row is a source — a repository and the events it delivers —
  * not a provider. Whether the Space is connected to the provider at all is the
@@ -573,7 +574,7 @@ export function ChannelSubscriptionsBlock({
 
         {pending ? (
           <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Loader2 className="size-3 animate-spin" />
+            <AnimatedIcon icon={Loader2} className="size-3 animate-spin" />
             Sent to this channel. GitHub confirms here when it lands.
           </p>
         ) : null}

@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Eye, Loader2, X } from "lucide-react";
@@ -167,7 +168,7 @@ export function CrossSpaceReadCard({ request, token, userId }: {
       status={!isOwner ? { tone: "secondary", label: "Owner decides" }
         : grant && status !== "pending" && { tone: status === "approved" ? "settled" : "alert", label: STATUS_COPY[status] }}
     >
-      {isOwner && grantQuery.isLoading && <Loader2 className="mt-2 size-3.5 animate-spin text-muted-foreground" />}
+      {isOwner && grantQuery.isLoading && <AnimatedIcon icon={Loader2} className="mt-2 flex size-3.5 animate-spin text-muted-foreground" />}
       <AskError error={error} loadError={grantQuery.error} action="Couldn't load this access request"
         onRetry={() => void grantQuery.refetch()} />
       {isOwner && grant?.status === "pending" && (
@@ -178,7 +179,7 @@ export function CrossSpaceReadCard({ request, token, userId }: {
             onClick={() => void decide("approve")}
             className={actionClass({ variant: "primary", size: "sm" })}
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
             Approve
           </button>
           <button
@@ -206,7 +207,7 @@ export function CrossSpaceReadCard({ request, token, userId }: {
             onClick={() => void decide("revoke")}
             className={actionClass({ variant: "secondary", size: "sm" })}
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+            {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
             Revoke now
           </button>
         </div>

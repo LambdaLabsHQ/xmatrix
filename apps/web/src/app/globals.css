@@ -2351,6 +2351,15 @@
   scroll-padding-inline: 0.75rem;
 }
 
+/* Off-strip islands have no composited paint layer. Their CSS timelines
+   must rest too, rather than waking the main thread for invisible work.
+   Transitions and overflowing hover controls keep their existing geometry. */
+.xmatrix-app .app-agent-work-item[data-work-visible="false"] *,
+.xmatrix-app .app-agent-work-item[data-work-visible="false"] *::before,
+.xmatrix-app .app-agent-work-item[data-work-visible="false"] *::after {
+  animation-play-state: paused !important;
+}
+
 @media (max-width: 767px) {
   .xmatrix-app .app-agent-work-dock {
     padding-top: 0.5rem !important;
@@ -3095,27 +3104,51 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   white-space: nowrap;
 }
 
-/* While the work is live its words carry a highlight that sweeps left to
-   right, like Codex's thinking line: the ink is the band's dim side and the
-   band is the full ink. A stale line drops it for the steady attention ink.
-   Repeated classes outrank the app-wide `background-image: none` reset. */
-.xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-main > .truncate.truncate.truncate.truncate.truncate {
-  --app-shimmer-dim: color-mix(in oklch, currentColor 52%, transparent);
-  -webkit-text-fill-color: transparent;
-  background-image: linear-gradient(90deg,
-    var(--app-shimmer-dim) 0% 40%,
-    currentColor 50%,
-    var(--app-shimmer-dim) 60% 100%) !important;
-  background-size: 300% 100%;
-  background-repeat: no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
+/* The same thinking-line sweep, with static glyph textures. The feathered
+   window moves across the dim base; its full-width ink moves oppositely, so
+   the words stay put. Animating a text-clipped background repainted the
+   glass behind every live island on every frame. */
+.xmatrix-app .app-agent-work-intent-ink { position: relative; }
+
+.xmatrix-app .app-agent-work-intent-ink-base,
+.xmatrix-app .app-agent-work-intent-ink-shine {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xmatrix-app .app-agent-work-intent-ink-shine::before { content: attr(data-ink); }
+.xmatrix-app .app-agent-work-intent-ink-window { display: none; }
+
+.xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-base { opacity: 0.52; }
+
+.xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-window {
+  position: absolute;
+  display: block;
+  top: 0;
+  bottom: 0;
+  left: -80%;
+  width: 60%;
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent, black 50%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 50%, transparent);
   animation: app-agent-work-intent-shimmer 2.2s linear infinite;
 }
 
+.xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-shine {
+  width: 166.666667%;
+  animation: app-agent-work-intent-ink-still 2.2s linear infinite;
+}
+
 @keyframes app-agent-work-intent-shimmer {
-  from { background-position: 100% 0; }
-  to { background-position: 0% 0; }
+  from { transform: translateX(0); }
+  to { transform: translateX(333.333333%); }
+}
+
+@keyframes app-agent-work-intent-ink-still {
+  from { transform: translateX(80%); }
+  to { transform: translateX(-120%); }
 }
 
 .xmatrix-app .app-agent-work-intent-timer {
@@ -3129,23 +3162,30 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 }
 
 .xmatrix-app .app-agent-work-intent-ring {
+  display: block;
   width: 1.125rem;
   height: 1.125rem;
-  fill: none;
-  stroke-width: 2.5;
   transform-origin: center;
   animation: app-agent-work-intent-ring-spin 1.6s linear infinite;
+}
+
+.xmatrix-app .app-agent-work-intent-ring-face {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke-width: 2.5;
 }
 
 @keyframes app-agent-work-intent-ring-spin {
   to { transform: rotate(360deg); }
 }
 
-.xmatrix-app .app-agent-work-intent-ring > circle:first-child {
+.xmatrix-app .app-agent-work-intent-ring-face > circle:first-child {
   stroke: color-mix(in oklch, var(--foreground) 10%, transparent);
 }
 
-.xmatrix-app .app-agent-work-intent-ring > circle:last-child {
+.xmatrix-app .app-agent-work-intent-ring-face > circle:last-child {
   stroke: oklch(0.769 0.188 70.08);
   stroke-linecap: round;
 }
@@ -3154,7 +3194,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   color: var(--m-ink-attention, var(--accent));
 }
 
-.xmatrix-app .app-agent-work-intent-stale .app-agent-work-intent-ring > circle:last-child {
+.xmatrix-app .app-agent-work-intent-stale .app-agent-work-intent-ring-face > circle:last-child {
   stroke: currentColor;
 }
 
@@ -3593,10 +3633,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[d
     animation: none;
   }
 
-  .xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-main > .truncate.truncate.truncate.truncate.truncate {
-    -webkit-text-fill-color: currentColor;
-    animation: none;
-  }
+  .xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-base { opacity: 1; }
+  .xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-window { display: none; }
 }
 
 @media (max-width: 767px) {
@@ -6906,6 +6944,15 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
    and its pages clip rather than hide: a hidden overflow is still a scroll
    container, and focusing a control while the track slides scrolled it
    sideways, leaving the whole page 16px off the plank above it. */
+.xmatrix-app .app-mobile-dock-pager[inert] *,
+.xmatrix-app .app-mobile-dock-page[inert] *,
+.xmatrix-app .app-mobile-dock-pager[inert] *::before,
+.xmatrix-app .app-mobile-dock-page[inert] *::before,
+.xmatrix-app .app-mobile-dock-pager[inert] *::after,
+.xmatrix-app .app-mobile-dock-page[inert] *::after {
+  animation-play-state: paused !important;
+}
+
 .xmatrix-app .app-mobile-dock-pager {
   overflow: hidden;
   overflow: clip;
@@ -7442,7 +7489,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-intent-launch:active:not(:disabled) { transform: scale(.97); }
 .app-intent-launch:disabled { cursor: default; opacity: .8; }
 .app-intent-launch svg { color: oklch(0.68 0.16 70); }
-.app-intent-launch[data-state="launching"] svg { animation: intent-zap 700ms ease-in-out infinite alternate; }
+.app-intent-launch[data-state="launching"] [data-slot="animated-icon"] { animation: intent-zap 700ms ease-in-out infinite alternate; }
 @keyframes intent-zap { to { transform: scale(1.25); filter: drop-shadow(0 0 4px oklch(0.72 0.16 70)); } }
 
 /* The draft's mention bands (composer-mention-bands.ts places them). They sit
@@ -7547,7 +7594,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   .xmatrix-app .app-mention-intent-declined,
   .xmatrix-app .app-mention-intent-declined[data-launching="true"],
   .app-intent-confidence-bar > span,
-  .app-intent-launch[data-state="launching"] svg,
+  .app-intent-launch[data-state="launching"] [data-slot="animated-icon"],
   .xmatrix-app .app-summon-condition[data-jev-arriving="true"] { animation: none; }
 }
 
@@ -8600,6 +8647,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
 
 .xmatrix-app .app-handoff-arrow {
   --invocation-color: var(--muted-foreground);
+  position: relative;
   display: inline-flex;
   flex: none;
   align-self: center;
@@ -8621,7 +8669,35 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   stroke-linejoin: round;
 }
 
-.xmatrix-app .app-handoff-comet { opacity: 0; stroke-width: 2.6; }
+.xmatrix-app .app-handoff-head {
+  position: absolute;
+  inset: 0;
+}
+
+.xmatrix-app .app-handoff-head svg { width: 100%; height: 100%; }
+
+/* The 38-unit track has 1.3-unit round caps. Its static clip holds a moving
+   HTML capsule: the old 10/40 normalized dash is 9.5 units plus those caps.
+   SVG stroke-dashoffset would repaint the message on every animation frame. */
+.xmatrix-app .app-handoff-comet-window {
+  position: absolute;
+  left: calc(2.4em * 0.7 / 44);
+  top: calc(2.4em * 4.7 / 44);
+  width: calc(2.4em * 40.6 / 44);
+  height: calc(2.4em * 2.6 / 44);
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.xmatrix-app .app-handoff-comet {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: calc(2.4em * 12.1 / 44);
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+}
 .xmatrix-app .app-handoff-arrow[data-tone="error"] .app-handoff-line { stroke-dasharray: 2 3; }
 
 /* In flight: a faint track, a bright comet running from one Agent to the
@@ -8630,24 +8706,21 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
 
 .xmatrix-app .app-handoff-arrow[data-flowing="true"] .app-handoff-comet {
   opacity: 1;
-  stroke-dasharray: 10 60;
   animation: app-handoff-comet 1.3s cubic-bezier(0.5, 0, 0.25, 1) infinite;
 }
 
 .xmatrix-app .app-handoff-arrow[data-flowing="true"] .app-handoff-head {
-  transform-box: fill-box;
-  transform-origin: center;
   animation: app-handoff-land 1.3s ease-out infinite;
 }
 
 @keyframes app-handoff-comet {
-  from { stroke-dashoffset: 10; }
-  to { stroke-dashoffset: -40; }
+  from { transform: translateX(calc(2.4em * -9.5 / 44)); }
+  to { transform: translateX(calc(2.4em * 38 / 44)); }
 }
 
 @keyframes app-handoff-land {
   0%, 60% { opacity: 0.45; transform: translateX(0); }
-  80% { opacity: 1; transform: translateX(1.5px); }
+  80% { opacity: 1; transform: translateX(3.409091%); }
   100% { opacity: 0.45; transform: translateX(0); }
 }
 
@@ -9003,4 +9076,14 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 
 .overlay-scrollbar-thumb:is(:hover, [data-dragging])::before {
   background: oklch(0.3 0 0 / 0.58);
+}
+
+/* Explicitly registered animation hosts keep their geometry outside scrolling
+   clips; any positive viewport intersection resumes their existing animation. */
+[data-animation-visible="false"],
+[data-animation-visible="false"]::before,
+[data-animation-visible="false"]::after,
+.identity-avatar[data-animation-visible="false"] .identity-avatar-face,
+.identity-avatar[data-animation-visible="false"] .identity-avatar-status {
+  animation-play-state: paused !important;
 }
