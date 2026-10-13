@@ -135,3 +135,26 @@ test("only a live since delta may wait on the host, and never past the bound", (
     assert.equal(agentHostTraceWaitMs({ since, waitMs }), 0);
   }
 });
+
+test("receive-order reads preserve host positions through clock reversal and page cutting", () => {
+  const streamId = "11111111-1111-4111-8111-111111111111";
+  const ordered = [3, 2, 1].map((sequence) => ({
+    ...event(4 - sequence), traceOrder: { streamId, sequence },
+  }));
+  const page = sanitizeAgentHostTraceHistory(result(ordered), binding, { maxEvents: 2, receivedOrder: true });
+  assert.deepEqual(page.events.map((item) => item.traceOrder.sequence), [3, 2]);
+  assert.equal(page.nextCursor, `received:${streamId}:2`);
+  const oldest = sanitizeAgentHostTraceHistory(result([ordered[2]]), binding, {
+    maxEvents: 2, receivedOrder: true, before: page.nextCursor,
+  });
+  assert.equal(oldest.events[0].traceOrder.sequence, 1);
+  const delta = sanitizeAgentHostTraceHistory(result(ordered.slice(0, 2)), binding, {
+    maxEvents: 2, receivedOrder: true, since: `received:${streamId}:2`,
+  });
+  assert.deepEqual(delta.events.map((item) => item.traceOrder.sequence), [3, 2]);
+  assert.equal(sanitizeAgentHostTraceHistory(result([...ordered].reverse()), binding, { maxEvents: 3, receivedOrder: true }), undefined);
+  assert.equal(sanitizeAgentHostTraceHistory(result([ordered[0], { ...ordered[1], traceOrder: undefined }]), binding, { maxEvents: 3, receivedOrder: true }), undefined);
+  assert.equal(sanitizeAgentHostTraceHistory(result(ordered), binding, { maxEvents: 3, receivedOrder: true, since: "received:22222222-2222-4222-8222-222222222222:2" }), undefined);
+  const legacy = sanitizeAgentHostTraceHistory(result([event(1), event(3), event(2)]), binding, { maxEvents: 3, receivedOrder: true });
+  assert.deepEqual(legacy.events.map((item) => item.id), ["event:0003", "event:0002", "event:0001"]);
+});

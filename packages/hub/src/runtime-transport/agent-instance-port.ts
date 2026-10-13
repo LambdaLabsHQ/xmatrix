@@ -512,7 +512,7 @@ export class AgentInstanceRuntimeTransport {
 
   requestTraceHistory(
     instanceId: string,
-    { maxEvents, since, before, waitMs: requestedWaitMs }: AgentHostTraceReadRequest,
+    { maxEvents, since, before, receivedOrder, waitMs: requestedWaitMs }: AgentHostTraceReadRequest,
   ): Promise<AgentHostTraceReadResult> {
     if (this.terminalTraceInstances.has(instanceId)) {
       return Promise.resolve({
@@ -528,7 +528,7 @@ export class AgentInstanceRuntimeTransport {
     const [socket, session] = candidates[0]!;
     const boundedMaxEvents = Math.max(1, Math.min(maxEvents, AGENT_HOST_TRACE_MAX_EVENTS));
     const waitMs = agentHostTraceWaitMs({ since, before, waitMs: requestedWaitMs });
-    const key = JSON.stringify([instanceId, boundedMaxEvents, since ?? null, before ?? null, waitMs]);
+    const key = JSON.stringify([instanceId, boundedMaxEvents, since ?? null, before ?? null, waitMs, receivedOrder === true]);
     const coalescedRequestId = this.pendingTraceRequestIdsByKey.get(key);
     if (coalescedRequestId) {
       const pending = this.pendingTraceRequests.get(coalescedRequestId);
@@ -566,7 +566,7 @@ export class AgentInstanceRuntimeTransport {
         key,
         socket,
         binding,
-        request: { maxEvents: boundedMaxEvents, since, before, ...(waitMs ? { waitMs } : {}) },
+        request: { maxEvents: boundedMaxEvents, since, before, receivedOrder, ...(waitMs ? { waitMs } : {}) },
         timer,
         resolves: [resolve],
       });
@@ -574,6 +574,7 @@ export class AgentInstanceRuntimeTransport {
       try {
         this.sockets.send(socket, {
           type: "trace_history_requested",
+          ...(receivedOrder ? { receivedOrder } : {}),
           requestId,
           instanceId,
           maxEvents: boundedMaxEvents,

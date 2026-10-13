@@ -45,6 +45,7 @@ async fn claude_cli_turn_fake_hub(
             tokio::select! {
                 _ = poll.tick() => {
                     let request = serde_json::to_string(&AgentInstanceServerMessage::TraceHistoryRequested {
+                        received_order: Some(true),
                         request_id: uuid::Uuid::new_v4().to_string(),
                         instance_id: instance_id.clone(),
                         max_events: 1000,
@@ -66,7 +67,6 @@ async fn claude_cli_turn_fake_hub(
                         // History is newest first; keep it in publication order.
                         let mut events = value["events"].as_array().cloned().unwrap_or_default();
                         events.reverse();
-                        events.sort_by(|a, b| a["timestamp"].as_str().cmp(&b["timestamp"].as_str()));
                         let mut retained = retained.lock().unwrap();
                         if events.len() >= retained.len() {
                             *retained = events;
@@ -99,6 +99,13 @@ async fn claude_cli_turn_fake_hub(
         traces,
         commit_gate,
     )
+}
+
+async fn completed_trace_events(traces: &ClaudeCliTurnLog) -> Vec<serde_json::Value> {
+    ClaudeCliTurnFixture::wait_in(traces, 0, Duration::from_secs(5), |event| {
+        event["metadata"]["payload"]["phase"] == "turn_completed"
+    }).await;
+    traces.lock().unwrap().clone()
 }
 
 struct ClaudeCliTurnFixture {

@@ -1231,3 +1231,38 @@ test("Cursor ACP deltas retain nanosecond order across history and live merges",
   assert.equal(onlyOutputBody(buildAgentConversationTraceTimeline([], target, [third, first, second])), "first second third");
   assert.equal(onlyOutputBody(buildAgentConversationTraceTimeline([], target, merged[0].events)), "first second third");
 });
+
+// These sources cover the four adapter families; the owning host test protects
+// receipt order, while this test catches presentation reordering of that order.
+test("all trace adapters preserve host receive order across pages, turns and tool updates", () => {
+  const { mergeAgentTraceReplicas } = require("./agent-trace-replica.ts");
+  for (const source of ["codex_app_server", "zcode_app_server", "claude_code", "cursor_acp"]) {
+    const streamId = "11111111-1111-4111-8111-111111111111";
+    const ordered = (sequence, phase, payload) => {
+      const event = llmTrace(`event:${10 - sequence}`, `2026-10-13T08:00:${String(20 - sequence).padStart(2, "0")}Z`, phase, payload, source);
+      event.traceOrder = { streamId, sequence };
+      event.channelId = "channel:trace";
+      event.agentId = "agent:trace";
+      event.metadata.payload.agent = { instanceId: "trace:1" };
+      return event;
+    };
+    const events = [
+      ordered(1, "turn_started", { threadId: "thread", turnId: "first", input: "first input" }),
+      ordered(2, "assistant_delta", { threadId: "thread", turnId: "first", delta: "first output" }),
+      ordered(3, "turn_started", { threadId: "thread", turnId: "second", input: "second input" }),
+      ordered(4, "runtime_event", { threadId: "thread", turnId: "second", category: "reasoning", status: "delta", delta: "reasoning" }),
+      ordered(5, "assistant_delta", { threadId: "thread", turnId: "second", delta: "second output" }),
+      ordered(6, "tool_call", { threadId: "thread", turnId: "second", update: { toolCallId: "tool-1", title: "Read file", kind: "read", status: "pending" } }),
+      ordered(7, "tool_call_update", { threadId: "thread", turnId: "second", update: { toolCallId: "tool-1", status: "completed", rawOutput: "read result" } }),
+    ];
+    const newest = mergeAgentTraceReplicas([], [events[6], events[5], events[4], events[3]], { source: "history" });
+    const all = mergeAgentTraceReplicas(newest, [events[3], events[2], events[1], events[0]], { source: "history" });
+    assert.deepEqual(all[0].eventIds, events.map((event) => event.id), source);
+    const timeline = buildAgentConversationTraceTimeline([], { name: source }, all[0].events);
+    assert.deepEqual(timeline.slice(0, 5).map((item) => item.body), ["first input", "first output", "second input", "reasoning", "second output"], source);
+    assert.equal(timeline.length, 6, source);
+    assert.ok(timeline[5].fields.some((field) => field.label === "Status" && field.value === "completed"), source);
+    const stale = { ...events[0], id: "stale", traceOrder: { streamId: "22222222-2222-4222-8222-222222222222", sequence: 99 } };
+    assert.deepEqual(mergeAgentTraceReplicas(all, [stale], { source: "history" })[0].eventIds, all[0].eventIds);
+  }
+});

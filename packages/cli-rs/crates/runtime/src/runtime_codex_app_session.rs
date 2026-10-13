@@ -2405,6 +2405,14 @@ impl CodexAppSession {
             let params = message.get("params").unwrap_or(&Value::Null);
             let same_thread =
                 params.get("threadId").and_then(Value::as_str) == Some(thread_id.as_str());
+            // Batch only consecutive chunks of one item. Flush before a later
+            // event is recorded, including a tool, error, or new turn/item.
+            if (same_thread || method == Some("error"))
+                && (method != Some("item/agentMessage/delta")
+                    || params.get("itemId").and_then(Value::as_str) != progress.delta_item_id.as_deref())
+            {
+                progress.flush_trace_delta(trace, &thread_id, thread_activity.active_turn_id()).await;
+            }
             let activity_event = thread_activity.observe(method, params);
             let turn_id = thread_activity.active_turn_id().map(str::to_string);
             let same_active_turn =
@@ -2609,24 +2617,15 @@ impl CodexAppSession {
                         } else {
                             progress.fallback_output.push_str(delta);
                         }
+                        if progress.delta_buffer.is_empty() {
+                            progress.delta_item_id = params.get("itemId").and_then(Value::as_str).map(str::to_string);
+                        }
                         progress.delta_buffer.push_str(delta);
                         if progress.delta_buffer.len() >= CODEX_TRACE_DELTA_FLUSH_BYTES
                             || last_delta_sent.elapsed()
                                 >= Duration::from_millis(CODEX_TRACE_DELTA_FLUSH_MS)
                         {
-                            trace
-                                .send(
-                                    "assistant_delta",
-                                    None,
-                                    None,
-                                    serde_json::json!({
-                                        "threadId": thread_id.clone(),
-                                        "turnId": turn_id.clone(),
-                                        "delta": progress.delta_buffer,
-                                    }),
-                                )
-                                .await;
-                            progress.delta_buffer = String::new();
+                            progress.flush_trace_delta(trace, &thread_id, turn_id.as_deref()).await;
                             last_delta_sent = Instant::now();
                         }
                     }
@@ -2650,6 +2649,7 @@ impl CodexAppSession {
                                     "turnId": turn_id.clone(),
                                     "delta": delta,
                                     "sourceMethod": method,
+                                    "messageId": codex_response_item_id(params),
                                 }),
                             )
                             .await;
@@ -2706,20 +2706,6 @@ impl CodexAppSession {
                 }
                 Some("turn/completed") if same_active_turn => {
                     tool_waits.clear();
-                    if !progress.delta_buffer.is_empty() {
-                        trace
-                            .send(
-                                "assistant_delta",
-                                None,
-                                None,
-                                serde_json::json!({
-                                    "threadId": thread_id.clone(),
-                                    "turnId": turn_id.clone(),
-                                    "delta": progress.delta_buffer,
-                                }),
-                            )
-                            .await;
-                    }
                     let local_output =
                         codex_visible_output(&progress.primary_output, &progress.fallback_output)
                             .to_string();
@@ -2842,7 +2828,7 @@ impl CodexAppSession {
         error: &str,
         recover_partial: bool,
     ) -> Option<CodexTurnResult> {
-        send_codex_assistant_delta(trace, thread_id, turn_id, &progress.delta_buffer, None).await;
+        send_codex_assistant_delta(trace, thread_id, turn_id, &progress.delta_buffer, None, progress.delta_item_id.as_deref()).await;
         let recovered = match recover_partial {
             true => {
                 progress
@@ -2938,6 +2924,7 @@ async fn send_codex_assistant_delta(
     turn_id: Option<&str>,
     delta: &str,
     source_method: Option<&str>,
+    message_id: Option<&str>,
 ) {
     if delta.is_empty() {
         return;
@@ -2947,6 +2934,9 @@ async fn send_codex_assistant_delta(
         "turnId": turn_id,
         "delta": delta,
     });
+    if let Some(message_id) = message_id {
+        payload["messageId"] = serde_json::json!(message_id);
+    }
     if let Some(source_method) = source_method {
         payload["sourceMethod"] = serde_json::json!(source_method);
     }
@@ -2959,11 +2949,16 @@ struct CodexTurnProgress {
     primary_output: String,
     fallback_output: String,
     delta_buffer: String,
+    delta_item_id: Option<String>,
     latest_usage: Option<protocol::LlmUsage>,
     latest_model: Option<String>,
 }
 
 impl CodexTurnProgress {
+    async fn flush_trace_delta(&mut self, trace: TurnTrace<'_>, thread_id: &str, turn_id: Option<&str>) {
+        send_codex_assistant_delta(trace, thread_id, turn_id, &std::mem::take(&mut self.delta_buffer), None, self.delta_item_id.as_deref()).await;
+    }
+
     /// A turn that broke off after streaming a visible answer restarts the
     /// app-server but keeps that answer.
     async fn partial_output_restart_result(

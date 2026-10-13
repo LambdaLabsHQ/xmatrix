@@ -1493,6 +1493,8 @@ pub enum AgentInstanceServerMessage {
         reason: Option<String>,
     },
     TraceHistoryRequested {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        received_order: Option<bool>,
         request_id: String,
         instance_id: String,
         max_events: u32,
