@@ -25,11 +25,12 @@ async function execute(outcome) {
     assert.fail(`unexpected import: ${name}`);
   });
   let attempts = 0;
-  const result = await support.withExecution({ id: "sentry", name: "Sentry" },
+  const { toolResult: result, receipt } = await support.withExecution({ id: "sentry", name: "Sentry" },
     { messageId: "read-fixture", channelId: "channel", actorUserId: "human" },
     { authority: {}, principal: { kind: "user", id: "human" }, connectionId: "connection" },
     { id: "read_issue", label: "Read issue", key: "" }, async () => { attempts++; return outcome; });
   assert.equal(attempts, 1);
+  assert.equal(receipt, result, "public actions retain the same receipt and tool result");
   assert.deepEqual(commands.map(c => c.command), ["record-execution", "finalize-execution"]);
   assert.equal(commands[1].input.expectedVersion, 1);
   return { result, finalized: commands[1].input };

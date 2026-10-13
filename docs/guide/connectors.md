@@ -214,6 +214,17 @@ Apple keeps a few steps for a person in App Store Connect: creating the app reco
 
 An agent in a conversation can use the Space's connected apps as tools, with the same actions and the same rules as a person typing the command. You do not configure anything on the agent.
 
+Gmail search and read return mail content only to the calling agent tool.
+Conversation status and execution history show only whether the action
+completed, failed or was blocked; they do not include headers, snippets,
+bodies, verification links or provider error details. A typed Gmail read
+command also shows only this status. Ask your agent to use its Gmail tools
+to retrieve the content privately.
+
+For a Gmail MCP search, use `{"target":"*","text":"is:unread newer_than:1h"}`.
+`target` is only `*` or one connected mailbox address; the Gmail query goes
+in `text`. Put neither the `@gmail:search:` prefix nor the query in `target`.
+
 ## Limiting an action
 
 Gmail sends and replies default to **Ask**. Each request appears in the

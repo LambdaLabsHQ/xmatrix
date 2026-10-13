@@ -29,7 +29,7 @@ export async function runSubscriptionStatement(
   if (!statement.ok) return `${label}: failed; ${statement.reason.replace(/_/gu, " ")}.`;
   const scope = await commandScope(manifest, input);
   if (typeof scope === "string") return `${label}: blocked; ${scope}.`;
-  return withExecution(manifest, input, scope, { id: statement.action, key: statementKey,
+  return (await withExecution(manifest, input, scope, { id: statement.action, key: statementKey,
     label: statement.action === "subscribe" ? "Subscribe source" : "Unsubscribe source" }, async () => {
     const relations = await listAppSourceRelations(input.env, { channelId: input.channelId, principal: scope.principal });
     const current = relations.map(record).find((candidate) => candidate.connectionId === scope.connectionId &&
@@ -65,5 +65,5 @@ export async function runSubscriptionStatement(
     return { status: "completed", summary: next.length > 0
       ? `${statement.action === "subscribe" ? "Subscribed to" : "Updated"} ${statement.source} (${next.join(", ")})`
       : `Unsubscribed from ${statement.source}` };
-  });
+  })).receipt;
 }

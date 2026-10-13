@@ -73,6 +73,8 @@ export interface ConnectorActionResult {
 
 export interface ConnectorAction {
   effect: "read" | "write";
+  /** Caller-only results never enter Channel receipts or execution summaries, including failures. */
+  resultVisibility?: "caller";
   /** Credential fields the action cannot run without. */
   requires: readonly string[];
   /** Validates the statement before any provider call; a string is the reason it is invalid. */

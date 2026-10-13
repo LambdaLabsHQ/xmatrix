@@ -403,7 +403,21 @@ the project default. Reads: `search:* [Gmail search]` returns the ten newest
 matching messages (id, received time, sender, subject, snippet) and
 `read:<message id>` returns the headers, the text body (plain text, else HTML
 reduced to text, truncated at 8,000 characters) and every distinct http(s)
-link the message contains, fenced as untrusted content. Inline
+link the message contains, fenced as untrusted content.
+
+Gmail `search` and `read` declare caller-only result visibility. Their full
+answers, including headers, snippets, body, links, query and provider error
+details, are returned only in the calling MCP tool response. Channel status
+messages and execution result summaries/reasons retain only the action and
+outcome, with a pointer to the Gmail MCP tool. Direct Channel commands also
+publish only that status; use the Agent's MCP tool to retrieve mail content.
+This separation is enforced before persistence and message append, including
+parse failures and blocked/failed executions; it does not depend on recognizing
+verification-code patterns. Other actions retain their existing result visibility.
+The MCP search shape is `{"target":"*","text":"<Gmail query>"}` (or a connected
+mailbox address as target), never the whole `@gmail:search` command in target.
+
+Inline
 `multipart/mixed` body segments retain their order, choosing plain text or
 rendered HTML for each segment without duplicating alternative versions.
 Attachment parts and their descendants are excluded. Reads visit at most
