@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { hmacHex, sha256Hex } from "@xmatrix/protocol";
 import { validateSentryEventIdentity } from "@xmatrix/db";
+import { ProviderRequestError } from "../src/connectors/http.ts";
 import { deliveryProven } from "../src/connectors/delivery-proof.ts";
 import { connectorEvent, parseJsonObject, record } from "../src/connectors/event-format.ts";
 import { sentryInstallationClient, validateSentryInstallationCredentials } from "../src/connectors/sentry-installation.ts";
@@ -84,9 +85,11 @@ function drainer() {
   const { deliverEvent } = ingressModule(name => ({ "../app-connectors": {}, "../index-shared": {},
     "../automation-triggers": {}, "../product-message-append": {}, "./credentials": {}, "@xmatrix/protocol": {},
     "./oauth": {}, "./event-format": {} })[name]);
-  const dependencies = { receipts: () => receipts, credentials: () => ({ resolve: async () => ({ connectionId: job.connectionId,
-    status: "configured", version: state.resolvedVersion, values: fields }) }), refresh: async () => { calls.refreshes++; return fields; },
-    verify: async () => {}, request: async url => { calls.provider.push(url); if (state.revokeAtProvider) state.current = false;
+  const dependencies = { receipts: () => receipts, credentials: () => ({ resolve: async () => { if (state.failCredentials) throw new Error("PRIVATE_TOKEN"); return ({ connectionId: job.connectionId,
+    status: "configured", version: state.resolvedVersion, values: fields }); } }), refresh: async () => { calls.refreshes++;
+      if (state.failRefresh) throw new ProviderRequestError(503, "PRIVATE_TOKEN"); return fields; },
+    verify: async () => { if (state.failVerify) throw new ProviderRequestError(401, "PRIVATE_TOKEN"); },
+    request: async url => { calls.provider.push(url); if (state.failProvider) throw new ProviderRequestError(429, "PRIVATE_RESPONSE"); if (state.revokeAtProvider) state.current = false;
       return { id: state.wrongProject ? "8" : "7", slug: "test-project", organization: { id: "9", slug: "company" } }; },
     apps: () => apps, append: async (_env, channelId, command) => { calls.appended.push({ channelId, command });
       if (state.rotateAfterAppend) state.version += 1;
@@ -94,7 +97,7 @@ function drainer() {
       calls.automation.push(input); if (state.failAutomation) throw new Error("private-provider-error"); return 0; } };
   const imports = { "@xmatrix/protocol": { sha256Hex }, "../automation-triggers": {}, "../product-message-append": {},
     "./credentials": {}, "./connection-credentials": {}, "./event-format": { connectorEvent, record },
-    "./event-ingress": { deliverEvent }, "./http": {}, "./sentry-installation": { sentryInstallationClient, validateSentryInstallationCredentials } };
+    "./event-ingress": { deliverEvent }, "./http": { ProviderRequestError }, "./sentry-installation": { sentryInstallationClient, validateSentryInstallationCredentials } };
   const { drainSentryEvents } = drainModule(name => imports[name]);
   return { calls, state, job, fields, run: () => drainSentryEvents(env, dependencies) };
 }
@@ -152,4 +155,26 @@ test("a token rotated after Channel append retries before Automation with the sa
   assert.equal(run.calls.finish[1].outcome, "done");
   assert.equal(run.calls.automation.length, 1);
   assert.equal(run.calls.appended[0].command.messageId, run.calls.appended[1].command.messageId);
+});
+
+test("Sentry drain failures name their stage and safe provider status, retain retries, and reveal no private error", async () => {
+  const logs = [];
+  const capture = mock.method(console, "error", (...args) => logs.push(args));
+  try {
+    for (const [flag, stage, providerStatus] of [["failRefresh", "refresh", 503], ["failCredentials", "credentials"],
+      ["failVerify", "installation", 401], ["failProvider", "project", 429],
+      ["failAppend", "channel"], ["failAutomation", "automation"]]) {
+      const run = drainer();
+      run.state[flag] = true;
+      await run.run();
+      assert.deepEqual(logs.at(-1), ["Sentry event attempt failed", { stage,
+        ...(providerStatus ? { providerStatus } : {}) }]);
+      assert.equal(run.calls.finish[0].outcome, "retry");
+      run.state[flag] = false;
+      await run.run();
+      assert.equal(run.calls.finish[1].outcome, "done");
+    }
+    assert.equal(logs.length, 6);
+    assert.doesNotMatch(JSON.stringify(logs), /private|PRIVATE|company|space|test-project/iu);
+  } finally { capture.mock.restore(); }
 });
