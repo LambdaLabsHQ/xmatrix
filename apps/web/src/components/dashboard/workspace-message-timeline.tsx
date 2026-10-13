@@ -1158,8 +1158,8 @@ export const MessageTimeline = memo(function MessageTimeline({
 
       {!loading && !hasChannels && (
         <EmptyConversation
-          title="No channels"
-          body="Mention an agent to create an instance."
+          title="No conversations yet"
+          body="Start one with New conversation, then mention an agent in it."
         />
       )}
 
