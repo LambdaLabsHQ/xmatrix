@@ -24,7 +24,7 @@ import type {
 } from "./space-agent-setup";
 
 /* The first screen of a Space that has no agent yet. It replaces the bare
-   "No channels" empty state: instead of asking the human to understand
+   "No conversations yet" empty state: instead of asking the human to understand
    channels and directories first, it reports what is already on this machine
    and offers one action that ends in a working agent. */
 

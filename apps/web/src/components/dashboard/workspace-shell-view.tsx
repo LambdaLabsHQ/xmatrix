@@ -401,7 +401,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const spaceAgentsUnreachable = registrationCatalog.isError;
   // A Space's agents are its registrations, so a Space with none cannot do
   // anything yet - that is the screen a new account lands on, and the same one
-  // every newly created Space starts from. It replaces the bare "No channels"
+  // every newly created Space starts from. It replaces the bare "No conversations yet"
   // empty state with what this machine already has.
   const spaceAgentSetup = useMemo(
     () => spaceAgentSetupState({
@@ -427,9 +427,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       spaceAgentsUnreachable,
     ]
   );
-  // Once an agent is bound the shell would fall back to "No channels - Mention
-  // an agent to create an instance", which asks for a mention inside a channel
-  // that does not exist yet. Sending the first task is what creates it.
+  // Once an agent is bound the shell would fall back to "No conversations yet",
+  // which can only point at New conversation. Sending the first task is what
+  // creates the first one.
   const spaceFirstTask = useMemo(
     () => spaceFirstTaskState({
       channelsLoaded,
