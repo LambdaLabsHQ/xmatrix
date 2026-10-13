@@ -98,7 +98,6 @@ import {
   LlmQuotaUsage,
   LlmUsage,
   OutgoingMessage,
-  agentBusyTraceStaleActivity,
 } from "./workspace-shell-helpers";
 
 import {
@@ -749,7 +748,7 @@ export function buildTimeline(
   history: ChannelMessage[],
   channel: SerializedChannel | null,
   channels: SerializedChannel[],
-  events: ObservabilityEvent[],
+  events: readonly ObservabilityEvent[],
   currentUser?: { id: string; email: string; name?: string; avatarUrl?: string } | null,
   channelReadCounts: Record<string, number> = {},
   historyCache?: Map<string, ChannelHistoryCacheEntry>,
@@ -757,6 +756,17 @@ export function buildTimeline(
   outboundPreviewByClientId?: Map<string, { sentAt: string; attachments: ChannelAttachment[] }>,
   spaceMembers: SerializedSpace["members"] = [],
 ): TimelineItem[] {
+  const channelsById = new Map(channels.map(channel => [channel.id, channel]));
+  const threadsByRoot = new Map<string, SerializedChannel>();
+  for (const candidate of channels) {
+    if (candidate.metadata?.kind !== "thread") continue;
+    const parent = metadataString(candidate.metadata, "threadRootChannelId");
+    const root = metadataString(candidate.metadata, "threadRootMessageId");
+    if (parent && root) {
+      const key = JSON.stringify([parent, root]);
+      if (!threadsByRoot.has(key)) threadsByRoot.set(key, candidate);
+    }
+  }
   const currentUserEmail = currentUser?.email.trim().toLowerCase();
   const currentUserIdentityId = currentUser ? `user:${currentUser.id}` : undefined;
   const channelHistory = channel
@@ -808,7 +818,7 @@ export function buildTimeline(
     // shows who answered elsewhere under the link owner's principal. Neither
     // sender is a member here: this Channel's presence, ordinals, and the
     // owner's own-message affordances say nothing about them.
-    const linkOrigin = messageLinkOrigin(message, channels);
+    const linkOrigin = messageLinkOrigin(message, channelsById);
     const linkedSender = linkOrigin?.kind === "link";
     const relayedReply = linkOrigin?.kind === "reply";
     const own =
@@ -881,25 +891,6 @@ export function buildTimeline(
               activity: matchedInstance?.activity || kindMatchedPresence?.activity,
             })
         : relayedReply ? undefined : humanPresenceStatus || (own ? "online" : "offline");
-    const senderTraceStaleActivity =
-      message.from.kind === "agent" && !senderInstanceStale
-        ? agentBusyTraceStaleActivity({
-            agentId: senderIdentityId,
-            channelId: message.channelId,
-            events,
-            instance: matchedInstance,
-            fallbackStatus: matchedInstance?.status || "offline",
-            name: authorLabel,
-            activity: matchedInstance?.activity || kindMatchedPresence?.activity,
-          })
-        : undefined;
-    const senderActivity =
-      senderInstanceStale
-        ? "Instance is no longer live"
-        : senderTraceStaleActivity ||
-          matchedInstance?.activity ||
-          kindMatchedPresence?.activity ||
-          (senderStatus === "busy" ? "Processing" : undefined);
     const senderGoal =
       message.from.kind === "agent"
         ? message.from.goal
@@ -942,7 +933,7 @@ export function buildTimeline(
             }
           : undefined;
     const threadChannel = channel && message.messageId
-      ? threadChannelForMessage(channels, channel.id, message.messageId)
+      ? threadsByRoot.get(JSON.stringify([channel.id, message.messageId]))
       : undefined;
     const threadMessages = threadChannel ? historyCache?.get(threadChannel.id)?.messages : undefined;
     const loadedThreadReplyCount = loadedThreadReplyCountForChannel(threadChannel, threadMessages);
@@ -1016,7 +1007,6 @@ export function buildTimeline(
       // xMatrix has its own product identity, while the delegated runtime
       // remains the source of truth for whether it is actively working.
       senderStatus,
-      senderActivity,
       senderInstanceStale: reservedSystemAgent ? false : senderInstanceStale,
       ...(linkOrigin ? { linkOrigin } : {}),
       senderGoal: reservedSystemAgent ? undefined : senderGoal,

@@ -21,11 +21,13 @@ const PRESENCE_FUNCTIONS = [
   "patchChannelAgentPresenceFromAgent",
   "patchChannelInstancesById",
   "patchChannelAgentMemberFromAgent",
-  "patchChannelsAgentPresenceFromAgent",
+  "patchChannelsAgentPresenceBatch",
 ];
 
 
-const { patchChannelsAgentPresenceFromAgent } = loadShellFunctions(shellModules, PRESENCE_FUNCTIONS);
+const { patchChannelsAgentPresenceBatch } = loadShellFunctions(shellModules, PRESENCE_FUNCTIONS);
+const patchChannelsAgentPresenceFromAgent = (channels, agent) => patchChannelsAgentPresenceBatch(channels, [agent]);
+const { patchChannelAgentPresenceFromAgent } = loadShellFunctions(shellModules, PRESENCE_FUNCTIONS);
 
 /** Claude's one working instance, as both the heartbeat and the Channel report it. */
 function workingInstance() {
@@ -125,4 +127,49 @@ test("an Instance shown machine-offline returns to its reported status when the 
   const backInstance = back[0].memberPresence["agent:claude"].instances[0];
   assert.equal(backInstance.status, "idle");
   assert.equal(backInstance.offlineReason, undefined);
+});
+
+test("one Run's presentation cannot change sibling Channels of the same Agent", () => {
+  const channel = channelsWithAgentPresence()[0];
+  const other = heartbeatAgent();
+  other.activity = "Working elsewhere";
+  other.intent = { summary: "Another task" };
+  other.lastSeenAt = "2026-09-19T12:01:00.000Z";
+  other.instances = [{ ...workingInstance(), id: "elsewhere", channelId: "another-channel" }];
+  assert.equal(patchChannelAgentPresenceFromAgent(channel, other), channel);
+  // Account limits still reach every Channel, without carrying the Run's intent.
+  other.usage = { quotaSource: "provider_api", quotaObservedAt: "2026-09-19T12:01:00.000Z",
+    quotaUsages: [{ percent: 95, label: "5h" }], totalTokens: 1 };
+  const updated = patchChannelAgentPresenceFromAgent(channel, other);
+  const presence = updated.memberPresence[other.id];
+  assert.equal(presence.activity, channel.memberPresence[other.id].activity);
+  assert.equal(presence.intent, undefined);
+  assert.equal(presence.lastSeenAt, channel.memberPresence[other.id].lastSeenAt);
+  assert.equal(presence.usage.quotaUsages[0].percent, 95);
+  assert.equal(presence.usage.totalTokens, undefined, "another Run's token counters are not account quota");
+  assert.equal(patchChannelAgentPresenceFromAgent(updated, other), updated, "the same quota is a no-op");
+});
+
+for (const sameAgent of [false, true]) test(`a thousand reports route once (${sameAgent ? "one Agent" : "independent Agents"})`, () => {
+  let reads = 0;
+  const channels = Array.from({ length: 1000 }, (_, index) => ({
+    id: `channel-${index}`,
+    get memberPresence() {
+      reads += 1;
+      return { [`agent:${sameAgent ? 0 : index}`]: { kind: "agent", instances: [{
+        ...workingInstance(), id: `instance-${index}`, channelId: `channel-${index}`,
+      }] } };
+    },
+  }));
+  const reports = channels.map((channel, index) => ({
+    ...heartbeatAgent(), id: `agent:${sameAgent ? 0 : index}`,
+    usage: { quotaSource: "provider_api", quotaObservedAt: "2026-09-19T12:01:00.000Z",
+      quotaUsages: [{ label: "5h", percent: 95 }] }, instances: [{
+      ...workingInstance(), id: `instance-${index}`, channelId: channel.id, activity: "New activity",
+    }],
+  }));
+  const updated = patchChannelsAgentPresenceBatch(channels, reports);
+  assert.ok(reads < 20_000, `unrelated Channels were inspected ${reads} times`);
+  updated.forEach((channel, index) => assert.equal(
+    channel.memberPresence[`agent:${sameAgent ? 0 : index}`].instances[0].activity, "New activity"));
 });

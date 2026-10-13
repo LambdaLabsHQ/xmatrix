@@ -6,16 +6,18 @@ import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 import type {
 } from "@/lib/desktop/bridge";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { CrossSpaceReadCard, useChannelPendingCrossSpaceReads } from "./cross-space-read-card";
 import { useQueries } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
+import { realtimeCollectionAny } from "./realtime-collection";
+import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
 import { MessageReferenceCatalogProvider, type MessageReferenceCatalog } from "./message-reference-catalog";
 import { MachineLinkProvider, type MachineLinks } from "./machine-link";
 import { ManageSecretsProvider } from "./secret-request-card";
-import { channelsInSpace, machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
+import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
 import { useAndroidBackHandler } from "./use-android-back";
 import { Loader2, Maximize2, X } from "lucide-react";
@@ -84,7 +86,7 @@ import { NewConversation } from "./new-conversation";
 import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
-import { DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
+import { mobileBackState, DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
 import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
 import { usePageCreation } from "@/components/pages/page-creation";
 import { searchWorkspacePages } from "./workspace-message-search";
@@ -106,6 +108,7 @@ function dockTabOf(view: AppView): AppView {
 
 export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const [desktopUpdateConfirmOpen, setDesktopUpdateConfirmOpen] = useState(false);
+  const [pageConversationDocked, setPageConversationDocked] = useState(false);
   const {
     children,
     user,
@@ -619,10 +622,21 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     return total + count;
   }, 0);
   // Status pulses while any conversation in this Space has an Agent at work.
-  const statusLive = useMemo(
-    () => channelsInSpace(channels, currentSpaceId).some((channel) => channelHasWorkInHand(channel, events)),
-    [channels, currentSpaceId, events],
-  );
+  const workIndicator = useMemo(() => {
+    const eventViews = model.realtimeEventViews;
+    const eventSnapshot = eventViews.getSnapshot();
+    const indicator = realtimeCollectionAny(model.realtimeChannels,
+      channel => (!currentSpaceId || channel.spaceId === currentSpaceId) &&
+        channelHasWorkInHand(channel, eventViews.get(channel.id)?.events ?? eventViews.get("")?.events ?? []));
+    return { ...indicator, subscribe: (notify: () => void) => {
+      const channels = indicator.subscribe(notify);
+      const events = eventViews.subscribeChanges(keys => indicator.invalidate(keys.includes("")
+        ? model.realtimeChannels.getSnapshot().map(channel => channel.id) : keys));
+      if (eventSnapshot !== eventViews.getSnapshot()) indicator.invalidate(model.realtimeChannels.getSnapshot().map(channel => channel.id));
+      return () => { channels(); events(); };
+    } };
+  }, [model.realtimeChannels, model.realtimeEventViews, currentSpaceId]);
+  const statusLive = useSyncExternalStore(workIndicator.subscribe, workIndicator.getSnapshot, workIndicator.getSnapshot);
 
   /* Stable identities. These are handed down through memoised subtrees, so a
      fresh closure on every render would re-render them for changes that have
@@ -1089,6 +1103,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       activeConversationId={selectedPageId ? selectedChannelId : null}
       {...(selectedChannel && selectedPageId ? { renderConversation: (placement: "margin" | "dock") =>
         renderConversationSurface(placement === "margin" ? "page-margin" : "beside-page") } : {})}
+      onConversationDockChange={setPageConversationDocked}
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId) => openPageConversation(conversationId)}
@@ -1221,6 +1236,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // Files are accepted by the whole window, not by the composer element, so
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
+    <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
+    <RealtimeEventsContext.Provider value={model.realtimeEventViews}>
     <MessageReferenceCatalogProvider catalog={messageReferenceCatalog}>
     <MachineLinkProvider links={machineLinks}>
     <ManageSecretsProvider value={manageSecrets}>
@@ -1236,6 +1253,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         channels={channels}
         spaces={spaces}
         agents={agents}
+        realtimeAgents={model.realtimeAgents}
         projects={projects}
         machineDaemons={machineDaemons}
         pages={pageTree.data ?? []}
@@ -1277,6 +1295,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         className={cn(
           "xmatrix-app xmatrix-app-shell relative isolate m-0 flex w-screen max-w-[100dvw] justify-start bg-background text-foreground",
           desktopFrameClass,
+          workspaceSearchOpen && "app-search-open",
+          view === "pages" && selectedPageId && selectedChannel && (isMobileViewport || pageConversationDocked) && "app-page-conversation-open",
+          mobileBackState(view, { channel: Boolean(!composingConversation && selectedChannel), page: Boolean(openedPage),
+            composing: composingConversation, conversationOverPage: phonePageConversation }).showBack && "app-mobile-back-open",
           // Exactly the clients that get no web dock draw their own bottom
           // bar, so the same condition decides which one occludes the bottom
           // of every mobile surface. Keeping one condition for both keeps the
@@ -1532,6 +1554,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </ManageSecretsProvider>
     </MachineLinkProvider>
     </MessageReferenceCatalogProvider>
+    </RealtimeEventsContext.Provider>
+    </RealtimeChannelsContext.Provider>
     </AttachmentDropZoneProvider>
   );
 }

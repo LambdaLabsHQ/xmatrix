@@ -2480,7 +2480,7 @@
 
 /* The control the panel dropped from is under its field row: the panel's
    magnifier and close button take its place, so it is not drawn twice. */
-body:has(.app-search-overlay) [data-search-anchor] {
+.xmatrix-app.app-search-open [data-search-anchor] {
   visibility: hidden;
 }
 
@@ -4342,7 +4342,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   }
 
   /* A docked conversation carries its own right-aligned search entry. */
-  .xmatrix-app:has(.app-page-conversation .app-panel-header) .app-global-bar {
+  .xmatrix-app.app-page-conversation-open .app-global-bar {
     display: none;
   }
 
@@ -5866,37 +5866,23 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     padding-bottom: calc(var(--app-composer-height, 5rem) + var(--mobile-bottom-safe) + 1.625rem) !important;
   }
 
-  /* Mobile only: the floating composer unmounts while an inline thread draft
-     is open, so drop the large clearance pad. Desktop keeps both. */
-  .xmatrix-app.xmatrix-app-shell .app-message-surface:has(.app-thread-draft-composer) .app-message-timeline {
-    scroll-padding-bottom: calc(1.25rem + var(--mobile-bottom-safe)) !important;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-surface:has(.app-thread-draft-composer) .app-message-timeline > div {
-    padding-bottom: calc(1.25rem + var(--mobile-bottom-safe)) !important;
-  }
-
-  .xmatrix-app.xmatrix-app-shell .app-message-surface:has(.app-thread-draft-composer) .app-message-timeline-scroll-end {
-    padding-bottom: calc(1.25rem + var(--mobile-bottom-safe)) !important;
-  }
-
   /* Channel detail: do not let the timeline scroll *under* the title bar.
      Padding inside a scroller only offsets the first paint; scrolling still
      moves rows into the fixed title zone. Offset the message surface so the
      scrollport's top edge sits below the title (same contract as tool views). */
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-main {
+  .xmatrix-app.xmatrix-app-shell.app-mobile-back-open .app-main {
     padding-top: var(--mobile-topbar-space) !important;
   }
 
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-message-surface {
+  .xmatrix-app.xmatrix-app-shell.app-mobile-back-open .app-message-surface {
     min-height: 0 !important;
   }
 
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-message-timeline {
+  .xmatrix-app.xmatrix-app-shell.app-mobile-back-open .app-message-timeline {
     scroll-padding-top: 0.5rem !important;
   }
 
-  .xmatrix-app.xmatrix-app-shell:has(.app-mobile-channel-detail-bar) .app-message-timeline > div {
+  .xmatrix-app.xmatrix-app-shell.app-mobile-back-open .app-message-timeline > div {
     padding-top: 0.5rem !important;
   }
 

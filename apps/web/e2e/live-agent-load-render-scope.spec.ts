@@ -1,5 +1,6 @@
+import { installRenderCounter } from "./render-counts";
 import { expect, test } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, conversationOpened } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, conversationOpened, fixtureJson, fixtureRequests } from "./workspace-fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -16,47 +17,8 @@ const messages = channelHistory(40, "load-message", (row) => `Load row ${row}: a
  * report is what made a busy Space stutter in the desktop app. React commits
  * are counted through the DevTools hook, so host speed cannot move the result.
  */
-test("Agents working in other conversations re-render only their own rows", async ({ page }) => {
-  await page.addInitScript(() => {
-    type Fiber = {
-      tag: number;
-      flags: number;
-      child: Fiber | null;
-      sibling: Fiber | null;
-      alternate: Fiber | null;
-      memoizedProps: Record<string, unknown> | null;
-    };
-    const counts = { navRows: 0, messageRows: 0, commits: 0, counting: false };
-    (window as unknown as { __renderCounts: typeof counts }).__renderCounts = counts;
-    // What React DevTools reads: a function component ran in this commit when
-    // it carries PerformedWork (1). A subtree React bailed out of keeps its old
-    // fibers, flags included, so it is skipped: its child is its alternate's.
-    const PERFORMED_WORK = 1;
-    (window as unknown as Record<string, unknown>).__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-      supportsFiber: true,
-      renderers: new Map(),
-      inject() { return 1; },
-      onCommitFiberRoot(_id: number, root: { current: Fiber }) {
-        if (!counts.counting) return;
-        counts.commits += 1;
-        const visit = (fiber: Fiber | null) => {
-          for (let node = fiber; node; node = node.sibling) {
-            const props = node.memoizedProps;
-            // Function components only: the row bodies, not their memo wrappers.
-            if (node.tag === 0 && props && (node.flags & PERFORMED_WORK)) {
-              if ("isPinnedRoot" in props && "onSelect" in props) counts.navRows += 1;
-              if ("message" in props && "onRetryAgentLaunch" in props) counts.messageRows += 1;
-            }
-            if (!node.alternate || node.child !== node.alternate.child) visit(node.child);
-          }
-        };
-        visit(root.current.child);
-      },
-      onCommitFiberUnmount() {},
-      onPostCommitFiberRoot() {},
-      checkDCE() {},
-    };
-  });
+for (const delivery of ["cards", "digest"] as const) test(`Agents in other conversations re-render only their own rows (${delivery})`, async ({ page }) => {
+  await installRenderCounter(page);
   const send = await openWorkingAgentsSpace(page, space, messages, "Load row 40:");
   // The last conversation is below the fold: the list only mounts rows near the viewport.
   await expect(page.locator(`[data-channel-row-id="${space.channelId(1)}"]`)).toBeVisible();
@@ -66,24 +28,80 @@ test("Agents working in other conversations re-render only their own rows", asyn
     (window as unknown as { __renderCounts: { counting: boolean } }).__renderCounts.counting = true;
   });
   const reports = CHANNEL_COUNT - 1;
+  const digest: unknown[] = [];
   for (let index = 1; index <= reports; index += 1) {
     const activity = `Running step ${index}`;
-    // The Agent card alone: the whole-Channel frame also moves the
-    // conversation's catalog row, which is not what this counts.
-    const [card] = space.report(index, activity);
-    send(card);
-    // Reports arrive spread out, as they do from working Agents, not batched into one commit.
-    await page.waitForTimeout(20);
+    // Exercise both current cards and compatible whole-Channel snapshots.
+    const frames = space.report(index, activity);
+    if (delivery === "digest") digest.push(frames[0].agent);
+    else {
+      for (const frame of frames) send(frame);
+      // Independent reports stay separate; a digest exercises one multi-Instance flush.
+      await page.waitForTimeout(20);
+    }
   }
+  if (delivery === "digest") send({ type: "presence_digest", agents: digest });
   // Frames are applied as they arrive; give the last ones a moment to commit.
   await page.waitForTimeout(500);
   const counts = await page.evaluate(() =>
-    (window as unknown as { __renderCounts: { navRows: number; messageRows: number; commits: number } }).__renderCounts);
+    (window as unknown as { __renderCounts: { navRows: number; messageRows: number; workspaceViews: number; commits: number } }).__renderCounts);
   console.log(`[live-agent-load] ${reports} reports: ${JSON.stringify(counts)}`);
 
   expect(counts.commits).toBeGreaterThan(0);
   // The open conversation is none of theirs: its messages never re-render.
   expect(counts.messageRows).toBe(0);
+  expect(counts.workspaceViews).toBe(0);
   // Each report touches its own row; the other 39 stay as they were.
+  expect(counts.navRows).toBeGreaterThan(0);
   expect(counts.navRows).toBeLessThanOrEqual(reports * 2);
+});
+
+test("current-Channel activity leaves Markdown alone and opens the latest owned trace", async ({ page }) => {
+  const current = workingAgentsSpace(1, "current");
+  const agent = current.agents[0];
+  const messages = channelHistory(40, "current-message", row => `Current row ${row}: **unchanged**.`)
+    .map(message => ({ ...message, sentAt: new Date(Date.parse(message.sentAt) + message.sequence * 600_000).toISOString(),
+      from: { kind: "agent", identityId: agent.id, userId: agent.userId,
+      label: "agent0:1", instanceId: agent.instances[0].id, channelInstanceId: "1", instanceLabel: "agent0:1",
+      email: agent.email } }));
+  await installRenderCounter(page);
+  // Current Hubs discover cards through presence, not an agent_list roster.
+  const send = await openWorkingAgentsSpace(page, { ...current, agents: [] }, messages, "Current row 40:");
+  await fixtureJson(page, "current-trace", `**/api/xmatrix/trace/instances/${agent.instances[0].id}/events?**`,
+    { availability: "available", complete: true, events: [], cursor: null, nextCursor: null });
+  await conversationOpened(page);
+  // Establish the authoritative snapshot after the opening/read acknowledgement.
+  for (const frame of current.report(0, "Working")) send(frame);
+  await expect(page.locator(".app-agent-work-dock").getByRole("button", { name: /Open agent0/ })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    (window as unknown as { __renderCounts: { counting: boolean } }).__renderCounts.counting = true;
+  });
+  for (let step = 1; step <= 30; step += 1) {
+    for (const frame of current.report(0, `Current step ${step}`)) send(frame);
+    await page.waitForTimeout(20);
+  }
+  const dock = page.locator(".app-agent-work-dock");
+  await expect(dock.getByRole("button", { name: /Open agent0/ })).toBeVisible();
+  await page.waitForTimeout(50);
+  const counts = await page.evaluate(() =>
+    (window as unknown as { __renderCounts: { messageRows: number; workspaceViews: number } }).__renderCounts);
+  expect(counts.messageRows).toBe(0);
+  expect(counts.workspaceViews).toBe(0);
+  await page.locator('[id="message:current-message-40"] .identity-avatar').click();
+  await expect(page.getByRole("dialog").getByText("Current step 30", { exact: true })).toBeVisible();
+  await expect.poll(async () => (await fixtureRequests(page, "current-trace")).length).toBeGreaterThan(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  send({ type: "channel_updated", channel: { ...current.channels[0], memberPresence: {} } });
+  send({ type: "agent_lifecycle", channelId: current.channelId(0), agentId: agent.id,
+    instanceId: agent.instances[0].id, status: "offline", layer: "agent", ts: new Date().toISOString() });
+  await expect(page.locator('[id="message:current-message-40"]').getByText("instance offline", { exact: true })).toBeVisible();
+  // Presence-discovered cards remain searchable while the shell uses its
+  // stable catalog snapshot and the Hub sends an empty agent_list.
+  await page.keyboard.press("Control+f");
+  const search = page.getByRole("dialog", { name: "Search workspace" });
+  await search.getByRole("textbox").fill("from:agent0");
+  await expect(search.getByRole("button", { name: /agent0.*Agent/ })).toBeVisible();
 });

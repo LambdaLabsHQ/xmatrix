@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_SPACE, installWorkspaceStubs, openWorkspaceWithStubs } from "./workspace-fixtures";
 import { fixtureJson } from "./in-page-api-fixtures";
+import { paintedMainTop } from "./painted-timeline-frames";
 
 /* The mobile wood topbar is the workspace identity bar. On a dock tab's own
    screen (Pages, Channels, Status, More) it names only the Space, because the
@@ -12,6 +13,14 @@ import { fixtureJson } from "./in-page-api-fixtures";
 test.use({ viewport: { width: 390, height: 844 } });
 
 const topbar = (page: import("@playwright/test").Page) => page.locator(".app-topbar");
+
+test("a new conversation's content clears its pushed-screen title bar", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await page.getByRole("button", { name: "New conversation" }).tap();
+  await expect(topbar(page)).toContainText("New conversation");
+  const painted = await paintedMainTop(page);
+  expect(painted.contentTop).toBeGreaterThanOrEqual(painted.titleBottom);
+});
 
 test("every dock tab's topbar names only the Space, and the tab's + sits just above the dock", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });

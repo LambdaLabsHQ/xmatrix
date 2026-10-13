@@ -101,6 +101,9 @@ export async function openWorkingAgentsSpace(
     }
   });
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: space.channels });
+  await fixtureJson(page, "working-agents-invocations", "**/api/xmatrix/channels/*/agent-launches/query", {
+    launches: [], rejections: [], continuations: [], executions: [], stops: [], nextCursor: null,
+  });
   await fixtureJson(page, "working-agents-history", "**/api/xmatrix/channels/channel-general/history**", {
     messages,
     hasMore: false,

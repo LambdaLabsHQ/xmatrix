@@ -25,6 +25,23 @@ type PaintedTimelineFrame = {
 
 type RecordingWindow = Window & { __paintedTimelineFrames?: PaintedTimelineFrame[] };
 
+/** The pushed screen's content edge after paint, below its floating title bar. */
+export async function paintedMainTop(page: Page) {
+  return page.evaluate(() => new Promise<{ contentTop: number; titleBottom: number }>(resolve => {
+    const painted = new MessageChannel();
+    painted.port1.onmessage = () => {
+      const main = document.querySelector(".app-main")!;
+      const title = document.querySelector(".app-topbar")!;
+      const contentTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(main).paddingTop);
+      const titleBottom = title.getBoundingClientRect().bottom;
+      painted.port1.close();
+      painted.port2.close();
+      resolve({ contentTop, titleBottom });
+    };
+    requestAnimationFrame(() => painted.port2.postMessage(null));
+  }));
+}
+
 /** Starts recording; `openSelector` marks the frames a spec cares about. */
 export async function recordPaintedTimelineFrames(page: Page, openSelector = ".app-message-timeline") {
   await page.evaluate((selector) => {

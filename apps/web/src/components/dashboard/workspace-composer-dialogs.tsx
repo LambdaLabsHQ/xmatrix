@@ -1,4 +1,5 @@
 "use client";
+import { useRealtimeChannel } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { ZoomableAttachmentImage } from "./zoomable-attachment-image";
@@ -302,7 +303,7 @@ export {
 
 export function Composer({
   compact = false,
-  channel,
+  channel: catalogChannel,
   attachmentsEnabled = true,
   draftIdentity,
   startsConversation = false,
@@ -383,6 +384,7 @@ export function Composer({
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
 }) {
+  const channel = useRealtimeChannel(catalogChannel);
   const writable = isJoined && (Boolean(channel) || startsConversation);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);

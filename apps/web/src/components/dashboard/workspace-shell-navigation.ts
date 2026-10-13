@@ -1,5 +1,17 @@
 "use client";
 
+/** One pushed-screen state for the mobile title bar and its layout clearance. */
+export function mobileBackState(view: AppView, input: {
+  channel: boolean; page: boolean; composing: boolean; conversationOverPage: boolean;
+}) {
+  const conversationOverPage = view === "pages" && input.channel && input.conversationOverPage;
+  const pageOpen = view === "pages" && input.page && !conversationOverPage;
+  const composingOpen = view === "messages" && input.composing;
+  const conversationOpen = (view === "messages" || conversationOverPage) && input.channel;
+  return { conversationOverPage, pageOpen, composingOpen, conversationOpen,
+    showBack: conversationOpen || pageOpen || composingOpen };
+}
+
 import {
   decodePathSegment,
 } from "./workspace-shell-path";

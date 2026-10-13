@@ -1,4 +1,5 @@
 "use client";
+import { useRealtimeChannel } from "./realtime-channels";
 
 import { normalizeChannelSearchText } from "./workspace-shell-search-model";
 import type { LiquidGlassMaterial } from "@/components/ui/liquid-glass-material";
@@ -27,6 +28,7 @@ import {
 import {
   AppView,
   DOCK_TAB_VIEWS,
+  mobileBackState,
   MORE_TAB_VIEWS,
   viewLabels,
 } from "./workspace-shell-navigation";
@@ -552,11 +554,9 @@ export function TopWorkspaceBar({
 }) {
   const [spaceMenuOpen, setSpaceMenuOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
-  const conversationOverPage = view === "pages" && Boolean(channel) && Boolean(onClosePageConversation);
-  const pageOpen = view === "pages" && Boolean(page) && !conversationOverPage;
-  const composingOpen = view === "messages" && composing;
-  const conversationOpen = (view === "messages" || conversationOverPage) && Boolean(channel);
-  const showBack = conversationOpen || pageOpen || composingOpen;
+  const { conversationOverPage, pageOpen, composingOpen, conversationOpen, showBack } = mobileBackState(view, {
+    channel: Boolean(channel), page: Boolean(page), composing, conversationOverPage: Boolean(onClosePageConversation),
+  });
   const showMoreBack = view !== "messages" && view !== "more" && MORE_TAB_VIEWS.includes(view);
   const currentSpace = currentSpaceId
     ? spaces.find((space) => space.id === currentSpaceId) || null
@@ -1245,7 +1245,7 @@ export function ChannelMoveDialog({
 }
 
 export function ChannelHeader({
-  channel,
+  channel: catalogChannel,
   spaces,
   currentUserId,
   onRename,
@@ -1272,6 +1272,7 @@ export function ChannelHeader({
   /** Controls of where the conversation is shown, such as closing it beside a page. */
   actions?: React.ReactNode;
 }) {
+  const channel = useRealtimeChannel(catalogChannel)!;
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState("");
   const channelSpace = channel
@@ -1526,11 +1527,11 @@ export function channelWorkInHand(channel: SerializedChannel, events: readonly O
   });
 }
 
-export function channelWorkInHandInstanceIds(channel: SerializedChannel, events: ObservabilityEvent[]): string[] {
+export function channelWorkInHandInstanceIds(channel: SerializedChannel, events: readonly ObservabilityEvent[]): string[] {
   return channelWorkInHand(channel, events).map((item) => item.instance.id);
 }
 
-export function channelHasWorkInHand(channel: SerializedChannel, events: ObservabilityEvent[]): boolean {
+export function channelHasWorkInHand(channel: SerializedChannel, events: readonly ObservabilityEvent[]): boolean {
   return channelWorkInHandInstanceIds(channel, events).length > 0;
 }
 

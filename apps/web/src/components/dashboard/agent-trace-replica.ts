@@ -106,12 +106,13 @@ export function purgeAgentTraceReplicas(
   const channelIds = new Set((boundary.channelIds || []).filter(isNonEmptyString));
   const instanceIds = new Set((boundary.instanceIds || []).filter(isNonEmptyString));
   if (!agentId && channelIds.size === 0 && instanceIds.size === 0) return current;
-  return current.filter((replica) => {
+  const kept = current.filter((replica) => {
     if (agentId && replica.scope.agentId !== agentId) return true;
     if (channelIds.size > 0 && !channelIds.has(replica.scope.channelId)) return true;
     if (instanceIds.size > 0 && !instanceIds.has(replica.scope.instanceId)) return true;
     return false;
   });
+  return kept.length === current.length ? current : kept;
 }
 
 /**

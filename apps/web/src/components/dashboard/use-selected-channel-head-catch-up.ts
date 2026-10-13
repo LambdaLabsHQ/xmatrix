@@ -45,9 +45,12 @@ export function useSelectedChannelHeadCatchUp(input: Input): void {
       if (cancelled) return;
       const result = await inputRef.current.catchUp(channelId, presentedHead)
         .catch(() => ({ ok: false, found: 0 }));
-      if (cancelled) return;
+      // Applying the fetched rows can synchronously commit the new presented
+      // head and clean up this effect before catchUp returns. That successful
+      // read still proves the socket missed rows in the same open Channel.
+      if (cancelled && (!result.ok || inputRef.current.channelId !== channelId)) return;
       if (result.ok) {
-        coveredHeadRef.current.set(channelId, knownHead);
+        coveredHeadRef.current.set(channelId, Math.max(knownHead, coveredHeadRef.current.get(channelId) ?? 0));
         if (result.found > 0) inputRef.current.onSocketMissedRows();
         return;
       }

@@ -880,6 +880,7 @@ test("a page's conversations sit beside what they are about, and one opens there
   await expect(browser).toHaveURL(/page=p-relay&conversation=channel-release/u);
   const open = browser.getByTestId("page-margin").getByTestId("page-margin-open");
   await expect(open).toContainText("Release notes");
+  await expect(browser.locator(".app-global-bar")).toBeVisible();
   await expect(open.getByTestId("page-conversation")).toContainText("Drafted the notes; checking the changelog.");
   await expect(editor).toContainText("In progress");
   await expect.poll(async () => Math.abs((await open.boundingBox())!.y - (await status.boundingBox())!.y),

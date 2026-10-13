@@ -1,5 +1,6 @@
+import { installRenderCounter } from "./render-counts";
 import { expect, test } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, conversationOpened } from "./workspace-fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 
 const AGENTS = 1000;
@@ -16,13 +17,20 @@ const messages = channelHistory(40, "k-message", (row) => `Row ${row}: a **statu
  * report arrives the way the Hub sends it to a client without digests: the
  * Agent card and the whole Channel. The page must process them all without
  * saturating the main thread. Wall-clock, so it runs in the serial
- * performance project; the bound is loose enough for a loaded CI host and is
- * tightened as track A lands.
+ * performance project; the steady-state budget reserves headroom for a loaded
+ * CI host and also requires zero shell/message-row renders from reports.
  */
 test("a thousand Agents reporting do not saturate the main thread", async ({ page }) => {
   test.setTimeout(120_000);
+  await installRenderCounter(page);
   const send = await openWorkingAgentsSpace(page, space, messages, "Row 40:");
 
+  await conversationOpened(page);
+  // Measure ongoing reports after initial invocation evidence and lazy chunks settle.
+  await page.waitForLoadState("networkidle");
+  // Initial row-arrival animations and invocation evidence belong to opening,
+  // which has its own painted-frame tests, rather than steady report traffic.
+  await page.waitForTimeout(2_000);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Performance.enable");
   const metrics = async () => Object.fromEntries(
@@ -37,6 +45,9 @@ test("a thousand Agents reporting do not saturate the main thread", async ({ pag
         record.longestMs = Math.max(record.longestMs, entry.duration);
       }
     }).observe({ type: "longtask" });
+  });
+  await page.evaluate(() => {
+    (window as unknown as { __renderCounts: { counting: boolean } }).__renderCounts.counting = true;
   });
   const before = await metrics();
   const startedAt = Date.now();
@@ -64,6 +75,12 @@ test("a thousand Agents reporting do not saturate the main thread", async ({ pag
     ...longTasks,
   })}`);
 
+  const renders = await page.evaluate(() =>
+    (window as unknown as { __renderCounts: { workspaceViews: number; messageRows: number } }).__renderCounts);
+  console.log(`[thousand-agent-renders] ${JSON.stringify(renders)}`);
+  // Reports also cover unloaded catalog pages; hydration must not repaint the shell.
+  expect(renders.workspaceViews).toBe(0);
+  expect(renders.messageRows).toBe(0);
   expect(sent).toBe(REPORTS_PER_SECOND * SECONDS);
-  expect(busy).toBeLessThan(0.8);
+  expect(busy).toBeLessThan(0.5);
 });

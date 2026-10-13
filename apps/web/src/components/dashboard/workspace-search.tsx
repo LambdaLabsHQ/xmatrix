@@ -7,7 +7,8 @@
  * on the search page. Pressed inside a
  * conversation, ⌘F starts with `in:` that conversation; Backspace takes it off.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { RealtimeCollection } from "./realtime-collection";
 import { ArrowRight, AtSign, Clock, FileText, Hash, MessageSquare, X } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
 import type {
@@ -232,7 +233,8 @@ export function WorkspaceSearchDialog({
   spaceId,
   channels,
   spaces,
-  agents,
+  agents: catalogAgents,
+  realtimeAgents,
   projects,
   machineDaemons,
   pages = [],
@@ -254,6 +256,7 @@ export function WorkspaceSearchDialog({
   channels: SerializedChannel[];
   spaces: SerializedSpace[];
   agents: SerializedAgent[];
+  realtimeAgents?: RealtimeCollection<SerializedAgent>;
   projects: SerializedWorkspace[];
   machineDaemons: SerializedMachineDaemon[];
   pages?: readonly PageSummary[];
@@ -268,6 +271,12 @@ export function WorkspaceSearchDialog({
   onChangeView: (view: AppView) => void;
   onCancel: () => void;
 }) {
+  // Subscribe only the open picker; Agent discovery must not require a shell
+  // render or an obsolete agent_list roster on the Hub.
+  const subscribeAgents = useCallback((notify: () => void) =>
+    open && realtimeAgents ? realtimeAgents.subscribe(notify) : () => {}, [open, realtimeAgents]);
+  const agents = useSyncExternalStore(subscribeAgents,
+    open && realtimeAgents ? realtimeAgents.getSnapshot : () => catalogAgents, () => catalogAgents);
   const [text, setText] = useState("");
   const [filters, setFilters] = useState<SearchFilters>(initialFilters);
   const [activeIndex, setActiveIndex] = useState(0);
