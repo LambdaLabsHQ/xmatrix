@@ -12,6 +12,7 @@ import {
   runtimeFailureOrigin,
 } from "../src/runtime-transport/runtime-operation-failure.ts";
 import { PostgresAgentInstancePort } from "../src/runtime-transport/postgres-agent-instance-port.ts";
+import { ControlError } from "@xmatrix/db";
 import { InvalidAuthTokenError } from "../src/auth.ts";
 import { capturingConsole } from "./support/capturing-console.mjs";
 
@@ -78,6 +79,31 @@ test("a Durable Object reset by a deploy reaches a socket as retryable service_r
     async () => { throw new Error("Durable Object storage failed"); }));
   assert.equal(output[0].failure.code, "runtime.session_failed");
   assert.equal(output[0].failure.retryable, false);
+});
+
+/** The one frame a socket sends, and what the Hub logs, when `error` fails an operation. */
+async function answered(error) {
+  const output = [];
+  const sockets = new RuntimeSocketState("test", (requestId, message, failure) => ({ requestId, message, failure }), () => {});
+  const logged = await capturingConsole(() => sockets.answerOperation(
+    { send: (value) => output.push(JSON.parse(value)) }, "request-1", "Request failed", async () => { throw error; }));
+  assert.equal(output.length, 1);
+  return { frame: output[0], logged };
+}
+
+test("a lost transaction conflict reaches a socket under its own retryable code", async () => {
+  const { frame, logged } = await answered(Object.assign(new Error("deadlock detected"), { code: "40P01" }));
+  assert.deepEqual([frame.failure.code, frame.failure.retryable, frame.failure.stage],
+    ["transaction_conflict", true, "authority.request"]);
+  assert.deepEqual(logged.error.map(([message, detail]) => [message, detail.authorityCode]),
+    [["xMatrix runtime authority rejection", "transaction_conflict"]]);
+  assert.doesNotMatch(JSON.stringify(frame), /deadlock/);
+});
+
+test("a repository rejection on a socket is reported once, under the id its client is given", async () => {
+  const { frame, logged } = await answered(new ControlError("forbidden", 403, "principal cannot manage this Space"));
+  assert.deepEqual(logged.error.map(([message, detail]) => [message, detail.diagnosticId]),
+    [["xMatrix runtime authority rejection", frame.failure.diagnosticId]]);
 });
 
 test("a permanent authority rejection never becomes automatically retryable", async () => {

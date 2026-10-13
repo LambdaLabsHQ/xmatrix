@@ -1,7 +1,9 @@
 import { ControlError, DetailedControlError } from "@xmatrix/db";
 
 import { DURABLE_OBJECT_RETRY_AFTER_SECONDS, transientDurableObjectFailure } from "./durable-object-failure";
-import { postgresRetryAfterSeconds, retryablePostgresFailure } from "./postgres-error-classification";
+import {
+  postgresRetryAfterSeconds, postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONFLICT,
+} from "./postgres-error-classification";
 
 /**
  * The Hub's one contract for answering a failure (docs/architecture/client-resilience.md):
@@ -53,12 +55,20 @@ export function transientError(error: unknown): boolean {
   return transientDurableObjectFailure(error) || retryablePostgresFailure(error);
 }
 
-/** A Durable Object or PostgreSQL outage a replay can survive, or null when the failure is not one. */
+/**
+ * A Durable Object or PostgreSQL outage a replay can survive, or a transaction
+ * that lost a conflict; null when the failure is neither.
+ */
 export function transientFailure(error: unknown): RequestFailure | null {
   if (transientDurableObjectFailure(error)) {
     console.error("Durable Object is briefly unavailable", error);
     return { status: 503, body: { error: "xMatrix is restarting; try again", code: "service_restarting", retryable: true },
       headers: { "retry-after": String(DURABLE_OBJECT_RETRY_AFTER_SECONDS) } };
+  }
+  if (postgresTransactionConflict(error)) {
+    console.error("PostgreSQL transaction lost a conflict", error);
+    return { status: 503, body: { ...TRANSACTION_CONFLICT, retryable: true },
+      headers: { "retry-after": String(postgresRetryAfterSeconds(error)) } };
   }
   if (retryablePostgresFailure(error)) {
     console.error("PostgreSQL is unavailable", error);

@@ -332,6 +332,7 @@ export function operationFailureDescription(value: unknown): string | undefined 
     agent_run_binding_mismatch: "The process credentials do not match the active Run. Check its Run and instance references.",
     agent_connection_superseded: "A newer connection replaced this one. Check the active connection before restarting.",
     postgres_runtime_unavailable: "The runtime service is temporarily unavailable.",
+    transaction_conflict: "The runtime service was busy with a conflicting change.",
     runtime_transaction_retry_exhausted: "The runtime service could not acquire its required state after bounded retries.",
     runtime_sql_contract_error: "The runtime service encountered an internal error. Use the diagnostic reference to investigate.",
     agent_run_forbidden: "The operation was refused for this Run. Refresh its state before requesting recovery.",

@@ -144,6 +144,9 @@ the reason comes from the failure's class, never from raw exception text:
 
 The Hub's messages for transient failures name no internal component
 (`postgres_unavailable` says "xMatrix is briefly unavailable; try again").
+A transaction that lost a conflict to a concurrent one is not an outage: it is
+`transaction_conflict`, "xMatrix was busy with a conflicting change; try
+again", with a `Retry-After` of one second.
 
 ### Finding a failure again
 
