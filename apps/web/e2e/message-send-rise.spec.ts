@@ -70,14 +70,19 @@ async function sendAndReadRises(page: Page): Promise<Rise[]> {
   return page.evaluate(() => (window as unknown as { __timelineRises: Rise[] }).__timelineRises);
 }
 
+/** The list stands in its place: nothing holds it lower, and nothing is still bringing it there. */
+async function listAtRest(page: Page) {
+  await expect.poll(() => page.locator(".app-message-timeline [data-viewport-type]").evaluate((list) =>
+    (list as HTMLElement).style.translate === "" && list.getAnimations().length === 0)).toBe(true);
+}
+
 /** The frames painted while `send` plays out, once the rows stand still again. */
 async function framesOfSend(page: Page, send: () => Promise<void>) {
   await recordPaintedTimelineFrames(page);
   await send();
   await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-row]").evaluateAll((rows) =>
     rows.filter((row) => row.getAnimations().length > 0).length)).toBe(0);
-  await expect.poll(() => page.locator(".app-message-timeline [data-viewport-type]").evaluate((list) =>
-    (list as HTMLElement).style.translate)).toBe("");
+  await listAtRest(page);
   return paintedTimelineFrames(page);
 }
 
@@ -155,8 +160,9 @@ test("messages that come in while the rows are rising are never drawn over each 
   await draft.fill("Two, which is a longer message than the one before it.");
   await draft.press("Enter");
   await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 2}"]`)).toBeInViewport();
-  await expect.poll(() => page.locator(".app-message-timeline [data-viewport-type]").evaluate((list) =>
-    (list as HTMLElement).style.translate)).toBe("");
+  await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-row]").evaluateAll((rows) =>
+    rows.filter((row) => row.getAnimations().length > 0).length)).toBe(0);
+  await listAtRest(page);
   const frames = await paintedTimelineFrames(page);
   expect(frames.length).toBeGreaterThan(10);
   expect(paintedRowOverlaps(frames)).toEqual([]);
