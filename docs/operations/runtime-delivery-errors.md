@@ -32,6 +32,16 @@ authentication check, and activity recording. Control and lifecycle frames keep
 their existing order. A successful CLI HTTP request or local daemon broker check
 alone does not establish that the Machine Daemon WebSocket is connected.
 
+The CLI starts the probe response deadline only after its socket writer flushes
+the probe. Waiting in the write queue is not evidence that the Hub ignored it.
+Queueing has a separate 20-second bound, socket writes retain their 10-second
+bound, and a written probe gets the connection-admission response budget of
+15 seconds. With the two-second sampling interval, a silent half-open link is
+still recovered within 44 seconds in the worst queueing case. Any inbound frame
+clears the outstanding probe; explicit read/write failures still reconnect
+immediately. These transport budgets do not extend command admission leases or
+change Run authorization.
+
 Unclassified socket failures include their error class and at most four filtered
 function names as the scalar `origin` field. The scalar survives Sentry's console
 argument normalization; an array would become `[Array]` before the event title
