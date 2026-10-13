@@ -22,6 +22,16 @@ deployed head sampling rate is one; an empty query is not proof of no failure.
 Keep unresolved incidents open until the originating failure is understood and
 any fix is verified in production.
 
+Machine Daemon application heartbeats are answered from the current authenticated
+socket session without joining the ordered Authority-operation queue. Connect
+catch-up and run reports may wait on database I/O longer than the CLI's liveness
+probe budget; queuing a pong behind that work falsely disconnects a reachable
+machine and can reject a subsequent launch as `registration_daemon_offline`.
+The heartbeat still uses the connection controller's bounded decoding,
+authentication check, and activity recording. Control and lifecycle frames keep
+their existing order. A successful CLI HTTP request or local daemon broker check
+alone does not establish that the Machine Daemon WebSocket is connected.
+
 Unclassified socket failures include their error class and at most four filtered
 function names as the scalar `origin` field. The scalar survives Sentry's console
 argument normalization; an array would become `[Array]` before the event title

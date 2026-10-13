@@ -24,7 +24,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
   try {
     await setup.query(`CREATE SCHEMA ${schema}`);
     for (const file of ["0009_expand_remaining_control_facts.sql", "0014_expand_current_control_fact_shapes.sql", "0036_expand_agent_launches.sql",
-      "0037_expand_agent_launch_timeline.sql", "0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql",
+      "0037_expand_agent_launch_timeline.sql", "0050_expand_launch_initial_source.sql", "0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql",
       "0062_expand_registration_execution_revision.sql", "0063_expand_registration_authority.sql",
       "0065_expand_registration_environment.sql", "0066_expand_registration_allocations.sql",
       "0067_expand_registration_grant_execution_revision.sql", "0068_expand_registration_run_bindings.sql",
@@ -155,6 +155,9 @@ integration("launch survives a hostname change with stale Workspace metadata and
       requirements: { ...request.requirements, effort: "low" } }),
     error => error.code === "idempotency_mismatch");
     assert.equal(launch.spawn_payload_json.context.initialMessageSource.bodyHash, bodyHash);
+    // Delivery trusts only this column, scoped to the Launch's Channel and trigger.
+    assert.deepEqual(launch.initial_source_json, launch.spawn_payload_json.context.initialMessageSource);
+    assert.deepEqual([launch.initial_source_json.channelId, launch.initial_source_json.messageId], [launch.channel_id, launch.trigger_id]);
     const admission = { requestId: "admit", key, runId: replay.runId,
       allocationId: launch.spawn_payload_json.registration.allocationId,
       authorizationDigest: launch.spawn_payload_json.registration.authorizationDigest,

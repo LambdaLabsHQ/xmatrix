@@ -36,11 +36,11 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { AgentListGroups, agentListGroups } from "./agent-list-groups";
+import { AgentHarnessDetail } from "./agent-harness-detail";
+import { AgentListGroups, agentHarnessItemId, agentListGroups } from "./agent-list-groups";
 import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
-import { HarnessProfileSection } from "./harness-profile-section";
 import { HarnessSignInSection } from "./harness-sign-in";
 import { IdentityAvatar } from "./identity-avatar";
 import { MeterReadingList } from "./machine-load-panel";
@@ -83,7 +83,8 @@ const INPUT_CLASS =
 /**
  * Agents: the Space's registrations under their runtime, one row per location
  * (owner and machine). A row is named by what differs between a runtime's
- * locations and says what that location is doing now.
+ * locations and says what that location is doing now. The runtime's heading
+ * opens what is set on the agent itself, whichever machine it runs on.
  */
 export function MyAgentsView({
   spaceId,
@@ -136,8 +137,9 @@ export function MyAgentsView({
   const groups = agentListGroups(catalog.data, { conversationTitle, now });
   const rows = groups.flatMap((group) => group.rows);
   const chosen = rows.find((row) => row.id === item);
-  // A desktop shows the list's first row beside it until another is chosen.
-  const shown = chosen ?? (item ? undefined : rows[0]);
+  // A desktop shows the list's first item, its first agent, beside it until another is chosen.
+  const shownGroup = chosen ? undefined
+    : groups.find((group) => agentHarnessItemId(group.harness) === item) ?? (item ? undefined : groups[0]);
 
   const list = (
     <ToolList title="Agents" createLead="avatar" create={{ label: "Manage machines", onCreate: onOpenMachines }}>
@@ -152,7 +154,8 @@ export function MyAgentsView({
       ) : rows.length === 0 ? (
         <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
       ) : (
-        <AgentListGroups groups={groups} selectedId={item} shownId={shown?.id} currentUserId={currentUserId}
+        <AgentListGroups groups={groups} selectedId={item} currentUserId={currentUserId} headingsOpen
+          shownId={shownGroup ? agentHarnessItemId(shownGroup.harness) : undefined}
           onSelect={(id) => { select(id); setEditingId(null); }} />
       )}
       {ready && (newCandidates.length > 0 || fleet.daemons.isError) && <ToolListGroup title="Installed on your machines" count={newCandidates.length}>
@@ -162,8 +165,11 @@ export function MyAgentsView({
   );
 
   let detail: React.ReactNode = null;
-  if (shown) {
-    const { registration, id, activity, harness, title, machineInLine } = shown;
+  if (shownGroup) {
+    detail = <AgentHarnessDetail key={shownGroup.harness} group={shownGroup} token={token}
+      onBack={() => select(null)} onOpenLocation={select} onSaved={() => catalog.refetch()} />;
+  } else if (chosen) {
+    const { registration, id, activity, harness, title, machineInLine } = chosen;
     const status = registrationStatus(registration);
     const ownerPreset = registration.key.ownerUserId === currentUserId
       ? AGENT_PRESETS.find((preset) => preset.id === harness) : undefined;
@@ -248,7 +254,6 @@ export function MyAgentsView({
             />
           </ToolDetailSection>
         )}
-        <HarnessProfileSection registration={registration} token={token} onSaved={() => catalog.refetch()} />
         {running.length > 0 && (
           <ToolDetailSection title={`Running now · ${running.length}`}>
             <ul className="app-tool-lines">

@@ -43,8 +43,17 @@ test("whoever may describe a harness writes what it is for in place, as free tex
   await fixtureJson(page, "profile", "**/api/xmatrix/spaces/*/agent-registrations/profiles",
     { harness: "codex", description: "saved", revision: 3 }, { method: "POST" });
   await page.goto("/app/personal-sspaceperso/agents");
-  await page.getByTestId("agent-row").filter({ hasText: "Remote server" }).click();
+  /* The text is the agent's, whichever machine runs it: a machine's page does not carry it. */
   const text = page.getByLabel("When to pick codex");
+  const machine = page.getByTestId("agent-row").filter({ hasText: "Remote server" });
+  await machine.click();
+  await expect(machine).toHaveAttribute("aria-current", "true");
+  await expect(page.getByText("Runtime", { exact: true })).toBeVisible();
+  await expect(text).toHaveCount(0);
+  const agent = page.getByRole("region", { name: "codex" }).locator(".app-tool-list-group-title");
+  await agent.click();
+  await expect(agent).toHaveAttribute("aria-current", "true");
+  await expect(page.getByTestId("agent-location")).toHaveText("Remote server");
   await expect(text).toHaveValue("Careful code review.");
   await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
   const prose = "擅长代码审计。\nKeep UI work away from it: it is slow there.";

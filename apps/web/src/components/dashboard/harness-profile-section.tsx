@@ -15,7 +15,9 @@ import { ToolDetailSection } from "./tool-split";
  * What the Space says this harness is for, edited where it is read. The text
  * is free: automatic routing reads it as it stands when it judges whether the
  * harness suits a piece of work. One text covers every location of the
- * harness in the Space. `draft` is null until the reader types.
+ * harness in the Space, so it is shown on the agent and not on one of its
+ * machines; any location's registration carries it. `draft` is null until the
+ * reader types.
  */
 export function HarnessProfileSection({ registration, token, onSaved }: {
   registration: AgentRegistrationSummary;
@@ -65,7 +67,7 @@ export function HarnessProfileSection({ registration, token, onSaved }: {
           {error && <p role="alert" className={noticeClass("alert", "rounded-lg p-3")}>{error}</p>}
           <div className="flex flex-wrap items-center gap-2">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-              Read when work is assigned automatically. Applies to every {harness} agent in this Space.
+              Read when work is assigned automatically. Applies on every machine {harness} runs on in this Space.
             </p>
             {changed && <>
               <button type="button" disabled={saving} onClick={() => { setDraft(null); setError(null); }}
