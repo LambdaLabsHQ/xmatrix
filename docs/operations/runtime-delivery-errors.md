@@ -21,3 +21,11 @@ which code path failed. Cloudflare can sample retained logs even when the
 deployed head sampling rate is one; an empty query is not proof of no failure.
 Keep unresolved incidents open until the originating failure is understood and
 any fix is verified in production.
+
+Unclassified socket failures include their error class and at most four filtered
+function names as the scalar `origin` field. The scalar survives Sentry's console
+argument normalization; an array would become `[Array]` before the event title
+is built. Exception text, file paths and private inputs are not copied. These
+names locate the original failure path; the captured console stack still points
+to the reporting boundary. This diagnostic does not establish the underlying
+failure's cause or change the socket's rejection or retry policy.

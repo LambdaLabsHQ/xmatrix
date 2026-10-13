@@ -147,9 +147,9 @@ test("an unclassified failure logs where it was thrown, never what it said", () 
   try { authenticationBinding(); } catch (caught) { error = caught; }
   const origin = runtimeFailureOrigin(error);
   assert.equal(origin.errorClass, "TypeError");
-  assert.equal(origin.origin[0], "authenticationBinding");
+  assert.equal(origin.origin.split(",")[0], "authenticationBinding");
   assert.doesNotMatch(JSON.stringify(origin), /user-secret|expired/u);
-  assert.deepEqual(runtimeFailureOrigin("plain text"), { errorClass: "string", origin: [] });
+  assert.deepEqual(runtimeFailureOrigin("plain text"), { errorClass: "string", origin: "" });
 });
 
 function credentialPort(authenticate) {

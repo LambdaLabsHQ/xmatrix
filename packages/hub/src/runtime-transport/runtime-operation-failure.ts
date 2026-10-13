@@ -92,15 +92,19 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
   return failure;
 }
 
-/** The error's class and its innermost function names: code locations only. */
-export function runtimeFailureOrigin(error: unknown): { errorClass: string; origin: string[] } {
+/**
+ * The error's class and its innermost function names: code locations only.
+ * Keep names in a scalar: Sentry normalizes nested console arguments before
+ * building the title, replacing an array here with the literal `[Array]`.
+ */
+export function runtimeFailureOrigin(error: unknown): { errorClass: string; origin: string } {
   const errorClass = error instanceof Error && /^[A-Za-z_$][\w$]{0,79}$/u.test(error.constructor.name)
     ? error.constructor.name : typeof error;
   const stack = error instanceof Error && typeof error.stack === "string" ? error.stack : "";
   const origin = stack.split("\n").slice(1)
     .map((line) => /^\s*at (?:async )?([A-Za-z_$][\w$.<>]{0,119}) \(/u.exec(line)?.[1])
     .filter((name): name is string => name !== undefined)
-    .slice(0, 4);
+    .slice(0, 4).join(",");
   return { errorClass, origin };
 }
 
