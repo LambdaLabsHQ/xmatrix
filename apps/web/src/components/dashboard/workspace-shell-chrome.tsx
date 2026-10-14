@@ -913,7 +913,7 @@ export function DesktopUpdateRailButton({
 const UPDATE_GLASS: LiquidGlassMaterial = { veil: "oklch(1 0 0 / 0.72)" };
 
 /** Restarting closes every window, so the rail and Settings ask first. */
-export function DesktopUpdateRestartDialog({
+export const DesktopUpdateRestartDialog = memo(function DesktopUpdateRestartDialog({
   status,
   open,
   onCancel,
@@ -952,7 +952,7 @@ export function DesktopUpdateRestartDialog({
       </DialogPanelFooter>
     </CenteredDialogShell>
   );
-}
+});
 
 export function ChannelActionsMenu({
   channel,

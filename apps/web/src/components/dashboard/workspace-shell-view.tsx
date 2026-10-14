@@ -842,6 +842,28 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const logOut = useStableCallback(() => void logoutAndClearDeviceData().catch(() => undefined));
   const reportIssue = useStableCallback(openIssueReport);
   const installUpdateFromRail = useStableCallback(() => requestDesktopUpdateInstall());
+  /* The conversation list is memoized: its handlers stay the same object and
+     act on what the shell holds when they are called. */
+  const renameSidebarSpace = useStableCallback((spaceId: string, name: string) => void renameSpace(spaceId, name));
+  const manageSidebarSpaces = useStableCallback(() => changeAppView("team"));
+  const toggleSidebarPin = useStableCallback((channelId: string) => toggleChannelPinned(channelId));
+  const markSidebarDone = useStableCallback((channelId: string) => void markChannelResponded(channelId));
+  const selectSidebarSpace = useStableCallback(selectSpace);
+  const copySidebarChannelLink = useStableCallback((channel: Parameters<typeof copyChannelLink>[0]) => copyChannelLink(channel));
+  const selectSidebarChannel = useStableCallback((channelId: string, messageId?: string) =>
+    requestChannelNavigation(channelId, messageId));
+  const cancelDesktopUpdate = useStableCallback(() => setDesktopUpdateConfirmOpen(false));
+  const confirmDesktopUpdate = useStableCallback(() => {
+    setDesktopUpdateConfirmOpen(false);
+    void installDesktopUpdate();
+  });
+  // The resize handle's context: one value while the width and the drag are the same.
+  const listColumnResize = useMemo(() => ({
+    width: desktopSidebarWidth,
+    resizing: resizingDesktopSidebar,
+    startResize: startDesktopSidebarResize,
+    onKeyDown: handleDesktopSidebarResizeKey,
+  }), [desktopSidebarWidth, handleDesktopSidebarResizeKey, resizingDesktopSidebar, startDesktopSidebarResize]);
   const submitChannelMove = useStableCallback(() => {
     if (selectedChannel) void moveChannel(selectedChannel);
   });
@@ -1416,12 +1438,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           On phones it is layout-transparent (display: contents). */}
       <div className="app-workspace-panel"
         style={{ "--app-desktop-sidebar-width": `${desktopSidebarWidth}px` } as CSSProperties}>
-      <ListColumnResizeProvider value={{
-        width: desktopSidebarWidth,
-        resizing: resizingDesktopSidebar,
-        startResize: startDesktopSidebarResize,
-        onKeyDown: handleDesktopSidebarResizeKey,
-      }}>
+      <ListColumnResizeProvider value={listColumnResize}>
         {/* A destination with a list of its own draws it in this column's place. */}
         <aside
           className={cn("app-sidebar hidden w-[var(--app-desktop-sidebar-width)] flex-col bg-sidebar text-sidebar-foreground",
@@ -1448,13 +1465,13 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             currentUserId={user.id}
             renamingSpaceId={renamingSpaceId}
             spacesError={spacesError}
-            onRenameSpace={(spaceId, name) => void renameSpace(spaceId, name)}
-            onManageSpaces={() => changeAppView("team")}
-            onTogglePinned={(channelId) => toggleChannelPinned(channelId)}
-            onMarkDone={(channelId) => void markChannelResponded(channelId)}
-            onSelectSpace={selectSpace}
-            onCopyChannelLink={(channel) => copyChannelLink(channel)}
-            onSelect={(channelId, messageId) => requestChannelNavigation(channelId, messageId)}
+            onRenameSpace={renameSidebarSpace}
+            onManageSpaces={manageSidebarSpaces}
+            onTogglePinned={toggleSidebarPin}
+            onMarkDone={markSidebarDone}
+            onSelectSpace={selectSidebarSpace}
+            onCopyChannelLink={copySidebarChannelLink}
+            onSelect={selectSidebarChannel}
             create={desktopCreate}
           />}
         </aside>
@@ -1607,11 +1624,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       <DesktopUpdateRestartDialog
         status={desktopUpdateStatus}
         open={desktopUpdateConfirmOpen}
-        onCancel={() => setDesktopUpdateConfirmOpen(false)}
-        onConfirm={() => {
-          setDesktopUpdateConfirmOpen(false);
-          void installDesktopUpdate();
-        }}
+        onCancel={cancelDesktopUpdate}
+        onConfirm={confirmDesktopUpdate}
       />
     </div>
     </ManageSecretsProvider>

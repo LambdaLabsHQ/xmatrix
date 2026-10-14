@@ -1,6 +1,6 @@
 "use client";
 import { actionClass } from "@/components/ui/action-tone";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ErrorNotice } from "@/components/ui/error-notice";
 import { errorFromResponse, isTransientFailure, unexpectedResponse, xmatrixApiRequest } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
@@ -17,7 +17,7 @@ type Proposal = {
   canAckOutbound: boolean; canAckInbound: boolean;
 };
 
-export function ChannelTransferQueue({ token, userId, spaceId, channelId, enabled = true }: {
+export const ChannelTransferQueue = memo(function ChannelTransferQueue({ token, userId, spaceId, channelId, enabled = true }: {
   token?: string | null; userId: string; spaceId: string; channelId?: string; enabled?: boolean;
 }) {
   const client = useQueryClient();
@@ -81,4 +81,4 @@ export function ChannelTransferQueue({ token, userId, spaceId, channelId, enable
       </article>;
     })}
   </section>;
-}
+});
