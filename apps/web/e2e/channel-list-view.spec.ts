@@ -7,10 +7,12 @@ import {
   E2E_SPACE,
   fixtureJson,
   fixtureRequestBodies,
+  fixtureRequests,
   fixtureRule,
   installWorkspaceStubs,
   openGeneralChannelWithHistory,
   openWorkspaceWithStubs,
+  releaseFixture,
   routeHumanSocket,
 } from "./workspace-fixtures";
 
@@ -354,6 +356,55 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
   await expect(sidebar.getByText("Needs you", { exact: true })).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Done with #design" })).toHaveCount(0);
 });
+
+/* The account under an open shell can change without a navigation: a session
+   read on focus brings whoever the browser is signed in as now. A Done one
+   session asked and the Hub answers in another writes nothing in that one. */
+for (const accounts of [["e2e-user", "other-reader"], ["e2e-user", "other-reader", "e2e-user"]]) {
+  const change = accounts.length === 2 ? "another account signed in" : "another account came and went";
+  test(`a Done answered after ${change} leaves the list as that session reads it`, async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true;
+    });
+    const asked = { ...E2E_CHANNEL, id: "channel-asked", name: "review", messageCount: 9, historyHeadSequence: 9,
+      readSequence: 6, attention: { channelId: "channel-asked", unreadAttentionCount: 2, lastMessageSequence: 8,
+        primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: E2E_CHANNEL.updatedAt } };
+    await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [asked] });
+    await fixtureJson(page, "auth-token", "**/api/auth/token**", { token: "test-jwt" });
+    // Due for renewal, so every focus reads the session again.
+    const signIn = (step: number) => fixtureJson(page, `auth-session-${step}`, "**/api/auth/get-session**", {
+      user: { id: accounts[step], email: `${accounts[step]}@xmatrix.test`, name: accounts[step] },
+      session: { token: `session-${step}`, expiresAt: new Date(Date.now() + 60_000).toISOString() },
+    });
+    await signIn(0);
+    await page.goto(`/app/${asked.spaceId}/channels/${asked.name}--${asked.id}`, { waitUntil: "domcontentloaded" });
+    const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+    const waitsOnReader = sidebar.getByText("Needs you", { exact: true });
+    await expect(waitsOnReader).toBeVisible();
+
+    // The Hub holds its answer to the first session's Done.
+    await fixtureRule(page, { id: "asked-done", pattern: "**/api/xmatrix/channels/channel-asked/read",
+      responder: { kind: "deferred", json: { ok: true, readSequence: 9 } } });
+    const row = sidebar.locator(`[data-channel-row-id="${asked.id}"]`);
+    await row.hover();
+    await row.getByRole("button", { name: "Done with #review" }).click();
+    await expect.poll(async () => (await fixtureRequests(page, "asked-done")).length).toBe(1);
+    for (let step = 1; step < accounts.length; step += 1) {
+      const listReads = (await fixtureRequests(page, "channel-catalog")).length;
+      await signIn(step);
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      // The shell starts over for the session and reads its list again.
+      await expect.poll(async () => (await fixtureRequests(page, "channel-catalog")).length).toBeGreaterThan(listReads);
+      await expect(waitsOnReader).toBeVisible();
+    }
+
+    await releaseFixture(page, "asked-done");
+    // The answer has landed once the page has painted twice after it.
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(waitsOnReader).toBeVisible();
+    await expect(row).toBeVisible();
+  });
+}
 
 test("unpinning the last conversation removes Pinned and saves an empty list", async ({ page }) => {
   const pinned = { ...E2E_CHANNEL, id: "channel-pinned", name: "launch-plan",

@@ -184,3 +184,55 @@ test("a Channel without read state starts from its message count and then keeps 
   assert.deepEqual(first, { "channel-a": 5 });
   assert.equal(readCountsFromHub(first, [{ id: "channel-a", messageCount: 9 }], () => 0), first);
 });
+
+test("a Done the Hub answers after a reset writes nothing, even when the same reader is back", async () => {
+  const coordinator = new ChannelReadSyncCoordinator({ send: async () => undefined });
+  const answer = deferred();
+  const responding = coordinator.respond("channel-c", 42, () => answer.promise);
+  // Another account signs in and reads the Channel to 7; then the first one is back.
+  coordinator.reset();
+  coordinator.noteRead("channel-c", 7);
+  coordinator.reset();
+  answer.resolve({ readSequence: 42 });
+  assert.equal(await responding, null);
+  assert.equal(coordinator.readHere("channel-c"), 0);
+});
+
+test("only a Done the Hub confirmed counts as read on this device", async () => {
+  const coordinator = new ChannelReadSyncCoordinator({ send: async () => undefined });
+  // Refused (401/403): no answer, so the Hub's next read state stands.
+  assert.deepEqual(await coordinator.respond("channel-c", 42, async () => undefined), { answer: undefined });
+  assert.equal(coordinator.readHere("channel-c"), 0);
+  const confirmed = { readSequence: 42 };
+  assert.deepEqual(await coordinator.respond("channel-c", 42, async () => confirmed), { answer: confirmed });
+  assert.equal(coordinator.readHere("channel-c"), 42);
+});
+
+test("an answer that comes once another reader is here is nobody's, even before the reset", async () => {
+  const timers = controlledTimers();
+  let reader = "reader-a";
+  const marked = deferred();
+  const successes = [];
+  const coordinator = new ChannelReadSyncCoordinator({
+    send: async () => marked.promise,
+    onSuccess: (_channelId, result) => successes.push(result),
+    reader: () => reader,
+    schedule: timers.schedule,
+    cancel: timers.cancel,
+  });
+  // Read on screen to 5, as the viewport reports it.
+  coordinator.noteRead("channel-c", 5);
+  coordinator.enqueue("channel-c", 5, { attentionUnread: false });
+  await timers.runNext();
+  const done = deferred();
+  const responding = coordinator.respond("channel-c", 42, () => done.promise);
+  // The next account has rendered; its reset has not run yet.
+  reader = "reader-b";
+  marked.resolve({ readSequence: 5 });
+  done.resolve({ readSequence: 42 });
+  assert.equal(await responding, null);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(successes, []);
+  assert.equal(coordinator.readHere("channel-c"), 5, "the Done answered for the reader who left raises nothing");
+  assert.equal(timers.pending().length, 0, "nothing is sent again for the reader who left");
+});
