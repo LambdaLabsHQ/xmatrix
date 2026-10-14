@@ -3,6 +3,7 @@ import { channelEventViews } from "./workspace-shell-presence";
 import type { ChannelEventView } from "./realtime-channels";
 import { channelAfterMessage, createViewerReads, type ChannelMessageArrival, type ViewerReads } from "./channel-message-summary";
 import { createRealtimeCollection } from "./realtime-collection";
+import { createPresentedChannelTail } from "./presented-channel-tail";
 import { useMachineDaemonLoad } from "./use-machine-daemon-load";
 
 import type { ComposerInvocationDraft } from "./composer-invocation-bindings";
@@ -453,6 +454,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [events, setEvents] = useState<ObservabilityEvent[]>([]);
   const [realtimeEventViews] = useState(() => createRealtimeCollection<ChannelEventView>());
+  const [presentedChannelTail] = useState(createPresentedChannelTail);
 
   const [agentTraceReplicas, setAgentTraceReplicas] = useState<AgentTraceReplica[]>([]);
 
@@ -2648,6 +2650,18 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const presentedHead = selectedChannelId && history.at(-1)?.channelId === selectedChannelId
     ? latestSequence(history)
     : 0;
+  // The open conversation's list row previews no message its timeline does not
+  // show yet (presented-channel-tail.ts). Published before paint, so the row and
+  // the timeline change in the same frame.
+  const presentedEntry = selectedChannelId && history.at(-1)?.channelId === selectedChannelId
+    ? latestHistoryEntry(history)
+    : undefined;
+  useLayoutEffect(() => {
+    const preview = presentedEntry ? channelLastMessagePreviewFromEntry(presentedEntry) : undefined;
+    presentedChannelTail.set(presentedEntry && preview
+      ? { channelId: presentedEntry.channelId, sequence: presentedHead, preview }
+      : null);
+  }, [presentedChannelTail, presentedEntry, presentedHead]);
   useSelectedChannelHeadCatchUp({
     channelId: token ? selectedChannelId : null,
     knownHead: selectedChannel?.historyHeadSequence,
@@ -2897,6 +2911,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     viewerReadsOf,
     realtimeAgents,
     realtimeEventViews,
+    presentedChannelTail,
     setChannels,
     spaces,
     setSpaces,
