@@ -131,32 +131,52 @@ test("quota probes are capability gated and complete through the existing lease"
   assert.equal(calls.length, before, "rejected responses never reach the authority");
 });
 
-test("harness actions are capability gated, carry no command, and complete through the lease", async () => {
+/**
+ * A command type only a capable daemon claims: an older daemon is never sent
+ * it, an invalid stored command is refused, and its result completes through
+ * the lease only from a capable connection.
+ */
+async function assertCapabilityGatedCommand({ commandType, capability, payload, invalid, invalidError, response }) {
   const calls = [];
-  const requestId = "harness:00000000-0000-4000-8000-000000000000";
   const lease = { leaseOwner: "machine-lease", leaseGeneration: 1, entityVersion: 2, daemonEpoch: 7 };
-  let payload = { type: "machine_harness_action", requestId, presetId: "claude", action: "update" };
+  let stored = payload;
   const port = authorityPort({
     commands: recordingCommands(calls, (_name, input) => (input.action === "claim"
-      ? { commands: input.commandTypes.includes("harness_action") ? [{ ...lease, payload }] : [] }
+      ? { commands: input.commandTypes.includes(commandType) ? [{ ...lease, payload: stored }] : [] }
       : {})),
   });
   assert.deepEqual(await port.claimCommands(session), []);
-  assert.equal(calls[0].input.commandTypes.includes("harness_action"), false);
-  const capable = { ...session, capabilities: ["machine_harness_action_v1"] };
+  assert.equal(calls[0].input.commandTypes.includes(commandType), false);
+  const capable = { ...session, capabilities: [capability] };
   const [command] = await port.claimCommands(capable);
   assert.deepEqual(command, { ...payload, relayLease: lease });
-  payload = { ...payload, command: "rm -rf /" };
-  await assert.rejects(port.claimCommands(capable), /invalid harness action/);
-  const response = { type: "machine_harness_action_result", requestId,
-    result: { presetId: "claude", action: "update", status: "succeeded", exitCode: 0 } };
+  stored = { ...payload, ...invalid };
+  await assert.rejects(port.claimCommands(capable), invalidError);
   assert.deepEqual(await port.execute(capable, response), {
-    type: "machine_command_completion_acked", requestId, controlId: requestId,
+    type: "machine_command_completion_acked", requestId: payload.requestId, controlId: payload.requestId,
   });
   assert.equal(calls.at(-1).input.action, "complete");
   const before = calls.length;
   await assert.rejects(port.execute(session, response), /capable connection/);
   assert.equal(calls.length, before, "rejected responses never reach the authority");
+}
+
+test("harness actions are capability gated, carry no command, and complete through the lease", async () => {
+  const requestId = "harness:00000000-0000-4000-8000-000000000000";
+  await assertCapabilityGatedCommand({ commandType: "harness_action", capability: "machine_harness_action_v1",
+    payload: { type: "machine_harness_action", requestId, presetId: "claude", action: "update" },
+    invalid: { command: "rm -rf /" }, invalidError: /invalid harness action/,
+    response: { type: "machine_harness_action_result", requestId,
+      result: { presetId: "claude", action: "update", status: "succeeded", exitCode: 0 } } });
+});
+
+test("sleep commands are capability gated and complete through the lease", async () => {
+  const requestId = "sleep:00000000-0000-4000-8000-000000000000";
+  const run = { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" };
+  await assertCapabilityGatedCommand({ commandType: "sleep", capability: "machine_sleep_agent_v1",
+    payload: { type: "machine_sleep_agent", requestId, ...run, idleForMillis: 1_800_000 },
+    invalid: { idleForMillis: -5 }, invalidError: /invalid sleep command/,
+    response: { type: "machine_sleep_result", requestId, ...run, slept: false, reason: "not_idle" } });
 });
 
 test("terminal reports dispatch one durable coalesced Channel About successor", async () => {

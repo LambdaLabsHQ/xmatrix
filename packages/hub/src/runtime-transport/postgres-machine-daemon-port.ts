@@ -12,11 +12,13 @@ import type {
   MachineDaemonHarnessActionCommand,
   MachineDaemonStopCommand,
   MachineDaemonTextTaskCommand,
+  MachineDaemonSleepCommand,
   MachineDaemonWorktreeActionCommand,
   MachineDaemonWorktreeCleanupCommand,
 } from "@xmatrix/protocol/connections/machine-daemon";
 import type { SerializedMachineDaemon } from "@xmatrix/protocol";
-import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_TEXT_TASK_CAPABILITY, MACHINE_WORKTREE_ACTION_CAPABILITY,
+import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_SLEEP_CAPABILITY, MACHINE_TEXT_TASK_CAPABILITY,
+  MACHINE_WORKTREE_ACTION_CAPABILITY,
   parseHarnessActionRequest, parseRoutingQuotaProbeRequest, parseTextTaskRequest, parseWorktreeActionRequest,
   type TextTaskResult,
   withMachineSpawnHarness, sha256Hex } from "@xmatrix/protocol";
@@ -66,6 +68,7 @@ const COMPLETION_EVENTS = new Set([
   "machine_harness_action_result",
   "machine_worktree_action_result",
   "machine_text_task_result",
+  "machine_sleep_result",
 ]);
 const PRIVATE_AUDIT_FIELDS = new Set([
   "token",
@@ -249,6 +252,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     }
     if (message.type === "machine_text_task_result" && !session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) {
       throw new Error("Text task result does not come from a capable connection");
+    }
+    if (message.type === "machine_sleep_result" && !session.capabilities.includes(MACHINE_SLEEP_CAPABILITY)) {
+      throw new Error("Sleep result does not come from a capable connection");
     }
     if (message.type === "machine_worktree_action_result" &&
         !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
@@ -546,7 +552,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
   async claimCommands(
     session: Readonly<MachineDaemonRuntimeSession>,
     commandTypes: readonly ("spawn" | "stop" | "cleanup" | "request_resolve" | "recover_reply" | "quota_probe" |
-      "harness_action" | "worktree_action" | "text_task")[] = [
+      "harness_action" | "worktree_action" | "text_task" | "sleep")[] = [
       "spawn", "stop", "cleanup", "request_resolve",
     ],
   ): Promise<readonly MachineDaemonServerMessage[]> {
@@ -561,7 +567,8 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
         commandTypes: [...commandTypes.filter(type => (type !== "quota_probe" || session.capabilities.includes("machine_quota_probe_v2")) &&
             (type !== "harness_action" || session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) &&
             (type !== "worktree_action" || session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) &&
-            (type !== "text_task" || session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY))),
+            (type !== "text_task" || session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) &&
+            (type !== "sleep" || session.capabilities.includes(MACHINE_SLEEP_CAPABILITY))),
           ...(session.capabilities.includes("reply_recovery_v1") && !commandTypes.includes("recover_reply") ? ["recover_reply"] : []),
           ...(session.capabilities.includes("machine_quota_probe_v2") && !commandTypes.includes("quota_probe") ? ["quota_probe"] : []),
           ...(session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY) && !commandTypes.includes("harness_action")
@@ -569,7 +576,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
           ...(session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY) && !commandTypes.includes("worktree_action")
             ? ["worktree_action"] : []),
           ...(session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY) && !commandTypes.includes("text_task")
-            ? ["text_task"] : [])],
+            ? ["text_task"] : []),
+          ...(session.capabilities.includes(MACHINE_SLEEP_CAPABILITY) && !commandTypes.includes("sleep")
+            ? ["sleep"] : [])],
         // Reverse push is primary; lease covers in-flight host execution until
         // complete. Delivery failure must release (see deliverPendingOnce), not rely on
         // shortening this window for bounded HTTP recovery.
@@ -597,6 +606,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       }
       if (command.type === "machine_text_task" && !session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) {
         throw new Error("Text task command does not match a capable connection");
+      }
+      if (command.type === "machine_sleep_agent" && !session.capabilities.includes(MACHINE_SLEEP_CAPABILITY)) {
+        throw new Error("Sleep command does not match a capable connection");
       }
       if (command.type === "machine_worktree_action" && !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
         throw new Error("Worktree action command does not match a capable connection");
@@ -674,6 +686,7 @@ type MachineDaemonLeasedCommand =
   | MachineDaemonHarnessActionCommand
   | MachineDaemonWorktreeActionCommand
   | MachineDaemonTextTaskCommand
+  | MachineDaemonSleepCommand
   | MachineDaemonQuotaProbeCommand
   | MachineDaemonRecoverReplyCommand
   | MachineDaemonSpawnCommand
@@ -885,6 +898,16 @@ function claimedCommand(value: unknown): MachineDaemonLeasedCommand {
     }
     return { type, requestId, presetId: action.presetId, action: action.action,
       ...(action.code === undefined ? {} : { code: action.code }) };
+  }
+  if (type === "machine_sleep_agent") {
+    if (!["runId", "executionKey", "instanceId"].every(key => optionalString(payload[key])) ||
+        !Number.isSafeInteger(payload.idleForMillis) || Number(payload.idleForMillis) < 0 ||
+        Object.keys(payload).some(key =>
+          !["type", "requestId", "runId", "executionKey", "instanceId", "idleForMillis", "relayLease"].includes(key))) {
+      throw new Error("PostgreSQL returned an invalid sleep command");
+    }
+    return { type, requestId, runId: String(payload.runId), executionKey: String(payload.executionKey),
+      instanceId: String(payload.instanceId), idleForMillis: Number(payload.idleForMillis) };
   }
   if (type === "machine_text_task") {
     const task = parseTextTaskRequest(payload);

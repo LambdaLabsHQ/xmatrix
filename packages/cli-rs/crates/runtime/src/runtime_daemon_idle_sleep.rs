@@ -200,6 +200,55 @@ impl IdleSleepTracker {
     }
 }
 
+/// Delivery and clock slack allowed when the Hub's idle duration is compared
+/// with this daemon's own.
+const HUB_SLEEP_SLACK: Duration = Duration::from_secs(60);
+
+/// What the daemon does with the Hub's decision that a Run sleeps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HubSleepVerdict {
+    Sleep { phase: String, idle_for: Duration },
+    /// `not_idle`, `not_running` or `not_resumable`, as the result reports it.
+    Decline(&'static str),
+}
+
+/// The daemon's own check before it sleeps a Run on the Hub's word. The Hub
+/// decides when; only this daemon sees the process, so the Run must still
+/// rest with no task execution or background task, and by this daemon's
+/// clock have been quiet about as long as the Hub saw it resting.
+pub(crate) fn verify_hub_sleep(
+    run: &RunIdleView,
+    hub_idle_for: Duration,
+    now_millis: u64,
+) -> HubSleepVerdict {
+    if !run.resumable_session {
+        return HubSleepVerdict::Decline("not_resumable");
+    }
+    let Some(marker) = run.marker.as_ref().filter(|_| !run.stop_in_progress) else {
+        return HubSleepVerdict::Decline("not_running");
+    };
+    if !is_resting_phase(&marker.phase)
+        || marker.execution_in_flight
+        || has_background_work(marker.background_tasks)
+    {
+        return HubSleepVerdict::Decline("not_idle");
+    }
+    let last_activity = marker
+        .last_execution_millis
+        .into_iter()
+        .chain(marker.wrapper_ready_at_millis)
+        .max()
+        .unwrap_or(0);
+    let idle_for = Duration::from_millis(now_millis.saturating_sub(last_activity));
+    if idle_for + HUB_SLEEP_SLACK < hub_idle_for {
+        return HubSleepVerdict::Decline("not_idle");
+    }
+    HubSleepVerdict::Sleep {
+        phase: marker.phase.clone(),
+        idle_for,
+    }
+}
+
 impl IdleSleepTracker {
     /// Never act on this Run's `pid` again.
     pub(crate) fn note_ended(&mut self, key: &str, pid: u32) {
@@ -482,5 +531,61 @@ mod tests {
         // It is gone, or another process now holds its number.
         assert!(!is_marker_writer(10, alive_at, &[]));
         assert!(!is_marker_writer(10, alive_at, &[process(10, 2_100)]));
+    }
+
+    #[test]
+    fn a_hub_sleep_runs_only_when_this_daemon_also_sees_the_run_quiet() {
+        let quiet = |phase: &str, last_execution: u64| {
+            let mut view = run(phase);
+            view.marker.as_mut().unwrap().last_execution_millis = Some(last_execution);
+            view
+        };
+        // Quiet here as long as the Hub saw it: it sleeps, with the phase it rests in.
+        assert_eq!(
+            verify_hub_sleep(&quiet("turn_completed", 0), WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Sleep {
+                phase: "turn_completed".into(),
+                idle_for: WINDOW
+            }
+        );
+        // A minute of skew or delivery is tolerated; recent work is not.
+        assert!(matches!(
+            verify_hub_sleep(&quiet("turn_completed", MINUTE), WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Sleep { .. }
+        ));
+        assert_eq!(
+            verify_hub_sleep(&quiet("turn_completed", 20 * MINUTE), WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_idle")
+        );
+        // Work in hand, a running turn, or a background watch keep it awake.
+        assert_eq!(
+            verify_hub_sleep(&quiet("turn_running", 0), WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_idle")
+        );
+        let mut watching = quiet("turn_completed", 0);
+        watching.marker.as_mut().unwrap().background_tasks = Some(1);
+        assert_eq!(
+            verify_hub_sleep(&watching, WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_idle")
+        );
+        let mut executing = quiet("turn_completed", 0);
+        executing.marker.as_mut().unwrap().execution_in_flight = true;
+        assert_eq!(
+            verify_hub_sleep(&executing, WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_idle")
+        );
+        // A Run that cannot resume, or that is already stopping, is not slept.
+        let mut fresh = quiet("turn_completed", 0);
+        fresh.resumable_session = false;
+        assert_eq!(
+            verify_hub_sleep(&fresh, WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_resumable")
+        );
+        let mut stopping = quiet("turn_completed", 0);
+        stopping.stop_in_progress = true;
+        assert_eq!(
+            verify_hub_sleep(&stopping, WINDOW, 30 * MINUTE),
+            HubSleepVerdict::Decline("not_running")
+        );
     }
 }
