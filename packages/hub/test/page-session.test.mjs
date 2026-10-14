@@ -58,7 +58,7 @@ function harness({ head = HEAD, suggestOnly = false, commit } = {}) {
       const kind = principal.kind === "agent" && suggestOnly ? "suggestion" : "edit";
       if (kind === "edit") headRevision = revision;
       commits.push({ principal: principal.id, kind, ...input });
-      return { revision, kind, headRevision };
+      return { revision, kind, headRevision, agentSuggestOnly: suggestOnly };
     }),
     persist: async (state) => { persisted.push(state); },
     send: (id, data) => clients.get(id)?.deliver(data),
@@ -458,6 +458,23 @@ test("an edit the repository turned into a suggestion never reaches the live tex
   const result = await h.session.submitEdit(agent, { baseRevision: 1, body: "# Replaced\n", conversationIds: [] });
   assert.equal(result.kind, "suggestion");
   assert.equal(ann.text.toString(), HEAD);
+});
+
+test("an Agent co-writing with a person suggests, and the page still takes other Agents' edits", async () => {
+  const h = harness();
+  const ann = await annConnected(h);
+  const original = h.ports.commit;
+  // The repository keeps the co-writing conversation's edit as a suggestion; the page is not suggest-only.
+  h.ports.commit = async (principal, input) => principal.conversationId === "co-writing"
+    ? { revision: 9, kind: "suggestion", headRevision: 1, agentSuggestOnly: false } : original(principal, input);
+  const suggested = await h.session.submitEdit({ ...agent, conversationId: "co-writing" },
+    { baseRevision: 1, body: HEAD.replace("none", "none yet"), conversationIds: ["co-writing"] });
+  assert.equal(suggested.kind, "suggestion");
+  assert.equal(ann.text.toString(), HEAD);
+  const edited = await h.session.submitEdit(agent,
+    { baseRevision: 1, body: HEAD.replace("In progress", "Shipped"), conversationIds: [] });
+  assert.equal(edited.kind, "edit");
+  assert.match(ann.text.toString(), /Shipped/u, "an Agent working from another conversation still edits the page");
 });
 
 test("a removed page's session stores nothing once the write in flight finishes", async () => {

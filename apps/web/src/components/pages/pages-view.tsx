@@ -5,10 +5,11 @@ import dynamic from "next/dynamic";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
-  isLiveAgentStatus, pageAuthorColor, pageAuthorLabel, type SerializedAutomation, type SerializedChannel,
+  agentPresetAvatarUrl, isLiveAgentStatus, normalizeAgentPresetRuntime, pageAuthorColor, pageAuthorLabel,
+  type SerializedAutomation, type SerializedChannel,
 } from "@xmatrix/protocol";
 import {
-  Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2,
+  Check, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share2, Trash2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -22,18 +23,21 @@ import {
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/dashboard/content-skeleton";
 import { CountPill } from "@/components/dashboard/count-pill";
+import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
-import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
+import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote, SuggestionControl } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
-  ConversationList, DeletePageDialog, PageDialog, PageHistory, PagePens, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PagePen, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin } from "./page-margin";
 import { PagePhoneDock } from "./page-phone-dock";
-import { PageReaderChangesBar } from "./page-reader-changes-bar";
+import { PageReaderChangeMark } from "./page-reader-changes-bar";
+import type { SuggestionsReport } from "./page-suggestions";
+import { usePageSuggestions } from "./use-page-suggestions";
 import { PageWriteWith } from "./page-write-with";
 import { usePageWriters } from "./page-writers";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
@@ -489,7 +493,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   /** Opens a conversation beside the page (pages-live-document.md §4.4). */
   onOpenConversation: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
-    anchor?: PageLinkAnchor; firstMessage?: string; draft?: string; open?: boolean }) => Promise<unknown>;
+    anchor?: PageLinkAnchor; firstMessage?: string; draft?: string; open?: boolean; coWrite?: boolean }) => Promise<unknown>;
   /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
   onConnectGitHub?: (input: { spaceId: string; pageId: string; blockId: string; repository: string;
     restricted: boolean }) => Promise<void>;
@@ -526,6 +530,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const saveTimer = useRef<number | undefined>(undefined);
   const [canEdit, setCanEdit] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Reads the page's waiting suggestions again; the live session calls it when one arrives.
+  const waitingRefetch = useRef<() => void>(() => undefined);
   const [mode, setMode] = useState<"page" | "history">("page");
   const [dialog, setDialog] = useState<PageDialogState | null>(null);
   // The conversation whose card is being read, so its passage is marked (§4.4).
@@ -693,7 +699,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             `“${automation.name}”`).join(", ")}, so ${detached.length === 1 ? "it is" : "they are"} paused. Put the reference back to resume.`);
         }
       }
-      if (event.type === "suggestion") setNotice(`${event.author} suggested a change — see History.`);
+      // A co-writing Agent's suggestion is laid over the page as it arrives.
+      if (event.type === "suggestion") waitingRefetch.current();
       if (event.type === "claims") {
         queryClient.setQueryData<{ claims: PageClaim[]; competitiveBlocks: string[] }>(pageClaimsKey(userId, spaceId, pageId),
           (current) => ({ competitiveBlocks: current?.competitiveBlocks ?? [], claims: event.claims }));
@@ -812,6 +819,20 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const liveOnPage = useMemo(() => pageAgents.data?.agents.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
   // Who this person can call to write the page with them, and the one they last called.
   const writers = usePageWriters(spaceId, token, Boolean(page) && canEdit);
+  // What Agents co-writing the page suggest (§4.2), laid over it change by change.
+  const waiting = usePageSuggestions(spaceId, pageId, token, Boolean(page));
+  const [suggesting, setSuggesting] = useState<SuggestionsReport>({ count: 0, current: 0, author: null, through: 0 });
+  waitingRefetch.current = waiting.refetch;
+  const suggestionControl = useRef<SuggestionControl | null>(null);
+  const reviewed = useRef(0);
+  // Once every change of the suggestions on screen is taken or left, they stop waiting on the page.
+  useEffect(() => {
+    if (!spaceId || !pageId || !canEdit || waiting.through === 0 || suggesting.through !== waiting.through
+      || suggesting.count > 0 || reviewed.current >= waiting.through) return;
+    reviewed.current = waiting.through;
+    void pageApi.reviewSuggestions(spaceId, pageId, token, waiting.through).then(waiting.refetch,
+      (cause: Error) => setNotice(cause.message));
+  }, [canEdit, pageId, spaceId, suggesting, token, waiting]);
   // An Agent just called, from the moment it is asked until it shows on the page.
   const [called, setCalled] = useState<{ pageId: string; harness: string; conversationId: string; blockId: string | null;
     at: number } | null>(null);
@@ -1036,12 +1057,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     writers.choose(harness);
     const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
     const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
-    const firstMessage = `@${harness} launch:force Co-write ${where} with me. I have it open and see each edit ` +
-      "land. Read it with `xmatrix page read`, decide what it most needs next, and write that with " +
-      "`xmatrix page edit`, a section at a time; then say here in a line what you wrote.";
+    const firstMessage = `@${harness} launch:force Co-write ${where} with me. Read it with \`xmatrix page read\`, ` +
+      "decide what it most needs, and write that with `xmatrix page edit`, a section at a time, each against a " +
+      "fresh read. Your edits arrive as suggestions I take or leave one by one; when you have none left, say here " +
+      "in a line what you suggested.";
     try {
       const conversationId = await onDiscuss({ spaceId, pageId: page.pageId, blockId: blockId ?? "", restricted,
-        name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false });
+        name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false,
+        coWrite: true });
       if (typeof conversationId === "string") {
         setCalled({ pageId: page.pageId, harness, conversationId, blockId, at: Date.now() });
       }
@@ -1140,6 +1163,17 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   // Who is out of view above or below, at the page's edges (§3.2). A line of room keeps
   // someone on the very edge counted as seen.
+  // Whose suggestion is in front of the reader: its face, and what to do with the change, stand beside
+  // the change at the right edge, as if the Agent were writing that line.
+  const suggestedBy = suggesting.count > 0 && suggesting.author ? suggesting.author : null;
+  const suggesterAvatar = suggestedBy ? agentPresetAvatarUrl(normalizeAgentPresetRuntime(suggestedBy.split(":")[0])) : undefined;
+  const suggestionMark = ((): { top: number; away: "above" | "below" | null } | null => {
+    const top = anchorTops.get("suggestion");
+    const at = contentTop("suggestion");
+    if (!suggestedBy || !drawn || mode !== "page" || top === undefined || at === null) return null;
+    return { top: top - 4, away: !viewport.height ? null
+      : at < viewport.top ? "above" : at > viewport.top + viewport.height - PEN_BOTTOM_ROOM ? "below" : null };
+  })();
   // On a phone each Agent on the page is its face in the margin beside its line (§3.2).
   const pens = ((): PagePen[] => {
     if (!phone || mode !== "page" || !drawn) return [];
@@ -1261,8 +1295,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       <PageScrollMarks marks={scrollMarks} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
-        <article ref={measureArticle} className={phone ? cn("app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6",
-          phoneDiff && "has-reader-changes") : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
+        <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
+          : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
           <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
             {phone ? (
               <>
@@ -1302,6 +1336,31 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
               <div className="flex gap-6">
                 <div ref={docColumn} className="relative min-w-0 max-w-3xl flex-1">
                   <PagePens pens={pens} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
+                  {suggestionMark && suggestedBy && (
+                    <PageChangeMark top={suggestionMark.top} away={suggestionMark.away} testId="page-suggestions"
+                      label={`${suggestedBy} suggests this change, ${suggesting.current + 1} of ${suggesting.count}`}>
+                      {/* Its face rides its pen in the line; here it says who waits, while the line is out of view. */}
+                      {suggestionMark.away && <button type="button" className="page-change-face" aria-label={`${suggestedBy}, show its change`}
+                        title={`${suggestedBy} suggests · ${suggesting.current + 1} of ${suggesting.count}`}
+                        onClick={() => suggestionControl.current?.step(0)}>
+                        <IdentityAvatar kind="agent" label={suggestedBy} imageUrl={suggesterAvatar} size="sm" shape="circle"
+                          glass={false} initials={suggesterAvatar ? avatarInitials(suggestedBy) : undefined}
+                          className="pointer-events-none rounded-full" />
+                      </button>}
+                      <button type="button" onClick={() => suggestionControl.current?.take()} aria-label="Take this change"
+                        title={phone ? "Accept" : "Accept (Tab)"} className="page-change-button is-primary">
+                        <Check className="size-4" />
+                      </button>
+                      <button type="button" onClick={() => suggestionControl.current?.leave()} aria-label="Leave this change"
+                        title={phone ? "Skip" : "Skip (Esc)"} className="page-change-button">
+                        <X className="size-4" />
+                      </button>
+                    </PageChangeMark>
+                  )}
+                  {phone && phoneDiff && !suggestionMark && (
+                    <PageReaderChangeMark column={docColumn} article={articleElement} changes={readerChanges ?? 0}
+                      onViewed={viewDiff} />
+                  )}
                   {!drawn && document.data && (
                     // Where the editor's host holds its height.
                     <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
@@ -1321,6 +1380,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                   <div className={drawn ? undefined : "hidden"}>
                     {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit}
                       onReady={() => setEditorReady(true)} readerBaseline={readerDiff} onReaderChanges={setReaderChanges}
+                      suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
+                      suggestionControl={suggestionControl}
                       actions={sectionActions} headingActions={headingActions} onBlocks={setBlocks} sections={sections}
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById} references={references}
@@ -1348,9 +1409,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       </div>
       {phone && mode === "page" && drawn && (
         <PagePhoneDock caller={caller?.agent ?? null} starting={caller?.starting ?? false}
-          onCall={() => setDialog({ kind: "write" })}
-          review={phoneDiff ? <PageReaderChangesBar document={docColumn} changes={readerChanges ?? 0} onViewed={viewDiff} />
-            : null} />
+          onCall={() => setDialog({ kind: "write" })} />
       )}
       {docked && renderConversation?.("dock")}
       {page && (

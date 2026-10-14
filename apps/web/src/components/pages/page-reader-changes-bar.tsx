@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { Check, ChevronDown } from "lucide-react";
-import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { PageChangeMark } from "./page-chrome";
 
 /** The blocks of the page that hold a change, in reading order: several marks in one paragraph are one stop. */
 function changedBlocks(root: HTMLElement | null): HTMLElement[] {
@@ -16,53 +16,58 @@ function changedBlocks(root: HTMLElement | null): HTMLElement[] {
 }
 
 /**
- * On a phone, what changed since the reader last read the page is one glass capsule under the thumb,
- * as Google Docs offers "See new changes": a tap takes them to the next change, and Viewed says they
- * have read it.
+ * On a phone, what changed since the reader last read the page is walked change by change from the
+ * right edge, beside the change in front of them, as Google Docs keeps what others did to the text in
+ * its margin: ↓ goes on to the next change, and ✓ says they have read them all.
  */
-export function PageReaderChangesBar({ document, changes, onViewed }: {
-  /** Where the page's text is drawn. */
-  document: RefObject<HTMLElement | null>;
+export function PageReaderChangeMark({ column, article, changes, onViewed }: {
+  /** The document column the mark stands beside. */
+  column: RefObject<HTMLElement | null>;
+  /** What scrolls, to tell whether the change is in view. */
+  article: RefObject<HTMLElement | null>;
   changes: number;
   onViewed: () => void;
 }) {
-  // Which change the reader stepped to; none until they step.
-  const [at, setAt] = useState<{ index: number; of: number } | null>(null);
-  // The capsule counts the stops it steps through, once the page has drawn its changes.
-  const [stops, setStops] = useState<number | null>(null);
+  const [index, setIndex] = useState(0);
+  const [place, setPlace] = useState<{ top: number; away: "above" | "below" | null; of: number } | null>(null);
+  const measure = useCallback(() => {
+    const blocks = changedBlocks(column.current);
+    const block = blocks[Math.min(index, blocks.length - 1)];
+    const frame = column.current?.getBoundingClientRect();
+    const view = article.current?.getBoundingClientRect();
+    if (!block || !frame || !view) { setPlace(null); return; }
+    const box = block.getBoundingClientRect();
+    const next = { top: Math.round(box.top - frame.top), of: blocks.length,
+      away: box.bottom < view.top ? "above" as const : box.top > view.bottom - 96 ? "below" as const : null };
+    // Scrolling measures every frame; only a change of place draws again.
+    setPlace((current) => current && current.top === next.top && current.of === next.of && current.away === next.away
+      ? current : next);
+  }, [article, column, index]);
   useEffect(() => {
-    const frameId = requestAnimationFrame(() => setStops(changedBlocks(document.current).length || null));
-    return () => cancelAnimationFrame(frameId);
-  }, [changes, document]);
-  const total = stops ?? changes;
-  const next = useCallback(() => {
-    const blocks = changedBlocks(document.current);
+    const frameId = requestAnimationFrame(measure);
+    const scroller = article.current;
+    scroller?.addEventListener("scroll", measure, { passive: true });
+    const resized = new ResizeObserver(measure);
+    if (column.current) resized.observe(column.current);
+    return () => { cancelAnimationFrame(frameId); scroller?.removeEventListener("scroll", measure); resized.disconnect(); };
+  }, [article, changes, column, measure]);
+  const next = () => {
+    const blocks = changedBlocks(column.current);
     if (blocks.length === 0) return;
-    const index = at === null ? 0 : (at.index + 1) % blocks.length;
-    blocks[index]!.scrollIntoView({ block: "center", behavior: "smooth" });
-    setAt({ index, of: blocks.length });
-  }, [at, document]);
-
+    const following = (index + 1) % blocks.length;
+    setIndex(following);
+    blocks[following]!.scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+  if (!place) return null;
   return (
-    <LiquidGlassPill className="pointer-events-auto flex h-14 min-w-0 flex-1 items-center rounded-full p-1"
-      role="toolbar" aria-label="Changes since you last read this page" data-testid="page-reader-diff">
-      <button type="button" onClick={next} aria-label="Next change"
-        className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-full pl-2 pr-3 text-left active:bg-foreground/[0.06]">
-        <span className="page-reader-capsule-mark grid size-8 shrink-0 place-items-center rounded-full" aria-hidden="true">
-          <ChevronDown className="size-4" />
-        </span>
-        <span className="flex min-w-0 flex-col leading-tight" aria-live="polite">
-          <span className="truncate text-[15px] font-semibold tabular-nums">
-            {at ? `Change ${at.index + 1} of ${at.of}` : total === 1 ? "1 change" : `${total} changes`}
-          </span>
-          <span className="truncate text-xs text-muted-foreground">{at ? "Tap for the next" : "since you last read"}</span>
-        </span>
+    <PageChangeMark top={place.top} away={place.away} label="Changes since you last read this page" testId="page-reader-diff">
+      <span className="page-change-count" aria-live="polite">{Math.min(index, place.of - 1) + 1}/{place.of}</span>
+      <button type="button" onClick={next} aria-label="Next change" className="page-change-button">
+        <ChevronDown className="size-4" />
       </button>
-      <span className="h-6 w-px shrink-0 bg-foreground/15" aria-hidden="true" />
-      <button type="button" onClick={onViewed}
-        className="flex h-12 shrink-0 items-center gap-1.5 rounded-full px-4 text-[15px] font-semibold active:bg-foreground/[0.06]">
-        <Check className="size-4" /> Viewed
+      <button type="button" onClick={onViewed} aria-label="Viewed" title="Viewed" className="page-change-button is-primary">
+        <Check className="size-4" />
       </button>
-    </LiquidGlassPill>
+    </PageChangeMark>
   );
 }

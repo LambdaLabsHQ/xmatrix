@@ -107,7 +107,7 @@ export function pageShellActions(input: {
    */
   async function startPageConversation(page: {
     spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean; anchor?: PageLinkAnchor;
-  }, options: { open?: boolean; firstMessage?: string; draft?: string } = {}): Promise<string | null> {
+  }, options: { open?: boolean; firstMessage?: string; draft?: string; coWrite?: boolean } = {}): Promise<string | null> {
     const { token, user } = input;
     if (!token || !user) return null;
     const channel = await createConversation({ token, spaceId: page.spaceId, memberName: user.name || user.email || "Human",
@@ -115,6 +115,8 @@ export function pageShellActions(input: {
     await pageApi.link(page.spaceId, token, { conversationId: channel.id, pageId: page.pageId,
       ...(page.blockId ? { blockId: page.blockId } : {}), ...(page.anchor ? { anchor: page.anchor } : {}) });
     input.setChannels((current) => replaceChannel(current, channel));
+    // Co-writing starts before its Agent is called, so the Agent's first edit is already a suggestion.
+    if (options.coWrite) await pageApi.startCoWriting(page.spaceId, page.pageId, token, channel.id);
     if (options.draft) input.seedDraft(channel.id, options.draft);
     if (options.firstMessage) {
       const sent = await xmatrixRawResponse(WEB_PROXY_ROUTES.channel_messages(channel.id), {

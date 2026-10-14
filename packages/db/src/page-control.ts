@@ -54,6 +54,12 @@ const MAX_HISTORY = 200;
 const OWED_WINDOW_DAYS = 7;
 /** How far back a section's last change is looked for; older changes read as unknown. */
 const BLOCK_UPDATE_REVISIONS = 30;
+/** A co-writing lapses this long after it started, ended or not. */
+const CO_WRITING_HOURS = 12;
+/** Suggestions older than this no longer wait on the page; History still has them. */
+const SUGGESTION_WAIT_DAYS = 14;
+/** At most this many suggestions wait on a page at once. */
+const MAX_WAITING_SUGGESTIONS = 20;
 /** Recent changes the Pages list shows, and at most when asked for more. */
 const RECENT_CHANGES = 3;
 const MAX_RECENT_CHANGES = 10;
@@ -207,6 +213,11 @@ export interface PageActor {
 }
 
 type Actor = PageActor;
+
+/** A conversation co-writing a page, named by the person starting or ending it. */
+interface CoWritingInput {
+  requestId: string; spaceId: string; pageId: string; principal: PagePrincipal; conversationId: string;
+}
 
 /**
  * A committed revision. When it moved the head, `automationChannels` are the
@@ -649,7 +660,14 @@ export class PostgresPageRepository {
     const revision = Number(next.next);
     const now = new Date().toISOString();
     const authors = dedupeAuthors([actor.author, ...input.coAuthors.map(validAuthor)]);
-    const suggestion = input.kind === "edit" && actor.isAgent && row.agent_suggest_only;
+    // An Agent co-writing the page with a person, from the conversation they started, suggests.
+    const coWriting = input.kind === "edit" && actor.isAgent && !row.agent_suggest_only && conversationIds.length > 0
+      && (await tx.query({ name: "page_co_writing_active_v1",
+        text: `SELECT 1 FROM data.page_co_writing WHERE space_id=$1 AND page_id=$2
+          AND conversation_id = ANY($3::text[]) AND ended_at IS NULL
+          AND started_at > now() - interval '${CO_WRITING_HOURS} hours' LIMIT 1`,
+        values: [spaceId, pageId, conversationIds], maxRows: 1 })).length > 0;
+    const suggestion = input.kind === "edit" && actor.isAgent && (row.agent_suggest_only || coWriting);
     if (!suggestion && input.baseRevision !== head) {
       const current = (await tx.query<RevisionRow>({
         name: "page_revision_head_v1",
@@ -748,6 +766,99 @@ export class PostgresPageRepository {
         coAuthors: kind === "accepted" && Array.isArray(source.authors_json) ? source.authors_json : [],
         blockIds: [], kind,
       });
+    });
+  }
+
+  /**
+   * Starts co-writing a page from a conversation linked to it (pages-live-document.md §4.2): until it
+   * ends or lapses, an Agent's edits to the page from that conversation are suggestions. A person who
+   * may edit the page starts it; the suggestions wait on them.
+   */
+  async startCoWriting(input: CoWritingInput): Promise<{ startedAt: string }> {
+    return this.coWriting(input, "page.co_writing_start", async (tx, { spaceId, pageId, conversationId, actor }) => {
+      const linked = await tx.query({ name: "page_co_writing_linked_v1",
+        text: "SELECT 1 FROM data.page_links WHERE space_id=$1 AND page_id=$2 AND conversation_id=$3 LIMIT 1",
+        values: [spaceId, pageId, conversationId], maxRows: 1 });
+      if (!linked.length) throw new PageControlError("page_link_not_found", 404, "Link the conversation to the page first");
+      const started = (await tx.query<QueryResultRow & { started_at: Date | string }>({ name: "page_co_writing_start_v1",
+        text: `INSERT INTO data.page_co_writing (space_id,page_id,conversation_id,started_by_user_id,started_at)
+          VALUES ($1,$2,$3,$4,now())
+          ON CONFLICT (space_id,page_id,conversation_id) DO UPDATE
+            SET started_by_user_id=EXCLUDED.started_by_user_id, started_at=EXCLUDED.started_at, ended_at=NULL
+          RETURNING started_at`,
+        values: [spaceId, pageId, conversationId, actor.userId], maxRows: 1 }))[0]!;
+      return { startedAt: new Date(started.started_at).toISOString() };
+    });
+  }
+
+  /** Ends co-writing from a conversation: its Agent's later edits to the page are edits again. */
+  async endCoWriting(input: CoWritingInput): Promise<{ ended: boolean }> {
+    return this.coWriting(input, "page.co_writing_end", async (tx, { spaceId, pageId, conversationId }) => {
+      const ended = await tx.query({ name: "page_co_writing_end_v1",
+        text: `UPDATE data.page_co_writing SET ended_at=now()
+          WHERE space_id=$1 AND page_id=$2 AND conversation_id=$3 AND ended_at IS NULL RETURNING 1`,
+        values: [spaceId, pageId, conversationId], maxRows: 1 });
+      return { ended: ended.length === 1 };
+    });
+  }
+
+  /** Co-writing is a person's to start and end, on a page they may edit. */
+  private coWriting<T>(input: CoWritingInput, operation: string, run: (tx: DatabaseTransaction,
+    at: { spaceId: string; pageId: string; conversationId: string; actor: Actor }) => Promise<T>): Promise<T> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    const conversationId = bounded(input.conversationId, "conversationId");
+    if (input.principal.kind !== "user") throw new PageControlError("page_co_writing_human_only", 403);
+    return this.inSpace(bounded(input.requestId, "requestId"), operation, spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, true);
+      await this.page(tx, spaceId, actor, pageId, "edit");
+      return run(tx, { spaceId, pageId, conversationId, actor });
+    });
+  }
+
+  /**
+   * The suggestions waiting on a page, oldest first: those after the last one a person reviewed, from
+   * the last two weeks. Each is a whole document, based on the revision it names.
+   */
+  async suggestions(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
+    Promise<{ suggestions: PageRevision[] }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.suggestions", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, false);
+      await this.page(tx, spaceId, actor, pageId, "read");
+      const rows = await tx.query<RevisionRow>({
+        name: "page_suggestions_waiting_v1",
+        text: `SELECT r.revision,r.kind,r.authors_json,r.conversation_ids,r.based_on_revision,r.created_at
+          FROM data.page_revisions r JOIN data.pages p ON p.space_id=r.space_id AND p.page_id=r.page_id
+          WHERE r.space_id=$1 AND r.page_id=$2 AND r.kind='suggestion'
+            AND r.revision > COALESCE(p.suggestions_reviewed_through, 0)
+            AND r.created_at > now() - interval '${SUGGESTION_WAIT_DAYS} days'
+          ORDER BY r.revision LIMIT ${MAX_WAITING_SUGGESTIONS}`,
+        values: [spaceId, pageId], maxRows: MAX_WAITING_SUGGESTIONS,
+      });
+      return { suggestions: rows.map(revisionOf) };
+    });
+  }
+
+  /** A person has taken or left every suggestion up to `through`: they stop waiting on the page. */
+  async reviewSuggestions(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal;
+    through: number }): Promise<{ reviewedThrough: number }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    if (input.principal.kind !== "user") throw new PageControlError("page_suggestion_review_human_only", 403);
+    if (!Number.isSafeInteger(input.through) || input.through < 1) {
+      throw new PageControlError("invalid_request", 400, "through is invalid");
+    }
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.suggestions_review", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, true);
+      await this.page(tx, spaceId, actor, pageId, "edit");
+      const stored = (await tx.query<QueryResultRow & { through: string }>({ name: "page_suggestions_review_v1",
+        text: `UPDATE data.pages SET suggestions_reviewed_through=GREATEST(COALESCE(suggestions_reviewed_through, 0),
+            LEAST($3::bigint, (SELECT MAX(revision) FROM data.page_revisions WHERE space_id=$1 AND page_id=$2)))
+          WHERE space_id=$1 AND page_id=$2 RETURNING suggestions_reviewed_through::text AS through`,
+        values: [spaceId, pageId, input.through], maxRows: 1 }))[0]!;
+      return { reviewedThrough: Number(stored.through) };
     });
   }
 
@@ -1412,7 +1523,8 @@ export class PostgresPageRepository {
         text: "SELECT 1 FROM data.pages WHERE space_id=$1 AND parent_page_id=$2 LIMIT 1",
         values: [spaceId, pageId], maxRows: 1 });
       if (child.length) throw new PageControlError("page_has_children", 409, "Move or remove its child pages first");
-      for (const table of ["data.page_links", "data.page_access", "data.page_reads", "data.page_revisions"]) {
+      for (const table of ["data.page_links", "data.page_access", "data.page_reads", "data.page_co_writing",
+        "data.page_revisions"]) {
         await tx.query({ name: `page_remove_${table.slice(5)}_v1`,
           text: `DELETE FROM ${table} WHERE space_id=$1 AND page_id=$2`, values: [spaceId, pageId], maxRows: 0 });
       }

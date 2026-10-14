@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
@@ -10,23 +9,19 @@ import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 export interface DockAgent { name: string; avatarUrl?: string }
 
 /**
- * The bottom of a page on a phone, under the thumb: what changed since the reader last read it on the
- * left, and at the right edge, where Agents on the page show, the face of the Agent the reader writes
- * with, on its own glass disc. A tap calls it. Once called it says it is starting, until it is on the
- * page and shows beside the line it writes instead.
+ * The bottom right of a page on a phone, under the thumb and on the edge where Agents on the page show:
+ * the face of the Agent the reader writes with, on its own glass disc. A tap calls it. Once called it
+ * says it is starting, until it is on the page and shows beside the line it writes instead.
  */
-export function PagePhoneDock({ review, caller, starting, onCall }: {
-  review: ReactNode;
+export function PagePhoneDock({ caller, starting, onCall }: {
   /** The Agent the button calls, or the one just called while its Run starts; null once one is on the page. */
   caller: DockAgent | null;
   starting: boolean;
   onCall: () => void;
 }) {
-  if (!review && !caller) return null;
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-[var(--z-raised)] flex items-end gap-3 px-4"
+    <div className="pointer-events-none absolute bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] right-4 z-[var(--z-raised)] flex"
       data-testid="page-phone-dock">
-      {review ?? <span className="flex-1" />}
       {caller && (
         <div className="relative flex shrink-0 flex-col items-end">
           {starting && (

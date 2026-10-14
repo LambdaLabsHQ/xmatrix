@@ -88,7 +88,8 @@ async function addSleepingInstance(client, ids) {
 }
 
 async function cleanup(client, ids) {
-  for (const table of ["page_reads", "page_claims", "page_block_competitions", "page_links", "page_access", "page_revisions", "pages"]) {
+  for (const table of ["page_reads", "page_claims", "page_block_competitions", "page_co_writing", "page_links", "page_access",
+    "page_revisions", "pages"]) {
     await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]).catch(() => {});
   }
   await client.query("DELETE FROM control.entity_space_routes WHERE entity_id=$1", [ids.run]).catch(() => {});
@@ -208,6 +209,51 @@ integration("pages: how far a person has read a page is theirs, only moves forwa
     await call("remove", { principal: owner, pageId: page.pageId });
     const { rows } = await client.query("SELECT 1 FROM data.page_reads WHERE space_id=$1", [ids.space]);
     assert.equal(rows.length, 0, "removing the page removes how far anyone read it");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("co-writing: an Agent in the conversation a person started on the page suggests until it ends", async () => {
+  const { client, ids, pages, owner, member, viewer, agent } = await pageTest("co-writing");
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
+    const { page } = await call("create", { principal: owner, title: "Plan", body: "# Plan\n\nOne\n" });
+    const pageId = page.pageId;
+    await assert.rejects(call("startCoWriting", { principal: member, pageId, conversationId: ids.open }),
+      code("page_link_not_found"), "only a conversation linked to the page co-writes it");
+    await call("link", { principal: member, conversationId: ids.open, pageId, source: "manual" });
+    await assert.rejects(call("startCoWriting", { principal: agent, pageId, conversationId: ids.open }),
+      code("page_co_writing_human_only"));
+    await assert.rejects(call("startCoWriting", { principal: viewer, pageId, conversationId: ids.open }),
+      code("page_edit_forbidden"), "a person who cannot edit the page cannot take suggestions into it");
+    await call("startCoWriting", { principal: member, pageId, conversationId: ids.open });
+
+    // The Agent's edit from that conversation waits for the person; the page is as it was.
+    const suggested = await call("edit", { principal: agent, pageId, baseRevision: 1,
+      body: "# Plan\n\nOne and two\n", conversationIds: [ids.open] });
+    assert.equal(suggested.revision.kind, "suggestion");
+    assert.equal(suggested.page.headRevision, 1);
+    const waiting = async () => (await call("suggestions", { principal: viewer, pageId })).suggestions
+      .map((revision) => [revision.revision, revision.basedOnRevision]);
+    assert.deepEqual(await waiting(), [[2, 1]]);
+    // A person reviews them; then nothing waits.
+    await assert.rejects(call("reviewSuggestions", { principal: agent, pageId, through: 2 }),
+      code("page_suggestion_review_human_only"));
+    assert.deepEqual(await call("reviewSuggestions", { principal: member, pageId, through: 99 }), { reviewedThrough: 2 },
+      "a review never runs past the page's last revision");
+    assert.deepEqual(await waiting(), []);
+
+    // Ended, the same Agent edits the page again.
+    assert.deepEqual(await call("endCoWriting", { principal: member, pageId, conversationId: ids.open }), { ended: true });
+    const edited = await call("edit", { principal: agent, pageId, baseRevision: 1, body: "# Plan\n\nOne, done\n",
+      conversationIds: [ids.open] });
+    assert.equal(edited.revision.kind, "edit");
+
+    await call("remove", { principal: owner, pageId });
+    const { rows } = await client.query("SELECT 1 FROM data.page_co_writing WHERE space_id=$1", [ids.space]);
+    assert.equal(rows.length, 0, "removing the page removes its co-writing");
   } finally {
     await cleanup(client, ids);
     await client.end();

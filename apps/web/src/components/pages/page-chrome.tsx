@@ -13,6 +13,7 @@ import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { Button } from "@/components/ui/button";
+import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
@@ -158,6 +159,31 @@ export function PagePens({ pens, onJump, onOpen }: {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The change in front of the reader, held at the right edge beside its line, where Google Docs keeps
+ * what others do to the text: whose change it is and what to do with it, travelling with the line and
+ * waiting at the top or bottom of the edge, pointing the way, while the line is out of view.
+ */
+export function PageChangeMark({ top, away, label, testId, children }: {
+  top: number; away: "above" | "below" | null; label: string; testId: string; children: ReactNode;
+}) {
+  const Chevron = away === "above" ? ChevronUp : ChevronDown;
+  return (
+    <div className="page-change-lane pointer-events-none absolute inset-y-0" data-testid={testId}>
+      {/* A spacer, not a margin, sets the line: a sticky mark may not leave its own margin box. */}
+      <div style={{ height: Math.max(0, top) }} />
+      <div className="page-change-mark" data-away={away ?? undefined}>
+        {away === "above" && <Chevron className="page-change-way" aria-hidden="true" strokeWidth={2.5} />}
+        <LiquidGlassPill role="toolbar" aria-label={label}
+          className="pointer-events-auto flex w-10 flex-col items-center gap-1 rounded-full p-1">
+          {children}
+        </LiquidGlassPill>
+        {away === "below" && <Chevron className="page-change-way" aria-hidden="true" strokeWidth={2.5} />}
+      </div>
     </div>
   );
 }

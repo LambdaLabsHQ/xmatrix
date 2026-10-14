@@ -5432,12 +5432,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     padding-bottom: calc(env(safe-area-inset-bottom) + 2.5rem);
   }
 
-  /* What changed since the reader last read the page floats at the bottom;
-     the last change can still scroll clear of it. */
-  .xmatrix-app .app-mobile-page-article.has-reader-changes {
-    padding-bottom: calc(env(safe-area-inset-bottom) + 6rem);
-  }
-
   /* The fixed mobile topbar is the single screen-title source. Hiding the
      desktop PageTitle prevents a duplicated title and a second material slab
      immediately beneath the navigation surface. */

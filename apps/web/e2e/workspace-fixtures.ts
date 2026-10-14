@@ -117,6 +117,15 @@ export async function routeHumanSocket(
   return { connections: () => connections };
 }
 
+/** Enabled, routing-ready registrations of these harnesses on one machine, as the Space's catalog lists them. */
+export function harnessRegistrations(harnesses: readonly string[]) {
+  return harnesses.map((harness) => ({
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "owner", machineId: "machine", harness },
+    displayName: harness, ownerName: "Owner", machineName: "Workstation", version: 1, state: "enabled",
+    models: [], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
+  }));
+}
+
 export const E2E_CHANNEL = {
   id: "channel-general",
   spaceId: E2E_SPACE.id,
