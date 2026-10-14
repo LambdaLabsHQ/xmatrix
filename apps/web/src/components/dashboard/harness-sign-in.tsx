@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, ExternalLink, Loader2, LogIn } from "lucide-react";
 import {
-  MACHINE_HARNESS_LOGIN_CAPABILITY, agentPresetById, parseHarnessInventory,
+  MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY, agentPresetById, parseHarnessInventory,
   type AgentRegistrationSummary, type HarnessActionStatus, type HarnessLoginProgress,
 } from "@xmatrix/protocol";
 
@@ -42,12 +42,13 @@ export function harnessSignInView(input: {
   const item = parseHarnessInventory(daemon?.metadata.harnesses)?.items.find((entry) => entry.id === registration.key.harness);
   return {
     visible: owner && Boolean(login),
+    canCancelStart: Array.isArray(capabilities) && capabilities.includes(MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY),
     flow: login?.flow,
     state: item?.login,
     installed: item?.installed,
     daemon,
     blocker: !daemon ? "Connect this machine to sign in from here."
-      : !capable ? "Update this machine's xMatrix daemon to sign in from here."
+      : !capable ? "Update this machine&apos;s xMatrix daemon to sign in from here."
         : item && !item.installed ? "Install this harness on the machine first." : undefined,
   };
 }
@@ -154,15 +155,18 @@ export function HarnessSignInSection({ registration, token, userId }: {
             </Button>
           )}
         </div>
-        {operation && !prompt && <Button size="sm" variant="ghost"
+        {operation && !prompt && view.canCancelStart && <Button size="sm" variant="ghost"
           disabled={queue.isPending || operation.step === "cancel"}
           onClick={() => queue.mutate({ step: "cancel" })}>Cancel sign-in</Button>}
+        {operation && !prompt && !view.canCancelStart && <p className="text-xs text-muted-foreground">
+          Update this machine&apos;s xMatrix daemon to cancel before its sign-in link arrives.
+        </p>}
         {operation && waitState !== "normal" && !status.isError && <p role="status" className="text-xs text-muted-foreground">
           {waitState === "expired"
-            ? "Stopped checking after 20 minutes. The sign-in may still be running on the machine. Cancel it before starting again."
+            ? "Stopped checking after 20 minutes. The sign-in may still be running on the machine. Resolve this sign-in before starting again."
             : status.data?.status === "queued"
-              ? "The machine has not picked up this sign-in request yet. You can cancel it."
-              : "The machine has not returned a sign-in result yet. You can cancel it."}
+              ? "The machine has not picked up this sign-in request yet."
+              : "The machine has not returned a sign-in result yet."}
         </p>}
         {view.blocker && <p className="text-xs text-muted-foreground">{view.blocker}</p>}
         {prompt?.verificationUri && (
