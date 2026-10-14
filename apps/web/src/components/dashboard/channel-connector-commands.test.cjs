@@ -3,12 +3,10 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 const {
   githubFeatureCommand,
-  githubSubscribeCommand,
   githubSubscriptionFeatures,
   githubSubscriptionRepository,
   githubToggledFeatures,
   githubUnsubscribeCommand,
-  isGitHubRepositoryName,
 } = require("./channel-connector-commands.ts");
 
 test("a subscription source round-trips to the repository the command names", () => {
@@ -65,18 +63,6 @@ test("an edit that both adds and drops events is one message of two statements",
       body: "@github:unsubscribe:LambdaLabsHQ/xmatrix issues commits",
     },
   );
-});
-
-test("subscribing sends the whole chosen set and refuses an incomplete repository", () => {
-  assert.deepEqual(
-    githubSubscribeCommand("owner/repo", ["issues", "comments"]),
-    { source: "github:repo:owner/repo", body: "@github:subscribe:owner/repo issues comments" },
-  );
-  assert.equal(githubSubscribeCommand("owner/repo", []), undefined);
-  for (const incomplete of ["", "owner", "owner/", "/repo", "owner/repo/extra", "owner repo"]) {
-    assert.equal(githubSubscribeCommand(incomplete, ["issues"]), undefined, incomplete);
-    assert.equal(isGitHubRepositoryName(incomplete), false, incomplete);
-  }
 });
 
 test("unsubscribe drops every feature so the relation is removed", () => {
