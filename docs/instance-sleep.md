@@ -47,45 +47,52 @@ keeps them until the successor connects, so a waking Instance stays visible.
 or an Automation occurrence, and got past wrapper startup (its exit phase is not
 a startup-failure phase).
 
-## 2. Sleep (Machine Daemon)
+## 2. Sleep (Hub decides, daemon carries it out)
 
-The daemon already reads every managed Run's status sidecar on its two-second
-monitor tick. It puts a Run to sleep when all of the following hold:
+When an Instance sleeps is the Hub's decision; the daemon reports facts and
+carries the decision out after its own check.
 
-- the Run is persistent and resumable (has a resume session key). Every harness
-  is covered by default — Claude, Codex, Grok, Cursor, ACP, OpenCode, and any
-  other registration Run with a resume key;
-- its sidecar phase is a resting phase (`turn_completed`, `turn_failed`,
-  `turn_interrupted`, `relay_registered`, `channel_joined`, `model_selected`,
-  `effort_selected`, or any `*_app_ready`) and no task execution is in flight;
-- nothing happened for `XMATRIX_INSTANCE_IDLE_SLEEP_SECS` (default `1800`;
-  `0` disables sleep): the newest task-execution update, the wrapper-ready time
-  and the daemon-observed phase change are all older than the window;
-- the provider does not report an open watch / wait. The wrapper keeps the
-  count in the sidecar's `backgroundTasks`: Claude's stream opens a task with
-  `system/task_started` and closes it with its `system/task_notification`
-  (completed, failed or stopped); a CI wait or `Monitor` the Agent left running
-  keeps the count above zero and blocks sleep. Nonterminal `system/task_updated`
-  frames also open tasks, even when the stream never saw their start (for
-  example a resumed watch or pending task); only a terminal status closes them.
-  Outstanding work resets the idle window, and the daemon checks the current
-  task state again before stamping a sleep. Only an explicit positive count
-  holds the Run awake. `None` or `0` means no reported watch (Codex, Cursor,
-  ACP, Grok never emit task events; Claude writes `0` when its stream ends with
-  none open) and the Run may sleep. Nothing is inferred from the process tree,
-  because a background wait and a long-lived MCP server look the same there.
+**Facts.** Every presence update the Run sends carries its live status and
+`runtimeState` (whether a turn runs, and the open waits it reports). The Hub
+treats the Run as resting when its status is not `busy`, no turn runs and
+nothing waits (`presenceRests` in `instance-idle-sleep.ts`). A watch, Monitor
+or CI wait the Agent left running keeps a wait open and the Run awake. The
+wrapper replays its latest presence on every reconnect, so a Hub restart
+re-learns every Run's state.
 
-Sleeping terminates the Run's process tree exactly like a retained stop
-(`worktreeDisposition: retain`), then reports `machine_run_exited` with
-`restReason: "sleeping"` and `statusPhase: "sleeping"`. A repo-pool slot becomes
-`Retained` on that exit as it does for any persistent Run.
+**Decision.** On a change of that resting fact, or of the runtime's own update
+time, the Hub writes `data.runs.idle_sleep_at` (migration
+`0191_expand_run_idle_sleep`, `markRunResting`):
 
-A wrapper whose sidecar says `wrapper_startup_failed` and whose process is still
-alive has already failed; once it has sat there for 60 seconds the daemon
-terminates it and reports an ordinary exit (never `sleeping`).
+- resting, and the Run is running, resumable (§1) and not being stopped: the
+  sleep falls due 30 minutes later (`INSTANCE_IDLE_SLEEP_MS`). A Run that
+  already has a due time keeps it;
+- anything else (a new turn, a wait, a stop): the due time is withdrawn.
 
-Older daemons never sleep a Run. Their exits classify as `interrupted` or `NULL`
-under §1, so a Hub update alone changes no running Instance.
+The Channel's launch coordinator keeps its alarm at the earliest due time (the
+`idleSleep` step). When it fires, `reconcileIdleSleeps` takes the due rows
+atomically and issues one durable `sleep` machine command per Run, fenced by
+Run id, execution key and Instance id, with the idle time the Hub observed.
+
+**Execution.** A daemon that advertises `machine_sleep_agent_v1` claims the
+command and checks its own facts first (`verify_hub_sleep`): the Run is the
+same execution and still resumable, its sidecar phase is a resting phase,
+no task execution is in flight, no background task count is positive, and its
+newest execution update and wrapper-ready time are not more recent than the
+Hub's idle time (60 seconds of slack). Any new work declines the sleep and the
+daemon reports why (`machine_sleep_result` with `slept: false`); the next turn
+re-arms the due time. Otherwise the daemon ends the process tree like a
+retained stop (`worktreeDisposition: retain`) and reports `machine_run_exited`
+with `restReason: "sleeping"` and `statusPhase: "sleeping"`. A repo-pool slot
+becomes `Retained` on that exit as it does for any persistent Run.
+
+The daemon decides one thing alone: a wrapper whose sidecar says
+`wrapper_startup_failed` and whose process is still alive has already failed;
+once it has sat there for 60 seconds the daemon terminates it and reports an
+ordinary exit (never `sleeping`).
+
+A daemon without the sleep capability gets no command (`sleep_unavailable`);
+its Runs rest on.
 
 ## 3. Wake (Hub)
 
@@ -212,13 +219,15 @@ fails closed with the existing "checkout was reclaimed" refusal.
 
 ## 7. Compatibility and rollout
 
-- Hub and database first (release train order). The migration is additive; old
-  daemons send no `restReason`, so nothing sleeps until the CLI update.
+- Hub and database first (release train order). The migrations are additive.
+  Daemons from before the sleep command still decide sleep themselves; the Hub
+  issues them nothing.
 - The CLI update is picked up by daemon self-update; running wrappers need no
-  restart. Old wrappers are put to sleep by the updated daemon like new ones,
+  restart. Old wrappers are put to sleep on the Hub's word like new ones,
   and wake with the updated binary through reborn.
-- Rolling back the CLI stops new sleeps; resting Instances still wake through
-  the Hub. Rolling back the Hub leaves `rest_state` unread.
+- Rolling back the CLI returns sleep to the daemon; resting Instances still
+  wake through the Hub. Rolling back the Hub leaves `idle_sleep_at` and
+  `rest_state` unread, and nothing sleeps until the daemon is rolled back too.
 
 ### Background-task interruption evidence
 

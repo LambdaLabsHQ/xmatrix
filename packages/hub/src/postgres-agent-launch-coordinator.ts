@@ -1,3 +1,4 @@
+import { reconcileIdleSleeps } from "./instance-idle-sleep";
 import { reconcileAgentTurnRetries } from "./agent-turn-retry";
 import { reconcileReborn } from "./reborn-reconcile";
 import { finalizeMachineRunTerminalReports } from "./machine-run-terminal-finalizer";
@@ -476,12 +477,13 @@ export async function channelsWithWork(database: AuthorityDatabase, shardId: str
   afterChannelId: string, limit: number): Promise<string[]> {
   return database.transaction({ requestId: `agent-launch:channels-with-work:${shardId}`,
     operation: "launch.coordinator.channels-with-work" }, async (tx) =>
-    (await tx.query<{ channel_id: string }>({ name: "agent_launch_channels_with_work_v4", text: `SELECT channel_id FROM (
+    (await tx.query<{ channel_id: string }>({ name: "agent_launch_channels_with_work_v5", text: `SELECT channel_id FROM (
         SELECT launch.channel_id FROM data.agent_launches launch
           WHERE ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$1")}
         UNION SELECT intent.channel_id FROM data.agent_reborn_intents intent
           WHERE intent.state IN ('waiting','prepared') OR (intent.state='failed' AND intent.failure_notified_at IS NULL)
         UNION SELECT retry.channel_id FROM data.runs retry WHERE retry.capacity_retry_at IS NOT NULL
+        UNION SELECT idle.channel_id FROM data.runs idle WHERE idle.idle_sleep_at IS NOT NULL
         UNION SELECT report.channel_id FROM data.machine_run_terminal_reports report
         UNION SELECT stop.channel_id FROM data.registration_stop_intents stop WHERE stop.state='pending'
         UNION SELECT prep.channel_id FROM data.registration_launch_intents prep
@@ -503,7 +505,8 @@ export async function channelsWithWork(database: AuthorityDatabase, shardId: str
  * would spin the Channel's alarm.
  */
 /** The coordinated work one pass can do, each run by its own step. */
-export type CoordinatorStep = "registrationPreparation" | "registrationStop" | "runTerminal" | "reborn" | "launch" | "turnRetry";
+export type CoordinatorStep = "registrationPreparation" | "registrationStop" | "runTerminal" | "reborn" | "launch" | "turnRetry" |
+  "idleSleep";
 
 
 function dueTime(value: string | Date | null | undefined): number | undefined {
@@ -518,8 +521,8 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
   return database.transaction({ requestId: `agent-launch:next-due:${channelId}`,
     operation: "launch.coordinator.next-due" }, async (tx) => {
     const rows = await tx.query<Record<"launch_due" | "reborn_due" | "report_due" | "preparation_due" | "stop_due"
-      | "automation_due" | "retry_due", string | Date | null>>({ name: options.automation
-        ? "agent_launch_channel_step_due_automation_v2" : "agent_launch_channel_step_due_v2",
+      | "automation_due" | "retry_due" | "idle_sleep_due", string | Date | null>>({ name: options.automation
+        ? "agent_launch_channel_step_due_automation_v3" : "agent_launch_channel_step_due_v3",
       text: `SELECT LEAST(
         (SELECT MIN(${attemptAt("launch")}) FROM data.agent_launches launch
           WHERE launch.channel_id=$1 AND ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$2")}),
@@ -550,7 +553,8 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
             AND (EXISTS (SELECT 1 FROM data.instances i WHERE i.run_id=run.run_id AND i.channel_id=run.channel_id)
               OR EXISTS (SELECT 1 FROM data.agent_launches l WHERE l.run_id=run.run_id AND l.channel_id=run.channel_id))
             AND NOT EXISTS (SELECT 1 FROM data.registration_stop_intents s WHERE s.run_id=run.run_id))) AS stop_due,
-        (SELECT MIN(capacity_retry_at) FROM data.runs WHERE channel_id=$1 AND capacity_retry_at IS NOT NULL) AS retry_due
+        (SELECT MIN(capacity_retry_at) FROM data.runs WHERE channel_id=$1 AND capacity_retry_at IS NOT NULL) AS retry_due,
+        (SELECT MIN(idle_sleep_at) FROM data.runs WHERE channel_id=$1 AND idle_sleep_at IS NOT NULL) AS idle_sleep_due
         ${options.automation ? `,(${CHANNEL_AUTOMATION_WAKE_SQL}) AS automation_due` : ""}`,
       values: [channelId, shardId], maxRows: 1 });
     const row = rows[0];
@@ -561,7 +565,7 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
     };
     set("launch", row?.launch_due); set("reborn", row?.reborn_due); set("runTerminal", row?.report_due);
     set("registrationPreparation", row?.preparation_due); set("registrationStop", row?.stop_due);
-    set("automation", row?.automation_due); set("turnRetry", row?.retry_due);
+    set("automation", row?.automation_due); set("turnRetry", row?.retry_due); set("idleSleep", row?.idle_sleep_due);
     return due;
   });
 }
@@ -649,6 +653,7 @@ export class RelayPostgresAgentLaunchCoordinatorService {
       shard.database, fleet.directoryDatabase, shard.shardId, this.env, channelId, plan.includeParked));
     await step("runTerminal", "runTerminal", () => finalizeMachineRunTerminalReports(this.env as Env, fleet.directoryDatabase, channelId));
     await step("turnRetry", "turnRetry", () => reconcileAgentTurnRetries(this.env as Env, shard.database, channelId));
+    await step("idleSleep", "idleSleep", () => reconcileIdleSleeps(this.env as Env, shard.database, channelId));
     await step("reborn", "reborn", () => reconcileReborn(shard.database, shard.shardId, this.env, fleet.directoryDatabase, channelId));
     await step("endedRun", "launch", () => reconcileEndedRunLaunches(shard.database, shard.shardId, channelId));
     await step("runless", "launch", () => reconcileRunlessLaunches(shard.database, shard.shardId, channelId));

@@ -9,7 +9,7 @@ import {
  * in `commands` and answers it with `respond`; history is inert.
  */
 export function recordingAgentInstancePort({ respond = () => ({}), signals = { async publish() {} },
-  pullRequestOpened, settleQuestionnaire } = {}) {
+  pullRequestOpened, settleQuestionnaire, markResting } = {}) {
   const commands = [];
   const port = new PostgresAgentInstancePort({
     atomicInstanceConnect: true,
@@ -34,6 +34,7 @@ export function recordingAgentInstancePort({ respond = () => ({}), signals = { a
         commands.push({ family: "registration-usage-limit-hold", input });
         return respond("registration-usage-limit-hold", input);
       },
+      ...(markResting ? { markResting } : {}),
     },
     signals,
     ...(pullRequestOpened ? { pullRequestOpened } : {}),

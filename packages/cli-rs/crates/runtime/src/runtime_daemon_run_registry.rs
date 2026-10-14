@@ -1393,14 +1393,14 @@ fn spawn_daemon_child_monitor(
         let mut interval = tokio::time::interval(Duration::from_secs(2));
         let mut progress = DaemonRunProgressReporter::default();
         let mut maintenance_at = Instant::now();
-        let mut idle_tracker = runtime_daemon_idle_sleep::IdleSleepTracker::default();
+        let mut failed_startups = runtime_daemon_idle_sleep::FailedStartupTracker::default();
         let mut pool_sweep_at = Instant::now() + Duration::from_secs(60);
         let pool_sweep_active = Arc::new(AtomicBool::new(false));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
             report_finished_daemon_children(&registry, &relay).await;
-            sleep_idle_daemon_children(&registry, &mut idle_tracker).await;
+            end_lingering_failed_startups(&registry, &mut failed_startups).await;
             if Instant::now() >= pool_sweep_at {
                 pool_sweep_at = Instant::now() + DAEMON_POOL_SWEEP_INTERVAL;
                 spawn_daemon_pool_sweep(registry.clone(), pool_sweep_active.clone());
@@ -1474,16 +1474,14 @@ fn daemon_run_idle_view(
     }
 }
 
-/// Put Runs that sat idle for the whole window to sleep, and end wrappers that
-/// failed at startup but never exited (docs/instance-sleep.md §2). The exit
-/// itself is reported by the ordinary finished-child path on a later tick.
-async fn sleep_idle_daemon_children(
+/// End wrappers that failed at startup but never exited (docs/instance-sleep.md
+/// §2). Idle Runs sleep on the Hub's word instead (sleep_daemon_child_on_hub_word).
+/// The exit itself is reported by the ordinary finished-child path on a later
+/// tick.
+async fn end_lingering_failed_startups(
     registry: &DaemonRunRegistry,
-    tracker: &mut runtime_daemon_idle_sleep::IdleSleepTracker,
+    tracker: &mut runtime_daemon_idle_sleep::FailedStartupTracker,
 ) {
-    let Some(window) = runtime_daemon_idle_sleep::idle_sleep_window() else {
-        return;
-    };
     let views = {
         let guard = registry.lock().await;
         guard
@@ -1491,7 +1489,7 @@ async fn sleep_idle_daemon_children(
             .map(|(key, managed)| daemon_run_idle_view(key, managed))
             .collect::<Vec<_>>()
     };
-    let decisions = tracker.observe(unix_millis_now(), window, &views);
+    let decisions = tracker.lingering(unix_millis_now(), &views);
     if decisions.is_empty() {
         return;
     }
@@ -1517,24 +1515,8 @@ async fn sleep_idle_daemon_children(
             ));
             continue;
         }
-        match decision.action {
-            runtime_daemon_idle_sleep::IdleAction::Sleep { idle_for, phase } => {
-                if end_idle_daemon_child(
-                    registry,
-                    &decision.key,
-                    decision.pid,
-                    Some((&phase, idle_for)),
-                )
-                .await
-                {
-                    tracker.note_ended(&decision.key, decision.pid);
-                }
-            }
-            runtime_daemon_idle_sleep::IdleAction::EndFailedStartup => {
-                if end_idle_daemon_child(registry, &decision.key, decision.pid, None).await {
-                    tracker.note_ended(&decision.key, decision.pid);
-                }
-            }
+        if end_idle_daemon_child(registry, &decision.key, decision.pid, None).await {
+            tracker.note_ended(&decision.key, decision.pid);
         }
     }
 }
