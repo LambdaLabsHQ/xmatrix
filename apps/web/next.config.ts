@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
+import CssSubjectBucketsPlugin from "./css-subject-buckets-webpack.mjs";
 import {
   configuredHubConnectSources,
   configuredHubOrigin,
@@ -34,8 +35,9 @@ const nextConfig: NextConfig = {
   htmlLimitedBots: /.*/u,
   // The user guide's Markdown is imported as text (src/lib/docs/guide.ts).
   turbopack: { rules: { "*.md": { loaders: ["./markdown-source-loader.cjs"], as: "*.js" } } },
-  webpack(config) {
+  webpack(config, { dev, isServer }) {
     config.module.rules.push({ test: /\.md$/u, use: [join(__dirname, "markdown-source-loader.cjs")] });
+    if (!dev && !isServer) config.plugins.push(new CssSubjectBucketsPlugin());
     return config;
   },
   // React Compiler memoizes components and hooks at build time, so a fresh
