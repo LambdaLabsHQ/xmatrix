@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 import {
@@ -125,6 +125,66 @@ function boxesOverlap(a: { x: number; y: number; width: number; height: number }
     && a.y < b.y + b.height - 1 && a.y + a.height > b.y + 1;
 }
 
+function runningLoops(decoration: Locator) {
+  return decoration.evaluate(node => node.getAnimations().filter(animation =>
+    animation.playState === "running" && animation.effect?.getTiming().iterations === Infinity).length);
+}
+
+/** Compare painted phases without coupling the owner to CSS or native clocks. */
+async function paintedLoopFrames(decoration: Locator, times: [number, number]): Promise<[Buffer, Buffer]> {
+  const loops = await decoration.evaluateHandle(node => node.getAnimations().filter(animation =>
+    animation.playState === "running" && animation.effect?.getTiming().iterations === Infinity));
+  const frames: Buffer[] = [];
+  try {
+    expect(await loops.evaluate(animations => animations.length)).toBeGreaterThan(0);
+    for (const time of times) {
+      await loops.evaluate((animations, time) => {
+        for (const animation of animations) {
+          animation.pause();
+          animation.currentTime = time;
+        }
+      }, time);
+      frames.push(await decoration.screenshot({ animations: "allow" }));
+    }
+    return [frames[0]!, frames[1]!];
+  } finally {
+    await loops.evaluate(animations => { for (const animation of animations) animation.play(); });
+    await loops.dispose();
+  }
+}
+
+test("a working face pulses, follows motion preferences, and stops its clock when it leaves", async ({ page }) => {
+  const space = workingAgentsSpace(1, "decoration-pulse");
+  const send = await openWorkingAgentsSpace(page, space, channelHistory(1, "decoration-pulse", () => "Working now"),
+    "Working now");
+  const dot = page.locator(".app-agent-work-dock .identity-avatar-status");
+  await expect(dot).toBeVisible();
+  await expect.poll(() => runningLoops(dot)).toBe(1);
+  const [bright, dim] = await paintedLoopFrames(dot, [0, 1_000]);
+  expect(bright.equals(dim)).toBe(false);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => runningLoops(dot)).toBe(0);
+  const resting = await dot.screenshot({ animations: "allow" });
+  await page.waitForTimeout(150);
+  expect(resting.equals(await dot.screenshot({ animations: "allow" }))).toBe(true);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(() => runningLoops(dot)).toBe(1);
+
+  // Keep the real clock and DOM node across the roster update: inspecting a
+  // replacement node could miss an animation left alive by its old ref.
+  const previous = await dot.evaluateHandle(node => ({ node, animations: node.getAnimations() }));
+  const agent = space.agents[0]!;
+  send({ type: "channel_updated", channel: { ...space.channels[0], memberPresence: {} } });
+  send({ type: "agent_lifecycle", channelId: space.channelId(0), agentId: agent.id,
+    instanceId: agent.instances[0]!.id, status: "offline", layer: "agent", ts: new Date().toISOString() });
+  await expect(dot).toHaveCount(0);
+  await expect.poll(() => previous.evaluate(({ node, animations }) => ({
+    connected: node.isConnected, running: animations.some(animation => animation.playState === "running"),
+  }))).toEqual({ connected: false, running: false });
+  await previous.dispose();
+});
+
 test("a waiting Instance grows into an island that says what it waits on and for how long", async ({ page }) => {
   await openWaitingChannel(page, { kind: "tool", label: "Wait for CI on PR #3781", details: ["gh pr checks 3781 --watch"],
     sinceMillis: Date.now() - 8 * 60_000 - 5_000 });
@@ -137,7 +197,11 @@ test("a waiting Instance grows into an island that says what it waits on and for
   await expect(island.locator(".app-agent-work-intent")).toHaveAttribute("aria-label", "Waiting: Wait for CI on PR #3781 · 8m");
   // The words say what it waits on, so the face drops its hollow waiting ring.
   await expect(island.locator(".identity-avatar-status")).toBeHidden();
-  await expect(island.locator(".app-agent-work-intent-ring")).toBeVisible();
+  const ring = island.locator(".app-agent-work-intent-ring");
+  await expect(ring).toBeVisible();
+  await expect.poll(() => runningLoops(ring)).toBe(1);
+  const [earlyRing, laterRing] = await paintedLoopFrames(ring, [0, 400]);
+  expect(earlyRing.equals(laterRing)).toBe(false);
 
   const disc = await island.locator(".app-agent-work-avatar").boundingBox();
   const face = await island.locator(".identity-avatar-face").boundingBox();
@@ -184,9 +248,12 @@ test("a waiting Instance grows into an island that says what it waits on and for
   expect(earlyInk.equals(middleInk)).toBe(false);
   expect(await words.boundingBox()).toEqual(wordBox);
   await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => runningLoops(ring)).toBe(0);
   const [steadyInk, laterInk] = await inkFrames();
   expect(steadyInk.equals(laterInk)).toBe(true);
   expect(await words.boundingBox()).toEqual(wordBox);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(() => runningLoops(ring)).toBe(1);
 
   await page.locator(".app-agent-work-dock").screenshot({ path: test.info().outputPath("waiting-island.png") });
 });
@@ -203,21 +270,26 @@ test("off-strip work islands rest and resume as scrolling brings them into view"
   const running = (index: number) => items.nth(index).evaluate(node =>
     node.getAnimations({ subtree: true }).filter(animation => animation.playState === "running" &&
       animation.effect?.getTiming().iterations === Infinity).length);
-  await expect.poll(() => running(0)).toBeGreaterThan(0);
-  await expect.poll(() => running(9)).toBe(0);
+  const ringRunning = (index: number) => runningLoops(items.nth(index).locator(".app-agent-work-intent-ring"));
+  const expectActiveEnd = async (visible: number, clipped: number) => {
+    await expect.poll(() => running(visible)).toBeGreaterThan(0);
+    await expect.poll(() => running(clipped)).toBe(0);
+    await expect.poll(() => ringRunning(visible)).toBe(1);
+    await expect.poll(() => ringRunning(clipped)).toBe(0);
+  };
+  await expectActiveEnd(0, 9);
   const stripBox = await strip.boundingBox();
   const lastBox = await items.last().boundingBox();
   if (!stripBox || !lastBox) throw new Error("work strip is not laid out");
   expect(lastBox.x).toBeGreaterThanOrEqual(stripBox.x + stripBox.width);
 
-  // Reveal only half the last island. Partial paint is enough to run its
-  // motion, and the same clipped strip must retain its overflowing controls.
+  // Reveal half of the last timer. A partially painted decoration runs; an
+  // entirely clipped one rests. The strip keeps its overflowing controls.
   await strip.evaluate(node => {
-    const last = node.lastElementChild!.getBoundingClientRect();
-    node.scrollLeft += last.left - node.getBoundingClientRect().left - node.clientWidth + last.width / 2;
+    const ring = node.lastElementChild!.querySelector(".app-agent-work-intent-ring")!.getBoundingClientRect();
+    node.scrollLeft += ring.right - node.getBoundingClientRect().left - node.clientWidth - ring.width / 2;
   });
-  await expect.poll(() => running(9)).toBeGreaterThan(0);
-  await expect.poll(() => running(0)).toBe(0);
+  await expectActiveEnd(9, 0);
   const partial = await items.last().boundingBox();
   expect(partial!.x).toBeLessThan(stripBox.x + stripBox.width);
   expect(partial!.x + partial!.width).toBeGreaterThan(stripBox.x + stripBox.width);
@@ -226,8 +298,7 @@ test("off-strip work islands rest and resume as scrolling brings them into view"
 
   await page.mouse.move(0, 0);
   await strip.evaluate(node => { node.scrollLeft = 0; });
-  await expect.poll(() => running(0)).toBeGreaterThan(0);
-  await expect.poll(() => running(9)).toBe(0);
+  await expectActiveEnd(0, 9);
 });
 
 test("a usage limit sits on the face, clear of the island's words", async ({ page }) => {

@@ -6,6 +6,7 @@ import type { AgentRuntimeWaiting } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
 import { statusInkClass } from "@/components/ui/status-tone";
+import { useDecorationAnimation } from "@/components/ui/decoration-animation";
 import type { AgentWorkItem } from "./workspace-shell-message-model";
 
 /**
@@ -205,9 +206,10 @@ const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS;
 
 function TimerRing({ fraction }: { fraction: number }) {
   // Arc length is the elapsed share of the attention threshold. The ring
-  // itself turns (CSS); reduced motion leaves the arc parked at 12 o'clock.
+  // itself turns; reduced motion leaves the arc parked at 12 o'clock.
+  const animationRef = useDecorationAnimation("spin");
   return (
-    <span className="app-agent-work-intent-ring" aria-hidden="true">
+    <span ref={animationRef} className="app-agent-work-intent-ring" aria-hidden="true">
       <svg className="app-agent-work-intent-ring-face" viewBox="0 0 18 18">
         <circle cx="9" cy="9" r={TIMER_RADIUS} />
         <circle cx="9" cy="9" r={TIMER_RADIUS} transform="rotate(-90 9 9)"

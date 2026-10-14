@@ -413,6 +413,17 @@ from forcing full paint-artifact updates during unrelated visible work. No
 content is hidden or paint-contained to achieve this, so hover cards and
 shadows retain their existing overflow.
 
+Busy/waking status dots and elapsed timer rings use component-owned Web
+Animations rather than CSS iteration events. Their two-second pulse and
+1.6-second rotation retain the same geometry and easing. The shared visibility
+observer pauses each actual target without losing phase; the component that
+makes a mobile pane inert also suspends its clocks. Changing reduced motion
+cancels these effects and restores the static dot or twelve-o'clock arc;
+reenabling motion starts a new effect. Unmount cancels the effect and releases
+the shared observer and motion-preference subscription. Browsers without Web
+Animations display the same static decoration. These clocks schedule no
+JavaScript frames and do not modify native event registration.
+
 Empty/plain drafts also skip the mention display registry until an address is
 present. Textarea transitions cover field chrome explicitly: switching between
 native and soft carets does not animate the unsupported caret-color property.
