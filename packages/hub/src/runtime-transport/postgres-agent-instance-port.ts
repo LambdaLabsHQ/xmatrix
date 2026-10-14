@@ -293,8 +293,11 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       case "agent_lifecycle": {
         const failure = classifiedTurnFailure(message);
         const published = await this.dependencies.signals.publish(session, failure);
+        // A host names each failure by its requestId and repeats it on a
+        // resend. One that names none is keyed by its whole error, so two
+        // different errors never share a notice.
         await this.persistTurnFailureNotice(session, failure,
-          failure.reason === "background_tasks_interrupted" ? failure.requestId : undefined);
+          await sha256Hex(failure.requestId ?? `${failure.reason ?? ""}\0${failure.detail ?? ""}`));
         return published;
       }
       case "presence_update": {
@@ -614,13 +617,13 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         actorUserId: session.principal.ownerUserId,
       });
     } catch (error) {
-      // The notice id is the Instance and the notice's opening text, so a
-      // later failure that opens the same way (or the same one reported by a
-      // later Run of the Instance) finds its notice already posted. That
-      // notice, and any handoff it started, stand; this one adds nothing.
-      if (error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict) return;
-      console.error("Agent turn-failure notice could not be committed", error);
-      return;
+      // A replayed failure finds its notice already posted. The handoff after
+      // it may not have committed before Hub was interrupted, so a replay
+      // continues to it; its own ids make the repeat change nothing.
+      if (!(error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict)) {
+        console.error("Agent turn-failure notice could not be committed", error);
+        return;
+      }
     }
     if (isAgentUsageLimitLifecycle(message) && session.run.kind === "channel-instance") {
       await this.handOffUsageLimitedInstance(session, message, command.messageId);
@@ -670,6 +673,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
           xmatrixUsageLimitHandoff: true, sourceMessageId } },
       }, { actorUserId: ownerUserId });
     } catch (error) {
+      if (error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict) return;
       console.error("Agent usage-limit handoff could not be posted", error);
     }
   }

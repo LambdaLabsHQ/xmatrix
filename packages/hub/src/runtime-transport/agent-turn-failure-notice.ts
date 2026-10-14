@@ -40,8 +40,7 @@ export function agentTurnFailureAppendCommand(input: {
   });
   const identity = [
     input.instanceId.trim() || input.runId.trim(),
-    ...(input.noticeId ? [channelId, input.noticeId] : []),
-    body.replace(/\s+/gu, " ").slice(0, TURN_FAILURE_NOTICE_IDENTITY_MAX),
+    ...(input.noticeId ? [channelId, input.noticeId] : [body.replace(/\s+/gu, " ").slice(0, TURN_FAILURE_NOTICE_IDENTITY_MAX)]),
   ].join(":");
   const messageId = runtimeCommandId("turn-failure", identity);
   return {

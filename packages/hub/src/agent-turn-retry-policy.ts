@@ -1,3 +1,4 @@
+import { boundAgentTurnFailureDetail } from "@xmatrix/protocol";
 import type { AgentInstanceTurnRetryMessage } from "@xmatrix/protocol/connections/agent-instance";
 
 // Product policy lives only on the Hub. Hosts report outcomes, never budgets
@@ -6,6 +7,8 @@ const DELAYS_MS = [5_000, 15_000, 30_000] as const;
 export const TURN_RETRY_LIFETIME_MS = 120_000;
 export const TURN_RETRY_DELIVERY_RECHECK_MS = 5_000;
 export const TURN_RETRY_RUNTIME_PATH = "/internal/product-agent/turn-retry";
+/** The whole bounded provider error, so Hub classifies what the provider said. */
+export const TURN_RETRY_ERROR_MAX_CHARS = 4_000;
 export const CAPACITY_CONTINUATION = "Continue the previous request that failed because the selected model was at capacity.";
 
 export interface HubTurnRetry {
@@ -31,7 +34,7 @@ export function parseHubTurnRetry(value: unknown): HubTurnRetry | undefined {
       !Number.isInteger(r.attempt) || r.attempt < 0 || r.attempt > DELAYS_MS.length ||
       !Number.isSafeInteger(r.dueAt) || !Number.isSafeInteger(r.expiresAt) ||
       !["waiting", "issued", "completed", "cancelled", "exhausted", "unsafe", "expired", "ineligible"].includes(r.state) ||
-      typeof r.notice !== "string" || r.notice.length > 100 || typeof r.errorMessage !== "string" || r.errorMessage.length > 600) return;
+      typeof r.notice !== "string" || r.notice.length > 100 || typeof r.errorMessage !== "string" || r.errorMessage.length > TURN_RETRY_ERROR_MAX_CHARS) return;
   return r;
 }
 
@@ -76,7 +79,7 @@ export function turnRetryNotice(state: HubTurnRetry): string {
   if (["waiting", "issued", "completed"].includes(state.state)) return prefix + outcome;
   // The host stays silent for these outcomes, so this notice is the only
   // place its original error appears. Mention sigils cannot summon anyone.
-  const error = state.errorMessage.replace(/\s+/gu, " ").replace(/[@＠]/gu, "﹫").trim();
+  const error = boundAgentTurnFailureDetail(state.errorMessage).replace(/[@＠]/gu, "﹫");
   return prefix + outcome + (error ? ` Error: ${error}` : "");
 }
 

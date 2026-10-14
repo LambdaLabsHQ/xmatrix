@@ -10,7 +10,7 @@ import { runtimeMessages, runtimeCommandId } from "./runtime-transport/runtime-m
 import { productAgentSystemNoticeSenderSnapshot } from "./product-agent-mention-authority-adapter";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { advanceTurnRetry, parseHubTurnRetry, turnRetryNotice, CAPACITY_CONTINUATION,
-  TURN_RETRY_DELIVERY_RECHECK_MS, TURN_RETRY_RUNTIME_PATH, type HubTurnRetry } from "./agent-turn-retry-policy";
+  TURN_RETRY_DELIVERY_RECHECK_MS, TURN_RETRY_ERROR_MAX_CHARS, TURN_RETRY_RUNTIME_PATH, type HubTurnRetry } from "./agent-turn-retry-policy";
 
 export type RetryDecision = Extract<AgentInstanceServerMessage, { type: "agent_turn_retry_decision" }>;
 const active = (r: HubTurnRetry) => r.state === "waiting" || r.state === "issued";
@@ -20,7 +20,7 @@ function reportIsValid(value: AgentInstanceTurnRetryMessage): boolean {
   return id(value.requestId) && id(value.operationId) &&
     ["failed", "completed", "cancelled"].includes(value.action) &&
     (value.action !== "failed" || id(value.threadId) && id(value.turnId) && typeof value.safeToContinue === "boolean" &&
-      typeof value.errorMessage === "string" && value.errorMessage.length > 0 && value.errorMessage.length <= 600) &&
+      typeof value.errorMessage === "string" && value.errorMessage.length > 0 && value.errorMessage.length <= TURN_RETRY_ERROR_MAX_CHARS) &&
     (value.attemptToken === undefined || id(value.attemptToken));
 }
 
