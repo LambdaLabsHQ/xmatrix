@@ -9,7 +9,10 @@ use xmatrix_cli_core::http;
 use xmatrix_cli_core::protocol::{HubRoutes, with_route};
 
 fn render(listing: &Value) -> String {
-    let connectors = listing["connectors"].as_array().cloned().unwrap_or_default();
+    let connectors = listing["connectors"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     if connectors.is_empty() {
         return "No app is connected to this Channel's Space.\n".to_string();
     }
@@ -59,7 +62,9 @@ mod tests {
             "actions": [{ "command": "@gmail:search:* <Gmail query>", "effect": "read",
                 "description": "Search mail." }]
         }] }));
-        assert!(text.starts_with("Gmail (gmail)\n  read   @gmail:search:* <Gmail query>\n         Search mail.\n"));
+        assert!(text.starts_with(
+            "Gmail (gmail)\n  read   @gmail:search:* <Gmail query>\n         Search mail.\n"
+        ));
         assert!(text.contains("xmatrix send <channel-id>"));
     }
 

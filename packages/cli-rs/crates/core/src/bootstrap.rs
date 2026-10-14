@@ -36,7 +36,11 @@ fn connected_apps_context() -> String {
     let Some(apps) = trimmed_env(CONNECTED_APPS_ENV) else {
         return String::new();
     };
-    let names: Vec<&str> = apps.lines().map(str::trim).filter(|name| !name.is_empty()).collect();
+    let names: Vec<&str> = apps
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
     if let Some(name) = names.iter().find(|name| !is_app_name(name)) {
         panic!("{CONNECTED_APPS_ENV} names `{name}`, which is not a short single-line name");
     }
@@ -310,7 +314,9 @@ mod tests {
 
     #[test]
     fn connected_apps_are_named_with_the_way_to_use_them_only_when_set() {
-        let _env = LAUNCH_ENV.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = LAUNCH_ENV
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // SAFETY: test-only env mutation, as in the other bootstrap tests.
         unsafe { std::env::remove_var(CONNECTED_APPS_ENV) };
         let without = bootstrap_prompt("claude", "a", "", true).unwrap();
@@ -332,7 +338,9 @@ mod tests {
 
     #[test]
     fn space_rules_page_is_named_before_the_working_mode_only_when_set() {
-        let _env = LAUNCH_ENV.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = LAUNCH_ENV
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // SAFETY: test-only env mutation, as in the other bootstrap tests.
         unsafe { std::env::remove_var(SPACE_RULES_PAGE_ENV) };
         let without = bootstrap_prompt("claude", "a", "", true).unwrap();

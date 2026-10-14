@@ -333,6 +333,22 @@ fn spawn_space_rules_page_comes_only_from_the_launch() {
 }
 
 #[test]
+fn spawn_connected_apps_come_only_from_the_launch() {
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("XMATRIX_CONNECTED_APPS".to_string(), "Stale".to_string());
+    let cleared = super::apply_spawn_connected_apps(env.clone(), &[]).unwrap();
+    assert!(!cleared.contains_key("XMATRIX_CONNECTED_APPS"));
+
+    let apps = vec!["Gmail".to_string(), "App Store Connect".to_string()];
+    let env = super::apply_spawn_connected_apps(env, &apps).unwrap();
+    assert_eq!(
+        env.get("XMATRIX_CONNECTED_APPS").map(String::as_str),
+        Some("Gmail\nApp Store Connect")
+    );
+    assert!(super::apply_spawn_connected_apps(env, &["Gmail\nrm -rf ~".to_string()]).is_err());
+}
+
+#[test]
 fn spawn_env_scrubs_retired_role_values_from_older_state() {
     // A Run resumed from state an older daemon wrote may still carry the
     // retired Role reminder, skills, App requirements, or Role avatar.

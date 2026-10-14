@@ -814,7 +814,10 @@ pub fn channel_switch_continuation(message: &ChannelMessage) -> Option<ChannelSw
         && instruction_instance_id(&continuation.instance_id)
         && !continuation.request_ids.is_empty()
         && continuation.request_ids.len() <= 16
-        && continuation.request_ids.iter().all(|id| instruction_token(id)))
+        && continuation
+            .request_ids
+            .iter()
+            .all(|id| instruction_token(id)))
     .then_some(continuation)
 }
 
