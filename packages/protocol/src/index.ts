@@ -55,10 +55,10 @@ export {
   CHANNEL_ACTIVITY_MAX_STEPS, CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE,
   ChannelActivityInvalid, channelActivityLine, channelActivityOf, isReservedAnnotationNamespace,
   isReservedMessageMetadataKey, normalizeChannelActivity, SUPERSEDED_ANNOTATION_NAMESPACE,
-  supersededByOf, SYSTEM_ANNOTATION_AUTHOR,
+  supersededByOf, SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
 } from "./channel-activity.js";
 export type {
-  ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus,
+  ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus, QuestionnaireState,
 } from "./channel-activity.js";
 export {
   channelSummarySource,

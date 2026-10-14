@@ -8,7 +8,8 @@ import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
 import type { AgentRegistrationKey, MessageCommitReceipt } from "@xmatrix/protocol";
-import { channelVisibilityScope, isReservedAnnotationNamespace, SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength } from "@xmatrix/protocol";
+import { channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+  SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -2247,6 +2248,80 @@ export class PostgresMessageRepository {
         mutationKind: input.kind, mutation: result, principal, result, now,
       });
       return result;
+    });
+  }
+
+  /**
+   * Settle a questionnaire card once: answered by its person, or withdrawn by
+   * the Instance that asked. The Hub's own annotation records the state and
+   * the card's wait on its person ends with it, in one transaction. A card
+   * that is already settled keeps its first state. Returns the card's state,
+   * or null when it is gone or, for a withdrawal, not the asking Instance's.
+   */
+  async settleQuestionnaire(input: {
+    requestId: string;
+    spaceId: string;
+    channelId: string;
+    messageId: string;
+    settlement: QuestionnaireState;
+    /** A withdrawal names the Instance that asked; only its own card settles. */
+    askedByInstanceId?: string;
+    requestDigest: string;
+  }): Promise<{ state: QuestionnaireState; changed: boolean } | null> {
+    const { requestId, spaceId, channelId } = channelRequest(input);
+    const messageId = bounded(input.messageId, "messageId");
+    const commandKind = "message-questionnaire-settle";
+    const principal = { kind: "system" as const, id: "xmatrix" };
+    return this.inSpace(requestId, commandKind, spaceId, async (transaction) => {
+      const candidate = (await transaction.query<MutableMessageRow>({
+        name: "message_questionnaire_candidate_v1",
+        text: `SELECT m.* FROM data.messages m WHERE m.space_id = $1 AND m.channel_id = $2
+          AND m.message_id = $3 AND m.deleted_at IS NULL AND m.recalled_at IS NULL
+          LIMIT 1 FOR UPDATE`,
+        values: [spaceId, channelId, messageId], maxRows: 1,
+      }))[0];
+      if (!candidate) return null;
+      if (input.askedByInstanceId !== undefined &&
+          (candidate.author_kind !== "agent" || candidate.author_id !== input.askedByInstanceId)) return null;
+      const collection = structuredClone(candidate.annotations_json) as Record<string, unknown>[];
+      const settled = questionnaireStateOf(collection);
+      if (settled) return { state: settled, changed: false };
+      const now = new Date().toISOString();
+      const expectedVersion = Number(candidate.entity_version);
+      const entityVersion = expectedVersion + 1;
+      const annotationId = `questionnaire:${messageId}`.slice(0, 200);
+      const annotation = await putMessageAnnotation(transaction, "message_questionnaire_annotation_upsert_v1", {
+        spaceId, channelId, messageId, annotationId, namespace: QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE,
+        collection, index: -1, authorUserId: SYSTEM_ANNOTATION_AUTHOR, authorLabel: "xMatrix",
+        payload: input.settlement, now,
+      });
+      await writeMessageCollection(transaction, "message_questionnaire_collection_update_v1", {
+        spaceId, channelId, messageId, column: "annotations_json", invocationInputVersion: null,
+        collection, entityVersion, expectedVersion, now,
+      });
+      await finalizeMutation(transaction, {
+        spaceId, channelId, messageId, entityVersion,
+        requestDigest: digest(input.requestDigest, "requestDigest"),
+        commandId: `questionnaire-settle:${messageId}:${entityVersion}`.slice(0, 200),
+        commandKind, mutationKind: "annotation", mutation: annotation, principal,
+        result: annotation, now,
+      });
+      // A settled card no longer waits on anyone.
+      await transaction.query({
+        name: "message_questionnaire_wait_end_v1",
+        text: `WITH ended AS (
+            UPDATE data.message_attention SET awaiting_response=FALSE
+            WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 AND awaiting_response
+            RETURNING subject_id
+          ) INSERT INTO data.message_attention_revisions
+            (space_id,subject_id,channel_id,revision,updated_at)
+          SELECT DISTINCT $1,subject_id,$2,1,$4::timestamptz FROM ended
+          ON CONFLICT (space_id,subject_id,channel_id) DO UPDATE SET
+            revision=data.message_attention_revisions.revision+1,
+            updated_at=EXCLUDED.updated_at`,
+        values: [spaceId, channelId, messageId, now], maxRows: 0,
+      });
+      return { state: input.settlement, changed: true };
     });
   }
 

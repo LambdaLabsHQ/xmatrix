@@ -991,6 +991,7 @@ export function buildTimeline(
       editedAt: message.editedAt,
       recalledAt: message.recalledAt,
       ...(message.supersededBy && !message.recalledAt ? { supersededBy: message.supersededBy } : {}),
+      ...(message.questionnaireState && !message.recalledAt ? { questionnaireState: message.questionnaireState } : {}),
       sentAt: displaySentAt,
       avatarUrl: matchedAvatar,
       own,

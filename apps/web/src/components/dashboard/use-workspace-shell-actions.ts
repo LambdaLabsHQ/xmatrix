@@ -2642,6 +2642,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       return true;
     } catch (err) {
       setHistoryError(userErrorMessage(err, "Couldn't send your answer"));
+      // A card the Hub already settled refuses the answer; reading it again
+      // shows the card as answered or withdrawn.
+      void refreshSelectedHistory();
       return false;
     }
   }

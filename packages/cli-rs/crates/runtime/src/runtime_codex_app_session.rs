@@ -1688,7 +1688,7 @@ impl CodexAppSession {
     async fn park_codex_question(
         &mut self,
         message: &Value,
-        relay: Option<&agent_instance_connection::AgentInstanceConnectionClient>,
+        relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
         channel_id: Option<&str>,
     ) {
         let request_id = message.get("id").cloned().unwrap_or(Value::Null);
@@ -1701,14 +1701,14 @@ impl CodexAppSession {
             .unwrap_or_else(|| request_id.to_string());
         match (relay, channel_id) {
             (Some(relay), Some(channel_id)) if !questions.is_empty() => {
-                crate::runtime_harness_questions::publish_questionnaire(
+                let card = crate::runtime_harness_questions::publish_questionnaire(
                     relay,
                     channel_id,
                     crate::runtime_harness_questions::questionnaire_message(
                         "codex", "Codex", &key, &questions,
                     ),
                 );
-                self.questions.park(key, request_id);
+                self.questions.park(key, request_id, card);
             }
             _ => {
                 let _ =
@@ -2522,7 +2522,7 @@ impl CodexAppSession {
                 _ => {}
             }
             if method == Some("item/tool/requestUserInput") {
-                self.park_codex_question(&message, trace_relay.map(Arc::as_ref), trace_channel_id)
+                self.park_codex_question(&message, trace_relay, trace_channel_id)
                     .await;
                 continue;
             }

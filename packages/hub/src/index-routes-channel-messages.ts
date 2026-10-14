@@ -14,6 +14,7 @@ import { dispatchProductMessagePostCommit, productMessageControlFinishesBeforeRe
 import { productMessageSenderPresentation } from "./message-sender-presentation";
 import { crossChannelReplyOrigin } from "./product-cross-channel-reply";
 import { messageMutationActor } from "./agent-run-channel-delegation";
+import { questionnaireAnswerTarget, settledQuestionnaireRefusal } from "./questionnaire-answer";
 import {
   requireAuth,
   requireAgentRunPermission,
@@ -25,6 +26,8 @@ import {
 } from "./index-shared";
 import {
   appendChannelMessage,
+  questionnaireCardState,
+  settleQuestionnaireCard,
   channelMessageCommand,
   channelMessageResponse,
   channelMessageResult,
@@ -345,9 +348,29 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
         const agentSendEvidence = rawAgentSubmission === null ? undefined : {
           agentSendFingerprint: await sha256Hex(rawAgentSubmission),
         };
+        // A card's answer reaches the harness only while the card is open. One
+        // to a card already answered or withdrawn is refused with the reason,
+        // rather than arriving at the Instance as a new task.
+        const answerTarget = questionnaireAnswerTarget(body.metadata);
+        if (answerTarget) {
+          const settled = await questionnaireCardState(c.env, {
+            channelId, messageId: answerTarget.cardMessageId, principal: appendPrincipal });
+          if (settled) return c.json(settledQuestionnaireRefusal(settled), 409);
+        }
         const result = await channelMessageResult(() =>
           appendChannelMessage(c.env, channelId, appendCommand, agentSendEvidence));
         if (!result.ok) return result.response;
+        // The card records its answer, so it shows answered however far its
+        // answer message scrolls, and stops waiting on its person.
+        // The answer itself has committed, so a failure here is reported, not
+        // turned into a failed send the person would retry.
+        if (answerTarget) {
+          await settleQuestionnaireCard(c.env, { channelId, messageId: answerTarget.cardMessageId,
+            settlement: { state: "answered", answers: answerTarget.answers } }).catch((error: unknown) =>
+            console.error("Questionnaire answer committed but its card could not record it", {
+              channelId, cardMessageId: answerTarget.cardMessageId,
+              error: error instanceof Error ? error.message : String(error) }));
+        }
         const committed = result.payload;
         const committedSenderSnapshot = committed.senderSnapshot &&
             typeof committed.senderSnapshot === "object" &&

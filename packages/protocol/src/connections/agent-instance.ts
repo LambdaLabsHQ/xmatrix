@@ -163,6 +163,19 @@ export interface AgentInstanceTurnRetryMessage {
   attemptToken?: string;
 }
 
+/**
+ * The Instance's harness withdrew a question it had asked on a card: the
+ * person answered in the Channel instead, or the turn it parked ended. A fact
+ * only; the Hub settles the card, ends its wait and says so in the Channel.
+ */
+export interface AgentInstanceQuestionClosedMessage {
+  type: "harness_question_closed";
+  requestId?: string;
+  channelId: string;
+  /** The requestId the card was posted with, which names its message. */
+  cardRequestId: string;
+}
+
 export type AgentInstanceNetworkSampleMessage = ClientNetworkSample & {
   type: "client_network_sample";
   requestId?: string;
@@ -222,6 +235,7 @@ export type AgentInstanceClientMessage =
   | AgentInstanceEffortSwitchResultMessage
   | AgentInstanceLifecycleMessage
   | AgentInstanceTurnRetryMessage
+  | AgentInstanceQuestionClosedMessage
   | AgentInstanceNetworkSampleMessage
   | AgentInstanceEventPublishMessage
   | AgentInstanceTraceHistoryResultMessage;

@@ -74,21 +74,56 @@ pub(crate) fn questionnaire_message(
     (lines.join("\n"), metadata)
 }
 
-/// Post a questionnaire card to `channel_id`.
+/// A card this runtime posted, by the request id that names its message.
+pub(crate) struct QuestionCard {
+    relay: Arc<agent_instance_connection::AgentInstanceConnectionClient>,
+    channel_id: String,
+    card_request_id: String,
+}
+
+impl QuestionCard {
+    /// Tell Hub the harness no longer waits on this card. Hub settles it and
+    /// says so in the Channel; an answer sent later is refused, not turned
+    /// into a new task. Kept until Hub answers, across a reconnect.
+    fn withdraw(self) {
+        if !self.relay.hub_accepts("harness_question_closed") {
+            return;
+        }
+        let request_id = uuid::Uuid::new_v4().to_string();
+        self.relay.send_report(
+            request_id.clone(),
+            protocol::AgentInstanceClientMessage::HarnessQuestionClosed {
+                request_id: Some(request_id),
+                channel_id: self.channel_id,
+                card_request_id: self.card_request_id,
+            },
+        );
+    }
+}
+
+/// Post a questionnaire card to `channel_id`, kept until Hub commits it. Its
+/// request id names the card's message, so a withdrawal can name the card.
 pub(crate) fn publish_questionnaire(
-    relay: &agent_instance_connection::AgentInstanceConnectionClient,
+    relay: &Arc<agent_instance_connection::AgentInstanceConnectionClient>,
     channel_id: &str,
     (body, metadata): (String, Value),
-) {
-    if let Err(err) = relay.send_message(protocol::AgentInstanceClientMessage::ChannelMessage {
-        request_id: None,
+) -> QuestionCard {
+    let card_request_id = uuid::Uuid::new_v4().to_string();
+    relay.send_report(
+        card_request_id.clone(),
+        protocol::AgentInstanceClientMessage::ChannelMessage {
+            request_id: Some(card_request_id.clone()),
+            channel_id: channel_id.to_string(),
+            body,
+            reply_to_message_id: None,
+            app_mentions: None,
+            metadata: Some(metadata),
+        },
+    );
+    QuestionCard {
+        relay: relay.clone(),
         channel_id: channel_id.to_string(),
-        body,
-        reply_to_message_id: None,
-        app_mentions: None,
-        metadata: Some(metadata),
-    }) {
-        eprintln!("xmatrix failed to publish a harness question: {err}");
+        card_request_id,
     }
 }
 
@@ -176,9 +211,9 @@ fn questionnaire_reply_in(
 }
 
 /// The harness requests a runtime has parked until their person answers, by
-/// request key. Shared between the reader that receives them and the turn
-/// loop that receives the answers.
-pub(crate) struct PendingQuestions<T>(Arc<Mutex<HashMap<String, T>>>);
+/// request key, each with the card that shows it. Shared between the reader
+/// that receives them and the turn loop that receives the answers.
+pub(crate) struct PendingQuestions<T>(Arc<Mutex<HashMap<String, (T, QuestionCard)>>>);
 
 impl<T> Clone for PendingQuestions<T> {
     fn clone(&self) -> Self {
@@ -193,37 +228,59 @@ impl<T> Default for PendingQuestions<T> {
 }
 
 impl<T> PendingQuestions<T> {
-    pub(crate) fn park(&self, key: String, native: T) {
+    pub(crate) fn park(&self, key: String, native: T, card: QuestionCard) {
         self.0
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .insert(key, native);
+            .insert(key, (native, card));
     }
 
+    /// The request a card answer settles. Hub recorded the answer on the card.
     pub(crate) fn take(&self, key: &str) -> Option<T> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner()).remove(key)
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(key)
+            .map(|(native, _)| native)
     }
 
     pub(crate) fn any(&self) -> bool {
         !self.0.lock().unwrap_or_else(|p| p.into_inner()).is_empty()
     }
 
-    /// Every parked request, for cancelling them all.
+    /// Every parked request, for cancelling them all; their cards are withdrawn.
     pub(crate) fn drain(&self) -> Vec<T> {
-        self.0
+        let drained: Vec<_> = self
+            .0
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .drain()
-            .map(|(_, native)| native)
+            .map(|(_, parked)| parked)
+            .collect();
+        drained
+            .into_iter()
+            .map(|(native, card)| {
+                card.withdraw();
+                native
+            })
             .collect()
     }
 
-    /// Remove the parked requests whose native data `matches`.
+    /// Remove the parked requests whose native data `matches`: the harness
+    /// withdrew them itself, so their cards are withdrawn too.
     pub(crate) fn forget(&self, matches: impl Fn(&T) -> bool) {
-        self.0
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .retain(|_, native| !matches(native));
+        let forgotten: Vec<_> = {
+            let mut parked = self.0.lock().unwrap_or_else(|p| p.into_inner());
+            let keys: Vec<String> = parked
+                .iter()
+                .filter(|(_, (native, _))| matches(native))
+                .map(|(key, _)| key.clone())
+                .collect();
+            keys.into_iter().filter_map(|key| parked.remove(&key)).collect()
+        };
+        for (_, card) in forgotten {
+            card.withdraw();
+        }
     }
 }
 

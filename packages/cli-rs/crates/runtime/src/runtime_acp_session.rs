@@ -566,7 +566,7 @@ impl AcpSession {
                     .and_then(Value::as_str)
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("acp-{}", uuid::Uuid::new_v4()));
-                crate::runtime_harness_questions::publish_questionnaire(
+                let card = crate::runtime_harness_questions::publish_questionnaire(
                     relay,
                     channel_id,
                     crate::runtime_harness_questions::questionnaire_message(
@@ -576,7 +576,7 @@ impl AcpSession {
                         &questions,
                     ),
                 );
-                self.questions.park(key, (id, params));
+                self.questions.park(key, (id, params), card);
                 Ok(())
             }
             _ => {

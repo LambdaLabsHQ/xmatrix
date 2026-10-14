@@ -15,6 +15,7 @@ import { plainRecord as protocolRecord } from "@xmatrix/protocol";
 import {
   CHANNEL_ACTIVITY_PROVENANCE,
   supersededByOf,
+  questionnaireStateOf,
   mentionAddressTokens,
   scanMentionAddresses,
   filterOperationalMentions,
@@ -219,6 +220,7 @@ export function channelMessage(
   const thread = normalizedThreadSummary(input.thread);
   // Only the Hub's own judgment crosses; other annotations stay out of frames.
   const supersededBy = recalledAt ? undefined : boundedId(supersededByOf(input.annotations));
+  const questionnaireState = recalledAt ? undefined : questionnaireStateOf(input.annotations);
   return {
     messageId,
     channelId,
@@ -264,5 +266,6 @@ export function channelMessage(
       ? { recalledBy: input.recalledBy as ChannelMessage["recalledBy"] }
       : {}),
     ...(supersededBy ? { supersededBy } : {}),
+    ...(questionnaireState ? { questionnaireState } : {}),
   };
 }
