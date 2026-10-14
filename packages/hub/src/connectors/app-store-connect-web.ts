@@ -13,10 +13,13 @@ import type { ConnectorAction, ConnectorActionContext } from "./provider";
  *
  * The connection keeps that session as one encrypted credential, the Cookie
  * header of a signed-in appstoreconnect.apple.com page, and every request goes
- * from the Hub with it, so no machine has to stay on. Apple rotates some of
- * the cookies as they are used; the rotated values are saved back into the
- * same credential. The Apple ID password never reaches xMatrix. The session
- * lasts about 30 days, and signing in again is the only renewal.
+ * from the Hub with it, so no machine has to stay on. The desktop app fills it
+ * by signing in on Apple's own page in a window of its own; elsewhere it is
+ * pasted. Apple rotates some of the cookies as they are used; the rotated
+ * values are saved back into the same credential. The Apple ID password never
+ * reaches xMatrix. Apple keeps a session from a day to a month, shorter when
+ * it is used from another region than it was signed in from, and signing in
+ * again is the only renewal.
  *
  * Only reads, only Apple's own origin, no redirects followed: a redirect is
  * Apple asking for a new sign-in. What reviewers wrote is untrusted text.
@@ -29,7 +32,7 @@ const MAX_OUTPUT = 12_000;
 const MAX_MESSAGE = 3_000;
 const COOKIE_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/u;
 const THREAD_TYPES = "REJECTION_BINARY,REJECTION_METADATA,REJECTION_REVIEW_SUBMISSION,APP_MESSAGE_ARC,APP_MESSAGE_ARB,APP_MESSAGE_COMM,APP_MESSAGE_INFORMATIONAL";
-const EXPIRED = "The App Store Connect web session is missing or has expired; sign in at appstoreconnect.apple.com and save a new one under Credentials";
+const EXPIRED = "The App Store Connect web session is missing or has expired; sign in again under Apps → App Store Connect → Credentials (Sign in to App Store Connect in the xMatrix app)";
 
 /** `name=value; name=value`, as copied from a request's Cookie header, into an ordered map. */
 export function parseCookies(header: string): Map<string, string> {
@@ -124,7 +127,7 @@ export const APP_STORE_CONNECT_WEB_ACTIONS: Record<string, ConnectorAction> = {
         const info = await session.read("/olympus/v1/session");
         const user = record(info.user), provider = record(info.provider);
         return { summary: `The App Store Connect web session works: signed in as ${cell(user.fullName) || "an Apple ID"}, team ${cell(provider.name) || "?"}. ` +
-          "It lasts about 30 days from sign-in; when it lapses, review_messages says so." };
+          "Apple keeps it a day to a month; when it lapses, review_messages says so." };
       } finally { await session.settle(); }
     },
   },

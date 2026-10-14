@@ -235,7 +235,7 @@ Subscribe the conversation with `feedback` among its kinds and an agent can pick
 
 ### When App Review rejects a version
 
-The conversation hears the rejection. `@appstoreconnect:review_messages:com.example.app` then reads the reasons and what the reviewer wrote, once a Space admin has saved a Web session under Credentials: the Cookie header of a signed-in appstoreconnect.apple.com page, which lasts about 30 days. Replying to the reviewer still happens in App Store Connect. Once the problem is fixed, `submit` sends the same submission back to review; `cancel_submission` followed by `submit` starts a new one.
+The conversation hears the rejection. `@appstoreconnect:review_messages:com.example.app` then reads the reasons and what the reviewer wrote, once a Space admin has saved a Web session under Credentials. In the xMatrix app that is Sign in to App Store Connect: you sign in on Apple's own page and the app saves the session. In a browser, paste the Cookie header of a signed-in appstoreconnect.apple.com page. Apple keeps it from a day to a month. Replying to the reviewer still happens in App Store Connect. Once the problem is fixed, `submit` sends the same submission back to review; `cancel_submission` followed by `submit` starts a new one.
 
 Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, entering the App Review sign-in password if reviewers need one, accepting agreements, and replying to App Review.
 

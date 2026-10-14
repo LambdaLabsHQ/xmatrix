@@ -71,6 +71,8 @@ import { readableUpdateErrorMessage, shouldShowUpdateRecovery } from "./update-e
 import { daemonFailureNeedsLogin } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
 import { planWindowOpen } from "./window-navigation";
+import { signInServiceId } from "./sign-in-services";
+import { signInWithWindow } from "./sign-in-window";
 import {
   aggregateBadge,
   appSpaceKey,
@@ -2826,6 +2828,12 @@ function registerIpcHandlers() {
     revealWorkspacePath(workspacePath)
   ));
   ipcMain.handle("desktop:check-runtime", secureIpc((_event, runtime: string) => checkRuntime(runtime)));
+  ipcMain.handle("desktop:service-sign-in", secureIpc((event, service: unknown, options: unknown) => {
+    const id = signInServiceId(service);
+    if (!id) throw new Error("Unknown sign-in service");
+    const fresh = typeof options === "object" && options !== null && (options as { fresh?: unknown }).fresh === true;
+    return signInWithWindow(id, BrowserWindow.fromWebContents(event.sender), { fresh });
+  }));
 
   ipcMain.handle("desktop:check-for-updates", secureIpc(() => checkForUpdates(true)));
   ipcMain.handle("desktop:get-update-status", secureIpc(() => getUpdateStatus()));

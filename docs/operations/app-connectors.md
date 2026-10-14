@@ -116,11 +116,15 @@ Apple's event id, so an Automation can use
 Apple gives no API for creating the app record, answering App Privacy,
 accepting agreements, or replying to App Review; those stay in App Store
 Connect, as does the App Review sign-in password. Reading App Review's messages
-needs the optional Web session credential: sign in at appstoreconnect.apple.com
-with the Apple ID the team chose (one with the App Manager role rather than the
-Account Holder's), copy the Cookie header of any request in the browser's
-developer tools, and save it. It works for about 30 days; `web_session` checks
-it, and `review_messages` says when it has lapsed. `read_app`
+needs the optional Web session credential. In the xMatrix desktop app, Sign in
+to App Store Connect under Credentials opens Apple's own sign-in page in a
+window of its own; once signed in, the app saves the session and closes the
+window. Elsewhere, sign in at appstoreconnect.apple.com, copy the Cookie header
+of any request in the browser's developer tools, and save it. Apple keeps it
+from a day to a month, less when it is used from another region than it was
+signed in from; `web_session` checks it, and `review_messages` says when it has
+lapsed. Renewing from the desktop app is usually one click, since its window
+stays signed in longer than the copy the Hub holds. `read_app`
 shows what a new app still lacks. A first version's App Review contact is set
 with `set_review_contact`; later versions inherit it through `create_version`.
 

@@ -3,11 +3,12 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Loader2, RefreshCw } from "lucide-react";
+import { Check, Copy, KeyRound, Loader2, LogIn, RefreshCw } from "lucide-react";
 import { WEB_PROXY_ROUTES, type SerializedAppConnectorConnection } from "@xmatrix/protocol";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
@@ -97,12 +98,22 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
       await afterSave();
     },
   });
+  // The desktop app signs in on the service's own page and saves the session it then holds.
+  const bridge = getDesktopBridge();
+  const signIn = useMutation({
+    mutationKey: [...key, "sign-in"],
+    mutationFn: async ({ field, service, fresh }: { field: string; service: string; fresh: boolean }) => {
+      const outcome = await bridge!.serviceSignIn!(service, { fresh });
+      if (outcome.status === "signed-in") await save.mutateAsync({ fields: { [field]: outcome.session } });
+    },
+  });
   const writable = connectorWritableCredentials(connector);
   const generated = (connector.credentials ?? []).filter((field) => field.generated && !field.managed);
   const stored = new Set(view.data?.credentialFields ?? connection?.credentialFields ?? []);
   const missingIngress = connector.events && !view.data?.ingressUrl;
-  const pending = save.isPending || view.isFetching;
+  const pending = save.isPending || view.isFetching || signIn.isPending;
   const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
+    userErrorMessage(signIn.error, "Couldn't sign in to the service") ??
     userErrorMessage(view.error, "Couldn't load the credentials");
 
   return (
@@ -135,16 +146,33 @@ export function ConnectorCredentials({ connector, connection, connected, spaceId
           if (Object.keys(fields).length > 0) save.mutate({ fields });
         }}>
           {writable.map((field) => (
-            <label key={field.id} className="block">
-              <span className="mb-1 flex items-center gap-2 text-xs font-bold text-muted-foreground">
-                {field.label}{field.required ? " *" : ""}
-                {stored.has(field.id) ? <span className="font-normal">· saved</span> : null}
-              </span>
-              <Input type="password" autoComplete="off" value={draft[field.id] ?? ""}
-                placeholder={stored.has(field.id) ? "Saved — enter a new value to replace it" : ""}
-                onChange={(event) => setDraft((current) => ({ ...current, [field.id]: event.target.value }))} />
-              <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
-            </label>
+            <div key={field.id}>
+              {/* Outside the label, which would otherwise pass its clicks to the first button. */}
+              {field.signIn && bridge?.serviceSignIn ? (
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Button size="sm" type="button" disabled={pending}
+                    onClick={() => signIn.mutate({ field: field.id, service: field.signIn!, fresh: false })}>
+                    {signIn.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <LogIn />} Sign in to {connector.name}
+                  </Button>
+                  {stored.has(field.id) ? (
+                    <Button size="sm" variant="ghost" type="button" disabled={pending}
+                      onClick={() => signIn.mutate({ field: field.id, service: field.signIn!, fresh: true })}>
+                      Use another account
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              <label className="block">
+                <span className="mb-1 flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                  {field.label}{field.required ? " *" : ""}
+                  {stored.has(field.id) ? <span className="font-normal">· saved</span> : null}
+                </span>
+                <Input type="password" autoComplete="off" value={draft[field.id] ?? ""}
+                  placeholder={stored.has(field.id) ? "Saved — enter a new value to replace it" : ""}
+                  onChange={(event) => setDraft((current) => ({ ...current, [field.id]: event.target.value }))} />
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
+              </label>
+            </div>
           ))}
           <Button size="sm" type="submit" disabled={pending || !Object.values(draft).some((value) => value.trim())}>
             {save.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <KeyRound />} {connected ? "Save credentials" : "Save and connect"}

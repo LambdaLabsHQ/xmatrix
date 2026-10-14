@@ -53,7 +53,7 @@ test("review_messages reads the newest thread's reasons and messages through the
 test("an expired or missing session says how to renew it, and nothing is saved from a failure without rotation", async () => {
   for (const answer of [{ status: 401, errors: [] }, { status: 302 }]) {
     const expired = await run("review_messages", { app: BUNDLE }, { ...apps, "GET /iris/v1/apps/6760000001/resolutionCenterThreads": answer }).catch((error) => error);
-    assert.match(String(expired.message ?? expired), /web session is missing or has expired; sign in at appstoreconnect\.apple\.com and save a new one/u);
+    assert.match(String(expired.message ?? expired), /web session is missing or has expired; sign in again under Apps → App Store Connect → Credentials/u);
   }
   const none = await run("web_session", {}, {}, { ...credentials, webSession: "not a cookie" }).catch((error) => error);
   assert.match(none.message, /missing or has expired/u);

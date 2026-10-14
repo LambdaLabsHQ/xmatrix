@@ -83,6 +83,12 @@ export interface AppConnectorProviderManifest {
     /** Written only by the Hub itself (OAuth tokens); never shown, minted, or typed. */
     managed?: boolean;
     required?: boolean;
+    /**
+     * The xMatrix desktop app can fill this field by signing in to the service
+     * in a window of its own (apps/desktop/src/sign-in-services.ts); typing the
+     * value stays possible everywhere else.
+     */
+    signIn?: "appstoreconnect";
   }>;
   /**
    * Inbound events (§3.3). A Channel subscribes with

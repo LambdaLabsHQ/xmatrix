@@ -119,6 +119,14 @@ export type DesktopBridge = {
   installAgentPreset?: (presetId: string) => Promise<{ ok: boolean; message: string }>;
   revealPath?: (workspacePath: string) => Promise<boolean>;
   checkRuntime?: (runtime: string) => Promise<DesktopRuntimeCheckResult>;
+  /**
+   * Sign a connector in to its service in a window of the shell's own and
+   * answer the session that window then holds (apps/desktop/src/sign-in-services.ts).
+   * `fresh` forgets the account the window was signed in to first. Absent on
+   * web and on shells older than it.
+   */
+  serviceSignIn?: (service: string, options?: { fresh?: boolean }) =>
+    Promise<{ status: "signed-in"; session: string } | { status: "cancelled" }>;
   checkForUpdates: () => Promise<DesktopUpdateStatus | void>;
   getUpdateStatus?: () => Promise<DesktopUpdateStatus>;
   installUpdate?: () => Promise<DesktopUpdateStatus>;
