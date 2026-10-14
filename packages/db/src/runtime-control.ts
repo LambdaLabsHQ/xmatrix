@@ -5,6 +5,7 @@ import { initialMessageSource } from "./runtime-initial-input.js";
 import { publicLaunchFailureCode, publicLaunchFailureMessage, publicRuntimeErrorCode } from "./runtime-public-failure.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import type { QueryResultRow } from "pg";
+import { resumableChannelRun } from "./instance-rest-state.js";
 import { decodeInvocationPageCursor, encodeInvocationPageCursor, type InvocationPagePosition } from "./runtime-invocation-cursor.js";
 import { readInvocationProgress } from "./runtime-invocation-progress.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
@@ -477,6 +478,40 @@ export class PostgresRuntimeRepository {
           { operationId: input.operationId, retired: input.terminalRetryReport === true }, new Date().toISOString());
       }
       return work(tx, run, mayContinue);
+    });
+  }
+
+  /**
+   * Record whether a running, resumable Run rests (docs/instance-sleep.md):
+   * its sleep falls due `windowMs` after it starts resting and is withdrawn
+   * the moment it works again. A Run already resting keeps its due time.
+   * Returns the due time now in force, and whether this call set it.
+   */
+  async markRunResting(input: {
+    requestId: string; actorUserId: string; runId: string; channelId: string;
+    resting: boolean; windowMs: number;
+  }): Promise<{ idleSleepAt: string | null; started: boolean }> {
+    const placement = await this.channelPlacement(input.requestId, input.channelId,
+      "runtime.idle-sleep.locate", "runtime.idle-sleep.placement");
+    return this.spaces.transaction(input.requestId, "runtime.idle-sleep.mark", placement, async tx => {
+      const run = (await tx.query<QueryResultRow>({ name: "runtime_idle_sleep_run_lock_v1", text: `SELECT
+        status,metadata_json,idle_sleep_at FROM data.runs
+        WHERE run_id=$1 AND channel_id=$2 AND owner_user_id=$3 FOR UPDATE`,
+        values: [input.runId, input.channelId, input.actorUserId], maxRows: 1 }))[0];
+      if (!run) return { idleSleepAt: null, started: false };
+      const metadata = (run.metadata_json ?? {}) as Record<string, unknown>;
+      // Only a Run the next message can wake again may sleep (instance-rest-state.ts).
+      const sleeps = input.resting && run.status === "running" && resumableChannelRun(metadata) &&
+        metadata.stopRequest === undefined;
+      const previous = run.idle_sleep_at ? new Date(run.idle_sleep_at as Date).toISOString() : null;
+      if (sleeps && previous) return { idleSleepAt: previous, started: false };
+      if (!sleeps && !previous) return { idleSleepAt: null, started: false };
+      const updated = (await tx.query<QueryResultRow>({ name: "runtime_idle_sleep_mark_v2", text: `UPDATE data.runs
+        SET idle_sleep_at=CASE WHEN $2::boolean THEN clock_timestamp()+($3::integer*interval '1 millisecond') END
+        WHERE run_id=$1 RETURNING idle_sleep_at`,
+        values: [input.runId, sleeps, Math.max(1, Math.trunc(input.windowMs))], maxRows: 1 }))[0];
+      const at = updated?.idle_sleep_at ? new Date(updated.idle_sleep_at as Date).toISOString() : null;
+      return { idleSleepAt: at, started: Boolean(at) };
     });
   }
 

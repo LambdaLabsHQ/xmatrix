@@ -1,5 +1,7 @@
 import { reportAgentTurnRetry } from "../agent-turn-retry";
 import { postgresSettleQuestionnaire } from "../postgres-message-authority";
+import { INSTANCE_IDLE_SLEEP_MS, presenceRests } from "../instance-idle-sleep";
+import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { subscribeConversationToPullRequest } from "../github-pull-request-subscription";
 import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
 import type {
@@ -180,6 +182,13 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
             at: String(command.at) })
           : runtimeRepository(input.env).mutate(command),
         holdUsageLimit: (hold) => holdRegistrationUsageLimit(input.env, hold),
+        markResting: async ({ runId, channelId, ownerUserId, resting }) => {
+          const marked = await runtimeRepository(input.env).markRunResting({ requestId: crypto.randomUUID(),
+            actorUserId: ownerUserId, runId, channelId, resting, windowMs: INSTANCE_IDLE_SLEEP_MS });
+          // The Channel coordinator keeps its alarm at the earliest due sleep.
+          if (marked.started) await wakeAgentLaunchCoordinator(input.env, channelId, ["idleSleep"]);
+          return marked;
+        },
       },
       turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
       settleQuestionnaire: (settle) => postgresSettleQuestionnaire(input.env, settle),
@@ -195,6 +204,33 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         ? { runtimeCells: (ownerUserId: string) => relayRuntimeCellsForOwners(input.env, [ownerUserId]) }
         : {}),
     });
+  }
+
+  /** What each Instance's Run last reported about resting, so idle sleep is written only on a change. */
+  private readonly restingByInstance = new Map<string, string>();
+
+  /**
+   * Start or withdraw a Run's idle sleep as its presence turns resting or
+   * busy. Written only when the rest state or the runtime's own update time
+   * changes, so a repeated presence costs nothing while a newly finished turn
+   * re-arms a sleep the daemon declined. A failed write is forgotten so the
+   * next presence tries again.
+   */
+  private async recordResting(session: Readonly<AgentInstanceRuntimeSession>, resting: boolean,
+    runtimeUpdatedAt: number | undefined): Promise<void> {
+    if (session.run.kind !== "channel-instance" || !this.dependencies.runtime.markResting) return;
+    const key = `${session.run.runId}:${session.run.instanceId}`;
+    const observed = `${resting}:${runtimeUpdatedAt ?? ""}`;
+    if (this.restingByInstance.get(key) === observed) return;
+    this.restingByInstance.set(key, observed);
+    try {
+      await this.dependencies.runtime.markResting({ runId: session.run.runId, channelId: session.run.channelId,
+        ownerUserId: session.principal.ownerUserId, resting });
+    } catch (error) {
+      this.restingByInstance.delete(key);
+      console.error("Run rest state could not be recorded", {
+        runId: session.run.runId, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   /** Last presentation persisted per Instance by this cell, to keep the write
@@ -314,13 +350,17 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         // The transport merges this into the session after `execute` returns,
         // so resolve the next presentation here rather than reading a stale one.
         const output = await this.dependencies.signals.publish(session, message);
+        const presentation = mergeAgentInstancePresentation(session.presentation, message);
+        const status = isLiveAgentStatus(message.status) ? message.status : session.run.instanceStatus;
         await this.persistInstancePresentation(
           session,
-          mergeAgentInstancePresentation(session.presentation, message),
+          presentation,
           Object.prototype.hasOwnProperty.call(message, "models"),
           Object.prototype.hasOwnProperty.call(message, "parameters"),
-          isLiveAgentStatus(message.status) ? message.status : session.run.instanceStatus,
+          status,
         );
+        await this.recordResting(session, presenceRests(status, presentation?.runtimeState),
+          presentation?.runtimeState?.updatedAtMillis);
         return output;
       }
       default: return this.dependencies.signals.publish(session, message);
