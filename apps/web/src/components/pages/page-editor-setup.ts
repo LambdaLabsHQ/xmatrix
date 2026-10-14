@@ -24,6 +24,8 @@ import { automationChips } from "./page-automation-chips";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
+import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
+import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
 import { mountSectionAgents, type SectionAgent } from "./page-section-agents";
 
 /**
@@ -350,6 +352,8 @@ export interface HeadingActions {
   attach?: (blockId: string) => void;
   /** Lists the section's conversations, the quiet ones too. */
   showConversations?: (blockId: string) => void;
+  /** On a phone the tools open under the heading from one "⋯", each with its name. */
+  phone?: boolean;
 }
 
 export const sectionsKey = new PluginKey<{ notes: Map<string, SectionNote>; decorations: DecorationSet }>("page-sections");
@@ -362,6 +366,7 @@ const ICONS = {
   schedule: '<path d="M16 14v2.2l1.6 1"/><path d="M16 2v4"/><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/>'
     + '<path d="M3 10h5"/><path d="M8 2v4"/><circle cx="16" cy="16" r="6"/>',
   talk: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
 } as const;
 
 function icon(name: keyof typeof ICONS, size = 14): string {
@@ -385,6 +390,38 @@ function control(className: string, label: string, run: () => void, content: str
 
 /** Takes down the React stack in a heading's widget when the editor drops the widget. */
 const unmountAgents = new WeakMap<Element, () => void>();
+
+const unmountMenus = new WeakMap<Element, () => void>();
+
+/** A phone's heading tools: one "⋯" that opens them, named, under the heading. */
+function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string, current: HeadingActions,
+  claim: SectionNote["claim"] | null): HTMLElement {
+  tools.classList.add("is-phone");
+  const menu: HeadingMenu = {};
+  if (current.discuss) menu.discuss = () => current.discuss!(blockId);
+  if (current.copyLink) menu.copyLink = () => current.copyLink!(blockId);
+  if (current.canEdit && claim?.mine && current.release) menu.claim = { label: "Release", run: () => current.release!(claim.claimId) };
+  else if (current.canEdit && !claim && current.claim) menu.claim = { label: "Claim", run: () => current.claim!(blockId) };
+  if (current.canEdit && current.attach) menu.attach = () => current.attach!(blockId);
+  const close = () => {
+    const open = tools.querySelector(".page-heading-menu");
+    if (!open) return;
+    unmountMenus.get(open)?.();
+    open.remove();
+    more.setAttribute("aria-expanded", "false");
+  };
+  const more = control("page-heading-more", `Actions for ${title}`, () => {
+    if (tools.querySelector(".page-heading-menu")) return close();
+    const holder = document.createElement("span");
+    holder.className = "page-heading-menu";
+    unmountMenus.set(holder, mountHeadingMenu(holder, title, menu, close));
+    tools.append(holder);
+    more.setAttribute("aria-expanded", "true");
+  }, icon("more", 18));
+  more.setAttribute("aria-expanded", "false");
+  tools.append(more);
+  return tools;
+}
 
 function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
   openConversation: (conversationId: string) => void, actions: () => HeadingActions): DecorationSet {
@@ -447,6 +484,7 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
       const tools = document.createElement("span");
       tools.className = "page-heading-tools";
       tools.contentEditable = "false";
+      if (current.phone) return phoneHeadingTools(tools, block.id, block.title, current, claim);
       if (current.discuss) tools.append(control("", "Discuss this section", () => current.discuss!(block.id), icon("discuss")));
       if (current.copyLink) tools.append(control("", "Copy a link to this section", () => current.copyLink!(block.id), icon("link")));
       if (current.canEdit && claim?.mine && current.release) {
@@ -461,7 +499,11 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
       }
       return tools;
     }, { side: 2, ignoreSelection: true,
-      key: `tools:${block.id}:${claim?.claimId ?? ""}:${String(claim?.mine)}:${String(actions().canEdit)}` }));
+      key: `tools:${block.id}:${claim?.claimId ?? ""}:${String(claim?.mine)}:${String(actions().canEdit)}:${String(actions().phone)}`,
+      destroy: (node) => {
+        const menu = (node as HTMLElement).querySelector(".page-heading-menu");
+        if (menu) unmountMenus.get(menu)?.();
+      } }));
   });
   return DecorationSet.create(doc, decorations);
 }
@@ -640,6 +682,8 @@ export function scrollToSection(view: EditorView, blockId: string): void {
  * its Run is live; a person's is idle while their page sits in a hidden tab.
  */
 export type CursorPresence = (state: object) => "active" | "idle" | null;
+/** The face an Agent's caret wears: the avatar of the Run it writes from, when it has one. */
+export type CursorAvatar = (state: object) => string | undefined;
 
 /**
  * Someone else's caret with their name on it, as in Google Docs: the name
@@ -647,7 +691,7 @@ export type CursorPresence = (state: object) => "active" | "idle" | null;
  * caret with a square at its top; hovering the caret shows the name again.
  */
 function namedCursor(user: { name?: string; color?: string; kind?: string; conversationId?: string | null },
-  clientId: number, idle: boolean): HTMLElement {
+  clientId: number, idle: boolean, avatar: string | undefined): HTMLElement {
   const cursor = document.createElement("span");
   cursor.className = `ProseMirror-yjs-cursor is-active${idle ? " is-idle" : ""}`;
   cursor.dataset.client = String(clientId);
@@ -656,6 +700,18 @@ function namedCursor(user: { name?: string; color?: string; kind?: string; conve
   const label = document.createElement("div");
   label.style.backgroundColor = user.color ?? "#888";
   label.textContent = user.name ?? "Someone";
+  // An Agent with a face wears it on its caret where it writes, and keeps it once the name has gone.
+  const src = avatarImageSrc(avatar);
+  if (src) {
+    cursor.classList.add("has-face");
+    const face = document.createElement("img");
+    face.className = "page-cursor-face";
+    face.src = src;
+    face.alt = "";
+    face.draggable = false;
+    face.referrerPolicy = "no-referrer";
+    cursor.append(face);
+  }
   // An Agent's caret names the conversation it works from; its label opens it beside the page.
   if (user.kind === "agent" && user.conversationId) {
     label.dataset.conversation = user.conversationId;
@@ -947,6 +1003,7 @@ export function editorPlugins(input: {
   focusConversation: (conversationId: string) => void;
   headingActions: () => HeadingActions;
   cursorPresence: () => CursorPresence;
+  cursorAvatar: () => CursorAvatar | undefined;
   /** Reads a GitHub file the page embeds; without it an embed only links to GitHub. */
   readGitHubFile: () => ReadGitHubFile | undefined;
   /** What `page:<id>` and `channel:<id>` in the text name and open. */
@@ -960,7 +1017,10 @@ export function editorPlugins(input: {
     ySyncPlugin(input.fragment),
     yCursorPlugin(input.awareness, {
       awarenessStateFilter: (own: number, clientId: number) => own !== clientId && presenceOf(clientId) !== null,
-      cursorBuilder: (user, clientId) => namedCursor(user, clientId, presenceOf(clientId) === "idle"),
+      cursorBuilder: (user, clientId) => {
+        const state = input.awareness.getStates().get(clientId);
+        return namedCursor(user, clientId, presenceOf(clientId) === "idle", state ? input.cursorAvatar()?.(state) : undefined);
+      },
     }),
     cursorActivity(input.awareness),
     cursorIdle(presenceOf),

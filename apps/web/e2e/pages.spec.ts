@@ -400,6 +400,27 @@ test.describe("on a phone", () => {
       .toContain(3);
   });
 
+  test("a heading's tools open under it, each with its name, from one ⋯", async ({ page: browser }) => {
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await servePageSession(browser, pageDocument(BODY));
+    await browser.goto("/app", { waitUntil: "domcontentloaded" });
+    await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+    await browser.getByRole("button", { name: /^Relay/u }).click();
+    const editor = browser.getByTestId("page-editor");
+    const status = editor.locator("h2", { hasText: "Status" });
+    // No row of bare icons by the heading.
+    await expect(status.getByRole("button", { name: "Copy a link to this section" })).toHaveCount(0);
+    await status.getByRole("button", { name: "Actions for Status" }).click();
+    const menu = browser.getByRole("toolbar", { name: "Actions for Status" });
+    for (const name of ["Discuss", "Copy link", "Claim", "Schedule"]) {
+      await expect(menu.getByRole("button", { name })).toBeVisible();
+    }
+    await browser.screenshot({ path: test.info().outputPath("pages-heading-menu-phone.png") });
+    await menu.getByRole("button", { name: "Copy link" }).click();
+    await expect(menu).toHaveCount(0);
+  });
+
   test("an Agent editing out of view floats at the right edge, pointing the way, and a tap goes to its line", async ({ page: browser }) => {
     const filler = Array.from({ length: 40 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
     const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
@@ -449,6 +470,8 @@ test.describe("on a phone", () => {
       const at = (await beside.boundingBox())!;
       return Math.abs(at.y + at.height / 2 - (line.y + line.height / 2));
     }).toBeLessThan(40);
+    // Where it writes, its caret wears the same face.
+    await expect(editor.locator(".ProseMirror-yjs-cursor .page-cursor-face")).toHaveAttribute("src", /claude\.svg/u);
     await browser.screenshot({ path: test.info().outputPath("pages-editor-floating-beside.png") });
   });
 });

@@ -195,6 +195,25 @@ a.page-section-claim:hover { text-decoration: underline; }
 .page-document :is(h1, h2, h3, h4, h5, h6):hover .page-heading-tools,
 .page-document .page-heading-current .page-heading-tools,
 .page-heading-tools:focus-within { opacity: 1; pointer-events: auto; }
+/* On a phone, one "⋯" always at hand beside the heading; it opens the tools, named, under the heading,
+   pushing the text down as a tapped message's actions do. */
+.page-heading-tools.is-phone { display: contents; opacity: 1; pointer-events: auto; }
+.page-heading-tools.is-phone .page-heading-more {
+  float: right;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-top: -0.25rem;
+  border-radius: 999px;
+}
+.page-heading-tools.is-phone .page-heading-more[aria-expanded="true"] { background: var(--muted); color: var(--foreground); }
+.page-heading-menu {
+  display: block;
+  clear: both;
+  font-size: 1rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: normal;
+}
 
 /* A discussion anchored in the text (§4.3): the passage, and a bubble that opens its conversation. */
 .page-discussion {
@@ -369,6 +388,25 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   width: 1rem;
   height: 1rem;
 }
+/* An Agent with a face wears it at the top of its caret, ringed in its colour; it stays when the name
+   fades, in place of the square, and the name sits beside it while it shows. */
+.ProseMirror-yjs-cursor.has-face::before { content: none; }
+.ProseMirror-yjs-cursor .page-cursor-face {
+  position: absolute;
+  top: -20px;
+  left: -9px;
+  width: 16px;
+  height: 16px;
+  max-width: none;
+  border-radius: 999px;
+  background: var(--background);
+  box-shadow: 0 0 0 1.5px currentColor;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+.ProseMirror-yjs-cursor.has-face > div { top: -20px; left: 11px; border-radius: 4px; }
+.ProseMirror-yjs-cursor.is-idle .page-cursor-face { opacity: 0.55; }
 /* An Agent's caret label opens the conversation it works from. */
 .ProseMirror-yjs-cursor > [data-conversation] { cursor: pointer; }
 .page-section-owed {

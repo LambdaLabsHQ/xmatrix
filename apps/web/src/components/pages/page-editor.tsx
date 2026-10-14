@@ -18,11 +18,11 @@ import { referencesKey, type PageReferenceTargets } from "./page-reference-chips
 import {
   addColumnAfter, addRowAfter, anchorOffsets, blockKind, deleteColumn, deleteRow, deleteTable, discussionsKey,
   editorPlugins, isInTable, insertRule, insertTable, linkAt, nodeViews, scrollToSection, showReaderChanges,
-  sectionsKey, selectionAnchor, setBlockKind, setLink, slashKey, type BlockKind, type CursorPresence, type Discussion,
+  sectionsKey, selectionAnchor, setBlockKind, setLink, slashKey, type BlockKind, type CursorAvatar, type CursorPresence, type Discussion,
   type HeadingActions, type SectionNote, type SlashState,
 } from "./page-editor-setup";
 
-export type { CursorPresence, Discussion, HeadingActions, SectionNote };
+export type { CursorAvatar, CursorPresence, Discussion, HeadingActions, SectionNote };
 
 /** Who last changed a section and when, as Google Docs' Show editors tells it for a selection. */
 export interface SectionEditors {
@@ -136,7 +136,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, readGitHubFile, references }: {
+  onAnchorOffsets, cursorPresence, cursorAvatar, onReady, readerBaseline = null, onReaderChanges, readGitHubFile, references }: {
   session: PageLiveSession;
   canEdit: boolean;
   onBlockChange?: (blockId: string) => void;
@@ -164,6 +164,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   onAnchorOffsets?: (offsets: Map<string, number>) => void;
   /** Which others' carets show, and which of them are idle; carets are drawn again when it changes. */
   cursorPresence?: CursorPresence;
+  cursorAvatar?: CursorAvatar;
   /** The editor is drawn and may take the place of the page's preview. */
   onReady?: () => void;
   /** The page as this reader last read it, as markdown, and the revision to diff it against: what changed since is shown as a diff. */
@@ -200,6 +201,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   anchorsChange.current = onAnchorOffsets;
   const presenceOf = useRef<CursorPresence>(cursorPresence ?? (() => "active"));
   presenceOf.current = cursorPresence ?? (() => "active");
+  const avatarOf = useRef(cursorAvatar);
+  avatarOf.current = cursorAvatar;
   const discussionList = useRef<Discussion[]>(discussions ?? []);
   discussionList.current = discussions ?? [];
   const measureFrame = useRef(0);
@@ -290,6 +293,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         focusConversation: (conversationId) => focusConversation.current?.(conversationId),
         headingActions: () => heading.current,
         cursorPresence: () => presenceOf.current,
+        cursorAvatar: () => avatarOf.current,
         readGitHubFile: () => readFile.current,
         references: () => referenceTargets.current,
       }) }),
@@ -377,7 +381,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     // An Agent's Run going to sleep or waking changes whose carets show, with no awareness change.
     const current = view.current;
     if (current) current.dispatch(current.state.tr.setMeta(yCursorPluginKey, { awarenessUpdated: true }));
-  }, [cursorPresence]);
+  }, [cursorPresence, cursorAvatar]);
 
   useEffect(() => {
     const current = view.current;

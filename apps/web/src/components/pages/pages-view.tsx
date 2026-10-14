@@ -26,7 +26,7 @@ import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
-import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
+import type { CursorAvatar, CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
   ConversationList, DeletePageDialog, PageDialog, PageEditorsRail, PageHistory, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PageEditor as FloatingEditor, type PresentPerson, type PageScrollMark,
@@ -809,6 +809,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const run = liveRunOf(present, liveOnPage);
     return !run ? null : run.status === "busy" ? "active" : "idle";
   }, [liveOnPage]);
+  const cursorAvatar = useCallback<CursorAvatar>((state) => {
+    const present = state as PagePresenceState;
+    return present.user?.kind === "agent" ? liveRunOf(present, liveOnPage)?.avatarUrl : undefined;
+  }, [liveOnPage]);
   const present = useMemo(() => presence.filter(({ state }) => cursorPresence(state) !== null),
     [cursorPresence, presence]);
 
@@ -1026,6 +1030,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     release: (claimId) => void releaseClaim(claimId),
     attach: (blockId: string) => setDialog({ kind: "attach", blockId }),
     showConversations: (blockId) => setDialog({ kind: "conversations", blockId }),
+    phone,
   };
   const whereDetail = (activity: string, blockId: string, conversationId: string | null | undefined) => {
     const section = blocks.find((block) => block.id === blockId)?.title;
@@ -1037,7 +1042,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     ...present.map(({ clientId, state }) => ({ key: `client:${clientId}`, name: state.user!.name,
       color: state.user!.color, agent: state.user!.kind === "agent", blockId: state.block ?? "",
       // An Agent writing through its caret shows the face of the Run it writes from.
-      avatarUrl: state.user!.kind === "agent" ? liveRunOf(state as PagePresenceState, liveOnPage)?.avatarUrl : undefined,
+      avatarUrl: cursorAvatar(state),
       idle: cursorPresence(state) === "idle",
       // Placed by their caret where they have one, so the edge hints point at the line.
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
@@ -1247,7 +1252,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById} references={references}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
+                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} cursorAvatar={cursorAvatar} readGitHubFile={readGitHubFile} />}
                   </div>
                 </div>
                 {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
