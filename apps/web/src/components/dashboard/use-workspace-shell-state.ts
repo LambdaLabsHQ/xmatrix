@@ -2,7 +2,6 @@
 import { channelEventViews } from "./workspace-shell-presence";
 import type { ChannelEventView } from "./realtime-channels";
 import { createRealtimeCollection } from "./realtime-collection";
-import { createAgentPresenceCommit } from "./agent-presence-commit";
 import { useMachineDaemonLoad } from "./use-machine-daemon-load";
 
 import type { ComposerInvocationDraft } from "./composer-invocation-bindings";
@@ -452,7 +451,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [agentTraceReplicas, setAgentTraceReplicas] = useState<AgentTraceReplica[]>([]);
 
-  const [realtimeAgents] = useState(() => createRealtimeCollection<SerializedAgent>());
+  const [realtimeAgents] = useState(() => createRealtimeCollection<SerializedAgent>([], agent => agent.name));
   const agents = useSyncExternalStore(
     view === "messages" || view === "pages" ? realtimeAgents.subscribeCatalog : realtimeAgents.subscribe,
     view === "messages" || view === "pages" ? realtimeAgents.getCatalogSnapshot : realtimeAgents.getSnapshot,
@@ -1468,13 +1467,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           flushPresence();
           const incomingAgents = agents;
           agents = [];
-          if (incomingAgents.length) realtimeAgents.commit(
-            createAgentPresenceCommit(realtimeAgents.getSnapshot(), incomingAgents), "live",
-          );
+          if (incomingAgents.length) realtimeAgents.receive(incomingAgents);
           const completed = channelBatch;
           channelBatch = null;
           if (completed) {
-            realtimeChannels.commit(completed.getCommit(), kind);
+            const liveUpdates = kind === "live" ? completed.getLiveUpdates() : undefined;
+            if (liveUpdates) realtimeChannels.receive(liveUpdates, completed.acceptLiveSnapshot);
+            else realtimeChannels.commit(completed.getCommit(), kind);
             routedBatch = completed;
           }
         };

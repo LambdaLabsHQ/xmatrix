@@ -277,17 +277,30 @@ access. Snapshots of unloaded Channels hydrate live keys without repeatedly
 refetching the entire catalog; its own pages, create/delete frames and revision
 watermarks discover navigation rows.
 
-A completed state run transfers its ordered rows, keyed index and changed IDs
-directly to the live collection. Publication checks the final references for
-those IDs instead of rebuilding the same index and diffing every Channel again.
-The producer rejects further writes after that transfer, and later runs build
-their own index; catalog and previous live snapshots remain immutable. Ordinary
-catalog, read-state and account-reset writes retain full reconciliation.
-The next run may take the completed run's member/Instance routes once, only
+A rank-preserving live run stages complete replacements in a small overlay over
+its immutable input. The collection applies those cards to its private live
+index instead of rebuilding and diffing the full Channel table. A complete
+array is captured before synchronous subscribers can publish another snapshot.
+Catalog and rank changes retain an immutable full commit whose index follows
+the final row order; ordinary catalog, read-state and account-reset writes
+retain full reconciliation. A sealed producer rejects further writes.
+The next run may take the completed run's member/Instance routes and immutable
+Channel positions once, only
 when its input is the exact published snapshot. Any intervening writer or a
 failed publication discards that handoff and rebuilds from current state.
-Agent cards use the same indexed publication contract while retaining their
-complete-replacement, last-card-wins and name-ordering behavior.
+Agent cards replace entries in the same live index; their full array is
+materialized only when a reader needs it. The first update after an external
+index or catalog publication forks the index, protecting earlier snapshots.
+New or renamed cards still sort immediately, preserving stable name ties
+across runs. Catalog promotion materializes once and relinquishes that private
+write ownership before notifying readers.
+
+An inherited sidebar order also avoids a full sort for a few new or re-ranked
+Channels: binary insertion uses the existing comparator and stable tie order.
+Unknown input order and larger changes retain the normal full sort. The Channel
+header follows structural catalog fields and selects only live Human counts,
+so Agent activity neither rerenders its controls nor resynchronizes its name
+draft.
 
 A Run's activity, intent, token counters and last-seen clock stay in its Channel.
 Only account quota travels to sibling Channels, and repeated quota readings
@@ -326,6 +339,11 @@ test instrumentation does not repeatedly walk the page. CDP measures absolute
 product script, style, layout and native work; `XMATRIX_PERF_TRANSPORT=cdp` keeps
 the former per-frame injected delivery available for diagnostic comparisons.
 These are controlled browser results, not a claim about every production device.
+The 1,000-Agent fixture has 991 distinct Channels because ten Instances share
+the open conversation. Catalog paging loads only its first page initially;
+the measured first window deliberately includes first-seen live hydration of
+the other Channels. Receipt counters witness native delivery, while the final
+trace assertion witnesses consumption of the focused Instance's state.
 
 Root search, page-conversation and mobile Channel-layout styles use explicit
 shell state classes. They do not inspect descendants with root/body `:has()`;

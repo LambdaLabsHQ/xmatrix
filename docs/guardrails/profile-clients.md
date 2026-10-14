@@ -47,8 +47,10 @@ The shared shell subscribes to live Channel presence by Channel key; catalog
 and message-reference snapshots stay stable across presence-only changes.
 Ordered Instance/card/snapshot batches share member/global Instance routing
 and publish once before message, history and control barriers. Completed runs
-transfer their existing keyed index and changed IDs without a second full
-collection reconciliation; a published producer cannot write that index again.
+publish small live replacement batches, retaining immutable full commits for
+catalog and ordering changes, without a second full collection reconciliation.
+Routing and Channel positions pass only to the exact next published snapshot;
+a sealed producer cannot change it again.
 A Run's
 presentation stays in its own Channel while account quota remains shared.
 See [live Instance load](../performance/channel-startup.md#live-instance-load).

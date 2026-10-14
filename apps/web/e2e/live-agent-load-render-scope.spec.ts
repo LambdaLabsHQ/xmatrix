@@ -94,6 +94,16 @@ test("current-Channel activity leaves Markdown alone and opens the latest owned 
   await expect.poll(async () => (await fixtureRequests(page, "current-trace")).length).toBeGreaterThan(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  // Ignoring Agent activity in the header must still follow live Human counts.
+  const liveChannel = current.report(0, "Current step 30")[1].channel!;
+  const header = page.locator(".app-main .app-panel-header").first();
+  for (const [status, label] of [["online", "1/1"], ["offline", "0/1"]] as const) {
+    send({ type: "channel_updated", channel: { ...liveChannel, memberPresence: {
+      ...liveChannel.memberPresence,
+      "user:e2e-user": { kind: "user", label: "E2E Tester", status },
+    } } });
+    await expect(header.getByTitle("Channel details", { exact: true })).toHaveText(label);
+  }
   send({ type: "channel_updated", channel: { ...current.channels[0], memberPresence: {} } });
   send({ type: "agent_lifecycle", channelId: current.channelId(0), agentId: agent.id,
     instanceId: agent.instances[0].id, status: "offline", layer: "agent", ts: new Date().toISOString() });

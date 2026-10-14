@@ -1,19 +1,26 @@
 /** A completed indexed reduction. The writer transfers ownership of byId and
  * must not mutate it after publication; changedKeys covers every possible
- * addition, removal or replacement since the current live snapshot. */
+ * addition, removal or replacement since basis (or the current live snapshot
+ * when no basis is supplied). */
 export type RealtimeCollectionCommit<T extends { id: string }> = {
+  /** When supplied, a superseded input requires a complete key comparison. */
+  readonly basis?: T[];
   readonly items: T[];
   readonly byId: ReadonlyMap<string, T>;
   readonly changedKeys: readonly string[];
 };
 
-/** A session-owned projection. Only authoritative reads change the catalog;
- * live reports notify the keys they changed, without invalidating that catalog. */
-export function createRealtimeCollection<T extends { id: string }>(initial: T[] = []) {
+/** A session-owned projection. Catalog writes and explicit promotion update
+ * catalog readers; live reports notify only their live subscribers. */
+export function createRealtimeCollection<T extends { id: string }>(initial: T[] = [], orderBy?: (item: T) => string) {
   let live = initial;
   let catalog = initial;
   let byId: ReadonlyMap<string, T> = new Map(initial.map(item => [item.id, item]));
   let catalogById = byId;
+  // Only receive owns a writable Map. External commits and catalog readers
+  // may retain their indices, so the next receive must fork after either.
+  let liveMapOwned = false;
+  let snapshotDirty = false;
   const liveListeners = new Set<() => void>();
   const catalogListeners = new Set<() => void>();
   const keyListeners = new Map<string, Set<() => void>>();
@@ -23,22 +30,45 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
     listeners.add(callback);
     return () => { listeners.delete(callback); };
   };
-  const publish = (next: T[], nextById: ReadonlyMap<string, T>, changedKeys: readonly string[], kind: "catalog" | "live") => {
-    live = next;
-    byId = nextById;
-    const catalogChanged = kind === "catalog";
-    if (catalogChanged) { catalog = live; catalogById = byId; }
-    // Publish every snapshot before any subscriber is called.
+  const snapshot = () => {
+    if (snapshotDirty) {
+      live = [...byId.values()];
+      snapshotDirty = false;
+    }
+    return live;
+  };
+  const notify = (changedKeys: readonly string[], catalogChanged: boolean) => {
     for (const id of changedKeys) for (const notify of keyListeners.get(id) ?? []) notify();
     if (changedKeys.length) for (const notify of changeListeners) notify(changedKeys);
     for (const notify of liveListeners) notify();
     if (catalogChanged) for (const notify of catalogListeners) notify();
   };
+  const publish = (next: T[], nextById: ReadonlyMap<string, T>, changedKeys: readonly string[], kind: "catalog" | "live",
+    receive?: { captureSnapshot?: (items: T[], previous: T[]) => void; previous?: T[] }) => {
+    live = next;
+    byId = nextById;
+    snapshotDirty = false;
+    const catalogChanged = kind === "catalog";
+    liveMapOwned = receive !== undefined && !catalogChanged;
+    if (catalogChanged) { catalog = live; catalogById = byId; }
+    // Publish every snapshot before any subscriber is called.
+    receive?.captureSnapshot?.(next, receive.previous!);
+    notify(changedKeys, catalogChanged);
+  };
   return {
-    getSnapshot: () => live,
+    getSnapshot: snapshot,
     getCatalogSnapshot: () => catalog,
     get: (id: string) => byId.get(id),
     getCatalog: (id: string) => catalogById.get(id),
+    /** Refresh the durable projection without publishing live data twice. */
+    promote() {
+      const current = snapshot();
+      if (catalog === current) return;
+      catalog = current;
+      catalogById = byId;
+      liveMapOwned = false;
+      for (const notify of catalogListeners) notify();
+    },
     subscribe: (callback: () => void) => listen(liveListeners, callback),
     subscribeCatalog: (callback: () => void) => listen(catalogListeners, callback),
     subscribeChanges(callback: (keys: readonly string[]) => void) {
@@ -55,8 +85,9 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
       };
     },
     set(update: T[] | ((current: T[]) => T[]), kind: "catalog" | "live" = "catalog") {
-      const next = typeof update === "function" ? update(live) : update;
-      if (next === live) return;
+      const current = snapshot();
+      const next = typeof update === "function" ? update(current) : update;
+      if (next === current) return;
       const nextById = new Map(next.map(item => [item.id, item]));
       const changedKeys: string[] = [];
       for (const [id, item] of byId) if (nextById.get(id) !== item) changedKeys.push(id);
@@ -65,11 +96,57 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
     },
     /** Publish an already indexed reduction without rebuilding or diffing the
      * whole collection. Ordinary callers keep the complete set() fallback. */
-    commit(snapshot: RealtimeCollectionCommit<T>, kind: "catalog" | "live" = "catalog") {
-      if (snapshot.items === live) return;
-      const changedKeys = [...new Set(snapshot.changedKeys)].filter(id =>
-        byId.get(id) !== snapshot.byId.get(id));
-      publish(snapshot.items, snapshot.byId, changedKeys, kind);
+    commit(commit: RealtimeCollectionCommit<T>, kind: "catalog" | "live" = "catalog") {
+      const current = snapshot();
+      if (commit.items === current) return;
+      const candidates = commit.basis !== undefined && commit.basis !== current
+        ? new Set([...byId.keys(), ...commit.byId.keys()]) : new Set(commit.changedKeys);
+      const changedKeys = [...candidates].filter(id =>
+        byId.get(id) !== commit.byId.get(id));
+      publish(commit.items, commit.byId, changedKeys, kind);
+    },
+    /** Whole live cards replace by id; a complete array is needed only by a
+     * reader. Name changes sort now so stable ties retain cross-batch order. */
+    receive(incoming: readonly T[], captureSnapshot?: (items: T[], previous: T[]) => void) {
+      const previous = captureSnapshot ? snapshot() : undefined;
+      if (!incoming.length) {
+        captureSnapshot?.(previous!, previous!);
+        return;
+      }
+      const updates = new Map(incoming.map(item => [item.id, item]));
+      const changedKeys: string[] = [];
+      let needsSort = false;
+      for (const [id, after] of updates) {
+        const before = byId.get(id);
+        if (before !== after) changedKeys.push(id);
+        if (orderBy) {
+          const name = orderBy(after);
+          if (typeof name !== "string") throw new Error("Invalid realtime ordering key");
+          if (!before || orderBy(before) !== name) needsSort = true;
+        }
+      }
+      if (needsSort && orderBy) {
+        // Build and sort a private candidate before changing any live value:
+        // a malformed card must not poison this or the next receive.
+        const candidate = new Map(byId);
+        for (const [id, item] of updates) candidate.set(id, item);
+        const items = [...candidate.values()].sort((left, right) => orderBy(left).localeCompare(orderBy(right)));
+        publish(items, new Map(items.map(item => [item.id, item])), changedKeys, "live", { captureSnapshot, previous });
+        return;
+      }
+      if (changedKeys.length) {
+        const writable = liveMapOwned ? byId as Map<string, T> : new Map(byId);
+        for (const id of changedKeys) writable.set(id, updates.get(id)!);
+        byId = writable;
+        liveMapOwned = true;
+      }
+      // Even identical nonempty cards retain the ordinary writer's new live
+      // snapshot/global notification, without notifying unchanged keys.
+      snapshotDirty = true;
+      // A reducer may retain routing for exactly this publication. Capture
+      // its identity before a synchronous listener can publish another one.
+      captureSnapshot?.(snapshot(), previous!);
+      notify(changedKeys, false);
     },
   };
 }

@@ -1,5 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { installTypeScriptRequire } = require("./typescript-require.cjs");
+installTypeScriptRequire();
+const { createRealtimeCollection } = require("./realtime-collection.ts");
 const { loadWorkspaceShellModuleMap, loadShellFunctions } = require("./workspace-shell-source-fixture.cjs");
 
 const shellModules = loadWorkspaceShellModuleMap(__dirname, ["channel-viewer-state.ts", "channel-links.ts"]);
@@ -172,8 +175,9 @@ test("one Run's presentation cannot change sibling Channels of the same Agent", 
 
 function countedChannelSpace(sameAgent = false) {
   let reads = 0;
+  let idReads = 0;
   const channels = Array.from({ length: 1000 }, (_, index) => ({
-    id: `channel-${index}`,
+    get id() { idReads += 1; return `channel-${index}`; },
     name: `conversation-${index}`,
     get memberPresence() {
       reads += 1;
@@ -182,7 +186,7 @@ function countedChannelSpace(sameAgent = false) {
       }] } };
     },
   }));
-  return { channels, reads: () => reads };
+  return { channels, reads: () => reads, idReads: () => idReads };
 }
 
 for (const sameAgent of [false, true]) test(`a thousand reports route once (${sameAgent ? "one Agent" : "independent Agents"})`, () => {
@@ -237,6 +241,110 @@ test("consecutive published runs do not reread unrelated Channel rosters", () =>
   assert.ok(counted.reads() < 5_000, `separate flushes inspected unrelated presence ${counted.reads()} times`);
   assert.equal(channels[99].memberPresence["agent:99"].instances[0].activity, "Step 99");
   assert.equal(channels[999], counted.channels[999]);
+});
+
+test("keyed live runs reuse Channel positions without revisiting unrelated ids or rewriting previous snapshots", () => {
+  const counted = countedChannelSpace();
+  const store = createRealtimeCollection(counted.channels);
+  const initialReads = counted.idReads();
+  let previous;
+  let firstPublished;
+  for (let step = 0; step < 100; step += 1) {
+    const basis = store.getSnapshot();
+    const batch = createChannelPresenceBatch(basis, previous?.takeRouting(basis));
+    const instance = { ...workingInstance(), id: `instance-${step}`, channelId: `channel-${step}`, activity: `Live ${step}` };
+    batch.applyPresence([{ ...heartbeatAgent(), id: `agent:${step}`, instances: [instance] }]);
+    batch.applyChannel({ id: instance.channelId, name: `conversation-${step}`, memberPresence: {
+      [`agent:${step}`]: { kind: "agent", instances: [instance] },
+    } });
+    const updates = batch.getLiveUpdates();
+    assert.equal(updates.length, 1);
+    store.receive(updates, batch.acceptLiveSnapshot);
+    assert.equal(batch.getSnapshot(), store.getSnapshot());
+    if (!firstPublished) firstPublished = Object.freeze(store.getSnapshot());
+    previous = batch;
+  }
+  assert.ok(counted.idReads() - initialReads < 4_000,
+    `live flushes revisited ${counted.idReads() - initialReads} Channel ids`);
+  assert.equal(store.get("channel-99").memberPresence["agent:99"].instances[0].activity, "Live 99");
+  assert.equal(firstPublished[99], counted.channels[99]);
+  assert.equal(firstPublished[0].memberPresence["agent:0"].instances[0].activity, "Live 0");
+  assert.equal(store.getCatalogSnapshot(), counted.channels);
+  assert.equal(store.getSnapshot()[999], counted.channels[999]);
+});
+
+test("a live seal publishes before subscribers and cannot inherit a later reentrant catalog write", () => {
+  const store = createRealtimeCollection(channelsWithAgentPresence());
+  const batch = createChannelPresenceBatch(store.getSnapshot());
+  assert.throws(() => batch.acceptLiveSnapshot([]), /after sealing/);
+  batch.applyPresence([{ ...heartbeatAgent(), instances: [{ ...workingInstance(), activity: "Before message" }] }]);
+  const updates = batch.getLiveUpdates();
+  assert.throws(() => batch.applyChannel({ id: "late", name: "Late" }), /published presence batch/);
+  let reentered = false;
+  store.subscribeKey("channel-1", () => {
+    assert.equal(batch.getSnapshot(), store.getSnapshot(), "the accepted snapshot is already visible at the state boundary");
+    assert.equal(store.get("channel-1").memberPresence["agent:claude"].instances[0].activity, "Before message");
+  });
+  store.subscribe(() => {
+    if (reentered) return;
+    reentered = true;
+    store.set(current => [...current, { id: "catalog-new", name: "Added synchronously" }]);
+  });
+  store.receive(updates, batch.acceptLiveSnapshot);
+  const published = batch.getSnapshot();
+  assert.notEqual(published, store.getSnapshot());
+  assert.equal(published.length, 1);
+  assert.equal(store.getSnapshot().length, 2);
+  assert.throws(() => batch.acceptLiveSnapshot(store.getSnapshot()), /accepted once/);
+  assert.equal(batch.getSnapshot(), published);
+  assert.equal(batch.takeRouting(store.getSnapshot()), undefined, "later catalog data cannot inherit the old position/routes index");
+  assert.equal(batch.takeRouting(published), undefined, "a rejected transfer cannot be replayed on the older basis");
+});
+
+test("a sorted indexed fallback retains its order and immutable Map through a later keyed live run", () => {
+  const older = { ...channelsWithAgentPresence()[0], updatedAt: "2026-09-19T10:00:00.000Z" };
+  const store = createRealtimeCollection([older]);
+  const fallback = createChannelPresenceBatch(store.getSnapshot());
+  fallback.applyPresence([heartbeatAgent()]);
+  fallback.applyChannel({ id: "newer", name: "Newer", updatedAt: "2026-09-19T11:00:00.000Z" });
+  assert.equal(fallback.getLiveUpdates(), undefined, "rank changes need the indexed fallback");
+  const committed = fallback.getCommit();
+  store.commit(committed, "live");
+  assert.deepEqual([...committed.byId.keys()], ["newer", older.id]);
+  const next = createChannelPresenceBatch(store.getSnapshot(), fallback.takeRouting(store.getSnapshot()));
+  next.applyPresence([{ ...heartbeatAgent(), instances: [{ ...workingInstance(), activity: "After fallback" }] }]);
+  store.receive(next.getLiveUpdates(), next.acceptLiveSnapshot);
+  assert.deepEqual(store.getSnapshot().map(channel => channel.id), ["newer", older.id]);
+  assert.equal(store.get(older.id).memberPresence["agent:claude"].instances[0].activity, "After fallback");
+  assert.equal(committed.byId.get(older.id).memberPresence["agent:claude"].instances[0].activity, undefined);
+  assert.equal(committed.items[1].memberPresence["agent:claude"].instances[0].activity, undefined);
+});
+
+test("a same-length reorder between staging and receive discards old routing and cannot update its neighbor", () => {
+  const channel = channelsWithAgentPresence()[0];
+  const neighbor = { ...channel, id: "neighbor", name: "Neighbor", memberPresence: {
+    "agent:other": { kind: "agent", instances: [{ ...workingInstance(), id: "other-instance", channelId: "neighbor", activity: "Neighbor activity" }] },
+  } };
+  const store = createRealtimeCollection([channel, neighbor]);
+  const staged = createChannelPresenceBatch(store.getSnapshot());
+  staged.applyPresence([{ ...heartbeatAgent(), instances: [{ ...workingInstance(), activity: "Staged before reorder" }] }]);
+  const updates = staged.getLiveUpdates();
+  store.set(current => [current[1], current[0]]);
+  store.receive(updates, staged.acceptLiveSnapshot);
+  const published = store.getSnapshot();
+  assert.equal(staged.getSnapshot(), published);
+  assert.deepEqual(published.map(item => item.id), [neighbor.id, channel.id]);
+  const routing = staged.takeRouting(published);
+  assert.equal(routing, undefined, "matching output identity cannot validate indices built before a different receive baseline");
+  const next = createChannelPresenceBatch(published, routing);
+  const report = { ...workingInstance(), activity: "After reorder" };
+  delete report.channelId;
+  next.applyPresence([{ ...heartbeatAgent(), id: "different-principal", instances: [report] }]);
+  store.receive(next.getLiveUpdates(), next.acceptLiveSnapshot);
+  assert.deepEqual(store.getSnapshot().map(item => item.id), [neighbor.id, channel.id]);
+  assert.equal(store.get(channel.id).memberPresence["agent:claude"].instances[0].activity, "After reorder");
+  assert.equal(store.get(neighbor.id), neighbor);
+  assert.equal(neighbor.memberPresence["agent:other"].instances[0].activity, "Neighbor activity");
 });
 
 test("routing transfers once and rebuilds after a catalog replacement or cleared session", () => {
@@ -337,6 +445,20 @@ test("snapshots keep sidebar ordering and cannot cross an explicitly published s
   after.applyPresence([{ ...heartbeatAgent(), instances: [{ ...workingInstance(), activity: "After message" }] }]);
   assert.equal(beforeMessage[1].memberPresence["agent:claude"].instances[0].activity, "Before message");
   assert.equal(after.getSnapshot()[1].memberPresence["agent:claude"].instances[0].activity, "After message");
+});
+
+test("an inherited sidebar order keeps stable ties when a Channel changes rank and returns", () => {
+  const first = { id: "first", name: "same", updatedAt: "2026-09-19T10:00:00.000Z" };
+  const second = { ...first, id: "second" };
+  const initial = createChannelPresenceBatch([first, second]);
+  initial.applyPresence([heartbeatAgent()]);
+  initial.applyChannel({ ...first, id: "third" });
+  const published = initial.getCommit();
+  const next = createChannelPresenceBatch(published.items, initial.takeRouting(published.items));
+  next.applyChannel({ ...first, updatedAt: "2026-09-19T11:00:00.000Z" });
+  next.applyChannel(first);
+  next.applyChannel({ ...first, id: "fourth" });
+  assert.deepEqual(next.getCommit().items.map(channel => channel.id), ["first", "second", "third", "fourth"]);
 });
 
 
