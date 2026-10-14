@@ -148,6 +148,13 @@ fact is about.
   or below, placed by their cursor where they have one and by their section
   otherwise: "claude:2 is editing below". Clicking scrolls to the nearest of
   them; clicking an avatar in the header does the same.
+- **On a phone, Agents are at the right edge.** Each Agent on the page is its
+  face beside the line it is at, travelling with the text as the page scrolls
+  and waiting at the top or bottom of the edge, a chevron pointing to the
+  line, while the line is out of view; a tap goes back to it, or, beside its
+  line, says what it is doing and opens its conversation. The header's avatar
+  stack names only the people. While no Agent is on the page, the bottom
+  right holds the face of the Agent this person co-writes with (§4.2).
 - **Headings** carry who is on the section: the people and Agents in it, and
   the Agents working in a conversation linked to it even when they do not
   have the page open, each with its state; the claim flag with its holder and
@@ -155,7 +162,9 @@ fact is about.
   back (§5.3); its conversation count (§4.4); and the freshness mark (§5.4).
   Hovering a heading, or
   editing in its section, offers Discuss, Copy link, Claim (Release on your
-  own claim) and Attach at the heading's right edge (§6).
+  own claim) and Attach at the heading's right edge (§6). A phone has no hover:
+  the heading of the section the reader is in carries one ⋯ whose menu names
+  each action, *Co-write with ‹Agent›* first.
 - **No change log in the text.** As in Google Docs, who changed a section
   and when is not written under it. *Show editors* on a selection says who
   last changed that section, when and in which conversation, with a link to
@@ -172,12 +181,16 @@ fact is about.
   a revision for a moment, or, when the page opened on a diff, once they tick
   that diff *Viewed*. Opening the page diffs the revision they last read
   against the document now, block by block and then word by word inside
-  changed blocks: new text stands on a tint and text taken out is struck
-  where it stood. Nothing is animated and nothing fades: the diff stays until
-  its reader ticks *Viewed* above the page, which shows the page as it is;
-  unticking shows the diff again. A diff they have viewed is not shown again:
-  the page opens as it is. A first visit shows nothing as changed. Agents
-  have no read state.
+  changed blocks. It is marked as a proofreader marks paper, in the app's
+  one accent ink and never in a tinted box: new words underlined in brass, a
+  block that is all new barred in the margin, text taken out struck through
+  in faint ink where it stood. Nothing is animated and nothing fades: the diff
+  stays until its reader ticks *Viewed* above the page, which shows the page
+  as it is; unticking shows the diff again. On a phone the diff is walked from
+  the right edge instead: a mark beside the change in front of the reader
+  counts the changes, steps to the next and says *Viewed*. A diff they have
+  viewed is not shown again: the page opens as it is. A first visit shows
+  nothing as changed. Agents have no read state.
 - **Opening a page draws it as the editor will.** Until the live session has
   synced, the page shows its prefetched document rendered from the same
   document schema and list item view as the editor, with the margin's room
@@ -227,8 +240,29 @@ fact is about.
   - *Discuss* starts a conversation anchored to the selection (§4.3).
 - **`/` insert**: heading, list, task list, table, page reference, live
   reference, mention.
-- **Suggestions** render inline as tracked changes with accept and reject per
-  change, and replace the History-panel accept flow.
+- **Co-writing.** A person starts an Agent writing the page from the page
+  itself, typing nothing: one tap on the face of the Agent to write with (the
+  one they last wrote with is offered first), from the page's button, the
+  header, or a heading's menu for one section. It starts in a conversation of
+  its own linked to the page; the Hub records that the conversation co-writes
+  the page (`data.page_co_writing`, started by a person who may edit it) before
+  the Agent is called, and while it lasts — until ended, at most twelve hours —
+  the Agent's `page edit` from that conversation is kept as a suggestion and
+  never written into the page. The Agent infers what the page needs. Agents
+  working from any other conversation edit as before. The page stays open and
+  the conversation is reached from the Agent's face.
+- **Suggestions** wait on the page, from a co-writing or a suggest-only page,
+  for two weeks after the last one a person reviewed
+  (`GET …/pages/:pageId/suggestions`). Each is rebased onto the text as it is
+  now, so what was typed meanwhile stays, and offered one change at a time, as
+  Cursor offers its edits: the change in front of the reader has its words
+  marked in its Agent's colour like a highlighter, and the Agent writes its new
+  words out in the line, its face moving with them at their height. Tab (✓ on
+  a phone, at the right edge beside the change) takes it into the page as the
+  reader's own edit; Escape (✕) leaves it; the next one comes up. Once every
+  change is taken or left, the suggestions stop waiting (`POST
+  …/suggestions/review`, a person's, recorded as the page's
+  `suggestions_reviewed_through`). History still has every suggestion.
 - **History**, as Google Docs' version history: versions grouped by day,
   each with its time and its editors beside a dot in their colour; the
   newest opens first, and the open one shows its additions highlighted in
@@ -630,4 +664,4 @@ Open:
 - Change events pushed to a Run when a block it read or claimed changes
   (§3.1), and "changes since your last visit" for people.
 - Live references and freshness for GitHub issues and pull requests (§5.4).
-- Suggestions inline as tracked changes, images.
+- Images.

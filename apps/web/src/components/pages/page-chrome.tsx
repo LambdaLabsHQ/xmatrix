@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
-import { ArrowDown, ArrowLeft, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
 import {
   CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
@@ -13,6 +13,7 @@ import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { COUNT_CHIP_MATERIAL_CLASS } from "@/components/dashboard/workspace-shell-constants";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { Button } from "@/components/ui/button";
+import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
@@ -45,6 +46,8 @@ export interface PresentPerson {
   editing: boolean;
   /** Away from the page, or an Agent whose Run is not working: dimmed, as Google Docs dims idle people. */
   idle?: boolean;
+  /** The conversation an Agent works from, where it is talked to. */
+  conversationId?: string | null;
 }
 
 /** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
@@ -121,6 +124,68 @@ export function PageOffscreenPeople({ above, below, onJump }: {
     );
   };
   return <>{edge("above", above)}{edge("below", below)}</>;
+}
+
+/** An Agent on the page, by the line it is at: its top in the document column, and whether that is out of view. */
+export interface PagePen { person: PresentPerson; top: number; away: "above" | "below" | null }
+
+/**
+ * On a phone, each Agent on the page is its face at the right edge beside the line its pen is at, where
+ * Google Docs keeps what others do to the text (§3.2). The face travels with the text, and when the line
+ * is scrolled out of view it waits at the top or bottom of the edge, pointing the way. A tap on a face
+ * that is away goes back to its line; on one beside its line, it opens what the Agent is doing.
+ */
+export function PagePens({ pens, onJump, onOpen }: {
+  pens: PagePen[]; onJump: (person: PresentPerson) => void; onOpen: (person: PresentPerson) => void;
+}) {
+  if (pens.length === 0) return null;
+  return (
+    <div className="page-pens pointer-events-none absolute inset-y-0 -right-6 w-8" data-testid="page-pens">
+      {pens.map(({ person, top, away }) => {
+        const Chevron = away === "above" ? ChevronUp : ChevronDown;
+        return (
+          // A spacer, not a margin, sets the line: a sticky face may not leave its own margin box.
+          <div key={person.key} className="absolute inset-0">
+            <div style={{ height: Math.max(0, top) }} />
+            <button type="button" onClick={() => (away ? onJump(person) : onOpen(person))} data-away={away ?? undefined}
+              className={cn("page-pen pointer-events-auto", person.idle && "is-idle", person.editing && "is-writing")}
+              aria-label={`${person.name} is ${person.editing ? "writing" : "here"}${away ? `, ${away}` : ""}`}
+              title={`${person.name} · ${person.detail}`}>
+              <IdentityAvatar kind="agent" label={person.name} imageUrl={person.avatarUrl}
+                initials={person.avatarUrl ? avatarInitials(person.name) : undefined} size="sm" shape="circle"
+                className="page-pen-face pointer-events-none rounded-full" />
+              {away && <Chevron className="page-pen-way" aria-hidden="true" strokeWidth={2.5} />}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The change in front of the reader, held at the right edge beside its line, where Google Docs keeps
+ * what others do to the text: whose change it is and what to do with it, travelling with the line and
+ * waiting at the top or bottom of the edge, pointing the way, while the line is out of view.
+ */
+export function PageChangeMark({ top, away, label, testId, children }: {
+  top: number; away: "above" | "below" | null; label: string; testId: string; children: ReactNode;
+}) {
+  const Chevron = away === "above" ? ChevronUp : ChevronDown;
+  return (
+    <div className="page-change-lane pointer-events-none absolute inset-y-0" data-testid={testId}>
+      {/* A spacer, not a margin, sets the line: a sticky mark may not leave its own margin box. */}
+      <div style={{ height: Math.max(0, top) }} />
+      <div className="page-change-mark" data-away={away ?? undefined}>
+        {away === "above" && <Chevron className="page-change-way" aria-hidden="true" strokeWidth={2.5} />}
+        <LiquidGlassPill role="toolbar" aria-label={label}
+          className="pointer-events-auto flex w-10 flex-col items-center gap-1 rounded-full p-1">
+          {children}
+        </LiquidGlassPill>
+        {away === "below" && <Chevron className="page-change-way" aria-hidden="true" strokeWidth={2.5} />}
+      </div>
+    </div>
+  );
 }
 
 /** A place on the page worth finding, drawn along its scrollbar (§3.2). */
