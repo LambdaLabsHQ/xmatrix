@@ -17,7 +17,7 @@ function timeline() {
   const listeners = new Map();
   const observers = [];
   const content = { getBoundingClientRect: () => ({ top: contentTop, bottom: contentTop + 100 }) };
-  const row = { id: "message:reader", lastElementChild: content, children: [] };
+  const row = { id: "message:reader", lastElementChild: content, children: [], hasAttribute: () => false };
   const root = {
     scrollTop: 0,
     children: [row],
