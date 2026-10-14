@@ -906,6 +906,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     return viewerReadsRef.current.reads;
   }, []);
 
+  const viewerUserId = user?.id;
+  const noteReadStateAnswered = useCallback((channelId: string) => {
+    if (viewerUserId) viewerReadsOf(viewerUserId).answered(channelId);
+  }, [viewerReadsOf, viewerUserId]);
+
   /* Emptying the entity table ends what the reader's reads had brought: the
      Channels are gone, and so is the claim that their read state is known. */
   const clearChannels = useCallback(() => {
@@ -1059,6 +1064,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     viewRef,
     setChannels,
     updateChannelReadCounts,
+    onReadStateAnswered: noteReadStateAnswered,
   });
 
   const selectedChannelIsReadableNow = useCallback((channelId: string) => (
@@ -1650,6 +1656,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               observeChannelReadSequence(message.event.channelId, readSequence);
             }
             if (attention || readSequence !== undefined) {
+              viewerReadsOf(userId).answered(message.event.channelId);
               setChannels((current) => updateChannelReadState(
                 current,
                 message.event.channelId!,
@@ -1914,6 +1921,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           }
           const merged = mergeAndRememberChannelHistory(entry.channelId, [entry], undefined, false);
           if (message.notification?.attention) {
+            viewerReadsOf(userId).answered(entry.channelId);
             setChannels((current) => updateChannelReadState(current, entry.channelId, {
               attention: message.notification!.attention,
               readSequence: undefined,

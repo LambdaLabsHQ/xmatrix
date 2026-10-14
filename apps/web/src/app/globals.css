@@ -1741,6 +1741,15 @@
   border-width: 1px;
 }
 
+/* A conversation row is paper in every state. Its faces, its +N and its count
+   are glass chips all the same, and a backdrop filter over flat paper draws
+   nothing: at four times the size a face differs by 7 in 255 at most with or
+   without it. It did make each of them a compositor layer of its own, and
+   with a full list those were two thirds of every layer pass of the page. */
+.xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane) .app-channel-row {
+  --app-liquid-backdrop-filter: none;
+}
+
 @keyframes flow {
   from { background-position: 0 0; }
   to { background-position: 24px 0; }

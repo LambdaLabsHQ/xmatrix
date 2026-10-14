@@ -23,6 +23,8 @@ test.use(E2E_DESKTOP_CONTEXT);
 
 type Page = Parameters<Parameters<typeof test>[2]>[0]["page"];
 type Rise = { sent: boolean; fromPx: number; fades: boolean };
+/** A way to rest the list was given to the compositor: where from, how long, and whether it only slows towards rest. */
+type ListRise = { fromPx: number; durationMs: number; oneWay: boolean; slowing: boolean };
 
 const HISTORY_LENGTH = 40;
 const SENT_BODY = "Rising message";
@@ -40,7 +42,9 @@ function channelAt(messages: number) {
 async function openChannelRecordingRises(page: Page) {
   await page.addInitScript(() => {
     const rises: Rise[] = [];
+    const listRises: ListRise[] = [];
     (window as unknown as { __timelineRises: Rise[] }).__timelineRises = rises;
+    (window as unknown as { __timelineListRises: ListRise[] }).__timelineListRises = listRises;
     const animate = Element.prototype.animate;
     Element.prototype.animate = function recordRise(this: Element, keyframes, options) {
       const kind = this.getAttribute("data-timeline-rise-row");
@@ -48,6 +52,17 @@ async function openChannelRecordingRises(page: Page) {
       const from = /translateY\(([\d.]+)px\)/u.exec(String(first?.transform ?? ""));
       if (kind !== null && from) {
         rises.push({ sent: kind === "sent", fromPx: Number(from[1]), fades: first?.opacity === 0 });
+      }
+      // The list's own way to rest: the offsets the compositor draws it at, in order.
+      if (this.hasAttribute("data-viewport-type") && Array.isArray(keyframes)) {
+        const offsets = keyframes.map((frame) => Number(/^0 (-?[\d.]+)px$/u.exec(String(frame.translate ?? ""))?.[1]));
+        const steps = offsets.slice(1).map((offset, index) => Math.abs(offsets[index]!) - Math.abs(offset));
+        listRises.push({
+          fromPx: offsets[0]!,
+          durationMs: Number(typeof options === "number" ? options : options?.duration),
+          oneWay: offsets.every(Number.isFinite) && offsets.at(-1) === 0 && steps.every((step) => step >= 0),
+          slowing: steps[0]! > steps.at(-1)!,
+        });
       }
       return animate.call(this, keyframes, options);
     };
@@ -68,6 +83,26 @@ async function sendAndReadRises(page: Page): Promise<Rise[]> {
   await draft.press("Enter");
   await expect(page.locator(".app-message-row").filter({ hasText: SENT_BODY })).toBeInViewport();
   return page.evaluate(() => (window as unknown as { __timelineRises: Rise[] }).__timelineRises);
+}
+
+/**
+ * Every way to rest the list has been given so far. The compositor draws it,
+ * so how many of its frames the page itself sees depends on how busy the page
+ * is; what the compositor was told to draw does not.
+ */
+async function listRises(page: Page): Promise<ListRise[]> {
+  return page.evaluate(() => (window as unknown as { __timelineListRises: ListRise[] }).__timelineListRises.slice());
+}
+
+/** Each of them goes one way; one that travels a row's room slows as it arrives and takes long enough to be seen. */
+function expectDrawnRises(rises: readonly ListRise[], atLeast: number) {
+  const travels = rises.filter((rise) => Math.abs(rise.fromPx) >= 8);
+  expect(travels.length, JSON.stringify(rises)).toBeGreaterThanOrEqual(atLeast);
+  expect(rises.filter((rise) => !rise.oneWay)).toEqual([]);
+  for (const rise of travels) {
+    expect(rise.slowing, JSON.stringify(rise)).toBe(true);
+    expect(rise.durationMs).toBeGreaterThan(100);
+  }
 }
 
 /** The list stands in its place: nothing holds it lower, and nothing is still bringing it there. */
@@ -104,11 +139,12 @@ test("a sent message rises from the composer and lifts the rows above it", async
   }));
 
   expect(rises).toEqual([{ sent: true, fromPx: expect.any(Number), fades: true }]);
-  // The rows above travel the room the new row took, over several frames,
-  // upward only, and slower as they arrive.
-  expect(moves.length).toBeGreaterThan(3);
+  // The rows above travel the room the new row took: up from where they
+  // stood, slower as they arrive, and what was painted of it never went back.
+  expectDrawnRises(await listRises(page), 1);
+  expect((await listRises(page))[0]!.fromPx).toBeGreaterThan(0);
+  expect(moves.length).toBeGreaterThan(0);
   expect(moves.filter((by) => by > 0)).toEqual([]);
-  expect(Math.abs(moves[0]!)).toBeGreaterThan(Math.abs(moves[moves.length - 1]!));
 });
 
 /* The list makes room for a new row by an estimate and corrects it a frame
@@ -125,7 +161,8 @@ test("messages sent one after another lift the rows without a bounce", async ({ 
       await draft.press("Enter");
       await expect(page.locator(`[id="message:held-${HISTORY_LENGTH + 1 + index}"]`)).toBeInViewport();
     }));
-    expect(moves.length).toBeGreaterThan(3);
+    expectDrawnRises(await listRises(page), index + 1);
+    expect(moves.length).toBeGreaterThan(0);
     expect(moves.filter((by) => by > 0)).toEqual([]);
   }
 });
@@ -145,7 +182,8 @@ test("a message from someone else comes in the same way", async ({ page }) => {
     )), E2E_SPACE.id);
     await expect(page.locator(`[id="message:rise-${HISTORY_LENGTH + 1}"]`)).toBeInViewport();
   }));
-  expect(moves.length).toBeGreaterThan(3);
+  expectDrawnRises(await listRises(page), 1);
+  expect(moves.length).toBeGreaterThan(0);
   expect(moves.filter((by) => by > 0)).toEqual([]);
 });
 
@@ -202,7 +240,9 @@ test("a message that comes in while the list is on its way to rest goes on from 
   // list to its place or back to where it stood: the only way down is the few
   // pixels by which a late correction of the layout settles, as after any send.
   const travelled = Math.abs(moves.reduce((sum, by) => sum + by, 0));
-  expect(moves.filter((by) => by < 0).length).toBeGreaterThan(6);
+  // Two ways to rest were given: the first, and the one that took over from where it had come.
+  expectDrawnRises(await listRises(page), 2);
+  expect(moves.filter((by) => by < 0).length).toBeGreaterThan(1);
   expect(Math.max(...moves.map((by) => Math.abs(by)))).toBeLessThan(travelled * 0.6);
   expect(Math.max(0, ...moves)).toBeLessThan(8);
   expect(paintedRowOverlaps(frames)).toEqual([]);
