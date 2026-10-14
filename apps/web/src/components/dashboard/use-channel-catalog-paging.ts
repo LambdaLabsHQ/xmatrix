@@ -36,7 +36,9 @@ import {
   createCatalogRefreshThrottle,
   observeSpaceCatalogRevision,
   refreshSpaceCatalogForEvent,
+  refreshSpaceCatalogForMessages,
   rowsFromData,
+  shareCatalogRows,
   type ChannelCatalogChangeDetail,
 } from "./channel-catalog-refresh";
 import { exactChannelIdFromRouteKey, routeEntityTokenFromKey } from "./channel-links";
@@ -93,6 +95,9 @@ export interface ChannelCatalogPagingModel {
   roots: ReactNode;
 }
 
+/** The most Channels one resolve asks the Hub for. */
+const RESOLVE_LIMIT = 200;
+
 const EMPTY_PAGE: ChannelCatalogClientPage = Object.freeze({
   rows: [], nextCursor: null, counts: null, loading: false, loaded: false, error: null,
 });
@@ -124,7 +129,11 @@ function commitCatalogChannels(
   unapplied: ReadonlySet<SerializedChannel>,
 ): SerializedChannel[] {
   const present = new Set(current.map((channel) => channel.id));
-  const next = incoming.filter((channel) => unapplied.has(channel) || !present.has(channel.id));
+  // A row made from the entity table's own Channel (a conversation a message
+  // brought into the list) says nothing the table does not hold already.
+  const held = new Set(current);
+  const next = incoming.filter((channel) => !held.has(channel) &&
+    (unapplied.has(channel) || !present.has(channel.id)));
   return next.length > 0 ? mergeChannels(current, next) : current;
 }
 
@@ -145,6 +154,11 @@ function catalogOptions(input: {
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     staleTime: 15_000,
+    // A row is the same row wherever it stands in the list (shareCatalogRows).
+    structuralSharing: (held, next) => shareCatalogRows(
+      held as InfiniteData<ChannelCatalogPage, string | null> | undefined,
+      next as InfiniteData<ChannelCatalogPage, string | null>,
+    ),
   });
 }
 
@@ -215,6 +229,10 @@ export function useChannelCatalogPaging(input: {
   routeChannelKey?: string | null;
   channels: SerializedChannel[];
   setChannels: Dispatch<SetStateAction<SerializedChannel[]>>;
+  /** The entity table's Channel as live reports have it, ahead of `channels`. */
+  liveChannel?: (channelId: string) => SerializedChannel | undefined;
+  /** Tells `channels`' readers what live reports changed since they last heard. */
+  promoteCatalog?: () => void;
   setSelectedChannelId: Dispatch<SetStateAction<string | null>>;
 }): ChannelCatalogPagingModel {
   const {
@@ -226,6 +244,8 @@ export function useChannelCatalogPaging(input: {
     routeChannelKey,
     channels,
     setChannels,
+    liveChannel,
+    promoteCatalog,
     setSelectedChannelId,
   } = input;
   const auth = useAuth();
@@ -331,7 +351,7 @@ export function useChannelCatalogPaging(input: {
     if (!token || !spaceId || !userId) {
       return { protocolVersion: 1 as const, channels: [], pathsByChannelId: {} };
     }
-    const ids = [...new Set(channelIds)].slice(0, 200);
+    const ids = [...new Set(channelIds)].slice(0, RESOLVE_LIMIT);
     const result = await client.fetchQuery({
       queryKey: xmatrixQueryKeys.channelResolve({
         userId, spaceId, channelIds: ids, routeToken, includeParticipants: true,
@@ -386,21 +406,49 @@ export function useChannelCatalogPaging(input: {
   useEffect(() => {
     refreshCatalogRef.current = (spaceId, details) => {
       if (!userId) return;
-      for (const detail of details) {
-        refreshSpaceCatalogForEvent({
-          client,
-          spaceId,
-          prefix: xmatrixQueryKeys.channels({ userId, spaceId }),
-          countsKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId }),
-          detail,
-          hasChannel: (channelId) => channels.some((channel) => channel.id === channelId),
-          resolveChannel: (targetSpaceId, channelId, fresh) => {
-            void resolve(targetSpaceId, [channelId], undefined, fresh).catch(() => undefined);
-          },
+      // Messages change their own rows as they arrive; `channels` hears of
+      // them here, in the same render that reorders the list.
+      promoteCatalog?.();
+      const lists = {
+        client,
+        spaceId,
+        prefix: xmatrixQueryKeys.channels({ userId, spaceId }),
+        countsKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId }),
+        hasChannel: (channelId: string) => liveChannel
+          ? liveChannel(channelId) !== undefined
+          : channels.some((channel) => channel.id === channelId),
+        channel: liveChannel,
+        viewerId: userId,
+        resolveChannel: (targetSpaceId: string, channelId: string, fresh?: boolean) => {
+          void resolve(targetSpaceId, [channelId], undefined, fresh).catch(() => undefined);
+        },
+      };
+      /* The Hub answers for a window's unknown Channels in one read. What it
+         returns the reader may read, so those join the conversation list as
+         the rows they are; a read that fails leaves the lists to be read again. */
+      const resolveMessageChannels = (targetSpaceId: string, unknown: ChannelCatalogChangeDetail[]) => {
+        const ids = [...new Set(unknown.map((detail) => detail.channelId!))];
+        const reads = Array.from({ length: Math.ceil(ids.length / RESOLVE_LIMIT) }, (_, part) =>
+          resolve(targetSpaceId, ids.slice(part * RESOLVE_LIMIT, (part + 1) * RESOLVE_LIMIT)));
+        void Promise.all(reads).then((results) => {
+          const resolved = new Map(results.flatMap((result) => result.channels).map((channel) => [channel.id, channel]));
+          refreshSpaceCatalogForMessages({
+            ...lists,
+            details: unknown.filter((detail) => resolved.has(detail.channelId!)),
+            hasChannel: () => true,
+            channel: (channelId) => liveChannel?.(channelId) ?? resolved.get(channelId),
+          });
+        }, () => {
+          refreshSpaceCatalogForMessages({ ...lists, details: unknown, hasChannel: () => true, channel: () => undefined });
         });
+      };
+      refreshSpaceCatalogForMessages({ ...lists, details, resolveMessageChannels });
+      for (const detail of details) {
+        if (detail.kind === "message" && detail.channelId) continue;
+        refreshSpaceCatalogForEvent({ ...lists, detail });
       }
     };
-  }, [channels, client, resolve, userId]);
+  }, [channels, client, liveChannel, promoteCatalog, resolve, userId]);
 
   useEffect(() => {
     // Busy Spaces change their catalog many times a second; the reads are

@@ -100,7 +100,12 @@ function RecordedRejectionChip({ rejection, labelContent, announcement, scope }:
   return <MentionInvocationRejectionChip rejection={rejection} labelContent={labelContent} announcement={announcement} unavailable={scope?.launchStatusUnavailable} />;
 }
 
-const ChannelScopeContext = createContext<MentionReadChannelScope | null>(null);
+/* The Channel scope reaches its readers in two parts. Every text run of every
+   message reads who a written name is; only a mention's chip reads the cursors
+   that say whether it was read. A cursor moves with each read and each
+   presence report, and must not run all the text again. */
+const MentionIndexContext = createContext<MentionReadIndex | null>(null);
+const MentionReceiptContext = createContext<Omit<MentionReadChannelScope, "index"> | null>(null);
 const MessageScopeContext = createContext<MentionReadMessageScope | null>(null);
 const OperationalMentionContext = createContext(true);
 
@@ -115,7 +120,18 @@ export function MentionReadChannelScopeProvider({
   scope: MentionReadChannelScope;
   children: ReactNode;
 }) {
-  return <ChannelScopeContext.Provider value={scope}><InvocationPopoverGroup>{children}</InvocationPopoverGroup></ChannelScopeContext.Provider>;
+  const { index, memberReadSequences, currentUserIdentityId, machineOfflineSubjectIds } = scope;
+  const receipts = useMemo(
+    () => ({ memberReadSequences, currentUserIdentityId, machineOfflineSubjectIds }),
+    [memberReadSequences, currentUserIdentityId, machineOfflineSubjectIds],
+  );
+  return (
+    <MentionIndexContext.Provider value={index}>
+      <MentionReceiptContext.Provider value={receipts}>
+        <InvocationPopoverGroup>{children}</InvocationPopoverGroup>
+      </MentionReceiptContext.Provider>
+    </MentionIndexContext.Provider>
+  );
 }
 
 export function MentionReadMessageScopeProvider({
@@ -177,11 +193,10 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
       return isMentionAddressStart(source, absolute) && isOperationalMentionStart(absolute, ranges);
     };
   }, [rawMarkdown, text, sourcePosition, scope?.sourceBody, scope?.nonOperationalRanges]);
-  const channelScope = useContext(ChannelScopeContext);
+  const base = useContext(MentionIndexContext);
   const reading = useIntentReading(scope?.launchStatusUnavailable ? undefined : scope?.sentAt);
   const segments = useMemo(() => {
     const launches = scope?.launches ?? [];
-    const base = channelScope?.index;
     const index = base || launches.length
       ? (run: string) => withWrittenInvocationTargets(withInvocationMentionTargets(
         base ?? { tokens: [], byToken: new Map() }, launches), run)
@@ -196,7 +211,7 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
       launchStatusUnavailable: scope?.launchStatusUnavailable,
       mentions: run => splitMentionSegments(run, index ? index(run) : null),
     }, allowed);
-  }, [text, allowed, channelScope?.index, scope?.continuations, scope?.rejections, scope?.launches,
+  }, [text, allowed, base, scope?.continuations, scope?.rejections, scope?.launches,
     scope?.stops, scope?.stopReceiptsLoaded, scope?.sourceBody, scope?.launchStatusUnavailable]);
   if (!operational) return <PageReferenceRichText text={text} />;
   return <>{segments.map((segment, index) =>
@@ -302,7 +317,7 @@ export function MentionReadChip({
   /** The address that resolved this mention; the label shows the name instead. */
   token?: string;
 }) {
-  const channelScope = useContext(ChannelScopeContext);
+  const channelScope = useContext(MentionReceiptContext);
   const messageScope = useContext(MessageScopeContext);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const receiptRef = useRef<HTMLSpanElement | null>(null);

@@ -379,13 +379,16 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   // The in-memory cache holds only this user's reads; it renders once the
   // selected Channel's rows are authorized. A copy per cache revision lets the
-  // memos below see writes to the cache ref.
+  // memos below see writes to the cache ref. The revision moves only for the
+  // histories the open conversation shows; a Channel that turns out to be one
+  // of them (a thread whose entity arrives after its first message) changes
+  // the catalog, and the copy is taken again then.
   const renderableHistoryCache = useMemo(() => {
-    if (!s.historyRenderAuthorized || !s.selectedChannelId || s.historyCacheRevision < 0) {
+    if (!s.historyRenderAuthorized || !s.selectedChannelId || s.historyCacheRevision < 0 || !s.channels) {
       return new Map<string, ChannelHistoryCacheEntry>();
     }
     return new Map(s.historyCacheRef.current);
-  }, [s.historyCacheRef, s.historyCacheRevision, s.historyRenderAuthorized, s.selectedChannelId]);
+  }, [s.channels, s.historyCacheRef, s.historyCacheRevision, s.historyRenderAuthorized, s.selectedChannelId]);
 
   const renderableOutgoingMessages = useMemo(() => {
     const authorizedById = new Map(s.renderableHistory.map((message) => [message.messageId, message]));

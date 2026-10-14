@@ -64,3 +64,21 @@ test("the idle work indicator reevaluates only changed Channels and observes the
   assert.deepEqual(values, [true, false]);
   unsubscribe();
 });
+
+test("promoting tells the catalog's readers what live reports changed, once", () => {
+  const initial = [{ id: "one", preview: "old" }];
+  const store = createRealtimeCollection(initial);
+  let told = 0;
+  store.subscribeCatalog(() => { told += 1; });
+  store.promote();
+  assert.equal(told, 0, "nothing to tell while the catalog is the live projection");
+  store.set(current => [{ ...current[0], preview: "new" }], "live");
+  assert.equal(store.getCatalogSnapshot(), initial);
+  assert.equal(store.getCatalog("one").preview, "old");
+  store.promote();
+  assert.equal(told, 1);
+  assert.equal(store.getCatalogSnapshot()[0].preview, "new");
+  assert.equal(store.getCatalog("one").preview, "new");
+  store.promote();
+  assert.equal(told, 1);
+});

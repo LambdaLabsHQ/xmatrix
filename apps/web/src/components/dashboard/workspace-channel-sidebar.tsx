@@ -73,6 +73,7 @@ const CONVERSATION_LIST_PRELOAD_PX = 600;
 import {
   channelHasUnreadMention,
   channelUnreadCount,
+  rowUnreadCount,
   channelUnreadMentionJumpId,
   rankCatalogChannels,
 } from "./workspace-shell-helpers-extra";
@@ -410,6 +411,8 @@ export const ChannelSidebar = memo(function ChannelSidebar({
                   events={channelEvents.get(channel.id) ?? NO_EVENTS}
                   active={view === "messages" && channel.id === selectedChannelId}
                   unreadCount={channelUnreadCount(channel, readCounts, readCountsBaselineReady)}
+                  readCount={readCounts[channel.id]}
+                  readCountsBaselineReady={readCountsBaselineReady}
                   hasUnreadMention={false}
                   isPinnedRoot={false}
                   onSelect={selectIntakeRow}
@@ -439,6 +442,8 @@ export const ChannelSidebar = memo(function ChannelSidebar({
                   events={channelEvents.get(channel.id) ?? NO_EVENTS}
                   active={view === "messages" && channel.id === selectedChannelId}
                   unreadCount={unreadCount}
+                  readCount={readCounts[channel.id]}
+                  readCountsBaselineReady={readCountsBaselineReady}
                   hasUnreadMention={hasUnreadMention}
                   isPinnedRoot={channelPinLookup.pinnedChannelIds.has(channel.id)}
                   onSelect={selectConversationRow}
@@ -1064,7 +1069,9 @@ export const MobileChannelChatRow = memo(function MobileChannelChatRow({
   displayChannel: catalogChannel,
   events,
   active,
-  badgeCount,
+  badgeCount: listedBadgeCount,
+  readCount,
+  readCountsBaselineReady,
   hasMention,
   onOpen,
   onOpenActions,
@@ -1074,12 +1081,21 @@ export const MobileChannelChatRow = memo(function MobileChannelChatRow({
   events: readonly ObservabilityEvent[];
   active: boolean;
   badgeCount: number;
+  /** See `ChannelNavItemProps`: the row counts a message that has reached only it so far. */
+  readCount?: number;
+  readCountsBaselineReady?: boolean;
   hasMention: boolean;
   /* The row passes its own Channel, so one stable handler serves every row. */
   onOpen: (channel: SerializedChannel) => void;
   onOpenActions: (channel: SerializedChannel) => void;
 }) {
   const displayChannel = useRealtimeChannel(catalogChannel)!;
+  const badgeCount = displayChannel === catalogChannel || readCountsBaselineReady === undefined
+    ? listedBadgeCount
+    : Math.max(
+      rowUnreadCount(displayChannel, catalogChannel, listedBadgeCount, readCount, readCountsBaselineReady),
+      displayChannel.attention?.unreadAttentionCount || 0,
+    );
   const rowRef = useRef<HTMLDivElement | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressPointerRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -1459,6 +1475,8 @@ export function MobileChannelChatList({
                         || channel.id === actionChannelId
                         || channel.id === pendingChannelId}
                       badgeCount={Math.max(unreadCount, channel.attention?.unreadAttentionCount || 0)}
+                      readCount={readCounts[channel.id]}
+                      readCountsBaselineReady={readCountsBaselineReady}
                       hasMention={hasMention}
                       onOpen={openConversation}
                       onOpenActions={openConversationActions}
@@ -1535,7 +1553,9 @@ export const ChannelNavItem = memo(function ChannelNavItem({
   channel: catalogChannel,
   events,
   active,
-  unreadCount = 0,
+  unreadCount: listedUnreadCount = 0,
+  readCount,
+  readCountsBaselineReady,
   hasUnreadMention = false,
   isPinnedRoot,
   onSelect,
@@ -1544,6 +1564,7 @@ export const ChannelNavItem = memo(function ChannelNavItem({
   onOpenContextMenu,
 }: ChannelNavItemProps) {
   const channel = useRealtimeChannel(catalogChannel)!;
+  const unreadCount = rowUnreadCount(channel, catalogChannel, listedUnreadCount, readCount, readCountsBaselineReady);
   const { onRowPointerDown, onRowClick } = usePointerFirstSelect(() => onSelect(channel));
   const focusedHumanMembers = channelFocusedHumanMembers(channel);
   const agentAvatarItems = channelOnlineAgentAvatarItems(channel);

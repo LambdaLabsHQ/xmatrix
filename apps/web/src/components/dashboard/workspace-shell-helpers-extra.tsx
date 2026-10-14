@@ -704,6 +704,22 @@ export function channelUnreadCount(
   return Math.max(0, channel.messageCount - readCount);
 }
 
+/**
+ * The unread count of the Channel as a row holds it. The list counted
+ * `listed`, its own copy; the row's copy is ahead of it by the messages that
+ * have reached only the row so far.
+ */
+export function rowUnreadCount(
+  channel: SerializedChannel,
+  listed: SerializedChannel,
+  listedCount: number,
+  readCount: number | undefined,
+  readCountsBaselineReady: boolean | undefined,
+): number {
+  if (channel === listed || readCountsBaselineReady === undefined) return listedCount;
+  return channelUnreadCount(channel, readCount === undefined ? {} : { [channel.id]: readCount }, readCountsBaselineReady);
+}
+
 function unreadAttentionIsMention(
   attention: SerializedChannel["attention"],
 ): boolean {

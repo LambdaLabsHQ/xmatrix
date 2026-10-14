@@ -7,7 +7,10 @@ import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 import type {
 } from "@/lib/desktop/bridge";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import {
+  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties,
+} from "react";
+import { useStableCallback } from "./workspace-shell-helpers";
 import { CrossSpaceReadCard, useChannelPendingCrossSpaceReads } from "./cross-space-read-card";
 import { useQueries } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -351,6 +354,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     routeChannelKey: routeInfo.channelKey || routeInfo.legacyChannelId || routeInfo.conversationKey,
     channels,
     setChannels,
+    liveChannel: model.realtimeChannels.get,
+    promoteCatalog: model.realtimeChannels.promote,
     setSelectedChannelId,
   });
   const currentSpaceCatalog = channelCatalogPaging.forSpace(currentSpaceId);
@@ -559,10 +564,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // A `page:<id>#<section>` chip opens the page at that section; a new seq scrolls there again.
   const [pageSectionRequest, setPageSectionRequest] =
     useState<{ pageId: string; blockId: string; seq: number } | null>(null);
-  const openPageAt = useCallback((pageId: string, blockId?: string | null) => {
+  const openPageAt = useStableCallback((pageId: string, blockId?: string | null) => {
     openPage(pageId);
     setPageSectionRequest((current) => blockId ? { pageId, blockId, seq: (current?.seq ?? 0) + 1 } : null);
-  }, [openPage]);
+  });
   // `#` completion and `channel:<id>` chips read the channels this reader can see.
   const navigateToChannelRef = useRef(navigateToChannel);
   navigateToChannelRef.current = navigateToChannel;
@@ -747,6 +752,36 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     token, canUseSelectedChannel && Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
       ["owner", "admin"].includes(transferSpaceRole(space, model.authenticatedUserId ?? "") || ""))));
 
+  /* The timeline, the work dock and the composer are memoized, and this shell
+     renders for every message and read: handlers that stay the same let those
+     renders pass them by. */
+  const openTimelineHumanProfile = useStableCallback((userId: string) => openHumanProfile(userId));
+  const stopDockInstance = useStableCallback((...args: Parameters<typeof stopAgentInstance>) =>
+    void stopAgentInstance(...args));
+  const rebornDockInstance = useStableCallback((...args: Parameters<typeof rebornAgentInstance>) =>
+    void rebornAgentInstance(...args));
+  const handoffDockInstance = useStableCallback((...args: Parameters<typeof handoffAgentInstance>) =>
+    void handoffAgentInstance(...args));
+  const cancelComposerReply = useStableCallback(() => {
+    replyTargetRef.current = null;
+    replyTargetHistoryRevisionRef.current = -1;
+    setReplyTarget(null);
+  });
+  const changeDraftAttachments = useStableCallback((updater: Parameters<ComponentProps<typeof Composer>["onAttachmentsChange"]>[0]) =>
+    setDraftAttachments((current) => {
+      const next =
+        typeof updater === "function" ? updater(current) : updater;
+      draftAttachmentsRef.current = next;
+      writeChannelComposerDraft(channelComposerDraftsRef.current, draftChannelIdRef.current, {
+        text: draftRef.current,
+        workspaceTarget: draftWorkspaceTargetValueRef.current,
+        attachments: next,
+      });
+      return next;
+    }));
+  const sendComposerMessage = useStableCallback((snapshot: Parameters<ComponentProps<typeof Composer>["onSend"]>[0]) =>
+    void sendChannelMessage(undefined, snapshot));
+  const openComposerApps = useStableCallback((spaceId: string) => openAppsForSpace(spaceId));
 
   if (loading || !user) {
     if (cachedCatalogChannels.length > 0) {
@@ -955,7 +990,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onScrollGesture={handleTimelineScrollGesture}
         onNearTop={handleTimelineNearTop}
         onOpenAgentTrace={openAgentTrace}
-        onOpenHumanProfile={(userId) => openHumanProfile(userId)}
+        onOpenHumanProfile={openTimelineHumanProfile}
         currentUserIdentityId={`user:${user.id}`}
         onReact={handleTimelineReact}
         onEdit={handleTimelineEdit}
@@ -998,15 +1033,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         stoppingAgentInstanceId={stoppingAgentInstanceId}
         reborningAgentInstanceId={reborningAgentInstanceId}
         handingOffAgentInstanceId={handingOffAgentInstanceId}
-        onStopAgentInstance={(agentId, instance, agentLabel) =>
-          void stopAgentInstance(agentId, instance, agentLabel)
-        }
-        onRebornAgentInstance={(agentId, instance, agentLabel) =>
-          void rebornAgentInstance(agentId, instance, agentLabel)
-        }
-        onHandoffAgentInstance={(agentId, instance, agentLabel, successor) =>
-          void handoffAgentInstance(agentId, instance, agentLabel, successor)
-        }
+        onStopAgentInstance={stopDockInstance}
+        onRebornAgentInstance={rebornDockInstance}
+        onHandoffAgentInstance={handoffDockInstance}
         onOpenAgentTrace={openAgentTrace}
       />
       {/* The composer sits in the reserved bottom gutter; the work dock stays
@@ -1035,26 +1064,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           error={historyError}
           onDraftChange={persistComposerDraftSnapshot}
           onWorkspaceSelect={setDraftWorkspaceTarget}
-          onCancelReply={() => {
-            replyTargetRef.current = null;
-            replyTargetHistoryRevisionRef.current = -1;
-            setReplyTarget(null);
-          }}
-          onAttachmentsChange={(updater) =>
-            setDraftAttachments((current) => {
-              const next =
-                typeof updater === "function" ? updater(current) : updater;
-              draftAttachmentsRef.current = next;
-              writeChannelComposerDraft(channelComposerDraftsRef.current, draftChannelIdRef.current, {
-                text: draftRef.current,
-                workspaceTarget: draftWorkspaceTargetValueRef.current,
-                attachments: next,
-              });
-              return next;
-            })
-          }
-          onSend={(snapshot) => void sendChannelMessage(undefined, snapshot)}
-          onOpenAppsForSpace={openAppsForSpace}
+          onCancelReply={cancelComposerReply}
+          onAttachmentsChange={changeDraftAttachments}
+          onSend={sendComposerMessage}
+          onOpenAppsForSpace={openComposerApps}
         />
       )}
     </section>

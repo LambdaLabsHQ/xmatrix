@@ -1,5 +1,5 @@
-import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query";
-import type { ChannelCatalogPage, ChannelCatalogPageRow } from "@xmatrix/protocol";
+import { replaceEqualDeep, type InfiniteData, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import type { ChannelCatalogPage, ChannelCatalogPageRow, SerializedChannel } from "@xmatrix/protocol";
 
 /** Flatten an infinite catalog query's pages into one row per channel, last write winning. */
 export function rowsFromData(
@@ -10,6 +10,49 @@ export function rowsFromData(
     for (const row of page.rows) rows.set(row.channel.id, row);
   }
   return [...rows.values()];
+}
+
+const NO_ROWS: ChannelCatalogPageRow[] = [];
+
+/**
+ * What a catalog query holds after `next` is written to it: `next`, with each
+ * row the query already held for the same Channel, saying the same, kept as
+ * the object it was.
+ *
+ * Rows are matched by their Channel, never by their place, and never copied.
+ * The query library's own sharing compares a list place by place: one row
+ * moving to the top makes every row below it a fresh copy of itself, which the
+ * entity table then takes for a new read and applies over what live reports
+ * have said since, and which re-renders every row of the list.
+ */
+export function shareCatalogRows<Data extends InfiniteData<ChannelCatalogPage, unknown>>(
+  held: Data | undefined,
+  next: Data,
+): Data {
+  if (!held || held === next) return next;
+  const heldRows = new Map<string, ChannelCatalogPageRow>();
+  for (const page of held.pages) for (const row of page.rows) heldRows.set(row.channel.id, row);
+  const pages = next.pages.map((page) => {
+    const rows = page.rows.map((row) => {
+      const prior = heldRows.get(row.channel.id);
+      return prior && replaceEqualDeep(prior, row) === prior ? prior : row;
+    });
+    return rows.every((row, index) => row === page.rows[index]) ? page : { ...page, rows };
+  });
+  // An answer that says what the query held is the held data: its readers are not told again.
+  const samePage = (before: ChannelCatalogPage | undefined, after: ChannelCatalogPage) => before !== undefined && (
+    before === after || (before.rows.length === after.rows.length &&
+      after.rows.every((row, index) => row === before.rows[index]) &&
+      sameValue({ ...before, rows: NO_ROWS }, { ...after, rows: NO_ROWS })));
+  if (held.pages.length === pages.length && pages.every((page, index) => samePage(held.pages[index], page)) &&
+      sameValue(held.pageParams, next.pageParams)) {
+    return held;
+  }
+  return pages.every((page, index) => page === next.pages[index]) ? next : { ...next, pages };
+}
+
+function sameValue(before: unknown, after: unknown): boolean {
+  return replaceEqualDeep(before, after) === before;
 }
 
 export interface ChannelCatalogChangeDetail {
@@ -106,8 +149,14 @@ export function refreshSpaceCatalogForEvent(input: {
   detail?: ChannelCatalogChangeDetail;
   /** Whether the entity table already holds this channel. */
   hasChannel: (channelId: string) => boolean;
+  /** The entity table's Channel, as live as it has it. */
+  channel?: (channelId: string) => SerializedChannel | undefined;
+  /** The reader, whose own intake conversations are among their conversations. */
+  viewerId?: string;
   /** Pull a channel into the entity table; `fresh` bypasses the cached read. */
   resolveChannel: (spaceId: string, channelId: string, fresh?: boolean) => void;
+  /** Ask the Hub for the Channels of a window's messages that nobody here knows. */
+  resolveMessageChannels?: (spaceId: string, details: ChannelCatalogChangeDetail[]) => void;
 }): void {
   const { client, spaceId, prefix, countsKey, detail } = input;
   client.removeQueries({ queryKey: prefix,
@@ -120,25 +169,8 @@ export function refreshSpaceCatalogForEvent(input: {
     return;
   }
 
-  // A message in a Channel the loaded page already shows only moves that row.
-  // The socket already delivered the message. Refetching every flat page would
-  // repeat GET /channels/page once per message.
   if (detail?.kind === "message" && detail.channelId) {
-    const channelId = detail.channelId;
-    const catalogQueries = client.getQueryCache().findAll({ queryKey: prefix })
-      .filter((query) => query.queryKey[5] === "catalog");
-    let refetch = false;
-    for (const query of catalogQueries) {
-      const data = query.state.data as InfiniteData<ChannelCatalogPage, unknown> | undefined;
-      const flat = query.queryKey[6] === "flat";
-      if (data && promoteCatalogChannel(client, query.queryKey, data, channelId, detail.at)) continue;
-      if (flat) {
-        void client.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: "all" });
-        refetch = true;
-      }
-    }
-    if (refetch) void client.invalidateQueries({ queryKey: countsKey, exact: true });
-    if (!input.hasChannel(channelId)) input.resolveChannel(spaceId, channelId);
+    refreshSpaceCatalogForMessages({ ...input, details: [detail] });
     return;
   }
 
@@ -208,39 +240,128 @@ export function coalesceCatalogChanges(
   ];
 }
 
+type CatalogData = InfiniteData<ChannelCatalogPage, unknown>;
+
+/**
+ * `data` with the Channel's row first and no later than `at`; `data` itself
+ * when the row already stands there; undefined when no loaded page holds it.
+ * Pages keep their cursors and are not refilled.
+ */
+function withChannelPromoted(data: CatalogData, channelId: string, at: string | undefined): CatalogData | undefined {
+  let found: ChannelCatalogPageRow | undefined;
+  for (const page of data.pages) {
+    const row = page.rows.find((item) => item.channel.id === channelId);
+    if (row) found = row;
+  }
+  if (!found || data.pages.length === 0) return undefined;
+  if (at && found.ownActivityAt && at < found.ownActivityAt) return data;
+  const nextRow = at && at !== found.ownActivityAt ? { ...found, ownActivityAt: at } : found;
+  if (data.pages[0]?.rows[0]?.channel.id === channelId && nextRow === found) return data;
+  return withRowFirst(data, nextRow);
+}
+
+function withRowFirst(data: CatalogData, row: ChannelCatalogPageRow): CatalogData {
+  const pages = data.pages.map((page) => ({
+    ...page,
+    rows: page.rows.filter((item) => item.channel.id !== row.channel.id),
+  }));
+  const first = pages[0]!;
+  pages[0] = { ...first, rows: [row, ...first.rows] };
+  return { ...data, pages };
+}
+
+/** The one list every conversation of the reader's is in: flat, unfiltered, unscoped, unsearched. */
+function isConversationList(queryKey: QueryKey): boolean {
+  return queryKey[6] === "flat" && queryKey[7] === "all" && (queryKey[8] ?? null) === null && (queryKey[9] ?? "") === "";
+}
+
+/**
+ * Whether `channel` is in the Space's conversation list as the Hub selects it
+ * (packages/db channel-catalog `viewSql`): every Channel the reader may read,
+ * except an intake conversation somebody else started. The entity table holds
+ * only Channels the Hub has shown this reader.
+ */
+function inConversationList(channel: SerializedChannel, spaceId: string, viewerId: string | undefined): boolean {
+  if (channel.spaceId !== spaceId) return false;
+  const intakeOf = channel.metadata?.intakeOf;
+  if (intakeOf === undefined || intakeOf === null) return true;
+  return typeof intakeOf === "string" && viewerId !== undefined && intakeOf === viewerId;
+}
+
+/**
+ * Brings one Space's cached lists in line with a window's messages.
+ *
+ * The socket already delivered each message, so a list that holds its
+ * Channel's row only moves that row. The conversation list also takes the row
+ * of a Channel it has not paged in yet: the reader may read it, it has just
+ * become the most recently active, and that is where the Hub would list it.
+ * A Channel nobody here knows is first resolved for this reader by the Hub,
+ * all of a window's in one request, and joins the conversation list with the
+ * answer (`known`). Every other list that lacks a Channel is read again, once
+ * however many of the window's messages it lacks.
+ */
+export function refreshSpaceCatalogForMessages(input: {
+  client: QueryClient;
+  spaceId: string;
+  prefix: QueryKey;
+  countsKey: QueryKey;
+  details: readonly ChannelCatalogChangeDetail[];
+  hasChannel: (channelId: string) => boolean;
+  channel?: (channelId: string) => SerializedChannel | undefined;
+  viewerId?: string;
+  resolveChannel: (spaceId: string, channelId: string, fresh?: boolean) => void;
+  resolveMessageChannels?: (spaceId: string, details: ChannelCatalogChangeDetail[]) => void;
+}): void {
+  const { client, spaceId, prefix, countsKey } = input;
+  const messages = input.details.filter((detail) => detail.kind === "message" && detail.channelId);
+  if (messages.length === 0) return;
+  const unknown = messages.filter((detail) => !input.hasChannel(detail.channelId!));
+  // With no batch reader, an unknown Channel's lists are read again as before.
+  const awaited = new Set(input.resolveMessageChannels ? unknown.map((detail) => detail.channelId!) : []);
+  client.removeQueries({ queryKey: prefix,
+    predicate: (query) => query.queryKey[5] === "child-prefetch" });
+  const catalogQueries = client.getQueryCache().findAll({ queryKey: prefix })
+    .filter((query) => query.queryKey[5] === "catalog");
+  let refetch = false;
+  for (const query of catalogQueries) {
+    const held = query.state.data as CatalogData | undefined;
+    const flat = query.queryKey[6] === "flat";
+    const conversations = isConversationList(query.queryKey);
+    let data = held;
+    let lacking = false;
+    for (const detail of messages) {
+      const channelId = detail.channelId!;
+      const promoted = data && withChannelPromoted(data, channelId, detail.at);
+      if (promoted) {
+        data = promoted;
+        continue;
+      }
+      const channel = conversations && data?.pages.length ? input.channel?.(channelId) : undefined;
+      if (data && channel && inConversationList(channel, spaceId, input.viewerId)) {
+        data = withRowFirst(data, {
+          channel,
+          ownActivityAt: detail.at ?? channel.lastMessage?.sentAt ?? channel.updatedAt,
+        });
+      } else if (flat && !(conversations && data?.pages.length && awaited.has(channelId))) lacking = true;
+    }
+    if (data && data !== held) client.setQueryData(query.queryKey, data);
+    if (lacking) {
+      void client.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: "all" });
+      refetch = true;
+    }
+  }
+  if (refetch) void client.invalidateQueries({ queryKey: countsKey, exact: true });
+  if (unknown.length === 0) return;
+  if (input.resolveMessageChannels) input.resolveMessageChannels(spaceId, unknown);
+  else for (const detail of unknown) input.resolveChannel(spaceId, detail.channelId!);
+}
+
 /**
  * Applies catalog changes at most once per window per Space: the first change
  * refreshes at once, the rest of the window is merged into one refresh at its
  * end. A Space with many working Agents would otherwise cancel and restart its
  * catalog read on every change and never finish one.
  */
-function promoteCatalogChannel(
-  client: QueryClient,
-  queryKey: QueryKey,
-  data: InfiniteData<ChannelCatalogPage, unknown>,
-  channelId: string,
-  at: string | undefined,
-): boolean {
-  let found: ChannelCatalogPageRow | undefined;
-  for (const page of data.pages) {
-    const row = page.rows.find((item) => item.channel.id === channelId);
-    if (row) found = row;
-  }
-  if (!found || data.pages.length === 0) return false;
-  if (at && found.ownActivityAt && at < found.ownActivityAt) return true;
-  const nextRow = at && at !== found.ownActivityAt ? { ...found, ownActivityAt: at } : found;
-  const alreadyFirst = data.pages[0]?.rows[0]?.channel.id === channelId && nextRow === found;
-  if (alreadyFirst) return true;
-  const pages = data.pages.map((page) => ({
-    ...page,
-    rows: page.rows.filter((row) => row.channel.id !== channelId),
-  }));
-  const first = pages[0]!;
-  pages[0] = { ...first, rows: [nextRow, ...first.rows] };
-  client.setQueryData(queryKey, { ...data, pages });
-  return true;
-}
-
 export function createCatalogRefreshThrottle(
   apply: (spaceId: string, details: ChannelCatalogChangeDetail[]) => void,
   windowMs = CATALOG_REFRESH_WINDOW_MS,

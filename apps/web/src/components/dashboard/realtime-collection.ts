@@ -53,6 +53,13 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
       if (liveChanged) for (const notify of liveListeners) notify();
       if (catalogChanged) for (const notify of catalogListeners) notify();
     },
+    /** Brings the catalog up to the live projection: what its readers have not been told yet. */
+    promote() {
+      if (catalog === live) return;
+      catalog = live;
+      catalogById = byId;
+      for (const notify of catalogListeners) notify();
+    },
   };
 }
 

@@ -1,6 +1,7 @@
 "use client";
 import { channelEventViews } from "./workspace-shell-presence";
 import type { ChannelEventView } from "./realtime-channels";
+import { channelAfterMessage } from "./channel-message-summary";
 import { createRealtimeCollection } from "./realtime-collection";
 import { useMachineDaemonLoad } from "./use-machine-daemon-load";
 
@@ -158,6 +159,7 @@ import {
   isOwnChannelMessage,
   isThreadChannel,
   isTimelineNearBottom,
+  metadataString,
   isValidChannelMessage,
   latestChannelMentionTimestampMs,
   latestHistoryEntry,
@@ -178,6 +180,7 @@ import {
   replaceAgents,
   sameChannelCatalogState,
   replaceBrowserPath,
+  placeChannel,
   replaceChannel,
   replaceSpace,
   resolveSelectedChannelIdAfterChannelListChange,
@@ -870,10 +873,29 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     authorizeHistoryRender, bumpHistoryCacheRevision, clearChannelHistory, syncChannelSummaryFromHistory,
   });
 
+  /* What is on screen reads the cache for the open conversation, its threads
+     (their counts under the root rows) and, in a thread, its parent. A cached
+     history nothing shows must not re-render the shell: with many Agents
+     posting, that was one render of everything per message anywhere. */
+  const historyCacheIsShown = useCallback((channelId: string): boolean => {
+    const selectedId = selectedChannelIdRef.current;
+    if (!selectedId) return false;
+    if (channelId === selectedId) return true;
+    const channel = realtimeChannels.get(channelId);
+    // Not known yet: no row of the open conversation can name it. The catalog
+    // change that brings it takes the cache as it is then.
+    if (!channel) return false;
+    if (isThreadChannel(channel)) return metadataString(channel.metadata, "threadRootChannelId") === selectedId;
+    const selected = realtimeChannels.get(selectedId);
+    return !selected || metadataString(selected.metadata, "threadRootChannelId") === channelId;
+  }, [realtimeChannels]);
+
   const rememberChannelHistory = useCallback((
     channelId: string,
     messages: ChannelMessage[],
-    nextHasOlderMessages = historyCacheRef.current.get(channelId)?.hasOlderMessages || false
+    nextHasOlderMessages = historyCacheRef.current.get(channelId)?.hasOlderMessages || false,
+    // An arriving message writes its Channel's line itself, once.
+    summarize = true,
   ) => {
     const channelMessages = sortChannelHistory(filterHistoryForChannel(channelId, messages));
     historyCacheRef.current.set(channelId, {
@@ -882,15 +904,16 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       cachedAt: Date.now(),
     });
     compactChannelHistoryCacheInPlace(historyCacheRef.current);
-    bumpHistoryCacheRevision();
-    syncChannelSummaryFromHistory(channelId, channelMessages);
+    if (historyCacheIsShown(channelId)) bumpHistoryCacheRevision();
+    if (summarize) syncChannelSummaryFromHistory(channelId, channelMessages);
     scheduleProductTailCachePersist(channelId);
-  }, [bumpHistoryCacheRevision, scheduleProductTailCachePersist, syncChannelSummaryFromHistory]);
+  }, [bumpHistoryCacheRevision, historyCacheIsShown, scheduleProductTailCachePersist, syncChannelSummaryFromHistory]);
 
   const commitChannelHistory = useCallback((
     channelId: string,
     messages: ChannelMessage[],
     nextHasOlderMessages: boolean,
+    summarize = true,
   ) => {
     const channelMessages = sortChannelHistory(filterHistoryForChannel(channelId, messages));
     // A later empty refresh must not replace a focus page that already
@@ -904,7 +927,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     ) {
       return historyRef.current;
     }
-    rememberChannelHistory(channelId, channelMessages, nextHasOlderMessages);
+    rememberChannelHistory(channelId, channelMessages, nextHasOlderMessages, summarize);
     if (
       selectedChannelIdRef.current !== channelId ||
       historyChannelIdRef.current !== channelId
@@ -939,12 +962,14 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     channelId: string,
     incoming: ChannelMessage[],
     nextHasOlderMessages?: boolean,
+    summarize = true,
   ) => {
     const held = heldChannelWindow(channelId, true);
     return commitChannelHistory(
       channelId,
       mergeChannelHistory(channelId, held.messages, incoming),
       nextHasOlderMessages ?? held.hasOlder,
+      summarize,
     );
   }, [commitChannelHistory, heldChannelWindow]);
 
@@ -1844,7 +1869,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               );
             }
           }
-          mergeAndRememberChannelHistory(entry.channelId, [entry]);
+          const merged = mergeAndRememberChannelHistory(entry.channelId, [entry], undefined, false);
           if (message.notification?.attention) {
             setChannels((current) => updateChannelReadState(current, entry.channelId, {
               attention: message.notification!.attention,
@@ -1872,37 +1897,31 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               queueChannelTimelineScroll(entry.channelId);
             }
           }
-          setChannels((current) =>
-            sortChannels(
-              current.map((channel) => {
-                if (channel.id !== entry.channelId) return channel;
-                const nextCount = entry.sequence
-                  ? Math.max(channel.messageCount || 0, entry.sequence)
-                  : (channel.messageCount || 0) + 1;
-                // An activity entry needs no reading: a reader who was caught
-                // up before it stays caught up, as the catalog also derives
-                // (docs/design/conversation-activity.md §3.2).
-                const stillRead = channelActivityOf(entry.metadata) !== undefined &&
-                  channel.readSequence !== undefined &&
-                  channel.readSequence >= (channel.messageCount || 0);
-                return patchChannelAgentPresenceFromMessage({
-                  ...channel,
-                  messageCount: nextCount,
-                  ...(stillRead ? { readSequence: nextCount } : {}),
-                  historyHeadSequence: entry.sequence
-                    ? Math.max(channel.historyHeadSequence || 0, entry.sequence)
-                    : channel.historyHeadSequence,
-                  updatedAt: entry.sentAt,
-                  lastMessage: channelLastMessagePreviewFromEntry(entry) ?? channel.lastMessage,
-                }, entry);
-              })
-            )
-          );
+          /* The message's Channel moves in the list; no other Channel is
+             touched or sorted again. The open conversation's readers hear it
+             now. For any other, the rows that show it do, and the shell is
+             told when the catalog window below reorders the list, instead of
+             once per message (use-channel-catalog-paging.ts). */
+          const arrival = {
+            entry,
+            preview: channelLastMessagePreviewFromEntry(entry),
+            known: alreadyCached,
+            historyCount: historyMessageCountEstimate(merged),
+            activity: channelActivityOf(entry.metadata) !== undefined,
+          };
+          setChannels((current) => {
+            const index = current.findIndex((channel) => channel.id === entry.channelId);
+            if (index < 0) return current;
+            const summarized = channelAfterMessage(current[index]!, arrival);
+            // A replay says nothing new about its sender either.
+            const next = alreadyCached ? summarized : patchChannelAgentPresenceFromMessage(summarized, entry);
+            return next === current[index] ? current : placeChannel(current, index, next);
+          }, selected ? "catalog" : "live");
           window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
             detail: {
               kind: "message",
               channelId: entry.channelId,
-              spaceId: channelsRef.current.find((channel) => channel.id === entry.channelId)?.spaceId,
+              spaceId: realtimeChannels.get(entry.channelId)?.spaceId,
               at: entry.sentAt,
             },
           }));

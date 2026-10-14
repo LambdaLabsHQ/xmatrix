@@ -2040,14 +2040,19 @@ export function replaceChannel(channels: SerializedChannel[], channel: Serialize
   const index = channels.findIndex((current) => current.id === channel.id);
   const merged = mergeChannelListHydratedFields(index >= 0 ? channels[index] : undefined, channel);
   if (index < 0) return sortChannels([...channels, merged]);
+  return placeChannel(channels, index, merged);
+}
+
+/** `channels` with the one at `index` replaced, sorted again only when it left its place. */
+export function placeChannel(channels: SerializedChannel[], index: number, channel: SerializedChannel): SerializedChannel[] {
   const next = channels.slice();
-  next[index] = merged;
+  next[index] = channel;
   // Most replacements (presence, read state, topic) leave a Channel where it
   // sorts; re-sorting a thousand Channels per realtime frame is what costs.
   const before = next[index - 1];
   const after = next[index + 1];
-  const stillSorted = (!before || compareChannelsForSidebar(before, merged) <= 0) &&
-    (!after || compareChannelsForSidebar(merged, after) <= 0);
+  const stillSorted = (!before || compareChannelsForSidebar(before, channel) <= 0) &&
+    (!after || compareChannelsForSidebar(channel, after) <= 0);
   return stillSorted ? next : sortChannels(next);
 }
 
