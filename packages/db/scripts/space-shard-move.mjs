@@ -84,6 +84,7 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
   "run_agent_registrations",
   // An approval lets one Run read a secret; it stays with the Runs.
   "run_secret_approvals",
+  "app_gmail_routes",
   "app_connector_action_requests",
   "app_connector_action_policies",
   "app_connector_connections",
@@ -140,6 +141,7 @@ export const GLOBAL_DATA_TABLES = Object.freeze([
   "app_wecom_suite_tickets",
   "app_wecom_company_lifecycle",
   "app_wecom_suite_tokens",
+  "app_gmail_notifications",
   "app_sentry_event_jobs",
   "app_sentry_event_receipts",
   "agent_registrations",
@@ -164,6 +166,7 @@ const BLOCKER_QUERIES = Object.freeze({
   channel_transfer_proposals: "space_id = $1 OR target_space_id = $1",
   agent_launches: "space_id = $1",
   agent_reborn_intents: "space_id = $1",
+  app_gmail_routes: "space_id = $1",
   app_connector_action_requests: "space_id = $1",
   app_connector_action_policies: "space_id = $1",
   app_connector_connections: "space_id = $1",

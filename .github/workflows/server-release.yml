@@ -241,6 +241,12 @@ jobs:
           # Gmail signs in through Composio: its client id is the Composio auth config id.
           CONNECTOR_COMPOSIO_API_KEY: ${{ secrets.CONNECTOR_COMPOSIO_API_KEY }}
           CONNECTOR_GMAIL_CLIENT_ID: ${{ secrets.CONNECTOR_GMAIL_CLIENT_ID }}
+          GMAIL_WATCH_CLIENT_ID: ${{ secrets.GMAIL_WATCH_CLIENT_ID }}
+          GMAIL_WATCH_CLIENT_SECRET: ${{ secrets.GMAIL_WATCH_CLIENT_SECRET }}
+          GMAIL_WATCH_TOPIC: ${{ secrets.GMAIL_WATCH_TOPIC }}
+          GMAIL_WATCH_PUSH_EMAIL: ${{ secrets.GMAIL_WATCH_PUSH_EMAIL }}
+          GMAIL_WATCH_PUSH_AUDIENCE: ${{ secrets.GMAIL_WATCH_PUSH_AUDIENCE }}
+          GMAIL_WATCH_SUBSCRIPTION: ${{ secrets.GMAIL_WATCH_SUBSCRIPTION }}
           CONNECTOR_GOOGLE_PICKER_API_KEY: ${{ secrets.CONNECTOR_GOOGLE_PICKER_API_KEY }}
           CONNECTOR_GOOGLE_PICKER_APP_ID: ${{ secrets.CONNECTOR_GOOGLE_PICKER_APP_ID }}
           CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON: ${{ secrets.CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON }}
@@ -314,6 +320,13 @@ jobs:
                 !/^price_[A-Za-z0-9]+$/.test(payload.STRIPE_PRO_ANNUAL_PRICE_ID)) {
               throw new Error("Invalid live production billing configuration");
             }
+          }
+          const gmailWatchKeys = ["GMAIL_WATCH_CLIENT_ID","GMAIL_WATCH_CLIENT_SECRET","GMAIL_WATCH_TOPIC",
+            "GMAIL_WATCH_PUSH_EMAIL","GMAIL_WATCH_PUSH_AUDIENCE","GMAIL_WATCH_SUBSCRIPTION"];
+          if (gmailWatchKeys.some(key => process.env[key])) {
+            const file = require("node:path").join(process.env.GITHUB_WORKSPACE || process.cwd(), "packages/protocol/dist/gmail-watch-config.js");
+            require(file).parseGmailWatchConfig(process.env);
+            for (const key of gmailWatchKeys) payload[key] = process.env[key];
           }
           // Each optional registered application rotates as a complete pair.
           // Unregistered providers preserve their existing Worker settings.
