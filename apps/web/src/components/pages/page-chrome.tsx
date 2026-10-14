@@ -129,26 +129,29 @@ export function PageOffscreenPeople({ above, below, onJump }: {
 export interface PagePen { person: PresentPerson; top: number; away: "above" | "below" | null }
 
 /**
- * On a phone, each Agent on the page is its face in the left margin, beside the line its pen is at, as
- * Paper and Quip name who is on a line (§3.2). The face travels with the text, and when the line is
- * scrolled out of view it stays at the top or bottom of the margin, pointing the way; a tap goes back.
+ * On a phone, each Agent on the page is its face at the right edge beside the line its pen is at, where
+ * Google Docs keeps what others do to the text (§3.2). The face travels with the text, and when the line
+ * is scrolled out of view it waits at the top or bottom of the edge, pointing the way. A tap on a face
+ * that is away goes back to its line; on one beside its line, it opens what the Agent is doing.
  */
-export function PagePens({ pens, onJump }: { pens: PagePen[]; onJump: (person: PresentPerson) => void }) {
+export function PagePens({ pens, onJump, onOpen }: {
+  pens: PagePen[]; onJump: (person: PresentPerson) => void; onOpen: (person: PresentPerson) => void;
+}) {
   if (pens.length === 0) return null;
   return (
-    <div className="page-pens pointer-events-none absolute inset-y-0 -left-6 w-6" data-testid="page-pens">
+    <div className="page-pens pointer-events-none absolute inset-y-0 -right-6 w-8" data-testid="page-pens">
       {pens.map(({ person, top, away }) => {
         const Chevron = away === "above" ? ChevronUp : ChevronDown;
         return (
           // A spacer, not a margin, sets the line: a sticky face may not leave its own margin box.
           <div key={person.key} className="absolute inset-0">
             <div style={{ height: Math.max(0, top) }} />
-            <button type="button" onClick={() => onJump(person)} data-away={away ?? undefined}
-              className={cn("page-pen pointer-events-auto", person.idle && "is-idle")}
+            <button type="button" onClick={() => (away ? onJump(person) : onOpen(person))} data-away={away ?? undefined}
+              className={cn("page-pen pointer-events-auto", person.idle && "is-idle", person.editing && "is-writing")}
               aria-label={`${person.name} is ${person.editing ? "writing" : "here"}${away ? `, ${away}` : ""}`}
               title={`${person.name} · ${person.detail}`}>
               <IdentityAvatar kind="agent" label={person.name} imageUrl={person.avatarUrl}
-                initials={person.avatarUrl ? avatarInitials(person.name) : undefined} size="xs" shape="circle"
+                initials={person.avatarUrl ? avatarInitials(person.name) : undefined} size="sm" shape="circle"
                 className="page-pen-face pointer-events-none rounded-full" />
               {away && <Chevron className="page-pen-way" aria-hidden="true" strokeWidth={2.5} />}
             </button>

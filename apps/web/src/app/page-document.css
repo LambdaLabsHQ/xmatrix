@@ -557,34 +557,29 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   box-shadow: inset 0 0 0 1.5px currentColor;
 }
 
-/* The Agent a page is written with, on a phone: a wood button of the same stock and cast as the app's
-   other floating button, carrying the Agent's own face. Wood carries only glass, so the face keeps its
-   glass disc and nothing else is laid on the plank but the small ink "+" that says it calls. */
-.xmatrix-app.xmatrix-app.xmatrix-app .page-agent-button.page-agent-button {
-  padding: 0;
-  border: 0;
-  overflow: visible;
-  color: oklch(0.2 0.04 58);
-  @apply app-wood-panel-recipe;
-  box-shadow: var(--app-wood-plank-cast);
+/* The Agent a page is written with, on a phone: its own face on its glass disc, floating at the right
+   edge where Agents on the page show; the small ink "+" says a tap calls it. */
+.page-agent-button {
   -webkit-tap-highlight-color: transparent;
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.xmatrix-app .page-agent-button:active { transform: scale(0.94); }
+.page-agent-button:active { transform: scale(0.94); }
+.page-agent-button .identity-avatar-face { box-shadow: 0 10px 24px -10px oklch(0 0 0 / 0.45); }
 .page-agent-button-add {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
+  right: 0;
+  bottom: 0;
   display: grid;
   place-items: center;
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 999px;
-  background: oklch(0.2 0.04 58);
-  color: oklch(0.97 0.01 85);
+  background: var(--foreground);
+  color: var(--background);
+  box-shadow: 0 0 0 2px var(--background);
 }
 
-/* Where the Agent's pen is, when the reader has scrolled away from it. Its dots run only while it writes. */
+/* An Agent just called, while its Run starts: the dots run until it is on the page. */
 .page-writer-dots { display: inline-flex; gap: 2px; }
 .page-writer-dots i {
   width: 4px;
@@ -603,9 +598,9 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   .page-writer-dots i { animation: none; opacity: 0.7; }
 }
 
-/* An Agent's face in the left margin beside the line its pen is at, on a phone. Sticky both ways, so the
+/* An Agent's face at the right edge beside the line its pen is at, on a phone. Sticky both ways, so the
    page's own scroll is all that moves it: it rides with its line, and waits at the top or bottom of the
-   margin, clear of the button and capsule there, while the line is out of view, a chevron pointing to it. */
+   edge, clear of the capsule there, while the line is out of view, a chevron pointing to it. */
 .page-pen {
   position: sticky;
   top: 12px;
@@ -613,11 +608,16 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   bottom: 52px;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 22px;
+  width: 32px;
+  height: 28px;
+  margin-top: -3px;
   -webkit-tap-highlight-color: transparent;
 }
-.page-pen .page-pen-face .identity-avatar-face { width: 20px; height: 20px; }
+.page-pen .page-pen-face .identity-avatar-face {
+  width: 28px;
+  height: 28px;
+  box-shadow: 0 4px 12px -4px oklch(0 0 0 / 0.35);
+}
 .page-pen.is-idle .page-pen-face { opacity: 0.5; }
 .page-pen-way {
   position: absolute;
@@ -627,8 +627,8 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   margin-left: -6px;
   color: var(--foreground);
 }
-.page-pen[data-away="above"] .page-pen-way { top: -12px; }
-.page-pen[data-away="below"] .page-pen-way { bottom: -12px; }
+.page-pen[data-away="above"] .page-pen-way { top: -13px; }
+.page-pen[data-away="below"] .page-pen-way { bottom: -13px; }
 
 /* Calling an Agent to write: the field is a well in the glass panel, rounded like the chips beside it;
    the text box inside it draws nothing of its own. */

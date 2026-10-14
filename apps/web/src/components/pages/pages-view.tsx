@@ -32,7 +32,7 @@ import {
   ConversationList, DeletePageDialog, PageDialog, PageHistory, PagePens, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin } from "./page-margin";
-import { PagePhoneDock, type DockWriter } from "./page-phone-dock";
+import { PagePhoneDock } from "./page-phone-dock";
 import { PageReaderChangesBar } from "./page-reader-changes-bar";
 import { PageWriteWith } from "./page-write-with";
 import { usePageWriters } from "./page-writers";
@@ -462,7 +462,8 @@ type PageDialogState =
   | "delete"
   | { kind: "conversations"; blockId: string | null }
   | { kind: "attach"; blockId: string }
-  | { kind: "write"; blockId: string | null };
+  | { kind: "write" }
+  | { kind: "agent"; key: string };
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
   renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
@@ -1027,21 +1028,27 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       throw cause;
     }
   };
-  // Writing with an Agent: a conversation of its own, linked to the page or section, whose first message
-  // calls the chosen runtime. The page stays open, and the Agent's cursor shows where it writes.
-  const writeWith = async (prompt: string, blockId: string | null) => {
-    const harness = writers.favourite;
-    if (!page || !harness) return;
+  // Co-writing with an Agent: a conversation of its own, linked to the page or a section, whose first
+  // message calls the chosen runtime to infer what the page needs and write it. The page stays open,
+  // and the Agent shows at the right edge beside the line it writes.
+  const coWrite = async (harness: string, blockId: string | null) => {
+    if (!page) return;
+    writers.choose(harness);
+    const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
     const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
-    const firstMessage = `@${harness} launch:force ${prompt}\n\nWe're writing ${where} together: I have it open and ` +
-      "see each edit land. Read it with `xmatrix page read` and write in it with `xmatrix page edit`, a section at a " +
-      "time so I can follow, then tell me here what you did or what you need from me.";
-    const conversationId = await onDiscuss({ spaceId, pageId: page.pageId, blockId: blockId ?? "", restricted,
-      name: `Write: ${prompt.slice(0, 60)}`, firstMessage, open: false });
-    if (typeof conversationId === "string") {
-      setCalled({ pageId: page.pageId, harness, conversationId, blockId, at: Date.now() });
+    const firstMessage = `@${harness} launch:force Co-write ${where} with me. I have it open and see each edit ` +
+      "land. Read it with `xmatrix page read`, decide what it most needs next, and write that with " +
+      "`xmatrix page edit`, a section at a time; then say here in a line what you wrote.";
+    try {
+      const conversationId = await onDiscuss({ spaceId, pageId: page.pageId, blockId: blockId ?? "", restricted,
+        name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false });
+      if (typeof conversationId === "string") {
+        setCalled({ pageId: page.pageId, harness, conversationId, blockId, at: Date.now() });
+      }
+      void links.refetch();
+    } catch (cause) {
+      setNotice(userErrorMessage(cause, "Couldn't start the Agent"));
     }
-    void links.refetch();
   };
   const claim = (blockId: string) => (claimable(blockId) ? void claimBlock(blockId)
     : setNotice("Someone is already on this section."));
@@ -1071,8 +1078,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     attach: (blockId: string) => setDialog({ kind: "attach", blockId }),
     showConversations: (blockId) => setDialog({ kind: "conversations", blockId }),
     phone,
-    ...(writers.favourite ? { write: { label: `Write with ${writers.favourite}`,
-      run: (blockId: string) => setDialog({ kind: "write", blockId }) } } : {}),
+    ...(writers.favourite ? { write: { label: `Co-write with ${writers.favourite}`,
+      run: (blockId: string) => void coWrite(writers.favourite!, blockId) } } : {}),
   };
   const whereDetail = (activity: string, blockId: string, conversationId: string | null | undefined) => {
     const section = blocks.find((block) => block.id === blockId)?.title;
@@ -1146,21 +1153,20 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     });
   })();
   const penned = new Set(pens.map((pen) => pen.person.key));
-  // The Agent the page's button is: the one writing, else the one on the page, else the one just called.
-  const writer = ((): (DockWriter & { conversationId: string | null }) | null => {
-    if (!phone || mode !== "page" || !drawn) return null;
-    const person = people.find((entry) => entry.agent && entry.editing && !entry.idle)
-      ?? people.find((entry) => entry.agent && !entry.idle);
-    if (person) {
-      return { conversationId: person.conversationId ?? null,
-        agent: { name: person.name, ...(person.avatarUrl ? { avatarUrl: person.avatarUrl } : {}) } };
+  // The page's button: the face of the Agent the reader co-writes with, while no Agent is on the page;
+  // an Agent just called shows there, starting, until it is on the page beside its line.
+  const caller = ((): { agent: { name: string; avatarUrl?: string }; starting: boolean } | null => {
+    if (!phone || mode !== "page" || !drawn || !canEdit || people.some((person) => person.agent && !person.idle)) return null;
+    if (called && called.pageId === pageId) {
+      const avatarUrl = writers.agents.find((agent) => agent.harness === called.harness)?.avatarUrl;
+      return { agent: { name: called.harness, ...(avatarUrl ? { avatarUrl } : {}) }, starting: true };
     }
-    // Called and not on the page yet: its face is on the button while its Run starts.
-    if (!called || called.pageId !== pageId) return null;
-    const avatarUrl = writers.agents.find((agent) => agent.harness === called.harness)?.avatarUrl;
-    return { conversationId: called.conversationId, starting: true,
-      agent: { name: called.harness, ...(avatarUrl ? { avatarUrl } : {}) } };
+    const favourite = writers.agents[0];
+    return favourite ? { agent: { name: favourite.harness, ...(favourite.avatarUrl ? { avatarUrl: favourite.avatarUrl } : {}) },
+      starting: false } : null;
   })();
+  const tapped = dialog && typeof dialog === "object" && dialog.kind === "agent"
+    ? people.find((person) => person.key === dialog.key) ?? null : null;
   const offscreen = ((): { above: OffscreenPerson[]; below: OffscreenPerson[] } => {
     const above: OffscreenPerson[] = [];
     const below: OffscreenPerson[] = [];
@@ -1203,7 +1209,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return marks;
   })();
   const listSection = dialog && typeof dialog === "object" && dialog.kind === "conversations" ? dialog : null;
-  const writeTarget = dialog && typeof dialog === "object" && dialog.kind === "write" ? dialog : null;
 
   const hasChildren = pages.some((item) => item.parentPageId === pageId);
   const removePage = async () => {
@@ -1223,11 +1228,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       {/* On a phone an Agent is its face in the margin and on the page's button; the stack names the people. */}
       <PresenceStack people={phone ? people.filter((person) => !person.agent) : people} onFollow={jumpTo} />
       {!phone && canEdit && writers.agents[0] && (
-        <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "write", blockId: null })}
-          title={`Write with ${writers.agents[0].harness}`}>
+        <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "write" })}
+          title={`Co-write with ${writers.agents[0].harness}`}>
           <IdentityAvatar kind="agent" label={writers.agents[0].harness} imageUrl={writers.agents[0].avatarUrl} size="xs"
             shape="circle" glass={false} className="pointer-events-none rounded-full" />
-          Write with {writers.agents[0].harness}
+          Co-write
         </Button>
       )}
       <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "conversations", blockId: null })}
@@ -1296,7 +1301,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             ) : (
               <div className="flex gap-6">
                 <div ref={docColumn} className="relative min-w-0 max-w-3xl flex-1">
-                  <PagePens pens={pens} onJump={jumpTo} />
+                  <PagePens pens={pens} onJump={jumpTo} onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
                   {!drawn && document.data && (
                     // Where the editor's host holds its height.
                     <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
@@ -1342,22 +1347,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         </article>
       </div>
       {phone && mode === "page" && drawn && (
-        <PagePhoneDock writer={writer}
-          caller={canEdit && writers.agents[0] ? { name: writers.agents[0].harness,
-            ...(writers.agents[0].avatarUrl ? { avatarUrl: writers.agents[0].avatarUrl } : {}) } : null}
-          onCall={() => setDialog({ kind: "write", blockId: null })}
-          onTalk={() => writer?.conversationId && openConversation(writer.conversationId)}
+        <PagePhoneDock caller={caller?.agent ?? null} starting={caller?.starting ?? false}
+          onCall={() => setDialog({ kind: "write" })}
           review={phoneDiff ? <PageReaderChangesBar document={docColumn} changes={readerChanges ?? 0} onViewed={viewDiff} />
             : null} />
       )}
       {docked && renderConversation?.("dock")}
       {page && (
         <>
-          {writeTarget && writers.favourite && (
-            <PageWriteWith agents={writers.agents} chosen={writers.favourite} onChoose={writers.choose}
-              target={{ blockId: writeTarget.blockId,
-                section: writeTarget.blockId ? blocks.find((block) => block.id === writeTarget.blockId)?.title ?? null : null }}
-              onSend={(prompt) => writeWith(prompt, writeTarget.blockId)} onClose={() => setDialog(null)} />
+          {((dialog && typeof dialog === "object" && dialog.kind === "write") || tapped) && (
+            <PageWriteWith agents={writers.agents} onClose={() => setDialog(null)}
+              working={tapped ? { name: tapped.name, ...(tapped.avatarUrl ? { avatarUrl: tapped.avatarUrl } : {}),
+                doing: tapped.detail } : null}
+              onStart={(harness) => { setDialog(null); void coWrite(harness, null); }}
+              onOpenConversation={tapped?.conversationId
+                ? () => { setDialog(null); openConversation(tapped.conversationId!); } : null} />
           )}
           <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}
             onClose={() => setDialog(null)} onDelete={removePage} />

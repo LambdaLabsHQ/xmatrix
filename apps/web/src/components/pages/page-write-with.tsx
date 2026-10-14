@@ -1,114 +1,72 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp } from "lucide-react";
+import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
-import { isImeKeyDown } from "@/lib/ime-keydown";
-import { cn } from "@/lib/utils";
 
-/** An Agent the reader can call to write the page with them: a runtime of the Space, by its own face. */
+/** An Agent the reader can co-write the page with: a runtime of the Space, by its own face. */
 export interface WriteAgent { harness: string; avatarUrl?: string }
 
-/** Where the Agent is asked to write: the whole page, or one section of it. */
-export interface WriteTarget { blockId: string | null; section: string | null }
-
-/** How far the on-screen keyboard covers the bottom of the window, so what sits there stays above it. */
-function useKeyboardInset(): number {
-  const [inset, setInset] = useState(0);
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    const read = () => setInset(Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop));
-    read();
-    viewport.addEventListener("resize", read);
-    viewport.addEventListener("scroll", read);
-    return () => { viewport.removeEventListener("resize", read); viewport.removeEventListener("scroll", read); };
-  }, []);
-  return inset;
-}
+/** An Agent already on the page: who, and what it is doing. */
+export interface WritingAgent { name: string; avatarUrl?: string; doing: string }
 
 /**
- * Calling an Agent to write the page with you (pages-live-document.md §3.2): pick who, say what, and it
- * starts in a conversation of its own linked to the page while you stay on the page and watch it write.
- * Opens from the page's button, from a heading's menu, or on a wide screen from the header.
+ * Co-writing a page with an Agent (pages-live-document.md §3.2). The reader types only in the page:
+ * starting is one tap on the face of the Agent to write with, and the Agent infers the rest from the
+ * page. Tapping an Agent already on the page shows what it is doing, and the conversation it works from.
  */
-export function PageWriteWith({ agents, chosen, onChoose, target, onSend, onClose }: {
+export function PageWriteWith({ agents, working, onStart, onOpenConversation, onClose }: {
   agents: readonly WriteAgent[];
-  chosen: string;
-  onChoose: (harness: string) => void;
-  target: WriteTarget;
-  onSend: (prompt: string) => Promise<void>;
+  /** The Agent tapped on the page, or null to choose one to start with. */
+  working: WritingAgent | null;
+  onStart: (harness: string) => void;
+  onOpenConversation: (() => void) | null;
   onClose: () => void;
 }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
-  const keyboard = useKeyboardInset();
   useEffect(() => listenForOverlayDismissal((event) => {
     const where = event.target instanceof Node ? event.target : null;
     if (where && panel.current?.contains(where)) return;
     onClose();
   }, onClose), [onClose]);
-  const send = (prompt: string) => {
-    if (!prompt.trim() || busy) return;
-    setBusy(true);
-    setProblem(null);
-    void onSend(prompt.trim()).then(onClose, (cause: Error) => { setProblem(cause.message); setBusy(false); });
-  };
-  const starts = target.section
-    ? [{ label: "Write this section", prompt: `Write the ${target.section} section.` }]
-    : [{ label: "Keep writing", prompt: "Read the page and keep writing it: fill in what is missing, in its own voice." },
-      { label: "Tidy it up", prompt: "Tighten the wording and fix mistakes, without changing what it says." }];
 
   return createPortal(
-    <div ref={panel} className="xmatrix-app page-write-with fixed inset-x-3 z-[var(--z-popover)] mx-auto max-w-lg"
-      style={{ bottom: `calc(${keyboard}px + env(safe-area-inset-bottom) + 0.75rem)` }}>
-      <LiquidGlassCard as="form" aria-label={`Write with ${chosen}`} data-testid="page-write-with"
-        className="rounded-[28px] p-3 text-foreground"
-        onSubmit={(event) => { event.preventDefault(); send(text); }}>
-        <div role="radiogroup" aria-label="Agent" className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
-          {agents.map((agent) => {
-            const on = agent.harness === chosen;
-            return (
-              <button key={agent.harness} type="button" role="radio" aria-checked={on} onClick={() => onChoose(agent.harness)}
-                className={cn("flex h-9 shrink-0 items-center gap-1.5 rounded-full border-[1px] pl-1 pr-3 text-sm",
-                  on ? "border-foreground/45 bg-foreground/[0.06] font-semibold" : "border-foreground/10 text-muted-foreground")}>
-                <IdentityAvatar kind="agent" label={agent.harness} imageUrl={agent.avatarUrl} size="sm" shape="circle"
-                  glass={false} className="pointer-events-none size-7 rounded-full" />
-                {agent.harness}
+    <div ref={panel} className="xmatrix-app page-write-with fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-[var(--z-popover)] mx-auto max-w-lg">
+      <LiquidGlassCard aria-label={working ? working.name : "Co-write with"} data-testid="page-write-with"
+        className="rounded-[28px] px-3 pb-3 pt-2.5 text-foreground">
+        {working ? (
+          <div className="flex items-center gap-3">
+            <IdentityAvatar kind="agent" label={working.name} imageUrl={working.avatarUrl} size="md" shape="circle" glass={false}
+              initials={working.avatarUrl ? avatarInitials(working.name) : undefined} className="pointer-events-none rounded-full" />
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="truncate text-[15px] font-semibold">{working.name}</p>
+              <p className="truncate text-[13px] text-muted-foreground">{working.doing}</p>
+            </div>
+            {onOpenConversation && (
+              <button type="button" onClick={onOpenConversation}
+                className="h-10 shrink-0 rounded-full border-[1px] border-foreground/10 px-4 text-sm font-medium active:bg-foreground/[0.06]">
+                Conversation
               </button>
-            );
-          })}
-        </div>
-        <div className="mt-2 flex items-end gap-2">
-          <div className="page-write-field flex min-w-0 flex-1">
-            <textarea autoFocus rows={1} value={text} onChange={(event) => setText(event.target.value)}
-              aria-label={`What should ${chosen} write?`}
-              placeholder={target.section ? `What should ${chosen} write in ${target.section}?` : `What should ${chosen} write?`}
-              onKeyDown={(event) => {
-                if (isImeKeyDown(event.nativeEvent)) return;
-                if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(text); }
-              }}
-              className="max-h-32 min-h-11 min-w-0 flex-1 resize-none px-4 py-2.5 text-[16px] leading-6 [field-sizing:content] focus:outline-none" />
+            )}
           </div>
-          <button type="submit" aria-label="Send" disabled={!text.trim() || busy}
-            className="grid size-11 shrink-0 place-items-center rounded-full bg-foreground text-background disabled:opacity-30">
-            <ArrowUp className="size-5" />
-          </button>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {starts.map((start) => (
-            <button key={start.label} type="button" disabled={busy} onClick={() => send(start.prompt)}
-              className="h-9 rounded-full border-[1px] border-foreground/10 px-3.5 text-sm font-medium disabled:opacity-40">
-              {start.label}
-            </button>
-          ))}
-        </div>
-        {problem && <p role="alert" className="mt-2 px-1 text-sm text-destructive">{problem}</p>}
+        ) : (
+          <>
+            <p className="px-1 pb-2 text-[13px] font-medium text-muted-foreground">Co-write with</p>
+            <div className="flex gap-2 overflow-x-auto">
+              {agents.map((agent) => (
+                <button key={agent.harness} type="button" onClick={() => onStart(agent.harness)}
+                  className="flex w-[4.5rem] shrink-0 flex-col items-center gap-1.5 rounded-[20px] py-1.5 active:bg-foreground/[0.06]">
+                  <IdentityAvatar kind="agent" label={agent.harness} imageUrl={agent.avatarUrl} size="lg" shape="circle"
+                    glass={false} className="pointer-events-none rounded-full" />
+                  <span className="max-w-full truncate text-[13px] font-medium">{agent.harness}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </LiquidGlassCard>
     </div>,
     document.body,

@@ -411,11 +411,11 @@ test.describe("on a phone", () => {
       .toContain(3);
   });
 
-  test("the page's button calls the Agent its reader writes with, and the reader stays on the page", async ({ page: browser }) => {
+  test("co-writing starts with one tap on an Agent's face, and the reader stays on the page", async ({ page: browser }) => {
     await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
     await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
     await stubWriters(browser, ["claude", "codex"]);
-    const writing = { ...E2E_CHANNEL, id: "channel-write", name: "Write: the risks" };
+    const writing = { ...E2E_CHANNEL, id: "channel-write", name: "Co-writing Relay" };
     await stubPageConversation(browser, writing, { linkId: "l-write", blockId: "" });
     await fixtureJson(browser, "write-message", /\/api\/xmatrix\/channels\/channel-write\/messages$/u, { message: {} },
       { method: "POST" });
@@ -423,30 +423,30 @@ test.describe("on a phone", () => {
     await browser.getByRole("button", { name: /^Relay/u }).click();
     await expect(browser.getByTestId("page-editor")).toContainText("In progress");
 
+    // The page's button is the face of the Agent the reader writes with, on glass.
     const call = browser.getByRole("button", { name: "Write with claude" });
     await expect(call.locator("img")).toHaveAttribute("src", /claude\.svg/u);
     await call.click();
-    const panel = browser.getByTestId("page-write-with");
-    await panel.getByRole("radio", { name: "codex" }).click();
-    await expect(panel.getByRole("radio", { name: "codex" })).toHaveAttribute("aria-checked", "true");
-    await panel.getByLabel("What should codex write?").fill("Draft the risks");
-    await browser.keyboard.press("Enter");
+    // Nothing to type: the reader picks who, and the Agent infers what.
+    const picker = browser.getByTestId("page-write-with");
+    await expect(picker.locator("textarea, input")).toHaveCount(0);
+    await picker.getByRole("button", { name: "codex" }).click();
 
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
-      /^@codex launch:force Draft the risks\n\nWe're writing page:p-relay together/u);
+      /^@codex launch:force Co-write page:p-relay with me\./u);
     expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ conversationId: writing.id, pageId: "p-relay" });
-    // The reader stays on the page to watch it write; the button is the Agent now, starting.
-    await expect(panel).toBeHidden();
+    await expect(picker).toBeHidden();
     await expect(browser).not.toHaveURL(/conversation=/u);
-    await expect(browser.getByRole("button", { name: "codex is starting" })).toBeVisible();
-    await expect(browser.getByRole("button", { name: "Talk to codex" })).toBeVisible();
+    await expect(browser.getByRole("status")).toHaveText(/codex is starting/u);
+    // The one picked is the one the button offers next time.
+    expect(await browser.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
   });
 
-  test("a heading's actions are named in one menu, and Write with asks for that section", async ({ page: browser }) => {
+  test("a heading's actions are named in one menu, and Co-write starts on that section", async ({ page: browser }) => {
     await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
     await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
     await stubWriters(browser, ["claude"]);
-    const writing = { ...E2E_CHANNEL, id: "channel-write", name: "Write: status" };
+    const writing = { ...E2E_CHANNEL, id: "channel-write", name: "Co-writing Relay › Status" };
     await stubPageConversation(browser, writing, { linkId: "l-write", blockId: "status" });
     await fixtureJson(browser, "write-message", /\/api\/xmatrix\/channels\/channel-write\/messages$/u, { message: {} },
       { method: "POST" });
@@ -461,18 +461,17 @@ test.describe("on a phone", () => {
     await expect(status.getByRole("button", { name: "Copy a link to this section" })).toHaveCount(0);
     await status.getByRole("button", { name: "Actions for Status" }).click();
     const menu = browser.getByRole("menu", { name: "Actions for Status" });
-    await expect(menu.getByRole("menuitem")).toHaveText(["Write with claude", "Discuss", "Copy link", "Claim", "Schedule"]);
+    await expect(menu.getByRole("menuitem")).toHaveText(["Co-write with claude", "Discuss", "Copy link", "Claim", "Schedule"]);
     await browser.screenshot({ path: test.info().outputPath("pages-heading-menu-phone.png") });
 
-    await menu.getByRole("menuitem", { name: "Write with claude" }).click();
+    await menu.getByRole("menuitem", { name: "Co-write with claude" }).click();
     await expect(menu).toBeHidden();
-    await browser.getByTestId("page-write-with").getByRole("button", { name: "Write this section" }).click();
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
-      /^@claude launch:force Write the Status section\.\n\nWe're writing page:p-relay \(section #status\) together/u);
+      /^@claude launch:force Co-write page:p-relay \(section #status\) with me\./u);
     expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ blockId: "status" });
   });
 
-  test("an Agent writing out of view waits in the margin, pointing the way, and a tap goes to its line", async ({ page: browser }) => {
+  test("an Agent writing out of view waits at the right edge, pointing the way, and a tap goes to its line", async ({ page: browser }) => {
     const filler = Array.from({ length: 40 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
     const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
     const AGENT = 1_234_567;
@@ -496,16 +495,16 @@ test.describe("on a phone", () => {
     push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
       conversationId: E2E_CHANNEL.id }, activity: "editing", block: "notes" }, "shipping Friday"));
 
-    // Its face waits at the bottom of the margin, clear of the text, pointing down to its line.
+    // Its face waits at the bottom of the right edge, pointing down to its line.
     const pens = browser.getByTestId("page-pens");
     const away = pens.getByRole("button", { name: "claude:2 is writing, below" });
     await expect(away).toBeInViewport();
     await expect(away.locator("img")).toHaveAttribute("src", /claude\.svg/u);
-    const textLeft = (await editor.getByText("In progress").boundingBox())!.x;
-    expect((await away.boundingBox())!.x + 24, "in the margin, not over the text").toBeLessThanOrEqual(textLeft + 1);
-    // It is not named twice: no edge pill for it, and the page's button is it, to talk to.
+    const face = (await away.boundingBox())!;
+    expect(face.x + face.width, "at the right edge").toBeGreaterThan(393 - 8);
+    // It is not named twice: no edge pill for it, and no button to call another while it writes.
     await expect(browser.getByTestId("page-people-below")).toHaveCount(0);
-    await expect(browser.getByRole("button", { name: "Talk to claude:2" })).toBeVisible();
+    await expect(browser.getByRole("button", { name: /^Write with/u })).toHaveCount(0);
     await browser.screenshot({ path: test.info().outputPath("pages-pen-away.png") });
 
     await away.click();
@@ -518,6 +517,13 @@ test.describe("on a phone", () => {
       return Math.abs(face.y + face.height / 2 - (text.y + text.height / 2));
     }).toBeLessThan(16);
     await browser.screenshot({ path: test.info().outputPath("pages-pen-beside.png") });
+    // Beside its line, a tap says what it is doing and opens the conversation it works from.
+    await beside.click();
+    const card = browser.getByTestId("page-write-with");
+    await expect(card).toContainText("claude:2");
+    await expect(card).toContainText("Notes");
+    await card.getByRole("button", { name: "Conversation" }).click();
+    await expect(browser).toHaveURL(new RegExp(`conversation=${E2E_CHANNEL.id}`, "u"));
   });
 });
 
