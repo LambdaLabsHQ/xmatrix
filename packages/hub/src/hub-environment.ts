@@ -143,6 +143,14 @@ export const HUB_ENVIRONMENT = {
   GOOGLE_CLIENT_SECRET: { kind: "secret", scope: "feature", summary: "Google OAuth client secret." },
   XMATRIX_SECRET_CATALOG_KEY: { kind: "secret", scope: "required", summary: "Encrypts Space secrets (at least 32 characters). Unset: Space secrets cannot be stored or read." },
 
+  // Dedicated native Gmail metadata notifications; configured together after review.
+  GMAIL_WATCH_CLIENT_ID: {kind:"secret",scope:"feature",summary:"Dedicated Google notification OAuth client; unset disables setup."},
+  GMAIL_WATCH_CLIENT_SECRET: {kind:"secret",scope:"feature",summary:"Dedicated notification OAuth secret, separate from Composio."},
+  GMAIL_WATCH_TOPIC: {kind:"secret",scope:"feature",summary:"Pub/Sub topic in the same Google project as the OAuth application."},
+  GMAIL_WATCH_SUBSCRIPTION: {kind:"secret",scope:"feature",summary:"Exact Pub/Sub push subscription accepted by notification ingress."},
+  GMAIL_WATCH_PUSH_EMAIL: {kind:"secret",scope:"feature",summary:"Expected verified Google service account in Pub/Sub push JWTs."},
+  GMAIL_WATCH_PUSH_AUDIENCE: {kind:"secret",scope:"feature",summary:"Exact JWT audience for the Gmail notification endpoint."},
+
   // Optional integrations.
   APPLE_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases." },
   PUSH_CONFIG: { kind: "secret", scope: "feature", summary: "JSON with the Hub's push identities, each optional: `vapid` (publicKey, privateKey, subject) for browsers, `apns` (keyP8, keyId, teamId, topic, and macTopic for the Mac app) for Apple devices, `fcm` (the Firebase service account key) for Android. Unset: nothing is pushed and notifications appear only while a client is open." },

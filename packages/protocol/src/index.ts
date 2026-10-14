@@ -572,3 +572,5 @@ export { erasedAccountMessageSender } from "./account-message-sender.js";
 export { agentTraceOrderCursor, parseAgentTraceOrder, parseAgentTraceOrderCursor, type AgentTraceOrder } from "./trace-order.js";
 
 export { connectorActionPolicy, type ConnectorActionPolicy } from "./app-connector-policy.js";
+
+export { parseGmailWatchConfig, GMAIL_WATCH_KEYS } from "./gmail-watch-config.js";
