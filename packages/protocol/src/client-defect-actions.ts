@@ -109,6 +109,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't send the question",
   "Couldn't send the request to the Agent",
   "Couldn't send your answer",
+  "Couldn't sign in to the service",
   "Couldn't sign you in",
   "Couldn't start drafting pages",
   "Couldn't start the Agent",

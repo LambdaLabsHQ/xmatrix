@@ -294,8 +294,12 @@ context's `saveCredentials`. The session never goes to the public API, and the
 API key's token never goes to the website. `review_messages` reads the newest
 thread's rejection reasons (section, description, code) and messages as plain
 text, fenced as untrusted; `web_session` says whose session it is. The Apple
-ID password never reaches xMatrix; the session lasts about 30 days, and signing
-in again is the only renewal. These endpoints are not a published contract and
+ID password never reaches xMatrix: the desktop app signs in on Apple's own page
+in a window with a profile of its own (`signIn` on the credential field,
+`apps/desktop/src/sign-in-services.ts`) and hands the page the cookies that
+window then holds for appstoreconnect.apple.com; the page saves them like any
+typed credential. Apple keeps the session from a day to a month, and signing in
+again is the only renewal. These endpoints are not a published contract and
 can change without notice.
 
 Files reach Apple in three steps, so the bytes never pass through the Hub and

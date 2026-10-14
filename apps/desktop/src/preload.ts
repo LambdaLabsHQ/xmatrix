@@ -85,6 +85,8 @@ contextBridge.exposeInMainWorld("xmatrixDesktop", {
     ipcRenderer.invoke("desktop:discover-agent-presets", presets),
   revealPath: (workspacePath: string) => ipcRenderer.invoke("desktop:reveal-path", workspacePath),
   checkRuntime: (runtime: string) => ipcRenderer.invoke("desktop:check-runtime", runtime),
+  serviceSignIn: (service: string, options?: { fresh?: boolean }) =>
+    ipcRenderer.invoke("desktop:service-sign-in", service, options),
   checkForUpdates: () => ipcRenderer.invoke("desktop:check-for-updates"),
   getUpdateStatus: () => ipcRenderer.invoke("desktop:get-update-status"),
   installUpdate: () => ipcRenderer.invoke("desktop:install-update"),
