@@ -8,6 +8,7 @@ const {
   AGENT_TURN_FAILURE_LIFECYCLE_REASON,
   AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
   agentTurnFailureNoticeBody,
+  agentUsageLimitFromError,
   boundAgentTurnFailureDetail,
   isAgentTurnFailureLifecycle,
   isAgentUsageLimitLifecycle,
@@ -69,4 +70,13 @@ test("usage_limited is a turn failure that also asks Hub for a handoff", () => {
   assert.equal(isAgentUsageLimitLifecycle({ ...limited, reason: "turn_failed" }), false);
   assert.equal(isAgentUsageLimitLifecycle({ ...limited, layer: "transport" }), false);
   assert.equal(isAgentUsageLimitLifecycle({ ...limited, status: "blocked" }), false);
+});
+
+test("Hub reads a usage limit from the original provider error, never a plain rate limit", () => {
+  for (const error of ["You've hit your usage limit. Upgrade to Pro", "codex: usage_limit_reached", "UsageLimitExceeded",
+    "You've hit your weekly limit", "Limit reached · resets 5pm", "insufficient_quota", "You exceeded your current quota"])
+    assert.ok(agentUsageLimitFromError(error), error);
+  for (const error of ["429 Too Many Requests", "rate limit exceeded, retrying", "overloaded_error", "", undefined])
+    assert.equal(agentUsageLimitFromError(error), undefined, String(error));
+  assert.deepEqual(agentUsageLimitFromError("Claude AI usage limit reached|1790000000"), { resetsAt: "2026-09-21T14:13:20Z" });
 });

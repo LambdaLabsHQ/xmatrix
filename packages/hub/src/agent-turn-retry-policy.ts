@@ -59,17 +59,25 @@ export function advanceTurnRetry(previous: HubTurnRetry | undefined,
     .startsWith("selected model is at capacity.");
   const state = !capacity ? "ineligible" : !report.safeToContinue ? "unsafe" : used >= DELAYS_MS.length ? "exhausted" : "waiting";
   const attempt = state === "waiting" ? used + 1 : used;
+  // Hub retries only capacity failures. Any other error is reported where it
+  // arrives, as the ordinary turn failure (see the Agent Instance port), so
+  // this record posts no notice of its own.
   return { operationId: report.operationId, threadId: report.threadId, turnId: report.turnId,
     requestId: report.requestId, attempt, attemptToken: token, state,
     dueAt: state === "waiting" ? now + DELAYS_MS[used]! : now,
     expiresAt: continuing ? previous.expiresAt : now + TURN_RETRY_LIFETIME_MS,
-    errorMessage: report.errorMessage!, notice: state === "waiting" ? `waiting:${attempt}` : state };
+    errorMessage: report.errorMessage!, notice: state === "waiting" ? `waiting:${attempt}` : state === "ineligible" ? "" : state };
 }
 
 export function turnRetryNotice(state: HubTurnRetry): string {
   const label = state.agentLabel?.replace(/[@＠`\r\n]/gu, " ").trim().slice(0, 160);
   const prefix = label ? `Agent ${label}: ` : "";
-  return prefix + turnRetryOutcome(state);
+  const outcome = turnRetryOutcome(state);
+  if (["waiting", "issued", "completed"].includes(state.state)) return prefix + outcome;
+  // The host stays silent for these outcomes, so this notice is the only
+  // place its original error appears. Mention sigils cannot summon anyone.
+  const error = state.errorMessage.replace(/\s+/gu, " ").replace(/[@＠]/gu, "﹫").trim();
+  return prefix + outcome + (error ? ` Error: ${error}` : "");
 }
 
 function turnRetryOutcome(state: HubTurnRetry): string {
@@ -79,7 +87,7 @@ function turnRetryOutcome(state: HubTurnRetry): string {
     case "completed": return `Model-capacity retry completed successfully after ${state.attempt} ${state.attempt === 1 ? "retry" : "retries"}.`;
     case "cancelled": return "Model-capacity retry cancelled because the current work stopped or changed.";
     case "expired": return "Model-capacity retry expired without a confirmed continuation. No further retry was issued.";
-    case "ineligible": return "Provider turn failed with an error Hub does not retry. See the Agent trace for the originating error.";
+    case "ineligible": return "Provider turn failed.";
     case "unsafe": return "Model-capacity failure was not retried because execution or output may already have occurred.";
     case "exhausted": return "Model remains at capacity after 3 retries. Hub stopped retrying.";
   }

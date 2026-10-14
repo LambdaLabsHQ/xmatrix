@@ -35,6 +35,14 @@ test("a notice without the Machine name names no machine", async () => {
   for (const body of [start.body, stop.body]) assert.doesNotMatch(body, /cursor/u);
 });
 
+test("a failed stop shows the daemon's error after boundary redaction", async () => {
+  const stop = await machineStopResultNoticeCommand({ ...base, controlKey: "k", ok: false,
+    detail: "process tree still alive after SIGKILL: /home/alice/.config/xmatrix/run.pid token=SECRET_SENTINEL" });
+  assert.match(stop.body, /process tree still alive after SIGKILL: \[local path\] token=\[REDACTED\]/u);
+  assert.doesNotMatch(stop.body, /alice|SECRET_SENTINEL|daemon logs/u);
+  assert.equal(stop.residual.appMetadata.stopFailureCode, "process_tree_still_alive");
+});
+
 test("repository preparation failures preserve the cause without publishing private paths", async () => {
   const input = { ...base, detail: "repo pool lease unavailable (base_ref_unresolved: could not resolve origin default branch after fetch) /private/SECRET_SENTINEL" };
   const notice = await machineRunFailureNoticeCommand(input);
