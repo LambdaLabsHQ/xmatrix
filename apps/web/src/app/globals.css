@@ -1741,12 +1741,14 @@
   border-width: 1px;
 }
 
-/* A conversation row is paper in every state. Its faces, its +N and its count
-   are glass chips all the same, and a backdrop filter over flat paper draws
-   nothing: at four times the size a face differs by 7 in 255 at most with or
-   without it. It did make each of them a compositor layer of its own, and
-   with a full list those were two thirds of every layer pass of the page. */
-.xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane) .app-channel-row {
+/* A conversation row is paper in every state, and its faces, its +N and its
+   count are glass chips on it. A backdrop filter has next to nothing to work
+   on there: flat paper, and under a pictured face nothing that shows. What it
+   drew was a hairline on a face's rim, where the face laps the one before it.
+   It also made each chip a compositor layer of its own, and with a full list
+   those were two thirds of every layer pass of the page. Glass on wood, the
+   rail's own face among it, keeps its filter. */
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane) .app-channel-row.app-channel-chat-row {
   --app-liquid-backdrop-filter: none;
 }
 

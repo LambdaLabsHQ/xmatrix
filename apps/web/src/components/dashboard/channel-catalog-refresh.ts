@@ -91,7 +91,9 @@ export function nextCatalogLeases(held: CatalogLeases, session: string, spaceIds
  * The lease is part of what the query is: a read still under way for an
  * authorization that ended, or its answer still fresh in the cache, is never
  * handed to another one that asks for the same Channels. The Channels it
- * answers with are marked with when the read was asked.
+ * answers with are marked with when the read was asked, and the cache keeps
+ * those very objects: a copy made to share structure with an earlier answer
+ * would carry no mark and pass for a read asked just now.
  */
 export function leasedResolveQuery(input: {
   /** Who asks, in which Space, for which Channels. */
@@ -111,6 +113,7 @@ export function leasedResolveQuery(input: {
       return result;
     },
     staleTime: input.fresh ? 0 : 30_000,
+    structuralSharing: false as const,
   };
 }
 
