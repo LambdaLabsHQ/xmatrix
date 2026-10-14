@@ -101,15 +101,15 @@ export function useChannelReadSync({
     const sequence = Math.max(channel?.historyHeadSequence ?? 0, channel?.messageCount ?? 0,
       channel?.attention?.lastMessageSequence ?? 0);
     if (!accessToken || sequence <= 0) return;
-    const responded = await coordinatorRef.current!.respond(channelId, sequence,
-      () => syncChannelReadCursor(accessToken, channelId, sequence, true));
-    // Asked in a session that has since ended: its answer writes nothing in this one.
-    if (!responded) return;
-    const readState = responded.answer;
-    // The Hub omits a cleared attention summary, and that absence is the answer.
-    if (readState) applyReadState(channelId, { attention: readState.attention, readSequence: readState.readSequence });
-    updateChannelReadCounts((current) => (current[channelId] || 0) >= sequence
-      ? current : { ...current, [channelId]: sequence });
+    // Written only while the session and reader that asked are still here.
+    await coordinatorRef.current!.respond(channelId, sequence,
+      () => syncChannelReadCursor(accessToken, channelId, sequence, true),
+      (readState) => {
+        // The Hub omits a cleared attention summary, and that absence is the answer.
+        if (readState) applyReadState(channelId, { attention: readState.attention, readSequence: readState.readSequence });
+        updateChannelReadCounts((current) => (current[channelId] || 0) >= sequence
+          ? current : { ...current, [channelId]: sequence });
+      });
   }, [accessTokenRef, applyReadState, channelsRef, updateChannelReadCounts]);
 
   useEffect(() => () => coordinatorRef.current?.reset(), []);

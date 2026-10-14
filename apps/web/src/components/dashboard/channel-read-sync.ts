@@ -81,17 +81,20 @@ export class ChannelReadSyncCoordinator<T extends ChannelReadSyncResult> {
 
   /**
    * The reader is done with the Channel, read to `sequence`: `send` asks the
-   * Hub. Its answer belongs to the session that asked. A reset while it is
-   * on its way (signed out, another account, even the same one back) ends
-   * that session, and the answer comes back as null, to be written nowhere.
-   * Only an answer the Hub gave counts as a read made here.
+   * Hub, and `commit` writes its answer. The answer belongs to the session
+   * and reader that asked: a reset or another reader while it is on its way
+   * (signed out, another account, even the same one back) and it is written
+   * nowhere. `commit` runs in the same step as that check, so nothing queued
+   * behind the answer can come between them. Only an answer the Hub gave
+   * counts as a read made here.
    */
-  async respond<A>(channelId: string, sequence: number, send: () => Promise<A | undefined>): Promise<{ answer: A | undefined } | null> {
+  async respond<A>(channelId: string, sequence: number, send: () => Promise<A | undefined>,
+    commit: (answer: A | undefined) => void): Promise<void> {
     const asked = this.asked();
     const answer = await send();
-    if (!this.stillAsked(asked)) return null;
+    if (!this.stillAsked(asked)) return;
     if (answer) this.noteRead(channelId, sequence);
-    return { answer };
+    commit(answer);
   }
 
   /** The session and reader a read is asked for. */
