@@ -928,5 +928,60 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.deepEqual((await reborn.wakeResting({ commandId: "wake-stopped", channelId: "channel",
       sourceMessageId: "connector-repository" })).woken, [], "a stopped Instance does not wake");
 
+
+    // New users have no registered directories or model overrides. Ordinary
+    // mentions must still admit a private cwd, as schedules/About already do.
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=
+      jsonb_set(jsonb_set(configuration_json-'model','{workspaceReferences}','[]'),'{routing,models}','[]')
+      WHERE harness='codex';
+      UPDATE data.space_agent_registration_access SET grant_limits=grant_limits||'{"workspaces":[],"models":[]}'::jsonb,
+        policy_limits=policy_limits||'{"workspaces":[],"models":[]}'::jsonb WHERE harness='codex';
+      UPDATE data.machine_daemons SET capabilities_json='["registration_launch_v3","registration_optional_model_v1"]'`);
+    const managedMessage = async (id, mention, target, condition = '') => {
+      const body = `${mention}${condition} QA first conversation`, hash = await digestCanonicalCloneCborV1(body);
+      await sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
+        [id, hash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: hash,
+          selections: [{ start: 0, end: mention.length, text: mention, target }] } }]);
+      return { commandId: id, actorUserId: 'caller', channelId: 'channel', sourceMessageId: id, body };
+    };
+    const target = { kind: 'registration', key };
+    const incapable = await launches.dispatchFromMessage(await managedMessage('managed-incapable', '@codex', target),
+      async () => assert.fail('a daemon without managed-cwd support must not be offered'));
+    assert.equal(incapable.prepared.length, 0);
+    await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_managed_v1"]'::jsonb`);
+    for (const [id, mention, target] of [
+      ['managed-registration', '@codex', { kind: 'registration', key }],
+      ['managed-capability', '@codex', { kind: 'capability', harness: 'codex' }],
+      ['managed-auto', '@auto', { kind: 'auto' }],
+    ]) {
+      const request = await managedMessage(id, mention, target);
+      const result = await launches.dispatchFromMessage(request, async ({ candidates, managedWorkspace }) => {
+        assert.equal(managedWorkspace, true);
+        const candidate = candidates.find(candidate => candidate.key.harness === 'codex');
+        assert.ok(candidate, 'an enabled new-user Agent remains a candidate without registered directories');
+        assert.deepEqual(candidate.workspaceReferences, []);
+        return { key: candidate.key, model: '', useRuntimeDefaultModel: true };
+      });
+      assert.deepEqual(result.rejected, []);
+      assert.equal(result.prepared.length, 1);
+      const launch = result.prepared[0];
+      const payload = (await sql('SELECT spawn_payload_json FROM data.agent_launches WHERE launch_id=$1', [launch.launchId]))
+        .rows[0].spawn_payload_json;
+      assert.deepEqual(payload.registration.resources.workspaces, []);
+      assert.equal(payload.managementSpaceId, payload.workspace.managedKey);
+      assert.match(payload.workspace.canonicalCwd, /^\.xmatrix-management\/registration-[a-f0-9]{48}$/);
+      assert.equal(payload.workspace.metadata.syntheticManagedWorkspace, true);
+      assert.equal(payload.workspace.metadata.managementProjectionKind, undefined);
+      assert.equal(payload.sourceMessageId, id);
+      const replay = await launches.dispatchFromMessage(request, async () => assert.fail('replay must not choose a second cwd'));
+      assert.equal(replay.prepared[0].runId, launch.runId);
+    }
+    for (const [id, condition] of [['managed-explicit-pwd', ' pwd:"/not-authorized"'], ['managed-explicit-repo', ' repo:other/private']]) {
+      const refusal = await launches.dispatchFromMessage(await managedMessage(id, '@codex', target, condition),
+        async () => assert.fail('an explicit unauthorized target must not fall back to a private cwd'));
+      assert.equal(refusal.prepared.length, 0);
+      assert.equal(refusal.rejected.length, 1);
+    }
+
   } finally { await setup.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); await setup.end(); }
 });
