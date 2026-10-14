@@ -95,6 +95,8 @@ function appConnectionRoutes<Api extends "/api" | "/api/xmatrix">(api: Api) {
     space_app_connection_dingtalk_install: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/dingtalk/install`,
     connector_dingtalk_install_prepare: `${api}/connectors/dingtalk/install/prepare` as const,
+    space_app_connection_gmail_notifications: (spaceId: string) =>
+      `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/notifications`,
     space_app_connection_gmail_mailboxes: (spaceId: string) =>
       `${api}/spaces/${encodeURIComponent(spaceId)}/app-connections/gmail/mailboxes`,
     space_app_connection_google_picker: (spaceId: string) =>
@@ -981,15 +983,16 @@ const TRIGGER_TEXT = /^[^\s][^\n]{0,199}$/u;
 function connectorEventTrigger(trigger: Record<string, unknown>): AutomationTrigger {
   const providerId = typeof trigger.provider === "string" ? trigger.provider.trim().toLowerCase() : "";
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
-  if (!manifest?.events) throw new Error("an event trigger names a connector that delivers events");
+  const events = manifest?.events ?? manifest?.automationEvents;
+  if (!manifest || !events) throw new Error("an event trigger names a connector that delivers events");
   const source = typeof trigger.source === "string" && trigger.source.trim() ? trigger.source.trim().toLowerCase() : "*";
-  if (source !== "*" && !new RegExp(manifest.events.source.pattern, "u").test(source)) {
-    throw new Error(`an event trigger's source is a ${manifest.name} ${manifest.events.source.label.toLowerCase()} or *`);
+  if (source !== "*" && !new RegExp(events.source.pattern, "u").test(source)) {
+    throw new Error(`an event trigger's source is a ${manifest.name} ${events.source.label.toLowerCase()} or *`);
   }
   const feature = typeof trigger.feature === "string" && trigger.feature.trim() && trigger.feature.trim() !== "*"
     ? trigger.feature.trim().toLowerCase() : undefined;
-  if (feature && !manifest.events.features.some((candidate) => candidate.id === feature)) {
-    throw new Error(`${manifest.name} events are ${manifest.events.features.map((candidate) => candidate.id).join(", ")}`);
+  if (feature && !events.features.some((candidate) => candidate.id === feature)) {
+    throw new Error(`${manifest.name} events are ${events.features.map((candidate) => candidate.id).join(", ")}`);
   }
   return { kind: "event", provider: manifest.id, source, ...(feature ? { feature } : {}) };
 }

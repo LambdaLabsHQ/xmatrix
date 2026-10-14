@@ -67,3 +67,15 @@ test("background interruption is a scoped idempotent fact without claiming task 
   assert.equal(agentTurnFailureAppendCommand({ ...input, noticeId: undefined }), null);
   assert.equal(agentTurnFailureAppendCommand({ ...input, noticeId: "bad key" }), null);
 });
+
+test("Hub words a background interruption from the host's count", () => {
+  const input = { runId: "run", instanceId: "instance", executionKey: "execution",
+    agentId: "agent", agentName: "Claude", ownerUserId: "owner", channelId: "channel",
+    senderSnapshot: {}, reason: "background_tasks_interrupted", noticeId: "provider-generation-1" };
+  assert.equal(agentTurnFailureAppendCommand({ ...input, pendingTasks: 2 }).body,
+    "xMatrix lost background-task tracking for Claude. The provider stream ended with 2 tasks still pending. " +
+    "Their outcome is unknown; verify external operations before continuing.");
+  assert.match(agentTurnFailureAppendCommand({ ...input, pendingTasks: 1 }).body, /with 1 task still pending/u);
+  // An older host sent the sentence itself.
+  assert.match(agentTurnFailureAppendCommand({ ...input, detail: "legacy sentence" }).body, /tracking for Claude\. legacy sentence$/u);
+});

@@ -404,12 +404,9 @@ exit 0
     let frame = fixture.frames.lock().unwrap()[index].clone();
     assert_eq!(frame["channelId"], "channel-1");
     assert_eq!(frame["status"], "blocked");
-    assert!(
-        frame["detail"]
-            .as_str()
-            .unwrap()
-            .contains("outcome is unknown")
-    );
+    // The host reports the fact; Hub words the notice.
+    assert_eq!(frame["pendingTasks"], 1);
+    assert!(frame.get("detail").is_none());
     assert!(!frame.to_string().contains("PRIVATE_TASK_INPUT"));
     assert!(uuid::Uuid::parse_str(frame["requestId"].as_str().unwrap()).is_ok());
     fixture.finish().await;

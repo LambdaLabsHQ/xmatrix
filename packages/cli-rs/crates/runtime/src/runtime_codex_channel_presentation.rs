@@ -435,6 +435,7 @@ pub(crate) fn send_agent_lifecycle_with_reset(
         detail: detail.map(str::to_string),
         snapshot,
         resets_at: resets_at.map(str::to_string),
+        pending_tasks: None,
         ts: None,
     });
 }

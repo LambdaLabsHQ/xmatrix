@@ -48,6 +48,12 @@ Leave unset to keep the feature off.
 | `GITHUB_APP_PRIVATE_KEY` | secret | GitHub App private key (PEM). |
 | `GITHUB_APP_SLUG` | var | GitHub App slug used for install links. |
 | `GITHUB_WEBHOOK_SECRET` | secret | GitHub App webhook signing secret. |
+| `GMAIL_WATCH_CLIENT_ID` | secret | Dedicated Google notification OAuth client; unset disables setup. |
+| `GMAIL_WATCH_CLIENT_SECRET` | secret | Dedicated notification OAuth secret, separate from Composio. |
+| `GMAIL_WATCH_PUSH_AUDIENCE` | secret | Exact JWT audience for the Gmail notification endpoint. |
+| `GMAIL_WATCH_PUSH_EMAIL` | secret | Expected verified Google service account in Pub/Sub push JWTs. |
+| `GMAIL_WATCH_SUBSCRIPTION` | secret | Exact Pub/Sub push subscription accepted by notification ingress. |
+| `GMAIL_WATCH_TOPIC` | secret | Pub/Sub topic in the same Google project as the OAuth application. |
 | `GOOGLE_CLIENT_ID` | secret | Google OAuth client id. Unset with its secret: Google sign-in is hidden. |
 | `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client secret. |
 | `JEV_AI_GATEWAY_API_KEY` | secret | Vercel AI Gateway key for Jev, the model that picks which Agent answers. Unset: message-triggered launches run without Jev's choice, while launches that need a choice (registration input dispatch) answer 503 `registration_selection_unconfigured`. |

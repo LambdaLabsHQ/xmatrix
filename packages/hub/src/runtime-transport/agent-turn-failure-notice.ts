@@ -17,6 +17,8 @@ export function agentTurnFailureAppendCommand(input: {
   ownerUserId: string;
   channelId: string;
   detail?: string | null;
+  /** The host's count of tasks still pending when its provider stream ended. */
+  pendingTasks?: number | null;
   reason?: string | null;
   noticeId?: string | null;
   senderSnapshot: Record<string, unknown>;
@@ -33,7 +35,7 @@ export function agentTurnFailureAppendCommand(input: {
   // the Instance and its opening text, which a replay repeats exactly.
   if (input.noticeId ? !/^[a-zA-Z0-9_-]{1,120}$/.test(input.noticeId) : background) return null;
   const body = background
-    ? `xMatrix lost background-task tracking for ${input.agentName.trim() || "agent"}. ${boundAgentTurnFailureDetail(input.detail)}`.trim()
+    ? `xMatrix lost background-task tracking for ${input.agentName.trim() || "agent"}. ${backgroundInterruptionDetail(input)}`.trim()
     : agentTurnFailureNoticeBody({
     agentName: input.agentName,
     detail: input.detail,
@@ -73,4 +75,12 @@ export function agentTurnFailureAppendCommand(input: {
 export function shouldPersistAgentTurnFailureNotice(message: Parameters<typeof isAgentTurnFailureLifecycle>[0]): boolean {
   return isAgentTurnFailureLifecycle(message) || (message.layer === "application"
     && message.status === "blocked" && message.reason === "background_tasks_interrupted");
+}
+
+/** Hub words the interruption from the host's count; an older host sent the sentence. */
+function backgroundInterruptionDetail(input: { pendingTasks?: number | null; detail?: string | null }): string {
+  const count = input.pendingTasks;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) return boundAgentTurnFailureDetail(input.detail);
+  return `The provider stream ended with ${count} ${count === 1 ? "task" : "tasks"} still pending. ` +
+    "Their outcome is unknown; verify external operations before continuing.";
 }
