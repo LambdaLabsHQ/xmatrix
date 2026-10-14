@@ -275,17 +275,6 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                     }
                     continue;
                 }
-                if goal_command.is_none() {
-                    run.refresh_goal().await;
-                    if codex_goal_is_paused(run.latest_goal.as_ref()) {
-                        let notice = codex_paused_goal_notice(run.latest_goal.as_ref());
-                        let _ = relay
-                            .send_channel_message(primary_channel_id.clone(), notice)
-                            .await;
-                        run.publish_idle();
-                        continue;
-                    }
-                }
                 let mut runtime_turn = runtime_state.begin_message_turn(
                     Some(&primary_channel_id),
                     Some(&primary_message_id),
