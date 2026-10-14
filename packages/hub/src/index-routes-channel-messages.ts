@@ -29,6 +29,7 @@ import {
   channelMessageResponse,
   channelMessageResult,
   scheduleChannelLiveDelivery,
+  committedLiveRouting,
 } from "./channel-messages";
 
 type MessageRouteContext = Context<{ Bindings: Env }, "/api/channels/:channelId/messages/:messageId/*">;
@@ -389,6 +390,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             ...(Object.keys(appMetadata).length > 0 ? { metadata: appMetadata } : {}),
             ...(committedAttachments?.length ? { attachments: committedAttachments } : {}),
           },
+          committedLiveRouting(committed),
         );
         if (typeof message.body === "string") {
           // The message payload's sentAt predates validation and the database
