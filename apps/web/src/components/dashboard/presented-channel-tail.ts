@@ -2,16 +2,12 @@
 
 import { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
 import type { SerializedChannel } from "@xmatrix/protocol";
+import { time } from "./channel-message-summary";
 
 type Preview = NonNullable<SerializedChannel["lastMessage"]>;
 
 /** The newest message the open conversation's timeline shows, as its list row previews it. */
 export type PresentedChannelTail = { channelId: string; sequence: number; preview: Preview };
-
-function time(value: string | undefined): number {
-  const parsed = value ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 
 /**
  * The Channel as its list row shows it: never ahead of its open timeline.
