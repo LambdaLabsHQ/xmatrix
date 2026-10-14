@@ -9,6 +9,7 @@ import {
   fixtureRule,
   openGeneralChannelWithHistory,
   openWorkspaceWithStubs,
+  routeHumanSocket,
 } from "./workspace-fixtures";
 
 
@@ -185,6 +186,51 @@ test("the list loads its next page into the same list", async ({ page }) => {
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect.poll(visibleChannelRowIds(page)).toEqual([E2E_CHANNEL.id, older.id]);
+});
+
+test("a message for a conversation the list has not paged in brings its row with the message, counted unread", async ({ page }) => {
+  // The reader has read all forty messages of both; neither is on the list's page.
+  const far = { ...E2E_CHANNEL, id: "channel-far", name: "far", updatedAt: "2026-06-01T00:00:00.000Z",
+    messageCount: 40, historyHeadSequence: 40, readSequence: 40 };
+  const shown = { ...far, id: "channel-shown", name: "shown" };
+  let send: ((frame: unknown) => void) | undefined;
+  await routeHumanSocket(page, (frame, reply) => { if (frame.type === "human_connect") send = reply; });
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, far, shown] });
+  await fixtureRule(page, {
+    id: "flat-open-only", pattern: /\/api\/xmatrix\/channels\/page\?.*view=flat/u,
+    responder: { kind: "static", json: { protocolVersion: 1, catalogRevision: 1, nextCursor: null,
+      rows: [{ channel: E2E_CHANNEL, ownActivityAt: E2E_CHANNEL.updatedAt }], counts: { active: 3, unread: 0, mentions: 0 } } },
+  });
+  send = undefined;
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect.poll(visibleChannelRowIds(page)).toEqual([E2E_CHANNEL.id]);
+  await expect.poll(() => Boolean(send)).toBe(true);
+  const message = (channelId: string, sequence: number, body: string) => ({ type: "channel_message_received", message: {
+    messageId: `${channelId}-${sequence}`, channelId, sequence, body, sentAt: new Date().toISOString(),
+    reactions: [], annotations: [], attachments: [],
+    from: { kind: "agent", label: "Codex", userId: "e2e-user", email: "codex@xmatrix.test", identityId: "agent:codex",
+      instanceId: "instance-codex-1", channelInstanceId: "1", instanceLabel: "Codex:1" },
+  } });
+
+  // Two messages arrive before the Hub has answered who the Channel is. Its
+  // answer is older than both: the row still ends on the second, two unread.
+  send!(message(far.id, 41, "first of two"));
+  send!(message(far.id, 42, "second of two"));
+  const farRow = page.locator(`[data-channel-row-id="${far.id}"]`);
+  await expect(farRow).toContainText("second of two");
+  await expect(farRow.locator(".app-count-pill-value")).toHaveText("2");
+  await expect.poll(visibleChannelRowIds(page)).toEqual([far.id, E2E_CHANNEL.id]);
+
+  // A shared presence frame shows the other Channel first, without the
+  // reader's read state. Its message still waits for their own read of it:
+  // one unread of forty-one, not forty-one, and not none.
+  send!({ type: "channel_updated",
+    channel: Object.fromEntries(Object.entries(shown).filter(([field]) => field !== "readSequence")) });
+  send!(message(shown.id, 41, "after the shared frame"));
+  const shownRow = page.locator(`[data-channel-row-id="${shown.id}"]`);
+  await expect(shownRow).toContainText("after the shared frame");
+  await expect(shownRow.locator(".app-count-pill-value")).toHaveText("1");
+  await expect.poll(visibleChannelRowIds(page)).toEqual([shown.id, far.id, E2E_CHANNEL.id]);
 });
 
 test("pinned conversations sit under their own Pinned heading", async ({ page }) => {

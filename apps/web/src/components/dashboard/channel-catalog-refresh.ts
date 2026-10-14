@@ -1,5 +1,7 @@
 import { replaceEqualDeep, type InfiniteData, type QueryClient, type QueryKey } from "@tanstack/react-query";
-import type { ChannelCatalogPage, ChannelCatalogPageRow, SerializedChannel } from "@xmatrix/protocol";
+import type {
+  ChannelCatalogPage, ChannelCatalogPageRow, ChannelCatalogResolveResult, SerializedChannel,
+} from "@xmatrix/protocol";
 
 /** Flatten an infinite catalog query's pages into one row per channel, last write winning. */
 export function rowsFromData(
@@ -53,6 +55,30 @@ export function shareCatalogRows<Data extends InfiniteData<ChannelCatalogPage, u
 
 function sameValue(before: unknown, after: unknown): boolean {
   return replaceEqualDeep(before, after) === before;
+}
+
+/** The authorization each loaded Space's reads stand on: one lease a Space, for one account on one Hub. */
+export interface CatalogLeases {
+  key: string;
+  session: string;
+  bySpace: Map<string, object>;
+}
+
+export const NO_CATALOG_LEASES: CatalogLeases = { key: "", session: "", bySpace: new Map() };
+
+/**
+ * The leases after the authorization became `session` over `spaceIds` (none
+ * when signed out). A Space that stays loaded for the same account keeps its
+ * lease, so a token renewed without a gap keeps its reads. A Space that was
+ * dropped, or any Space once the account, the Hub or the sign-in went away,
+ * gets a new lease when it comes back: reads asked under the old one never
+ * match again, even when everything returns to the values it had.
+ */
+export function nextCatalogLeases(held: CatalogLeases, session: string, spaceIds: readonly string[]): CatalogLeases {
+  const key = spaceIds.length ? `${session}\u0000${spaceIds.join("\u0000")}` : "";
+  if (held.key === key) return held;
+  const kept = held.session === session ? held.bySpace : NO_CATALOG_LEASES.bySpace;
+  return { key, session, bySpace: new Map(spaceIds.map((id) => [id, kept.get(id) ?? {}])) };
 }
 
 export interface ChannelCatalogChangeDetail {
@@ -357,6 +383,57 @@ export function refreshSpaceCatalogForMessages(input: {
   if (unknown.length === 0) return;
   if (input.resolveMessageChannels) input.resolveMessageChannels(spaceId, unknown);
   else for (const detail of unknown) input.resolveChannel(spaceId, detail.channelId!);
+}
+
+/**
+ * Reads Channels for this reader and puts them into the entity table.
+ *
+ * `authorized` says whether the authorization the read was asked under still
+ * stands. Once it has ended the answer is for nobody here: nothing is
+ * committed, and the caller is told that nothing was found.
+ */
+export async function readChannelsIntoStore(input: {
+  authorized: () => boolean;
+  read: () => Promise<ChannelCatalogResolveResult>;
+  commit: (channels: SerializedChannel[]) => void;
+}): Promise<ChannelCatalogResolveResult> {
+  const result = await input.read();
+  if (!input.authorized()) return { protocolVersion: 1, channels: [], pathsByChannelId: {} };
+  input.commit(result.channels);
+  return result;
+}
+
+/**
+ * Asks the Hub for a window's Channels nobody here knows, a read per `limit`
+ * of them, and lists what it answers. A read that fails leaves the lists to
+ * be read again. Both stand on the authorization that asked: once it has
+ * ended, an answer lists nothing and a failure reads nothing.
+ */
+export function resolveWindowChannels(input: Omit<Parameters<typeof refreshSpaceCatalogForMessages>[0], "details" | "resolveMessageChannels"> & {
+  unknown: readonly ChannelCatalogChangeDetail[];
+  limit: number;
+  authorized: () => boolean;
+  /** Reads these Channels into the entity table and gives back those the Hub showed this reader. */
+  resolve: (channelIds: string[]) => Promise<readonly SerializedChannel[]>;
+}): Promise<void> {
+  const { unknown, limit, authorized, resolve, ...lists } = input;
+  const ids = [...new Set(unknown.map((detail) => detail.channelId!))];
+  const reads = Array.from({ length: Math.ceil(ids.length / limit) }, (_, part) =>
+    resolve(ids.slice(part * limit, (part + 1) * limit)));
+  return Promise.all(reads).then((results) => {
+    if (!authorized()) return;
+    // What the Hub returned the reader may read: those join the conversation list as the rows they are.
+    const resolved = new Map(results.flat().map((channel) => [channel.id, channel]));
+    refreshSpaceCatalogForMessages({
+      ...lists,
+      details: unknown.filter((detail) => resolved.has(detail.channelId!)),
+      hasChannel: () => true,
+      channel: (channelId) => lists.channel?.(channelId) ?? resolved.get(channelId),
+    });
+  }, () => {
+    if (!authorized()) return;
+    refreshSpaceCatalogForMessages({ ...lists, details: [...unknown], hasChannel: () => true, channel: () => undefined });
+  });
 }
 
 /**

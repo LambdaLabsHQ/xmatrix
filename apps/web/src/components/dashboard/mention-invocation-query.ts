@@ -6,12 +6,17 @@ export class InvocationAccessError extends Error {
 }
 
 export interface InvocationSourceMessage { id: string; messageId?: string; body: string; sentAt: string; senderKind?: "agent" | "app" | "user" | "system" }
+/** Whether a message can carry invocation state: a Human's, or one that summons or stops an Agent. */
+export function isInvocationSource(message: InvocationSourceMessage): boolean {
+  // An Agent's stop command carries a receipt chip too, like a Human's.
+  return message.senderKind === "user" || hasOperationalAgentInvocation(message.body) ||
+    parseAutoLaunchMentions(message.body).length > 0 || parseAgentStopInvocation(message.body) !== undefined;
+}
+
 export function invocationSourceMessages<T extends InvocationSourceMessage>(messages: readonly T[], visibleIds?: readonly string[]): T[] {
   const visible = visibleIds === undefined ? undefined : new Set(visibleIds);
   const candidates = visible ? messages.filter((message) => visible.has(message.messageId || message.id)) : messages.slice(-20);
-  // An Agent's stop command carries a receipt chip too, like a Human's.
-  return candidates.filter((message) => message.senderKind === "user" || hasOperationalAgentInvocation(message.body) ||
-    parseAutoLaunchMentions(message.body).length > 0 || parseAgentStopInvocation(message.body) !== undefined);
+  return candidates.filter(isInvocationSource);
 }
 
 /** One channel reader, bounded pages and a single cancellation/deadline budget.

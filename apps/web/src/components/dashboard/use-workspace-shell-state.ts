@@ -906,6 +906,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     return viewerReadsRef.current.reads;
   }, []);
 
+  /* Emptying the entity table ends what the reader's reads had brought: the
+     Channels are gone, and so is the claim that their read state is known. */
+  const clearChannels = useCallback(() => {
+    viewerReadsRef.current = null;
+    setChannels([]);
+  }, [setChannels]);
+
   const rememberChannelHistory = useCallback((
     channelId: string,
     messages: ChannelMessage[],
@@ -1439,7 +1446,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       channelReadStateUserIdRef.current = null;
       resetChannelReadSync();
       viewportExposureRef.current = {};
-      setChannels([]);
+      clearChannels();
       setChannelReadCounts({});
       setChannelMentionClearedAt({});
       setChannelReadCountsBaselineReady(false);
@@ -1449,11 +1456,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     channelReadStateUserIdRef.current = null;
     resetChannelReadSync();
     viewportExposureRef.current = {};
-    setChannels([]);
+    clearChannels();
     setChannelReadCountsBaselineReady(false);
     setChannelReadCounts(readChannelReadCounts(authenticatedUserId));
     setChannelMentionClearedAt(readChannelMentionClearedAt(authenticatedUserId));
-  }, [authenticatedUserId, resetChannelReadSync, realtimeAgents, setChannels]);
+  }, [authenticatedUserId, clearChannels, resetChannelReadSync, realtimeAgents]);
 
   const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, setHistoryError, setLoadingHistory });
 
@@ -2045,6 +2052,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       relaySocketProbeRef.current = null;
     };
   }, [
+    viewerReadsOf,
     applyChannelHistory,
     authorizeHistoryRender,
     bumpHistoryRevision,
@@ -2158,7 +2166,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       return;
     }
     if (!token) {
-      setChannels([]);
+      clearChannels();
       setSpaces([]);
       setSpacesLoadedUserId(null);
       setProjects([]);
@@ -2204,6 +2212,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       requestedChannelId: requestedChannel?.id || null,
     }));
   }, [
+    clearChannels,
     authenticatedUserId,
     setChannels,
     eventsQuery.data,

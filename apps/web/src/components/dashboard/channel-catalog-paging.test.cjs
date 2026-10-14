@@ -250,6 +250,179 @@ test("a row that moves in the list stays the row it was, and a read that repeats
   } finally { client.clear(); }
 });
 
+test("a read asked under an authorization that ended stays ended when the same values come back", async () => {
+  const { NO_CATALOG_LEASES, nextCatalogLeases } = await import("./channel-catalog-refresh.ts");
+  const session = "xmatrix\u0000hub\u0000user";
+  const signedIn = nextCatalogLeases(NO_CATALOG_LEASES, session, ["space", "other"]);
+  const asked = signedIn.bySpace.get("space");
+  assert.ok(asked);
+  // A token renewed without a gap changes nothing the reads stand on.
+  assert.equal(nextCatalogLeases(signedIn, session, ["space", "other"]), signedIn);
+  // One Space is left and joined again: its reads ended, the other Space's did not.
+  const left = nextCatalogLeases(signedIn, session, ["other"]);
+  const back = nextCatalogLeases(left, session, ["space", "other"]);
+  assert.equal(left.bySpace.get("space"), undefined);
+  assert.notEqual(back.bySpace.get("space"), asked);
+  assert.equal(back.bySpace.get("other"), signedIn.bySpace.get("other"));
+  // The sign-in is lost and returns with the same account, Hub and Space.
+  const out = nextCatalogLeases(signedIn, session, []);
+  const again = nextCatalogLeases(out, session, ["space", "other"]);
+  assert.equal(out.bySpace.size, 0);
+  assert.notEqual(again.bySpace.get("space"), asked);
+  assert.notEqual(again.bySpace.get("other"), signedIn.bySpace.get("other"));
+  // Another account on the same Space never inherits a lease.
+  const theirs = nextCatalogLeases(signedIn, "xmatrix\u0000hub\u0000someone-else", ["space"]);
+  assert.notEqual(theirs.bySpace.get("space"), asked);
+});
+
+/* The asynchronous half of the message path as the hook runs it: the real
+   resolve-into-store and window coordinators, a real QueryClient and entity
+   collection, real leases, and reads this test holds until it lets them go. */
+async function openResolveOwner() {
+  const { QueryClient } = require("@tanstack/react-query");
+  const refresh = await import("./channel-catalog-refresh.ts");
+  const { createRealtimeCollection } = await import("./realtime-collection.ts");
+  const { createViewerReads } = await import("./channel-message-summary.ts");
+  const session = "xmatrix\u0000hub\u0000user";
+  const prefix = ["xmatrix", "hub", "user", "channels", "space"];
+  const conversations = [...prefix, "catalog", "flat", "all", null, ""];
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+  const store = createRealtimeCollection([]);
+  let reads = createViewerReads();
+  let leases = refresh.nextCatalogLeases(refresh.NO_CATALOG_LEASES, session, ["space"]);
+  const published = [];
+  store.subscribe(() => published.push(store.getSnapshot().map((channel) => channel.id)));
+  const fetched = [];
+  const page = (rows) => ({ rows, protocolVersion: 1, catalogRevision: 4, nextCursor: null, counts: null });
+  await client.fetchQuery({ queryKey: conversations, structuralSharing: refresh.shareCatalogRows, queryFn: async () => {
+    fetched.push("conversations");
+    return { pages: [page([catalogRow("first", "2026-10-06T00:00:00.000Z")])], pageParams: [null] };
+  } });
+  fetched.length = 0;
+  const held = [];
+  // One request as the hook admits it: the lease it was asked under, the Hub's answer held by the test.
+  const ask = (unknown, limit = 200) => {
+    const lease = leases.bySpace.get("space");
+    const authorized = () => lease !== undefined && leases.bySpace.get("space") === lease;
+    return refresh.resolveWindowChannels({
+      client, spaceId: "space", prefix, countsKey: [...prefix, "catalog-counts"], viewerId: "user",
+      hasChannel: (id) => reads.has(id) && store.get(id) !== undefined, channel: (id) => store.get(id),
+      resolveChannel: () => assert.fail("a window's unknown Channels are one read"),
+      unknown, limit, authorized,
+      resolve: async (channelIds) => (await refresh.readChannelsIntoStore({
+        authorized,
+        read: () => new Promise((resolve, reject) => held.push({ channelIds, resolve, reject })),
+        commit: (channels) => store.set((current) => [...current, ...channels.map((channel) => reads.settle(channel))]),
+      })).channels,
+    });
+  };
+  const answer = (request) => request.resolve({ protocolVersion: 1, pathsByChannelId: {},
+    channels: request.channelIds.map((id) => ({ id, spaceId: "space", readSequence: 40, messageCount: 41 })) });
+  return {
+    client, store, published, fetched, held, ask, answer, conversations,
+    listed: () => client.getQueryData(conversations).pages[0].rows.map((row) => row.channel.id),
+    hasRead: (id) => reads.has(id),
+    // What the shell does when the sign-in or the Space goes: no Space is admitted and the table is emptied.
+    retract() { leases = refresh.nextCatalogLeases(leases, session, []); reads = createViewerReads(); store.set([]); published.length = 0; },
+    restore() { leases = refresh.nextCatalogLeases(leases, session, ["space"]); },
+    renewToken() { leases = refresh.nextCatalogLeases(leases, session, ["space"]); },
+    settled: () => new Promise((resolve) => setImmediate(resolve)),
+  };
+}
+
+const unknownMessage = (channelId) => ({ kind: "message", channelId, at: "2026-10-06T05:00:00.000Z" });
+
+test("the Hub's answer for a Channel nobody knew brings it to this reader, once", async () => {
+  const t = await openResolveOwner();
+  try {
+    const done = t.ask([unknownMessage("far")]);
+    t.renewToken();
+    t.answer(t.held[0]);
+    await done;
+    assert.deepEqual(t.store.getSnapshot().map((channel) => channel.id), ["far"]);
+    assert.equal(t.hasRead("far"), true);
+    assert.deepEqual(t.listed(), ["far", "first"]);
+    assert.equal(t.published.length, 1);
+    await t.settled();
+    assert.deepEqual(t.fetched, []);
+  } finally { t.client.clear(); }
+});
+
+test("an answer that comes after the sign-in or the Space went writes nothing, even once they are back", async () => {
+  const t = await openResolveOwner();
+  try {
+    // Asked, then the authorization ends and the table is emptied, then the answer.
+    const gone = t.ask([unknownMessage("far")]);
+    t.retract();
+    t.answer(t.held[0]);
+    await gone;
+    assert.deepEqual(t.store.getSnapshot(), []);
+    assert.deepEqual(t.published, []);
+    assert.equal(t.hasRead("far"), false);
+    assert.deepEqual(t.listed(), ["first"]);
+
+    // Asked, ended, and the same account and Space are back before the old answer arrives.
+    t.restore();
+    const old = t.ask([unknownMessage("older")]);
+    t.retract();
+    t.restore();
+    t.answer(t.held[1]);
+    await old;
+    assert.deepEqual(t.store.getSnapshot(), []);
+    assert.equal(t.hasRead("older"), false);
+    assert.deepEqual(t.listed(), ["first"]);
+    // What is asked under the new authorization is answered as usual.
+    const fresh = t.ask([unknownMessage("older")]);
+    t.answer(t.held[2]);
+    await fresh;
+    assert.deepEqual(t.store.getSnapshot().map((channel) => channel.id), ["older"]);
+    assert.deepEqual(t.listed(), ["older", "first"]);
+    await t.settled();
+    assert.deepEqual(t.fetched, []);
+  } finally { t.client.clear(); }
+});
+
+test("a window's reads that end on both sides of a lost sign-in list nothing and read nothing again", async () => {
+  const t = await openResolveOwner();
+  try {
+    // Two reads for one window. The first is answered and committed; the sign-in goes; the second is answered.
+    const both = t.ask([unknownMessage("far"), unknownMessage("farther")], 1);
+    t.answer(t.held[0]);
+    await t.settled();
+    assert.deepEqual(t.store.getSnapshot().map((channel) => channel.id), ["far"]);
+    t.retract();
+    t.answer(t.held[1]);
+    await both;
+    assert.deepEqual(t.store.getSnapshot(), []);
+    assert.deepEqual(t.published, []);
+    assert.deepEqual(t.listed(), ["first"]);
+
+    // The same with a read that fails after the sign-in went: nothing falls back to reading the lists.
+    t.restore();
+    const failing = t.ask([unknownMessage("far"), unknownMessage("farther")], 1);
+    t.answer(t.held[2]);
+    await t.settled();
+    t.retract();
+    t.held[3].reject(new Error("cancelled"));
+    await failing;
+    await t.settled();
+    assert.deepEqual(t.fetched, []);
+    assert.deepEqual(t.listed(), ["first"]);
+  } finally { t.client.clear(); }
+});
+
+test("a read that fails while its authorization stands leaves the list to be read again", async () => {
+  const t = await openResolveOwner();
+  try {
+    const failing = t.ask([unknownMessage("far")]);
+    t.held[0].reject(new Error("network"));
+    await failing;
+    await t.settled();
+    assert.deepEqual(t.fetched, ["conversations"]);
+    assert.deepEqual(t.store.getSnapshot(), []);
+  } finally { t.client.clear(); }
+});
+
 // Run the real `pageFromCache` so this fails on the readiness it reports.
 function loadPageFromCache() {
   const ts = require("typescript");

@@ -134,3 +134,14 @@ test("messages waiting for a read that never comes do not pile up", () => {
   for (let sequence = 41; sequence < 141; sequence += 1) reads.hold(arrival(sequence, LATER));
   assert.equal(reads.settle(channel()).messageCount, 140);
 });
+
+test("emptying the entity table ends what the reader's reads had brought", () => {
+  // The owner makes a new one whenever the table is emptied: nothing carries over.
+  const before = createViewerReads();
+  before.settle(channel());
+  before.hold(arrival(41, LATER));
+  const after = createViewerReads();
+  assert.equal(before.has("c1"), true);
+  assert.equal(after.has("c1"), false);
+  assert.equal(after.settle(channel()).messageCount, 40);
+});

@@ -228,12 +228,12 @@ import { PageReferenceScopeProvider } from "@/components/dashboard/page-referenc
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAutoLaunchMentions } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentStopInvocation, parseAutoLaunchMentions } from "@xmatrix/protocol";
 import { UnpublishedTurnState } from "./unpublished-turn-status";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered, launchChoicePollInterval, launchChoiceView } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { InvocationAccessError, invocationSourceMessages, loadInvocationPages } from "./mention-invocation-query";
+import { InvocationAccessError, invocationSourceMessages, isInvocationSource, loadInvocationPages } from "./mention-invocation-query";
 import { invocationPollInterval } from "./mention-invocation-state";
 import {
   buildMentionReadIndex, machineOfflineMentionSubjects, sameMentionReadIndex, withInvocationMentionTargets,
@@ -432,6 +432,19 @@ function offersLaunchChoice(message: TimelineItem, channel: SerializedChannel | 
     channel?.metadata?.autoName === true && !message.recalledAt && !message.editedAt &&
     !hasOperationalAgentInvocation(message.body) && parseAutoLaunchMentions(message.body).length === 0 &&
     launchChoiceOffered(message.sentAt, Date.now()));
+}
+
+/* Whether the receipts have loaded matters to the one message that is a stop
+   command. Every other row is told the same thing always: the answer changes
+   each time the question does, and must not render them all. */
+const stopCommands = new WeakMap<TimelineItem, boolean>();
+function isStopCommand(message: TimelineItem): boolean {
+  let known = stopCommands.get(message);
+  if (known === undefined) {
+    known = parseAgentStopInvocation(normalizeMessageBodyForDisplay(message.body, message.senderKind)) !== undefined;
+    stopCommands.set(message, known);
+  }
+  return known;
 }
 
 interface TimelineVirtuosoContext {
@@ -945,12 +958,21 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   const handleTimelineItemsRendered = useStableCallback((items: ListItem<TimelineItem>[]) => {
     if (channel?.id) {
+      /* Only the rows that can carry invocation state are asked about, and
+         the scope stays the one held while it covers them: the rendered range
+         changes several times as each message arrives, and a new scope renders
+         the whole timeline again for a question that is the same. With none
+         of them in view the scope is empty, and nothing is asked. */
       const currentIds = new Set(timeline.map((message) => message.messageId || message.id));
-      const ids = items.flatMap(({ data }) => data && currentIds.has(data.messageId || data.id)
+      const ids = items.flatMap(({ data }) => data && currentIds.has(data.messageId || data.id) && isInvocationSource(data)
         ? [data.messageId || data.id] : []);
-      setVisibleInvocationScope((previous) => previous?.channelId === channel.id &&
-        previous.ids.length === ids.length && previous.ids.every((id, index) => id === ids[index])
-        ? previous : { channelId: channel.id, ids });
+      setVisibleInvocationScope((previous) => {
+        if (previous?.channelId === channel.id && (ids.length > 0 || previous.ids.length === 0)) {
+          const held = new Set(previous.ids);
+          if (ids.every((id) => held.has(id))) return previous;
+        }
+        return { channelId: channel.id, ids };
+      });
     }
     const exposedHighWaterByChannel = new Map<string, number>();
     for (const { data: message } of items) {
@@ -1113,7 +1135,8 @@ export const MessageTimeline = memo(function MessageTimeline({
                   message={message}
                   agentLaunches={agentLaunchesByMessage.get(message.messageId || message.id) ?? NO_LAUNCHES}
                   agentStops={stopsByMessage.get(message.messageId || message.id) ?? NO_STOPS}
-                  stopReceiptsLoaded={agentLaunchQuery.data !== undefined || agentLaunchQuery.isError}
+                  stopReceiptsLoaded={isStopCommand(message)
+                    ? agentLaunchQuery.data !== undefined || agentLaunchQuery.isError : true}
                   invocationRejections={invocationRejectionsByMessage.get(message.messageId || message.id) ?? NO_REJECTIONS}
                   continuationInvocations={continuationsByMessage.get(message.messageId || message.id) ?? NO_CONTINUATIONS}
                   messageTargetEvidence={messageTargetEvidence.get(message.messageId || message.id)}

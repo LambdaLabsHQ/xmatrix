@@ -33,8 +33,12 @@ import {
   type NormalizedChannelCatalogQuery,
 } from "./channel-catalog-query";
 import {
+  NO_CATALOG_LEASES,
   createCatalogRefreshThrottle,
+  nextCatalogLeases,
   observeSpaceCatalogRevision,
+  readChannelsIntoStore,
+  resolveWindowChannels,
   refreshSpaceCatalogForEvent,
   refreshSpaceCatalogForMessages,
   rowsFromData,
@@ -123,13 +127,24 @@ function aheadOfRead(live: SerializedChannel, read: SerializedChannel): Serializ
   const historyHeadSequence = (live.historyHeadSequence ?? 0) > (read.historyHeadSequence ?? 0)
     ? live.historyHeadSequence : read.historyHeadSequence;
   const updatedAt = Date.parse(live.updatedAt) > Date.parse(read.updatedAt) ? live.updatedAt : read.updatedAt;
-  if (messageCount === read.messageCount && historyHeadSequence === read.historyHeadSequence && updatedAt === read.updatedAt) {
+  // The reader's own cursor only moves forward as well. A read from before it
+  // moved says nothing newer about what waits on them either, unless it names
+  // a message past where they have read: what an acknowledgement cleared
+  // stays cleared, and a later mention still shows.
+  const behind = live.readSequence !== undefined && (read.readSequence ?? 0) < live.readSequence;
+  const readSequence = behind ? live.readSequence : read.readSequence;
+  const attention = behind && (read.attention?.lastMessageSequence ?? 0) <= live.readSequence!
+    ? live.attention : read.attention;
+  if (messageCount === read.messageCount && historyHeadSequence === read.historyHeadSequence &&
+      updatedAt === read.updatedAt && readSequence === read.readSequence && attention === read.attention) {
     return read;
   }
   return {
     ...read,
     ...(messageCount !== undefined ? { messageCount } : {}),
     ...(historyHeadSequence !== undefined ? { historyHeadSequence } : {}),
+    ...(readSequence !== undefined ? { readSequence } : {}),
+    attention,
     updatedAt,
   };
 }
@@ -296,16 +311,21 @@ export function useChannelCatalogPaging(input: {
     [spaceIdKey, token, userId],
   );
   const loadedSpaceIdSet = useMemo(() => new Set(loadedSpaceIds), [loadedSpaceIds]);
-  /* Who is signed in to which Hub, with which Spaces loaded. A read answers
-     for the session that asked: one that ends after another account or Hub
-     took over, or after its Space was left, must not write into theirs. */
+  /* A read is good for the authorization it was asked under: this account, on
+     this Hub, with this Space loaded. Losing it ends every read asked before,
+     for good. The same token and Space coming back are a new authorization,
+     and an answer to the old one must not rebuild its list or its read state
+     in the new. A token renewed without a gap keeps its reads. */
   const session = xmatrixQueryKeys.all({ userId }).join("\u0000");
-  const sessionRef = useRef({ session, spaces: loadedSpaceIdSet });
-  useEffect(() => {
-    sessionRef.current = { session, spaces: loadedSpaceIdSet };
-  }, [loadedSpaceIdSet, session]);
-  const settleViewerRead = useMemo<SettleViewerRead | undefined>(
-    () => (userId && viewerReads ? viewerReads(userId).settle : undefined),
+  const leasesRef = useRef(NO_CATALOG_LEASES);
+  const leases = useMemo(
+    () => (leasesRef.current = nextCatalogLeases(leasesRef.current, session, loadedSpaceIds)),
+    [loadedSpaceIds, session],
+  );
+  const leaseOf = useCallback((spaceId: string) => leasesRef.current.bySpace.get(spaceId), []);
+  // Asked for at each merge: emptying the entity table starts the reader's reads over.
+  const settleViewerRead = useCallback<SettleViewerRead>(
+    (channel) => (userId && viewerReads ? viewerReads(userId).settle(channel) : channel),
     [userId, viewerReads],
   );
 
@@ -335,6 +355,8 @@ export function useChannelCatalogPaging(input: {
     const key = event.query.queryKey;
     if (key[0] !== "xmatrix" || key[3] !== "channels") return;
     if (typeof key[4] !== "string" || !loadedSpaceIdSet.has(key[4])) return;
+    // Another account's or Hub's cache entry for the same Space is not this reader's.
+    if (`${key[0]}\u0000${String(key[1])}\u0000${String(key[2])}` !== session) return;
     // The model below reads the lists and their counts from the cache. A
     // resolve answers its caller, and a speculative page is read by nobody
     // here: neither is a reason to render the shell again.
@@ -355,7 +377,7 @@ export function useChannelCatalogPaging(input: {
       }
     }
     rerender();
-  }), [client, commitRows, loadedSpaceIdSet, userId]);
+  }), [client, commitRows, loadedSpaceIdSet, session, userId]);
 
   const queryKey = useCallback((spaceId: string, query: ChannelCatalogQuery) => {
     if (!spaceId || !userId) return null;
@@ -403,19 +425,21 @@ export function useChannelCatalogPaging(input: {
       return { protocolVersion: 1 as const, channels: [], pathsByChannelId: {} };
     }
     const ids = [...new Set(channelIds)].slice(0, RESOLVE_LIMIT);
-    const result = await client.fetchQuery({
-      queryKey: xmatrixQueryKeys.channelResolve({
-        userId, spaceId, channelIds: ids, routeToken, includeParticipants: true,
+    const lease = leases.bySpace.get(spaceId);
+    return readChannelsIntoStore({
+      authorized: () => lease !== undefined && leaseOf(spaceId) === lease,
+      read: () => client.fetchQuery({
+        queryKey: xmatrixQueryKeys.channelResolve({
+          userId, spaceId, channelIds: ids, routeToken, includeParticipants: true,
+        }),
+        queryFn: ({ signal }) => fetchChannelCatalogResolve({
+          token, spaceId, channelIds: ids, routeToken, includeParticipants: true, signal,
+        }),
+        staleTime: fresh ? 0 : 30_000,
       }),
-      queryFn: ({ signal }) => fetchChannelCatalogResolve({
-        token, spaceId, channelIds: ids, routeToken, includeParticipants: true, signal,
-      }),
-      staleTime: fresh ? 0 : 30_000,
+      commit: (resolved) => setChannels((current) => mergeChannels(current, resolved, settleViewerRead)),
     });
-    if (sessionRef.current.session !== session || !sessionRef.current.spaces.has(spaceId)) return result;
-    setChannels((current) => mergeChannels(current, result.channels, settleViewerRead));
-    return result;
-  }, [client, session, setChannels, settleViewerRead, token, userId]);
+  }, [client, leaseOf, leases, setChannels, settleViewerRead, token, userId]);
 
   const resolvedRouteKeyRef = useRef<string | null>(null);
 
@@ -476,26 +500,16 @@ export function useChannelCatalogPaging(input: {
           void resolve(targetSpaceId, [channelId], undefined, fresh).catch(() => undefined);
         },
       };
-      /* The Hub answers for a window's unknown Channels in one read. What it
-         returns the reader may read, so those join the conversation list as
-         the rows they are; a read that fails leaves the lists to be read again. */
+      // The reads, the rows they bring and the fallback all stand on the one authorization.
+      const lease = leases.bySpace.get(spaceId);
       const resolveMessageChannels = (targetSpaceId: string, unknown: ChannelCatalogChangeDetail[]) => {
-        const ids = [...new Set(unknown.map((detail) => detail.channelId!))];
-        const reads = Array.from({ length: Math.ceil(ids.length / RESOLVE_LIMIT) }, (_, part) =>
-          resolve(targetSpaceId, ids.slice(part * RESOLVE_LIMIT, (part + 1) * RESOLVE_LIMIT)));
-        const current = () => sessionRef.current.session === session && sessionRef.current.spaces.has(targetSpaceId);
-        void Promise.all(reads).then((results) => {
-          if (!current()) return;
-          const resolved = new Map(results.flatMap((result) => result.channels).map((channel) => [channel.id, channel]));
-          refreshSpaceCatalogForMessages({
-            ...lists,
-            details: unknown.filter((detail) => resolved.has(detail.channelId!)),
-            hasChannel: () => true,
-            channel: (channelId) => liveChannel?.(channelId) ?? resolved.get(channelId),
-          });
-        }, () => {
-          if (!current()) return;
-          refreshSpaceCatalogForMessages({ ...lists, details: unknown, hasChannel: () => true, channel: () => undefined });
+        void resolveWindowChannels({
+          ...lists,
+          spaceId: targetSpaceId,
+          unknown,
+          limit: RESOLVE_LIMIT,
+          authorized: () => lease !== undefined && targetSpaceId === spaceId && leaseOf(targetSpaceId) === lease,
+          resolve: async (channelIds) => (await resolve(targetSpaceId, channelIds)).channels,
         });
       };
       refreshSpaceCatalogForMessages({ ...lists, details, resolveMessageChannels });
@@ -504,7 +518,7 @@ export function useChannelCatalogPaging(input: {
         refreshSpaceCatalogForEvent({ ...lists, detail });
       }
     };
-  }, [channels, client, liveChannel, promoteCatalog, resolve, session, userId, viewerReads]);
+  }, [channels, client, leaseOf, leases, liveChannel, promoteCatalog, resolve, userId, viewerReads]);
 
   useEffect(() => {
     // Busy Spaces change their catalog many times a second; the reads are
