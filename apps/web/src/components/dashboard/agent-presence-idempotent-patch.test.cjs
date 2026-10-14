@@ -273,6 +273,51 @@ test("keyed live runs reuse Channel positions without revisiting unrelated ids o
   assert.equal(store.getSnapshot()[999], counted.channels[999]);
 });
 
+test("appending Channels hands routing forward without reindexing the unchanged prefix", () => {
+  const counted = countedChannelSpace();
+  const first = createChannelPresenceBatch(counted.channels);
+  first.applyPresence([heartbeatAgent()]);
+  first.applyChannel({ id: "appended-1", name: "zzzz-older-1" });
+  const published = first.getCommit();
+  const next = createChannelPresenceBatch(published.items, first.takeRouting(published.items));
+  next.applyChannel({ id: "appended-2", name: "zzzz-older-2" });
+  const second = next.getCommit();
+  const before = counted.idReads();
+  const routing = next.takeRouting(second.items);
+  assert.ok(counted.idReads() - before < 4, "an append must not inspect the thousand unchanged Channel ids");
+  const third = createChannelPresenceBatch(second.items, routing);
+  const instance = { ...workingInstance(), id: "instance-999", activity: "After append" };
+  delete instance.channelId;
+  third.applyPresence([{ ...heartbeatAgent(), id: "other-principal", instances: [instance] }]);
+  const changed = third.getSnapshot();
+  assert.equal(changed.find(channel => channel.id === "channel-999").memberPresence["agent:999"].instances[0].activity,
+    "After append");
+  assert.deepEqual(changed.slice(-2).map(channel => channel.id), ["appended-1", "appended-2"]);
+  assert.equal(published.byId.has("appended-2"), false, "private routing does not alter a published commit index");
+  assert.equal(second.byId.get("channel-999").memberPresence["agent:999"].instances[0].activity, undefined);
+});
+
+test("reading a staged tail before a larger reorder cannot reuse the old prefix positions", () => {
+  const original = channelsWithAgentPresence()[0];
+  const first = createChannelPresenceBatch([original]);
+  first.applyPresence([heartbeatAgent()]);
+  first.applyChannel({ id: "tail", name: "zzzz-tail" });
+  const published = first.getCommit();
+  const next = createChannelPresenceBatch(published.items, first.takeRouting(published.items));
+  next.applyChannel({ id: "tail-2", name: "zzzz-tail-2" });
+  assert.equal(next.getSnapshot().at(-1).id, "tail-2");
+  for (let index = 0; index < 9; index += 1) next.applyChannel({ id: `prefix-${index}`, name: `000-${index}` });
+  const second = next.getCommit();
+  const third = createChannelPresenceBatch(second.items, next.takeRouting(second.items));
+  const instance = { ...workingInstance(), activity: "After full reorder" };
+  delete instance.channelId;
+  third.applyPresence([{ ...heartbeatAgent(), id: "other-principal", instances: [instance] }]);
+  const changed = third.getSnapshot();
+  assert.deepEqual(changed.slice(0, 9).map(channel => channel.id), Array.from({ length: 9 }, (_, index) => `prefix-${index}`));
+  assert.equal(changed.find(channel => channel.id === original.id).memberPresence["agent:claude"].instances[0].activity,
+    "After full reorder");
+});
+
 test("a live seal publishes before subscribers and cannot inherit a later reentrant catalog write", () => {
   const store = createRealtimeCollection(channelsWithAgentPresence());
   const batch = createChannelPresenceBatch(store.getSnapshot());

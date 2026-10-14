@@ -17,6 +17,10 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
   let catalog = initial;
   let byId: ReadonlyMap<string, T> = new Map(initial.map(item => [item.id, item]));
   let catalogById = byId;
+  // Presentation order is private: inserting a newly seen Agent must not
+  // rebuild the entire keyed index or materialize a public Agent array.
+  let orderedIds = orderBy ? [...new Set(initial.map(item => item.id))] : undefined;
+  let orderKnown = initial.length < 2;
   // Only receive owns a writable Map. External commits and catalog readers
   // may retain their indices, so the next receive must fork after either.
   let liveMapOwned = false;
@@ -32,7 +36,7 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
   };
   const snapshot = () => {
     if (snapshotDirty) {
-      live = [...byId.values()];
+      live = orderedIds ? orderedIds.map(id => byId.get(id)!) : [...byId.values()];
       snapshotDirty = false;
     }
     return live;
@@ -45,8 +49,13 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
   };
   const publish = (next: T[], nextById: ReadonlyMap<string, T>, changedKeys: readonly string[], kind: "catalog" | "live",
     receive?: { captureSnapshot?: (items: T[], previous: T[]) => void; previous?: T[] }) => {
+    const nextOrder = orderBy ? [...new Set(next.map(item => item.id))] : undefined;
     live = next;
     byId = nextById;
+    orderedIds = nextOrder;
+    // External arrays keep their supplied order until a real name/addition
+    // change requires sorting; a completed receive sort is already ordered.
+    orderKnown = receive !== undefined || next.length < 2;
     snapshotDirty = false;
     const catalogChanged = kind === "catalog";
     liveMapOwned = receive !== undefined && !catalogChanged;
@@ -90,7 +99,11 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
       if (next === current) return;
       const nextById = new Map(next.map(item => [item.id, item]));
       const changedKeys: string[] = [];
-      for (const [id, item] of byId) if (nextById.get(id) !== item) changedKeys.push(id);
+      if (orderedIds) {
+        for (const id of orderedIds) if (nextById.get(id) !== byId.get(id)) changedKeys.push(id);
+      } else {
+        for (const [id, item] of byId) if (nextById.get(id) !== item) changedKeys.push(id);
+      }
       for (const id of nextById.keys()) if (!byId.has(id)) changedKeys.push(id);
       publish(next, nextById, changedKeys, kind);
     },
@@ -100,7 +113,7 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
       const current = snapshot();
       if (commit.items === current) return;
       const candidates = commit.basis !== undefined && commit.basis !== current
-        ? new Set([...byId.keys(), ...commit.byId.keys()]) : new Set(commit.changedKeys);
+        ? new Set([...(orderedIds ?? byId.keys()), ...commit.byId.keys()]) : new Set(commit.changedKeys);
       const changedKeys = [...candidates].filter(id =>
         byId.get(id) !== commit.byId.get(id));
       publish(commit.items, commit.byId, changedKeys, kind);
@@ -115,24 +128,46 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
       }
       const updates = new Map(incoming.map(item => [item.id, item]));
       const changedKeys: string[] = [];
-      let needsSort = false;
+      const added: T[] = [];
+      let renamed = false;
       for (const [id, after] of updates) {
         const before = byId.get(id);
         if (before !== after) changedKeys.push(id);
         if (orderBy) {
           const name = orderBy(after);
           if (typeof name !== "string") throw new Error("Invalid realtime ordering key");
-          if (!before || orderBy(before) !== name) needsSort = true;
+          if (!before) added.push(after);
+          else if (orderBy(before) !== name) renamed = true;
         }
       }
-      if (needsSort && orderBy) {
-        // Build and sort a private candidate before changing any live value:
-        // a malformed card must not poison this or the next receive.
-        const candidate = new Map(byId);
-        for (const [id, item] of updates) candidate.set(id, item);
-        const items = [...candidate.values()].sort((left, right) => orderBy(left).localeCompare(orderBy(right)));
-        publish(items, new Map(items.map(item => [item.id, item])), changedKeys, "live", { captureSnapshot, previous });
-        return;
+      let nextOrder = orderedIds;
+      if ((renamed || added.length) && orderBy) {
+        // Finish every comparison on a private candidate before changing the
+        // keyed cards: a failed ordering must not poison a later good report.
+        if (orderKnown && !renamed && added.length <= 8) {
+          nextOrder = orderedIds!.slice();
+          for (const item of added) {
+            const name = orderBy(item);
+            let low = 0;
+            let high = nextOrder.length;
+            while (low < high) {
+              const middle = (low + high) >>> 1;
+              const id = nextOrder[middle];
+              const resident = updates.get(id) ?? byId.get(id)!;
+              if (name.localeCompare(orderBy(resident)) >= 0) low = middle + 1;
+              else high = middle;
+            }
+            // New same-name cards follow existing ties and each other in
+            // their first-seen order, exactly as a stable full sort would.
+            nextOrder.splice(low, 0, item.id);
+          }
+        } else {
+          const items = orderedIds!.map(id => updates.get(id) ?? byId.get(id)!);
+          items.push(...added);
+          items.sort((left, right) => orderBy(left).localeCompare(orderBy(right)));
+          publish(items, new Map(items.map(item => [item.id, item])), changedKeys, "live", { captureSnapshot, previous });
+          return;
+        }
       }
       if (changedKeys.length) {
         const writable = liveMapOwned ? byId as Map<string, T> : new Map(byId);
@@ -140,6 +175,8 @@ export function createRealtimeCollection<T extends { id: string }>(initial: T[] 
         byId = writable;
         liveMapOwned = true;
       }
+      orderedIds = nextOrder;
+      if (added.length) orderKnown = true;
       // Even identical nonempty cards retain the ordinary writer's new live
       // snapshot/global notification, without notifying unchanged keys.
       snapshotDirty = true;
