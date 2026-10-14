@@ -29,7 +29,9 @@ export function agentTurnFailureAppendCommand(input: {
   const channelId = input.channelId.trim();
   if (!channelId) return null;
   const background = input.reason === "background_tasks_interrupted";
-  if (background && (!input.noticeId || !/^[a-zA-Z0-9_-]{1,120}$/.test(input.noticeId))) return null;
+  // A notice that names its failure is keyed by it; one without falls back to
+  // the Instance and its opening text, which a replay repeats exactly.
+  if (input.noticeId ? !/^[a-zA-Z0-9_-]{1,120}$/.test(input.noticeId) : background) return null;
   const body = background
     ? `xMatrix lost background-task tracking for ${input.agentName.trim() || "agent"}. ${boundAgentTurnFailureDetail(input.detail)}`.trim()
     : agentTurnFailureNoticeBody({
@@ -38,7 +40,7 @@ export function agentTurnFailureAppendCommand(input: {
   });
   const identity = [
     input.instanceId.trim() || input.runId.trim(),
-    ...(background ? [channelId, input.noticeId!] : []),
+    ...(input.noticeId ? [channelId, input.noticeId] : []),
     body.replace(/\s+/gu, " ").slice(0, TURN_FAILURE_NOTICE_IDENTITY_MAX),
   ].join(":");
   const messageId = runtimeCommandId("turn-failure", identity);

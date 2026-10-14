@@ -8,6 +8,12 @@ import type {
 } from "@xmatrix/protocol/connections/agent-instance";
 import type { LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
 import {
+  AGENT_TURN_FAILURE_LIFECYCLE_LAYER,
+  AGENT_TURN_FAILURE_LIFECYCLE_REASON,
+  AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
+  AGENT_USAGE_LIMIT_LIFECYCLE_REASON,
+  agentUsageLimitFromError,
+  boundAgentTurnFailureDetail,
   callerMessageMetadata,
   ChannelActivityInvalid,
   CHANNEL_ACTIVITY_MESSAGE_KIND,
@@ -17,6 +23,7 @@ import {
   isLiveAgentStatus,
   normalizeChannelActivity,
   repoSummonReference,
+  sha256Hex,
 } from "@xmatrix/protocol";
 
 import { InvalidAuthTokenError, verifyAuthToken, type AgentRunPrincipal, type AuthUser } from "../auth";
@@ -268,12 +275,26 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         // call that host directly, so Runtime never stores or forwards them.
         if (message.eventType === "llm_trace") return undefined;
         return this.dependencies.signals.publish(session, message);
-      case "agent_turn_retry":
+      case "agent_turn_retry": {
         if (!this.dependencies.turnRetry) throw new Error("Hub retry authority is unavailable");
-        return this.dependencies.turnRetry(session, message);
+        const decision = await this.dependencies.turnRetry(session, message);
+        // A host hands Hub every failed turn and stays silent once Hub
+        // answers. An error Hub does not retry is still Hub's to report: the
+        // same turn failure a host would have sent, with the original error.
+        if (message.action === "failed" && message.errorMessage && decision && "type" in decision &&
+            decision.type === "agent_turn_retry_decision" && decision.action === "stop" && decision.reason === "ineligible") {
+          const failure = turnFailureLifecycle(session.run.channelId, message.errorMessage);
+          await this.dependencies.signals.publish(session, failure);
+          await this.persistTurnFailureNotice(session, failure,
+            await sha256Hex(`${message.operationId}\0${message.turnId}`));
+        }
+        return decision;
+      }
       case "agent_lifecycle": {
-        const published = await this.dependencies.signals.publish(session, message);
-        await this.persistTurnFailureNotice(session, message);
+        const failure = classifiedTurnFailure(message);
+        const published = await this.dependencies.signals.publish(session, failure);
+        await this.persistTurnFailureNotice(session, failure,
+          failure.reason === "background_tasks_interrupted" ? failure.requestId : undefined);
         return published;
       }
       case "presence_update": {
@@ -568,6 +589,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
   private async persistTurnFailureNotice(
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"agent_lifecycle">,
+    noticeId: string | undefined,
   ): Promise<void> {
     if (!shouldPersistAgentTurnFailureNotice(message)) return;
     if (!session.principal.channelWriteAllowed || session.run.kind === "channel-about-session") {
@@ -583,7 +605,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       channelId: message.channelId || session.principal.channelId,
       detail: message.detail,
       reason: message.reason,
-      noticeId: message.requestId,
+      noticeId,
       senderSnapshot: agentMessagePresentation(session.presentation) ?? {},
     });
     if (!command) return;
@@ -1078,4 +1100,20 @@ function requiredString(value: unknown, field: string): string {
 function requiredNonnegativeInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error(`${field} is invalid`);
   return Number(value);
+}
+
+/** Hub reads a usage limit from the original error, whatever the host said. */
+function classifiedTurnFailure(message: Message<"agent_lifecycle">): Message<"agent_lifecycle"> {
+  if (message.layer !== AGENT_TURN_FAILURE_LIFECYCLE_LAYER || message.status !== AGENT_TURN_FAILURE_LIFECYCLE_STATUS ||
+      message.reason !== AGENT_TURN_FAILURE_LIFECYCLE_REASON) return message;
+  const limit = agentUsageLimitFromError(message.detail);
+  return limit ? { ...message, reason: AGENT_USAGE_LIMIT_LIFECYCLE_REASON,
+    ...(limit.resetsAt && !message.resetsAt ? { resetsAt: limit.resetsAt } : {}) } : message;
+}
+
+function turnFailureLifecycle(channelId: string, error: string): Message<"agent_lifecycle"> {
+  return classifiedTurnFailure({ type: "agent_lifecycle", channelId,
+    layer: AGENT_TURN_FAILURE_LIFECYCLE_LAYER, status: AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
+    reason: AGENT_TURN_FAILURE_LIFECYCLE_REASON, detail: boundAgentTurnFailureDetail(error),
+    snapshot: { run: "failed", process: "online" } });
 }
