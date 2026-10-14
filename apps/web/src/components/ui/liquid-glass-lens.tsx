@@ -18,7 +18,9 @@ import React, { useEffect, useSyncExternalStore } from "react";
  * - a surface opts in by rendering `LiquidGlassSurface` with `fill`; nothing
  *   scans or watches the document;
  * - one shared ResizeObserver reports border-box sizes after layout, so the
- *   lens never reads layout itself;
+ *   lens never reads layout itself, and a surface that needs no new map (the
+ *   recipe keeps it flat, or its lens exists) is settled in that same report:
+ *   it asks for no frame of its own;
  * - sizes snap to a quarter pixel, so the map's rim lands on the surface's
  *   own rim (a map rounded 3px wider than its chip left the chip's right cap
  *   unbent and dull); each map is at most MAX_MAP_PIXELS pixels,
@@ -26,7 +28,8 @@ import React, { useEffect, useSyncExternalStore } from "react";
  * - surfaces with the same rounded size and radius share one filter, and a
  *   filter is dropped as soon as its last surface unmounts or resizes away;
  * - at most MAX_LENSES filters exist; further surfaces keep the CSS recipe;
- * - at most MAPS_PER_FRAME maps are drawn per animation frame.
+ * - a map that has yet to be drawn waits for an animation frame, and at most
+ *   MAPS_PER_FRAME are drawn in one.
  */
 
 const SIZE_STEP = 0.25;
@@ -114,17 +117,26 @@ function readNumber(style: CSSStyleDeclaration, name: string, fallback: number) 
   return Number.isFinite(value) ? value : fallback;
 }
 
-function measure(element: HTMLElement, surface: Surface) {
-  if (!element.isConnected) return;
+/** The lens a surface's size and style ask for. */
+type WantedLens = {
+  key: string;
+  width: number;
+  height: number;
+  radius: number;
+  bezel: number;
+  depth: number;
+  edgeLight: number;
+};
+
+/** What the surface asks of the lens now: null where the recipe keeps it flat, nothing once it left the document. */
+function wantedLens(element: HTMLElement, surface: Surface): WantedLens | null | undefined {
+  if (!element.isConnected) return undefined;
   const style = getComputedStyle(element);
   const width = snap(surface.width);
   const height = snap(surface.height);
   /* A surface the recipe keeps flat (glass on a slab, a white control on the
      paper) has no backdrop to bend. */
-  if (style.backdropFilter === "none" || width < MIN_SIZE || height < MIN_SIZE) {
-    release(element, surface);
-    return;
-  }
+  if (style.backdropFilter === "none" || width < MIN_SIZE || height < MIN_SIZE) return null;
   const radius = Math.min(
     Number.parseFloat(style.borderTopLeftRadius) || 0,
     width / 2,
@@ -134,32 +146,56 @@ function measure(element: HTMLElement, surface: Surface) {
   const thickness = readNumber(style, "--app-liquid-glass-thickness", DEFAULT_THICKNESS);
   const refraction = readNumber(style, "--app-liquid-refraction-level", DEFAULT_REFRACTION);
   const edgeLight = readNumber(style, "--app-liquid-edge-light", DEFAULT_EDGE_LIGHT);
-  const key = `${width}x${height}r${Math.round(radius)}b${bezel}t${thickness}l${refraction}e${edgeLight}`;
-  if (surface.key === key) return;
+  return {
+    key: `${width}x${height}r${Math.round(radius)}b${bezel}t${thickness}l${refraction}e${edgeLight}`,
+    width, height, radius, bezel, depth: thickness * refraction, edgeLight,
+  };
+}
+
+/**
+ * Gives the surface the lens it asks for. One that exists, or none, is settled
+ * at once. One that has yet to be drawn is drawn only where `draw` allows, and
+ * the answer says which of the three happened.
+ */
+function fit(
+  element: HTMLElement,
+  surface: Surface,
+  wanted: WantedLens | null | undefined,
+  draw: boolean,
+): "fitted" | "drew" | "undrawn" {
+  if (wanted === undefined) return "fitted";
+  if (!wanted) {
+    release(element, surface);
+    return "fitted";
+  }
+  if (surface.key === wanted.key) return "fitted";
+  let lens = lenses.get(wanted.key);
+  if (!lens && !draw) return "undrawn";
 
   release(element, surface);
-  let lens = lenses.get(key);
+  const drew = !lens;
   if (!lens) {
-    if (lenses.size >= MAX_LENSES) return;
+    if (lenses.size >= MAX_LENSES) return "fitted";
     lens = {
-      id: `xm-lens-${lenses.size}-${hash(key)}`,
-      key,
-      width,
-      height,
+      id: `xm-lens-${lenses.size}-${hash(wanted.key)}`,
+      key: wanted.key,
+      width: wanted.width,
+      height: wanted.height,
       map: "",
       scale: 0,
-      edgeLight,
+      edgeLight: wanted.edgeLight,
       users: 0,
     };
-    lenses.set(key, lens);
-    const drawn = drawLensMap(width, height, radius, bezel, thickness * refraction);
+    lenses.set(wanted.key, lens);
+    const drawn = drawLensMap(wanted.width, wanted.height, wanted.radius, wanted.bezel, wanted.depth);
     lens.map = drawn.map;
     lens.scale = drawn.scale;
     publish();
   }
   lens.users += 1;
-  surface.key = key;
+  surface.key = wanted.key;
   element.style.setProperty("--app-liquid-lens", `url("#${lens.id}")`);
+  return drew ? "drew" : "fitted";
 }
 
 function flush() {
@@ -170,8 +206,7 @@ function flush() {
     pending.delete(element);
     const surface = surfaces.get(element);
     if (!surface) continue;
-    measure(element, surface);
-    drawn += 1;
+    if (fit(element, surface, wantedLens(element, surface), true) === "drew") drawn += 1;
   }
   if (pending.size > 0) schedule();
 }
@@ -187,6 +222,7 @@ function queue(element: HTMLElement) {
 
 function sharedObserver() {
   observer ??= new ResizeObserver((entries) => {
+    const sized: Array<[HTMLElement, Surface]> = [];
     for (const entry of entries) {
       const element = entry.target as HTMLElement;
       const surface = surfaces.get(element);
@@ -194,26 +230,39 @@ function sharedObserver() {
       if (!surface || !box) continue;
       surface.width = box.inlineSize;
       surface.height = box.blockSize;
-      queue(element);
+      sized.push([element, surface]);
     }
+    /* Layout has just settled, so reading a style costs nothing here. What
+       every surface asks for is read before any of them is written to; a
+       write between two reads would have the second restyle the page. */
+    const wanted = sized.map(([element, surface]) => wantedLens(element, surface));
+    sized.forEach(([element, surface], index) => {
+      if (fit(element, surface, wanted[index], false) === "undrawn") queue(element);
+    });
   });
   return observer;
+}
+
+/** Keeps `element` fitted with its lens until the returned function is called. */
+export function watchLiquidGlassLens(element: HTMLElement): () => void {
+  if (!isLensCapable()) return () => undefined;
+  const surface: Surface = { key: null, width: 0, height: 0 };
+  surfaces.set(element, surface);
+  sharedObserver().observe(element);
+  return () => {
+    observer?.unobserve(element);
+    pending.delete(element);
+    surfaces.delete(element);
+    release(element, surface);
+  };
 }
 
 /** `version` changes when the surface's lens parameters do, so it redraws. */
 export function useLiquidGlassLens(ref: React.RefObject<HTMLElement | null>, enabled: boolean, version = "") {
   useEffect(() => {
     const element = ref.current;
-    if (!enabled || !element || !isLensCapable()) return;
-    const surface: Surface = { key: null, width: 0, height: 0 };
-    surfaces.set(element, surface);
-    sharedObserver().observe(element);
-    return () => {
-      observer?.unobserve(element);
-      pending.delete(element);
-      surfaces.delete(element);
-      release(element, surface);
-    };
+    if (!enabled || !element) return;
+    return watchLiquidGlassLens(element);
   }, [ref, enabled, version]);
 }
 
