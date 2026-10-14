@@ -2232,6 +2232,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// Write a journal as an older CLI left it: no dating, no budget.
+    fn write_as_older_cli(path: &Path, payload: EffectJournalPayload) {
+        let envelope = EffectJournalEnvelope {
+            checksum_sha256: payload_checksum(&payload).unwrap(),
+            payload,
+        };
+        fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    }
+
     #[test]
     fn effect_journal_rolls_each_effect_out_after_hub_can_no_longer_deliver_it() {
         let root = std::env::temp_dir().join(format!(
@@ -2269,15 +2278,7 @@ mod tests {
             };
         }
         // Written without dating, as an older CLI left it.
-        let envelope = EffectJournalEnvelope {
-            checksum_sha256: payload_checksum(&payload).unwrap(),
-            payload,
-        };
-        fs::write(
-            root.join("effects.json"),
-            serde_json::to_vec(&envelope).unwrap(),
-        )
-        .unwrap();
+        write_as_older_cli(&root.join("effects.json"), payload);
         commit("fresh", "quota_probe");
         let kept = journal.load_or_empty().unwrap().effects;
         let ids = kept
@@ -2326,17 +2327,7 @@ mod tests {
                 effect.received_unix_ms = None;
             }
         }
-        let envelope = EffectJournalEnvelope {
-            checksum_sha256: payload_checksum(&payload).unwrap(),
-            payload,
-        };
-        fs::write(
-            root.join("effects.json"),
-            serde_json::to_vec(&envelope).unwrap(),
-        )
-        .unwrap();
         // Older-CLI actions of unknown age may have acted; they stay.
-        let mut payload = journal.load_or_empty().unwrap();
         for (control_id, command_type) in [
             ("harness-old", "harness_action"),
             ("worktree-old", "worktree_action"),
@@ -2355,15 +2346,7 @@ mod tests {
             };
             payload.effects.insert(effect.stable_id(), effect);
         }
-        let envelope = EffectJournalEnvelope {
-            checksum_sha256: payload_checksum(&payload).unwrap(),
-            payload,
-        };
-        fs::write(
-            root.join("effects.json"),
-            serde_json::to_vec(&envelope).unwrap(),
-        )
-        .unwrap();
+        write_as_older_cli(&root.join("effects.json"), payload);
         commit("probe-new", "quota_probe").unwrap();
         commit("probe-newer", "quota_probe").unwrap();
         let kept = journal
