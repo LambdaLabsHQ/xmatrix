@@ -98,8 +98,11 @@ pub(crate) struct RunLoopEvents<'a> {
     /// The channel whose last turn ended cancelled, until something answers it.
     interrupted_turn: Option<String>,
     /// A resume owed to `interrupted_turn` once a switch landed, with what was
-    /// selected.
+    /// selected. Only for a Hub that does not decide continuations.
     owed_resume: Option<(String, Vec<String>)>,
+    /// The turn a switch cancelled, by channel and the switches since, while
+    /// this loop waits for the Hub's continuation instruction.
+    awaiting_continuation: Option<(String, Vec<String>)>,
 }
 
 impl<'a> RunLoopEvents<'a> {
@@ -121,6 +124,7 @@ impl<'a> RunLoopEvents<'a> {
             termination_signals: None,
             interrupted_turn: None,
             owed_resume: None,
+            awaiting_continuation: None,
         }
     }
 
@@ -161,6 +165,42 @@ impl<'a> RunLoopEvents<'a> {
         })
     }
 
+    /// The Hub's instruction to continue a turn a switch cancelled, when
+    /// `event` is one for this Instance. It runs only while this loop still
+    /// owes that turn (one of its switches is named) and no newer input waits;
+    /// otherwise it is acknowledged and dropped. `None` for any other event.
+    fn continuation(&mut self, event: &ConnectionEvent) -> Option<Option<RunLoopInput>> {
+        let ConnectionEvent::Server(
+            protocol::AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+            | protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. },
+        ) = event
+        else {
+            return None;
+        };
+        let instruction = protocol::channel_switch_continuation(message)?;
+        if self.agent.instance_id.as_deref() != Some(instruction.instance_id.as_str()) {
+            return None;
+        }
+        let _ = self.relay.ack_channel_message(
+            message.message_id.clone(),
+            message.channel_id.clone(),
+            message.sequence,
+        );
+        let owed = self.awaiting_continuation.as_ref().is_some_and(|(channel_id, switches)| {
+            channel_id == &message.channel_id
+                && switches.iter().any(|id| instruction.request_ids.contains(id))
+        });
+        let superseded = self.pending.iter().any(is_channel_delivery_connection_event);
+        if !owed || superseded {
+            return Some(None);
+        }
+        self.awaiting_continuation = None;
+        Some(Some(RunLoopInput::Resume {
+            channel_id: message.channel_id.clone(),
+            prompt: message.body.clone(),
+        }))
+    }
+
     async fn next_event(&mut self) -> Option<ConnectionEvent> {
         if self.watch_termination {
             let signals = self
@@ -187,11 +227,24 @@ impl<'a> RunLoopEvents<'a> {
                 return Some(resume);
             }
             let event = self.next_event().await?;
-            let event = match answer_switch_request(relay, runtime, event).await {
+            let interrupted = self.interrupted_turn.is_some();
+            let event = match answer_switch_request(relay, runtime, event, interrupted).await {
                 SwitchAnswer::NotASwitch(event) => *event,
+                // The Hub decides whether the cancelled turn continues and
+                // words its input; this loop waits for that instruction.
+                SwitchAnswer::Switched { request_id, .. }
+                    if relay.hub_accepts(SWITCH_CONTINUATION) =>
+                {
+                    if let Some(channel_id) = self.interrupted_turn.take() {
+                        self.awaiting_continuation = Some((channel_id, vec![request_id]));
+                    } else if let Some((_, switches)) = self.awaiting_continuation.as_mut() {
+                        switches.push(request_id);
+                    }
+                    continue;
+                }
                 // A refused switch cancelled the turn all the same, so the
                 // work resumes either way, on whatever is selected now.
-                SwitchAnswer::Switched(selection) => {
+                SwitchAnswer::Switched { selection, .. } => {
                     if let Some(channel_id) = self.interrupted_turn.take() {
                         self.owed_resume = Some((channel_id, Vec::new()));
                     }
@@ -203,6 +256,12 @@ impl<'a> RunLoopEvents<'a> {
                     continue;
                 }
             };
+            if let Some(continuation) = self.continuation(&event) {
+                match continuation {
+                    Some(resume) => return Some(resume),
+                    None => continue,
+                }
+            }
             if !is_channel_delivery_connection_event(&event) {
                 return Some(RunLoopInput::Event(Box::new(event)));
             }
@@ -240,6 +299,7 @@ impl<'a> RunLoopEvents<'a> {
             // resumed behind it.
             self.interrupted_turn = None;
             self.owed_resume = None;
+            self.awaiting_continuation = None;
             return Some(RunLoopInput::Delivery {
                 channel_id,
                 messages,
@@ -252,9 +312,15 @@ impl<'a> RunLoopEvents<'a> {
 enum SwitchAnswer {
     NotASwitch(Box<ConnectionEvent>),
     /// A switch was answered; carries what it selected, e.g. "model `x`",
-    /// or nothing when it was refused.
-    Switched(Option<String>),
+    /// or nothing when it was refused, and the request it answered.
+    Switched {
+        selection: Option<String>,
+        request_id: String,
+    },
 }
+
+/// The Hub capability that decides and words a switch's continuation.
+const SWITCH_CONTINUATION: &str = "switch_continuation";
 
 /// Answer a model or effort switch request; any other event is handed back.
 ///
@@ -266,6 +332,7 @@ async fn answer_switch_request<R: ChannelControlledRuntime>(
     relay: &agent_instance_connection::AgentInstanceConnectionClient,
     runtime: &mut R,
     event: ConnectionEvent,
+    interrupted_turn: bool,
 ) -> SwitchAnswer {
     let (is_model, request_id, outcome) = match event {
         ConnectionEvent::Server(
@@ -293,22 +360,26 @@ async fn answer_switch_request<R: ChannelControlledRuntime>(
         }
         Err(error) => (None, Some(error)),
     };
-    let answer = SwitchAnswer::Switched(
-        selected
+    let answer = SwitchAnswer::Switched {
+        selection: selected
             .as_ref()
             .map(|selected| format!("{} `{selected}`", if is_model { "model" } else { "effort" })),
-    );
+        request_id: request_id.clone(),
+    };
+    let interrupted_turn = interrupted_turn.then_some(true);
     let _ = relay.send_message(if is_model {
         protocol::AgentInstanceClientMessage::AgentModelSwitchResult {
             request_id,
             model: selected,
             error,
+            interrupted_turn,
         }
     } else {
         protocol::AgentInstanceClientMessage::AgentEffortSwitchResult {
             request_id,
             effort: selected,
             error,
+            interrupted_turn,
         }
     });
     answer

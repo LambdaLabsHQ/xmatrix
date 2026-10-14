@@ -2415,11 +2415,20 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
                         }
                     }
                 }
-                if delivery_is_acknowledged_and_dropped(
-                    &server_msg,
-                    own_author.as_ref(),
-                    ctx.spawn_initial_message_id.as_deref(),
-                ) {
+                // A switch continuation for this Instance reaches its run
+                // loop, which runs it only while it still owes that turn.
+                let own_continuation = channel_switch_continuation(message).is_some_and(|c| {
+                    own_author
+                        .as_ref()
+                        .is_some_and(|author| author.is_instance(&c.instance_id))
+                });
+                if !own_continuation
+                    && delivery_is_acknowledged_and_dropped(
+                        &server_msg,
+                        own_author.as_ref(),
+                        ctx.spawn_initial_message_id.as_deref(),
+                    )
+                {
                     let waterline = ctx
                         .channel_waterlines
                         .lock()
