@@ -89,6 +89,8 @@ export function useChannelReadSync({
           : Promise.resolve(undefined);
       },
       onSuccess: (channelId, readState) => applyReadStateRef.current(channelId, readState),
+      // The account can change a commit before the reset that starts its session over.
+      reader: () => userIdRef.current,
     });
   }
 

@@ -207,3 +207,32 @@ test("only a Done the Hub confirmed counts as read on this device", async () => 
   assert.deepEqual(await coordinator.respond("channel-c", 42, async () => confirmed), { answer: confirmed });
   assert.equal(coordinator.readHere("channel-c"), 42);
 });
+
+test("an answer that comes once another reader is here is nobody's, even before the reset", async () => {
+  const timers = controlledTimers();
+  let reader = "reader-a";
+  const marked = deferred();
+  const successes = [];
+  const coordinator = new ChannelReadSyncCoordinator({
+    send: async () => marked.promise,
+    onSuccess: (_channelId, result) => successes.push(result),
+    reader: () => reader,
+    schedule: timers.schedule,
+    cancel: timers.cancel,
+  });
+  // Read on screen to 5, as the viewport reports it.
+  coordinator.noteRead("channel-c", 5);
+  coordinator.enqueue("channel-c", 5, { attentionUnread: false });
+  await timers.runNext();
+  const done = deferred();
+  const responding = coordinator.respond("channel-c", 42, () => done.promise);
+  // The next account has rendered; its reset has not run yet.
+  reader = "reader-b";
+  marked.resolve({ readSequence: 5 });
+  done.resolve({ readSequence: 42 });
+  assert.equal(await responding, null);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(successes, []);
+  assert.equal(coordinator.readHere("channel-c"), 5, "the Done answered for the reader who left raises nothing");
+  assert.equal(timers.pending().length, 0, "nothing is sent again for the reader who left");
+});
