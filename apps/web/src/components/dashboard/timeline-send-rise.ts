@@ -55,9 +55,10 @@ const risingTimelines = new WeakMap<HTMLElement, {
   stop: () => number;
 }>();
 
-/* The virtualizer's content box: the header, every row it has mounted and the
-   footer, in one element. */
-const TIMELINE_CONTENT = "[data-viewport-type]";
+/* The visual layer holds the header, mounted rows and footer together. Its
+   measured Virtuoso viewport stays still, so a rise cannot change the layout
+   offset reported to the custom scroll parent. */
+const TIMELINE_CONTENT = "[data-timeline-rise-content]";
 
 /** The timeline's layout was just moved by code; the rise draws from before it. */
 export function timelineLayoutMoved(scrollRoot: HTMLElement | null) {

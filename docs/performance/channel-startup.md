@@ -368,6 +368,15 @@ the retired inline-thread-draft selector is removed. The existing timeline
 scroll style-scope regression counts `UpdateLayoutTree.elementCount` to guard
 against whole-app restyling when virtual rows mount.
 
+Arrival motion translates a visual layer inside Virtuoso's measured viewport,
+holding the header, mounted rows and footer together. The viewport itself stays
+in its layout position: with a custom scroll parent, Virtuoso reads its bounding
+box on scroll and must not interpret the animation as a new layout offset.
+The stable custom Scroller preserves the library's viewport component and ref;
+its child composition follows the pinned Virtuoso version. The painted-frame
+arrival owner checks both the row motion and the invariant viewport offset,
+including the integration boundary when that dependency changes.
+
 Channel visibility changes still publish authorized Space catalog revision
 watermarks, including grants to newly visible private Channels; presence
 snapshots are not the discovery announcement. Revision delivery remains best
