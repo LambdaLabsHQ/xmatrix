@@ -19,7 +19,9 @@ continuation text. It waits for the committed Channel message bound to its
 pending failure report and exact Instance, and executes that message body once.
 A private retry-decision frame cannot start a continuation. The message ID,
 sequence, body and binding metadata are the same in history and live delivery;
-provider thread/turn identifiers remain private. Other Instances and stale
+provider thread/turn identifiers remain private. The continuation body contains
+only Hub-authored text and the numeric attempt; display names remain data in
+waiting notices, so a name cannot become a privileged instruction. Other Instances and stale
 waits receive the message as context. Original input and
 attachments remain in the provider thread; selected model, effort, parameters
 and developer instructions stay in force. Transport report replay reuses its
