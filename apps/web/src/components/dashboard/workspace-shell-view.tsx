@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { realtimeCollectionAny } from "./realtime-collection";
 import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
-import { MessageReferenceCatalogProvider, type MessageReferenceCatalog } from "./message-reference-catalog";
-import { MachineLinkProvider, type MachineLinks } from "./machine-link";
+import { channelReferences, MessageReferenceCatalogProvider, type ChannelReference, type MessageReferenceCatalog } from "./message-reference-catalog";
+import { MachineLinkProvider, sameMachineTargets, type MachineLinks } from "./machine-link";
 import { ManageSecretsProvider } from "./secret-request-card";
 import { machinesInSpace, spaceChannelIdSet } from "./space-scoped-tool-content";
 import { channelHasWorkInHand } from "./workspace-shell-chrome";
@@ -576,20 +576,31 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // `#` completion and `channel:<id>` chips read the channels this reader can see.
   const navigateToChannelRef = useRef(navigateToChannel);
   navigateToChannelRef.current = navigateToChannel;
+  // One catalog while what references show of the channels is the same (channelReferences).
+  const channelReferencesRef = useRef<readonly ChannelReference[]>([]);
+  const referenceChannels = useMemo(
+    () => (channelReferencesRef.current = channelReferences(channelReferencesRef.current, channels)),
+    [channels],
+  );
   const messageReferenceCatalog = useMemo<MessageReferenceCatalog>(() => ({
-    channels,
+    channels: referenceChannels,
     onOpenChannel: (channelId) => navigateToChannelRef.current(channelId),
-  }), [channels]);
+  }), [referenceChannels]);
   const changeAppViewRef = useRef(changeAppView);
   changeAppViewRef.current = changeAppView;
   // The Machines the Machines view lists for this Space, scoped the same way, so
   // a Machine tag only links where that view has the Machine's page.
-  const machineLinks = useMemo<MachineLinks>(() => ({
-    machines: machinesInSpace(machines, spaceChannelIdSet(channels, currentSpaceId), { ownerUserId: user?.id })
+  // One value while the Machines are the same: a message changes `channels`, not them.
+  const machineTargetsRef = useRef<MachineLinks["machines"]>([]);
+  const machineTargets = useMemo(() => (machineTargetsRef.current = sameMachineTargets(machineTargetsRef.current,
+    machinesInSpace(machines, spaceChannelIdSet(channels, currentSpaceId), { ownerUserId: user?.id })
       .flatMap((machine) => machine.machineId
-        ? [{ machineId: machine.machineId, ownerUserId: machine.daemon?.userId }] : []),
+        ? [{ machineId: machine.machineId, ownerUserId: machine.daemon?.userId }] : []))),
+  [channels, currentSpaceId, machines, user?.id]);
+  const machineLinks = useMemo<MachineLinks>(() => ({
+    machines: machineTargets,
     onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
-  }), [channels, currentSpaceId, machines, user?.id]);
+  }), [machineTargets]);
   const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
   // The route owns whether a page is open; its tree entry may arrive later.
   // Keep the back bar and its content spacing while the title is loading.

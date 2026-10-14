@@ -70,7 +70,7 @@ export type ReferenceCandidate =
   | { kind: "channel"; id: string; label: string; detail: string; channelId: string }
   | { kind: "page"; id: string; label: string; detail: string; pageId: string; blockId: string | null };
 
-export function channelReferenceCandidates(channels: readonly SerializedChannel[], query: string,
+export function channelReferenceCandidates(channels: readonly Pick<SerializedChannel, "id" | "spaceId" | "name" | "topic" | "summary">[], query: string,
   spaceId: string | null, currentChannelId: string | null): ReferenceCandidate[] {
   const pool = channels.filter((channel) => (!spaceId || channel.spaceId === spaceId) && channel.name?.trim());
   // The conversation being written in is the least likely one to point at.
