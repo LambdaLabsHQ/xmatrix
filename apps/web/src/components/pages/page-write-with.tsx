@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { avatarInitials } from "@/components/dashboard/completion-option-button";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
+import { actionClass } from "@/components/ui/action-tone";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 
 /** An Agent the reader can co-write the page with: a runtime of the Space, by its own face. */
@@ -46,8 +47,7 @@ export function PageWriteWith({ agents, working, onStart, onOpenConversation, on
               <p className="truncate text-[13px] text-muted-foreground">{working.doing}</p>
             </div>
             {onOpenConversation && (
-              <button type="button" onClick={onOpenConversation}
-                className="h-10 shrink-0 rounded-full border-[1px] border-foreground/10 px-4 text-sm font-medium active:bg-foreground/[0.06]">
+              <button type="button" onClick={onOpenConversation} className={actionClass({ variant: "secondary", size: "md" })}>
                 Conversation
               </button>
             )}
