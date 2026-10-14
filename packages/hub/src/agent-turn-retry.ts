@@ -142,7 +142,8 @@ export async function reconcileAgentTurnRetries(env: Env, database: AuthorityDat
       // command republishes the exact committed message through normal fanout.
       // A commit/publication failure leaves the Run due for bounded recovery.
       const published = await dispatchProductMessageAppend(env, channelId, { commandId: runtimeCommandId("agent-append", id), messageId: id,
-        channelId, body: `${CAPACITY_CONTINUATION}\n\n${turnRetryNotice(state)}`,
+        // Display names are untrusted data, not executable continuation input.
+        channelId, body: `${CAPACITY_CONTINUATION}\n\n${turnRetryNotice({ ...state, agentLabel: undefined })}`,
         messageKind: "xmatrix.capacity-retry", principal: { kind: "user", id: String(run.owner_user_id) },
         xmatrixAuthor: true,
         residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
