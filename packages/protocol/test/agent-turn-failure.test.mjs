@@ -8,6 +8,7 @@ const {
   AGENT_TURN_FAILURE_LIFECYCLE_REASON,
   AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
   agentTurnFailureNoticeBody,
+  agentUsageLimitFromError,
   boundAgentTurnFailureDetail,
   isAgentTurnFailureLifecycle,
   isAgentUsageLimitLifecycle,
@@ -69,4 +70,27 @@ test("usage_limited is a turn failure that also asks Hub for a handoff", () => {
   assert.equal(isAgentUsageLimitLifecycle({ ...limited, reason: "turn_failed" }), false);
   assert.equal(isAgentUsageLimitLifecycle({ ...limited, layer: "transport" }), false);
   assert.equal(isAgentUsageLimitLifecycle({ ...limited, status: "blocked" }), false);
+});
+
+test("Hub reads a usage limit from the original provider error, never a plain rate limit", () => {
+  for (const error of [
+    "You've hit your usage limit. Upgrade to Pro or try again at 3:04 PM.",
+    "You've hit your limit · resets 7pm (America/Los_Angeles)",
+    "5-hour limit reached ∙ resets 3pm",
+    "error_during_execution: usage_limit_reached",
+    "{\"codexErrorInfo\":\"usageLimitExceeded\"}",
+    "429 insufficient_quota: You exceeded your current quota",
+    "Quota exceeded for quota metric 'Generate Content API requests'",
+    `${"context ".repeat(200)}You've hit your weekly limit`,
+  ]) assert.ok(agentUsageLimitFromError(error), error);
+  for (const error of [
+    "Claude API error 429 (rate_limit_error); retry 3/10 in 8s",
+    "Rate limit reached for requests",
+    "Overloaded",
+    "Codex app-server turn failed: stream disconnected before completion",
+    "context window limit reached",
+    "",
+    undefined,
+  ]) assert.equal(agentUsageLimitFromError(error), undefined, String(error));
+  assert.deepEqual(agentUsageLimitFromError("Claude AI usage limit reached|1790000000"), { resetsAt: "2026-09-21T14:13:20Z" });
 });

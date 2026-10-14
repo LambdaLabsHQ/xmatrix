@@ -1,3 +1,4 @@
+import { boundAgentTurnFailureDetail } from "@xmatrix/protocol";
 import type { AgentInstanceTurnRetryMessage } from "@xmatrix/protocol/connections/agent-instance";
 
 // Product policy lives only on the Hub. Hosts report outcomes, never budgets
@@ -6,6 +7,8 @@ const DELAYS_MS = [5_000, 15_000, 30_000] as const;
 export const TURN_RETRY_LIFETIME_MS = 120_000;
 export const TURN_RETRY_DELIVERY_RECHECK_MS = 5_000;
 export const TURN_RETRY_RUNTIME_PATH = "/internal/product-agent/turn-retry";
+/** The whole bounded provider error, so Hub classifies what the provider said. */
+export const TURN_RETRY_ERROR_MAX_CHARS = 4_000;
 export const CAPACITY_CONTINUATION = "Continue the previous request that failed because the selected model was at capacity.";
 
 export interface HubTurnRetry {
@@ -31,7 +34,7 @@ export function parseHubTurnRetry(value: unknown): HubTurnRetry | undefined {
       !Number.isInteger(r.attempt) || r.attempt < 0 || r.attempt > DELAYS_MS.length ||
       !Number.isSafeInteger(r.dueAt) || !Number.isSafeInteger(r.expiresAt) ||
       !["waiting", "issued", "completed", "cancelled", "exhausted", "unsafe", "expired", "ineligible"].includes(r.state) ||
-      typeof r.notice !== "string" || r.notice.length > 100 || typeof r.errorMessage !== "string" || r.errorMessage.length > 600) return;
+      typeof r.notice !== "string" || r.notice.length > 100 || typeof r.errorMessage !== "string" || r.errorMessage.length > TURN_RETRY_ERROR_MAX_CHARS) return;
   return r;
 }
 
@@ -59,17 +62,25 @@ export function advanceTurnRetry(previous: HubTurnRetry | undefined,
     .startsWith("selected model is at capacity.");
   const state = !capacity ? "ineligible" : !report.safeToContinue ? "unsafe" : used >= DELAYS_MS.length ? "exhausted" : "waiting";
   const attempt = state === "waiting" ? used + 1 : used;
+  // Hub retries only capacity failures. Any other error is reported where it
+  // arrives, as the ordinary turn failure (see the Agent Instance port), so
+  // this record posts no notice of its own.
   return { operationId: report.operationId, threadId: report.threadId, turnId: report.turnId,
     requestId: report.requestId, attempt, attemptToken: token, state,
     dueAt: state === "waiting" ? now + DELAYS_MS[used]! : now,
     expiresAt: continuing ? previous.expiresAt : now + TURN_RETRY_LIFETIME_MS,
-    errorMessage: report.errorMessage!, notice: state === "waiting" ? `waiting:${attempt}` : state };
+    errorMessage: report.errorMessage!, notice: state === "waiting" ? `waiting:${attempt}` : state === "ineligible" ? "" : state };
 }
 
 export function turnRetryNotice(state: HubTurnRetry): string {
   const label = state.agentLabel?.replace(/[@＠`\r\n]/gu, " ").trim().slice(0, 160);
   const prefix = label ? `Agent ${label}: ` : "";
-  return prefix + turnRetryOutcome(state);
+  const outcome = turnRetryOutcome(state);
+  if (["waiting", "issued", "completed"].includes(state.state)) return prefix + outcome;
+  // The host stays silent for these outcomes, so this notice is the only
+  // place its original error appears. Mention sigils cannot summon anyone.
+  const error = boundAgentTurnFailureDetail(state.errorMessage).replace(/[@＠]/gu, "﹫");
+  return prefix + outcome + (error ? ` Error: ${error}` : "");
 }
 
 function turnRetryOutcome(state: HubTurnRetry): string {
@@ -79,7 +90,7 @@ function turnRetryOutcome(state: HubTurnRetry): string {
     case "completed": return `Model-capacity retry completed successfully after ${state.attempt} ${state.attempt === 1 ? "retry" : "retries"}.`;
     case "cancelled": return "Model-capacity retry cancelled because the current work stopped or changed.";
     case "expired": return "Model-capacity retry expired without a confirmed continuation. No further retry was issued.";
-    case "ineligible": return "Provider turn failed with an error Hub does not retry. See the Agent trace for the originating error.";
+    case "ineligible": return "Provider turn failed.";
     case "unsafe": return "Model-capacity failure was not retried because execution or output may already have occurred.";
     case "exhausted": return "Model remains at capacity after 3 retries. Hub stopped retrying.";
   }

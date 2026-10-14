@@ -390,11 +390,14 @@ pub(crate) fn send_agent_lifecycle(
             detail,
             snapshot,
             resets_at: None,
+            request_id: None,
         },
     );
 }
 
 pub(crate) struct AgentLifecycleNotice<'a> {
+    /// Names one reported fact; a resend repeats it so Hub keys it once.
+    request_id: Option<&'a str>,
     layer: &'a str,
     status: &'a str,
     reason: Option<&'a str>,
@@ -412,6 +415,7 @@ pub(crate) fn send_agent_lifecycle_with_reset(
     notice: AgentLifecycleNotice<'_>,
 ) {
     let AgentLifecycleNotice {
+        request_id,
         layer,
         status,
         reason,
@@ -420,7 +424,7 @@ pub(crate) fn send_agent_lifecycle_with_reset(
         resets_at,
     } = notice;
     let _ = relay.send_message(protocol::AgentInstanceClientMessage::AgentLifecycle {
-        request_id: None,
+        request_id: request_id.map(str::to_string),
         channel_id: channel_id.map(str::to_string),
         agent_id: Some(agent.id.clone()),
         instance_id: agent.instance_id.clone(),
