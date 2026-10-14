@@ -1591,7 +1591,7 @@ export function AppsView({
       {connector.id === "gmail" && state.configured && token && currentSpace && user?.id ? (
         <ToolDetailSection title="Gmail mailboxes">
           <GmailMailboxes key={currentSpace.id} spaceId={currentSpace.id} token={token} userId={user.id}
-            members={currentSpace.members} adding={updatingProviderId === connector.id}
+            members={currentSpace.members} channels={channels} adding={updatingProviderId === connector.id}
             onAdd={() => void configureConnector(connector)} />
         </ToolDetailSection>
       ) : null}

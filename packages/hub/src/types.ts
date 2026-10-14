@@ -1,6 +1,13 @@
 import type { RequestRateLimiter } from "./request-rate-limit";
 
 export interface Env {
+  /** Dedicated native Gmail metadata notification application, separate from Composio. */
+  GMAIL_WATCH_CLIENT_ID?: string;
+  GMAIL_WATCH_CLIENT_SECRET?: string;
+  GMAIL_WATCH_TOPIC?: string;
+  GMAIL_WATCH_PUSH_EMAIL?: string;
+  GMAIL_WATCH_PUSH_AUDIENCE?: string;
+  GMAIL_WATCH_SUBSCRIPTION?: string;
   /** Per-Space clock for PostgreSQL-owned decision retention. */
   RELAY_SUMMON_DECISION_CLOCK?: DurableObjectNamespace;
   /** Per-Space clock for PostgreSQL-owned Space deletion purges. */

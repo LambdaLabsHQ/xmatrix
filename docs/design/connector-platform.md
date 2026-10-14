@@ -440,7 +440,7 @@ the link itself. `send:<address> <subject>\n<body>` sends one plain-text
 message to one recipient, and `reply:<message id> <body>` answers the
 message's Reply-To (else From) in its thread with In-Reply-To and References
 set; header values are single-line and non-ASCII ones RFC 2047 encoded. There
-is no label, delete, draft or settings action and no inbound event. Composio is a subprocessor for connected mailboxes.
+is no label, delete, draft or settings action. Native notifications are described below. Composio is a subprocessor for connected mailboxes.
 
 Disconnect reads the grant through the credential authority's live Space
 owner/admin check before any provider deletion. Member-visible connection
@@ -452,6 +452,47 @@ preserving a grant installed by a concurrent reconnect. Google disconnects
 use the same authorized read and version comparison. The Hub-only credential
 read remains for independently authorized executions and verified ingress.
 See [Gmail API](https://developers.google.com/workspace/gmail/api/reference/rest).
+
+#### Native Gmail notification signals
+
+Optional native notifications use a separate Google OAuth client requesting
+only `gmail.metadata`. They do not replace the Composio content grant or its
+send/reply approval contract. Apps → Gmail lets a Human mailbox owner who is
+also a Space admin choose a destination conversation and authorize notification
+access. Agent-owned mailboxes are not supported by this first notification flow.
+No Gmail forwarding configuration is needed.
+
+Google watch publishes an email address and history ID to Pub/Sub; the Hub
+checks Google's RS256 signature, issuer, configured audience, verified service
+account and exact subscription before durably recording a wake. Only after an
+event does it query Gmail history for inbox `messageAdded` identities. It never
+queries the inbox on a timer. Daily watch renewal and retries of already accepted
+work use the existing scheduled drain, bounded to four leased jobs per pass.
+Renewal does not overwrite the consumed history cursor. Google does not provide
+a seconds-level delivery SLA; notification gaps may require a later event, and
+an expired history cursor establishes a fresh baseline and reports the gap.
+Old mail is not replayed as new work.
+
+The primary App authority stores the native refresh token and pending PKCE
+verifier in an encrypted notification envelope bound to the route identity.
+Configuration fingerprints, captured connection generation, credential version,
+mailbox ownership, current Space admin and conversation capability fence work.
+Mailbox credential edits, disconnect, Channel move, account erasure and Space erasure retire the
+notification rows and encrypted grants. Stop clears the local grant immediately;
+it does not revoke a Google grant another Space might still use. Abandoned
+OAuth attempts expire after ten minutes and bounded maintenance removes them.
+
+Durable Gmail-ID receipts coalesce duplicate signals and make conversation
+append idempotent. Notifications contain only a mail ID reference, never sender,
+subject, snippet or body. Reads still pass through the existing caller-only tool.
+The private `automationEvents` manifest allows `gmail:message.received:<id>`
+Page Automations without exposing the private source as a generic Channel
+subscription. Only Automations whose authority root is the mailbox owner fire.
+The UI exposes the notification ID for that source. Credentials must be supplied
+as an atomic optional group; partial configuration fails closed. Provisioning,
+Google verification and production activation are separate operator steps in
+[Native Gmail notifications](../operations/gmail-notifications.md).
+
 
 Google Sheets uses the same per-file Google connection and `drive.file` grant.
 `read_sheet:<spreadsheet id> <A1 range>` returns an explicit rectangle (up to

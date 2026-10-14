@@ -320,3 +320,4 @@ export type { AccountDeletionBlocker, AccountDeletionState } from "./account-del
 export type { AccountSpaceClosureAuthorization } from "./account-space-closure-authorization.js";
 
 export { PostgresAppActionRequestRepository, type AppActionRequestPayload } from "./app-action-request-control.js";
+export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRoutingSelection } from "./gmail-routing-control.js";
