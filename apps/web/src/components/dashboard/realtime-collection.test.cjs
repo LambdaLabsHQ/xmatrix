@@ -169,6 +169,18 @@ test("live Agent cards replace complete values and repeated ids use only the fin
   assert.equal(store.getCatalogSnapshot(), initial);
   assert.equal(store.getCatalog("z"), previous);
   assert.deepEqual(initial, [previous, alpha]);
+  for (const viaSet of [false, true]) {
+    const repeated = [previous, alpha, { ...previous, activity: "Last external card" }];
+    const duplicates = createRealtimeCollection(viaSet ? [] : repeated, item => item.name);
+    if (viaSet) duplicates.set(repeated);
+    assert.equal(duplicates.getSnapshot(), repeated, "external snapshots retain their supplied identity");
+    duplicates.receive([final]);
+    assert.deepEqual(duplicates.getSnapshot(), [final, alpha], "a received card keeps the first position and only the last value");
+    let removed = 0;
+    duplicates.subscribeKey(previous.id, () => { removed += 1; });
+    duplicates.set([]);
+    assert.equal(removed, 1, "a repeated external id has one removal notification");
+  }
 });
 
 test("added and renamed Agents sort immediately, including stable name ties across unread batches", () => {
@@ -185,6 +197,87 @@ test("added and renamed Agents sort immediately, including stable name ties acro
   assert.deepEqual(store.getSnapshot().map(item => item.id), ["b", "a", "m", "o"]);
   store.receive([{ id: "m", name: "Zulu" }]);
   assert.deepEqual(store.getSnapshot().map(item => item.id), ["b", "a", "o", "m"]);
+});
+
+test("first-seen Agents keep stable same-name order without repeatedly comparing the entire inventory", () => {
+  let nameReads = 0;
+  const store = createRealtimeCollection([], item => { nameReads += 1; return item.name; });
+  const arrivals = Array.from({ length: 256 }, (_, index) => ({ id: `agent-${index}`, name: `Agent ${index % 7}` }));
+  for (const item of arrivals) store.receive([item]);
+  const expected = arrivals.slice().sort((left, right) => left.name.localeCompare(right.name));
+  assert.deepEqual(store.getSnapshot(), expected);
+  assert.ok(nameReads < 5_000, `first-seen reports read names ${nameReads} times`);
+  const removed = [];
+  store.subscribeChanges(keys => removed.push(...keys));
+  store.set([]);
+  assert.deepEqual(removed, expected.map(item => item.id), "authoritative removals retain presentation order after keyed insertions");
+});
+
+test("renames and external snapshot order remain stable after keyed insertions and bulk additions", () => {
+  const zeta = { id: "z", name: "Zulu" };
+  const alpha = { id: "a", name: "Alpha" };
+  const store = createRealtimeCollection([], item => item.name);
+  store.receive([zeta]);
+  store.receive([alpha]);
+  const renamed = { ...zeta, name: "Alpha" };
+  store.receive([renamed]);
+  assert.deepEqual(store.getSnapshot(), [alpha, renamed], "a renamed tie follows the prior display order, not Map insertion order");
+
+  const external = Object.freeze([renamed, alpha]);
+  const externalIndex = new Map([[alpha.id, alpha], [renamed.id, renamed]]);
+  store.commit({ items: external, byId: externalIndex, changedKeys: [] }, "live");
+  const latest = { ...renamed, activity: "Latest" };
+  store.receive([latest]);
+  assert.deepEqual(store.getSnapshot(), [latest, alpha], "activity does not reorder an external array");
+  const added = { id: "added", name: "Alpha" };
+  store.receive([added]);
+  assert.deepEqual(store.getSnapshot(), [latest, alpha, added]);
+  const bulk = Array.from({ length: 9 }, (_, index) => ({ id: `bulk-${index}`, name: "Alpha" }));
+  store.receive(bulk);
+  assert.deepEqual(store.getSnapshot(), [latest, alpha, added, ...bulk]);
+  assert.equal(externalIndex.get(renamed.id), renamed);
+  assert.deepEqual(external, [renamed, alpha]);
+
+  store.set([zeta, alpha]);
+  store.receive([{ ...zeta, activity: "Unsorted update" }]);
+  assert.deepEqual(store.getSnapshot().map(item => item.id), ["z", "a"]);
+  store.receive([{ id: "middle", name: "Middle" }]);
+  assert.deepEqual(store.getSnapshot().map(item => item.id), ["a", "middle", "z"]);
+});
+
+test("a failed first-seen comparison leaves cards, ordering and captures unchanged before a good retry", () => {
+  const alpha = { id: "a", name: "Alpha" };
+  const beta = { id: "b", name: "Beta", activity: "Original" };
+  let rejectAlpha = false;
+  const store = createRealtimeCollection([], item => {
+    if (rejectAlpha && item.id === alpha.id) throw new Error("Resident ordering failed");
+    return item.name;
+  });
+  store.receive([alpha, beta]);
+  const before = Object.freeze(store.getSnapshot());
+  let captures = 0;
+  const changes = [];
+  store.subscribeChanges(keys => changes.push([...keys]));
+  rejectAlpha = true;
+  assert.throws(() => store.receive([{ ...beta, activity: "Discarded" }, { id: "new", name: "Aardvark" }], () => { captures += 1; }), /Resident ordering failed/);
+  rejectAlpha = false;
+  assert.equal(store.getSnapshot(), before);
+  assert.equal(store.get(beta.id), beta);
+  assert.equal(store.get("new"), undefined);
+  assert.equal(captures, 0);
+  assert.deepEqual(changes, []);
+  const good = { id: "new", name: "Gamma" };
+  store.receive([good], (items, basis) => {
+    captures += 1;
+    assert.equal(basis, before);
+    assert.equal(store.getSnapshot(), items);
+    assert.deepEqual(items, [alpha, beta, good]);
+    assert.equal(store.get("new"), good);
+  });
+  assert.equal(captures, 1);
+  assert.deepEqual(changes, [[good.id]]);
+  assert.deepEqual(before, [alpha, beta]);
+  assert.deepEqual(store.getCatalogSnapshot(), []);
 });
 
 test("receiving publishes a complete batch before isolated key notifications and preserves identical-card notifications", () => {

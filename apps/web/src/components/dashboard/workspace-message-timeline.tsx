@@ -31,14 +31,12 @@ import {
 } from "./message-attachment-media-store";
 
 import {
-  agentInstanceBranchLabel,
   type AgentTraceTarget,
 } from "./workspace-shell-message-model";
 
 import { RealtimeMessageAvatar } from "./realtime-message-avatar";
-import { useRealtimeChannel } from "./realtime-channels";
-import { sameReportedPresenceValue } from "./workspace-admin-views";
-import { agentInstanceDisplayStatus } from "./workspace-shell-presence";
+import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
+import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { statusInkClass } from "@/components/ui/status-tone";
@@ -106,7 +104,6 @@ import {
   formatFileSize,
   formatTime,
   isMachineRunFailureNotice,
-  presenceStatusLabel,
   provenanceBadgeClass,
   provenanceLabel,
   provenanceTitle,
@@ -117,6 +114,7 @@ import {
   Fragment,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -3356,7 +3354,6 @@ function QuickReactionPicker({
 
 
 export type { AgentWorkItem } from "./workspace-shell-message-model";
-import type { AgentWorkItem } from "./workspace-shell-message-model";
 import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 
 
@@ -3401,25 +3398,46 @@ export function AgentWorkDetailsDock({
   ) => void;
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
 }) {
-  const channel = useRealtimeChannel(catalogChannel);
-  const launchQuery = useChannelAgentLaunches(channel, token, timeline);
+  const realtimeChannels = useContext(RealtimeChannelsContext);
+  const realtimeEvents = useContext(RealtimeEventsContext);
+  const launchQuery = useChannelAgentLaunches(catalogChannel, token, timeline);
   const launches = launchQuery.data?.launches ?? NO_LAUNCHES;
-  const workItemsRef = useRef<AgentWorkItem[]>([]);
-  const workItems = useMemo(() => {
-    const previous = new Map(workItemsRef.current.map(item => [item.key, item]));
-    const next = buildAgentWorkItems(channel, events, launches).map(item => {
-      const before = previous.get(item.key);
-      return before && sameReportedPresenceValue(before, item) ? before : item;
-    });
-    workItemsRef.current = next;
-    return next;
-  }, [channel, events, launches]);
+  const channelId = catalogChannel?.id ?? "";
+  const presentedViews = useRef<readonly AgentWorkView[]>([]);
+  const selectWork = useMemo(() => createAgentWorkSelection(channel => buildAgentWorkItems(channel, events, launches), presentedViews.current),
+    [events, launches]);
+  const workItems = useRealtimeChannelSelection(catalogChannel, selectWork);
+  // Share equal presentation across new query/event inputs. This cache never
+  // supplies an operation; readLatest always rebuilds from the current store.
+  useLayoutEffect(() => { presentedViews.current = workItems; }, [workItems]);
+  const readLatest = useCallback((key: string) => {
+    const channel = realtimeChannels ? realtimeChannels.get(channelId) : catalogChannel;
+    if (!channel) return undefined;
+    const liveEvents = realtimeEvents?.get(channelId)?.events;
+    return buildAgentWorkItems(channel, liveEvents ? [...liveEvents] : events, launches).find(item => item.key === key);
+  }, [realtimeChannels, realtimeEvents, channelId, catalogChannel, events, launches]);
+  const openTrace = useStableCallback((key: string) => {
+    const item = readLatest(key);
+    if (item) onOpenAgentTrace(item.target);
+  });
+  const stopInstance = useStableCallback((key: string) => {
+    const item = readLatest(key);
+    if (item && item.canStop !== false) onStopAgentInstance(item.agentId, item.instance, item.agentLabel);
+  });
+  const rebornInstance = useStableCallback((key: string) => {
+    const item = readLatest(key);
+    if (item && agentWorkCanReborn(item)) onRebornAgentInstance(item.agentId, item.instance, item.agentLabel);
+  });
+  const handoffInstance = useStableCallback((key: string, successor: string) => {
+    const item = readLatest(key);
+    if (item && agentWorkCanReborn(item)) onHandoffAgentInstance(item.agentId, item.instance, item.agentLabel, successor);
+  });
   const intentSince = useIntentSince(workItems);
   const now = useNow();
   // Handoff successors are the harnesses this Space registered — the same
   // catalog the composer completes `:handoff:@` from.
-  const registrationCatalog = useAgentRegistrationCatalog(channel?.spaceId ?? "", token ?? "",
-    Boolean(token && channel?.spaceId && workItems.some(agentWorkCanReborn)));
+  const registrationCatalog = useAgentRegistrationCatalog(catalogChannel?.spaceId ?? "", token ?? "",
+    Boolean(token && catalogChannel?.spaceId && workItems.some(item => item.canReborn)));
   const handoffSuccessors = useMemo(() => agentWorkHandoffSuccessors(
     registrationCatalog.data?.capabilities.map((capability) => capability.harness) ?? []),
   [registrationCatalog.data]);
@@ -3528,16 +3546,16 @@ export function AgentWorkDetailsDock({
             item={item}
             intentSince={intentSince.get(item.key)}
             now={now}
-            stopping={stoppingAgentInstanceId === item.instance.id}
+            stopping={stoppingAgentInstanceId === item.instanceId}
             stopDisabled={controlsBusy}
-            reborning={reborningAgentInstanceId === item.instance.id}
+            reborning={reborningAgentInstanceId === item.instanceId}
             rebornDisabled={controlsBusy}
-            handingOff={handingOffAgentInstanceId === item.instance.id}
+            handingOff={handingOffAgentInstanceId === item.instanceId}
             handoffSuccessors={handoffSuccessors}
-            onStop={onStopAgentInstance}
-            onReborn={onRebornAgentInstance}
-            onHandoff={onHandoffAgentInstance}
-            onOpenAgentTrace={onOpenAgentTrace}
+            onStop={stopInstance}
+            onReborn={rebornInstance}
+            onHandoff={handoffInstance}
+            onOpenAgentTrace={openTrace}
           />
         ))}
       </div>}
@@ -3562,7 +3580,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   onHandoff,
   onOpenAgentTrace,
 }: {
-  item: AgentWorkItem;
+  item: AgentWorkView;
   /** When this client first saw the current intent (agent-work-intent.tsx). */
   intentSince?: number;
   now?: number;
@@ -3573,10 +3591,10 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   handingOff?: boolean;
   /** Successor names offered by the Handoff picker, `auto` first. */
   handoffSuccessors?: readonly string[];
-  onStop: (agentId: string, instance: SerializedAgentInstance, agentLabel: string) => void;
-  onReborn: (agentId: string, instance: SerializedAgentInstance, agentLabel: string) => void;
-  onHandoff?: (agentId: string, instance: SerializedAgentInstance, agentLabel: string, successor: string) => void;
-  onOpenAgentTrace: (target: AgentTraceTarget) => void;
+  onStop: (key: string) => void;
+  onReborn: (key: string) => void;
+  onHandoff?: (key: string, successor: string) => void;
+  onOpenAgentTrace: (key: string) => void;
 }) {
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
@@ -3598,28 +3616,22 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   const [armedAction, setArmedAction] = useState<string | null>(null);
   const stopArmed = armedAction === "stop";
   const stopArmedByGestureRef = useRef(false);
-  const displayStatus = agentWorkDisplayStatus(item);
-  const waiting = displayStatus === "waiting" ? item.instance.runtimeState?.waiting : undefined;
-  const issue = item.instance.runtimeState?.issue;
-  const notice = item.instance.runtimeState?.notice;
+  const { displayStatus, waiting, issue, notice } = item;
   // Decided upstream by `agentInstanceUsageLimit` from the same inputs the
   // detail row uses. Deriving it here again is what let the two disagree.
   const usageLimit = item.usageLimit;
-  const canReborn = agentWorkCanReborn(item);
+  const canReborn = item.canReborn;
   // Handoff shares Reborn's address (`@<name>:<n>`); the picker only opens
   // when there is a successor to offer.
   const canHandoff = canReborn && Boolean(onHandoff) && handoffSuccessors.length > 0;
   const titleParts = [
     item.agentLabel,
     item.label,
-    agentInstanceBranchLabel(item.instance),
-    waiting ? agentWaitingPhrase(waiting, now ?? Date.now()) : presenceStatusLabel({
-      status: displayStatus,
-      activity: displayStatus === "busy" ? undefined : item.activity,
-    }),
+    item.branchLabel,
+    waiting ? agentWaitingPhrase(waiting, now ?? Date.now()) : item.statusLabel,
     usageLimit?.title,
     // Why its wake failed: the only place a wake, which answers no message, says so.
-    item.instance.rest === "wake_failed" && item.instance.restReason ? item.instance.restReason : undefined,
+    item.wakeFailureReason,
     issue ? agentRuntimeIssuePhrase(issue, now ?? Date.now()) : undefined,
     notice ? agentRuntimeNoticePhrase(notice) : undefined,
   ].filter(Boolean);
@@ -3777,7 +3789,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
           event.preventDefault();
           return;
         }
-        onOpenAgentTrace(item.target);
+        onOpenAgentTrace(item.key);
       }}
       onContextMenu={(event) => {
         if (item.canStop === false) return;
@@ -3788,7 +3800,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onOpenAgentTrace(item.target);
+          onOpenAgentTrace(item.key);
         } else if (item.canStop !== false && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
           event.preventDefault();
           requestStopFromGesture();
@@ -3884,11 +3896,11 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
           data-status={displayStatus}
           onClick={(event) => {
             // The disc handles its own click; the rest of the island opens the same trace.
-            if (!avatarButtonRef.current?.contains(event.target as Node)) onOpenAgentTrace(item.target);
+            if (!avatarButtonRef.current?.contains(event.target as Node)) onOpenAgentTrace(item.key);
           }}>
           {avatarButton}
           <AgentRuntimeNotice issue={issue} notice={notice} now={now ?? Date.now()}
-            onOpenTrace={() => onOpenAgentTrace(item.target)} />
+            onOpenTrace={() => onOpenAgentTrace(item.key)} />
           {(item.intent || waiting) && <AgentWorkIntent intent={item.intent} since={intentSince} now={now ?? Date.now()}
             busy={displayStatus === "busy"} waiting={waiting} />}
         </LiquidGlassPill>
@@ -3919,7 +3931,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
         data-mode={handoffPickerOpen && canHandoff ? "handoff" : undefined}
         data-usage={usageLimit ? usageLimit.severity : undefined}
         role="toolbar"
-        aria-label={`Controls for ${item.instance.label}`}
+        aria-label={`Controls for ${item.instanceLabel}`}
         onClick={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
@@ -3953,7 +3965,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
             </div>
             {/* One row per successor, so five or fifty stay one column;
                 the list scrolls inside the toolbar past a few rows. */}
-            <div className="app-agent-work-picker-list" role="group" aria-label={`Hand off ${item.instance.label} to`}>
+            <div className="app-agent-work-picker-list" role="group" aria-label={`Hand off ${item.instanceLabel} to`}>
               {handoffSuccessors.map((successor) => {
                 const armed = armedAction === `handoff:${successor}`;
                 const target = successor === "auto" ? "the best available agent" : `a new @${successor}`;
@@ -3961,14 +3973,14 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
                   <button
                     key={successor}
                     type="button"
-                    aria-label={`${armed ? "Confirm hand off" : "Hand off"} ${item.instance.label} to ${target}`}
+                    aria-label={`${armed ? "Confirm hand off" : "Hand off"} ${item.instanceLabel} to ${target}`}
                     disabled={rebornDisabled}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
                       pressArmed(`handoff:${successor}`, () => {
                         setHandoffPickerOpen(false);
-                        onHandoff?.(item.agentId, item.instance, item.agentLabel, successor);
+                        onHandoff?.(item.key, successor);
                       });
                     }}
                     className="app-agent-work-action"
@@ -3989,12 +4001,12 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
         {canReborn ? (
           <button
             type="button"
-            aria-label={armedAction === "reborn" ? `Confirm reborn ${item.instance.label}` : `Reborn ${item.instance.label}`}
+            aria-label={armedAction === "reborn" ? `Confirm reborn ${item.instanceLabel}` : `Reborn ${item.instanceLabel}`}
             disabled={rebornDisabled}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              pressArmed("reborn", () => onReborn(item.agentId, item.instance, item.agentLabel));
+              pressArmed("reborn", () => onReborn(item.key));
             }}
             className="app-agent-work-action"
             data-action="reborn"
@@ -4011,7 +4023,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
         {canHandoff ? (
           <button
             type="button"
-            aria-label={`Hand off ${item.instance.label}`}
+            aria-label={`Hand off ${item.instanceLabel}`}
             disabled={rebornDisabled}
             onClick={(event) => {
               event.preventDefault();
@@ -4033,12 +4045,12 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
         ) : null}
         <button
           type="button"
-          aria-label={stopArmed ? `Confirm stop ${item.instance.label}` : `Stop ${item.instance.label}`}
+          aria-label={stopArmed ? `Confirm stop ${item.instanceLabel}` : `Stop ${item.instanceLabel}`}
           disabled={stopDisabled}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            pressArmed("stop", () => onStop(item.agentId, item.instance, item.agentLabel));
+            pressArmed("stop", () => onStop(item.key));
           }}
           className="app-agent-work-action"
           data-action="stop"
@@ -4059,16 +4071,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
 
 
 
-export function agentWorkDisplayStatus(item: AgentWorkItem): string {
-  return agentInstanceDisplayStatus({
-    agentId: item.agentId,
-    events: item.latestEvent ? [item.latestEvent] : [],
-    instance: item.instance,
-    fallbackStatus: item.status,
-    name: item.agentLabel,
-    activity: item.activity,
-  });
-}
+export { agentWorkDisplayStatus, agentWorkCanReborn } from "./agent-work-view";
 
 
 
@@ -4079,12 +4082,6 @@ export function agentWorkHandoffSuccessors(harnesses: readonly string[]): string
   return names.length > 0 ? ["auto", ...new Set(names)] : [];
 }
 
-export function agentWorkCanReborn(item: AgentWorkItem): boolean {
-  if (item.canStop === false) return false;
-  if (item.avatarKind === "system") return false;
-  const channelInstanceId = item.instance.channelInstanceId?.trim();
-  return Boolean(channelInstanceId && /^[1-9]\d*$/.test(channelInstanceId));
-}
 
 
 

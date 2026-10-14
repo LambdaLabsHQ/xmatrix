@@ -11,7 +11,7 @@ export async function installRenderCounter(page: Page) {
       alternate: Fiber | null;
       memoizedProps: Record<string, unknown> | null;
     };
-    const counts = { navRows: 0, messageRows: 0, workspaceViews: 0, commits: 0, counting: false };
+    const counts = { navRows: 0, messageRows: 0, workspaceViews: 0, workDocks: 0, workAvatars: 0, commits: 0, counting: false };
     (window as unknown as { __renderCounts: typeof counts }).__renderCounts = counts;
     // What React DevTools reads: a function component ran in this commit when
     // it carries PerformedWork (1). A subtree React bailed out of keeps its old
@@ -32,6 +32,12 @@ export async function installRenderCounter(page: Page) {
               if ("model" in props) counts.workspaceViews += 1;
               if ("isPinnedRoot" in props && "onSelect" in props) counts.navRows += 1;
               if ("message" in props && "onRetryAgentLaunch" in props) counts.messageRows += 1;
+            }
+            // Simple memo functions carry their own performed work (tag 15),
+            // unlike a separate memo wrapper above a normal function body.
+            if ((node.tag === 0 || node.tag === 15) && props && (node.flags & PERFORMED_WORK)) {
+              if ("stoppingAgentInstanceId" in props && "onStopAgentInstance" in props) counts.workDocks += 1;
+              if ("intentSince" in props && "stopDisabled" in props) counts.workAvatars += 1;
             }
             if (!node.alternate || node.child !== node.alternate.child) visit(node.child);
           }

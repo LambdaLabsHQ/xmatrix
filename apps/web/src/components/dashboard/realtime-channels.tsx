@@ -34,3 +34,12 @@ export function useRealtimeChannelValue<T extends string | number | boolean | nu
 ) {
   return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
 }
+
+/** select must return the same reference for unchanged presentation, including
+ * repeated snapshot reads. Keep its cache scoped to this Channel and inputs. */
+export function useRealtimeChannelSelection<T>(
+  channel: SerializedChannel | null, select: (channel: SerializedChannel | null) => T,
+  source?: RealtimeCollection<SerializedChannel>,
+) {
+  return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
+}

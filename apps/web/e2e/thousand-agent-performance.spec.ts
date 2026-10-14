@@ -5,10 +5,11 @@ import { expect, test } from "./fixtures";
 import { E2E_DESKTOP_CONTEXT, conversationOpened, fixtureJson } from "./workspace-fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 
-const AGENTS = 1000;
+const FOCUSED_INSTANCES = 10;
+const CHANNELS = 1900;
+const AGENTS = CHANNELS + FOCUSED_INSTANCES - 1;
 const REPORTS_PER_SECOND = 100;
 const SECONDS = 60;
-const FOCUSED_INSTANCES = 10;
 const nativeSocket = process.env.XMATRIX_PERF_TRANSPORT !== "cdp";
 
 test.use({ ...E2E_DESKTOP_CONTEXT, trace: "off" });
@@ -29,7 +30,7 @@ type Traffic = { counting: boolean; reports: number; snapshots: number; last: nu
  * the old injected transport available for diagnostic comparisons. CDP still
  * accounts for all product script, style, layout and native renderer work.
  */
-for (const ticksPerSecond of [10, 100]) test(`a thousand Agents stay below ten percent with ${ticksPerSecond === 100 ? "even" : "burst"} reports`, async ({ page }) => {
+for (const ticksPerSecond of [10, 100]) test(`${AGENTS} Agents across ${CHANNELS} Channels stay below ten percent with ${ticksPerSecond === 100 ? "even" : "burst"} reports`, async ({ page }) => {
   test.setTimeout(150_000);
   const space = workingAgentsSpace(AGENTS, "k", { focusedInstances: FOCUSED_INSTANCES, intent: "Review channels and message performance" });
   await installRenderCounter(page);
@@ -51,7 +52,7 @@ for (const ticksPerSecond of [10, 100]) test(`a thousand Agents stay below ten p
     };
   });
   const send = await openWorkingAgentsSpace(page, space, messages, "Row 40:",
-    { routeSocket: nativeSocket ? routeNativeHumanSocket : undefined });
+    { routeSocket: nativeSocket ? routeNativeHumanSocket : undefined, initialAgentList: [] });
   await conversationOpened(page);
   await expect(page.locator(".app-agent-work-intent:not(.app-agent-work-intent-stale)")).toHaveCount(FOCUSED_INSTANCES);
   await page.waitForLoadState("networkidle");
@@ -99,6 +100,8 @@ for (const ticksPerSecond of [10, 100]) test(`a thousand Agents stay below ten p
   const busy = (after.TaskDuration - before.TaskDuration) / elapsed;
   console.log(`[thousand-agents] ${sent} reports in ${elapsed.toFixed(1)}s: ${JSON.stringify({
     transport: nativeSocket ? "native-websocket" : "cdp-injected",
+    agents: AGENTS,
+    channels: space.channels.length,
     reportsPerTick: REPORTS_PER_SECOND / ticksPerSecond,
     mainThreadBusy: Number(busy.toFixed(3)),
     windows: windows.map(value => Number(value.toFixed(3))),

@@ -50,8 +50,10 @@ and publish once before message, history and control barriers. Completed runs
 publish small live replacement batches, retaining immutable full commits for
 catalog and ordering changes, without a second full collection reconciliation.
 Routing and Channel positions pass only to the exact next published snapshot;
-a sealed producer cannot change it again.
-A Run's
+a sealed producer cannot change it again. The work dock selects only its rendered
+presentation; activity-only reports do not commit its cards. Trace and lifecycle
+actions resolve the exact current Instance key when executed, including a second
+confirmation press. A Run's
 presentation stays in its own Channel while account quota remains shared.
 See [live Instance load](../performance/channel-startup.md#live-instance-load).
 

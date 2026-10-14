@@ -2193,7 +2193,7 @@ export function mergeChannelMemberPresencePreferringQuotas(
 type ChannelPresenceRouting = {
   byMember: Map<string, Set<string>>;
   byInstance: Map<string, Set<string>>;
-  positions: ReadonlyMap<string, number>;
+  positions: Map<string, number>;
   ordered: boolean;
 };
 
@@ -2206,7 +2206,8 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
     items.forEach((channel, index) => positions.set(channel.id, index));
     return positions;
   };
-  // The position index is immutable and belongs to this exact input array.
+  // The private position index belongs to this exact input array and passes
+  // to only one successor. Published arrays and commit indices never share it.
   // Ordinary reports stage only changed cards, without copying the catalog.
   const channelPositions = routing?.positions ?? positionsFor(channels);
   const updates = new Map<string, SerializedChannel>();
@@ -2232,6 +2233,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
   const inputOrdered = routing?.ordered ?? false;
   let outputOrdered = inputOrdered;
   const reordered = new Set<string>();
+  let appendedOnly = false;
   const routes = (channel: SerializedChannel) => {
     const members: string[] = [];
     const instances: string[] = [];
@@ -2282,6 +2284,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
   };
   const snapshot = () => {
     if (published) return published;
+    appendedOnly = false;
     if (!updates.size) return channels;
     const next = channelPositions.size === channels.length ? channels.slice() : [...values()];
     if (channelPositions.size === channels.length) {
@@ -2297,6 +2300,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
     // The inherited order is already sorted. Move only the added/re-ranked
     // rows, keeping the full comparator and its original stable tie order.
     const ordered = next.filter(channel => !reordered.has(channel.id));
+    appendedOnly = [...reordered].every(id => !channelPositions.has(id));
     let positions: Map<string, number> | undefined;
     const compare = (left: SerializedChannel, right: SerializedChannel) => {
       const rank = compareChannelsForSidebar(left, right);
@@ -2313,6 +2317,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
         if (compare(ordered[middle], channel) <= 0) low = middle + 1;
         else high = middle;
       }
+      if (low < channels.length) appendedOnly = false;
       ordered.splice(low, 0, channel);
     }
     return ordered;
@@ -2420,7 +2425,14 @@ export function createChannelPresenceBatch(channels: SerializedChannel[], routin
       const reusable = !routesTaken && indexed && publishedFromBasis && published === basis;
       routesTaken = true;
       if (!reusable) return undefined;
-      const positions = !reordered.size && basis.length === channels.length ? channelPositions : positionsFor(basis);
+      let positions: Map<string, number>;
+      if (!reordered.size && basis.length === channels.length) positions = channelPositions;
+      else if (appendedOnly) {
+        // Older first-seen Channels often append to a known catalog order.
+        // The unchanged prefix needs no fresh index or key allocation.
+        positions = channelPositions;
+        for (let index = channels.length; index < basis.length; index += 1) positions.set(basis[index].id, index);
+      } else positions = positionsFor(basis);
       return { byMember, byInstance, positions, ordered: outputOrdered };
     },
   };

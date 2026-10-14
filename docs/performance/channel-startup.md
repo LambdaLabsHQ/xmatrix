@@ -284,7 +284,7 @@ array is captured before synchronous subscribers can publish another snapshot.
 Catalog and rank changes retain an immutable full commit whose index follows
 the final row order; ordinary catalog, read-state and account-reset writes
 retain full reconciliation. A sealed producer rejects further writes.
-The next run may take the completed run's member/Instance routes and immutable
+The next run may take the completed run's member/Instance routes and private
 Channel positions once, only
 when its input is the exact published snapshot. Any intervening writer or a
 failed publication discards that handoff and rebuilds from current state.
@@ -292,20 +292,31 @@ Agent cards replace entries in the same live index; their full array is
 materialized only when a reader needs it. The first update after an external
 index or catalog publication forks the index, protecting earlier snapshots.
 New or renamed cards still sort immediately, preserving stable name ties
-across runs. Catalog promotion materializes once and relinquishes that private
+across runs. A small number of newly seen cards uses binary insertion into a
+private ID order; renames, larger additions and unknown external order retain
+the stable full sort. The keyed index no longer needs rebuilding just to sort
+new cards. Catalog promotion materializes once and relinquishes that private
 write ownership before notifying readers.
 
 An inherited sidebar order also avoids a full sort for a few new or re-ranked
 Channels: binary insertion uses the existing comparator and stable tie order.
-Unknown input order and larger changes retain the normal full sort. The Channel
-header follows structural catalog fields and selects only live Human counts,
+Unknown input order and larger changes retain the normal full sort. The private
+position index passes to one successor only; when newly seen Channels append
+after the existing order, only their tail positions are added. Public arrays
+and completed commit indices never share this private routing index.
+The Channel header follows structural catalog fields and selects only live Human counts,
 so Agent activity neither rerenders its controls nor resynchronizes its name
 draft.
 
 A Run's activity, intent, token counters and last-seen clock stay in its Channel.
 Only account quota travels to sibling Channels, and repeated quota readings
-reuse unchanged objects. The work dock shares unchanged item references and
-memoizes Instance cards, so a sibling's report leaves those controls intact.
+reuse unchanged objects. The work dock selects its visible presentation, including
+trace-derived status, intent, waiting details, notices, quota verdicts and control
+capabilities. Activity-only reports retain the selected array and Instance cards;
+new event/query inputs also share equal views. The view contains no actionable
+Instance snapshot: Trace, Stop, Reborn and Handoff resolve the exact current key
+from the live Channel at execution, including the second confirmation press.
+Removed keys do not fall back to an older catalog item.
 Unchanged intents retain their age without dispatching a no-op state update.
 Channel ordering parses timestamps once per immutable snapshot; replacements
 receive fresh keys and discarded snapshots are held only weakly.
@@ -318,11 +329,11 @@ shared Channel event slice instead of scanning the catalog for each message.
 Head catch-up still probes the socket after successfully applying missed rows,
 even when that application synchronously commits and cleans up the read effect.
 
-Regression coverage counts workspace, conversation-row and message-row renders
+Regression coverage counts workspace, conversation-row, work-dock, Instance-card and message-row renders
 in `live-agent-load-render-scope.spec.ts`, including cards and whole-Channel
 snapshots. The presence owner tests cover sibling-Run isolation, unchanged quota,
 and a 1,000-report digest with a bounded number of Channel inspections. The
-thousand-Agent browser benchmark sends 100 legacy two-frame reports per second
+Agent browser benchmark sends 100 legacy two-frame reports per second
 for 60 seconds per cadence, both ten-report bursts every 100 ms and single
 reports every 10 ms, including ten working Instances with live intent text in
 the open Channel. Performance cases run one worker at a time so another load
@@ -339,11 +350,13 @@ test instrumentation does not repeatedly walk the page. CDP measures absolute
 product script, style, layout and native work; `XMATRIX_PERF_TRANSPORT=cdp` keeps
 the former per-frame injected delivery available for diagnostic comparisons.
 These are controlled browser results, not a claim about every production device.
-The 1,000-Agent fixture has 991 distinct Channels because ten Instances share
-the open conversation. Catalog paging loads only its first page initially;
+The fixture has 1,909 Agents in 1,900 distinct Channels because ten Instances
+share the open conversation. Catalog paging loads only its first page initially;
 the measured first window deliberately includes first-seen live hydration of
 the other Channels. Receipt counters witness native delivery, while the final
 trace assertion witnesses consumption of the focused Instance's state.
+The handshake sends an empty Agent inventory, matching Hub; the first reports
+must populate those cards too.
 
 Root search, page-conversation and mobile Channel-layout styles use explicit
 shell state classes. They do not inspect descendants with root/body `:has()`;
