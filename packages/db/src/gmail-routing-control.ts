@@ -112,7 +112,7 @@ export class PostgresGmailRoutingRepository {
       await tx.query({ name: "gmail_route_configuration_lock_v1", text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
         values: [connectionId], maxRows: 1 });
       await tx.query({ name: "gmail_route_pending_cleanup_v1", text: `DELETE FROM data.app_gmail_routes
-        WHERE connection_id=$1 AND NOT enabled AND (encrypted_value_json='{}'::jsonb OR created_at<now()-interval '10 minutes')`,
+        WHERE connection_id=$1 AND NOT enabled AND (encrypted_value_json='{}'::jsonb OR (expires_at IS NULL AND error_code IS NULL AND created_at<now()-interval '10 minutes'))`,
         values: [connectionId], maxRows: 0 });
       const count = await tx.query<QueryResultRow>({ name: "gmail_route_count_v1", text: `SELECT count(*) AS count FROM
         (SELECT 1 FROM data.app_gmail_routes WHERE connection_id=$1 LIMIT 20) r`, values: [connectionId], maxRows: 1 });
@@ -146,7 +146,7 @@ export class PostgresGmailRoutingRepository {
   async cleanup() {
     return this.transaction("cleanup", tx => tx.query({ name: "gmail_route_cleanup_v1", text: `DELETE FROM data.app_gmail_routes
       WHERE route_id IN (SELECT route_id FROM data.app_gmail_routes WHERE NOT enabled
-        AND (encrypted_value_json='{}'::jsonb OR created_at<now()-interval '10 minutes')
+        AND (encrypted_value_json='{}'::jsonb OR (expires_at IS NULL AND error_code IS NULL AND created_at<now()-interval '10 minutes'))
         ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED)`, values: [], maxRows: 0 }));
   }
   async claim() {
@@ -209,14 +209,16 @@ export class PostgresGmailRoutingRepository {
     values: [job.id, id, job.leaseId], maxRows: 0 }));
   }
   async finish(job: GmailRoutingJob, outcome: "done" | "continue" | "retry" | "blocked") {
+    const retired=outcome==="blocked" ? await encryptSecretValue(this.material,`gmail-route:${job.id}`,"selection",1,
+      JSON.stringify({...job.selection,oauthVerifier:"",refreshToken:undefined})) : undefined;
     return this.transaction("finish", tx => tx.query({ name: "gmail_route_finish_v1", text: `UPDATE data.app_gmail_routes
       SET lease_id=NULL,lease_until=NULL,processed_version=CASE WHEN $3='done' THEN $4 ELSE processed_version END,
         last_verified_at=CASE WHEN $3='done' THEN now() ELSE last_verified_at END,
         enabled=CASE WHEN $3='blocked' THEN false ELSE enabled END,
-        encrypted_value_json=CASE WHEN $3='blocked' THEN '{}'::jsonb ELSE encrypted_value_json END,
+        encrypted_value_json=CASE WHEN $3='blocked' THEN $5::jsonb ELSE encrypted_value_json END,
         attempts=CASE WHEN $3 IN ('done','continue') THEN 0 ELSE attempts END,
         error_code=CASE WHEN $3 IN ('done','continue') THEN NULL WHEN $3='retry' AND attempts>=8 THEN 'paused' ELSE $3 END,
         available_at=now()+interval '15 seconds'*CASE WHEN $3 IN ('done','continue') THEN 1 ELSE least(60,power(2,attempts)) END,updated_at=now()
-      WHERE route_id=$1 AND lease_id=$2::uuid`, values: [job.id, job.leaseId, outcome, job.wakeVersion], maxRows: 0 }));
+      WHERE route_id=$1 AND lease_id=$2::uuid AND lease_until>now()`, values: [job.id, job.leaseId, outcome, job.wakeVersion, retired ? JSON.stringify(retired):null], maxRows: 0 }));
   }
 }

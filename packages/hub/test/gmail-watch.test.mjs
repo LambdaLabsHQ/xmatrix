@@ -80,3 +80,14 @@ test("push ingress verifies Google signatures, issuer, audience and the exact ve
     assert.equal((await receive(await sign({},other.privateKey))).status,401);
   } finally {globalThis.fetch=fetchOriginal;}
 });
+
+test("notification authorization distinguishes revoked refresh grants from retryable Google throttling and normalizes mailbox casing",async()=>{
+  const {nativeGmailGet,verifyGmailWatchMailbox}=await import("../src/connectors/gmail-watch-client.ts");
+  await fetched([{status:403,body:{error:{errors:[{reason:"userRateLimitExceeded"}],message:"Rate limit"}}}],()=>
+    assert.rejects(nativeGmailGet("fixture-access","/profile"),error=>error.status===403));
+  await fetched([{status:400,body:{error:"invalid_grant"}}],()=>
+    assert.rejects(gmailWatchToken(env,{grant_type:"refresh_token",refresh_token:"fixture-refresh"},false),error=>error.status===401));
+  await fetched([{body:{emailAddress:"Me@Example.com"}}],()=>verifyGmailWatchMailbox("fixture-access","me@example.com"));
+  await fetched([{body:{emailAddress:"other@example.com"}}],()=>
+    assert.rejects(verifyGmailWatchMailbox("fixture-access","me@example.com"),error=>error.status===401));
+});

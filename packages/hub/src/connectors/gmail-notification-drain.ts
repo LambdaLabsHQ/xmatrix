@@ -4,7 +4,7 @@ import { dispatchProductMessageAppend } from "../product-message-append";
 import { fireConnectorAutomationTriggers } from "../automation-triggers";
 import { connectorCredentialRepository, gmailRoutingRepository } from "./credentials";
 import { parseMailboxes } from "./gmail-mailboxes";
-import { gmailWatchIdentity,gmailWatchToken,renewGmailWatch,nativeGmailGet } from "./gmail-watch-client";
+import { gmailWatchIdentity,gmailWatchToken,renewGmailWatch,verifyGmailWatchMailbox } from "./gmail-watch-client";
 import { gmailIncomingChanges } from "./gmail-notification-api";
 import { ProviderRequestError } from "./http";
 
@@ -33,8 +33,7 @@ async function process(env: Env, job: GmailRoutingJob) {
   if (job.selection.appIdentity!==await gmailWatchIdentity(env) || !job.selection.refreshToken) return "blocked" as const;
   const token=await gmailWatchToken(env,{grant_type:"refresh_token",refresh_token:job.selection.refreshToken},false);
   if(job.renewAt && Date.parse(job.renewAt)<=Date.now()) {
-    const profile=await nativeGmailGet(token.accessToken,"/profile");
-    if(profile.emailAddress!==job.selection.address)return "blocked" as const;
+    await verifyGmailWatchMailbox(token.accessToken,job.selection.address);
     const renewal=await renewGmailWatch(env,token.accessToken);
     await repository.renewed(job,renewal.expiresAt);
     // The new watch head never overwrites the last consumed history cursor.
@@ -73,8 +72,17 @@ export async function drainGmailNotifications(env: Env) {
   for (const job of await repository.claim()) {
     try { await repository.finish(job, await process(env,job)); }
     catch (error) {
-      // An expired history cursor requires explicit resynchronization, never replay of old mail.
-      await repository.finish(job,error instanceof ProviderRequestError && [401,403,404,409].includes(error.status) ? "blocked" : "retry");
+      // 403 may be Gmail quota throttling; lease loss and delivery conflicts also retry.
+      // Only definitive authorization failure retires the native grant.
+      const revoked=error instanceof ProviderRequestError && error.status===401;
+      if(revoked && await repository.current(job)) {
+        const response=await dispatchProductMessageAppend(env,job.channelId,{
+          commandId:`product:gmail-stopped:${job.id}`,messageId:`app:gmail-stopped:${job.id}`,
+          channelId:job.channelId,principal:{kind:"user",id:job.userId},appAuthorId:"gmail",
+          body:"Gmail notifications need attention. Authorize notifications again in Apps → Gmail; existing search, read and reply remain available."});
+        if(!response.ok) {await repository.finish(job,"retry");continue;}
+      }
+      await repository.finish(job,revoked ? "blocked" : "retry");
     }
   }
 }

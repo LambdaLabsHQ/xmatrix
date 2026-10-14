@@ -73,9 +73,12 @@ integration("abandoned OAuth attempts release capacity while live grants remain;
     await repository.signal("signal-digest");const [job]=await repository.claim();
     await repository.finish(job,"blocked");
     const stored=(await sql("SELECT encrypted_value_json,enabled FROM data.app_gmail_routes WHERE route_id=$1",[active])).rows[0];
-    assert.deepEqual(stored.encrypted_value_json,{});assert.equal(stored.enabled,false);
+    assert.notDeepEqual(stored.encrypted_value_json,{});assert.equal(stored.enabled,false);
+    assert.doesNotMatch(JSON.stringify((await repository.list(spaceId,"owner"))[0]),/private-refresh-token/);
     await repository.cleanup();
-    assert.deepEqual(await repository.list(spaceId,"owner"),[]);
+    const [blocked]=await repository.list(spaceId,"owner");
+    assert.equal(blocked.id,active);assert.equal(blocked.error,"blocked");
+    assert.equal(blocked.enabled,false);
   });
 });
 
@@ -109,5 +112,20 @@ integration("account closure immediately fences native work and account erasure 
       await database.transaction({requestId:crypto.randomUUID(),operation:"test.account-private-cleanup"},tx=>erasePrivateAccountRows(tx,userId));
       assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_gmail_routes WHERE created_by=$1",[userId])).rows[0].n,0);
     }finally {await sql("DELETE FROM data.account_deletion_fences WHERE user_id=$1",[userId]);}
+  });
+});
+
+integration("an expired worker cannot disable or finish a live watcher",async()=>{
+  await fixture(async({repository,activate,sql,spaceId})=>{
+    const id=await activate();await repository.signal("signal-digest");
+    const [job]=await repository.claim();
+    await sql("UPDATE data.app_gmail_routes SET lease_until=now()-interval '1 second' WHERE route_id=$1",[id]);
+    assert.equal(await repository.current(job),false);
+    await repository.finish(job,"blocked");
+    await repository.finish(job,"done");
+    const [visible]=await repository.list(spaceId,"owner");
+    assert.equal(visible.enabled,true);assert.equal(visible.error,undefined);
+    assert.equal(visible.selection.refreshToken,"private-refresh-token");
+    const [next]=await repository.claim();assert.ok(next);assert.notEqual(next.leaseId,job.leaseId);
   });
 });

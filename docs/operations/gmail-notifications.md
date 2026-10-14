@@ -62,7 +62,9 @@ No event means no history query. Scheduled work only renews watch or recovers
 accepted unfinished events. Notifications can be delayed or dropped by Google;
 this design does not promise lossless delivery or a maximum delay. An expired
 history cursor establishes a fresh baseline and posts a gap warning, without
-replaying older messages as new notifications. Stop clears the local encrypted grant;
+replaying older messages as new notifications. Google throttling retries rather than revoking the watcher. A revoked native grant
+retains a visible reauthorization state after clearing its refresh token; expired
+workers cannot finalize or disable a watcher. Stop clears the local encrypted grant;
 removing or changing mailbox credentials also retires watchers. Gmail sending
 retains its existing per-message approval policy.
 

@@ -36,7 +36,9 @@ export function GmailNotifications({spaceId,token,userId,mailboxes,channels}:{
   },[update]);
   const owned=mailboxes.filter(mailbox=>mailbox.owner===`user:${userId}`);
   const latest=new Map<string,Notification>();
-  for(const item of state.data?.notifications ?? [])if(!latest.has(item.address))latest.set(item.address,item);
+  for(const item of state.data?.notifications ?? []) {
+    if(!latest.has(item.address) || (item.enabled && !latest.get(item.address)?.enabled))latest.set(item.address,item);
+  }
   if(state.isLoading)return <p className="text-xs text-muted-foreground">Loading notification settings…</p>;
   return <div className="space-y-3 border-t border-border/60 pt-3">
     <p className="text-sm font-bold">New mail notifications</p>
