@@ -776,6 +776,25 @@ export function isAgentUsageLimitLifecycle(message: {
   return isAgentTurnFailureLifecycle(message) && message.reason === AGENT_USAGE_LIMIT_LIFECYCLE_REASON;
 }
 
+/**
+ * A turn failure whose provider error says the account's usage limit or quota
+ * is used up. Hub reads this from the original error, so every host that
+ * reports a failed turn gets the same handoff. Plain rate limiting (`429`,
+ * "rate limit", "overloaded") is retried by the provider CLIs and is not a
+ * usage limit.
+ */
+export function agentUsageLimitFromError(error: string | undefined | null): { resetsAt?: string } | undefined {
+  const lower = (error ?? "").toLowerCase();
+  const limited = ["usage limit", "usage_limit", "usagelimitexceeded", "hit your limit", "hit your session limit",
+    "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded"]
+    .some((phrase) => lower.includes(phrase)) || (lower.includes("limit reached") && lower.includes("reset"));
+  if (!limited) return undefined;
+  // Claude Code's legacy result text `Claude AI usage limit reached|<unix seconds>`.
+  const seconds = /usage limit reached\|(\d{1,12})/u.exec(error ?? "")?.[1];
+  const reset = seconds ? new Date(Number(seconds) * 1000) : undefined;
+  return reset && Number.isFinite(reset.getTime()) ? { resetsAt: reset.toISOString().replace(/\.000Z$/u, "Z") } : {};
+}
+
 export function boundAgentTurnFailureDetail(detail: string | undefined | null): string {
   const compact = (detail ?? "").replace(/\s+/gu, " ").trim();
   if (!compact) return "";

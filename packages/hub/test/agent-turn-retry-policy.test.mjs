@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { advanceTurnRetry, parseHubTurnRetry, turnRetryNotice, turnRetryStopReason } from "../src/agent-turn-retry-policy.ts";
+import { advanceTurnRetry, parseHubTurnRetry, turnRetryNotice } from "../src/agent-turn-retry-policy.ts";
 
 const failure = (turn, extra = {}) => ({ type: "agent_turn_retry", action: "failed", operationId: "operation",
   requestId: `request-${turn}`, threadId: "thread", turnId: turn, safeToContinue: true,
@@ -53,12 +53,10 @@ test("cancellation and completion are terminal and survive replay", () => {
   }
 });
 
-test("an error Hub does not retry stays the host's to report, with a reason no host suppresses", () => {
+test("an error Hub does not retry posts no retry notice; the turn failure reports it", () => {
   const state = advanceTurnRetry(undefined, failure("turn", { errorMessage: "You've hit your usage limit." }), 1_000, "token");
   assert.equal(state.state, "ineligible");
-  assert.equal(state.notice, "", "Hub posts no notice of its own");
-  assert.equal(turnRetryStopReason(state.state), "not_retryable");
-  assert.equal(turnRetryStopReason("exhausted"), "exhausted");
+  assert.equal(state.notice, "");
 });
 
 test("Hub-reported outcomes show the original error, and its text cannot summon anyone", () => {

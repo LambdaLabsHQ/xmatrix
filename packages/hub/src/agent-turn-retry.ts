@@ -9,7 +9,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { runtimeMessages, runtimeCommandId } from "./runtime-transport/runtime-messages";
 import { productAgentSystemNoticeSenderSnapshot } from "./product-agent-mention-authority-adapter";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
-import { advanceTurnRetry, parseHubTurnRetry, turnRetryNotice, turnRetryStopReason, CAPACITY_CONTINUATION,
+import { advanceTurnRetry, parseHubTurnRetry, turnRetryNotice, CAPACITY_CONTINUATION,
   TURN_RETRY_DELIVERY_RECHECK_MS, TURN_RETRY_RUNTIME_PATH, type HubTurnRetry } from "./agent-turn-retry-policy";
 
 export type RetryDecision = Extract<AgentInstanceServerMessage, { type: "agent_turn_retry_decision" }>;
@@ -34,7 +34,7 @@ function decision(r: HubTurnRetry): RetryDecision {
   return { type: "agent_turn_retry_decision", requestId: r.requestId, operationId: r.operationId,
     threadId: r.threadId, turnId: r.turnId, attemptToken: r.attemptToken,
     action: r.state === "issued" ? "retry" : "stop",
-    ...(r.state === "issued" ? { input: CAPACITY_CONTINUATION } : { reason: turnRetryStopReason(r.state) }) };
+    ...(r.state === "issued" ? { input: CAPACITY_CONTINUATION } : { reason: r.state }) };
 }
 
 /** Authenticated reports reach this owning authority; the host never supplies

@@ -59,21 +59,14 @@ export function advanceTurnRetry(previous: HubTurnRetry | undefined,
     .startsWith("selected model is at capacity.");
   const state = !capacity ? "ineligible" : !report.safeToContinue ? "unsafe" : used >= DELAYS_MS.length ? "exhausted" : "waiting";
   const attempt = state === "waiting" ? used + 1 : used;
-  // Hub owns only capacity failures. Any other error stays the host's to
-  // report through its ordinary turn failure, which carries the original
-  // error and its usage-limit, auth and restart handling; Hub posts nothing.
+  // Hub retries only capacity failures. Any other error is reported where it
+  // arrives, as the ordinary turn failure (see the Agent Instance port), so
+  // this record posts no notice of its own.
   return { operationId: report.operationId, threadId: report.threadId, turnId: report.turnId,
     requestId: report.requestId, attempt, attemptToken: token, state,
     dueAt: state === "waiting" ? now + DELAYS_MS[used]! : now,
     expiresAt: continuing ? previous.expiresAt : now + TURN_RETRY_LIFETIME_MS,
     errorMessage: report.errorMessage!, notice: state === "waiting" ? `waiting:${attempt}` : state === "ineligible" ? "" : state };
-}
-
-/** The stop reason a host reads. A host stays silent only for the reasons it
- * knows Hub reported, so an error Hub does not own carries a reason no host
- * suppresses and the host reports the failure itself. */
-export function turnRetryStopReason(state: HubTurnRetry["state"]): string {
-  return state === "ineligible" ? "not_retryable" : state;
 }
 
 export function turnRetryNotice(state: HubTurnRetry): string {
