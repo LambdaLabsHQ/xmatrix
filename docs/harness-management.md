@@ -189,6 +189,8 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
 - **Waiting and recovery.** A request that has not returned a sign-in result
   after one minute shows whether the machine has picked it up. Cancel is
   available before the link arrives as well as while waiting for approval.
+  The daemon registers a starting session before waiting for its prompt, so
+  cancellation reaches the process and late output cannot restore it.
   Status-read failures offer a read-only retry; they never issue another sign-in.
   After 20 minutes the UI stops observing and says the remote sign-in may still
   be running; cancel it before starting again. Posting an action is bounded to
