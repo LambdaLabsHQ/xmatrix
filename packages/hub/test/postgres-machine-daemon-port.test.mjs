@@ -179,6 +179,28 @@ test("sleep commands are capability gated and complete through the lease", async
     response: { type: "machine_sleep_result", requestId, ...run, slept: false, reason: "not_idle" } });
 });
 
+test("a sleep or reply-recovery result is not a Run lifecycle report", async () => {
+  const capable = { ...session, capabilities: ["machine_sleep_agent_v1"] };
+  const messages = [
+    { session: capable, message: { type: "machine_sleep_result", requestId: "sleep-1", runId: "run-1",
+      executionKey: "execution-1", instanceId: "instance-1", slept: true } },
+    { session, message: { type: "machine_recover_reply_result", requestId: "recover-1", runId: "run-1",
+      instanceId: "instance-1", executionKey: "execution-1", channelId: "channel-1",
+      executionId: "execution-id", ok: true, result: { status: "committed" } } },
+  ];
+  for (const { session: actor, message } of messages) {
+    const calls = [];
+    const port = authorityPort({
+      commands: recordingCommands(calls, () => ({ runLifecycleChannelId: "channel-1" })),
+    });
+    const reply = await port.execute(actor, message);
+    assert.deepEqual(reply, { type: "machine_command_completion_acked", requestId: message.requestId,
+      controlId: message.requestId });
+    assert.deepEqual(calls.map((call) => call.input.action), ["complete"]);
+    assert.equal(calls.some((call) => call.input.runLifecycleReplica), false);
+  }
+});
+
 test("terminal reports dispatch one durable coalesced Channel About successor", async () => {
   const followUps = [];
   const port = authorityPort({
