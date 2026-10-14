@@ -256,7 +256,9 @@ changes nothing: `create_version` (or renames the one version still open for
 editing, never downward), `set_metadata` (one language's listing text, checked
 against Apple's limits before any call), `set_build` (only the exact processed
 build, read back after binding), `submit`, `cancel_submission`, `release`
-(only from Pending Developer Release; Apple cannot undo it) and
+(only from Pending Developer Release; `phased` enables a 7-day rollout first,
+then `pause_phased_release`, `resume_phased_release` and
+`complete_phased_release`; Apple cannot undo the release) and
 `reply_review`. `submit` reuses an open draft submission with whatever else
 the team put in it, and refuses while another submission is with App Review or
 waits for an answer. App Review contact and sign-in details never pass through
