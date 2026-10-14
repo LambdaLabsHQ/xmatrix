@@ -427,7 +427,7 @@ test("shared Human presence fanout cannot publish one viewer's private Channel s
   assert.equal(channel.attention, attention, "the personalized Authority snapshot stays immutable");
 });
 
-test("the shared presence serializer drops only viewer-scoped fields", () => {
+test("the shared presence serializer drops viewer-scoped fields and what messages say", () => {
   const attention = {
     channelId: "channel-1",
     unreadAttentionCount: 1,
@@ -437,6 +437,9 @@ test("the shared presence serializer drops only viewer-scoped fields", () => {
     id: "channel-1",
     attention,
     readSequence: 4,
+    messageCount: 5,
+    historyHeadSequence: 5,
+    lastMessage: { messageId: "message-5", bodyPreview: "Not yet received", sentAt: "2026-08-21T06:00:00.000Z" },
     memberReadSequences: { "user:user-1": 4 },
     memberPresence: { "user:user-1": { kind: "user", status: "online" } },
   };

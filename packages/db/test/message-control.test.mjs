@@ -139,6 +139,11 @@ test("append commits structured invocation intent with its source and excludes o
       : query.name === "message_agent_targets_commit_v1" ? [{ message_id: "message-1" }]
       : query.name === "message_append_publish_unmetered_v1"
         ? [{ accepted: true, channel_id: "channel-1", sequence_confirmed: true, result_json: JSON.parse(query.values[4]) }]
+      : query.name === "message_live_routing_recipients_v4"
+        ? [{ user_id: "alice", recipient_count: "2" }, { user_id: "bob", recipient_count: "2" }]
+      : query.name === "message_live_routing_attention_summary_v3"
+        ? [{ subject_id: "user:alice", unread_count: "1", message_id: "message-1", kind: "mention",
+          timeline_sequence: "7", created_at: "2026-09-20T00:00:00.000Z", kinds: ["mention"] }]
       : []));
   const input = appendRequest({
     sentAt: "2026-09-20T00:00:00.000Z",
@@ -146,7 +151,15 @@ test("append commits structured invocation intent with its source and excludes o
     attentionBody: body,
     invocationSelections,
   });
-  await new PostgresMessageRepository(db).append(input);
+  const appended = await new PostgresMessageRepository(db).append(input);
+  // Who it reaches is read in the append's own transaction, so it is delivered as it commits;
+  // the stored receipt the sender gets back does not carry it.
+  assert.deepEqual(appended.liveRouting, { recipientUserIds: ["alice", "bob"], recipientNotifications: [{
+    userId: "alice", notification: { reason: "mention", attention: { channelId: "channel-1", unreadAttentionCount: 1,
+      lastAttentionAt: "2026-09-20T00:00:00.000Z", lastMessageId: "message-1", lastMessageSequence: 7,
+      primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: "2026-09-20T00:00:00.000Z" } } }] });
+  const receipt = JSON.parse(db.calls.find(call => call.name === "message_append_publish_unmetered_v1").values[4]);
+  assert.equal("liveRouting" in receipt, false);
   const stored = JSON.parse(db.calls.find(call => call.name === "message_agent_targets_commit_v1").values[3]);
   assert.deepEqual(stored, { entityVersion: 1, bodyHash, targets: [], selections: invocationSelections });
   assert.deepEqual(JSON.parse(db.calls.find(call => call.name === "message_append_attention_batch_v5").values[0]),
