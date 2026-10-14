@@ -9,17 +9,16 @@ const FOCUSED_INSTANCES = 10;
 const CHANNELS = 1900;
 const AGENTS = CHANNELS + FOCUSED_INSTANCES - 1;
 const REPORTS_PER_SECOND = 100;
-const SECONDS = 60;
 const nativeSocket = process.env.XMATRIX_PERF_TRANSPORT !== "cdp";
 
-test.use({ ...E2E_DESKTOP_CONTEXT, trace: "off" });
+test.use({ ...E2E_DESKTOP_CONTEXT, trace: "off", humanSocketWorker: nativeSocket });
 const messages = channelHistory(40, "k-message", (row) => `Row ${row}: a **status** update with \`code\` and a list:\n\n- one\n- two`);
 
 type Traffic = { counting: boolean; reports: number; snapshots: number; last: number };
 
 /** Absolute renderer TaskDuration, including normal animations and delivery.
  * Every report retains the legacy Hub pair (Agent card + whole Channel), at
- * 100 reports/s for a full minute. Ten percent of reports target the open
+ * 100 reports/s for one burst minute and four uniform minutes. Ten percent of reports target the open
  * Channel, the rest exercise the thousand-Channel catalog. Each ten-second
  * window must meet the same budget: neither idle subtraction nor a long drain
  * can disguise sustained work or socket loss. Both bursts and evenly spaced
@@ -30,8 +29,8 @@ type Traffic = { counting: boolean; reports: number; snapshots: number; last: nu
  * the old injected transport available for diagnostic comparisons. CDP still
  * accounts for all product script, style, layout and native renderer work.
  */
-for (const ticksPerSecond of [10, 100]) test(`${AGENTS} Agents across ${CHANNELS} Channels stay below ten percent with ${ticksPerSecond === 100 ? "even" : "burst"} reports`, async ({ page }) => {
-  test.setTimeout(150_000);
+for (const { ticksPerSecond, seconds: SECONDS } of [{ ticksPerSecond: 10, seconds: 60 }, { ticksPerSecond: 100, seconds: 240 }]) test(`${AGENTS} Agents across ${CHANNELS} Channels stay below ten percent with ${ticksPerSecond === 100 ? "even" : "burst"} reports for ${SECONDS}s`, async ({ page }) => {
+  test.setTimeout((SECONDS + 90) * 1_000);
   const space = workingAgentsSpace(AGENTS, "k", { focusedInstances: FOCUSED_INSTANCES, intent: "Review channels and message performance" });
   await installRenderCounter(page);
   if (!nativeSocket) await page.addInitScript(() => {
@@ -80,21 +79,28 @@ for (const ticksPerSecond of [10, 100]) test(`${AGENTS} Agents across ${CHANNELS
       for (const frame of space.report(index, `Step ${sent}`)) send(frame);
       sent += 1;
     }
+    // A normal immediate control frame closes the final transport packet
+    // before the unchanged deadline. No receipt/drain wait extends the CPU
+    // window, and the control's processing is measured with the reports.
+    if (sent === REPORTS_PER_SECOND * SECONDS) send({ type: "pong", requestId: "performance-complete" });
     // Node's deadline avoids browser-side timers/actions becoming the load.
     await delay(Math.max(0, startedAt + (tick + 1) * (1000 / ticksPerSecond) - Date.now()));
-    if ((tick + 1) % (10 * ticksPerSecond) === 0) {
+    if ((tick + 1) % (10 * ticksPerSecond) === 0 && tick + 1 < SECONDS * ticksPerSecond) {
       const current = await metrics();
       windows.push((current.TaskDuration - windowBefore.TaskDuration) / (current.Timestamp - windowBefore.Timestamp));
       windowBefore = current;
     }
   }
   // The final report has the normal inter-arrival interval before this read.
-  const after = await metrics();
-  const elapsed = after.Timestamp - before.Timestamp;
   const nativeTraffic = nativeSocket ? await readNativeHumanSocketTraffic(page) : null;
   const traffic: Traffic = nativeTraffic ? { counting: nativeTraffic.counting, reports: nativeTraffic.byType.enhanced_presence ?? 0,
     snapshots: nativeTraffic.byType.channel_updated ?? 0, last: nativeTraffic.lastStep } :
     await page.evaluate(() => (window as unknown as { __loadTraffic: Traffic }).__loadTraffic);
+  // Witness receipts before the CPU cutoff. This is one snapshot, never a
+  // drain/poll, and its own main-thread cost remains in the final window.
+  const after = await metrics();
+  const elapsed = after.Timestamp - before.Timestamp;
+  windows.push((after.TaskDuration - windowBefore.TaskDuration) / (after.Timestamp - windowBefore.Timestamp));
   const renders = await page.evaluate(() =>
     (window as unknown as { __renderCounts: { workspaceViews: number; messageRows: number } }).__renderCounts);
   const busy = (after.TaskDuration - before.TaskDuration) / elapsed;
@@ -111,6 +117,8 @@ for (const ticksPerSecond of [10, 100]) test(`${AGENTS} Agents across ${CHANNELS
     styleUpdates: after.RecalcStyleCount - before.RecalcStyleCount,
     received: traffic,
     connections: send.connections(),
+    workerConnections: nativeTraffic?.workerConnections,
+    workerPackets: nativeTraffic?.workerPackets,
   })}`);
   console.log(`[thousand-agent-renders] ${JSON.stringify(renders)}`);
   await expect(page.locator(".app-agent-work-intent:not(.app-agent-work-intent-stale)")).toHaveCount(FOCUSED_INSTANCES);
@@ -118,18 +126,24 @@ for (const ticksPerSecond of [10, 100]) test(`${AGENTS} Agents across ${CHANNELS
   expect(traffic.snapshots).toBe(traffic.reports);
   expect(traffic.last).toBe(sent - 1);
   expect(send.connections()).toBe(1);
-  if (nativeTraffic) expect(nativeTraffic.connections).toBe(1);
+  if (nativeTraffic) {
+    expect(nativeTraffic.connections).toBe(1);
+    expect(nativeTraffic.workerConnects).toBe(1);
+    expect(nativeTraffic.workerConnections).toBe(1);
+    expect(nativeTraffic.workerPackets).toBeGreaterThan(0);
+    expect(nativeTraffic.workerPackets).toBeLessThan(traffic.reports);
+  }
   expect(elapsed).toBeGreaterThanOrEqual(SECONDS);
   expect(elapsed).toBeLessThan(SECONDS + 1);
   // The separate render-scope test isolates report-driven shell commits. This
-  // minute also includes ordinary expiry/clock housekeeping.
+  // sustained run also includes ordinary expiry/clock housekeeping.
   expect(renders.messageRows).toBe(0);
   // Arrival counters alone cannot prove the app consumed its final live state.
   // Exercise the real trace UI only after every measured value is captured.
   await fixtureJson(page, "load-final-trace", "**/api/xmatrix/trace/instances/instance-k-9/events?**",
     { availability: "available", complete: true, events: [], cursor: null, nextCursor: null });
   await page.locator(".app-agent-work-dock").getByRole("button", { name: /^Open agent9 -/u }).click();
-  await expect(page.getByRole("dialog").getByText("Step 5990", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog").getByText(`Step ${sent - 10}`, { exact: true })).toBeVisible();
   expect(busy).toBeLessThan(0.1);
   for (const windowBusy of windows) expect(windowBusy).toBeLessThan(0.1);
 });

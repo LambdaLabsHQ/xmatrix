@@ -1,10 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { compileTsModules } = require("./compile-ts-modules.cjs");
-
-const batcherModule = compileTsModules(__dirname, ["realtime-frame-batcher"]);
-const { createRealtimeFrameBatcher, humanFrameBatchKey } = batcherModule.exports;
-test.after(batcherModule.dispose);
+require("./typescript-require.cjs").installTypeScriptRequire();
+const { createRealtimeFrameBatcher, humanFrameBatchKey } = require("./realtime-frame-batcher.ts");
 
 function harness() {
   const applied = [];

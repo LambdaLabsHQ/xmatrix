@@ -334,7 +334,7 @@ in `live-agent-load-render-scope.spec.ts`, including cards and whole-Channel
 snapshots. The presence owner tests cover sibling-Run isolation, unchanged quota,
 and a 1,000-report digest with a bounded number of Channel inspections. The
 Agent browser benchmark sends 100 legacy two-frame reports per second
-for 60 seconds per cadence, both ten-report bursts every 100 ms and single
+for 60 seconds of ten-report bursts every 100 ms and 240 seconds of single
 reports every 10 ms, including ten working Instances with live intent text in
 the open Channel. Performance cases run one worker at a time so another load
 generator cannot contaminate a renderer's wall-clock budget. Each cadence checks receipt counts, the final
@@ -342,10 +342,14 @@ report, the last focused Instance activity in the real trace window, one
 uninterrupted socket and the delivery deadline, plus absolute renderer
 `TaskDuration / elapsed` below 10% overall and in every ten-second window. Normal
 animations remain enabled and idle work is included. Frames arrive through a
-real loopback TCP WebSocket and the browser's native message events. The fixture
-admits only that listener's exact origin to the navigation document's connect-src
-and its isolated browser context's loopback-network permission; product policy
-stays unchanged. Playwright DOM-snapshot recording is off during measurement so
+real loopback TCP WebSocket in the production Human Worker. Both the physical
+connection and the Worker's connection/packet counts are witnessed, so native
+fallback cannot silently stand in for Worker coverage. A final ordinary control
+frame flushes the last packet before the original delivery deadline; no drain
+wait extends the measured CPU window. The fixture admits only that listener's
+exact origin to the navigation document and marked Worker entry's connect-src,
+plus its isolated context's loopback-network permission; asset bytes and product
+policy stay unchanged. Playwright DOM-snapshot recording is off during measurement so
 test instrumentation does not repeatedly walk the page. CDP measures absolute
 product script, style, layout and native work; `XMATRIX_PERF_TRANSPORT=cdp` keeps
 the former per-frame injected delivery available for diagnostic comparisons.

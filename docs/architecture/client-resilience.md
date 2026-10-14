@@ -207,6 +207,30 @@ session (`lib/pages/page-client.ts`). It guarantees:
 - on resume: a suspended page replaces its socket, a page with no socket dials
   at once, a live socket is probed.
 
+### Human receive transport
+
+The Human connection opens its physical WebSocket in a same-origin Dedicated
+Worker. The Worker parses JSON and transfers lossless, ordered packets to the
+shell. Presence, lifecycle, observable events and Channel snapshots share one
+16 ms window; any other frame flushes earlier state and itself immediately.
+Packets also flush at 256 frames or one million characters. The shell still
+validates messages, applies the existing keyed coalescing and flushes each packet
+without waiting a second window. Invalid frames cannot discard valid neighbors.
+
+Authentication, compatibility, device capabilities, focus, heartbeat and retry
+decisions remain with the existing main-thread owner. The Worker forwards
+physical close codes, including `4401`, and flushes received state before close
+or error. Replacing or stopping the owner retires its packet subscription and
+terminates its Worker; late events cannot reach a replacement session. Local
+retirement uses immediate termination rather than waiting for a close handshake.
+
+A readiness handshake precedes opening the physical socket. Unsupported or
+blocked Workers therefore fall back to a native socket without creating a second
+connection. Infrastructure failure after opening ends that dial; the regular
+reconnect and authentication policy runs before the next native attempt. The
+native fallback uses the same packet policy. The page editor retains its native
+WebSocket and raw binary/text delivery through the shared reconnecting owner.
+
 ### Heartbeats cost nothing
 
 The Hub answers both heartbeats with a Durable Object WebSocket auto-response,

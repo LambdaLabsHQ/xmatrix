@@ -16,7 +16,7 @@ const OPEN_EVERY = 5;
 const HISTORY = 40;
 const CATALOG_WINDOW_MS = 500;
 
-test.use({ ...E2E_DESKTOP_CONTEXT, trace: "off" });
+test.use({ ...E2E_DESKTOP_CONTEXT, trace: "off", humanSocketWorker: true });
 
 type Arrivals = { counting: boolean; total: number; open: number; byChannel: Record<string, number> };
 type RenderCounts = { navRows: number; messageRows: number; workspaceViews: number; commits: number; counting: boolean };
@@ -111,10 +111,9 @@ test("a minute of messages into a thousand conversations costs each of them once
     const due = startedAt + (tick + 1) * TICK_MS;
     latest = Math.max(latest, Date.now() - due);
     await delay(Math.max(0, due - Date.now()));
-    if ((tick + 1) % (10_000 / TICK_MS) === 0) await budget.closeWindow();
+    if ((tick + 1) % (10_000 / TICK_MS) === 0 && tick + 1 < (SECONDS * 1000) / TICK_MS) await budget.closeWindow();
   }
   // The last message has had its normal interval before this read; nothing is drained.
-  const spent = await budget.total();
   const traffic = await readNativeHumanSocketTraffic(page);
   const { arrivals, renders } = await page.evaluate(() => {
     const state = window as unknown as { __messageArrivals: Arrivals; __renderCounts: RenderCounts };
@@ -123,6 +122,10 @@ test("a minute of messages into a thousand conversations costs each of them once
     state.__renderCounts.counting = false;
     return { arrivals: { ...state.__messageArrivals, byChannel: { ...state.__messageArrivals.byChannel } }, renders: { ...state.__renderCounts } };
   });
+  // Receipt/consumption snapshots precede the CPU cutoff; no late packet can
+  // satisfy completeness after its processing has left the measured window.
+  await budget.closeWindow();
+  const spent = await budget.total();
   const catalogAsked = (await fixtureRequestRecords(page, "channel-catalog")).slice(catalogBefore);
   const listReads = catalogAsked.filter((request) => /\/channels\/page(\?|$)/u.test(request.url)).length;
   const resolves = catalogAsked.filter((request) => /\/channels\/resolve(\?|$)/u.test(request.url)).length;
@@ -142,6 +145,9 @@ test("a minute of messages into a thousand conversations costs each of them once
   expect(toOpen).toBe(toOthers / OPEN_EVERY);
   expect(send.connections()).toBe(1);
   expect(traffic.connections).toBe(1);
+  expect(traffic.workerConnects).toBe(1);
+  expect(traffic.workerConnections).toBe(1);
+  expect(traffic.workerPackets).toBeGreaterThan(0);
   expect(traffic.byType.channel_message_received).toBe(toOthers + toOpen);
   expect(arrivals.open).toBe(toOpen);
   expect(arrivals.total - arrivals.open).toBe(toOthers);

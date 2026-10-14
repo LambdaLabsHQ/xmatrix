@@ -17,6 +17,8 @@ import {
 export { expect };
 export type { Browser, Page };
 
+type BrowserCapabilities = { humanSocketWorker: boolean };
+
 type WorkerFixtures = {
   /**
    * Worker-scoped Browser handle. Either a private Chromium (default) or a
@@ -32,8 +34,15 @@ type WorkerFixtures = {
  * - Set PLAYWRIGHT_SHARED_BROWSER=1 to connect every worker to one BrowserServer
  *   for controlled low-process measurements.
  */
-export const test = base.extend<Record<string, never>, WorkerFixtures>({
-  page: async ({ page }, providePage, testInfo) => {
+export const test = base.extend<BrowserCapabilities, WorkerFixtures>({
+  humanSocketWorker: [false, { option: true }],
+  page: async ({ page, humanSocketWorker }, providePage, testInfo) => {
+    // Playwright's WebSocket routes instrument window, not Dedicated Workers.
+    // Mock socket owners exercise the real unsupported-Worker fallback; native
+    // TCP owners explicitly enable and witness the production Worker path.
+    if (!humanSocketWorker) await page.addInitScript(() => {
+      Object.defineProperty(window, "Worker", { configurable: true, value: undefined });
+    });
     // A query that resolves to undefined means a fixture answered an endpoint
     // with the wrong shape; the real Hub never does. Fail here rather than
     // leave it to the Next dev overlay.

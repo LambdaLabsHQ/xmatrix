@@ -26,7 +26,8 @@ import {
 } from "./workspace-shell-constants";
 import { sendHumanChannelFocus } from "./send-human-channel-focus";
 import { useChannelHistoryWarmup } from "./use-channel-history-warmup";
-import { ReconnectingSocket } from "@/lib/connectivity/reconnecting-socket";
+import { ReconnectingSocket, type SocketTransport } from "@/lib/connectivity/reconnecting-socket";
+import { createHumanSocketOpener, type HumanSocketTransport } from "@/lib/connectivity/human-socket-transport";
 import { listenForForegroundRefresh } from "./foreground-refresh";
 import {
   channelLastMessagePreviewFromEntry,
@@ -240,9 +241,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const relayPushConnectedRef = useRef(false);
 
-  const relaySocketRef = useRef<WebSocket | null>(null);
+  const relaySocketRef = useRef<SocketTransport | null>(null);
   const relayReconnectAttemptRef = useRef(0);
-  const humanConnectionRef = useRef<ReconnectingSocket | null>(null);
+  const humanConnectionRef = useRef<ReconnectingSocket<HumanSocketTransport> | null>(null);
   // The Human socket reads the token when it dials: a renewal must not drop a
   // working socket (the Hub closes it with 4401 when it needs a new token).
   const tokenRef = useRef(token);
@@ -255,7 +256,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const reconcileUnconfirmedOnReconnectRef = useRef<(() => void) | null>(null);
 
   const lastHumanFocusRequestRef = useRef<{
-    socket: WebSocket;
+    socket: SocketTransport;
     channelId: string | null;
     sentAt: number;
   } | null>(null);
@@ -1995,8 +1996,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       }
     }
 
-    const connection = new ReconnectingSocket({
-      open: async () => new WebSocket(relayUrl()),
+    const openHumanSocket = createHumanSocketOpener();
+    const connection = new ReconnectingSocket<HumanSocketTransport>({
+      open: async () => openHumanSocket(relayUrl()),
       onOpen: (live) => {
         relaySocketRef.current = live;
         relayPushConnectedRef.current = false;
@@ -2008,19 +2010,24 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           device: { ...browserDevicePresence(desktopBridgeRef.current), capabilities: [HUMAN_CLIENT_PRESENCE_DIGEST] },
         }));
       },
-      onMessage: (_live, event) => {
-        try {
-          const decoded = JSON.parse(String(event.data)) as unknown;
-          const catalogChanged = parseHumanChannelCatalogChangedMessage(decoded);
-          const workspaceChanged = parseHumanWorkspaceResourceChangedMessage(decoded);
-          const claimedType = decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
-            ? (decoded as { type?: unknown }).type : undefined;
-          if ((claimedType === "space_channel_catalog_changed" && !catalogChanged) ||
-              (claimedType === "workspace_resource_changed" && !workspaceChanged)) return;
-          relayFrames.push(workspaceChanged ?? catalogChanged ?? decoded as HumanServerMessage);
-        } catch {
-          // Ignore malformed push payloads; REST refresh remains the fallback.
+      onPacket: (_live, frames) => {
+        for (const frame of frames) {
+          try {
+            const decoded = frame.kind === "json" ? frame.value : JSON.parse(String(frame.data)) as unknown;
+            const catalogChanged = parseHumanChannelCatalogChangedMessage(decoded);
+            const workspaceChanged = parseHumanWorkspaceResourceChangedMessage(decoded);
+            const claimedType = decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
+              ? (decoded as { type?: unknown }).type : undefined;
+            if ((claimedType === "space_channel_catalog_changed" && !catalogChanged) ||
+                (claimedType === "workspace_resource_changed" && !workspaceChanged)) continue;
+            relayFrames.push(workspaceChanged ?? catalogChanged ?? decoded as HumanServerMessage);
+          } catch {
+            // A malformed frame cannot discard good neighbors in its packet.
+          }
         }
+        // Transport already waited its one window. Apply now; message/history
+        // and control frames still flush preceding state inside push().
+        relayFrames.flush();
       },
       onDown: () => {
         relaySocketRef.current = null;
