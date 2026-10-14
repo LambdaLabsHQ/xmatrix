@@ -6,11 +6,21 @@ export class InvocationAccessError extends Error {
 }
 
 export interface InvocationSourceMessage { id: string; messageId?: string; body: string; sentAt: string; senderKind?: "agent" | "app" | "user" | "system" }
+/* Whether a message asks for anything is read from its text, which never
+   changes on the same object: the timeline asks again for every message on
+   screen each time one arrives, and is answered from here. */
+const invocationSources = new WeakMap<InvocationSourceMessage, boolean>();
+
 /** Whether a message can carry invocation state: a Human's, or one that summons or stops an Agent. */
 export function isInvocationSource(message: InvocationSourceMessage): boolean {
-  // An Agent's stop command carries a receipt chip too, like a Human's.
-  return message.senderKind === "user" || hasOperationalAgentInvocation(message.body) ||
-    parseAutoLaunchMentions(message.body).length > 0 || parseAgentStopInvocation(message.body) !== undefined;
+  let source = invocationSources.get(message);
+  if (source === undefined) {
+    // An Agent's stop command carries a receipt chip too, like a Human's.
+    source = message.senderKind === "user" || hasOperationalAgentInvocation(message.body) ||
+      parseAutoLaunchMentions(message.body).length > 0 || parseAgentStopInvocation(message.body) !== undefined;
+    invocationSources.set(message, source);
+  }
+  return source;
 }
 
 export function invocationSourceMessages<T extends InvocationSourceMessage>(messages: readonly T[], visibleIds?: readonly string[]): T[] {

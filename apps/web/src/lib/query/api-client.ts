@@ -63,14 +63,21 @@ export class XMatrixRawResponseError extends XMatrixApiError {
   }
 }
 
+// Every query key names the Hub; the URL is parsed once for the address it is built from.
+let hubOrigin: { from: string; origin: string } | undefined;
+
 export function xmatrixHubOrigin(): string {
-  try {
-    return new URL(normalizeHubUrl(
-      process.env.NEXT_PUBLIC_XMATRIX_HUB_URL || DEFAULT_HUB_URL,
-    )).origin;
-  } catch {
-    return "xmatrix-hub";
+  const configured = process.env.NEXT_PUBLIC_XMATRIX_HUB_URL || DEFAULT_HUB_URL;
+  if (hubOrigin?.from !== configured) {
+    let origin = "xmatrix-hub";
+    try {
+      origin = new URL(normalizeHubUrl(configured)).origin;
+    } catch {
+      // An address that does not parse keys every query under the fallback.
+    }
+    hubOrigin = { from: configured, origin };
   }
+  return hubOrigin.origin;
 }
 
 /** Statuses a gateway in front of the Hub answers while the Hub restarts or is unreachable. */
