@@ -177,7 +177,6 @@ export const HUB_ROUTES = {
   /** An Agent Run saves a credential it holds into its Space. */
   secrets: "/api/secrets",
   run_secrets: "/api/run-secrets",
-  connectors_mcp: "/api/connectors/mcp",
   space_secrets: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/secrets`,
   space_secret: (spaceId: string, secretRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/secrets/${encodeURIComponent(secretRef)}`,

@@ -57,27 +57,20 @@ function executionExcerpt(value: string, maximum: number): string {
   return excerpt.trimEnd();
 }
 
-export interface ConnectorCommandResult {
-  toolResult: string;
-  receipt: string;
+/** The Channel's receipt for one command: the action, its outcome and what it returned. */
+export function commandResult(name: string, actionId: string,
+  outcome: { status: "completed" | "failed" | "blocked"; summary: string }): string {
+  return `${name} ${actionId}: ${outcome.status}; ${outcome.summary}${/[.!?。`]$/u.test(outcome.summary.trimEnd()) ? "" : "."}`;
 }
 
-/** Separate the calling tool's private answer from the Channel's durable receipt. */
-export function commandResult(name: string, action: Pick<ConnectorAction, "resultVisibility"> & { id: string },
-  outcome: { status: "completed" | "failed" | "blocked"; summary: string }): ConnectorCommandResult {
-  const line = (summary: string) => `${name} ${action.id}: ${outcome.status}; ${summary}${/[.!?。`]$/u.test(summary.trimEnd()) ? "" : "."}`;
-  return { toolResult: line(outcome.summary), receipt: line(action.resultVisibility === "caller"
-    ? `Private result; use the ${name} MCP tool for details` : outcome.summary) };
-}
-
-/** Records one execution, runs it, and finalizes it with a public summary only. */
+/** Records one execution, runs it, and finalizes it with its receipt. */
 export async function withExecution(
   manifest: AppConnectorProviderManifest,
   input: ConnectorCommandInput,
   scope: CommandScope,
-  action: Pick<ConnectorAction, "resultVisibility"> & { id: string; label: string; key: string },
+  action: { id: string; label: string; key: string },
   run: () => Promise<{ status: "completed" | "failed" | "blocked"; summary: string }>,
-): Promise<ConnectorCommandResult> {
+): Promise<string> {
   const executionId = `app-execution:${input.messageId}${action.key}:${manifest.id}:${action.id}`.slice(0, 240);
   await appCommand(input.env, "record-execution", {
     commandId: `product:${manifest.id}-record:${input.messageId}${action.key}`.slice(0, 200),
@@ -86,23 +79,22 @@ export async function withExecution(
     principal: scope.principal,
   });
   const outcome = await run();
-  const result = commandResult(manifest.name, action, outcome);
-  const publicSummary = action.resultVisibility === "caller" ? result.receipt : outcome.summary;
   await appCommand(input.env, "finalize-execution", {
     commandId: `product:${manifest.id}-finalize:${input.messageId}${action.key}`.slice(0, 200),
     executionId, expectedVersion: 1, status: outcome.status,
     ...(outcome.status === "completed"
-      ? { resultSummary: executionExcerpt(publicSummary, 1_000), resultChannelId: input.channelId }
-      : { reason: executionExcerpt(publicSummary, 500) }),
+      ? { resultSummary: executionExcerpt(outcome.summary, 1_000), resultChannelId: input.channelId }
+      : { reason: executionExcerpt(outcome.summary, 500) }),
     principal: scope.principal,
   });
-  return result;
+  return commandResult(manifest.name, action.id, outcome);
 }
 
 /* The receipt reports what the Hub already did, so it is a system fact:
-   context for every Instance, never a turn. An Agent's tool call has its
-   answer in the tool result; delivering the receipt as work made the caller's
-   own receipt cancel the turn that was waiting on it. */
+   context for every Instance, never a turn. It replies to the command's
+   message, where everyone in the Channel, the sender included, reads the
+   outcome; delivering it as work made the sender's own receipt cancel the
+   turn that sent the command. */
 export async function publishCommandStatus(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput,
   lines: readonly string[]): Promise<void> {
   if (lines.length === 0) return;
@@ -113,7 +105,8 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     body: `App connector command status:\n${lines.map((line) => `- ${line}`).join("\n")}`,
     principal: { kind: "user", id: input.actorUserId },
     appAuthorId: manifest.id,
-    residual: { appMetadata: { xmatrixProvenance: "system_fact" } },
+    residual: { appMetadata: { xmatrixProvenance: "system_fact" },
+      replyToMessageId: input.commandMessageId ?? input.messageId },
   });
   if (!response.ok) throw await failure(`${manifest.name} connector status`, response);
 }

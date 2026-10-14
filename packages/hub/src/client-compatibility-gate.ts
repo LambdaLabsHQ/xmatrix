@@ -103,7 +103,7 @@ export function clientCompatibilityRequired(request: Request): boolean {
   if (pathname === CLIENT_COMPATIBILITY_PATH) return false;
   if (pathname.startsWith("/api/auth/") || pathname.startsWith("/api/admin/")) return false;
   if (pathname === "/api/apps/github/setup" || pathname === "/api/apps/github/webhook") return false;
-  if (/^\/api\/connectors\/[^/]+\/events\//u.test(pathname) || pathname === "/api/connectors/mcp" ||
+  if (/^\/api\/connectors\/[^/]+\/events\//u.test(pathname) ||
       pathname === "/api/connectors/oauth/callback") return false;
   if (pathname === "/api/migrations/slack/oauth/callback") return false;
   // Outside AI apps: their OAuth token is for the MCP endpoint, not an xMatrix client.

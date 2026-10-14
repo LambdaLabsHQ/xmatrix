@@ -234,12 +234,12 @@ async function sendPrepared(context: Context, input: Record<string, string>): Pr
 
 export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
   search: {
-    effect: "read", resultVisibility: "caller", requires: ["mailboxes"],
+    effect: "read", requires: ["mailboxes"],
     parse(statement) {
       const query = statement.text.trim();
       const mailbox = statement.target === "*" ? "" : address(statement.target);
       if (mailbox === undefined || (mailbox && mailbox !== statement.target)) {
-        return 'use @gmail:search:* <Gmail query>, or MCP {"target":"*","text":"from:noreply@example.com newer_than:1d"}; target is only * or one connected mailbox address, and the query goes in text';
+        return "use @gmail:search:* <Gmail query> or @gmail:search:<connected mailbox address> <Gmail query>";
       }
       return query.length <= MAX_QUERY ? { query, mailbox } : `keep the search under ${MAX_QUERY} characters`;
     },
@@ -263,7 +263,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     },
   },
   read: {
-    effect: "read", resultVisibility: "caller", requires: ["mailboxes"],
+    effect: "read", requires: ["mailboxes"],
     parse(statement) {
       return MESSAGE_ID.test(statement.target) && !statement.text.trim()
         ? { id: statement.target } : "name a message id from @gmail:search";

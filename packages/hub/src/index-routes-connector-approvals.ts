@@ -62,7 +62,8 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
       try {
         if (action) {
           receipt = await runConnectorAction(request.providerId, { env: c.env, channelId: scope.channelId,
-            actorUserId: request.requestedBy, messageId: `${payload.messageId}:approved`, body: "",
+            actorUserId: request.requestedBy, messageId: `${payload.messageId}:approved`,
+            commandMessageId: payload.messageId, body: "",
             senderKind: payload.senderKind, senderId: payload.senderId }, request.actionId, action, payload.statement,
           { requestId: request.requestId, prepared: payload.prepared });
           status = /: completed;/u.test(receipt) ? "completed" : /: blocked;/u.test(receipt) ? "blocked" : "failed";
