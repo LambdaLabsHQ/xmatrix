@@ -154,17 +154,20 @@ export function channelActivityOf(metadata: unknown): ChannelActivity | undefine
   }
 }
 
+/** The payloads of the Hub's own annotations in `namespace`; no other author counts. */
+function hubJudgments(annotations: unknown, namespace: string): Record<string, unknown>[] {
+  if (!Array.isArray(annotations)) return [];
+  return annotations.flatMap((entry) => {
+    const annotation = entry && typeof entry === "object" ? entry as Record<string, unknown> : undefined;
+    if (annotation?.namespace !== namespace || annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) return [];
+    return [annotation.payload && typeof annotation.payload === "object" ? annotation.payload as Record<string, unknown> : {}];
+  });
+}
+
 /** The id of the message that superseded this one, when the Hub judged so. */
 export function supersededByOf(annotations: unknown): string | undefined {
-  if (!Array.isArray(annotations)) return undefined;
-  for (const entry of annotations) {
-    if (!entry || typeof entry !== "object") continue;
-    const annotation = entry as Record<string, unknown>;
-    if (annotation.namespace !== SUPERSEDED_ANNOTATION_NAMESPACE ||
-        annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) continue;
-    const payload = annotation.payload;
-    const by = payload && typeof payload === "object" ? (payload as Record<string, unknown>).supersededBy : undefined;
-    if (typeof by === "string" && by) return by;
+  for (const payload of hubJudgments(annotations, SUPERSEDED_ANNOTATION_NAMESPACE)) {
+    if (typeof payload.supersededBy === "string" && payload.supersededBy) return payload.supersededBy;
   }
   return undefined;
 }
@@ -178,14 +181,7 @@ export interface QuestionnaireState {
 
 /** The card's settled state from the Hub's own annotation; absent while it is open. */
 export function questionnaireStateOf(annotations: unknown): QuestionnaireState | undefined {
-  if (!Array.isArray(annotations)) return undefined;
-  for (const entry of annotations) {
-    if (!entry || typeof entry !== "object") continue;
-    const annotation = entry as Record<string, unknown>;
-    if (annotation.namespace !== QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE ||
-        annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) continue;
-    const payload = annotation.payload && typeof annotation.payload === "object"
-      ? annotation.payload as Record<string, unknown> : {};
+  for (const payload of hubJudgments(annotations, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE)) {
     if (payload.state !== "answered" && payload.state !== "cancelled") continue;
     const answers = payload.answers && typeof payload.answers === "object" && !Array.isArray(payload.answers)
       ? Object.fromEntries(Object.entries(payload.answers as Record<string, unknown>).map(([id, values]) =>

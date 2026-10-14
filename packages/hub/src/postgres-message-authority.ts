@@ -984,11 +984,8 @@ export async function postgresSettleQuestionnaire(
   },
   dependencies: PostgresMessageDependencies = {},
 ): Promise<{ state: QuestionnaireState; changed: boolean } | null> {
-  const requestId = `message-questionnaire-settle:${crypto.randomUUID()}`;
-  const { channelId, spaceId, messages } = await postgresMessageContext(
-    env, input.channelId, requestId, dependencies.database ?? database(env),
-    dependencies.requestScoped === true,
-  );
+  const { requestId, channelId, spaceId, messages } = await postgresMessageBackgroundContext(
+    env, input.channelId, "message-questionnaire-settle", dependencies);
   return messages.settleQuestionnaire({
     requestId, spaceId, channelId,
     messageId: input.messageId,
