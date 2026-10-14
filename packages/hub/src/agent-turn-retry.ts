@@ -121,7 +121,7 @@ export async function reconcileAgentTurnRetries(env: Env, database: AuthorityDat
     if (state.notice) {
       const id = runtimeCommandId("capacity-retry", `${run.run_id}:${state.operationId}:${state.notice}`);
       await runtimeMessages(env).append({ commandId: runtimeCommandId("agent-append", id), messageId: id,
-        channelId, body: turnRetryNotice(state), principal: { kind: "user", id: String(run.owner_user_id) },
+        channelId, body: turnRetryNotice(state), messageKind: "xmatrix.system.turn-retry", principal: { kind: "user", id: String(run.owner_user_id) },
         senderSnapshot: productAgentSystemNoticeSenderSnapshot(String(run.owner_user_id)),
         residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
           xmatrixTurnRetry: { instanceId: String(run.instance_id), state: state.state, attempt: state.attempt } } },

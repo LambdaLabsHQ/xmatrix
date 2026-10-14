@@ -12,6 +12,8 @@ export const CHANNEL_ACTIVITY_PROVENANCE = "activity";
 
 /** Annotation namespace of the Hub's judgment that a later message superseded this one. */
 export const SUPERSEDED_ANNOTATION_NAMESPACE = "xmatrix.superseded";
+/** The Hub's record that a questionnaire card was answered or withdrawn. */
+export const QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE = "xmatrix.questionnaire";
 
 /** Author of annotations the Hub writes itself. Public writers cannot take it. */
 export const SYSTEM_ANNOTATION_AUTHOR = "system:xmatrix";
@@ -163,6 +165,33 @@ export function supersededByOf(annotations: unknown): string | undefined {
     const payload = annotation.payload;
     const by = payload && typeof payload === "object" ? (payload as Record<string, unknown>).supersededBy : undefined;
     if (typeof by === "string" && by) return by;
+  }
+  return undefined;
+}
+
+/** How a questionnaire card was settled, as the Hub recorded it. */
+export interface QuestionnaireState {
+  state: "answered" | "cancelled";
+  /** What the person picked or typed, per question id, when answered. */
+  answers?: Record<string, string[]>;
+}
+
+/** The card's settled state from the Hub's own annotation; absent while it is open. */
+export function questionnaireStateOf(annotations: unknown): QuestionnaireState | undefined {
+  if (!Array.isArray(annotations)) return undefined;
+  for (const entry of annotations) {
+    if (!entry || typeof entry !== "object") continue;
+    const annotation = entry as Record<string, unknown>;
+    if (annotation.namespace !== QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE ||
+        annotation.authorUserId !== SYSTEM_ANNOTATION_AUTHOR) continue;
+    const payload = annotation.payload && typeof annotation.payload === "object"
+      ? annotation.payload as Record<string, unknown> : {};
+    if (payload.state !== "answered" && payload.state !== "cancelled") continue;
+    const answers = payload.answers && typeof payload.answers === "object" && !Array.isArray(payload.answers)
+      ? Object.fromEntries(Object.entries(payload.answers as Record<string, unknown>).map(([id, values]) =>
+        [id, Array.isArray(values) ? values.filter((value): value is string => typeof value === "string") : []]))
+      : undefined;
+    return { state: payload.state, ...(answers ? { answers } : {}) };
   }
   return undefined;
 }

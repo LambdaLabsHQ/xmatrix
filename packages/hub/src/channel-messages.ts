@@ -24,6 +24,8 @@ import {
   postgresMessageMutation,
   postgresMessageRepairSenderSnapshots,
   postgresMessageRoute,
+  postgresQuestionnaireState,
+  postgresSettleQuestionnaire,
   withPostgresMessageRequestScope,
 } from "./postgres-message-authority";
 
@@ -121,6 +123,22 @@ export async function channelMessageAnnotations(
   },
 ): Promise<Record<string, unknown>> {
   return withPostgresMessageRequestScope(env, (scope) => postgresMessageAnnotations(env, input, scope));
+}
+
+/** A questionnaire card's settled state as `principal` may read it; undefined while open. */
+export async function questionnaireCardState(
+  env: Env,
+  input: { channelId: string; messageId: string; principal: AuthorityPrincipal },
+) {
+  return withPostgresMessageRequestScope(env, (scope) => postgresQuestionnaireState(env, input, scope));
+}
+
+/** Settle a questionnaire card once, as answered or withdrawn. */
+export async function settleQuestionnaireCard(
+  env: Env,
+  input: Parameters<typeof postgresSettleQuestionnaire>[1],
+) {
+  return withPostgresMessageRequestScope(env, (scope) => postgresSettleQuestionnaire(env, input, scope));
 }
 
 export async function appendChannelMessage(
