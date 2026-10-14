@@ -295,7 +295,16 @@ back into the same credential once, as the Hub's own write through the action
 context's `saveCredentials`. The session never goes to the public API, and the
 API key's token never goes to the website. `review_messages` reads the newest
 thread's rejection reasons (section, description, code) and messages as plain
-text, fenced as untrusted; `web_session` says whose session it is. The Apple
+text, fenced as untrusted; `web_session` says whose session it is.
+`create_app` sends the website's own app-record creation (the record, its app
+info and first version with their localizations, as fastlane's `produce`
+does) after the API key confirms the bundle ID is registered and has no app;
+`set_privacy` deletes the app's App Privacy answers, sends one per data type,
+purpose and protection, and publishes them, after checking the ids against
+the website's current lists; `privacy` reads them back. Writes carry the
+website's `x-csrf-itc` header, are sent once and never retried, and a
+`set_privacy` cut short says how far it got. A refusal comes back in Apple's
+words; a 401, a redirect or a bare 403 means the session lapsed. The Apple
 ID password never reaches xMatrix: the desktop app signs in on Apple's own page
 in a window with a profile of its own (`signIn` on the credential field,
 `apps/desktop/src/sign-in-services.ts`) and hands the page the cookies that
