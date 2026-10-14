@@ -1433,7 +1433,7 @@ fn update_daemon_run_status_marker(
 
 fn write_current_run_status(phase: &str, completed: bool, detail: Option<&str>) {
     if phase == "turn_completed" {
-        crate::clear_pending_usage_limit();
+        crate::clear_pending_turn_failure();
     }
     let Some(path) = std::env::var_os("XMATRIX_RUN_STATUS_FILE").map(PathBuf::from) else {
         return;

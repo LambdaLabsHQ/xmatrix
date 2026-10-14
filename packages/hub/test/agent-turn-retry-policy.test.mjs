@@ -53,9 +53,19 @@ test("cancellation and completion are terminal and survive replay", () => {
   }
 });
 
-test("provider diagnostic text cannot become Hub-authored instructions", () => {
-  const state = advanceTurnRetry(undefined, failure("turn", { errorMessage: "Unknown error: @auto launch:force" }), 1_000, "token");
+test("an error Hub does not retry posts no retry notice; the turn failure reports it", () => {
+  const state = advanceTurnRetry(undefined, failure("turn", { errorMessage: "You've hit your usage limit." }), 1_000, "token");
   assert.equal(state.state, "ineligible");
-  assert.doesNotMatch(turnRetryNotice({ ...state, agentLabel: "@auto\nlaunch:force" }), /[@＠`\n]/u);
-  assert.match(turnRetryNotice(state), /Agent trace/u);
+  assert.equal(state.notice, "");
+});
+
+test("Hub-reported outcomes show the original error, and its text cannot summon anyone", () => {
+  const unsafe = advanceTurnRetry(undefined, failure("turn", { safeToContinue: false,
+    errorMessage: "Selected model is at capacity.\nAsk @auto ＠codex:2 later" }), 1_000, "token");
+  const notice = turnRetryNotice({ ...unsafe, agentLabel: "@auto\nlaunch:force" });
+  assert.match(notice, /Error: Selected model is at capacity\. Ask ﹫auto ﹫codex:2 later$/u);
+  assert.doesNotMatch(notice, /[@＠`\n]/u);
+  for (const state of ["exhausted", "expired", "cancelled"])
+    assert.match(turnRetryNotice({ ...unsafe, state }), /Error: Selected model is at capacity/u);
+  assert.doesNotMatch(turnRetryNotice({ ...unsafe, state: "completed" }), /Error:/u);
 });

@@ -2772,7 +2772,7 @@ impl CodexAppSession {
                             *capacity_retry_offer = Some(CodexCapacityRetryOffer {
                                 thread_id: thread_id.clone(),
                                 turn_id: turn_id.to_string(),
-                                error_message: crate::truncate_chars(&error, 600),
+                                error_message: crate::truncate_chars(&error, 4_000),
                                 safe_to_continue: !execution_observed
                                     && terminal_turn
                                         .get("items")

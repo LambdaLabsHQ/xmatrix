@@ -70,7 +70,7 @@ pub(crate) fn emit_agent_connection_reconnected_lifecycle(
     if let Some(channel_id) = auto_join_channel_id {
         send_agent_reconnected_lifecycle(relay, channel_id, reconnected_agent);
     }
-    crate::resend_pending_usage_limit(relay, reconnected_agent);
+    crate::resend_pending_turn_failure(relay, reconnected_agent);
 }
 
 /// Tell `channel_id` the agent's transport is back online.

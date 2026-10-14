@@ -90,7 +90,7 @@ test("Hub persists the retry budget across replay/reconnect, exposes it, and fen
     const messages = history.messages ?? history.data?.messages ?? [];
     for (let attempt = 1; attempt <= 3; attempt++)
       assert.ok(messages.some(m => m.body?.includes(`retry ${attempt}/3`)), `visible retry ${attempt}`);
-    assert.ok(messages.some(m => m.body?.includes("Hub stopped retrying")));
+    assert.ok(messages.some(m => m.body?.includes("Hub stopped retrying") && m.body.includes(`Error: ${errorMessage}`)));
     for (const delivered of retryMessages) {
       const stored = messages.find(message => message.messageId === delivered.messageId);
       assert.ok(stored, "the retry instruction must exist in authoritative Channel history");
@@ -134,6 +134,39 @@ test("Hub persists the retry budget across replay/reconnect, exposes it, and fen
     assert.notEqual((await retryState(command.runId)).state, "issued");
   } finally {
     for (const socket of sockets) socket.ws.close();
+    scenario?.daemon.ws.close();
+    await worker.stop();
+  }
+});
+
+test("Hub reports an error it does not retry as the turn failure, with the original error, once", { timeout: 120_000 }, async () => {
+  const worker = await startMockUserHubWorker({ id: `retry-${randomUUID()}`, email: "retry@example.com", name: "Retry" });
+  let scenario;
+  let agent;
+  try {
+    scenario = await createPgSpawnableScenario(worker, { agentName: "codex-failure" });
+    const { token, body } = await launchScenarioRun(worker, scenario);
+    agent = await connectAgent(worker, { ...body, capabilities: ["agent_turn_retry", "agent_turn_retry_channel_message"] }, token);
+    const original = "Internal error: unknown certificate verification error (provider request 7f3a)";
+    const report = { type: "agent_turn_retry", requestId: randomUUID(), operationId: randomUUID(), action: "failed",
+      threadId: "provider-thread", turnId: "provider-turn", safeToContinue: true, errorMessage: original };
+    // A reconnecting host replays the same report under the same request id.
+    for (const attempt of ["report", "replay"]) {
+      agent.ws.send(JSON.stringify(report));
+      const decision = await agent.inbox.waitFor(m => m.type === "agent_turn_retry_decision" &&
+        m.requestId === report.requestId, `stop decision for the ${attempt}`);
+      assert.equal(decision.action, "stop");
+      assert.equal(decision.reason, "ineligible", "the host stays silent: Hub reports this failure");
+    }
+    const history = await (await worker.fetch(`/api/channels/${scenario.channelId}/history?limit=30`,
+      { headers: { Authorization: `Bearer ${MOCK_TOKEN}` } })).json();
+    const messages = history.messages ?? history.data?.messages ?? [];
+    const failures = messages.filter(m => m.body?.includes(original));
+    assert.equal(failures.length, 1, "one notice, carrying the original error, survives a replayed report");
+    assert.match(failures[0].body, /^xMatrix could not complete this codex-failure turn: /u);
+    assert.ok(!messages.some(m => m.body?.includes("Agent trace")));
+  } finally {
+    agent?.ws.close();
     scenario?.daemon.ws.close();
     await worker.stop();
   }
