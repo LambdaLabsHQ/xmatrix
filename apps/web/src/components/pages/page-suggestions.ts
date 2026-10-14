@@ -73,12 +73,13 @@ interface Writer { color: string; avatarUrl?: string }
 /** The words already written out once, so laying the suggestions over the page again does not write them twice. */
 const written = new Set<string>();
 
-/** The Agent's pen: a caret in its colour carrying its face, moving with the words as it writes them. */
+/** The Agent's pen: its own face, in the line at the height of the words, moving with them as it writes. */
 function pen(writer: Writer): HTMLElement {
   const element = document.createElement("span");
   element.className = "page-suggest-pen";
   element.contentEditable = "false";
   element.setAttribute("aria-hidden", "true");
+  element.style.setProperty("--page-suggest-color", writer.color);
   if (writer.avatarUrl) {
     const face = document.createElement("img");
     face.className = "page-suggest-pen-face";
@@ -88,6 +89,16 @@ function pen(writer: Writer): HTMLElement {
     element.append(face);
   }
   return element;
+}
+
+/** Marks the words of each block in `element` as being written, as a highlighter marks lines of text. */
+function inkBlocks(element: HTMLElement): void {
+  for (const block of element.querySelectorAll<HTMLElement>("p, h1, h2, h3, h4, h5, h6")) {
+    const ink = document.createElement("span");
+    ink.className = "page-suggest-ink";
+    ink.append(...block.childNodes);
+    block.append(ink);
+  }
 }
 
 /**
@@ -100,12 +111,20 @@ function writeOut(element: HTMLElement, writer: Writer, key: string): void {
   const walk = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   for (let node = walk.nextNode(); node; node = walk.nextNode()) nodes.push(node as Text);
   const caret = pen(writer);
-  const rest = () => (nodes[nodes.length - 1] ?? element).after(caret);
+  const rest = () => {
+    (nodes[nodes.length - 1] ?? element).after(caret);
+    // Resting at the end of its block, the pen hangs past the words rather than taking a line of its own.
+    const block = caret.closest("p, h1, h2, h3, h4, h5, h6, li");
+    if (!block) return;
+    const after = document.createRange();
+    after.setStartAfter(caret);
+    after.setEndAfter(block.lastChild ?? block);
+    caret.classList.toggle("is-last", after.toString().trim() === "");
+  };
   const words = nodes.map((node) => node.data);
   const total = words.reduce((sum, text) => sum + text.length, 0);
   if (written.has(key) || total === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     if (nodes.length) rest(); else element.append(caret);
-    caret.classList.add("is-resting");
     written.add(key);
     return;
   }
@@ -130,7 +149,7 @@ function writeOut(element: HTMLElement, writer: Writer, key: string): void {
     }
     shown = target;
     if (shown < total) requestAnimationFrame(step);
-    else { written.add(key); rest(); caret.classList.add("is-resting"); }
+    else { written.add(key); rest(); }
   };
   element.append(caret);
   requestAnimationFrame(step);
@@ -139,17 +158,20 @@ function writeOut(element: HTMLElement, writer: Writer, key: string): void {
 /** New blocks as they would read, ghosted where they would go; the one being written is lit in its Agent's colour. */
 function ghostBlocks(hunk: PageDocHunk, current: boolean, writer: Writer, key: string): HTMLElement {
   const element = document.createElement("div");
-  element.className = `page-suggest-in is-block${current ? " is-current page-suggest-line" : ""}`;
+  element.className = `page-suggest-in is-block${current ? " is-current" : ""}`;
   element.style.setProperty("--page-suggest-color", writer.color);
   element.contentEditable = "false";
   element.append(serializer.serializeFragment(hunk.content));
-  if (current) writeOut(element, writer, key);
+  if (current) {
+    inkBlocks(element);
+    writeOut(element, writer, key);
+  }
   return element;
 }
 
 function putIn(text: string, block: boolean, current: boolean, writer: Writer, key: string): HTMLElement {
   const element = document.createElement(block ? "div" : "span");
-  element.className = `page-suggest-in${block ? " is-block" : ""}${current ? " is-current" : ""}`;
+  element.className = `page-suggest-in${block ? " is-block" : ""}${current ? " is-current page-suggest-ink" : ""}`;
   element.style.setProperty("--page-suggest-color", writer.color);
   element.contentEditable = "false";
   element.textContent = text;
@@ -170,14 +192,15 @@ function decorate(doc: DocNode, hunks: readonly PageDocHunk[], current: number, 
       }));
       return;
     }
-    // The blocks being written are lit in the colour of the Agent writing them, as its caret and History are.
+    // The words of the blocks being written are marked in the colour of the Agent writing them, as a
+    // highlighter marks lines, the colour its caret and History have.
     if (now) {
       doc.nodesBetween(hunk.from, hunk.to, (node, pos) => {
-        if (pos >= hunk.from && pos + node.nodeSize <= hunk.to) {
-          decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: "page-suggest-line",
+        if (node.isTextblock && node.content.size > 0) {
+          decorations.push(Decoration.inline(pos + 1, pos + node.nodeSize - 1, { class: "page-suggest-ink",
             style: `--page-suggest-color: ${color}` }));
         }
-        return false;
+        return !node.isTextblock;
       });
     }
     const outs = hunk.changes.filter((change) => change.kind === "added");
@@ -335,11 +358,11 @@ export function stepSuggestion(view: EditorView, by: -1 | 0 | 1): void {
 }
 
 /**
- * Where the change in front of the reader starts: the top of the block lit for it, where what to do with
- * it stands, clear of the pen writing at its end.
+ * Where the change in front of the reader starts: the top of the words marked for it, where what to do
+ * with it stands, clear of the pen writing at its end.
  */
 export function currentSuggestionTop(view: EditorView): number | null {
   const value = suggestionsKey.getState(view.state);
   if (!value?.hunks[value.current]) return null;
-  return view.dom.querySelector(".page-suggest-line, .is-current")?.getBoundingClientRect().top ?? null;
+  return view.dom.querySelector(".page-suggest-ink, .is-current")?.getBoundingClientRect().top ?? null;
 }

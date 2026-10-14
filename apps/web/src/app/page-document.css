@@ -709,52 +709,43 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   color: var(--m-ink-attention, var(--accent));
 }
 
-/* The block an Agent is writing, lit in its colour (its caret's and History's), so whose change it is and
-   where it lands are seen at a glance. */
-.page-document .page-suggest-line {
-  border-radius: 6px;
-  background-color: color-mix(in oklab, var(--page-suggest-color) 15%, transparent);
-  box-shadow: 0 0 0 0.35em color-mix(in oklab, var(--page-suggest-color) 15%, transparent);
+/* The words an Agent is writing, marked in its colour (its caret's and History's) as a highlighter marks
+   lines of text, so whose change it is and where it lands are seen at a glance. */
+.page-document .page-suggest-ink {
+  border-radius: 3px;
+  background-color: color-mix(in oklab, var(--page-suggest-color) 20%, transparent);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
-.page-document .page-suggest-line.is-block::after { content: none; }
+.page-document .page-suggest-in.is-block.is-current::after { content: none; }
 
-/* The Agent's pen: a caret in its colour with its face for a head, moving with the words as it writes them
-   out, then resting at their end and blinking, as a caret does. */
-@keyframes page-suggest-pen-rest {
-  0%, 55% { opacity: 1; }
-  56%, 100% { opacity: 0; }
-}
+/* The Agent's pen: its own face, in the line at the height of the words it writes and centred on them,
+   moving with them as it writes them out, then resting at their end. */
 .page-document .page-suggest-pen {
-  position: relative;
   display: inline-block;
-  width: 2px;
-  height: 1.15em;
-  margin: 0 1px;
-  vertical-align: -0.2em;
+  width: 1.25em;
+  height: 1.25em;
+  margin: 0 0.1em;
+  vertical-align: -0.28em;
   user-select: none;
 }
-.page-document .page-suggest-pen::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 1px;
-  background: var(--page-suggest-color);
-}
-.page-document .page-suggest-pen.is-resting::before { animation: page-suggest-pen-rest 1.1s linear infinite; }
+.page-document .page-suggest-pen.is-last { margin-right: -1.35em; }
 .page-document .page-suggest-pen-face {
-  position: absolute;
-  bottom: calc(100% + 1px);
-  left: 50%;
-  width: 24px;
-  height: 24px;
+  display: block;
+  width: 100%;
+  height: 100%;
   max-width: none;
-  margin-left: -12px;
-  padding: 1px;
-  border-radius: 999px;
-  background: var(--background);
-  box-shadow: 0 0 0 1.5px var(--page-suggest-color), 0 3px 8px -3px oklch(0 0 0 / 0.35);
+  border-radius: 0;
   object-fit: contain;
 }
-@media (prefers-reduced-motion: reduce) {
-  .page-document .page-suggest-pen.is-resting::before { animation: none; }
+/* Just the mark: an app-icon tile around a logo melts into the paper it sits on. */
+:root:not(.dark) .page-document .page-suggest-pen-face { mix-blend-mode: multiply; }
+.page-document .page-suggest-pen:not(:has(img))::before {
+  content: "";
+  display: block;
+  width: 0.5em;
+  height: 0.5em;
+  margin: 0.375em;
+  border-radius: 999px;
+  background: var(--page-suggest-color);
 }

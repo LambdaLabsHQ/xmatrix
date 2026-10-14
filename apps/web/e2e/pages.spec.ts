@@ -509,11 +509,16 @@ test.describe("on a phone", () => {
     await expect(editor.locator(".page-suggest-out.is-current")).toHaveText("Planned for next");
     await expect(editor.locator(".page-suggest-in.is-current")).toHaveText("Shipped this");
     await expect(editor.locator(".page-suggest-in.is-block")).toContainText("Late reviews");
-    // The Agent writes the change out in the line, its pen carrying its face, and the paragraph is lit in its
-    // colour; what to do with the change stands at the right edge beside it, and nothing across the bottom.
-    await expect(editor.locator(".page-suggest-line .page-suggest-pen-face")).toHaveAttribute("src", /claude\.svg/u);
+    // The Agent writes the change out in the line, its face moving with the words at their height, and the
+    // paragraph's words are marked in its colour; what to do with the change stands at the right edge beside
+    // it, and nothing across the bottom.
+    const face = editor.locator(".page-suggest-pen-face");
+    await expect(face).toHaveAttribute("src", /claude\.svg/u);
+    const marked = editor.locator(".page-suggest-ink").first();
+    const [faceBox, wordsBox] = [(await face.boundingBox())!, (await editor.locator(".page-suggest-in.is-current").boundingBox())!];
+    expect(Math.abs(faceBox.y + faceBox.height / 2 - (wordsBox.y + wordsBox.height / 2))).toBeLessThan(6);
     const take = mark.getByRole("button", { name: "Take this change" });
-    const [takeBox, lineBox] = [(await take.boundingBox())!, (await editor.locator(".page-suggest-line").boundingBox())!];
+    const [takeBox, lineBox] = [(await take.boundingBox())!, (await marked.boundingBox())!];
     expect(takeBox.x + takeBox.width).toBeGreaterThan(393 - 12);
     expect(Math.abs(takeBox.y - lineBox.y)).toBeLessThan(24);
     await browser.screenshot({ path: test.info().outputPath("pages-suggestions-phone.png") });
