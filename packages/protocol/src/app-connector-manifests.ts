@@ -89,6 +89,8 @@ export interface AppConnectorProviderManifest {
    * `@<provider>:subscribe:<source> <feature…|all>`; each delivery is routed to
    * the Channels subscribed to its source and feature.
    */
+  /** Private, owner-bound event sources that may fire Automations but do not support general Channel subscriptions. */
+  automationEvents?: NonNullable<AppConnectorProviderManifest["events"]>;
   events?: {
     source: { label: string; description: string; pattern: string; placeholder: string };
     features: Array<{ id: string; label: string; description: string }>;

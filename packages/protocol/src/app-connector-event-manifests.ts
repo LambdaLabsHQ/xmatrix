@@ -293,6 +293,12 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       ],
     }),
     auth: { type: "oauth", scopes: ["https://mail.google.com/"], secretRefs: [] },
+    automationEvents: {
+      source: { label: "Notification ID", description: "An enabled notification owned by the Automation author.",
+        pattern: "^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$", placeholder: "Notification ID from Gmail settings" },
+      features: [{ id: "message.received", label: "New mail", description: "A new incoming message ID, without email content." }],
+      defaultFeatures: ["message.received"],
+    },
   },
   {
     ...eventConnector({
