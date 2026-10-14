@@ -115,6 +115,10 @@ function answersOf(value: unknown): Record<string, string[]> {
   ]));
 }
 
+/* A timeline without answers hands its cards the same empty map, so a new
+   message does not ask every card in it again. */
+const NO_ANSWERS: ReadonlyMap<string, Record<string, string[]>> = new Map();
+
 export function AnsweredQuestionnairesProvider({ timeline, children }: { timeline: readonly TimelineItem[]; children: ReactNode }) {
   const answered = useMemo(() => {
     const map = new Map<string, Record<string, string[]>>();
@@ -124,7 +128,7 @@ export function AnsweredQuestionnairesProvider({ timeline, children }: { timelin
       const cardId = trimmed(metadata.questionnaireMessageId);
       if (cardId && !map.has(cardId)) map.set(cardId, answersOf(metadata.answers));
     }
-    return map;
+    return map.size > 0 ? map : NO_ANSWERS;
   }, [timeline]);
   return <AnsweredQuestionnaires.Provider value={answered}>{children}</AnsweredQuestionnaires.Provider>;
 }
