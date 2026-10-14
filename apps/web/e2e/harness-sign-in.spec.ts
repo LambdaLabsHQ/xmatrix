@@ -87,3 +87,52 @@ test("a paste-code sign-in hands back the pasted code and settles signed in", as
   expect((await fixtureRequestBodies(page, "sign-in-issue")).at(-1)).toEqual(
     { machineId: MACHINE, hostId: "host-studio", presetId: "claude", action: "login_finish", code: "pasted#code" });
 });
+
+
+test("a queued sign-in explains the wait and can be cancelled before a link arrives", async ({ page }) => {
+  const section = await openAgent(page, "codex-studio");
+  await fixtureJson(page, "sign-in-start", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`, {
+    controlId: START, presetId: "codex", action: "login_start", status: "queued" });
+  await fixtureJson(page, "sign-in-cancel", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(FINISH)}`, {
+    controlId: FINISH, presetId: "codex", action: "login_cancel", status: "succeeded",
+    result: { login: { state: "cancelled" } } });
+  await page.clock.install();
+  await section.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(section.getByRole("button", { name: "Starting sign-in…" })).toBeVisible();
+  await page.clock.fastForward(61_000);
+  await expect(section).toContainText("The machine has not picked up this sign-in request yet");
+  await expect(section.getByRole("button", { name: "Sign-in pending" })).toBeVisible();
+  await section.getByRole("button", { name: "Cancel sign-in" }).click();
+  await expect(section.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled();
+  expect((await fixtureRequestBodies(page, "sign-in-issue")).at(-1)?.action).toBe("login_cancel");
+});
+
+test("a failed status read offers recovery without issuing a second sign-in", async ({ page }) => {
+  const section = await openAgent(page, "codex-studio");
+  await fixtureJson(page, "sign-in-start", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`,
+    { error: "temporarily unavailable" }, { status: 503 });
+  await section.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(section).toContainText("Status could not be checked");
+  await expect(section.getByRole("button", { name: "Starting sign-in…" })).toHaveCount(0);
+  await expect(section.getByRole("button", { name: "Cancel sign-in" })).toBeEnabled();
+  await fixtureJson(page, "sign-in-start", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`, {
+    controlId: START, presetId: "codex", action: "login_start", status: "failed", error: "No sign-in link was returned." });
+  await section.getByRole("button", { name: "Check status again" }).click();
+  await expect(section).toContainText("No sign-in link was returned.");
+  await expect(section.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled();
+  expect(await fixtureRequestBodies(page, "sign-in-issue")).toHaveLength(1);
+});
+
+test("the observation deadline ends the spinner without claiming the remote sign-in ended", async ({ page }) => {
+  const section = await openAgent(page, "codex-studio");
+  await fixtureJson(page, "sign-in-start", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`, {
+    controlId: START, presetId: "codex", action: "login_start", status: "running" });
+  await page.clock.install();
+  await section.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(section.getByRole("button", { name: "Starting sign-in…" })).toBeVisible();
+  await page.clock.fastForward(20 * 60_000 + 1_000);
+  await expect(section).toContainText("Stopped checking after 20 minutes");
+  await expect(section.getByRole("button", { name: "Starting sign-in…" })).toHaveCount(0);
+  await expect(section.getByRole("button", { name: "Cancel sign-in" })).toBeEnabled();
+  expect(await fixtureRequestBodies(page, "sign-in-issue")).toHaveLength(1);
+});

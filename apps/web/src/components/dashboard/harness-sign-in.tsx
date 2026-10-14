@@ -23,6 +23,7 @@ type Step = "start" | "finish" | "cancel";
 type Operation = { controlId: string; step: Step; startedAt: number };
 
 const SETTLED = (status?: HarnessActionStatus["status"]) => Boolean(status && !["queued", "running"].includes(status));
+const OBSERVATION_TIMEOUT = 20 * 60_000;
 const LOGIN_STATE_LABEL = { signed_in: "Signed in", signed_out: "Not signed in", unknown: "Could not check" } as const;
 
 /** What the owner sees of a harness's own sign-in on one Machine, and the
@@ -65,11 +66,21 @@ export function HarnessSignInSection({ registration, token, userId }: {
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [waitState, setWaitState] = useState<"normal" | "slow" | "expired">("normal");
+  useEffect(() => {
+    setWaitState("normal");
+    if (!operation) return;
+    const slow = setTimeout(() => setWaitState("slow"), Math.max(0, operation.startedAt + 60_000 - Date.now()));
+    const expired = setTimeout(() => setWaitState("expired"),
+      Math.max(0, operation.startedAt + OBSERVATION_TIMEOUT - Date.now()));
+    return () => { clearTimeout(slow); clearTimeout(expired); };
+  }, [operation]);
+
   const status = useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId }, "harness-actions", [operation?.controlId ?? null]),
     queryFn: ({ signal }) => readHarnessAction(token, operation!.controlId, signal),
-    enabled: Boolean(operation), retry: false,
-    refetchInterval: (query) => operation && Date.now() - operation.startedAt < 20 * 60_000 &&
+    enabled: Boolean(operation) && waitState !== "expired", retry: false,
+    refetchInterval: (query) => operation && Date.now() - operation.startedAt < OBSERVATION_TIMEOUT &&
       !SETTLED(query.state.data?.status) ? 2_000 : false,
     refetchIntervalInBackground: true,
   });
@@ -79,7 +90,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
       const daemon = view.daemon;
       if (!daemon?.machineId) throw new UserFacingProblem("This machine is offline.", true);
       const result = await queueHarnessAction(token, daemon.machineId, daemon.hostId, registration.key.harness,
-        `login_${input.step}`, undefined, input.code);
+        `login_${input.step}`, AbortSignal.timeout(30_000), input.code);
       return { ...input, controlId: result.controlId };
     },
     onSuccess: ({ step, controlId }) => {
@@ -124,7 +135,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
 
   if (!view.visible) return null;
   const busy = queue.isPending || Boolean(operation);
-  const starting = busy && !prompt;
+  const starting = busy && !prompt && !status.isError && waitState === "normal";
   const waitingForDevice = Boolean(prompt && prompt.flow === "device_code");
 
   return (
@@ -139,10 +150,20 @@ export function HarnessSignInSection({ registration, token, userId }: {
             <Button size="sm" variant="outline" disabled={busy || Boolean(view.blocker)}
               onClick={() => queue.mutate({ step: "start" })}>
               {starting ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <LogIn />}
-              {starting ? "Starting sign-in…" : view.state === "signed_in" ? "Sign in again" : "Sign in"}
+              {starting ? "Starting sign-in…" : operation ? "Sign-in pending" : view.state === "signed_in" ? "Sign in again" : "Sign in"}
             </Button>
           )}
         </div>
+        {operation && !prompt && <Button size="sm" variant="ghost"
+          disabled={queue.isPending || operation.step === "cancel"}
+          onClick={() => queue.mutate({ step: "cancel" })}>Cancel sign-in</Button>}
+        {operation && waitState !== "normal" && !status.isError && <p role="status" className="text-xs text-muted-foreground">
+          {waitState === "expired"
+            ? "Stopped checking after 20 minutes. The sign-in may still be running on the machine. Cancel it before starting again."
+            : status.data?.status === "queued"
+              ? "The machine has not picked up this sign-in request yet. You can cancel it."
+              : "The machine has not returned a sign-in result yet. You can cancel it."}
+        </p>}
         {view.blocker && <p className="text-xs text-muted-foreground">{view.blocker}</p>}
         {prompt?.verificationUri && (
           <div className="space-y-2">
@@ -179,7 +200,7 @@ export function HarnessSignInSection({ registration, token, userId }: {
               </form>
             )}
             <div className="flex items-center justify-between gap-2">
-              {waitingForDevice && <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {waitingForDevice && !status.isError && waitState !== "expired" && <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <AnimatedIcon icon={Loader2} className="size-3 animate-spin" />Waiting for you to finish in the browser…
               </p>}
               <Button size="sm" variant="ghost" className="ml-auto"
@@ -189,7 +210,11 @@ export function HarnessSignInSection({ registration, token, userId }: {
           </div>
         )}
         {notice && <p role="status" className={noticeClass(notice.error ? "alert" : "settled", "rounded-lg p-3")}>{notice.text}</p>}
-        {status.isError && <p className="text-xs text-destructive">Status could not be checked. The sign-in may still be running.</p>}
+        {status.isError && operation && <div className="space-y-2">
+          <p role="status" className="text-xs text-destructive">Status could not be checked. The sign-in may still be running on the machine.</p>
+          {waitState !== "expired" && <Button size="sm" variant="outline" disabled={status.isFetching}
+            onClick={() => { void status.refetch(); }}>Check status again</Button>}
+        </div>}
       </div>
     </ToolDetailSection>
   );
