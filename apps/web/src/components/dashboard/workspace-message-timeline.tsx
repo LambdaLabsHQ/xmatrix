@@ -3372,7 +3372,7 @@ import { errorFromResponse, xmatrixRawResponse } from "@/lib/query/api-client";
 
 
 
-export function AgentWorkDetailsDock({
+export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   approvals,
   channel: catalogChannel,
   token,
@@ -3575,7 +3575,7 @@ export function AgentWorkDetailsDock({
       </div>}
     </div>
   );
-}
+});
 
 
 

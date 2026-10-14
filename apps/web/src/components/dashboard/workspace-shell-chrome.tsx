@@ -49,6 +49,7 @@ import {
 import type { SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -137,7 +138,7 @@ import type {
 
 export type { WorkspaceSearchResult } from "./workspace-shell-search-model";
 
-export function WorkspaceRail({
+export const WorkspaceRail = memo(function WorkspaceRail({
   activeView,
   profile,
   platformAdmin,
@@ -224,7 +225,7 @@ export function WorkspaceRail({
       </div>
     </aside>
   );
-}
+});
 
 type StarAskPlace = { left: number; bottom: number; width: number };
 
@@ -341,7 +342,7 @@ function HelpRailMenu({ onReportIssue }: { onReportIssue?: () => void }) {
 
 /** The phone's +, a wood plank just above the web or native tab bar, on a
     dock tab's own screen only. */
-export function CreateFab({ action }: { action: CreateAction | null }) {
+export const CreateFab = memo(function CreateFab({ action }: { action: CreateAction | null }) {
   if (!action) return null;
   return (
     <WoodPanel
@@ -356,9 +357,9 @@ export function CreateFab({ action }: { action: CreateAction | null }) {
       <Plus className="size-6" />
     </WoodPanel>
   );
-}
+});
 
-export function MobileTabDock({
+export const MobileTabDock = memo(function MobileTabDock({
   activeView,
   hidden,
   statusLive,
@@ -413,7 +414,7 @@ export function MobileTabDock({
       })}
     </LiquidGlassPill>
   );
-}
+});
 
 /**
  * The global search entry for destinations without a conversation header: the
@@ -1155,7 +1156,7 @@ export function ChannelActionsMenu({
   );
 }
 
-export function ChannelMoveDialog({
+export const ChannelMoveDialog = memo(function ChannelMoveDialog({
   open,
   channel,
   spaces,
@@ -1246,9 +1247,9 @@ export function ChannelMoveDialog({
     </div>,
     document.body
   );
-}
+});
 
-export function ChannelHeader({
+export const ChannelHeader = memo(function ChannelHeader({
   channel: catalogChannel,
   spaces,
   currentUserId,
@@ -1425,7 +1426,7 @@ export function ChannelHeader({
       </div>
     </div>
   );
-}
+});
 
 export function ChannelPresenceAvatars({
   channel,

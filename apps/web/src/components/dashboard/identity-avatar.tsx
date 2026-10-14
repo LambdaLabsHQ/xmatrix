@@ -1,6 +1,6 @@
 "use client";
 
-import { type MouseEvent } from "react";
+import { memo, type MouseEvent } from "react";
 import { AlertTriangle, Boxes, Bot, Moon, Server, UserRound } from "lucide-react";
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
@@ -70,7 +70,7 @@ interface IdentityAvatarProps {
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 }
 
-export function IdentityAvatar({
+export const IdentityAvatar = memo(function IdentityAvatar({
   kind,
   label,
   status,
@@ -180,7 +180,7 @@ export function IdentityAvatar({
       )}
     </AvatarRoot>
   );
-}
+});
 
 function avatarTone(label: string): number {
   return Array.from(label || "xmatrix").reduce(

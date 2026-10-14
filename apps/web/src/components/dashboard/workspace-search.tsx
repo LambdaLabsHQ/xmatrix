@@ -7,7 +7,7 @@
  * on the search page. Pressed inside a
  * conversation, ⌘F starts with `in:` that conversation; Backspace takes it off.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RealtimeCollection } from "./realtime-collection";
 import { ArrowRight, AtSign, Clock, FileText, Hash, MessageSquare, X } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
@@ -227,7 +227,7 @@ function searchAuthors(space: SerializedSpace | undefined, agents: readonly Seri
   return [...people, ...agentAuthors];
 }
 
-export function WorkspaceSearchDialog({
+export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
   open,
   initialFilters,
   spaceId,
@@ -478,7 +478,7 @@ export function WorkspaceSearchDialog({
       )}
     </SearchPanel>
   );
-}
+});
 
 /**
  * Every result of one search, on paper. Its address names the search, so it
