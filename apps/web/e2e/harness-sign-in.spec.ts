@@ -10,7 +10,7 @@ const daemon = {
   id: "daemon-sign-in", userId: "e2e-user", email: "e2e@xmatrix.test", name: "Studio",
   machineId: MACHINE, machineName: "Studio", hostId: "host-studio", hostName: "Studio", status: "online",
   connectedAt: E2E_NOW, lastSeenAt: new Date().toISOString(), daemonVersion: "0.16.900",
-  metadata: { platform: "linux", capabilities: ["machine_harness_action_v1", "machine_harness_login_v1"],
+  metadata: { platform: "linux", capabilities: ["machine_harness_action_v1", "machine_harness_login_v1", "machine_harness_login_start_cancel_v1"],
     harnesses: { schemaVersion: 1, capturedAt: E2E_NOW, items: [
       { id: "codex", installed: true, probeStatus: "ok", version: "0.159.2", login: "signed_out" },
       { id: "claude", installed: true, probeStatus: "ok", version: "2.1.292", login: "signed_in" },
@@ -26,9 +26,10 @@ function registration(harness: string, displayName: string) {
   };
 }
 
-async function openAgent(page: Parameters<typeof installWorkspaceStubs>[0], name: string) {
+async function openAgent(page: Parameters<typeof installWorkspaceStubs>[0], name: string, canCancelStart = true) {
   const registrations = [registration("codex", "codex-studio"), registration("claude", "claude-studio")];
-  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], machineDaemons: [daemon] });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], machineDaemons: [{ ...daemon, metadata: { ...daemon.metadata,
+    capabilities: daemon.metadata.capabilities.filter((capability) => canCancelStart || capability !== "machine_harness_login_start_cancel_v1") } }] });
   await fixtureJson(page, "sign-in-catalog", /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?quota=refresh)?$/, {
     registrations,
     capabilities: ["claude", "codex"].map((harness) => ({ harness, models: [],
@@ -134,5 +135,18 @@ test("the observation deadline ends the spinner without claiming the remote sign
   await expect(section).toContainText("Stopped checking after 20 minutes");
   await expect(section.getByRole("button", { name: "Starting sign-in…" })).toHaveCount(0);
   await expect(section.getByRole("button", { name: "Cancel sign-in" })).toBeEnabled();
+  expect(await fixtureRequestBodies(page, "sign-in-issue")).toHaveLength(1);
+});
+
+
+test("an older daemon keeps status recovery but does not offer unsupported startup cancellation", async ({ page }) => {
+  const section = await openAgent(page, "codex-studio", false);
+  await fixtureJson(page, "sign-in-start", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`,
+    { error: "temporarily unavailable" }, { status: 503 });
+  await section.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(section).toContainText("Update this machine's xMatrix daemon to cancel before its sign-in link arrives.");
+  await expect(section.getByRole("button", { name: "Cancel sign-in" })).toHaveCount(0);
+  await expect(section.getByRole("button", { name: "Starting sign-in…" })).toHaveCount(0);
+  await expect(section.getByRole("button", { name: "Check status again" })).toBeEnabled();
   expect(await fixtureRequestBodies(page, "sign-in-issue")).toHaveLength(1);
 });

@@ -2131,6 +2131,7 @@ async fn cmd_daemon_connected(
             "machine_harness_release_v1",
             // The daemon parses and runs the `login_*` harness actions.
             "machine_harness_login_v1",
+            "machine_harness_login_start_cancel_v1",
             // A stop may push the Run's whole checkout to a handoff branch.
             "machine_handoff_export_v1",
             // The owner lists and reclaims this machine's git worktrees.
@@ -2181,6 +2182,7 @@ async fn cmd_daemon_connected(
             "machine_harness_uninstall_v1".to_string(),
             "machine_harness_release_v1".to_string(),
             "machine_harness_login_v1".to_string(),
+            "machine_harness_login_start_cancel_v1".to_string(),
             "machine_handoff_export_v1".to_string(),
             "machine_worktree_action_v1".to_string(),
         ],
