@@ -151,7 +151,7 @@ impl CodexAppSession {
                     && turn_id == offer.turn_id
                     && matches!(
                         reason.as_str(),
-                        "exhausted" | "unsafe" | "expired" | "cancelled" | "ineligible"
+                        "exhausted" | "unsafe" | "expired" | "cancelled"
                     ) =>
                 {
                     result.failure_reported_by_hub = true;

@@ -70,7 +70,7 @@ test("Hub persists the retry budget across replay/reconnect, exposes it, and fen
     const messages = history.messages ?? history.data?.messages ?? [];
     for (let attempt = 1; attempt <= 3; attempt++)
       assert.ok(messages.some(m => m.body?.includes(`retry ${attempt}/3`)), `visible retry ${attempt}`);
-    assert.ok(messages.some(m => m.body?.includes("Hub stopped retrying")));
+    assert.ok(messages.some(m => m.body?.includes("Hub stopped retrying") && m.body.includes(`Error: ${errorMessage}`)));
 
     // A stop arriving before a delayed failure is still an authoritative fence.
     const earlyId = randomUUID();
