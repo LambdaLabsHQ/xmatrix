@@ -25,6 +25,8 @@ const ORDERING_FUNCTIONS = [
   "compareChannelsByRecentActivity",
   "compareChannelsForSidebar",
   "rankCatalogChannels",
+  "sortChannels",
+  "placeChannel",
 ];
 
 function loadOrderingModule() {
@@ -197,4 +199,25 @@ test("replacement snapshots receive their new activity and pin times", () => {
   const invalidPin = { ...pinned, metadata: { pinnedAt: "invalid", pinned_at: CREATED_JUST_NOW } };
   assert.ok(compareChannelsForSidebar(invalidPin, updated) > 0,
     "an explicit invalid pinnedAt still takes precedence over the legacy field");
+});
+
+test("a Channel that leaves its place is put where a full sort would leave it, the others untouched", () => {
+  const { placeChannel, sortChannels } = loadOrderingModule();
+  const at = (minute) => new Date(Date.UTC(2026, 9, 13, 8, minute)).toISOString();
+  // Twelve Channels, some with the same activity and the same title, so the order among equals shows.
+  const sorted = sortChannels(Array.from({ length: 12 }, (_, index) => (
+    { id: `c${index}`, name: index % 3 === 0 ? "same" : `n${index}`, createdAt: at(0), updatedAt: at(Math.floor(index / 2) * 5) })));
+  for (let index = 0; index < sorted.length; index += 1) {
+    for (const minute of [0, 5, 10, 15, 20, 25, 30, 99]) {
+      const moved = { ...sorted[index], updatedAt: at(minute) };
+      const withMoved = sorted.slice();
+      withMoved[index] = moved;
+      const placed = placeChannel(sorted, index, moved);
+      assert.deepEqual(placed.map((channel) => channel.id), sortChannels(withMoved).map((channel) => channel.id),
+        `c at ${index} to minute ${minute}`);
+      // Every other Channel is the object it was.
+      assert.equal(placed.filter((channel) => channel !== moved).every((channel) => sorted.includes(channel)), true);
+    }
+  }
+  assert.equal(sorted.length, 12);
 });

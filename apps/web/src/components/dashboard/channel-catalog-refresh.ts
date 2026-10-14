@@ -147,7 +147,7 @@ export function refreshSpaceCatalogForEvent(input: {
   /** This Space's catalog-counts key. */
   countsKey: QueryKey;
   detail?: ChannelCatalogChangeDetail;
-  /** Whether the entity table already holds this channel. */
+  /** Whether the entity table holds this channel as a read for this reader brought it. */
   hasChannel: (channelId: string) => boolean;
   /** The entity table's Channel, as live as it has it. */
   channel?: (channelId: string) => SerializedChannel | undefined;
@@ -336,7 +336,10 @@ export function refreshSpaceCatalogForMessages(input: {
         data = promoted;
         continue;
       }
-      const channel = conversations && data?.pages.length ? input.channel?.(channelId) : undefined;
+      // Only a Channel a read for this reader has brought: one a shared
+      // presence frame showed first has none of their read state yet.
+      const channel = conversations && data?.pages.length && input.hasChannel(channelId)
+        ? input.channel?.(channelId) : undefined;
       if (data && channel && inConversationList(channel, spaceId, input.viewerId)) {
         data = withRowFirst(data, {
           channel,

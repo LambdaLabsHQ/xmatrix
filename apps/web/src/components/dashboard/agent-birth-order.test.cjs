@@ -6,6 +6,7 @@ const shellModules = loadWorkspaceShellModuleMap(__dirname, ["use-channel-catalo
 
 // Pure helpers only — no React or workspace shell runtime.
 const ORDERING_FUNCTIONS = [
+  "aheadOfRead",
   "mergeChannels",
   "commitCatalogChannels",
   "mergeChannelViewerState",
@@ -73,6 +74,28 @@ test("a cached catalog row replayed after a message never drops an Instance that
   const fresh = { id: "channel-1", memberPresence: { "agent-1": { kind: "agent", instances: [] } } };
   assert.deepEqual(commitCatalogChannels(channels, [fresh], new Set([fresh]))[0].memberPresence["agent-1"].instances, []);
   assert.deepEqual(commitCatalogChannels([], [cached], new Set()).map((channel) => channel.id), ["channel-1"]);
+});
+
+test("a catalog read older than what the socket has said does not take the Channel back", () => {
+  const live = { id: "channel-1", messageCount: 42, historyHeadSequence: 42, readSequence: 40,
+    updatedAt: "2026-10-13T08:00:42Z", lastMessage: { messageId: "m42", sentAt: "2026-10-13T08:00:42Z" } };
+  const read = { id: "channel-1", messageCount: 41, historyHeadSequence: 41, readSequence: 41,
+    updatedAt: "2026-10-13T08:00:41Z", lastMessage: { messageId: "m41", sentAt: "2026-10-13T08:00:41Z" } };
+  const [merged] = mergeChannels([live], [read]);
+  assert.equal(merged.messageCount, 42);
+  assert.equal(merged.historyHeadSequence, 42);
+  assert.equal(merged.updatedAt, "2026-10-13T08:00:42Z");
+  assert.equal(merged.lastMessage.messageId, "m42");
+  // What the reader has read is the read's to say, and only moves forward.
+  assert.equal(merged.readSequence, 41);
+  // A read that is ahead is taken as it is, and one for a Channel not here yet too.
+  const ahead = { ...read, messageCount: 44, historyHeadSequence: 44, updatedAt: "2026-10-13T08:00:44Z" };
+  assert.equal(mergeChannels([live], [ahead])[0].messageCount, 44);
+  assert.equal(mergeChannels([], [read])[0], read);
+  // The reader's own read of the Channel is told that it landed, with what it merged to.
+  const settled = [];
+  mergeChannels([live], [read], (channel) => { settled.push(channel.messageCount); return channel; });
+  assert.deepEqual(settled, [41]);
 });
 
 test("paged catalog refresh retains live labels and busy state, then accepts idle and removal", () => {

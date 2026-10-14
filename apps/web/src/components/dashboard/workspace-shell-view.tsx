@@ -356,6 +356,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     setChannels,
     liveChannel: model.realtimeChannels.get,
     promoteCatalog: model.realtimeChannels.promote,
+    viewerReads: model.viewerReadsOf,
     setSelectedChannelId,
   });
   const currentSpaceCatalog = channelCatalogPaging.forSpace(currentSpaceId);

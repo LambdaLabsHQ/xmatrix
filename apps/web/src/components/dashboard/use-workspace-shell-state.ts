@@ -1,7 +1,7 @@
 "use client";
 import { channelEventViews } from "./workspace-shell-presence";
 import type { ChannelEventView } from "./realtime-channels";
-import { channelAfterMessage } from "./channel-message-summary";
+import { channelAfterMessage, createViewerReads, type ChannelMessageArrival, type ViewerReads } from "./channel-message-summary";
 import { createRealtimeCollection } from "./realtime-collection";
 import { useMachineDaemonLoad } from "./use-machine-daemon-load";
 
@@ -890,6 +890,23 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     return !selected || metadataString(selected.metadata, "threadRootChannelId") === channelId;
   }, [realtimeChannels]);
 
+  /* Each reader's own reads of the Channels here (channel-message-summary.ts):
+     a new reader starts with none. */
+  const viewerReadsRef = useRef<{ userId: string; reads: ViewerReads } | null>(null);
+  const viewerReadsOf = useCallback((userId: string): ViewerReads => {
+    if (viewerReadsRef.current?.userId !== userId) {
+      viewerReadsRef.current = {
+        userId,
+        reads: createViewerReads((channel, arrival: ChannelMessageArrival) => {
+          const summarized = channelAfterMessage(channel, arrival);
+          // A replay says nothing new about its sender either.
+          return arrival.known ? summarized : patchChannelAgentPresenceFromMessage(summarized, arrival.entry);
+        }),
+      };
+    }
+    return viewerReadsRef.current.reads;
+  }, []);
+
   const rememberChannelHistory = useCallback((
     channelId: string,
     messages: ChannelMessage[],
@@ -1654,7 +1671,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         case "channel_list":
           channelReadStateUserIdRef.current = userId;
           reconcileAgentTraceChannelAccess(message.channels, { revalidateAll: true });
-          setChannels((current) => mergeChannelListSnapshot(current, message.channels));
+          // The reader's own list: each Channel in it comes with their read state.
+          setChannels((current) => {
+            const reads = viewerReadsOf(userId);
+            const merged = mergeChannelListSnapshot(current, message.channels);
+            const settled = merged.map((channel) => reads.settle(channel));
+            return settled.some((channel, index) => channel !== merged[index]) ? sortChannels(settled) : merged;
+          });
           // Intentionally do NOT clear the workspace `error` here: a channel_list
           // push only restores channels, not spaces/projects. Clearing the error
           // would let the refresh guard re-suppress background polling (relay push
@@ -1909,6 +1932,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             historyCount: historyMessageCountEstimate(merged),
             activity: channelActivityOf(entry.metadata) !== undefined,
           };
+          // No read of this reader's has brought the Channel yet: the one on
+          // its way may be older than this message, which is applied to it then.
+          const viewerReads = viewerReadsOf(userId);
+          if (!viewerReads.has(entry.channelId)) viewerReads.hold(arrival);
           setChannels((current) => {
             const index = current.findIndex((channel) => channel.id === entry.channelId);
             if (index < 0) return current;
@@ -2842,6 +2869,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     queueMessageJump,
     channels,
     realtimeChannels,
+    viewerReadsOf,
     realtimeAgents,
     realtimeEventViews,
     setChannels,

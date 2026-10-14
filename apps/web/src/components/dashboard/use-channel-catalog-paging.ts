@@ -110,14 +110,45 @@ const INERT_SPACE_CATALOG: SpaceChannelCatalog = Object.freeze({
   resolve: async () => ({ protocolVersion: 1 as const, channels: [], pathsByChannelId: {} }),
 });
 
-function mergeChannels(current: SerializedChannel[], incoming: readonly SerializedChannel[]) {
+/** What a read for this reader does to a Channel once merged (`ViewerReads.settle`). */
+type SettleViewerRead = (channel: SerializedChannel) => SerializedChannel;
+
+/**
+ * A catalog read answers as of when the Hub made it. What the socket has said
+ * of the Channel since stays: its count, its head and its activity time only
+ * move forward.
+ */
+function aheadOfRead(live: SerializedChannel, read: SerializedChannel): SerializedChannel {
+  const messageCount = (live.messageCount ?? 0) > (read.messageCount ?? 0) ? live.messageCount : read.messageCount;
+  const historyHeadSequence = (live.historyHeadSequence ?? 0) > (read.historyHeadSequence ?? 0)
+    ? live.historyHeadSequence : read.historyHeadSequence;
+  const updatedAt = Date.parse(live.updatedAt) > Date.parse(read.updatedAt) ? live.updatedAt : read.updatedAt;
+  if (messageCount === read.messageCount && historyHeadSequence === read.historyHeadSequence && updatedAt === read.updatedAt) {
+    return read;
+  }
+  return {
+    ...read,
+    ...(messageCount !== undefined ? { messageCount } : {}),
+    ...(historyHeadSequence !== undefined ? { historyHeadSequence } : {}),
+    updatedAt,
+  };
+}
+
+function mergeChannels(
+  current: SerializedChannel[],
+  incoming: readonly SerializedChannel[],
+  settle: SettleViewerRead = (channel) => channel,
+) {
   const byId = new Map(current.map((channel) => [channel.id, channel]));
   for (const channel of incoming) {
     const prior = byId.get(channel.id);
     // Page/resolve responses race live presence just like channel_updated.
     // Use its merge contract rather than replacing a hydrated instance with
     // a sparse or older catalog row (and losing tags and busy status).
-    byId.set(channel.id, mergeChannelListHydratedFields(prior, channel));
+    // They race live messages too: the ones that got ahead of this read are
+    // applied to what it says, in the order they came.
+    const read = settle(mergeChannelListHydratedFields(prior, channel));
+    byId.set(channel.id, prior ? aheadOfRead(prior, read) : read);
   }
   return [...byId.values()];
 }
@@ -127,6 +158,7 @@ function commitCatalogChannels(
   current: SerializedChannel[],
   incoming: readonly SerializedChannel[],
   unapplied: ReadonlySet<SerializedChannel>,
+  settle?: SettleViewerRead,
 ): SerializedChannel[] {
   const present = new Set(current.map((channel) => channel.id));
   // A row made from the entity table's own Channel (a conversation a message
@@ -134,7 +166,7 @@ function commitCatalogChannels(
   const held = new Set(current);
   const next = incoming.filter((channel) => !held.has(channel) &&
     (unapplied.has(channel) || !present.has(channel.id)));
-  return next.length > 0 ? mergeChannels(current, next) : current;
+  return next.length > 0 ? mergeChannels(current, next, settle) : current;
 }
 
 function catalogOptions(input: {
@@ -233,6 +265,8 @@ export function useChannelCatalogPaging(input: {
   liveChannel?: (channelId: string) => SerializedChannel | undefined;
   /** Tells `channels`' readers what live reports changed since they last heard. */
   promoteCatalog?: () => void;
+  /** What reads made for a reader have brought them (channel-message-summary.ts). */
+  viewerReads?: (userId: string) => { has(channelId: string): boolean; settle: SettleViewerRead };
   setSelectedChannelId: Dispatch<SetStateAction<string | null>>;
 }): ChannelCatalogPagingModel {
   const {
@@ -246,6 +280,7 @@ export function useChannelCatalogPaging(input: {
     setChannels,
     liveChannel,
     promoteCatalog,
+    viewerReads,
     setSelectedChannelId,
   } = input;
   const auth = useAuth();
@@ -261,6 +296,18 @@ export function useChannelCatalogPaging(input: {
     [spaceIdKey, token, userId],
   );
   const loadedSpaceIdSet = useMemo(() => new Set(loadedSpaceIds), [loadedSpaceIds]);
+  /* Who is signed in to which Hub, with which Spaces loaded. A read answers
+     for the session that asked: one that ends after another account or Hub
+     took over, or after its Space was left, must not write into theirs. */
+  const session = xmatrixQueryKeys.all({ userId }).join("\u0000");
+  const sessionRef = useRef({ session, spaces: loadedSpaceIdSet });
+  useEffect(() => {
+    sessionRef.current = { session, spaces: loadedSpaceIdSet };
+  }, [loadedSpaceIdSet, session]);
+  const settleViewerRead = useMemo<SettleViewerRead | undefined>(
+    () => (userId && viewerReads ? viewerReads(userId).settle : undefined),
+    [userId, viewerReads],
+  );
 
   // Every cache write hands over all of a Space's cached rows, and a message
   // only moves its row, keeping the Channel it was read with. Applying such a
@@ -272,8 +319,8 @@ export function useChannelCatalogPaging(input: {
     const applied = appliedChannelsRef.current;
     const unapplied = new Set(incoming.filter((channel) => !applied.has(channel)));
     for (const channel of incoming) applied.add(channel);
-    setChannels((current) => commitCatalogChannels(current, incoming, unapplied));
-  }, [setChannels]);
+    setChannels((current) => commitCatalogChannels(current, incoming, unapplied, settleViewerRead));
+  }, [setChannels, settleViewerRead]);
 
   const roots = useMemo(() => createElement(
     Fragment,
@@ -288,6 +335,10 @@ export function useChannelCatalogPaging(input: {
     const key = event.query.queryKey;
     if (key[0] !== "xmatrix" || key[3] !== "channels") return;
     if (typeof key[4] !== "string" || !loadedSpaceIdSet.has(key[4])) return;
+    // The model below reads the lists and their counts from the cache. A
+    // resolve answers its caller, and a speculative page is read by nobody
+    // here: neither is a reason to render the shell again.
+    if (key[5] !== "catalog" && key[5] !== "catalog-counts") return;
     const data = event.query.state.data as InfiniteData<ChannelCatalogPage, string | null> | undefined;
     if (key[5] === "catalog" && data) {
       commitRows(rowsFromData(data));
@@ -361,9 +412,10 @@ export function useChannelCatalogPaging(input: {
       }),
       staleTime: fresh ? 0 : 30_000,
     });
-    setChannels((current) => mergeChannels(current, result.channels));
+    if (sessionRef.current.session !== session || !sessionRef.current.spaces.has(spaceId)) return result;
+    setChannels((current) => mergeChannels(current, result.channels, settleViewerRead));
     return result;
-  }, [client, setChannels, token, userId]);
+  }, [client, session, setChannels, settleViewerRead, token, userId]);
 
   const resolvedRouteKeyRef = useRef<string | null>(null);
 
@@ -414,9 +466,10 @@ export function useChannelCatalogPaging(input: {
         spaceId,
         prefix: xmatrixQueryKeys.channels({ userId, spaceId }),
         countsKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId }),
-        hasChannel: (channelId: string) => liveChannel
+        hasChannel: (channelId: string) => (liveChannel
           ? liveChannel(channelId) !== undefined
-          : channels.some((channel) => channel.id === channelId),
+          : channels.some((channel) => channel.id === channelId)) &&
+          (!viewerReads || viewerReads(userId).has(channelId)),
         channel: liveChannel,
         viewerId: userId,
         resolveChannel: (targetSpaceId: string, channelId: string, fresh?: boolean) => {
@@ -430,7 +483,9 @@ export function useChannelCatalogPaging(input: {
         const ids = [...new Set(unknown.map((detail) => detail.channelId!))];
         const reads = Array.from({ length: Math.ceil(ids.length / RESOLVE_LIMIT) }, (_, part) =>
           resolve(targetSpaceId, ids.slice(part * RESOLVE_LIMIT, (part + 1) * RESOLVE_LIMIT)));
+        const current = () => sessionRef.current.session === session && sessionRef.current.spaces.has(targetSpaceId);
         void Promise.all(reads).then((results) => {
+          if (!current()) return;
           const resolved = new Map(results.flatMap((result) => result.channels).map((channel) => [channel.id, channel]));
           refreshSpaceCatalogForMessages({
             ...lists,
@@ -439,6 +494,7 @@ export function useChannelCatalogPaging(input: {
             channel: (channelId) => liveChannel?.(channelId) ?? resolved.get(channelId),
           });
         }, () => {
+          if (!current()) return;
           refreshSpaceCatalogForMessages({ ...lists, details: unknown, hasChannel: () => true, channel: () => undefined });
         });
       };
@@ -448,7 +504,7 @@ export function useChannelCatalogPaging(input: {
         refreshSpaceCatalogForEvent({ ...lists, detail });
       }
     };
-  }, [channels, client, liveChannel, promoteCatalog, resolve, userId]);
+  }, [channels, client, liveChannel, promoteCatalog, resolve, session, userId, viewerReads]);
 
   useEffect(() => {
     // Busy Spaces change their catalog many times a second; the reads are

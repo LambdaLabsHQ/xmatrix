@@ -59,3 +59,44 @@ export function channelAfterMessage(channel: SerializedChannel, arrival: Channel
     ...(lastMessage ? { lastMessage } : {}),
   };
 }
+
+const UNPLACED_CHANNELS = 512;
+const UNPLACED_ARRIVALS = 32;
+
+/**
+ * What one reader's reads have brought, and the messages that got ahead of them.
+ *
+ * The entity table knows a Channel for this reader once a read made for them
+ * has landed: a catalog page, a resolve, their own list. A shared presence
+ * frame can show a Channel first, with no read state of theirs, and a message
+ * can reach a Channel before any read has. Such a message is kept until the
+ * reader's read lands, which can be older than the message and is the first
+ * to say what the reader had read.
+ */
+export function createViewerReads(place: (channel: SerializedChannel, arrival: ChannelMessageArrival) => SerializedChannel = channelAfterMessage) {
+  const read = new Set<string>();
+  const unplaced = new Map<string, ChannelMessageArrival[]>();
+  return {
+    /** Whether a read made for this reader has brought the Channel. */
+    has: (channelId: string) => read.has(channelId),
+    /** A message for a Channel no read of theirs has brought yet. */
+    hold(arrival: ChannelMessageArrival) {
+      const channelId = arrival.entry.channelId;
+      const held = unplaced.get(channelId) ?? [];
+      unplaced.delete(channelId);
+      unplaced.set(channelId, [...held, arrival].slice(-UNPLACED_ARRIVALS));
+      // The longest waiting go first: their read is not coming, or a later message will say as much.
+      while (unplaced.size > UNPLACED_CHANNELS) unplaced.delete(unplaced.keys().next().value!);
+    },
+    /** The Channel as a read for this reader has it, brought up to the messages that got ahead of the read. */
+    settle(channel: SerializedChannel): SerializedChannel {
+      read.add(channel.id);
+      const arrivals = unplaced.get(channel.id);
+      if (!arrivals) return channel;
+      unplaced.delete(channel.id);
+      return arrivals.reduce(place, channel);
+    },
+  };
+}
+
+export type ViewerReads = ReturnType<typeof createViewerReads>;
