@@ -7,7 +7,6 @@ const {
   githubSubscriptionRepository,
   githubToggledFeatures,
   githubUnsubscribeCommand,
-  isGitHubRepositoryName,
 } = require("./channel-connector-commands.ts");
 
 test("a subscription source round-trips to the repository the command names", () => {
