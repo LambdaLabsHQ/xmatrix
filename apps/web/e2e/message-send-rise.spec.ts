@@ -54,7 +54,7 @@ async function openChannelRecordingRises(page: Page) {
         rises.push({ sent: kind === "sent", fromPx: Number(from[1]), fades: first?.opacity === 0 });
       }
       // The list's own way to rest: the offsets the compositor draws it at, in order.
-      if (this.hasAttribute("data-viewport-type") && Array.isArray(keyframes)) {
+      if (this.hasAttribute("data-timeline-rise-content") && Array.isArray(keyframes)) {
         const offsets = keyframes.map((frame) => Number(/^0 (-?[\d.]+)px$/u.exec(String(frame.translate ?? ""))?.[1]));
         const steps = offsets.slice(1).map((offset, index) => Math.abs(offsets[index]!) - Math.abs(offset));
         listRises.push({
@@ -107,7 +107,7 @@ function expectDrawnRises(rises: readonly ListRise[], atLeast: number) {
 
 /** The list stands in its place: nothing holds it lower, and nothing is still bringing it there. */
 async function listAtRest(page: Page) {
-  await expect.poll(() => page.locator(".app-message-timeline [data-viewport-type]").evaluate((list) =>
+  await expect.poll(() => page.locator(".app-message-timeline [data-timeline-rise-content]").evaluate((list) =>
     (list as HTMLElement).style.translate === "" && list.getAnimations().length === 0)).toBe(true);
 }
 
@@ -134,9 +134,10 @@ function movesOfRowAbove(frames: Awaited<ReturnType<typeof paintedTimelineFrames
 test("a sent message rises from the composer and lifts the rows above it", async ({ page }) => {
   await openChannelRecordingRises(page);
   let rises: Rise[] = [];
-  const moves = movesOfRowAbove(await framesOfSend(page, async () => {
+  const frames = await framesOfSend(page, async () => {
     rises = await sendAndReadRises(page);
-  }));
+  });
+  const moves = movesOfRowAbove(frames);
 
   expect(rises).toEqual([{ sent: true, fromPx: expect.any(Number), fades: true }]);
   // The rows above travel the room the new row took: up from where they
@@ -145,6 +146,11 @@ test("a sent message rises from the composer and lifts the rows above it", async
   expect((await listRises(page))[0]!.fromPx).toBeGreaterThan(0);
   expect(moves.length).toBeGreaterThan(0);
   expect(moves.filter((by) => by > 0)).toEqual([]);
+  // The rows move visually; the viewport the virtualizer measures retains
+  // its place in the layout, so a scroll cannot feed the rise back as an offset.
+  const viewportOffsets = frames.flatMap((frame) => frame.viewportOffsetTop === null ? [] : [frame.viewportOffsetTop]);
+  expect(viewportOffsets.length).toBeGreaterThan(1);
+  expect(Math.max(...viewportOffsets) - Math.min(...viewportOffsets)).toBeLessThan(1);
 });
 
 /* The list makes room for a new row by an estimate and corrects it a frame
@@ -211,7 +217,7 @@ test("messages that come in while the rows are rising are never drawn over each 
 /** Resolves once the compositor is drawing the list to rest, with what it has drawn so far (ms). */
 async function listOnItsWayToRest(page: Page): Promise<number> {
   const handle = await page.waitForFunction(() => {
-    const list = document.querySelector(".app-message-timeline [data-viewport-type]");
+    const list = document.querySelector(".app-message-timeline [data-timeline-rise-content]");
     const [rise] = list?.getAnimations() ?? [];
     return rise?.playState === "running" && Number(rise.currentTime) > 30 ? Number(rise.currentTime) : false;
   }, undefined, { polling: "raf" });
@@ -263,7 +269,7 @@ test("the reader's wheel takes the list from a rise that is still playing", asyn
   await listOnItsWayToRest(page);
   await page.mouse.wheel(0, -400);
   const state = () => timeline.evaluate((scroller) => {
-    const list = scroller.querySelector<HTMLElement>("[data-viewport-type]")!;
+    const list = scroller.querySelector<HTMLElement>("[data-timeline-rise-content]")!;
     return {
       held: list.style.translate !== "" || list.getAnimations().length > 0 || list.parentElement!.style.overflow !== "",
       fromEnd: Math.round(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop),

@@ -137,7 +137,8 @@ function OpenConversationCard({ conversation, canResolve, children, onResolve, o
     };
     const sizes = new ResizeObserver(measure);
     const attach = () => {
-      const found = body.querySelector(".app-message-timeline > div > div");
+      const viewport = body.querySelector(".app-message-timeline > div > div");
+      const found = viewport?.querySelector(":scope > [data-timeline-rise-content]") ?? viewport;
       if (found !== list) {
         list = found;
         sizes.disconnect();
