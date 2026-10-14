@@ -236,68 +236,18 @@ test("a provider's command handler accepts its subscriptions, actions and policy
   assert.ok(!handler.accepts("@linear:comment:ENG-1 hi"));
 });
 
-test("connector MCP lists the connected providers' actions and runs a call as the Agent in its Run's Channel", async () => {
-  const { handleConnectorMcp } = await import("../src/connectors/mcp.ts");
-  const caller = { ownerUserId: "owner", channelId: "channel-1", runId: "run-1", spaceId: "space-1" };
-  const initialized = await (await handleConnectorMcp({}, caller, { jsonrpc: "2.0", id: 1, method: "initialize" })).json();
-  assert.equal(initialized.result.serverInfo.name, "xmatrix-connectors");
-  const seen = [];
-  const connected = async (_env, who) => { seen.push(who); return new Set(["slack", "linear"]); };
-  const listed = await (await handleConnectorMcp({}, caller, { jsonrpc: "2.0", id: 2, method: "tools/list" }, undefined,
-    connected)).json();
-  const names = listed.result.tools.map((tool) => tool.name);
-  assert.equal(seen[0].spaceId, "space-1");
-  assert.ok(names.includes("slack__post"));
-  assert.ok(names.includes("linear__create_issue"));
-  assert.ok(!names.some((name) => name.startsWith("notion__") || name.startsWith("openconnector__")),
-    "a provider the Space has not connected offers no tools");
-  assert.ok(!names.some((name) => name.endsWith("__policy") || name.endsWith("__subscribe")), "only provider actions are tools");
-  const unavailable = await (await handleConnectorMcp({}, caller, { jsonrpc: "2.0", id: 5, method: "tools/list" }, undefined,
-    async () => { throw new Error("connector connections are unavailable (503)"); })).json();
-  assert.equal(unavailable.error.code, -32603);
-
-  const calls = [];
-  const run = async (providerId, input, actionId, _action, statement) => {
-    calls.push({ providerId, input, actionId, statement });
-    return "Slack post: blocked; post is denied in this channel.";
-  };
-  const called = await (await handleConnectorMcp({}, caller, { jsonrpc: "2.0", id: 3, method: "tools/call",
-    params: { name: "slack__post", arguments: { target: "C0123456789", text: "hi" } } }, run)).json();
-  assert.equal(called.result.isError, true);
-  assert.equal(calls[0].input.senderKind, "agent");
-  assert.equal(calls[0].input.channelId, "channel-1");
-  assert.equal(calls[0].input.actorUserId, "owner");
-  assert.deepEqual(calls[0].statement, { target: "C0123456789", text: "hi" });
-  const unknown = await (await handleConnectorMcp({}, caller, { jsonrpc: "2.0", id: 4, method: "tools/call",
-    params: { name: "slack__delete", arguments: {} } }, run)).json();
-  assert.equal(unknown.error.code, -32602);
-  assert.equal((await handleConnectorMcp({}, caller, { jsonrpc: "2.0", method: "notifications/initialized" })).status, 202);
-});
-
-test("connector MCP tools carry no policy precondition", async () => {
-  const { handleConnectorMcp } = await import("../src/connectors/mcp.ts");
-  const caller = { ownerUserId: "owner", channelId: "channel-1", runId: "run-1", spaceId: "space-1" };
-  const listed = await (await handleConnectorMcp({}, caller, { jsonrpc: "2.0", id: 1, method: "tools/list" }, undefined,
-    async () => new Set(["sentry"]))).json();
-  const resolve = listed.result.tools.find((tool) => tool.name === "sentry__resolve");
-  assert.ok(resolve, "Sentry resolve is offered");
-  assert.doesNotMatch(resolve.description, /policy/u);
-  const read = listed.result.tools.find((tool) => tool.name === "sentry__read_issue");
-  assert.ok(read && !read.description.includes("policy"), "a read action still needs no policy");
-});
-
-test("MCP rejects undeclared and prototype action names before execution or storage", async () => {
-  const { handleConnectorMcp } = await import("../src/connectors/mcp.ts");
-  const caller = { ownerUserId: "owner", channelId: "channel-1", runId: "run-1", spaceId: "space-1" };
-  for (const provider of APP_CONNECTOR_PROVIDER_MANIFESTS) {
-    for (const action of ["constructor", "__proto__", "not_declared"]) {
-      const response = await (await handleConnectorMcp({}, caller, {
-        jsonrpc: "2.0", id: 1, method: "tools/call",
-        params: { name: `${provider.id}__${action}`, arguments: { target: "*" } },
-      })).json();
-      assert.deepEqual(response.error, { code: -32602, message: "Unknown tool" }, `${provider.id}__${action}`);
-    }
-  }
+test("connector usage lists each connected provider's Channel commands, and nothing else", async () => {
+  const { usageOf } = await import("../src/connectors/usage.ts");
+  const listed = usageOf(new Set(["slack", "linear", "webhook"]));
+  assert.deepEqual(new Set(listed.map((connector) => connector.provider)), new Set(["slack", "linear"]),
+    "a provider that only receives events offers nothing to send");
+  const commands = listed.flatMap((connector) => connector.actions.map((action) => action.command));
+  assert.ok(commands.some((command) => command.startsWith("@slack:post:")));
+  assert.ok(commands.some((command) => command.startsWith("@linear:create_issue:")));
+  assert.ok(!commands.some((command) => /^@\w+:(policy|subscribe|unsubscribe):/u.test(command)),
+    "policy and subscriptions are not actions");
+  assert.ok(commands.every((command) => !command.startsWith("@notion:")), "an unconnected provider is not listed");
+  assert.deepEqual(usageOf(new Set()), []);
 });
 
 test("Channel action admission requires a declared own executor with the declared effect", () => {
@@ -328,16 +278,16 @@ test("chat webhook actions only post to their provider's own hosts", async () =>
   assert.match(telegram.calls[0].url, /^https:\/\/api\.telegram\.org\/bot12345:/u);
 });
 
-test("an Agent Run reaches the connector MCP endpoint, but not a read-only Channel About Run", async () => {
+test("an Agent Run reads its connector usage, but not a read-only Channel About Run, and no MCP endpoint remains", async () => {
   const { agentRunHttpRouteAllowed } = await import("../src/index-shared.ts");
-  const request = (method) => new Request("https://hub.test/api/connectors/mcp", { method });
+  const request = (method, path = "/api/connectors/usage") => new Request(`https://hub.test${path}`, { method });
   const run = { ownerUserId: "u", agentId: "a", agentName: "claude", runId: "r", executionKey: "e",
     spaceId: "s", channelId: "c", machineId: "m", hostId: "h", permissions: [] };
-  assert.equal(agentRunHttpRouteAllowed(request("POST"), run), true);
-  assert.equal(agentRunHttpRouteAllowed(request("GET"), run), false);
-  assert.equal(agentRunHttpRouteAllowed(request("POST"), { ...run, runKind: "channel-about-session",
+  assert.equal(agentRunHttpRouteAllowed(request("GET"), run), true);
+  assert.equal(agentRunHttpRouteAllowed(request("POST"), run), false);
+  assert.equal(agentRunHttpRouteAllowed(request("GET"), { ...run, runKind: "channel-about-session",
     managementSpaceId: "s", channelWriteAllowed: false }), false);
-  assert.equal(agentRunHttpRouteAllowed(request("POST"), { ...run, channelWriteAllowed: false }), false);
+  assert.equal(agentRunHttpRouteAllowed(request("POST", "/api/connectors/mcp"), run), false);
 });
 
 test("OpenConnector runs one runtime action with JSON input and shields its result", async () => {

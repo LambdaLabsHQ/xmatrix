@@ -25,8 +25,12 @@ export async function connectorUsage(env: Env, caller: { ownerUserId: string; ch
   const spaceId = record(channel).spaceId;
   if (typeof spaceId !== "string" || !spaceId) throw new Error("The Run's Channel has no Space");
   const listed = await listAppConnections(env, { spaceId, channelId: caller.channelId, actorUserId: caller.ownerUserId });
-  const connected = new Set(listed.map(record).flatMap((connection) =>
-    connection.status === "configured" && typeof connection.providerId === "string" ? [connection.providerId] : []));
+  return usageOf(new Set(listed.map(record).flatMap((connection) =>
+    connection.status === "configured" && typeof connection.providerId === "string" ? [connection.providerId] : [])));
+}
+
+/** The connected providers' declared actions, in catalog order; one with none is left out. */
+export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) => {
     const actions = manifest.actions.flatMap((action) => action.effect ? [{
       command: `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`,
