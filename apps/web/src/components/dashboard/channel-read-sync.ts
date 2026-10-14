@@ -14,6 +14,8 @@ type ChannelReadSyncEntry = {
   desiredSequence: number;
   attentionSequence: number;
   attemptedAttentionSequence: number;
+  /** How far this device has read the Channel since the last reset. */
+  readHere: number;
   inFlight: boolean;
   failureCount: number;
   timer?: TimerHandle;
@@ -22,6 +24,9 @@ type ChannelReadSyncEntry = {
 export interface ChannelReadSyncCoordinatorOptions<T extends ChannelReadSyncResult> {
   send: (channelId: string, sequence: number) => Promise<T | undefined>;
   onSuccess?: (channelId: string, result: T) => void;
+  /** Whose reads these are now. A read asked for one reader and answered when
+   * another is here is nobody's, even before the reset that follows. */
+  reader?: () => string | undefined;
   retryDelaysMs?: readonly number[];
   schedule?: (callback: () => void, delayMs: number) => TimerHandle;
   cancel?: (handle: TimerHandle) => void;
@@ -62,6 +67,46 @@ export class ChannelReadSyncCoordinator<T extends ChannelReadSyncResult> {
     this.schedule(channelId, entry, 0);
   }
 
+  /** A read made on this device: no Hub answer takes its count below it (readCountsFromHub). */
+  noteRead(channelId: string, sequence: number): void {
+    if (!channelId || !validSequence(sequence)) return;
+    const entry = this.entry(channelId);
+    entry.readHere = Math.max(entry.readHere, sequence);
+  }
+
+  /** How far this device has read the Channel since the last reset. */
+  readHere(channelId: string): number {
+    return this.entries.get(channelId)?.readHere ?? 0;
+  }
+
+  /**
+   * The reader is done with the Channel, read to `sequence`: `send` asks the
+   * Hub, and `commit` writes its answer. The answer belongs to the session
+   * and reader that asked: a reset or another reader while it is on its way
+   * (signed out, another account, even the same one back) and it is written
+   * nowhere. `commit` runs in the same step as that check, so nothing queued
+   * behind the answer can come between them. Only an answer the Hub gave
+   * counts as a read made here.
+   */
+  async respond<A>(channelId: string, sequence: number, send: () => Promise<A | undefined>,
+    commit: (answer: A | undefined) => void): Promise<void> {
+    const asked = this.asked();
+    const answer = await send();
+    if (!this.stillAsked(asked)) return;
+    if (answer) this.noteRead(channelId, sequence);
+    commit(answer);
+  }
+
+  /** The session and reader a read is asked for. */
+  private asked() {
+    return { generation: this.generation, reader: this.options.reader?.() };
+  }
+
+  /** Whether the session and reader a read was asked for are still the ones here. */
+  private stillAsked(asked: { generation: number; reader: string | undefined }): boolean {
+    return asked.generation === this.generation && asked.reader === this.options.reader?.();
+  }
+
   reset(): void {
     this.generation += 1;
     for (const entry of this.entries.values()) this.clearTimer(entry);
@@ -76,6 +121,7 @@ export class ChannelReadSyncCoordinator<T extends ChannelReadSyncResult> {
       desiredSequence: 0,
       attentionSequence: 0,
       attemptedAttentionSequence: 0,
+      readHere: 0,
       inFlight: false,
       failureCount: 0,
     };
@@ -98,13 +144,13 @@ export class ChannelReadSyncCoordinator<T extends ChannelReadSyncResult> {
 
   private async pump(channelId: string, entry: ChannelReadSyncEntry): Promise<void> {
     if (entry.inFlight || !this.needsSync(entry)) return;
-    const generation = this.generation;
+    const asked = this.asked();
     const targetSequence = entry.desiredSequence;
     entry.inFlight = true;
     let succeeded = false;
     try {
       const result = await this.options.send(channelId, targetSequence);
-      if (generation !== this.generation || !result || !validSequence(result.readSequence)) return;
+      if (!this.stillAsked(asked) || !result || !validSequence(result.readSequence)) return;
       entry.acknowledgedSequence = Math.max(entry.acknowledgedSequence, result.readSequence);
       // One successful acknowledgement is enough to reconcile attention for
       // this exposed high-water mark. If attention remains, it belongs to a
@@ -120,8 +166,9 @@ export class ChannelReadSyncCoordinator<T extends ChannelReadSyncResult> {
       // Product errors are surfaced by the caller. This class owns only the
       // bounded retry cadence for an idempotent read acknowledgement.
     } finally {
-      if (generation === this.generation) {
-        entry.inFlight = false;
+      if (asked.generation === this.generation) entry.inFlight = false;
+      // Another reader's session goes on without this one's retries.
+      if (this.stillAsked(asked)) {
         if (!succeeded) {
           const retryIndex = Math.min(entry.failureCount, Math.max(0, this.retryDelaysMs.length - 1));
           entry.failureCount += 1;
