@@ -916,7 +916,8 @@ pub(crate) async fn claude_stream_reader(
         *interrupted_channels.entry(channel.clone()).or_default() += 1;
     }
     for (channel, count) in interrupted_channels {
-        // Only bounded facts cross into the channel; descriptions can contain private tool input.
+        // Only the bounded fact crosses into the channel; Hub words the notice.
+        // Descriptions can contain private tool input and stay on this host.
         let _ = relay.send_message(protocol::AgentInstanceClientMessage::AgentLifecycle {
             request_id: Some(interruption_id.clone()),
             channel_id: Some(channel),
@@ -926,9 +927,10 @@ pub(crate) async fn claude_stream_reader(
             layer: "application".into(),
             status: "blocked".into(),
             reason: Some("background_tasks_interrupted".into()),
-            detail: Some(format!("The provider stream ended with {count} task(s) still pending. Their outcome is unknown; verify external operations before continuing.")),
+            detail: None,
             snapshot: None,
             resets_at: None,
+            pending_tasks: Some(u32::try_from(count).unwrap_or(u32::MAX)),
             ts: None,
         });
     }

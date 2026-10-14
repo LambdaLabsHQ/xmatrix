@@ -145,6 +145,8 @@ export interface AgentInstanceLifecycleMessage {
   snapshot?: AgentLifecycleSnapshot;
   /** RFC 3339 time a `usage_limited` provider account resets, when known. */
   resetsAt?: string;
+  /** Tasks still pending when `background_tasks_interrupted` was observed. */
+  pendingTasks?: number;
   ts?: string;
 }
 

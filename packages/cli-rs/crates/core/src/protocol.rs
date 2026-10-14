@@ -1395,6 +1395,9 @@ pub enum AgentInstanceClientMessage {
         /// RFC 3339 time a `usage_limited` provider account resets, when known.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         resets_at: Option<String>,
+        /// Tasks still pending when `background_tasks_interrupted` was observed.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        pending_tasks: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         ts: Option<String>,
     },
@@ -2454,6 +2457,7 @@ mod tests {
                 process: Some("online".into()),
             }),
             resets_at: None,
+            pending_tasks: None,
             ts: None,
         };
         let json = serde_json::to_value(&msg).unwrap();

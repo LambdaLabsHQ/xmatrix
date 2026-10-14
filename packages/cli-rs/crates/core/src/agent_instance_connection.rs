@@ -4469,6 +4469,7 @@ pub(crate) mod tests {
             detail: None,
             snapshot: None,
             resets_at: None,
+            pending_tasks: None,
             ts: None,
         };
         client.prepare_outbound_message(&mut terminal);
