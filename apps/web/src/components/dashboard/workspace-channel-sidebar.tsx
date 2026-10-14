@@ -507,33 +507,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
       )}
     </>
   );
-}, areChannelSidebarPropsEqual);
-
-export function areChannelSidebarPropsEqual(previous: ChannelSidebarProps, next: ChannelSidebarProps): boolean {
-  return (
-    previous.events === next.events &&
-    previous.spaces === next.spaces &&
-    previous.currentSpaceId === next.currentSpaceId &&
-    // The view setter closes over the held selection, so a stale one writes
-    // an outdated record.
-    previous.selectedChannelId === next.selectedChannelId &&
-    previous.loading === next.loading &&
-    previous.error === next.error &&
-    previous.view === next.view &&
-    previous.readCounts === next.readCounts &&
-    previous.mentionClearedAt === next.mentionClearedAt &&
-    previous.pinState === next.pinState &&
-    previous.readCountsBaselineReady === next.readCountsBaselineReady &&
-    previous.renamingSpaceId === next.renamingSpaceId &&
-    previous.spacesError === next.spacesError &&
-    previous.fallbackChannels === next.fallbackChannels &&
-    previous.onCopyChannelLink === next.onCopyChannelLink &&
-    // The + opens a draft through state setters, so only what it shows is compared.
-    previous.create?.label === next.create?.label &&
-    previous.create?.disabled === next.create?.disabled &&
-    previous.create?.active === next.create?.active
-  );
-}
+});
 
 function prefersReducedMotion() {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
