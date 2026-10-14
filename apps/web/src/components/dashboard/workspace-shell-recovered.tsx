@@ -117,6 +117,7 @@ import { threadReplyPreviews } from "./thread-reply-preview";
 import {
   type ComponentProps,
   type ReactNode,
+  memo,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -2095,7 +2096,7 @@ const STATUS_TAG_ICON_COMPONENTS: Record<StatusTagIcon, ComponentProps<typeof Ta
   fast: Zap,
 };
 
-export function StatusChipBadge({
+export const StatusChipBadge = memo(function StatusChipBadge({
   chip,
   staged,
   expanded,
@@ -2162,7 +2163,7 @@ export function StatusChipBadge({
   return chip.busy || openMachine
     ? <MachineLoadTag tag={tag} name={value} label={title} glance={chip.busy?.glance} onOpen={openMachine} />
     : tag;
-}
+});
 
 /* The Machine tag opens the Machine's load the way its list row shows it, so
    the tag's tone can be read without leaving the conversation. When the reader

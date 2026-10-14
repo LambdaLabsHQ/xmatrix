@@ -111,6 +111,9 @@ function dockTabOf(view: AppView): AppView {
   return view === "pages" || view === "messages" || view === "status" ? view : "more";
 }
 
+/** The search dialog's pages while the tree has not been read: one array, so the dialog keeps its memo. */
+const NO_PAGES: NonNullable<ReturnType<typeof usePageTree>["data"]> = [];
+
 export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const [desktopUpdateConfirmOpen, setDesktopUpdateConfirmOpen] = useState(false);
   const [pageConversationDocked, setPageConversationDocked] = useState(false);
@@ -672,14 +675,19 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const canMovePages = Boolean(currentSpace && user &&
     ["owner", "admin"].includes(transferSpaceRole(currentSpace, user.id) || ""));
   // Both clients lead to the same action; each controls where it is visible.
-  const listCreate: CreateAction | null = view === "messages" && canCreateChannel
-    ? { label: "New conversation", onCreate: openNewConversation, active: composingConversation }
+  const startNewConversation = useStableCallback(() => openNewConversation());
+  const createNewPage = useStableCallback(() => void pageCreation.create(null));
+  const manageMachines = useStableCallback(() => changeAppView("machines"));
+  // One object while what it offers is the same: the list column that shows it is memoized.
+  const listCreate = useMemo<CreateAction | null>(() => view === "messages" && canCreateChannel
+    ? { label: "New conversation", onCreate: startNewConversation, active: composingConversation }
     : view === "pages"
-      ? { label: "New page", onCreate: () => void pageCreation.create(null),
-        disabled: pageCreation.creating || !currentSpaceId }
+      ? { label: "New page", onCreate: createNewPage, disabled: pageCreation.creating || !currentSpaceId }
       : view === "agents" && user
-        ? { label: "Manage machines", onCreate: () => changeAppView("machines") }
-        : null;
+        ? { label: "Manage machines", onCreate: manageMachines }
+        : null,
+  [canCreateChannel, composingConversation, createNewPage, currentSpaceId, manageMachines, pageCreation.creating,
+    startNewConversation, user, view]);
   const mobileCreate = !nativeMobileTabVisible || agentConfigDialog ? null : listCreate;
   const desktopCreate = isMobileViewport || agentConfigDialog ? null : listCreate;
   // Elsewhere Ctrl/⌘+N starts a new conversation (browsers that reserve it for a new window keep it).
@@ -784,6 +792,68 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const sendComposerMessage = useStableCallback((snapshot: Parameters<ComponentProps<typeof Composer>["onSend"]>[0]) =>
     void sendChannelMessage(undefined, snapshot));
   const openComposerApps = useStableCallback((spaceId: string) => openAppsForSpace(spaceId));
+  /* The same holds for the header, the details, the rail and the search
+     dialog: each is memoized, and a shell render that changes nothing of
+     theirs gives them the same handlers, so it passes them by. */
+  const renameSelectedChannel = useStableCallback((name: string) => {
+    if (selectedChannel) void renameChannel(selectedChannel.id, name);
+  });
+  const changeSelectedVisibility = useStableCallback((mode: Parameters<typeof updateChannelVisibility>[1]) => {
+    if (selectedChannel) void updateChannelVisibility(selectedChannel, mode);
+  });
+  const moveSelectedChannel = useStableCallback(() => {
+    if (selectedChannel) openChannelMove(selectedChannel);
+  });
+  const toggleSelectedMembers = useStableCallback(() => {
+    if (mobileChannelDetailsOpen) closeMobileChannelDetails();
+    else openMobileChannelDetails();
+  });
+  const runSelectedChannelCommand = useStableCallback((body: string) => {
+    void sendChannelMessage({ body });
+  });
+  const manageSelectedApps = useStableCallback(() => {
+    if (selectedChannel) openAppsForSpace(selectedChannel.spaceId);
+  });
+  const toggleDetailsAutomation = useStableCallback(toggleAutomation);
+  const updateDetailsAutomation = useStableCallback(updateAutomation);
+  const deleteDetailsAutomation = useStableCallback(deleteAutomation);
+  const openDetailsSchedule = useStableCallback(openSchedule);
+  const closeDetailsOverlay = useStableCallback(closeMobileChannelDetails);
+  const openSearchResultsFor = useStableCallback((request: Parameters<typeof searchRequestParams>[0]) =>
+    openSearchResults(searchRequestParams(request).toString()));
+  const selectSearchChannel = useStableCallback((channelId: string) => navigateToChannel(channelId));
+  const selectSearchMessage = useStableCallback((channelId: string, messageId: string) =>
+    navigateToChannel(channelId, messageId));
+  const selectSearchPage = useStableCallback((pageId: string, blockId?: string | null) => {
+    openPageAt(pageId, blockId);
+    setWorkspaceSearchOpen(false);
+  });
+  const selectSearchMember = useStableCallback((userId: string, spaceId?: string) => {
+    openHumanProfile(userId, spaceId);
+    setWorkspaceSearchOpen(false);
+  });
+  const changeSearchView = useStableCallback((nextView: Parameters<typeof changeAppView>[0]) => {
+    changeAppView(nextView);
+    setWorkspaceSearchOpen(false);
+  });
+  const cancelSearch = useStableCallback(() => setWorkspaceSearchOpen(false));
+  const changeRailView = useStableCallback(changeAppView);
+  const openOwnProfile = useStableCallback(() => openHumanProfile());
+  const logOut = useStableCallback(() => void logoutAndClearDeviceData().catch(() => undefined));
+  const reportIssue = useStableCallback(openIssueReport);
+  const installUpdateFromRail = useStableCallback(() => requestDesktopUpdateInstall());
+  const submitChannelMove = useStableCallback(() => {
+    if (selectedChannel) void moveChannel(selectedChannel);
+  });
+  const cancelChannelMove = useStableCallback(() => {
+    setChannelMoveOpen(false);
+    setChannelMoveError(null);
+  });
+  const ownMember = user ? currentSpace?.members.find((member) => member.userId === user.id) : undefined;
+  const railProfile = useMemo(() => user ? humanProfileFromSpaceMember(user, ownMember) : null, [ownMember, user]);
+  const railUpdateControl = useMemo(() => desktopBridge ? (
+    <DesktopUpdateRailButton status={desktopUpdateStatus} onInstall={installUpdateFromRail} />
+  ) : undefined, [desktopBridge, desktopUpdateStatus, installUpdateFromRail]);
 
   if (loading || !user) {
     if (cachedCatalogChannels.length > 0) {
@@ -909,16 +979,13 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           spaces={spaces}
           currentUserId={user.id}
           onOpenSearch={openWorkspaceSearch}
-          onRename={(name) => void renameChannel(selectedChannel.id, name)}
-          onVisibilityChange={(mode) => void updateChannelVisibility(selectedChannel, mode)}
-          onMove={() => openChannelMove(selectedChannel)}
+          onRename={renameSelectedChannel}
+          onVisibilityChange={changeSelectedVisibility}
+          onMove={moveSelectedChannel}
           renaming={renamingChannelId === selectedChannel.id}
           updatingVisibility={updatingChannelVisibilityId === selectedChannel.id}
           moving={movingChannelId === selectedChannel.id}
-          onToggleMembers={() => {
-            if (mobileChannelDetailsOpen) closeMobileChannelDetails();
-            else openMobileChannelDetails();
-          }}
+          onToggleMembers={toggleSelectedMembers}
           actions={placement === "beside-page" ? (
             <>
               <button type="button" title="Open in Conversations" aria-label="Open in Conversations"
@@ -1083,19 +1150,17 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       currentUserMemberId={humanMemberId}
       currentUserId={user.id}
       onOpenAgentTrace={openAgentTrace}
-      onRunChannelCommand={canUseSelectedChannel
-        ? (body) => { void sendChannelMessage({ body }); }
-        : undefined}
-      onManageApps={() => openAppsForSpace(selectedChannel!.spaceId)}
+      onRunChannelCommand={canUseSelectedChannel ? runSelectedChannelCommand : undefined}
+      onManageApps={manageSelectedApps}
       automations={automations}
       automationExecutionEnabled={automationExecutionEnabled}
       automationBusy={automationBusy}
-      onToggleAutomation={toggleAutomation}
-      onUpdateAutomation={updateAutomation}
-      onDeleteAutomation={deleteAutomation}
-      onOpenSchedule={openSchedule}
+      onToggleAutomation={toggleDetailsAutomation}
+      onUpdateAutomation={updateDetailsAutomation}
+      onDeleteAutomation={deleteDetailsAutomation}
+      onOpenSchedule={openDetailsSchedule}
       mobileOverlayOpen={mobileChannelDetailsOpen}
-      onCloseMobileOverlay={closeMobileChannelDetails}
+      onCloseMobileOverlay={closeDetailsOverlay}
     />}
   </div>
   );
@@ -1272,26 +1337,17 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         realtimeAgents={model.realtimeAgents}
         projects={projects}
         machineDaemons={machineDaemons}
-        pages={pageTree.data ?? []}
+        pages={pageTree.data ?? NO_PAGES}
         searchMessages={messageSearch}
         searchPages={searchPages}
         catalogPaging={currentSpaceCatalog}
-        onOpenResults={(request) => openSearchResults(searchRequestParams(request).toString())}
-        onSelectChannel={(channelId) => navigateToChannel(channelId)}
-        onSelectMessage={(channelId, messageId) => navigateToChannel(channelId, messageId)}
-        onSelectPage={(pageId, blockId) => {
-          openPageAt(pageId, blockId);
-          setWorkspaceSearchOpen(false);
-        }}
-        onSelectMember={(userId, spaceId) => {
-          openHumanProfile(userId, spaceId);
-          setWorkspaceSearchOpen(false);
-        }}
-        onChangeView={(nextView) => {
-          changeAppView(nextView);
-          setWorkspaceSearchOpen(false);
-        }}
-        onCancel={() => setWorkspaceSearchOpen(false)}
+        onOpenResults={openSearchResultsFor}
+        onSelectChannel={selectSearchChannel}
+        onSelectMessage={selectSearchMessage}
+        onSelectPage={selectSearchPage}
+        onSelectMember={selectSearchMember}
+        onChangeView={changeSearchView}
+        onCancel={cancelSearch}
       />
       <ChannelMoveDialog
         open={channelMoveOpen}
@@ -1301,11 +1357,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         busy={Boolean(movingChannelId)}
         error={channelMoveError}
         onTargetSpaceChange={setChannelMoveTargetSpaceId}
-        onSubmit={() => selectedChannel && void moveChannel(selectedChannel)}
-        onCancel={() => {
-          setChannelMoveOpen(false);
-          setChannelMoveError(null);
-        }}
+        onSubmit={submitChannelMove}
+        onCancel={cancelChannelMove}
       />
       <div
         className={cn(
@@ -1334,23 +1387,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <div className="app-ambient pointer-events-none fixed inset-0" />
         <WorkspaceRail
           activeView={view}
-          profile={humanProfileFromSpaceMember(
-            user,
-            currentSpace?.members.find((member) => member.userId === user.id),
-          )}
+          profile={railProfile!}
           platformAdmin={platformAdmin}
-          onChangeView={changeAppView}
-          onOpenProfile={() => openHumanProfile()}
-          onLogout={() => void logoutAndClearDeviceData().catch(() => undefined)}
-          onReportIssue={openIssueReport}
+          onChangeView={changeRailView}
+          onOpenProfile={openOwnProfile}
+          onLogout={logOut}
+          onReportIssue={reportIssue}
           pendingJoinRequestCount={pendingJoinRequestCount}
           statusLive={statusLive}
-          updateControl={desktopBridge ? (
-            <DesktopUpdateRailButton
-              status={desktopUpdateStatus}
-              onInstall={requestDesktopUpdateInstall}
-            />
-          ) : undefined}
+          updateControl={railUpdateControl}
         />
         {!(view === "messages" && selectedChannel && !composingConversation) && <GlobalSearchBar
           searching={workspaceSearchOpen}
@@ -1362,7 +1407,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             activeView={view}
             hidden={!nativeMobileTabVisible}
             statusLive={statusLive}
-            onChangeView={changeAppView}
+            onChangeView={changeRailView}
           />
         )}
 

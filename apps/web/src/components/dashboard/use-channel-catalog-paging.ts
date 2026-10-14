@@ -99,6 +99,12 @@ export interface ChannelCatalogPagingModel {
    * sidebar empties until something reloads it.
    */
   roots: ReactNode;
+  /**
+   * Which state of the catalog cache these catalogs read. It moves with every
+   * change of it, and so do the catalogs: a memoized view handed one of them
+   * reads it again.
+   */
+  cacheRevision: number;
 }
 
 /** The most Channels one resolve asks the Hub for. */
@@ -315,7 +321,8 @@ export function useChannelCatalogPaging(input: {
   const auth = useAuth();
   const userId = auth.user?.id ?? "";
   const client = useQueryClient();
-  const [, rerender] = useReducer((value) => value + 1, 0);
+  // Counts the catalog cache's changes (ChannelCatalogPagingModel.cacheRevision).
+  const [cacheVersion, rerender] = useReducer((value) => value + 1, 0);
   // Identity, not just contents: a new array of the same ids must not remount
   // every Space's root subscription and refetch its whole tree.
   const spaceIdKey = [...spaceIds].join("\u0000");
@@ -593,6 +600,7 @@ export function useChannelCatalogPaging(input: {
       forSpace: (spaceId: string | null) =>
         (spaceId ? catalogs.get(spaceId) : undefined) ?? INERT_SPACE_CATALOG,
       roots,
+      cacheRevision: cacheVersion,
     };
-  }, [channels, client, load, loadedSpaceIds, queryKey, resolve, roots, userId]);
+  }, [cacheVersion, channels, client, load, loadedSpaceIds, queryKey, resolve, roots, userId]);
 }

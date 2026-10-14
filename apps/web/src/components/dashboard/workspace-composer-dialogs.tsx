@@ -137,6 +137,7 @@ import {
 import {
   useCallback,
   useEffect,
+  memo,
   useId,
   useLayoutEffect,
   useMemo,
@@ -303,7 +304,7 @@ export {
   agentTraceEventPhase,
 } from "./workspace-shell-presence";
 
-export function Composer({
+export const Composer = memo(function Composer({
   compact = false,
   channel: catalogChannel,
   attachmentsEnabled = true,
@@ -1396,7 +1397,7 @@ export function Composer({
         />
     </div>
   );
-}
+});
 
 export function ComposerIcon({
   label,
@@ -1434,7 +1435,7 @@ function summarySourceLine(source: ChannelSummarySource, historyHeadSequence: nu
   return parts.join(" · ");
 }
 
-export function ChannelDetails({
+export const ChannelDetails = memo(function ChannelDetails({
   channel,
   space,
   workspaces,
@@ -1944,7 +1945,7 @@ export function ChannelDetails({
       {detailsBody}
     </aside>
   );
-}
+});
 
 /**
  * Presentation metadata in the Details rail is deliberately read from the
@@ -1954,7 +1955,7 @@ export function ChannelDetails({
  * Every element here is the element the message header uses, so one metric
  * looks the same wherever it appears.
  */
-function LiveAgentPresentationChips({
+const LiveAgentPresentationChips = memo(function LiveAgentPresentationChips({
   instance,
   usageLimit,
   mention,
@@ -2013,7 +2014,7 @@ function LiveAgentPresentationChips({
       <TagRow tags={usageMeterTags} compact />
     </div>
   );
-}
+});
 
 export { AgentConfigPage } from "./agent-config-page";
 
