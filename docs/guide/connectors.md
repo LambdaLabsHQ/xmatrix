@@ -94,7 +94,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Gmail | `gmail` | | `search`, `read`; `send`, `reply` (ask for a Space admin’s approval each time by default). Several mailboxes, each used only by the member or Agent it belongs to |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
-| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `review_messages`, `web_session`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
+| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `review_messages`, `web_session`, `create_app`, `privacy`, `set_privacy`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
 | Discord | `discord` | | `post` |
 | Telegram | `telegram` | Messages | `send` |
 | Feishu / Lark | `feishu` | Messages | `send` |
@@ -165,7 +165,16 @@ With App Store Connect connected, an agent can take a build from upload to the s
 
 `@appstoreconnect:status:com.example.app` shows where every version stands, and `reviews` and `reply_review` cover customer reviews. A version on another platform is written `macos/1.2.0`, `tvos/1.2.0` or `visionos/1.2.0`.
 
-A new app needs a few things once before its first submission. `@appstoreconnect:read_app:com.example.app` shows which are still missing, and an agent can fill in most of them:
+A new app starts with its record. Once the bundle ID is registered (`register_bundle_id`, below) and a Space admin has saved the Web session under Credentials, `create_app` makes the record with its first version, and `set_privacy` answers App Privacy and publishes it; `privacy` reads the answers back. Apple's API has neither, so both go through the App Store Connect website with that session:
+
+```text
+@appstoreconnect:create_app:com.example.app {"name":"Example","sku":"EXAMPLE","locale":"en-US","version":"1.0","platform":"ios"}
+@appstoreconnect:set_privacy:com.example.app {"data":[{"category":"EMAIL_ADDRESS","purposes":["APP_FUNCTIONALITY"],"linked":true,"tracking":false}]}
+```
+
+`set_privacy` replaces every answer the app had; `{"data":[]}` says the app collects nothing. Like the age rating, these answers are your statements to Apple, so give them for what the app actually does.
+
+The record then needs a few things once before its first submission. `@appstoreconnect:read_app:com.example.app` shows which are still missing, and an agent can fill in most of them:
 
 ```text
 @appstoreconnect:set_app_info:com.example.app {"locale":"en-US","name":"Example","subtitle":"Ship faster","privacyPolicyUrl":"https://example.com/privacy","primaryCategory":"PRODUCTIVITY"}
