@@ -9,9 +9,9 @@ test.use({ ...E2E_DESKTOP_CONTEXT, trace: "off", humanSocketWorker: true });
 
 /** The loaded-work budget cannot detect clocks waking an otherwise idle
  * renderer: their iterations can coincide with work already in progress.
- * Keep normal motion and bound style updates in its own quiet window. The
- * unchanged hint and illumination effects still have iteration boundaries;
- * individual dots and rings must not add repeated style sampling. */
+ * Keep normal motion and bound style updates in its own quiet window. Hint
+ * transitions still begin and end; compositor decorations must not add
+ * repeated style sampling at their iteration boundaries. */
 test("working decorations keep an idle renderer below ten percent without repeated style updates", async ({ page }) => {
   const space = workingAgentsSpace(1009, "k", { focusedInstances: 10, intent: "Review channels and message performance" });
   await openWorkingAgentsSpace(page, space, channelHistory(40, "k-message", row => `Row ${row}: **status**`), "Row 40:",
@@ -25,5 +25,5 @@ test("working decorations keep an idle renderer below ten percent without repeat
   const measured = await budget.total();
   console.log(`[idle-decoration] ${JSON.stringify(measured)}`);
   expect(measured.busy).toBeLessThan(0.1);
-  expect(measured.styleUpdates).toBeLessThanOrEqual(90);
+  expect(measured.styleUpdates).toBeLessThanOrEqual(45);
 });

@@ -229,7 +229,9 @@ test("a waiting Instance grows into an island that says what it waits on and for
   const words = island.locator(".app-agent-work-intent-main > .truncate");
   await expect(words).toHaveText("Wait for CI on PR #3781");
   const wordBox = await words.boundingBox();
+  let inkPass = 0;
   const inkFrames = async () => {
+    const pass = inkPass++;
     const frames: Buffer[] = [];
     for (const time of [550, 1100]) {
       await words.evaluate((node, at) => {
@@ -238,7 +240,7 @@ test("a waiting Instance grows into an island that says what it waits on and for
           animation.currentTime = at;
         }
       }, time);
-      frames.push(await words.screenshot({ animations: "allow" }));
+      frames.push(await words.screenshot({ animations: "allow", path: test.info().outputPath(`ink-${pass}-${time}.png`) }));
     }
     return frames;
   };
@@ -271,6 +273,22 @@ test("off-strip work islands rest and resume as scrolling brings them into view"
     node.getAnimations({ subtree: true }).filter(animation => animation.playState === "running" &&
       animation.effect?.getTiming().iterations === Infinity).length);
   const ringRunning = (index: number) => runningLoops(items.nth(index).locator(".app-agent-work-intent-ring"));
+  const ink = (index: number) => items.nth(index).locator(".app-agent-work-intent-ink");
+  const inkClocks = (index: number) => ink(index).evaluate(node => node.getAnimations({ subtree: true }).map(animation => ({
+    state: animation.playState, pending: animation.pending,
+    currentTime: typeof animation.currentTime === "number" ? animation.currentTime : null,
+    startTime: typeof animation.startTime === "number" ? animation.startTime : null,
+  })));
+  const expectInkClock = async (index: number, state: "running" | "paused") => {
+    await expect.poll(() => inkClocks(index)).toEqual([0, 1].map(() => ({
+      state, pending: false, currentTime: expect.any(Number),
+      startTime: state === "running" ? expect.any(Number) : null,
+    })));
+    const clocks = await inkClocks(index);
+    expect(clocks[0]!.startTime).toBe(clocks[1]!.startTime);
+    expect(clocks[0]!.currentTime).toBe(clocks[1]!.currentTime);
+    return clocks;
+  };
   const expectActiveEnd = async (visible: number, clipped: number) => {
     await expect.poll(() => running(visible)).toBeGreaterThan(0);
     await expect.poll(() => running(clipped)).toBe(0);
@@ -278,6 +296,8 @@ test("off-strip work islands rest and resume as scrolling brings them into view"
     await expect.poll(() => ringRunning(clipped)).toBe(0);
   };
   await expectActiveEnd(0, 9);
+  await expectInkClock(0, "running");
+  const firstInk = await ink(0).evaluateHandle(node => ({ node, animations: node.getAnimations({ subtree: true }) }));
   const stripBox = await strip.boundingBox();
   const lastBox = await items.last().boundingBox();
   if (!stripBox || !lastBox) throw new Error("work strip is not laid out");
@@ -290,6 +310,14 @@ test("off-strip work islands rest and resume as scrolling brings them into view"
     node.scrollLeft += ring.right - node.getBoundingClientRect().left - node.clientWidth - ring.width / 2;
   });
   await expectActiveEnd(9, 0);
+  // The previously visible pair keeps one held phase while the strip paints
+  // twice. The last island may create its clocks only on this first reveal.
+  const heldInk = await expectInkClock(0, "paused");
+  await page.evaluate(() => new Promise<void>(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  }));
+  expect(await inkClocks(0)).toEqual(heldInk);
+  await expectInkClock(9, "running");
   const partial = await items.last().boundingBox();
   expect(partial!.x).toBeLessThan(stripBox.x + stripBox.width);
   expect(partial!.x + partial!.width).toBeGreaterThan(stripBox.x + stripBox.width);
@@ -299,6 +327,13 @@ test("off-strip work islands rest and resume as scrolling brings them into view"
   await page.mouse.move(0, 0);
   await strip.evaluate(node => { node.scrollLeft = 0; });
   await expectActiveEnd(0, 9);
+  const resumedInk = await expectInkClock(0, "running");
+  expect(resumedInk[0]!.currentTime!).toBeGreaterThanOrEqual(heldInk[0]!.currentTime!);
+  expect(await firstInk.evaluate(({ node, animations }) => {
+    const current = node.getAnimations({ subtree: true });
+    return node.isConnected && current.length === animations.length && current.every((animation, index) => animation === animations[index]);
+  })).toBe(true);
+  await firstInk.dispose();
 });
 
 test("a usage limit sits on the face, clear of the island's words", async ({ page }) => {

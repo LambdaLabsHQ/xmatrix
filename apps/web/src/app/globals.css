@@ -3145,22 +3145,13 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   overflow: hidden;
   mask-image: linear-gradient(to right, transparent, black 50%, transparent);
   -webkit-mask-image: linear-gradient(to right, transparent, black 50%, transparent);
-  animation: app-agent-work-intent-shimmer 2.2s linear infinite;
+  /* Frame zero while visibility is first observed; native effects retain the held frame. */
+  transform: translateX(0);
 }
 
 .xmatrix-app .app-agent-work-intent:not(.app-agent-work-intent-stale) .app-agent-work-intent-ink-shine {
   width: 166.666667%;
-  animation: app-agent-work-intent-ink-still 2.2s linear infinite;
-}
-
-@keyframes app-agent-work-intent-shimmer {
-  from { transform: translateX(0); }
-  to { transform: translateX(333.333333%); }
-}
-
-@keyframes app-agent-work-intent-ink-still {
-  from { transform: translateX(80%); }
-  to { transform: translateX(-120%); }
+  transform: translateX(80%);
 }
 
 .xmatrix-app .app-agent-work-intent-timer {
@@ -8766,12 +8757,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   width: 240%;
   background: linear-gradient(to right,
     currentColor 0% 46.666667%, transparent 46.666667% 53.333333%, currentColor 53.333333% 100%);
-  animation: app-status-pulse-break 2s linear infinite;
-}
-
-@keyframes app-status-pulse-break {
-  from { transform: translateX(0); }
-  to { transform: translateX(58.333333%); }
+  /* The whole trace is visible at frame zero before the first IO observation. */
+  transform: translateX(0);
 }
 
 @media (prefers-reduced-motion: reduce) {

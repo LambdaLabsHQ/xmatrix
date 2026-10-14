@@ -19,7 +19,8 @@ async function paintedPulseAt(page: import("@playwright/test").Page, time: numbe
       animation.currentTime = at;
     }
   }, time);
-  return pulse(page).screenshot({ animations: "allow" });
+  const reduced = await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
+  return pulse(page).screenshot({ animations: "allow", path: test.info().outputPath(`pulse-${time}-${reduced}.png`) });
 }
 
 test("the Status line rests whole while no Agent works", async ({ page }) => {

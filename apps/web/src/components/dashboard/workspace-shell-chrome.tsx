@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { useDecorationAnimationGroup } from "@/components/ui/decoration-animation";
 import { useRealtimeChannelValue } from "./realtime-channels";
 
 import { normalizeChannelSearchText } from "./workspace-shell-search-model";
@@ -451,14 +452,23 @@ export function GlobalSearchBar({ searching, onOpenSearch }: {
 const STATUS_PULSE_PATH = "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2";
 const STATUS_PULSE_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="${STATUS_PULSE_PATH}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`)}")`;
 
+function createStatusPulseEffects(element: HTMLElement): readonly KeyframeEffect[] {
+  const sweep = element.querySelector<HTMLElement>(".app-status-pulse-sweep");
+  return sweep ? [new KeyframeEffect(sweep, [
+    { transform: "translateX(0)" },
+    { transform: "translateX(58.333333%)" },
+  ], { duration: 2000, iterations: Infinity, easing: "linear" })] : [];
+}
+
 /**
  * Status: a pulse line. While an Agent in the Space works, a break runs along
  * it left to right, the way a monitor redraws its trace; at rest the line is
  * whole.
  */
 export function StatusPulseIcon({ className, live = false }: { className?: string; live?: boolean }) {
+  const animationRef = useDecorationAnimationGroup(createStatusPulseEffects, live);
   return (
-    <span className={cn("app-status-pulse", className)} data-live={live || undefined}
+    <span ref={animationRef} className={cn("app-status-pulse", className)} data-live={live || undefined}
       style={{ maskImage: STATUS_PULSE_MASK, WebkitMaskImage: STATUS_PULSE_MASK }}
       aria-hidden="true">
       <span className="app-status-pulse-sweep" />

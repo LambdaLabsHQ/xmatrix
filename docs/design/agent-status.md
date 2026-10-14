@@ -53,6 +53,15 @@ dot). A small timer ring at the
 trailing end keeps turning; its arc grows toward that threshold, with the
 elapsed time beside it.
 
+The work-island highlight and Status monitor use native Web Animations to
+avoid CSS iteration events. The window and its counter-moving ink share
+one 2.2-second clock. They pause together when the whole island leaves its
+work scroller, including while its pane is inactive, and resume their held
+phase when any positive area is visible again. Reduced motion cancels the
+effects and shows the steady words. Updating those words does not restart
+the clock. The Status monitor's moving break uses the same visibility and
+motion lifecycle; a responsive view that was hidden resumes its held phase.
+
 ## 3. The wait is declared by the runtime
 
 `AgentRuntimeState.waiting` (`packages/protocol/src/authority-foundation.ts`):

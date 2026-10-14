@@ -12,12 +12,16 @@ export function AnimationActivityScope({ active, children }: { active: boolean; 
 }
 
 type DecorationKind = "pulse" | "spin";
+type DecorationClock = Pick<Animation, "playState" | "play" | "pause" | "cancel">;
+type ClockFactory = (element: HTMLElement) => DecorationClock | undefined;
+type VisibilityTarget = (element: HTMLElement) => { element: HTMLElement; root?: Element | Document | null };
 type Decoration = {
   element: HTMLElement;
-  kind: DecorationKind;
+  root?: Element | Document | null;
+  createClock: () => DecorationClock | undefined;
   active: boolean;
   visible: boolean;
-  animation?: Animation;
+  animation?: DecorationClock;
 };
 
 const decorations = new Set<Decoration>();
@@ -33,22 +37,8 @@ function synchronize(decoration: Decoration) {
     decoration.animation?.pause();
     return;
   }
-  if (!decoration.animation) {
-    // Pulse's easing belongs to each half, as in the CSS keyframes. Applying
-    // it once to the whole iteration would change the painted rhythm.
-    const pulse = decoration.kind === "pulse";
-    decoration.animation = decoration.element.animate(pulse ? [
-      { opacity: 1, offset: 0, easing: "cubic-bezier(0.4, 0, 0.6, 1)" },
-      { opacity: 0.5, offset: 0.5, easing: "cubic-bezier(0.4, 0, 0.6, 1)" },
-      { opacity: 1, offset: 1 },
-    ] : [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
-      duration: pulse ? 2000 : 1600,
-      iterations: Infinity,
-      easing: "linear",
-    });
-  } else if (decoration.animation.playState !== "running") {
-    decoration.animation.play();
-  }
+  if (!decoration.animation) decoration.animation = decoration.createClock();
+  else if (decoration.animation.playState !== "running") decoration.animation.play();
 }
 
 function onMotionChange() {
@@ -64,7 +54,7 @@ function registerDecoration(decoration: Decoration) {
   const unobserve = observeAnimationVisibility(decoration.element, (visible) => {
     decoration.visible = visible;
     synchronize(decoration);
-  });
+  }, decoration.root);
   return () => {
     unobserve?.();
     decoration.animation?.cancel();
@@ -76,10 +66,7 @@ function registerDecoration(decoration: Decoration) {
   };
 }
 
-/** Ordinary Web Animations keep these compositor clocks independent of CSS
- * iteration events. Visibility and pane activity pause without losing phase;
- * reduced motion cancels the effect and restores the static CSS appearance. */
-export function useDecorationAnimation(kind: DecorationKind, enabled = true) {
+function useDecorationClock(createClock: ClockFactory, enabled: boolean, visibilityTarget?: VisibilityTarget) {
   const active = useContext(AnimationActivity);
   const activeRef = useRef(active);
   const decorationRef = useRef<Decoration | undefined>(undefined);
@@ -93,12 +80,85 @@ export function useDecorationAnimation(kind: DecorationKind, enabled = true) {
   }, [active]);
   return useCallback((element: HTMLElement | null) => {
     if (!element || !enabled || typeof element.animate !== "function") return;
-    const decoration: Decoration = { element, kind, active: activeRef.current, visible: false };
+    const target = visibilityTarget?.(element) ?? { element };
+    const decoration: Decoration = { ...target, createClock: () => createClock(element), active: activeRef.current, visible: false };
     decorationRef.current = decoration;
     const unregister = registerDecoration(decoration);
     return () => {
       unregister();
       if (decorationRef.current === decoration) decorationRef.current = undefined;
     };
-  }, [kind, enabled]);
+  }, [createClock, enabled, visibilityTarget]);
+}
+
+/** Ordinary Web Animations keep these compositor clocks independent of CSS
+ * iteration events. Visibility and pane activity pause without losing phase;
+ * reduced motion cancels the effect and restores the static CSS appearance. */
+export function useDecorationAnimation(kind: DecorationKind, enabled = true) {
+  const createClock = useCallback((element: HTMLElement) => {
+    // Pulse's easing belongs to each half, as in the CSS keyframes.
+    const pulse = kind === "pulse";
+    return element.animate(pulse ? [
+      { opacity: 1, offset: 0, easing: "cubic-bezier(0.4, 0, 0.6, 1)" },
+      { opacity: 0.5, offset: 0.5, easing: "cubic-bezier(0.4, 0, 0.6, 1)" },
+      { opacity: 1, offset: 1 },
+    ] : [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
+      duration: pulse ? 2000 : 1600,
+      iterations: Infinity,
+      easing: "linear",
+    });
+  }, [kind]);
+  return useDecorationClock(createClock, enabled);
+}
+
+/** All effects share one document clock at playbackRate 1. A synchronous
+ * currentTime assignment completes a pending pause, so neither member can
+ * retain a different held time or finish an old async continuation later. */
+function createSynchronizedClock(effects: readonly KeyframeEffect[]): DecorationClock | undefined {
+  if (!effects.length || typeof document.timeline.currentTime !== "number") return;
+  const animations = effects.map(effect => new Animation(effect, document.timeline));
+  let heldTime = 0;
+  let state: AnimationPlayState = "paused";
+  const clock: DecorationClock = {
+    get playState() { return state; },
+    play() {
+      if (state === "running") return;
+      const now = document.timeline.currentTime;
+      if (typeof now !== "number") return;
+      const startTime = now - heldTime;
+      for (const animation of animations) {
+        animation.currentTime = heldTime;
+        animation.play();
+        animation.startTime = startTime;
+      }
+      state = "running";
+    },
+    pause() {
+      if (state !== "running") return;
+      const current = animations[0]!.currentTime;
+      if (typeof current === "number") heldTime = current;
+      for (const animation of animations) {
+        animation.pause();
+        animation.currentTime = heldTime;
+      }
+      state = "paused";
+    },
+    cancel() {
+      for (const animation of animations) animation.cancel();
+      state = "idle";
+    },
+  };
+  clock.play();
+  return clock;
+}
+
+/** One owner keeps related effects in phase. Factories and visibility-target
+ * resolvers must be stable: updating text must not recreate their clocks. */
+export function useDecorationAnimationGroup(
+  createEffects: (element: HTMLElement) => readonly KeyframeEffect[],
+  enabled = true,
+  visibilityTarget?: VisibilityTarget,
+) {
+  const createClock = useCallback((element: HTMLElement) => createSynchronizedClock(createEffects(element)), [createEffects]);
+  return useDecorationClock(createClock, enabled, visibilityTarget);
 }
