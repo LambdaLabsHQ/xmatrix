@@ -10,6 +10,7 @@ const {
   machineOfflineMentionSubjects,
   mentionChipLabel,
   mentionReadResolution,
+  sameMentionReadIndex,
   splitMentionSegments,
   withMemberReadSequence,
   withInvocationMentionTargets,
@@ -405,4 +406,26 @@ test("a summon paints its whole written expression, flagging force and malformed
   ]);
   assert.equal(spans[0].invalid, undefined);
   assert.equal(spans[1].invalid, true);
+});
+
+test("an index is the same only while every written name resolves to the same member drawn the same way", () => {
+  const rebuilt = (change = (candidate) => candidate) => buildMentionReadIndex(CANDIDATES.map((candidate) => change({ ...candidate })));
+  // A Channel replaced by a message or a presence report: same members, new objects.
+  assert.equal(sameMentionReadIndex(INDEX, rebuilt()), true);
+  assert.equal(sameMentionReadIndex(INDEX, rebuilt((candidate) => ({ ...candidate, status: "busy" }))), true);
+  // A rename, a new avatar, a different person behind a name, a new or lost member.
+  const yiming = (change) => (candidate) => (candidate.id === "user:u-yiming" ? { ...candidate, ...change } : candidate);
+  assert.equal(sameMentionReadIndex(INDEX, rebuilt(yiming({ name: "Yiming H" }))), false);
+  assert.equal(sameMentionReadIndex(INDEX, rebuilt(yiming({ avatarUrl: "/b.png" }))), false);
+  assert.equal(sameMentionReadIndex(INDEX, rebuilt(yiming({ id: "user:u-other" }))), false);
+  assert.equal(sameMentionReadIndex(INDEX, buildMentionReadIndex(CANDIDATES.slice(1))), false);
+  // `@Yiming` is ambiguous in INDEX; once one of the two is gone it names the other.
+  const unambiguous = buildMentionReadIndex(CANDIDATES.filter((candidate) => candidate.id !== "user:u-yiming"));
+  assert.equal(sameMentionReadIndex(unambiguous, buildMentionReadIndex(CANDIDATES.filter((candidate) => candidate.id !== "user:u-legend"))), false);
+  // A written fallback is unresolved; the launch that names it is not.
+  const written = withWrittenInvocationTargets(INDEX, "@claude 看一下");
+  const launched = withInvocationMentionTargets(INDEX, [{ instanceId: "written:claude", targetName: "claude", sourceMention: "@claude" }]);
+  assert.equal(sameMentionReadIndex(written, launched), false);
+  // No launches: the index is the answer itself, not a copy per text run.
+  assert.equal(withInvocationMentionTargets(INDEX, []), INDEX);
 });

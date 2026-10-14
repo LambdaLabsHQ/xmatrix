@@ -3,9 +3,12 @@ const test = require("node:test");
 const { loadWorkspaceShellModuleMap, loadShellFunctions } = require("./workspace-shell-source-fixture.cjs");
 
 const shellModules = loadWorkspaceShellModuleMap(__dirname, ["use-channel-catalog-paging.ts", "channel-viewer-state.ts"]);
+require("./typescript-require.cjs").installTypeScriptRequire();
+const { withChannelReadState } = require("./channel-read-state.ts");
 
 // Pure helpers only — no React or workspace shell runtime.
 const ORDERING_FUNCTIONS = [
+  "aheadOfRead",
   "mergeChannels",
   "commitCatalogChannels",
   "mergeChannelViewerState",
@@ -73,6 +76,56 @@ test("a cached catalog row replayed after a message never drops an Instance that
   const fresh = { id: "channel-1", memberPresence: { "agent-1": { kind: "agent", instances: [] } } };
   assert.deepEqual(commitCatalogChannels(channels, [fresh], new Set([fresh]))[0].memberPresence["agent-1"].instances, []);
   assert.deepEqual(commitCatalogChannels([], [cached], new Set()).map((channel) => channel.id), ["channel-1"]);
+});
+
+test("a catalog read older than what the socket has said does not take the Channel back", () => {
+  const live = { id: "channel-1", messageCount: 42, historyHeadSequence: 42, readSequence: 40,
+    updatedAt: "2026-10-13T08:00:42Z", lastMessage: { messageId: "m42", sentAt: "2026-10-13T08:00:42Z" } };
+  const read = { id: "channel-1", messageCount: 41, historyHeadSequence: 41, readSequence: 41,
+    updatedAt: "2026-10-13T08:00:41Z", lastMessage: { messageId: "m41", sentAt: "2026-10-13T08:00:41Z" } };
+  const [merged] = mergeChannels([live], [read]);
+  assert.equal(merged.messageCount, 42);
+  assert.equal(merged.historyHeadSequence, 42);
+  assert.equal(merged.updatedAt, "2026-10-13T08:00:42Z");
+  assert.equal(merged.lastMessage.messageId, "m42");
+  // What the reader has read is the read's to say, and only moves forward.
+  assert.equal(merged.readSequence, 41);
+  // A read that is ahead is taken as it is, and one for a Channel not here yet too.
+  const ahead = { ...read, messageCount: 44, historyHeadSequence: 44, updatedAt: "2026-10-13T08:00:44Z" };
+  assert.equal(mergeChannels([live], [ahead])[0].messageCount, 44);
+  assert.equal(mergeChannels([], [read])[0], read);
+  // The reader's own read of the Channel is told that it landed, with what it merged to.
+  const settled = [];
+  mergeChannels([live], [read], (channel) => { settled.push(channel.messageCount); return channel; });
+  assert.deepEqual(settled, [41]);
+});
+
+test("a read from before the reader caught up neither takes their cursor back nor brings back what they cleared", () => {
+  const attentionAt = (sequence) => ({ channelId: "channel-1", unreadAttentionCount: 1, lastMessageId: `m${sequence}`,
+    lastMessageSequence: sequence, updatedAt: "2026-10-13T08:00:00Z" });
+  // Two reads of the Channel were on their way. The first landed and was brought up to message 42.
+  let channels = mergeChannels([], [{ id: "channel-1", messageCount: 42, historyHeadSequence: 42, readSequence: 40,
+    attention: attentionAt(41), updatedAt: "2026-10-13T08:00:42Z" }]);
+  // The reader opened it: the Hub acknowledged 42, which is past the mention, so the summary is gone.
+  channels = channels.map((channel) => withChannelReadState(channel, { readSequence: 42, attention: undefined }));
+  // The second read, taken at 41 with the reader at 40, lands now.
+  const stale = { id: "channel-1", messageCount: 41, historyHeadSequence: 41, readSequence: 40,
+    attention: attentionAt(41), updatedAt: "2026-10-13T08:00:41Z" };
+  const [afterStale] = mergeChannels(channels, [stale]);
+  assert.equal(afterStale.readSequence, 42);
+  assert.equal(afterStale.attention, undefined);
+  assert.equal(afterStale.messageCount, 42);
+  // A mention that came after what they read still shows, on a read just as old.
+  const [mentioned] = mergeChannels(channels, [{ ...stale, attention: attentionAt(43) }]);
+  assert.equal(mentioned.readSequence, 42);
+  assert.equal(mentioned.attention.lastMessageSequence, 43);
+  // A read that is not behind the reader says what waits on them, whatever it says.
+  const [current] = mergeChannels(channels, [{ ...stale, messageCount: 43, readSequence: 42, attention: attentionAt(43) }]);
+  assert.equal(current.attention.lastMessageId, "m43");
+  const [cleared] = mergeChannels([{ ...channels[0], attention: attentionAt(41), readSequence: 40 }],
+    [{ ...stale, readSequence: 41 }]);
+  assert.equal(cleared.readSequence, 41);
+  assert.equal(cleared.attention.lastMessageSequence, 41);
 });
 
 test("paged catalog refresh retains live labels and busy state, then accepts idle and removal", () => {

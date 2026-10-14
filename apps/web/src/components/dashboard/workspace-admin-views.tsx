@@ -2041,15 +2041,37 @@ export function replaceChannel(channels: SerializedChannel[], channel: Serialize
   const index = channels.findIndex((current) => current.id === channel.id);
   const merged = mergeChannelListHydratedFields(index >= 0 ? channels[index] : undefined, channel);
   if (index < 0) return sortChannels([...channels, merged]);
+  return placeChannel(channels, index, merged);
+}
+
+/** `channels` with the one at `index` replaced, and moved to where it now sorts when it left its place. */
+export function placeChannel(channels: SerializedChannel[], index: number, channel: SerializedChannel): SerializedChannel[] {
   const next = channels.slice();
-  next[index] = merged;
+  next[index] = channel;
   // Most replacements (presence, read state, topic) leave a Channel where it
   // sorts; re-sorting a thousand Channels per realtime frame is what costs.
   const before = next[index - 1];
   const after = next[index + 1];
-  const stillSorted = (!before || compareChannelsForSidebar(before, merged) <= 0) &&
-    (!after || compareChannelsForSidebar(merged, after) <= 0);
-  return stillSorted ? next : sortChannels(next);
+  if ((!before || compareChannelsForSidebar(before, channel) <= 0) &&
+      (!after || compareChannelsForSidebar(channel, after) <= 0)) {
+    return next;
+  }
+  // The others keep their order: only this one is taken out and put back
+  // where a sort would leave it, among its equals as near as it stood.
+  next.splice(index, 1);
+  const bound = (afterEquals: boolean) => {
+    let low = 0;
+    let high = next.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      const order = compareChannelsForSidebar(next[middle]!, channel);
+      if (order < 0 || (afterEquals && order === 0)) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  next.splice(Math.min(Math.max(index, bound(false)), bound(true)), 0, channel);
+  return next;
 }
 
 export function mergeChannelListSnapshot(

@@ -483,6 +483,8 @@ export function areChannelNavItemPropsEqual(previous: ChannelNavItemProps, next:
     previous.events === next.events &&
     previous.active === next.active &&
     previous.unreadCount === next.unreadCount &&
+    previous.readCount === next.readCount &&
+    previous.readCountsBaselineReady === next.readCountsBaselineReady &&
     previous.hasUnreadMention === next.hasUnreadMention &&
     previous.isPinnedRoot === next.isPinnedRoot &&
     previous.onSelect === next.onSelect &&

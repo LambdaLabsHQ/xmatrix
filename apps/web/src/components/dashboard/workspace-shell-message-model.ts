@@ -271,6 +271,11 @@ export type ChannelNavItemProps = {
   events: readonly ObservabilityEvent[];
   active: boolean;
   unreadCount?: number;
+  /* The reader's cursor for this Channel, and whether cursors are loaded. A
+     message reaches the row's own Channel before the list hears of it; with
+     these the row counts it then, so the badge moves with the preview. */
+  readCount?: number;
+  readCountsBaselineReady?: boolean;
   hasUnreadMention?: boolean;
   isPinnedRoot: boolean;
   /* The row passes its own Channel, so one stable handler serves every row. */

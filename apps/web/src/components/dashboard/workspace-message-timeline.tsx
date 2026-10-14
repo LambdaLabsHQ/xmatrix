@@ -226,14 +226,17 @@ import { PageReferenceScopeProvider } from "@/components/dashboard/page-referenc
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAutoLaunchMentions } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentStopInvocation, parseAutoLaunchMentions } from "@xmatrix/protocol";
 import { UnpublishedTurnState } from "./unpublished-turn-status";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered, launchChoicePollInterval, launchChoiceView } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { InvocationAccessError, invocationSourceMessages, loadInvocationPages } from "./mention-invocation-query";
+import { InvocationAccessError, invocationSourceMessages, isInvocationSource, loadInvocationPages } from "./mention-invocation-query";
 import { invocationPollInterval } from "./mention-invocation-state";
-import { buildMentionReadIndex, machineOfflineMentionSubjects, withInvocationMentionTargets } from "@/components/dashboard/mention-read-state";
+import {
+  buildMentionReadIndex, machineOfflineMentionSubjects, sameMentionReadIndex, withInvocationMentionTargets,
+  type MentionReadIndex,
+} from "@/components/dashboard/mention-read-state";
 
 
 
@@ -351,18 +354,32 @@ function useChannelAgentLaunches(channel: SerializedChannel | null, token: strin
   timeline: readonly TimelineItem[], visibleMessageIds?: readonly string[], viewerIdentity?: string | null) {
   const launchSourceMessages = useMemo(() => invocationSourceMessages(timeline, visibleMessageIds),
     [timeline, visibleMessageIds]);
-  const sourceMessageIds = useMemo(() => launchSourceMessages
+  const shownMessageIds = useMemo(() => launchSourceMessages
     .map((message) => message.messageId || message.id), [launchSourceMessages]);
-  const sourceRevisionKey = useMemo(() => launchSourceMessages.map(message => [
+  const shownRevisionKey = useMemo(() => launchSourceMessages.map(message => [
     lowercaseHex(sha256(new TextEncoder().encode(message.body))),
     message.editedAt, message.recalledAt,
   ]), [launchSourceMessages]);
+  /* The question stays the one last asked while it still covers every message
+     shown. Each arrival scrolls a message out of view; asking again for the
+     ones left would send the Hub the same question once per arrival. A message
+     it does not cover (a new one, an edited one) asks anew. */
+  const askedRef = useRef<{ channelId?: string; ids: string[]; revisions: unknown[][] } | null>(null);
+  const channelId = channel?.id;
+  const { ids: sourceMessageIds, revisions: sourceRevisionKey } = useMemo(() => {
+    const asked = askedRef.current;
+    if (asked && asked.channelId === channelId && shownMessageIds.length > 0) {
+      const askedRevision = new Map(asked.ids.map((id, index) => [id, JSON.stringify(asked.revisions[index])]));
+      if (shownMessageIds.every((id, index) => askedRevision.get(id) === JSON.stringify(shownRevisionKey[index]))) return asked;
+    }
+    return (askedRef.current = { channelId, ids: shownMessageIds, revisions: shownRevisionKey });
+  }, [channelId, shownMessageIds, shownRevisionKey]);
   const newestSourceAt = launchSourceMessages.reduce((latest, message) =>
     Math.max(latest, Date.parse(message.sentAt) || 0), 0);
   return useQuery<AgentInvocationQueryPage>({
     queryKey: ["agent-launches", channel?.id, viewerIdentity, sourceMessageIds,
       sourceRevisionKey],
-    enabled: Boolean(token && viewerIdentity && channel?.id && sourceMessageIds.length),
+    enabled: Boolean(token && viewerIdentity && channel?.id && shownMessageIds.length),
     retry: false,
     placeholderData: (previous, previousQuery) => {
       if (!previous || !previousQuery || previousQuery.queryKey[1] !== channel?.id ||
@@ -413,6 +430,19 @@ function offersLaunchChoice(message: TimelineItem, channel: SerializedChannel | 
     channel?.metadata?.autoName === true && !message.recalledAt && !message.editedAt &&
     !hasOperationalAgentInvocation(message.body) && parseAutoLaunchMentions(message.body).length === 0 &&
     launchChoiceOffered(message.sentAt, Date.now()));
+}
+
+/* Whether the receipts have loaded matters to the one message that is a stop
+   command. Every other row is told the same thing always: the answer changes
+   each time the question does, and must not render them all. */
+const stopCommands = new WeakMap<TimelineItem, boolean>();
+function isStopCommand(message: TimelineItem): boolean {
+  let known = stopCommands.get(message);
+  if (known === undefined) {
+    known = parseAgentStopInvocation(normalizeMessageBodyForDisplay(message.body, message.senderKind)) !== undefined;
+    stopCommands.set(message, known);
+  }
+  return known;
 }
 
 interface TimelineVirtuosoContext {
@@ -926,12 +956,21 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   const handleTimelineItemsRendered = useStableCallback((items: ListItem<TimelineItem>[]) => {
     if (channel?.id) {
+      /* Only the rows that can carry invocation state are asked about, and
+         the scope stays the one held while it covers them: the rendered range
+         changes several times as each message arrives, and a new scope renders
+         the whole timeline again for a question that is the same. With none
+         of them in view the scope is empty, and nothing is asked. */
       const currentIds = new Set(timeline.map((message) => message.messageId || message.id));
-      const ids = items.flatMap(({ data }) => data && currentIds.has(data.messageId || data.id)
+      const ids = items.flatMap(({ data }) => data && currentIds.has(data.messageId || data.id) && isInvocationSource(data)
         ? [data.messageId || data.id] : []);
-      setVisibleInvocationScope((previous) => previous?.channelId === channel.id &&
-        previous.ids.length === ids.length && previous.ids.every((id, index) => id === ids[index])
-        ? previous : { channelId: channel.id, ids });
+      setVisibleInvocationScope((previous) => {
+        if (previous?.channelId === channel.id && (ids.length > 0 || previous.ids.length === 0)) {
+          const held = new Set(previous.ids);
+          if (ids.every((id) => held.has(id))) return previous;
+        }
+        return { channelId: channel.id, ids };
+      });
     }
     const exposedHighWaterByChannel = new Map<string, number>();
     for (const { data: message } of items) {
@@ -953,14 +992,33 @@ export const MessageTimeline = memo(function MessageTimeline({
   // One index per Channel membership change, shared by every mention chip in
   // the timeline: resolving `@name` per message would rebuild the same member
   // table for every row.
-  const mentionReadScope = useMemo<MentionReadChannelScope>(() => ({
-    index: withInvocationMentionTargets(buildMentionReadIndex(
+  // The Channel is a new object after every message and presence report. Its
+  // members are almost always who they were, so the index and the unreachable
+  // set are kept by what they say: only a change of theirs reaches the rows.
+  const launchedMentions = invocationQueryData?.launches;
+  const mentionIndexRef = useRef<MentionReadIndex | null>(null);
+  const mentionIndex = useMemo(() => {
+    const next = withInvocationMentionTargets(buildMentionReadIndex(
       channelMentionCandidates(channel, localContext, [], space)
-    ), invocationQueryData?.launches ?? []),
-    ...(channel?.memberReadSequences ? { memberReadSequences: channel.memberReadSequences } : {}),
+    ), launchedMentions ?? []);
+    const held = mentionIndexRef.current;
+    return (mentionIndexRef.current = held && sameMentionReadIndex(held, next) ? held : next);
+  }, [channel, localContext, space, launchedMentions]);
+  const machineOfflineRef = useRef<ReadonlySet<string> | null>(null);
+  const memberPresence = channel?.memberPresence;
+  const machineOfflineSubjectIds = useMemo(() => {
+    const next = machineOfflineMentionSubjects({ memberPresence });
+    const held = machineOfflineRef.current;
+    const same = held && held.size === next.size && [...next].every((subject) => held.has(subject));
+    return (machineOfflineRef.current = same ? held : next);
+  }, [memberPresence]);
+  const memberReadSequences = channel?.memberReadSequences;
+  const mentionReadScope = useMemo<MentionReadChannelScope>(() => ({
+    index: mentionIndex,
+    ...(memberReadSequences ? { memberReadSequences } : {}),
     ...(currentUserIdentityId ? { currentUserIdentityId } : {}),
-    machineOfflineSubjectIds: machineOfflineMentionSubjects(channel),
-  }), [channel, currentUserIdentityId, localContext, space, invocationQueryData]);
+    machineOfflineSubjectIds,
+  }), [mentionIndex, memberReadSequences, currentUserIdentityId, machineOfflineSubjectIds]);
 
   const pageReferenceScope = useMemo(() => {
     const spaceId = space?.id ?? channel?.spaceId;
@@ -1075,7 +1133,8 @@ export const MessageTimeline = memo(function MessageTimeline({
                   message={message}
                   agentLaunches={agentLaunchesByMessage.get(message.messageId || message.id) ?? NO_LAUNCHES}
                   agentStops={stopsByMessage.get(message.messageId || message.id) ?? NO_STOPS}
-                  stopReceiptsLoaded={agentLaunchQuery.data !== undefined || agentLaunchQuery.isError}
+                  stopReceiptsLoaded={isStopCommand(message)
+                    ? agentLaunchQuery.data !== undefined || agentLaunchQuery.isError : true}
                   invocationRejections={invocationRejectionsByMessage.get(message.messageId || message.id) ?? NO_REJECTIONS}
                   continuationInvocations={continuationsByMessage.get(message.messageId || message.id) ?? NO_CONTINUATIONS}
                   messageTargetEvidence={messageTargetEvidence.get(message.messageId || message.id)}
