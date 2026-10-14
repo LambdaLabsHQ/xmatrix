@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AUTOMATION_MAX_INTERVAL_MINUTES, AUTOMATION_MIN_INTERVAL_MINUTES, automationRunIdentity, canonicalAutomationCommand, isAutomationIntervalMinutes, legacyAutomationCommandKind, legacyAutomationCommandView } from "../dist/index.js";
+import { automationTriggersFrom, APP_CONNECTOR_PROVIDER_MANIFESTS, AUTOMATION_MAX_INTERVAL_MINUTES, AUTOMATION_MIN_INTERVAL_MINUTES, automationRunIdentity, canonicalAutomationCommand, isAutomationIntervalMinutes, legacyAutomationCommandKind, legacyAutomationCommandView } from "../dist/index.js";
 
 test("an Automation cadence is one pair of bounds", () => {
   assert.equal(AUTOMATION_MIN_INTERVAL_MINUTES, 15);
@@ -36,4 +36,13 @@ test("Run metadata identifies its Automation only under the automation spelling"
     scheduledOccurrenceId: "o" }), {}, "0081 rewrote every pre-rename key");
   assert.deepEqual(automationRunIdentity({ automationId: " ", automationOccurrenceId: "" }), {});
   assert.deepEqual(automationRunIdentity(undefined), {});
+});
+
+test("private Gmail notification sources support Page Automations without generic Channel subscriptions",()=>{
+  const source="12345678-1234-1234-1234-123456789abc";
+  assert.deepEqual(automationTriggersFrom([{kind:"event",provider:"gmail",source,feature:"message.received"}]),
+    [{kind:"event",provider:"gmail",source,feature:"message.received"}]);
+  assert.equal(APP_CONNECTOR_PROVIDER_MANIFESTS.find(item=>item.id==="gmail").events,undefined);
+  assert.throws(()=>automationTriggersFrom([{kind:"event",provider:"gmail",source:"private@example.com",feature:"message.received"}]));
+  assert.throws(()=>automationTriggersFrom([{kind:"event",provider:"gmail",source,feature:"message.body"}]));
 });

@@ -856,3 +856,13 @@ it with a personal account, purchase a plan or widen an IP allowlist implicitly.
 ## Teams company bot
 
 Native Teams personal/groupChat support uses a company SingleTenant bot and Human Space admin confirmation. The canonical registration, authorization, receipt, revocation and acceptance contract is in [Teams company bot](../connectors/teams-native.md). Teams Workflows webhook connections remain outbound-only. Legacy Office 365 Connectors stopped working in May 2026; preserve their existing records but do not create new legacy registrations or describe them as native acceptance. Native corporate registration and acceptance must be recorded separately from release validation.
+
+
+## Native Gmail notification access
+
+An optional separate metadata grant enables Gmail watch → authenticated Pub/Sub
+push → new inbox message IDs. Apps → Gmail provides one-time Google consent and
+an automatically renewed watcher; no forwarding setup or periodic inbox query is
+required. It currently supports Human-owned mailboxes whose owner is a Space
+admin. Existing Composio content access and per-message send approval remain the
+same. Provisioning and acceptance are in [Native Gmail notifications](gmail-notifications.md).

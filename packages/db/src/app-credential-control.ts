@@ -236,6 +236,10 @@ export class PostgresAppCredentialRepository {
         if (value === null) delete values[name];
         else values[name] = value;
       }
+      if (providerId === "gmail") {
+        await tx.query({ name: "gmail_notification_grant_retire_v1", text: "DELETE FROM data.app_gmail_routes WHERE connection_id=$1",
+          values: [connectionId], maxRows: 0 });
+      }
       const names = Object.keys(values).sort();
       if (names.length > MAX_FIELDS) throw new AppControlError("invalid_app_request", 400, "Too many credential fields");
       // Human credential edits replace the credential evidence for the binding.
