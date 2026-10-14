@@ -184,6 +184,9 @@ export interface MachineDaemonSpawnCommand {
   /** The Space's rules page (its governance page). The Agent reads it on
    * demand; the launch carries only its id. */
   spaceRulesPageId?: string;
+  /** Names of the apps connected to the Space that an Agent can act in. The
+   * launch prompt names them; the Agent reads their commands on demand. */
+  connectedApps?: string[];
   resume?: boolean;
   resumeInstanceId?: string;
   resumeSessionKey?: string;
