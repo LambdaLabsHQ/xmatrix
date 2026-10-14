@@ -281,8 +281,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         // A host hands Hub every failed turn and stays silent once Hub
         // answers. An error Hub does not retry is still Hub's to report: the
         // same turn failure a host would have sent, with the original error.
-        if (message.action === "failed" && message.errorMessage &&
-            decision?.action === "stop" && decision.reason === "ineligible") {
+        if (message.action === "failed" && message.errorMessage && decision && "type" in decision &&
+            decision.type === "agent_turn_retry_decision" && decision.action === "stop" && decision.reason === "ineligible") {
           const failure = turnFailureLifecycle(session.run.channelId, message.errorMessage);
           await this.dependencies.signals.publish(session, failure);
           await this.persistTurnFailureNotice(session, failure,
