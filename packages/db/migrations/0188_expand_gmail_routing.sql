@@ -30,6 +30,9 @@ CREATE TABLE data.app_gmail_routes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TRIGGER account_fence BEFORE INSERT ON data.app_gmail_routes FOR EACH ROW
+  EXECUTE FUNCTION data.fence_deleted_account_insert('created_by');
+CREATE INDEX app_gmail_routes_owner_idx ON data.app_gmail_routes(created_by);
 CREATE UNIQUE INDEX app_gmail_routes_active_mailbox_idx ON data.app_gmail_routes(connection_id,mailbox_digest) WHERE enabled;
 CREATE INDEX app_gmail_routes_identity_idx ON data.app_gmail_routes(token_digest);
 CREATE INDEX app_gmail_routes_renew_idx ON data.app_gmail_routes(renew_at) WHERE enabled;

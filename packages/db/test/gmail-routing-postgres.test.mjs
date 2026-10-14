@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { connectorDatabase,integration } from "./postgres-database.fixture.mjs";
+import { erasePrivateAccountRows } from "../dist/account-deletion-cleanup.js";
 import { PostgresGmailRoutingRepository } from "../dist/index.js";
 
 async function fixture(run) {
@@ -21,7 +22,7 @@ async function fixture(run) {
       mailboxDigest:"mailbox-digest",tokenDigest:"signal-digest",nonceDigest:"nonce-digest",selection,historyId:"0",...changes});
     const activate=async()=>{const id=await create();const job=await repository.consumeOAuth(id,"owner","nonce-digest");
       await repository.activate(job,"private-refresh-token","100",new Date(Date.now()+86400000).toISOString());return id;};
-    await run({repository,sql,create,activate,spaceId,channelId,connectionId});
+    await run({repository,database,sql,create,activate,spaceId,channelId,connectionId});
   }finally {
     for(const table of ["app_gmail_routes","app_connector_credentials","app_connector_connections","channels","space_members"])
       await sql(`DELETE FROM data.${table} WHERE space_id=$1`,[spaceId]);
@@ -89,5 +90,24 @@ integration("successful pagination never consumes the retry budget or marks queu
     }
     const stored=(await sql("SELECT attempts,error_code,history_id FROM data.app_gmail_routes WHERE route_id=$1",[id])).rows[0];
     assert.equal(stored.attempts,0);assert.equal(stored.error_code,null);assert.equal(stored.history_id,"100");
+  });
+});
+
+integration("account closure immediately fences native work and account erasure removes its encrypted grant",async()=>{
+  await fixture(async({repository,database,sql,create,spaceId})=>{
+    const userId=`closing-${crypto.randomUUID()}`;
+    await sql("INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at) VALUES($1,$2,'admin',1,now(),now())",[spaceId,userId]);
+    try {
+      const id=await create({userId,selection:{address:"private@example.com",account:"ca_fixture",owner:`user:${userId}`,oauthVerifier:"proof",appIdentity:"fixture-app"}});
+      const attempt=await repository.consumeOAuth(id,userId,"nonce-digest");
+      await repository.activate(attempt,"private-refresh-token","100",new Date(Date.now()+86400000).toISOString());
+      await repository.signal("signal-digest");const [job]=await repository.claim();
+      assert.equal(await repository.current(job),true);
+      await sql("INSERT INTO data.account_deletion_fences(user_id,request_id,committed) VALUES($1,$2,true)",[userId,crypto.randomUUID()]);
+      assert.equal(await repository.current(job),false);
+      await assert.rejects(create({userId,selection:attempt.selection}));
+      await database.transaction({requestId:crypto.randomUUID(),operation:"test.account-private-cleanup"},tx=>erasePrivateAccountRows(tx,userId));
+      assert.equal((await sql("SELECT count(*)::int AS n FROM data.app_gmail_routes WHERE created_by=$1",[userId])).rows[0].n,0);
+    }finally {await sql("DELETE FROM data.account_deletion_fences WHERE user_id=$1",[userId]);}
   });
 });

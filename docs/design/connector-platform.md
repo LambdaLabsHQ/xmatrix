@@ -477,7 +477,7 @@ The primary App authority stores the native refresh token and pending PKCE
 verifier in an encrypted notification envelope bound to the route identity.
 Configuration fingerprints, captured connection generation, credential version,
 mailbox ownership, current Space admin and conversation capability fence work.
-Mailbox credential edits, disconnect, Channel move and Space erasure retire the
+Mailbox credential edits, disconnect, Channel move, account erasure and Space erasure retire the
 notification rows and encrypted grants. Stop clears the local grant immediately;
 it does not revoke a Google grant another Space might still use. Abandoned
 OAuth attempts expire after ten minutes and bounded maintenance removes them.

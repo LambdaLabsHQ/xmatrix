@@ -40,6 +40,7 @@ export class PostgresGmailRoutingRepository {
   private async authorize(tx: DatabaseTransaction, spaceId: string, userId: string, channelId?: string) {
     const roles = await tx.query<QueryResultRow>({ name: "gmail_route_admin_v1", text: `SELECT role FROM data.space_members
       WHERE space_id=$1 AND user_id=$2 AND NOT EXISTS (SELECT 1 FROM data.space_deletions WHERE space_id=$1)
+      AND NOT EXISTS (SELECT 1 FROM data.account_deletion_fences WHERE user_id=$2 AND (committed OR expires_at>clock_timestamp()))
       LIMIT 1 FOR SHARE`, values: [spaceId, userId], maxRows: 1 });
     if (!["owner", "admin"].includes(String(roles[0]?.role))) throw fail();
     if (channelId) {
