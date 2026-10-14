@@ -24,13 +24,15 @@ export async function withApple(routes, work) {
     const target = new URL(String(url));
     const sent = init.body ? JSON.parse(init.body) : {};
     const call = { method: init.method ?? "GET", origin: target.origin, path: target.pathname, query: Object.fromEntries(target.searchParams),
-      body: sent.data, included: sent.included, authorization: new Headers(init.headers).get("authorization") };
+      body: sent.data, included: sent.included, authorization: new Headers(init.headers).get("authorization"), cookie: new Headers(init.headers).get("cookie") };
     calls.push(call);
     const route = routes[`${call.method} ${call.path}`];
     const result = typeof route === "function" ? route(call) : route;
     if (result === undefined) return Response.json({ errors: [{ status: "404", code: "NOT_FOUND", detail: `no route ${call.method} ${call.path}` }] }, { status: 404 });
     if (result === null) return new Response(null, { status: 204 });
-    return Response.json(result, { status: result.status ?? 200 });
+    /* A route may also answer with headers, such as the cookies Apple's website rotates. */
+    const { responseHeaders, ...document } = result;
+    return Response.json(document, { status: result.status ?? 200, headers: responseHeaders ?? {} });
   };
   try { return { value: await work(), calls }; } finally { globalThis.fetch = original; }
 }
