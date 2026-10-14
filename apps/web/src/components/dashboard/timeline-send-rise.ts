@@ -50,7 +50,8 @@ export function isJustSentRow(message: { own?: boolean; sendStatus?: string; sen
 /** The rise each timeline is playing: a layout move reported to it, and its end. */
 const risingTimelines = new WeakMap<HTMLElement, {
   moved: () => void;
-  arrived: () => void;
+  /** The new row is in, coming up on its own `entrance` (none under reduced motion). */
+  arrived: (entrance: Animation | null) => void;
   /** Ends the rise and gives back how far below its place the list was drawn. */
   stop: () => number;
 }>();
@@ -69,18 +70,73 @@ function motionReduced(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** The new row itself comes up out of the composer as it appears. */
+/* The new row's own way up, fading in over the first three fifths of it: on
+   this curve, as straight pieces of it, so the same way can be given a still
+   end without being drawn any differently. */
+const ENTRANCE_CURVE = [0.2, 0.8, 0.2, 1] as const;
+const ENTRANCE_PIECES = 16;
+
+/** How far along the entrance is `time` of SEND_RISE_MS in (cubic-bezier ENTRANCE_CURVE). */
+function entranceProgress(time: number): number {
+  if (time <= 0) return 0;
+  if (time >= 1) return 1;
+  const [x1, y1, x2, y2] = ENTRANCE_CURVE;
+  const at = (a: number, b: number, u: number) => 3 * a * u * (1 - u) ** 2 + 3 * b * u * u * (1 - u) + u ** 3;
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 24; step += 1) {
+    const middle = (low + high) / 2;
+    if (at(x1, x2, middle) < time) low = middle;
+    else high = middle;
+  }
+  return at(y1, y2, (low + high) / 2);
+}
+
+/**
+ * The entrance drawn over `duration` ms: the way up in its first
+ * SEND_RISE_MS, the row standing in its place for the rest.
+ */
+function entranceKeyframes(duration: number): Keyframe[] {
+  const frames: Keyframe[] = Array.from({ length: ENTRANCE_PIECES + 1 }, (_, piece) => {
+    const progress = entranceProgress(piece / ENTRANCE_PIECES);
+    return {
+      offset: (SEND_RISE_MS * piece) / ENTRANCE_PIECES / duration,
+      opacity: Math.min(1, progress / 0.6),
+      transform: piece === ENTRANCE_PIECES ? "none" : `translateY(${SEND_RISE_MIN_PX * (1 - progress)}px)`,
+    };
+  });
+  return duration > SEND_RISE_MS ? [...frames, { offset: 1, opacity: 1, transform: "none" }] : frames;
+}
+
+/**
+ * The new row itself comes up out of the composer as it appears, from as far
+ * below as a short timeline's rows rise: its height is not read, which would
+ * lay the page out in the middle of putting the row in.
+ */
 export function playSentRowEntrance(scrollRoot: HTMLElement | null, sentRow: HTMLElement) {
-  if (scrollRoot) risingTimelines.get(scrollRoot)?.arrived();
-  if (typeof sentRow.animate !== "function" || motionReduced()) return;
-  sentRow.animate(
-    [
-      { opacity: 0, transform: `translateY(${Math.min(sentRow.offsetHeight, SEND_RISE_MIN_PX)}px)` },
-      { opacity: 1, offset: 0.6 },
-      { opacity: 1, transform: "none" },
-    ],
-    { duration: SEND_RISE_MS, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
-  );
+  const entrance = typeof sentRow.animate === "function" && !motionReduced()
+    ? sentRow.animate(entranceKeyframes(SEND_RISE_MS), { duration: SEND_RISE_MS, easing: "linear" })
+    : null;
+  if (scrollRoot) risingTimelines.get(scrollRoot)?.arrived(entrance);
+}
+
+/**
+ * Has the row's entrance end when the list's rise does, standing still after
+ * its way up. The end of an animation wakes the page ahead of it and lays its
+ * layers out again once it is over; ending together, the two do that once.
+ */
+function endEntranceWith(entrance: Animation | null, rise: Animation, riseDuration: number) {
+  if (!entrance || entrance.playState !== "running") return;
+  void rise.ready.then(() => {
+    const riseStart = rise.startTime === null ? NaN : Number(rise.startTime);
+    const entranceStart = entrance.startTime === null ? NaN : Number(entrance.startTime);
+    if (!Number.isFinite(riseStart) || !Number.isFinite(entranceStart) || entrance.playState !== "running") return;
+    const duration = riseStart + riseDuration - entranceStart;
+    const effect = entrance.effect as KeyframeEffect | null;
+    if (!effect || duration <= SEND_RISE_MS) return;
+    effect.setKeyframes(entranceKeyframes(duration));
+    effect.updateTiming({ duration });
+  }, () => undefined);
 }
 
 /** How long the list takes from `from` to rest, slowing all the way. */
@@ -157,6 +213,7 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
   let quietFrames = 0;
   // Not before the new row is in: the composer can give way a frame ahead of it.
   let arrived = false;
+  let entrance: Animation | null = null;
   let stopped = false;
   let frame = 0;
   const startedAt = performance.now();
@@ -189,6 +246,7 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
       { duration, easing: "linear" },
     );
     resting = { animation, from, duration };
+    endEntranceWith(entrance, animation, duration);
     // The animation draws the list from here on; this is where it leaves it.
     held = 0;
     content.style.translate = "";
@@ -268,5 +326,12 @@ export function beginTimelineSendRise(scrollRoot: HTMLElement) {
     if (risingTimelines.get(scrollRoot)?.stop === stop) risingTimelines.delete(scrollRoot);
     return left;
   };
-  risingTimelines.set(scrollRoot, { moved, arrived: () => { arrived = true; }, stop });
+  risingTimelines.set(scrollRoot, {
+    moved,
+    arrived: (rowEntrance) => {
+      arrived = true;
+      entrance = rowEntrance;
+    },
+    stop,
+  });
 }

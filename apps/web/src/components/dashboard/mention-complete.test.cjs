@@ -1824,3 +1824,20 @@ test("composer targets and operations come from interaction descriptors the regi
   assert.equal(actions.stage, "app-action");
   assert.deepEqual(actions.candidates.map((candidate) => candidate.appActionId), ["create_issue"]);
 });
+
+test("a conversation's targets are checked once while they stay the same, and anew when one changes", () => {
+  const working = (activity) => agentPresenceChannel("codex", "busy", [{ id: "instance-1", channelInstanceId: "1",
+    label: "codex:1", status: "busy", activity, connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z" }]);
+  // A message changes the Channel object and its sender's presence, never who can be addressed.
+  const first = channelInteractionTargets(working("Reading"));
+  const next = channelInteractionTargets(working("Writing"));
+  assert.equal(next.registry, first.registry);
+  assert.deepEqual(next.candidates, first.candidates);
+  // Someone new to address is checked and resolved.
+  const joined = openChannel({ memberPresence: { ...working("Writing").memberPresence,
+    "agent:claude": { kind: "agent", status: "busy", label: "claude", instances: [] } } });
+  const widened = channelInteractionTargets(joined);
+  assert.notEqual(widened.registry, first.registry);
+  assert.equal(widened.registry.resolve("claude", "launch").status, "resolved");
+  assert.equal(first.registry.resolve("claude", "launch").status, "unknown");
+});

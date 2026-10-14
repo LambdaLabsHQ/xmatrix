@@ -351,6 +351,19 @@ export type TimelineJumpHandle = {
 
 
 
+/* A message's text, hashed once per message: the question about the messages
+   shown is keyed by their texts, and asked again as each arrival changes them. */
+const bodyHashes = new WeakMap<TimelineItem, string>();
+
+function bodyHashOf(message: TimelineItem): string {
+  let hash = bodyHashes.get(message);
+  if (hash === undefined) {
+    hash = lowercaseHex(sha256(new TextEncoder().encode(message.body)));
+    bodyHashes.set(message, hash);
+  }
+  return hash;
+}
+
 function useChannelAgentLaunches(channel: SerializedChannel | null, token: string | null,
   timeline: readonly TimelineItem[], visibleMessageIds?: readonly string[], viewerIdentity?: string | null) {
   const launchSourceMessages = useMemo(() => invocationSourceMessages(timeline, visibleMessageIds),
@@ -358,8 +371,7 @@ function useChannelAgentLaunches(channel: SerializedChannel | null, token: strin
   const shownMessageIds = useMemo(() => launchSourceMessages
     .map((message) => message.messageId || message.id), [launchSourceMessages]);
   const shownRevisionKey = useMemo(() => launchSourceMessages.map(message => [
-    lowercaseHex(sha256(new TextEncoder().encode(message.body))),
-    message.editedAt, message.recalledAt,
+    bodyHashOf(message), message.editedAt, message.recalledAt,
   ]), [launchSourceMessages]);
   /* The question stays the one last asked while it still covers every message
      shown. Each arrival scrolls a message out of view; asking again for the

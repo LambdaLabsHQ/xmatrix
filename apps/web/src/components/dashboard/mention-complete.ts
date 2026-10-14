@@ -324,9 +324,30 @@ export function channelInteractionTargets(
   instanceTargetScope: MentionInstanceTargetScope = "channel",
 ): { registry: MessageInteractionRegistry; candidates: MentionCandidate[] } {
   const entries = channel ? channelTargetEntries(channel, localContext, appConnectors, space, instanceTargetScope) : [];
-  const registry = interactionRegistry(entries.map(entry => entry.descriptor));
-  const accepted = new Set(registry.descriptors().map(descriptor => descriptor.targetId));
+  const { registry, accepted } = registryOf(entries.map(entry => entry.descriptor));
   return { registry, candidates: entries.filter(entry => accepted.has(entry.descriptor.targetId)).map(entry => entry.candidate) };
+}
+
+/* A registry checks every alias of every target against the grammar as it is
+   built. A conversation's targets are the same from one of its messages to
+   the next, while the Channel they are read from is a new object after each,
+   so the registries built last are kept by what they were built from. They
+   are never changed once built. */
+const REGISTRIES_KEPT = 16;
+const registries = new Map<string, { registry: MessageInteractionRegistry; accepted: ReadonlySet<string> }>();
+
+function registryOf(descriptors: readonly InteractionTargetDescriptor[]) {
+  const key = JSON.stringify(descriptors);
+  let built = registries.get(key);
+  if (built) {
+    registries.delete(key);
+  } else {
+    const registry = interactionRegistry(descriptors);
+    built = { registry, accepted: new Set(registry.descriptors().map(descriptor => descriptor.targetId)) };
+  }
+  registries.set(key, built);
+  if (registries.size > REGISTRIES_KEPT) registries.delete(registries.keys().next().value!);
+  return built;
 }
 
 export function channelMentionCandidates(

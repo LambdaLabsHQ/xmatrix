@@ -131,6 +131,25 @@ function movesOfRowAbove(frames: Awaited<ReturnType<typeof paintedTimelineFrames
   return paintedRowMoves(frames).filter((move) => move.row === `message:rise-${HISTORY_LENGTH}`).map((move) => move.by);
 }
 
+test("the new row comes in and the list comes to rest in the same frame", async ({ page }) => {
+  await openChannelRecordingRises(page);
+  await sendAndReadRises(page);
+  // When each of the two animations ends, on the document's clock: the row's
+  // own way up, and the list's way to rest. Ending apart, each would wake the
+  // page ahead of its end and lay its layers out again once it is over.
+  const ends = () => page.evaluate(() => {
+    const list = document.querySelector(".app-message-timeline [data-timeline-rise-content]");
+    const row = Array.from(document.querySelectorAll(".app-message-timeline [data-timeline-rise-row='sent']")).at(-1);
+    const [rise] = list?.getAnimations() ?? [];
+    const [entrance] = row?.getAnimations() ?? [];
+    if (!rise?.effect || !entrance?.effect || rise.startTime === null || entrance.startTime === null) return null;
+    const end = (animation: Animation) => Number(animation.startTime) + Number(animation.effect!.getComputedTiming().endTime);
+    return Math.abs(end(rise) - end(entrance));
+  });
+  await expect.poll(ends).toBeLessThan(1);
+  await listAtRest(page);
+});
+
 test("a sent message rises from the composer and lifts the rows above it", async ({ page }) => {
   await openChannelRecordingRises(page);
   let rises: Rise[] = [];
