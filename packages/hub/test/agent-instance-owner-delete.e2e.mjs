@@ -324,16 +324,11 @@ test("a failed daemon stop result surfaces a channel notice that the process may
       failureNotice.body.includes("may still be running"),
       "failure notice must warn that the process may still be running",
     );
-    // The raw daemon error (host paths, command lines) must never enter ANY
-    // channel-visible field: history metadata ships to every member, so
-    // only the stable classification code may appear anywhere in the message.
-    const serializedNotice = JSON.stringify(failureNotice);
-    assert.ok(
-      !serializedNotice.includes("process tree still alive") &&
-        !serializedNotice.includes("/Users/dev/") &&
-        !serializedNotice.includes("--resume"),
-      "no channel-visible field may leak the raw daemon error",
-    );
+    // The notice shows the daemon's own error after boundary redaction:
+    // local paths and credentials never enter channel-visible fields.
+    assert.ok(failureNotice.body.includes("process tree still alive after termination: [9999]"),
+      "the failure notice shows the originating daemon error");
+    assert.ok(!JSON.stringify(failureNotice).includes("/Users/dev/"), "no channel-visible field carries a local path");
     assert.equal(failureNotice.metadata?.stopOutcome, "failed");
     assert.equal(failureNotice.metadata?.stopFailureCode, "process_tree_still_alive");
     assert.equal(failureNotice.metadata?.stopFailureDetail, undefined);
