@@ -56,8 +56,8 @@ for (const delivery of ["cards", "digest"] as const) test(`Agents in other conve
   expect(counts.navRows).toBeLessThanOrEqual(reports * 2);
 });
 
-test("current-Channel activity leaves Markdown alone and opens the latest owned trace", async ({ page }) => {
-  const current = workingAgentsSpace(1, "current");
+test("current-Channel activity leaves Markdown and the work dock alone and opens the latest owned trace", async ({ page }) => {
+  const current = workingAgentsSpace(1, "current", { intent: "Verify current work" });
   const agent = current.agents[0];
   const messages = channelHistory(40, "current-message", row => `Current row ${row}: **unchanged**.`)
     .map(message => ({ ...message, sentAt: new Date(Date.parse(message.sentAt) + message.sequence * 600_000).toISOString(),
@@ -86,14 +86,35 @@ test("current-Channel activity leaves Markdown alone and opens the latest owned 
   await expect(dock.getByRole("button", { name: /Open agent0/ })).toBeVisible();
   await page.waitForTimeout(50);
   const counts = await page.evaluate(() =>
-    (window as unknown as { __renderCounts: { messageRows: number; workspaceViews: number } }).__renderCounts);
+    (window as unknown as { __renderCounts: { messageRows: number; workspaceViews: number; workDocks: number; workAvatars: number } }).__renderCounts);
   expect(counts.messageRows).toBe(0);
   expect(counts.workspaceViews).toBe(0);
+  expect(counts.workDocks).toBe(0);
+  expect(counts.workAvatars).toBe(0);
+  // The island skips activity-only commits, but a real click resolves the
+  // current complete Instance instead of the item last used to paint it.
+  await dock.getByRole("button", { name: /Open agent0/ }).click();
+  await expect(page.getByRole("dialog").getByText("Current step 30", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.locator('[id="message:current-message-40"] .identity-avatar').click();
   await expect(page.getByRole("dialog").getByText("Current step 30", { exact: true })).toBeVisible();
   await expect.poll(async () => (await fixtureRequests(page, "current-trace")).length).toBeGreaterThan(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  // A changed task must still repaint the island. This positive control also
+  // proves that the counters above observe the components being protected.
+  const taskChannel = current.report(0, "Current step 30")[1].channel!;
+  const member = taskChannel.memberPresence[agent.id];
+  send({ type: "channel_updated", channel: { ...taskChannel, memberPresence: {
+    ...taskChannel.memberPresence, [agent.id]: { ...member, instances: member.instances.map((instance: typeof agent.instances[number]) =>
+      ({ ...instance, intent: "Verify next task" })) },
+  } } });
+  await expect(dock.locator(".app-agent-work-intent").first()).toContainText("Verify next task");
+  const taskCounts = await page.evaluate(() =>
+    (window as unknown as { __renderCounts: { workDocks: number; workAvatars: number } }).__renderCounts);
+  expect(taskCounts.workDocks).toBeGreaterThan(0);
+  expect(taskCounts.workAvatars).toBeGreaterThan(0);
   // Ignoring Agent activity in the header must still follow live Human counts.
   const liveChannel = current.report(0, "Current step 30")[1].channel!;
   const header = page.locator(".app-main .app-panel-header").first();
