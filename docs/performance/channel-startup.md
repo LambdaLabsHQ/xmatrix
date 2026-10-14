@@ -427,3 +427,14 @@ JavaScript frames and do not modify native event registration.
 Empty/plain drafts also skip the mention display registry until an address is
 present. Textarea transitions cover field chrome explicitly: switching between
 native and soft carets does not animate the unsupported caret-color property.
+
+The client production build adds class buckets to a conservative subset of
+final CSS selectors after minification. A subject consisting of a multi-class
+`:is()` or `:where()` gains one alternative per class, each retaining the whole
+original condition and adding a zero-specificity `:where(.class)` guard. This
+helps the browser index the rule without changing matching, specificity or
+cascade order. Complex arguments, escaped names, nested style rules and unknown
+pseudo-elements stay unchanged; expansion is bounded per rule. The transform
+runs before source-map emission and real content hashing, so deployed filenames
+and manifest references cover the resulting bytes. Browser cascade checks and
+a real compiler owner protect this boundary when the CSS toolchain changes.
