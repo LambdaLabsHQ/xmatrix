@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { useRealtimeChannel } from "./realtime-channels";
+import { useRealtimeChannelValue } from "./realtime-channels";
 
 import { normalizeChannelSearchText } from "./workspace-shell-search-model";
 import type { LiquidGlassMaterial } from "@/components/ui/liquid-glass-material";
@@ -49,6 +49,7 @@ import {
 import type { SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -1275,14 +1276,20 @@ export function ChannelHeader({
   /** Controls of where the conversation is shown, such as closing it beside a page. */
   actions?: React.ReactNode;
 }) {
-  const channel = useRealtimeChannel(catalogChannel)!;
+  const channel = catalogChannel;
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState("");
   const channelSpace = channel
     ? spaces.find((space) => space.id === channel.spaceId) || null
     : null;
-  const presenceSummary = channel ? memberPresenceSummary(channel, channelSpace) : null;
+  const humanPresenceLabel = useCallback((live: SerializedChannel | null) => {
+    if (!live) return null;
+    const summary = memberPresenceSummary(live, channelSpace);
+    return `${summary.online}/${summary.total}`;
+  }, [channelSpace]);
+  const presenceLabel = useRealtimeChannelValue(channel, humanPresenceLabel);
   const channelHeading = channel ? channelTitle(channel) : "channels";
+  const editableName = channel ? channelHeading : null;
   const currentUserRole = channelSpace ? spaceRoleFor(channelSpace, currentUserId) : "viewer";
   const canManageVisibility = Boolean(
     channel &&
@@ -1290,10 +1297,10 @@ export function ChannelHeader({
   );
 
   useEffect(() => {
-    if (!editingName && channel) {
-      setDraftName(channelTitle(channel));
+    if (!editingName && editableName !== null) {
+      setDraftName(editableName);
     }
-  }, [channel, editingName]);
+  }, [editableName, editingName]);
 
   function submitRename() {
     if (!channel || renaming) return;
@@ -1396,8 +1403,8 @@ export function ChannelHeader({
           className="flex h-8 items-center gap-1 rounded px-2 text-sm text-muted-foreground hover:bg-muted xl:hidden"
         >
           <MoreHorizontal className="size-4" />
-          {presenceSummary
-            ? `${presenceSummary.online}/${presenceSummary.total}`
+          {presenceLabel !== null
+            ? presenceLabel
             : channel
               ? visibleHumanChannelMembers(channel, channelSpace).length
               : 0}
