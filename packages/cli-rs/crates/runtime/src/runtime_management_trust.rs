@@ -2604,6 +2604,7 @@ fn polled_daemon_command_control_id(command: &MachineDaemonCommand) -> Option<&s
         | MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
         | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
         | MachineDaemonCommand::MachineTextTask { request_id, .. }
+        | MachineDaemonCommand::MachineSleepAgent { request_id, .. }
         | MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => Some(request_id),
         MachineDaemonCommand::MachineRequestResolve { request_id, .. } => request_id.as_deref(),
     }

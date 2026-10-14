@@ -24,6 +24,7 @@ const MACHINE_DAEMON_MESSAGE_TYPES = new Set([
   "machine_harness_action_result",
   "machine_worktree_action_result",
   "machine_text_task_result",
+  "machine_sleep_result",
   "machine_command_lease_renew",
   "machine_command_admitted",
   "machine_activation_begin",
@@ -55,6 +56,7 @@ export interface MachineDaemonConnectionPort extends SocketEndpointPort {
   reportHarnessAction(ws: WebSocket, message: MachineDaemonMessage<"machine_harness_action_result">): void;
   reportWorktreeAction(ws: WebSocket, message: MachineDaemonMessage<"machine_worktree_action_result">): void;
   reportTextTask(ws: WebSocket, message: MachineDaemonMessage<"machine_text_task_result">): void;
+  reportSleep(ws: WebSocket, message: MachineDaemonMessage<"machine_sleep_result">): void;
   reportWorktreeCleanup(ws: WebSocket, message: MachineDaemonMessage<"machine_worktree_cleanup_result">): void;
   renewCommandLease(ws: WebSocket, message: MachineDaemonMessage<"machine_command_lease_renew">): void;
   admitCommand(ws: WebSocket, message: MachineDaemonMessage<"machine_command_admitted">): void;
@@ -95,6 +97,7 @@ export class MachineDaemonConnectionController {
       case "machine_harness_action_result": this.port.reportHarnessAction(ws, message); return;
       case "machine_worktree_action_result": this.port.reportWorktreeAction(ws, message); return;
       case "machine_text_task_result": this.port.reportTextTask(ws, message); return;
+      case "machine_sleep_result": this.port.reportSleep(ws, message); return;
       case "machine_worktree_cleanup_result": this.port.reportWorktreeCleanup(ws, message); return;
       case "machine_command_lease_renew": this.port.renewCommandLease(ws, message); return;
       case "machine_command_admitted": this.port.admitCommand(ws, message); return;

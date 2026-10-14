@@ -1539,6 +1539,58 @@ async fn sleep_idle_daemon_children(
     }
 }
 
+/// Sleep the Run the Hub named, once this daemon's own facts agree it rests
+/// (`verify_hub_sleep`). The process is ended exactly like a self-decided
+/// sleep, so its exit report leaves the Instance `sleeping`. `Err` names why
+/// it was not: `not_running`, `not_idle` or `not_resumable`.
+pub(crate) async fn sleep_daemon_child_on_hub_word(
+    registry: &DaemonRunRegistry,
+    run_id: &str,
+    execution_key: &str,
+    instance_id: &str,
+    hub_idle_for: Duration,
+) -> Result<(), &'static str> {
+    let view = {
+        let guard = registry.lock().await;
+        guard
+            .iter()
+            .find(|(_, managed)| {
+                managed.run_id.as_deref() == Some(run_id)
+                    && managed.execution_key.as_deref() == Some(execution_key)
+                    && managed.instance_id.as_deref() == Some(instance_id)
+            })
+            .map(|(key, managed)| daemon_run_idle_view(key, managed))
+    };
+    let Some(view) = view else {
+        return Err("not_running");
+    };
+    let (phase, idle_for) =
+        match runtime_daemon_idle_sleep::verify_hub_sleep(&view, hub_idle_for, unix_millis_now()) {
+            runtime_daemon_idle_sleep::HubSleepVerdict::Sleep { phase, idle_for } => (phase, idle_for),
+            runtime_daemon_idle_sleep::HubSleepVerdict::Decline(reason) => return Err(reason),
+        };
+    let alive_at = view.marker.as_ref().map_or(0, |marker| marker.updated_at_millis);
+    let processes = tokio::task::spawn_blocking(runtime_daemon_idle_sleep::process_snapshot)
+        .await
+        .unwrap_or_default();
+    // Only the wrapper that wrote the marker may be signalled.
+    if !runtime_daemon_idle_sleep::is_marker_writer(view.pid, alive_at, &processes) {
+        return Err("not_running");
+    }
+    if end_idle_daemon_child(registry, &view.key, view.pid, Some((&phase, idle_for))).await {
+        append_daemon_registry_audit(&format!(
+            "hub_sleep key={} pid={} idle_for_ms={}",
+            view.key,
+            view.pid,
+            idle_for.as_millis()
+        ));
+        Ok(())
+    } else {
+        // The wrapper changed phase meanwhile: a message arrived.
+        Err("not_idle")
+    }
+}
+
 /// End one idle Run's process tree without removing its registry row. With a
 /// sleep, its marker is stamped `sleeping` first so the exit report, even one
 /// sent by a later daemon, reports the sleep; if the wrapper changed phase in

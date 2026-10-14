@@ -516,6 +516,41 @@ export interface MachineDaemonWorktreeActionCommand {
   relayLease?: MachineDaemonCommandLease;
 }
 
+/** The capability a daemon advertises when it puts a Run to sleep on the Hub's word. */
+export const MACHINE_SLEEP_CAPABILITY = "machine_sleep_agent_v1";
+
+/**
+ * The Hub decided a resting Run has been idle long enough to sleep
+ * (docs/instance-sleep.md). The daemon verifies its own facts first: the Run
+ * still rests, with no task execution, background task or other activity for
+ * at least `idleForMillis` by its own clock; only then does it end the process
+ * as a sleep, whose exit report leaves the Instance `sleeping`. Otherwise it
+ * declines.
+ */
+export interface MachineDaemonSleepCommand {
+  type: "machine_sleep_agent";
+  requestId: string;
+  runId: string;
+  executionKey: string;
+  instanceId: string;
+  /** How long the Hub has seen the Run resting: a duration, so clocks need not agree. */
+  idleForMillis: number;
+  relayLease?: MachineDaemonCommandLease;
+}
+
+/** Whether the daemon put the Run to sleep, or why it declined. */
+export interface MachineDaemonSleepResultReport {
+  type: "machine_sleep_result";
+  requestId: string;
+  runId: string;
+  executionKey: string;
+  instanceId: string;
+  slept: boolean;
+  /** Why it declined: `not_idle`, `not_running` or `not_resumable`. */
+  reason?: string;
+  relayLease?: MachineDaemonCommandLease;
+}
+
 /** One bounded piece of text work for a fresh, tool-less harness process. */
 export interface MachineDaemonTextTaskCommand {
   type: "machine_text_task";
@@ -548,6 +583,7 @@ export interface MachineDaemonQuotaProbeResultReport {
 }
 
 export type MachineDaemonClientMessage =
+  | MachineDaemonSleepResultReport
   | MachineDaemonHarnessActionResultReport
   | MachineDaemonWorktreeActionResultReport
   | MachineDaemonTextTaskResultReport
@@ -580,6 +616,7 @@ type MachineDaemonUnregistered = { requestId?: string } & { type: "unregistered"
 type MachineDaemonShutdown = { reason?: string } & { type: "shutdown_requested" };
 
 export type MachineDaemonServerMessage =
+  | MachineDaemonSleepCommand
   | MachineDaemonHarnessActionCommand
   | MachineDaemonWorktreeActionCommand
   | MachineDaemonTextTaskCommand

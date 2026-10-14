@@ -252,7 +252,7 @@ test("Machine list says since when an online daemon left work unanswered", async
 test("Machine claim leases queued PostgreSQL commands with exact epoch evidence", async () => {
   const db = database((query) => query.name === "machine_control_daemon_lock_v1"
     ? [daemon]
-    : query.name === "machine_control_claim_candidates_v8"
+    : query.name === "machine_control_claim_candidates_v9"
       ? [{ command_id: "spawn-1", command_type: "spawn", version: 1, lease_generation: null,
           payload_json: { type: "machine_spawn_agent", requestId: "spawn-1",
             spaceId: "space-1", channelId: "channel-1" } }]
@@ -274,7 +274,7 @@ test("Machine claim leases queued PostgreSQL commands with exact epoch evidence"
   });
   assert.equal(value.commands[0].payload.spaceId, "space-1");
   assert.equal(value.commands[0].leaseUntil, "2099-08-30T00:01:00.000Z");
-  const candidates = db.calls.find((call) => call.name === "machine_control_claim_candidates_v8");
+  const candidates = db.calls.find((call) => call.name === "machine_control_claim_candidates_v9");
   assert.match(candidates.text, /LEFT JOIN data\.agent_launches launch/u);
   assert.match(candidates.text, /'spaceId',launch\.space_id/u);
   const claim = db.calls.find((call) => call.name === "machine_control_claim_v3");
@@ -939,3 +939,47 @@ function batchIssueReadRows(query, rows) {
 function machinePrincipal(overrides = {}) {
   return { kind: "machine", id: "machine-daemon:user-1:machine-1:host-1", ownerUserId: "user-1", machineId: "machine-1", hostId: "host-1", ...overrides };
 }
+
+test("a sleep is issued only to a daemon that sleeps on the Hub's word, with an exact envelope", async () => {
+  const payload = { type: "machine_sleep_agent", requestId: "sleep-1", runId: "run-1", executionKey: "execution-1",
+    instanceId: "instance-1", idleForMillis: 1_790_000_000_000 };
+  const input = { commandId: "issue-sleep", action: "issue", controlId: "sleep-1", commandType: "sleep",
+    ownerUserId: "user-1", ownerEmail: "one@example.com", machineId: "machine-1", hostId: "host-1",
+    daemonId: "daemon-1", principal: { kind: "user", id: "user-1" }, payload };
+  const make = capable => database(query => query.name === "machine_control_daemon_lock_v1" ? [daemon]
+    : query.name === "machine_sleep_daemon_v1" ? capable ? [{}] : []
+    : query.name === "machine_control_issue_v1" ? [{ command_id: "sleep-1" }] : []);
+  const db = make(true);
+  await new PostgresMachineControlRepository(db).command(input);
+  assert.deepEqual(db.calls.find(call => call.name === "machine_sleep_daemon_v1").values,
+    ["user-1", "machine-1", "machine_sleep_agent_v1"]);
+  assert.ok(db.calls.some(call => call.name === "machine_control_issue_v1"));
+  const absent = make(false);
+  await assert.rejects(new PostgresMachineControlRepository(absent).command(input),
+    error => error.code === "sleep_unavailable");
+  assert.equal(absent.calls.some(call => call.name === "machine_control_issue_v1"), false);
+  for (const patch of [{ idleForMillis: -1 }, { runId: "" }, { reason: "extra" }]) {
+    await assert.rejects(new PostgresMachineControlRepository(make(true)).command({ ...input,
+      payload: { ...payload, ...patch } }), error => error.code === "invalid_sleep_command");
+  }
+});
+
+test("a sleep result names the issued Run and says whether it slept", async () => {
+  const issued = { type: "machine_sleep_agent", requestId: "sleep-1", runId: "run-1", executionKey: "execution-1",
+    instanceId: "instance-1", idleForMillis: 1 };
+  const payload = { type: "machine_sleep_result", requestId: "sleep-1", runId: "run-1", executionKey: "execution-1",
+    instanceId: "instance-1", slept: false, reason: "not_idle" };
+  const db = database(query => query.name === "machine_control_daemon_lock_v1" ? [daemon]
+    : query.name === "machine_control_complete_replay_lock_v2" ? [{ command_type: "sleep",
+      status: "completed", payload_json: issued, result_json: payload }] : []);
+  const repository = new PostgresMachineControlRepository(db);
+  const input = { commandId: "complete-sleep", action: "complete", controlId: "sleep-1",
+    ownerUserId: "user-1", ownerEmail: "one@example.com", machineId: "machine-1", hostId: "host-1",
+    daemonId: "daemon-1", connectionEpoch: 1, eventType: "machine_sleep_result", payload,
+    principal: machinePrincipal() };
+  assert.equal((await repository.command(input)).reused, true);
+  for (const patch of [{ runId: "run-2" }, { slept: "yes" }, { reason: "bored" }]) {
+    await assert.rejects(repository.command({ ...input, payload: { ...payload, ...patch } }),
+      error => error.code === "machine_command_result_mismatch");
+  }
+});

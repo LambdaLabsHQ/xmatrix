@@ -633,6 +633,20 @@ pub enum MachineDaemonCommand {
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+    /// The Hub decided a resting Run has been idle long enough to sleep. The
+    /// daemon verifies its own facts first: the Run still rests, with no task
+    /// execution, background task or other activity for at least
+    /// `idle_for_millis` by its own clock; only then does it end the process
+    /// as a sleep. Otherwise it declines.
+    MachineSleepAgent {
+        request_id: String,
+        run_id: String,
+        execution_key: String,
+        instance_id: String,
+        idle_for_millis: u64,
+        #[serde(default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
     /// The owner lists or reclaims the git worktrees on this Machine. Paths
     /// name trees from a listing; the daemon reclaims only trees it finds
     /// registered with git itself, behind its own gates.
@@ -854,6 +868,18 @@ pub enum MachineDaemonReport {
     MachineTextTaskResult {
         request_id: String,
         result: MachineTextTaskOutcome,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
+    /// Whether the daemon put the Run to sleep, or why it declined.
+    MachineSleepResult {
+        request_id: String,
+        run_id: String,
+        execution_key: String,
+        instance_id: String,
+        slept: bool,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        reason: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
@@ -1087,6 +1113,7 @@ impl MachineDaemonCommand {
             | Self::MachineQuotaProbe { relay_lease, .. }
             | Self::MachineHarnessAction { relay_lease, .. }
             | Self::MachineTextTask { relay_lease, .. }
+            | Self::MachineSleepAgent { relay_lease, .. }
             | Self::MachineWorktreeAction { relay_lease, .. } => relay_lease.as_ref(),
         }
     }
@@ -2878,6 +2905,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
         | "machine_quota_probe"
         | "machine_harness_action"
         | "machine_text_task"
+        | "machine_sleep_agent"
         | "machine_worktree_action"
         | "machine_recover_reply"
         | "machine_worktree_cleanup" => Some(

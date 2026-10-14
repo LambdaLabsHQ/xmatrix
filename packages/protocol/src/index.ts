@@ -390,7 +390,10 @@ export type {
   MachineDaemonWorktreeCleanupCommand as MachineWorktreeCleanupMessage,
   MachineDaemonWorktreeCleanupResultReport,
   MachineDaemonWorktreeCleanupResultReport as MachineWorktreeCleanupResultMessage,
+  MachineDaemonSleepCommand,
+  MachineDaemonSleepResultReport,
 } from "./connections/machine-daemon.js";
+export { MACHINE_SLEEP_CAPABILITY } from "./connections/machine-daemon.js";
 
 
 export type {

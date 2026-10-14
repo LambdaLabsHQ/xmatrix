@@ -116,6 +116,10 @@ fn replay_result_matches_command(
         Some("machine_quota_probe") => ("machine_quota_probe_result", &["requestId"]),
         Some("machine_harness_action") => ("machine_harness_action_result", &["requestId"]),
         Some("machine_text_task") => ("machine_text_task_result", &["requestId"]),
+        Some("machine_sleep_agent") => (
+            "machine_sleep_result",
+            &["requestId", "runId", "executionKey", "instanceId"],
+        ),
         Some("machine_worktree_action") => ("machine_worktree_action_result", &["requestId"]),
         _ => return Ok(false),
     };
@@ -178,6 +182,7 @@ fn command_admission_report(command: &MachineDaemonCommand) -> error::Result<Mac
         MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
         | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
         | MachineDaemonCommand::MachineTextTask { request_id, .. }
+        | MachineDaemonCommand::MachineSleepAgent { request_id, .. }
         | MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id.clone(), None, None)
         }
@@ -250,6 +255,7 @@ fn prepare_command_effect(
             (request_id, "harness_action")
         }
         MachineDaemonCommand::MachineTextTask { request_id, .. } => (request_id, "text_task"),
+        MachineDaemonCommand::MachineSleepAgent { request_id, .. } => (request_id, "sleep"),
         MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id, "worktree_action")
         }
@@ -578,6 +584,43 @@ async fn execute_leased_text_task(
     Some(MachineDaemonReport::MachineTextTaskResult {
         request_id,
         result,
+        relay_lease,
+    })
+}
+
+/// The Hub decided a resting Run sleeps; this daemon checks its own facts and
+/// either ends the process as a sleep or says why it would not.
+async fn execute_sleep_on_hub_word(
+    registry: &DaemonRunRegistry,
+    command: MachineDaemonCommand,
+) -> Option<MachineDaemonReport> {
+    let MachineDaemonCommand::MachineSleepAgent {
+        request_id,
+        run_id,
+        execution_key,
+        instance_id,
+        idle_for_millis,
+        relay_lease,
+    } = command
+    else {
+        return None;
+    };
+    let declined = crate::sleep_daemon_child_on_hub_word(
+        registry,
+        &run_id,
+        &execution_key,
+        &instance_id,
+        std::time::Duration::from_millis(idle_for_millis),
+    )
+    .await
+    .err();
+    Some(MachineDaemonReport::MachineSleepResult {
+        request_id,
+        run_id,
+        execution_key,
+        instance_id,
+        slept: declined.is_none(),
+        reason: declined.map(str::to_string),
         relay_lease,
     })
 }
@@ -2124,6 +2167,8 @@ async fn cmd_daemon_connected(
             "machine_harness_action_v1",
             // The daemon answers one bounded text task with a fresh, tool-less harness process.
             "machine_text_task_v1",
+            // The daemon sleeps a resting Run on the Hub's word, after its own check.
+            "machine_sleep_agent_v1",
             "machine_harness_cursor_launcher_v1",
             // The daemon parses and runs the `uninstall` harness action.
             "machine_harness_uninstall_v1",
@@ -2178,6 +2223,7 @@ async fn cmd_daemon_connected(
             "machine_harness_inventory_v1".to_string(),
             "machine_harness_action_v1".to_string(),
             "machine_text_task_v1".to_string(),
+            "machine_sleep_agent_v1".to_string(),
             "machine_harness_cursor_launcher_v1".to_string(),
             "machine_harness_uninstall_v1".to_string(),
             "machine_harness_release_v1".to_string(),
@@ -2729,6 +2775,19 @@ async fn cmd_daemon_connected(
                             };
                             if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
                                 eprintln!("{} failed to report text task result: {error}", "⚠".yellow().bold());
+                            }
+                        });
+                    }
+                    MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineSleepAgent { .. }) => {
+                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let registry = run_registry.clone();
+                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { relay, effect_journal, effect_id, .. } = context;
+                            let Some(report) = execute_sleep_on_hub_word(&registry, command).await else {
+                                return;
+                            };
+                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                                eprintln!("{} failed to report sleep result: {error}", "⚠".yellow().bold());
                             }
                         });
                     }
