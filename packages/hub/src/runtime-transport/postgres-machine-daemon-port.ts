@@ -70,6 +70,15 @@ const COMPLETION_EVENTS = new Set([
   "machine_text_task_result",
   "machine_sleep_result",
 ]);
+// A completed command that names a Run still has a Channel route. Only these
+// reports are Run lifecycle. A sleep or reply-recovery result is not: the
+// lifecycle authority rejects it as invalid_machine_lifecycle, and the daemon
+// never receives the completion it already committed.
+const RUN_LIFECYCLE_REPLICA_TYPES = new Set<string>([
+  "machine_spawn_result",
+  "machine_run_exited",
+  "machine_stop_result",
+]);
 const PRIVATE_AUDIT_FIELDS = new Set([
   "token",
   "userCode",
@@ -334,7 +343,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     if (terminalRecorded) {
       if (runLifecycleChannelId) await this.dependencies.wakeCoordinator?.(runLifecycleChannelId, ["runTerminal", "reborn"]);
       if (runId) this.activeRunChannels.delete(runId);
-    } else if (runLifecycleChannelId && runId) {
+    } else if (runLifecycleChannelId && runId && RUN_LIFECYCLE_REPLICA_TYPES.has(message.type)) {
       const lifecycleResult = await this.dependencies.runLifecycleReport({
         ...sessionCommand(session, "report", message),
         commandId: runtimeCommandId(
