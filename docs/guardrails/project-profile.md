@@ -22,7 +22,8 @@ legacy hosts retain the timestamp compatibility path. See
 
 Hub owns Codex model-capacity retry policy, persisted Run state, Channel-alarm
 scheduling and visible outcomes. Hosts report terminal/execution observations
-and execute only exact Hub permits; they have no autonomous capacity retry.
+and execute the body of an exact Hub-written Channel retry message; private
+retry input cannot start work and hosts have no autonomous capacity retry.
 See [Codex capacity recovery](../operations/codex-capacity-retry.md).
 
 Runtime delivery errors retain the sending cause chain and report the original

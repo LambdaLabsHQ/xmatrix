@@ -1671,7 +1671,7 @@ impl AgentInstanceConnectionClient {
         message: AgentInstanceClientMessage,
     ) -> Result<AgentInstanceServerMessage> {
         if !matches!(message, AgentInstanceClientMessage::AgentTurnRetry { .. })
-            || !self.hub_accepts("agent_turn_retry")
+            || !self.hub_accepts("agent_turn_retry_channel_message")
         {
             return Err(CliError::Relay("Hub retry authority is unavailable".into()));
         }
@@ -2222,6 +2222,23 @@ struct ReaderContext {
 }
 
 impl ReaderContext {
+    fn acknowledge_channel_delivery(&self, message: &ChannelMessage) {
+        let ack = AgentInstanceClientMessage::ChannelMessageAck {
+            message_id: message.message_id.clone(),
+            channel_id: message.channel_id.clone(),
+            sequence: message.sequence,
+        };
+        remember_last_channel_ack(&self.last_channel_acks, &ack);
+        if let Ok(json) = serde_json::to_string(&ack) {
+            let _ = self.write_tx.try_send(json);
+        }
+        advance_channel_waterline(
+            &self.channel_waterlines,
+            message.channel_id.clone(),
+            message.sequence,
+        );
+    }
+
     fn shutdown(&self, message: AgentInstanceServerMessage) {
         self.signals
             .intentional_close
@@ -2403,13 +2420,40 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
             if let AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
             | AgentInstanceServerMessage::ChannelHistoryReplay { message, .. } = &server_msg
             {
-                let (message_id, channel_id, sequence) =
-                    (&message.message_id, &message.channel_id, &message.sequence);
+                let channel_id = &message.channel_id;
                 let own_author = ctx
                     .registered_author
                     .lock()
                     .ok()
                     .and_then(|author| author.clone());
+                // A recovery instruction is this committed Channel message,
+                // not a private reply frame. Only its exact waiting report may
+                // consume it; otherwise it remains ordinary Channel context.
+                if let Some(retry) = channel_turn_retry(message)
+                    && retry.expires_at > now_ms()
+                    && own_author
+                        .as_ref()
+                        .is_some_and(|author| author.is_instance(&retry.instance_id))
+                {
+                    let matches_report =
+                        ctx.unanswered_reports.lock().ok().is_some_and(|reports| {
+                            reports.iter().any(|(id, report)| {
+                                id == &retry.request_id
+                                    && matches!(report,
+                            AgentInstanceClientMessage::AgentTurnRetry { operation_id, action, .. }
+                                if operation_id == &retry.operation_id && action == "failed")
+                            })
+                        });
+                    if matches_report {
+                        let waiting = ctx.pending.lock().await.remove(&retry.request_id);
+                        if let Some(waiting) = waiting
+                            && waiting.send(server_msg.clone()).is_ok()
+                        {
+                            ctx.acknowledge_channel_delivery(message);
+                            continue;
+                        }
+                    }
+                }
                 if delivery_is_acknowledged_and_dropped(
                     &server_msg,
                     own_author.as_ref(),
@@ -2428,20 +2472,7 @@ fn spawn_reader(mut read: WsRead, ctx: ReaderContext) -> tokio::task::JoinHandle
                     );
                     // Ack it so the hub's durable cursor still advances;
                     // otherwise reconnect replay would resurrect it forever.
-                    let ack = AgentInstanceClientMessage::ChannelMessageAck {
-                        message_id: message_id.clone(),
-                        channel_id: channel_id.clone(),
-                        sequence: *sequence,
-                    };
-                    remember_last_channel_ack(&ctx.last_channel_acks, &ack);
-                    if let Ok(json) = serde_json::to_string(&ack) {
-                        let _ = ctx.write_tx.try_send(json);
-                    }
-                    advance_channel_waterline(
-                        &ctx.channel_waterlines,
-                        channel_id.clone(),
-                        *sequence,
-                    );
+                    ctx.acknowledge_channel_delivery(message);
                     continue;
                 }
             }

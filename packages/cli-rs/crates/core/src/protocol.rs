@@ -733,6 +733,59 @@ impl CrossChannelReplySource {
     }
 }
 
+/// Hub-written Channel instruction. The message body is the only retry input;
+/// provider thread/turn identifiers remain private in the failure report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelTurnRetry {
+    pub version: u8,
+    pub state: String,
+    pub request_id: String,
+    pub operation_id: String,
+    pub attempt_token: String,
+    pub instance_id: String,
+    pub expires_at: u64,
+}
+
+pub fn channel_turn_retry(message: &ChannelMessage) -> Option<ChannelTurnRetry> {
+    let metadata = message.metadata.as_ref()?;
+    if message.from.kind != "system"
+        || metadata["xmatrixProvenance"] != "system_fact"
+        || metadata["xmatrixSystemNotice"] != true
+        || message.sequence.is_none_or(|sequence| sequence == 0)
+        || message.body.is_empty()
+        || message.body.len() > 2_000
+        || message.edited_at.is_some()
+        || message.recalled_at.is_some()
+        || message.deleted_at.is_some()
+    {
+        return None;
+    }
+    let retry: ChannelTurnRetry =
+        serde_json::from_value(metadata["xmatrixTurnRetry"].clone()).ok()?;
+    if retry.version != 1
+        || retry.state != "issued"
+        || retry.instance_id.is_empty()
+        || retry.instance_id.len() > 300
+        || retry
+            .instance_id
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
+        || [&retry.request_id, &retry.operation_id, &retry.attempt_token]
+            .iter()
+            .any(|id| {
+                id.is_empty()
+                    || id.len() > 160
+                    || !id
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+            })
+    {
+        return None;
+    }
+    Some(retry)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelMessage {

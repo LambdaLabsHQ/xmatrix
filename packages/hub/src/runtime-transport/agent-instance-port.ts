@@ -425,9 +425,10 @@ export class AgentInstanceRuntimeTransport {
    * waits rather than recording an intent: an unanswered request is a failure,
    * not a silent switch.
    */
-  /** Exact-run Hub permit delivery; this live route creates no retry authority. */
+  /** Exact-run terminal receipt only. Retry input must travel as a Channel message. */
   deliverTurnRetry(input: { runId: string; instanceId: string; ownerUserId: string; channelId: string;
     message: Extract<AgentInstanceServerMessage, { type: "agent_turn_retry_decision" }> }): boolean {
+    if (input.message.action !== "stop" || input.message.input !== undefined) return false;
     const targets = Array.from(this.sockets.entries()).filter(([, session]) =>
       session.run.kind === "channel-instance" && session.run.runId === input.runId &&
       session.run.instanceId === input.instanceId && session.principal.ownerUserId === input.ownerUserId &&
@@ -1003,7 +1004,7 @@ function deliveryWasAuthoredBy(
 function messageSenderFromDelivery(value: unknown): MessageSender | undefined {
   const record = plainDeliveryRecord(value);
   if (!record) return undefined;
-  const kind = record.kind === "agent" || record.kind === "app" || record.kind === "user"
+  const kind = record.kind === "agent" || record.kind === "app" || record.kind === "user" || record.kind === "system"
     ? record.kind
     : undefined;
   const label = typeof record.label === "string" && record.label.trim()

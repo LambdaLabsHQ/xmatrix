@@ -67,7 +67,7 @@ impl CodexAppSession {
     ) -> error::Result<CodexTurnResult> {
         let mut recovery = request
             .trace_relay
-            .filter(|relay| relay.hub_accepts("agent_turn_retry"))
+            .filter(|relay| relay.hub_accepts("agent_turn_retry_channel_message"))
             .map(|relay| CodexHubRetryOperation {
                 relay: relay.clone(),
                 operation_id: request
@@ -117,26 +117,19 @@ impl CodexAppSession {
                 })
                 .await;
             let authorized = match answer {
-                Ok(protocol::AgentInstanceServerMessage::AgentTurnRetryDecision {
-                    operation_id,
-                    action,
-                    thread_id,
-                    turn_id,
-                    attempt_token: token,
-                    input: Some(input),
-                    ..
-                }) if action == "retry"
-                    && offer.safe_to_continue
-                    && operation_id == operation.operation_id
-                    && thread_id == offer.thread_id
-                    && turn_id == offer.turn_id
-                    && attempt_token.as_deref() != Some(token.as_str())
-                    && !token.is_empty()
-                    && !input.is_empty() =>
-                {
-                    attempt_token = Some(token);
-                    continuation = input;
-                    true
+                Ok(protocol::AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+                    | protocol::AgentInstanceServerMessage::ChannelHistoryReplay { message, .. }) => {
+                    if let Some(retry) = protocol::channel_turn_retry(&message)
+                        && offer.safe_to_continue
+                        && retry.operation_id == operation.operation_id
+                        && request.agent.instance_id.as_deref() == Some(retry.instance_id.as_str())
+                        && request.trace_channel_id == Some(message.channel_id.as_str())
+                        && attempt_token.as_deref() != Some(retry.attempt_token.as_str())
+                    {
+                        attempt_token = Some(retry.attempt_token);
+                        continuation = message.body;
+                        true
+                    } else { false }
                 }
                 Ok(protocol::AgentInstanceServerMessage::AgentTurnRetryDecision {
                     operation_id,

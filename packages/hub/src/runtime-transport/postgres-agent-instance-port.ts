@@ -89,7 +89,7 @@ type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServer
  * connect: a Hub closes the socket on an unknown type, so a newer runtime
  * sends one only when its Hub lists it.
  */
-export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry"] as const;
+export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry", "agent_turn_retry_channel_message"] as const;
 
 /** The card a Run posts when its harness asks its own question (runtime_harness_questions.rs). */
 const HARNESS_QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
