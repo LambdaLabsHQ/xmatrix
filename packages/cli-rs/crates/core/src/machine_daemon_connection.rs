@@ -493,6 +493,9 @@ pub enum MachineDaemonCommand {
         /// The Space's rules page, which the Agent reads on demand.
         #[serde(default)]
         space_rules_page_id: Option<String>,
+        /// Names of the apps connected to the Space, for the launch prompt.
+        #[serde(default)]
+        connected_apps: Vec<String>,
         #[serde(default)]
         resume: Option<bool>,
         #[serde(default)]
