@@ -88,7 +88,8 @@ type HistoryMessage = Message<"join_channel"> | Message<"leave_channel"> |
 type RuntimeSignalMessage = Exclude<
   PortMessage,
   HistoryMessage | Message<"unregister"> | Message<"channel_message"> | Message<"channel_activity"> |
-  Message<"channel_message_ack"> | Message<"agent_turn_retry"> | Message<"harness_question_closed">
+  Message<"channel_message_ack"> | Message<"agent_turn_retry"> | Message<"harness_question_closed"> |
+  Message<"agent_parameter_control_result">
 >;
 type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServerMessage[] | undefined;
 
@@ -98,7 +99,7 @@ type AuthorityOutput = AgentInstanceServerMessage | readonly AgentInstanceServer
  * sends one only when its Hub lists it.
  */
 export const AGENT_INSTANCE_HUB_CAPABILITIES = ["channel_activity", "agent_turn_retry", "agent_turn_retry_channel_message",
-  "harness_question_closed"] as const;
+  "harness_question_closed", "agent_parameter_control_result"] as const;
 
 /** The card a Run posts when its harness asks its own question (runtime_harness_questions.rs). */
 const HARNESS_QUESTIONNAIRE_KIND = "xmatrix.questionnaire.v1";
@@ -298,6 +299,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         return decision;
       }
       case "harness_question_closed": return this.withdrawQuestion(session, message);
+      case "agent_parameter_control_result": return this.reportParameterControl(session, message);
       case "agent_lifecycle": {
         const failure = classifiedTurnFailure(message);
         const published = await this.dependencies.signals.publish(session, failure);
@@ -598,6 +600,31 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
   }
 
   /**
+   * A fact the Hub states in the Instance's Channel, replying to what it is
+   * about: shown as xMatrix under the owner, of its own kind so it is nobody's
+   * speech, and keyed so a resent report posts nothing new.
+   */
+  private async appendHubNotice(session: Readonly<AgentInstanceRuntimeSession>, notice: {
+    noticeId: string; body: string; messageKind: string; replyToMessageId: string;
+    appMetadata?: Record<string, unknown>;
+  }): Promise<void> {
+    const ownerUserId = session.principal.ownerUserId;
+    await this.dependencies.messages.append({
+      commandId: runtimeCommandId("agent-append", notice.noticeId),
+      messageId: notice.noticeId,
+      channelId: session.run.channelId,
+      body: notice.body,
+      messageKind: notice.messageKind,
+      principal: { kind: "user", id: ownerUserId },
+      senderSnapshot: productAgentSystemNoticeSenderSnapshot(ownerUserId),
+      residual: { replyToMessageId: notice.replyToMessageId,
+        appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, ...notice.appMetadata } },
+    }, { actorUserId: ownerUserId }).catch((error) => {
+      if (!(error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict)) throw error;
+    });
+  }
+
+  /**
    * The asking Instance's harness withdrew a card's question. Hub settles the
    * card (only this Instance's own), which ends its wait, and says so in the
    * Channel, so an answer sent later is refused with a reason rather than
@@ -607,9 +634,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"harness_question_closed">,
   ): Promise<AuthorityOutput> {
-    if (!session.principal.channelWriteAllowed || session.run.kind !== "channel-instance") {
-      throw new RuntimeClientOperationError("agent_read_only_session");
-    }
+    requireChannelWriter(session);
     if (typeof message.cardRequestId !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/u.test(message.cardRequestId)) {
       throw new RuntimeClientOperationError("invalid_agent_message_fields");
     }
@@ -624,23 +649,39 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     const receipt: AuthorityOutput = message.requestId
       ? { type: "pong", requestId: message.requestId, ts: new Date().toISOString() } : undefined;
     if (!settled?.changed) return receipt;
-    const ownerUserId = session.principal.ownerUserId;
     const label = session.principal.agentName.replace(/[@＠`\r\n]/gu, " ").trim() || "The agent";
-    const noticeId = runtimeCommandId("questionnaire-withdrawn", cardMessageId);
-    await this.dependencies.messages.append({
-      commandId: runtimeCommandId("agent-append", noticeId),
-      messageId: noticeId,
-      channelId,
+    await this.appendHubNotice(session, {
+      noticeId: runtimeCommandId("questionnaire-withdrawn", cardMessageId),
       body: `${label} withdrew this question and is no longer waiting for an answer here.`,
       messageKind: QUESTIONNAIRE_WITHDRAWN_KIND,
-      principal: { kind: "user", id: ownerUserId },
-      senderSnapshot: productAgentSystemNoticeSenderSnapshot(ownerUserId),
-      residual: { replyToMessageId: cardMessageId, appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
-        xmatrixQuestionnaireState: { messageId: cardMessageId, state: "cancelled" } } },
-    }, { actorUserId: ownerUserId }).catch((error) => {
-      if (!(error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict)) throw error;
+      replyToMessageId: cardMessageId,
+      appMetadata: { xmatrixQuestionnaireState: { messageId: cardMessageId, state: "cancelled" } },
     });
     return receipt;
+  }
+
+  /**
+   * The Instance applied (or refused) a `/config` or `/fast` control and
+   * reported what it did. Hub words the notice and posts it as its own fact,
+   * replying to the control, rather than the Instance posting prose as speech.
+   */
+  private async reportParameterControl(
+    session: Readonly<AgentInstanceRuntimeSession>,
+    message: Message<"agent_parameter_control_result">,
+  ): Promise<AuthorityOutput> {
+    requireChannelWriter(session);
+    if (message.channelId !== session.run.channelId || typeof message.sourceMessageId !== "string" ||
+        !message.sourceMessageId.trim() || message.sourceMessageId.length > 300) {
+      throw new RuntimeClientOperationError("invalid_agent_message_fields");
+    }
+    const label = `${session.principal.agentName}${session.run.channelInstanceId ? `:${session.run.channelInstanceId}` : ""}`;
+    await this.appendHubNotice(session, {
+      noticeId: runtimeCommandId("parameter-control", `${session.run.instanceId}:${message.sourceMessageId}`),
+      body: parameterControlNotice(label, message),
+      messageKind: "xmatrix.system.parameter-control",
+      replyToMessageId: message.sourceMessageId.trim(),
+    });
+    return undefined;
   }
 
   private async persistTurnFailureNotice(
@@ -1175,4 +1216,30 @@ function turnFailureLifecycle(channelId: string, error: string): Message<"agent_
     layer: AGENT_TURN_FAILURE_LIFECYCLE_LAYER, status: AGENT_TURN_FAILURE_LIFECYCLE_STATUS,
     reason: AGENT_TURN_FAILURE_LIFECYCLE_REASON, detail: boundAgentTurnFailureDetail(error),
     snapshot: { run: "failed", process: "online" } });
+}
+
+/** Hub's words for what a parameter control did, from the Instance's facts. */
+export function parameterControlNotice(label: string,
+  result: Pick<Message<"agent_parameter_control_result">, "parameter" | "action" | "current" | "choices" | "notice" | "error">): string {
+  const who = label.replace(/[@＠`\r\n]/gu, " ").trim() || "The agent";
+  const text = (value: unknown) => typeof value === "string" ? boundAgentTurnFailureDetail(value).replace(/[@＠]/gu, "﹫") : "";
+  const parameter = text(result.parameter);
+  const named = parameter ? `\`${parameter}\`` : "a parameter";
+  if (text(result.error)) {
+    return `Could not ${result.action === "query" ? "read" : "change"} ${named} for ${who}: ${text(result.error)}`;
+  }
+  const current = text(result.current) || "not reported";
+  const choices = Array.isArray(result.choices) ? result.choices.slice(0, 25).map(text).filter(Boolean) : [];
+  const providerNote = text(result.notice) ? ` (${text(result.notice)})` : "";
+  if (result.action === "query") {
+    return `${who} ${named}: \`${current}\`${providerNote}.${choices.length ? ` Choices: ${choices.join(", ")}.` : ""}`;
+  }
+  return `Set ${named} to \`${current}\` for ${who}${providerNote}.`;
+}
+
+/** Only a writing Channel Instance states facts in its Channel. */
+function requireChannelWriter(session: Readonly<AgentInstanceRuntimeSession>): void {
+  if (!session.principal.channelWriteAllowed || session.run.kind !== "channel-instance") {
+    throw new RuntimeClientOperationError("agent_read_only_session");
+  }
 }

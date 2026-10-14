@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { recordingAgentInstancePort } from "./support/agent-instance-port.mjs";
+import { channelInstanceSession, recordingAgentInstancePort } from "./support/agent-instance-port.mjs";
 import { questionnaireAnswerTarget, settledQuestionnaireRefusal } from "../src/questionnaire-answer.ts";
 import { questionnaireStateOf } from "@xmatrix/protocol";
 
@@ -11,11 +11,7 @@ import { questionnaireStateOf } from "@xmatrix/protocol";
  * the Hub settles the card, which ends its wait, and says so in the Channel,
  * so a later answer is refused with the reason rather than becoming a task.
  */
-const session = {
-  principal: { ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1",
-    agentName: "codex", runId: "run-1", executionKey: "execution-1", channelWriteAllowed: true },
-  run: { kind: "channel-instance", instanceId: "instance-1", channelId: "channel", channelInstanceId: "2" },
-};
+const session = channelInstanceSession();
 const withdrawal = { type: "harness_question_closed", requestId: "report-1", channelId: "channel", cardRequestId: "card-1" };
 
 test("a withdrawal settles only the asking Instance's card and says so once", async () => {

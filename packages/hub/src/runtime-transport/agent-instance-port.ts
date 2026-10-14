@@ -71,6 +71,7 @@ export const AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES = [
   "agent_lifecycle",
   "agent_turn_retry",
   "harness_question_closed",
+  "agent_parameter_control_result",
   "event_publish",
 ] as const;
 
@@ -279,6 +280,7 @@ export class AgentInstanceRuntimeTransport {
       reportEffortSwitch: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportTurnRetry: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportQuestionClosed: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
+      reportParameterControl: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       reportLifecycle: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       publishEvent: (ws, message) => this.sockets.ordered.schedule(this.dispatch(ws, message)),
       traceHistoryResult: (ws, message) => this.sockets.ordered.schedule(

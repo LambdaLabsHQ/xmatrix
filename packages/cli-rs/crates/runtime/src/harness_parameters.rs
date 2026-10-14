@@ -599,6 +599,68 @@ pub(crate) fn add_commands(
     }
 }
 
+/// The Hub capability that words parameter controls from their facts.
+pub(crate) const PARAMETER_CONTROL_RESULT: &str = "agent_parameter_control_result";
+
+/// Report what a parameter control did. A Hub that words these gets the facts
+/// (the parameter, its value now, its choices, or the original error); an
+/// older one gets the former channel text.
+pub(crate) async fn report_parameter_control(
+    relay: &crate::agent_instance_connection::AgentInstanceConnectionClient,
+    channel_id: &str,
+    source_message_id: &str,
+    requested: &ParameterCommand,
+    catalog: &[protocol::HarnessParameter],
+    outcome: Result<String, String>,
+) {
+    if !relay.hub_accepts(PARAMETER_CONTROL_RESULT) {
+        let notice = outcome.unwrap_or_else(|error| format!("Parameter control failed: {error}"));
+        let _ = relay
+            .send_channel_message(channel_id.to_string(), notice)
+            .await;
+        return;
+    }
+    let _ = relay.send_message(parameter_control_result(
+        channel_id,
+        source_message_id,
+        requested,
+        catalog,
+        outcome.err(),
+    ));
+}
+
+pub(crate) fn parameter_control_result(
+    channel_id: &str,
+    source_message_id: &str,
+    requested: &ParameterCommand,
+    catalog: &[protocol::HarnessParameter],
+    error: Option<String>,
+) -> protocol::AgentInstanceClientMessage {
+    let (parameter, action) = match requested {
+        Ok((id, ParameterAction::Query)) => (Some(id.clone()), "query"),
+        Ok((id, ParameterAction::Select(_))) => (Some(id.clone()), "select"),
+        Ok((id, ParameterAction::Toggle)) => (Some(id.clone()), "toggle"),
+        Err(_) => (None, "query"),
+    };
+    let entry = parameter
+        .as_deref()
+        .and_then(|id| catalog.iter().find(|candidate| candidate.id == id));
+    let error = error.or_else(|| requested.as_ref().err().cloned());
+    protocol::AgentInstanceClientMessage::AgentParameterControlResult {
+        request_id: None,
+        channel_id: channel_id.to_string(),
+        source_message_id: source_message_id.to_string(),
+        parameter,
+        action: action.into(),
+        current: entry.and_then(|entry| entry.current_value.clone()),
+        choices: entry
+            .map(|entry| entry.options.iter().take(100).cloned().collect())
+            .unwrap_or_default(),
+        notice: entry.and_then(|entry| entry.notice.clone()),
+        error,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ParameterAction {
     Query,
@@ -650,6 +712,39 @@ pub(crate) fn command(text: &str) -> Option<ParameterCommand> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_parameter_control_reports_its_facts_not_a_sentence() {
+        let mut fast = choice("fast", "Fast", vec!["on".into(), "off".into()], Some("on".into())).unwrap();
+        fast.notice = Some("cooldown".into());
+        let result = parameter_control_result(
+            "channel-1",
+            "message-1",
+            &Ok(("fast".into(), ParameterAction::Toggle)),
+            std::slice::from_ref(&fast),
+            None,
+        );
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["type"], "agent_parameter_control_result");
+        assert_eq!(json["sourceMessageId"], "message-1");
+        assert_eq!(json["parameter"], "fast");
+        assert_eq!(json["action"], "toggle");
+        assert_eq!(json["current"], "on");
+        assert_eq!(json["choices"], serde_json::json!(["on", "off"]));
+        assert_eq!(json["notice"], "cooldown");
+        assert!(json.get("error").is_none());
+        // A refused control carries the original error.
+        let refused = parameter_control_result(
+            "channel-1",
+            "message-1",
+            &Err("Use /config <parameter> [value]".into()),
+            &[],
+            None,
+        );
+        let json = serde_json::to_value(&refused).unwrap();
+        assert_eq!(json["error"], "Use /config <parameter> [value]");
+        assert!(json.get("parameter").is_none());
+    }
+
     #[test]
     fn parameter_status_includes_provider_notice_for_disabled_and_cooldown_switches() {
         let mut fast = choice(

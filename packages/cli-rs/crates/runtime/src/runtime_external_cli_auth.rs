@@ -1106,18 +1106,19 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
                 };
                 let passthrough = single_message_slash_passthrough(&inbound_messages, &agent);
                 ack_inbound_channel_messages(&relay, &inbound_messages);
-                if passthrough
+                if let Some(requested) = passthrough
                     .as_deref()
                     .and_then(crate::harness_parameters::command)
-                    .is_some()
                 {
-                    let _ = relay
-                        .send_channel_message(
-                            primary_channel_id,
-                            "ZCode app-server does not advertise configurable parameters"
-                                .to_string(),
-                        )
-                        .await;
+                    crate::harness_parameters::report_parameter_control(
+                        &relay,
+                        &primary_channel_id,
+                        &inbound_messages[0].message_id,
+                        &requested,
+                        &[],
+                        Err("ZCode app-server does not advertise configurable parameters".into()),
+                    )
+                    .await;
                     continue;
                 }
                 let goal_command = passthrough.as_deref().and_then(parse_goal_command);
@@ -2575,6 +2576,10 @@ impl ChannelControlledRuntime for AcpRun<'_> {
 
     fn parameter_presence(&self) -> PresencePatch {
         PresencePatch::presentation(self.presentation())
+    }
+
+    fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter> {
+        self.presentation().parameters.unwrap_or_default()
     }
 }
 
