@@ -114,9 +114,12 @@ Apple's event id, so an Automation can use
 `--on appstoreconnect:version:com.example.app`.
 
 Apple gives no API for creating the app record, answering App Privacy,
-accepting agreements, or replying to App Review; those stay in App Store
-Connect, as does the App Review sign-in password. Reading App Review's messages
-needs the optional Web session credential. In the xMatrix desktop app, Sign in
+accepting agreements, or replying to App Review. The first two, and reading
+App Review's messages, go through the App Store Connect website with the
+optional Web session credential (`create_app`, `set_privacy` and `privacy`,
+`review_messages`); accepting agreements and replying to App Review stay in
+App Store Connect, as does the App Review sign-in password. The Web session is
+saved like this. In the xMatrix desktop app, Sign in
 to App Store Connect under Credentials opens Apple's own sign-in page in a
 window of its own; once signed in, the app saves the session and closes the
 window. Elsewhere, sign in at appstoreconnect.apple.com, copy the Cookie header
