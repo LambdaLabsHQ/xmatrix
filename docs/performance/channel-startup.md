@@ -406,23 +406,26 @@ HTML container at the original cadence.
 
 Animation visibility follows clipping in production. The work dock observes
 its horizontal strip once per roster; fully clipped islands pause their
-animations and any positive-area intersection resumes them. Avatar and icon
+animations and any positive-area intersection resumes them. Icon
 animation surfaces share a viewport observer, and inert mobile panels pause
 their descendants. This keeps invisible targets without compositor layers
 from forcing full paint-artifact updates during unrelated visible work. No
 content is hidden or paint-contained to achieve this, so hover cards and
 shadows retain their existing overflow.
 
-Busy/waking status dots and elapsed timer rings use component-owned Web
-Animations rather than CSS iteration events. Their two-second pulse and
-1.6-second rotation retain the same geometry and easing. The shared visibility
-observer pauses each actual target without losing phase; the component that
-makes a mobile pane inert also suspends its clocks. Changing reduced motion
-cancels these effects and restores the static dot or twelve-o'clock arc;
-reenabling motion starts a new effect. Unmount cancels the effect and releases
-the shared observer and motion-preference subscription. Browsers without Web
-Animations display the same static decoration. These clocks schedule no
-JavaScript frames and do not modify native event registration.
+Avatar status dots and waking faces are static. Live presence still updates
+colour, solid or hollow fill, greying and rest marks, without an opacity clock
+or visibility subscription for each avatar.
+
+Elapsed timer rings use component-owned Web Animations rather than CSS
+iteration events. Their 1.6-second rotation retains the same geometry and
+easing. The shared visibility observer pauses each actual target without
+losing phase; the component that makes a mobile pane inert also suspends its
+clocks. Changing reduced motion cancels these effects and restores the static
+twelve-o'clock arc; reenabling motion starts a new effect. Unmount cancels the
+effect and releases the shared observer and motion-preference subscription.
+Browsers without Web Animations display the same static decoration. These
+clocks schedule no JavaScript frames and do not modify native event registration.
 
 Empty/plain drafts also skip the mention display registry until an address is
 present. Textarea transitions cover field chrome explicitly: switching between

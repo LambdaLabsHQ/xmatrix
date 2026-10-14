@@ -9072,8 +9072,6 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
    clips; any positive viewport intersection resumes their existing animation. */
 [data-animation-visible="false"],
 [data-animation-visible="false"]::before,
-[data-animation-visible="false"]::after,
-.identity-avatar[data-animation-visible="false"] .identity-avatar-face,
-.identity-avatar[data-animation-visible="false"] .identity-avatar-status {
+[data-animation-visible="false"]::after {
   animation-play-state: paused !important;
 }

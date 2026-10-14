@@ -4,9 +4,7 @@ import { memo, type MouseEvent } from "react";
 import { AlertTriangle, Boxes, Bot, Moon, Server, UserRound } from "lucide-react";
 import { LoadingImage } from "@/components/dashboard/content-skeleton";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
-import { useAnimationVisibility } from "@/components/ui/animation-visibility";
 import { cn } from "@/lib/utils";
-import { useDecorationAnimation } from "../ui/decoration-animation";
 
 type IdentityKind = "agent" | "app" | "human" | "machine" | "system";
 type IdentityAvatarSize = "xs" | "sm" | "md" | "lg";
@@ -93,15 +91,12 @@ export const IdentityAvatar = memo(function IdentityAvatar({
   const imageSrc = avatarImageSrc(imageUrl);
   const tone = avatarTone(label);
   const rest = identityRestStatus(status);
-  const animationRef = useAnimationVisibility(rest === "waking");
-  const statusAnimationRef = useDecorationAnimation("pulse", status === "busy" || rest === "waking");
   const imageFallback = initials
     ? initials
     : <Icon className={iconSizeClasses[size]} />;
 
   return (
     <AvatarRoot
-      ref={animationRef}
       type={onClick ? "button" : undefined}
       onClick={onClick}
       onContextMenu={(event) => event.preventDefault()}
@@ -124,8 +119,7 @@ export const IdentityAvatar = memo(function IdentityAvatar({
           sizeClasses[size],
           toneClasses[kind],
           // A resting Instance is still the Channel's, greyed until a message wakes it.
-          rest && "opacity-55 grayscale",
-          rest === "waking" && "animate-pulse"
+          rest && "opacity-55 grayscale"
         )}
       >
         {imageSrc ? (
@@ -160,7 +154,6 @@ export const IdentityAvatar = memo(function IdentityAvatar({
         </span>
       ) : status && status !== "offline" && (
         <span
-          ref={statusAnimationRef}
           className={cn(
             "identity-avatar-status absolute -right-0.5 -top-0.5 rounded-full border border-background",
             statusSizeClasses[size],
@@ -232,8 +225,8 @@ export function identityRestStatus(
 
 /**
  * A presence dot: the one place the vivid status colours live (see
- * status-vocabulary.test). Yellow means work in hand: solid and breathing
- * while the Agent itself is working, a still ring while it waits on CI, the
+ * status-vocabulary.test). Yellow means work in hand: solid
+ * while the Agent itself is working, a ring while it waits on CI, the
  * network or its background tasks. Green is free to take work; online and
  * idle say the same thing to a reader, so they look the same
  * (docs/design/agent-status.md).

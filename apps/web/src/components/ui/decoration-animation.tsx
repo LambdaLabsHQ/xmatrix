@@ -11,7 +11,6 @@ export function AnimationActivityScope({ active, children }: { active: boolean; 
   return <AnimationActivity value={active && parentActive}>{children}</AnimationActivity>;
 }
 
-type DecorationKind = "pulse" | "spin";
 type DecorationClock = Pick<Animation, "playState" | "play" | "pause" | "cancel">;
 type ClockFactory = (element: HTMLElement) => DecorationClock | undefined;
 type VisibilityTarget = (element: HTMLElement) => { element: HTMLElement; root?: Element | Document | null };
@@ -94,20 +93,11 @@ function useDecorationClock(createClock: ClockFactory, enabled: boolean, visibil
 /** Ordinary Web Animations keep these compositor clocks independent of CSS
  * iteration events. Visibility and pane activity pause without losing phase;
  * reduced motion cancels the effect and restores the static CSS appearance. */
-export function useDecorationAnimation(kind: DecorationKind, enabled = true) {
-  const createClock = useCallback((element: HTMLElement) => {
-    // Pulse's easing belongs to each half, as in the CSS keyframes.
-    const pulse = kind === "pulse";
-    return element.animate(pulse ? [
-      { opacity: 1, offset: 0, easing: "cubic-bezier(0.4, 0, 0.6, 1)" },
-      { opacity: 0.5, offset: 0.5, easing: "cubic-bezier(0.4, 0, 0.6, 1)" },
-      { opacity: 1, offset: 1 },
-    ] : [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
-      duration: pulse ? 2000 : 1600,
-      iterations: Infinity,
-      easing: "linear",
-    });
-  }, [kind]);
+export function useDecorationSpin(enabled = true) {
+  const createClock = useCallback((element: HTMLElement) => element.animate(
+    [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+    { duration: 1600, iterations: Infinity, easing: "linear" },
+  ), []);
   return useDecorationClock(createClock, enabled);
 }
 
