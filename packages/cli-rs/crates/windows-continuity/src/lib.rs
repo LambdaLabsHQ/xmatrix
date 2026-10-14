@@ -1371,11 +1371,11 @@ impl CommandEffectJournal {
         self.load_or_empty()?
             .effects
             .into_values()
-            // Hub refuses an expired probe's result; replaying it after a
+            // Hub refuses an expired command's result; replaying it after a
             // restart is only refused again.
             .filter(|effect| {
                 effect.phase == EffectPhase::EffectCommitted
-                    && !expired_quota_probe(effect, unix_millis())
+                    && !expired_effect(effect, unix_millis())
             })
             .map(|effect| {
                 effect.result.ok_or(ContinuityError::Invalid(
@@ -1450,22 +1450,27 @@ impl CommandEffectJournal {
         }
     }
 
-    /// Write the journal within its size budget. Quota probes past their
-    /// window are dropped on every write. Over budget, acknowledged effects
-    /// and quota probes an older CLI journaled (no receipt time; a probe only
-    /// reads, so answering it again is harmless) go next, oldest first. Any
-    /// other unacknowledged effect is never dropped: it fences a redelivery
-    /// against running twice.
+    /// Write the journal within its size budget. Every effect rolls out once
+    /// Hub can no longer deliver its command again (see `effect_retention_ms`);
+    /// one an older CLI wrote without a receipt time is dated from the first
+    /// write that sees it. Over budget, acknowledged effects and quota probes
+    /// (a probe only reads, so answering it again is harmless) go next, oldest
+    /// first. Any other unacknowledged effect stays until it rolls out: it
+    /// fences a redelivery against running twice.
     fn store(&self, payload: &EffectJournalPayload) -> Result<(), ContinuityError> {
         let mut payload = payload.clone();
         let now = unix_millis();
         payload
             .effects
-            .retain(|_, effect| !expired_quota_probe(effect, now));
+            .retain(|_, effect| !expired_effect(effect, now));
         loop {
+            let mut dated = payload.clone();
+            for effect in dated.effects.values_mut() {
+                effect.received_unix_ms.get_or_insert(now);
+            }
             let envelope = EffectJournalEnvelope {
-                checksum_sha256: payload_checksum(&payload)?,
-                payload: payload.clone(),
+                checksum_sha256: payload_checksum(&dated)?,
+                payload: dated,
             };
             let bytes = serde_json::to_vec_pretty(&envelope)?;
             if bytes.len() <= MAX_EFFECT_JOURNAL_BYTES {
@@ -1475,8 +1480,7 @@ impl CommandEffectJournal {
                 .effects
                 .iter()
                 .filter(|(_, effect)| {
-                    effect.phase == EffectPhase::HubCompletionAcked
-                        || effect.received_unix_ms.is_none() && quota_probe(effect)
+                    effect.phase == EffectPhase::HubCompletionAcked || quota_probe(effect)
                 })
                 .map(|(id, effect)| (effect.received_unix_ms.unwrap_or(0), id.clone()))
                 .collect::<Vec<_>>();
@@ -1492,22 +1496,31 @@ impl CommandEffectJournal {
     }
 }
 
-/// A quota probe answers for one connection and Hub refuses its result once
-/// it expires (under a minute), so its effect is only kept for an hour. Other
-/// actions can keep renewing their lease and report late, so they stay until
-/// Hub acknowledges them.
-const QUOTA_PROBE_EFFECT_TTL_MS: u64 = 60 * 60 * 1000;
+const HOUR_MS: u64 = 60 * 60 * 1000;
+const DAY_MS: u64 = 24 * HOUR_MS;
+
+/// How long an effect is kept after receipt. Hub never delivers a command
+/// again once it expires: a quota probe within a minute, a harness, text or
+/// worktree action within 10 minutes, anything else within 30 days. The
+/// margin past that covers an action still renewing its lease to report.
+fn effect_retention_ms(effect: &CommandEffect) -> u64 {
+    // A profile daemon journals `<profile>:<type>`.
+    match effect.command_type.rsplit(':').next() {
+        Some("quota_probe") => HOUR_MS,
+        Some("harness_action" | "text_task" | "worktree_action") => DAY_MS,
+        _ => 31 * DAY_MS,
+    }
+}
 
 fn quota_probe(effect: &CommandEffect) -> bool {
     // A profile daemon journals `<profile>:<type>`.
     effect.command_type.rsplit(':').next() == Some("quota_probe")
 }
 
-fn expired_quota_probe(effect: &CommandEffect, now_unix_ms: u64) -> bool {
-    quota_probe(effect)
-        && effect
-            .received_unix_ms
-            .is_some_and(|at| now_unix_ms.saturating_sub(at) > QUOTA_PROBE_EFFECT_TTL_MS)
+fn expired_effect(effect: &CommandEffect, now_unix_ms: u64) -> bool {
+    effect
+        .received_unix_ms
+        .is_some_and(|at| now_unix_ms.saturating_sub(at) > effect_retention_ms(effect))
 }
 
 fn unix_millis() -> u64 {
@@ -2219,56 +2232,78 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// Write a journal as an older CLI left it: no dating, no budget.
+    fn write_as_older_cli(path: &Path, payload: EffectJournalPayload) {
+        let envelope = EffectJournalEnvelope {
+            checksum_sha256: payload_checksum(&payload).unwrap(),
+            payload,
+        };
+        fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    }
+
     #[test]
-    fn effect_journal_ages_out_quota_probes_but_keeps_renewable_actions() {
+    fn effect_journal_rolls_each_effect_out_after_hub_can_no_longer_deliver_it() {
         let root = std::env::temp_dir().join(format!(
-            "xmatrix-effect-journal-age-{}",
+            "xmatrix-effect-journal-roll-{}",
             uuid::Uuid::new_v4()
         ));
         let journal = CommandEffectJournal::new(root.join("effects.json"));
-        for (index, command_type) in ["p:quota_probe", "harness_action", "spawn"]
-            .iter()
-            .enumerate()
-        {
+        let commit = |control_id: &str, command_type: &str| {
             let effect = journal
-                .receive(&format!("old-{index}"), command_type, &"a".repeat(64))
+                .receive(control_id, command_type, &"a".repeat(64))
                 .unwrap();
             journal.admit(&effect.stable_id()).unwrap();
             journal
-                .commit_result(&effect.stable_id(), serde_json::json!({"index": index}))
+                .commit_result(&effect.stable_id(), serde_json::json!({"id": control_id}))
                 .unwrap();
+        };
+        for (control_id, command_type) in [
+            ("probe-2h", "p:quota_probe"),
+            ("harness-2h", "harness_action"),
+            ("harness-2d", "harness_action"),
+            ("spawn-2d", "spawn"),
+            ("spawn-32d", "spawn"),
+            ("legacy-spawn", "spawn"),
+        ] {
+            commit(control_id, command_type);
         }
-        // Age every effect past the window, as an unacknowledged result sits.
+        let now = unix_millis();
         let mut payload = journal.load_or_empty().unwrap();
         for effect in payload.effects.values_mut() {
-            effect.received_unix_ms = Some(unix_millis() - QUOTA_PROBE_EFFECT_TTL_MS - 1);
+            effect.received_unix_ms = match effect.control_id.as_str() {
+                "probe-2h" | "harness-2h" => Some(now - 2 * HOUR_MS),
+                "harness-2d" | "spawn-2d" => Some(now - 2 * DAY_MS),
+                "spawn-32d" => Some(now - 32 * DAY_MS),
+                _ => None,
+            };
         }
-        journal.store(&payload).unwrap();
-        journal
-            .receive("fresh", "quota_probe", &"b".repeat(64))
-            .unwrap();
-        let kept = journal
-            .load_or_empty()
-            .unwrap()
-            .effects
-            .into_values()
-            .map(|effect| effect.control_id)
+        // Written without dating, as an older CLI left it.
+        write_as_older_cli(&root.join("effects.json"), payload);
+        commit("fresh", "quota_probe");
+        let kept = journal.load_or_empty().unwrap().effects;
+        let ids = kept
+            .values()
+            .map(|effect| effect.control_id.clone())
             .collect::<BTreeSet<_>>();
-        // A harness action may still hold a renewed lease and a spawn may be
-        // redelivered, so both stay until Hub acknowledges them.
         assert_eq!(
-            kept,
+            ids,
             BTreeSet::from([
-                "old-1".to_string(),
-                "old-2".to_string(),
-                "fresh".to_string()
+                "harness-2h".to_string(),
+                "spawn-2d".to_string(),
+                "legacy-spawn".to_string(),
+                "fresh".to_string(),
             ])
+        );
+        // An undated effect is dated from this write and rolls out on schedule.
+        assert!(
+            kept.values()
+                .all(|effect| effect.received_unix_ms.is_some())
         );
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn a_full_effect_journal_drops_older_cli_quota_probes_but_keeps_other_fences() {
+    fn a_full_effect_journal_drops_quota_probes_but_keeps_other_fences() {
         let root = std::env::temp_dir().join(format!(
             "xmatrix-effect-journal-full-{}",
             uuid::Uuid::new_v4()
@@ -2292,9 +2327,7 @@ mod tests {
                 effect.received_unix_ms = None;
             }
         }
-        journal.store(&payload).unwrap();
         // Older-CLI actions of unknown age may have acted; they stay.
-        let mut payload = journal.load_or_empty().unwrap();
         for (control_id, command_type) in [
             ("harness-old", "harness_action"),
             ("worktree-old", "worktree_action"),
@@ -2313,7 +2346,7 @@ mod tests {
             };
             payload.effects.insert(effect.stable_id(), effect);
         }
-        journal.store(&payload).unwrap();
+        write_as_older_cli(&root.join("effects.json"), payload);
         commit("probe-new", "quota_probe").unwrap();
         commit("probe-newer", "quota_probe").unwrap();
         let kept = journal
@@ -2327,11 +2360,34 @@ mod tests {
         assert!(kept.contains("harness-old") && kept.contains("worktree-old"));
         assert!(kept.contains("probe-newer"));
         assert!(!kept.contains("probe-0"));
-        // With nothing safe left to drop, a command is refused, never a fence lost.
+        // A probe gives way to a spawn; with only fences left, a command is
+        // refused and no fence is lost.
+        commit("spawn-3", "spawn").unwrap();
+        let refused = (4..8)
+            .map(|index| commit(&format!("spawn-{index}"), "spawn"))
+            .find(Result::is_err);
         assert!(matches!(
-            commit("spawn-3", "spawn"),
-            Err(ContinuityError::FrameTooLarge(_))
+            refused,
+            Some(Err(ContinuityError::FrameTooLarge(_)))
         ));
+        let kept = journal.load_or_empty().unwrap().effects;
+        assert!(
+            !kept
+                .values()
+                .any(|effect| effect.command_type == "quota_probe")
+        );
+        for fence in [
+            "spawn-1",
+            "spawn-2",
+            "spawn-3",
+            "harness-old",
+            "worktree-old",
+        ] {
+            assert!(
+                kept.values().any(|effect| effect.control_id == fence),
+                "{fence}"
+            );
+        }
         let replayed = journal
             .receive("spawn-1", "spawn", &"a".repeat(64))
             .unwrap();
