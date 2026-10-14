@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   SUPERSEDED_ANNOTATION_NAMESPACE,
@@ -19,7 +19,9 @@ import type { TimelineItem } from "./workspace-shell-message-model";
  * `supersededBy`; a message that arrived live is judged moments after the
  * next one from its sender, within Jev's five-second budget. So each new
  * message is followed by a few reads of recent judgments, and then nothing
- * until the next message.
+ * until the next message. The reads belong to the Channel, not to the
+ * message: in a busy conversation the messages share them, one read per
+ * interval, instead of each one starting its own.
  */
 const LOOKS_PER_MESSAGE = 3;
 const LOOK_INTERVAL_MS = 5_000;
@@ -57,13 +59,15 @@ export function useChannelSupersessions(
   const tail = timeline[timeline.length - 1];
   // Only a message someone said can supersede the one before it.
   const tailMessageId = tail?.messageId && !timelineItemActivity(tail) ? tail.messageId : undefined;
+  // Until when the last message still has reads to come.
+  const lookUntilRef = useRef(0);
   const query = useQuery<[messageId: string, supersededBy: string][]>({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "channel-supersessions",
-      [channelId ?? "", tailMessageId ?? ""]),
+      [channelId ?? ""]),
     enabled: Boolean(channelId && token && tailMessageId && user?.id),
     retry: false,
     staleTime: Infinity,
-    refetchInterval: (state) => state.state.dataUpdateCount < LOOKS_PER_MESSAGE ? LOOK_INTERVAL_MS : false,
+    refetchInterval: () => Date.now() < lookUntilRef.current ? LOOK_INTERVAL_MS : false,
     queryFn: async ({ signal }) => {
       const search = new URLSearchParams({
         namespace: SUPERSEDED_ANNOTATION_NAMESPACE,
@@ -77,6 +81,16 @@ export function useChannelSupersessions(
       return parseSupersessions(payload);
     },
   });
+  const look = query.refetch;
+  const looking = Boolean(channelId && token && user?.id);
+  useEffect(() => {
+    if (!looking || !tailMessageId) return;
+    const resting = Date.now() >= lookUntilRef.current;
+    // The read at arrival and one per interval after it: the last falls inside this.
+    lookUntilRef.current = Date.now() + (LOOKS_PER_MESSAGE - 1.5) * LOOK_INTERVAL_MS;
+    // Reads already under way reach this message too; otherwise it starts them.
+    if (resting) void look({ cancelRefetch: false });
+  }, [look, looking, tailMessageId]);
   const [judged, setJudged] = useState<{ channelId?: string; judgments: ReadonlyMap<string, string> }>(
     { judgments: EMPTY },
   );
