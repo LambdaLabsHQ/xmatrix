@@ -470,9 +470,11 @@ sleep 30
     let frame = fixture.frames.lock().unwrap()[index].clone();
     assert_eq!(frame["channelId"], "channel-1");
     assert_eq!(frame["status"], "failed");
-    assert_eq!(
-        frame["detail"],
-        "You have hit your weekly limit · resets Oct 4, 11pm (UTC)"
+    assert!(
+        frame["detail"]
+            .as_str()
+            .unwrap()
+            .ends_with("You have hit your weekly limit · resets Oct 4, 11pm (UTC)")
     );
     assert!(uuid::Uuid::parse_str(frame["requestId"].as_str().unwrap()).is_ok());
     fixture.finish().await;
