@@ -149,9 +149,11 @@ test("Hub reports an error it does not retry as the turn failure, with the origi
     const original = "Internal error: unknown certificate verification error (provider request 7f3a)";
     const report = { type: "agent_turn_retry", requestId: randomUUID(), operationId: randomUUID(), action: "failed",
       threadId: "provider-thread", turnId: "provider-turn", safeToContinue: true, errorMessage: original };
-    for (const requestId of [report.requestId, randomUUID()]) {
-      agent.ws.send(JSON.stringify({ ...report, requestId }));
-      const decision = await agent.inbox.waitFor(m => m.type === "agent_turn_retry_decision" && m.requestId === requestId, "stop decision");
+    // A reconnecting host replays the same report under the same request id.
+    for (const attempt of ["report", "replay"]) {
+      agent.ws.send(JSON.stringify(report));
+      const decision = await agent.inbox.waitFor(m => m.type === "agent_turn_retry_decision" &&
+        m.requestId === report.requestId, `stop decision for the ${attempt}`);
       assert.equal(decision.action, "stop");
       assert.equal(decision.reason, "ineligible", "the host stays silent: Hub reports this failure");
     }
