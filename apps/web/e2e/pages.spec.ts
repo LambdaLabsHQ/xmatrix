@@ -409,7 +409,7 @@ test.describe("on a phone", () => {
     await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
     await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
       pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
-        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes" }] }],
+        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", avatarUrl: "/agent-vendors/claude.svg" }] }],
     });
     await servePageSession(browser, server, { connect: (send) => { push = send; } });
     await browser.goto("/app", { waitUntil: "domcontentloaded" });
@@ -435,6 +435,8 @@ test.describe("on a phone", () => {
     expect(box.x + box.width, "at the right edge").toBeGreaterThan(393 - 24);
     // It replaces the edge pill for the one editing, rather than saying it twice.
     await expect(browser.getByTestId("page-people-below")).toHaveCount(0);
+    // Writing through its caret, it shows the face of the Run it writes from.
+    await expect(disc.locator("img")).toHaveAttribute("src", /claude\.svg/u);
     await browser.screenshot({ path: test.info().outputPath("pages-editor-floating-below.png") });
 
     await disc.click();

@@ -1036,6 +1036,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const people: PresentPerson[] = [
     ...present.map(({ clientId, state }) => ({ key: `client:${clientId}`, name: state.user!.name,
       color: state.user!.color, agent: state.user!.kind === "agent", blockId: state.block ?? "",
+      // An Agent writing through its caret shows the face of the Run it writes from.
+      avatarUrl: state.user!.kind === "agent" ? liveRunOf(state as PagePresenceState, liveOnPage)?.avatarUrl : undefined,
       idle: cursorPresence(state) === "idle",
       // Placed by their caret where they have one, so the edge hints point at the line.
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
