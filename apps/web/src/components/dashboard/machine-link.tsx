@@ -17,6 +17,16 @@ export type MachineLinks = {
 
 const MachineLinkContext = createContext<MachineLinks | null>(null);
 
+/** The same list while it names the same Machines of the same owners. */
+export function sameMachineTargets(
+  previous: readonly MachineLinkTarget[],
+  next: readonly MachineLinkTarget[],
+): readonly MachineLinkTarget[] {
+  return previous.length === next.length && next.every((target, index) =>
+    target.machineId === previous[index]!.machineId && target.ownerUserId === previous[index]!.ownerUserId)
+    ? previous : next;
+}
+
 export function MachineLinkProvider({ links, children }: { links: MachineLinks | null; children: ReactNode }) {
   return <MachineLinkContext.Provider value={links}>{children}</MachineLinkContext.Provider>;
 }

@@ -157,6 +157,8 @@ export const MACHINE_HARNESS_UNINSTALL_CAPABILITY = "machine_harness_uninstall_v
 export const MACHINE_HARNESS_RELEASE_CAPABILITY = "machine_harness_release_v1";
 /** A daemon without it cannot parse a `login_*` command, so none is issued or leased to it. */
 export const MACHINE_HARNESS_LOGIN_CAPABILITY = "machine_harness_login_v1";
+/** The daemon registers a starting login before its prompt can be cancelled. */
+export const MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY = "machine_harness_login_start_cancel_v1";
 export const HARNESS_LOGIN_ACTIONS: readonly HarnessAction[] = ["login_start", "login_finish", "login_cancel"];
 /** A harness action no daemon claimed within this long expires and never runs later. */
 export const HARNESS_ACTION_CLAIM_TTL_MS = 10 * 60_000;

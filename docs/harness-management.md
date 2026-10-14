@@ -186,6 +186,18 @@ without a terminal, so its owner can sign the harness in from the Agents page
 instead of opening a shell on that Machine. The owner of a registration sees a
 Sign-in section with the harness's state on that Machine and a Sign in button.
 
+- **Waiting and recovery.** A request that has not returned a sign-in result
+  after one minute shows whether the machine has picked it up. Cancel is
+  available before the link arrives when the daemon advertises
+  `machine_harness_login_start_cancel_v1`, and while waiting for approval on
+  all supported daemons. Older daemons keep status recovery and show an update
+  hint instead of offering cancellation they cannot reliably perform.
+  The daemon registers a starting session before waiting for its prompt, so
+  cancellation reaches the process and late output cannot restore it.
+  Status-read failures offer a read-only retry; they never issue another sign-in.
+  After 20 minutes the UI stops observing and says the remote sign-in may still
+  be running; cancel it before starting again. Posting an action is bounded to
+  30 seconds, and each status read uses the shared workspace request deadline.
 - **Recipe.** `login.flow` is `device_code` (the harness prints a URL and, if it
   is not already in the URL, a one-time code; it finishes on its own once the
   owner approves) or `url_paste_code` (the sign-in page shows a code the

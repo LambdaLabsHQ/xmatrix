@@ -993,11 +993,15 @@ export class PostgresPageRepository {
       for (const page of candidates) {
         const [head, before] = (byPage.get(page.page_id) ?? []).sort((a, b) => Number(b.revision) - Number(a.revision));
         if (!head) continue;
-        const after = canonicalPageMarkdown(head.body ?? "");
+        // Edits are stored in the form the editor saves, so revisions compare
+        // as text; only a first revision (a created or migrated page's body as
+        // written) is put in that form. Parsing every page here is seconds of
+        // CPU inside the transaction, which timed out its COMMIT (XMATRIX-HUB-7T).
+        const after = head.body ?? "";
         const { revision, authors, createdAt } = revisionOf(head);
         const created = !before && revision === 1;
-        const { blockId, gist } = before ? pageChangeGist(canonicalPageMarkdown(before.body ?? ""), after)
-          : { blockId: null, gist: null };
+        const older = before && (Number(before.revision) === 1 ? canonicalPageMarkdown(before.body ?? "") : before.body ?? "");
+        const { blockId, gist } = older !== undefined ? pageChangeGist(older, after) : { blockId: null, gist: null };
         const block = blockId ? pageBlocks(after).find((item) => item.id === blockId) : undefined;
         changes.push({ pageId: page.page_id, title: page.title, revision, createdAt, authors, created,
           block: block ? { id: block.id, title: block.title } : null, gist });
@@ -1842,8 +1846,15 @@ export class PostgresPageRepository {
           maxRows: sectioned.length,
         });
         for (const head of heads) {
-          const titles = new Map(pageBlocks(canonicalPageMarkdown(head.body ?? "")).map((block) => [block.id, block.title]));
-          for (const agent of byPage.get(head.page_id) ?? []) {
+          // Readers see the canonical form, and stored heads almost always are;
+          // a whole page is put in that form only when a section is missing.
+          const sections = (body: string) => new Map(pageBlocks(body).map((block) => [block.id, block.title]));
+          const agents = byPage.get(head.page_id) ?? [];
+          let titles = sections(head.body ?? "");
+          if (agents.some((agent) => agent.blockId && !titles.has(agent.blockId))) {
+            titles = sections(canonicalPageMarkdown(head.body ?? ""));
+          }
+          for (const agent of agents) {
             const section = agent.blockId ? titles.get(agent.blockId) : undefined;
             if (section) agent.section = section;
           }

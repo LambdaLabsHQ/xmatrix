@@ -22,16 +22,18 @@ for how long) are words in the work dock, never more colours.
 
 | Display status | When | Dot |
 |---|---|---|
-| `busy` (working) | The turn is running and the runtime reports no wait | Yellow, solid, breathing (static under reduced motion) |
+| `busy` (working) | The turn is running and the runtime reports no wait | Yellow, solid, still |
 | `waiting` | The runtime reports `runtimeState.waiting` | Yellow ring, still |
 | `online` / `idle` (free) | Live, no work in hand | Green, solid |
 | `sleeping` / `interrupted` | Offline with a rest state | Moon / warning badge, face greyed (unchanged) |
-| `waking` | Rest state `waking` | Grey ring, pulsing |
+| `waking` | Rest state `waking` | Grey ring, still |
 | `machine offline` | The Instance's machine is unreachable | Red, solid |
 | `offline` | Gone | No dot |
 
-Yellow means work in hand: fill and motion say whether the Agent itself is
-working (solid, breathing) or waiting on something outside it (ring, still).
+Yellow means work in hand: fill says whether the Agent itself is working
+(solid) or waiting on something outside it (ring). Avatar status dots and
+waking faces stay still everywhere; live status changes still update their
+colour, fill, greyed face and rest badge.
 Blue is no longer a presence colour.
 
 Being stuck is told in words, not by recolouring the dot: the work dock's Now

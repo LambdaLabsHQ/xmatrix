@@ -14,7 +14,7 @@ import {
   MachineDaemonConnectionController,
   type MachineDaemonConnectionPort,
 } from "../connections/machine-daemon/controller";
-import { RuntimeClientOperationError } from "./runtime-operation-failure";
+import { RuntimeClientOperationError, supersededMachineDaemonConnection } from "./runtime-operation-failure";
 import { RuntimeSocketState } from "./ordered-socket-dispatch";
 import {
   parseMachineDaemonHibernationAttachment,
@@ -475,6 +475,7 @@ export class MachineDaemonRuntimeTransport {
 
   private async dispatch(ws: WebSocket, message: ExecutableMachineDaemonMessage): Promise<void> {
     const requestId = "requestId" in message ? message.requestId : undefined;
+    let superseded = false;
     await this.sockets.authenticatedOperation(ws, requestId, "Machine Daemon", "Workstation request could not be completed", async (session) => {
       const activationMessage = message.type === "machine_activation_prepare" ||
         message.type === "machine_activation_advance";
@@ -484,7 +485,10 @@ export class MachineDaemonRuntimeTransport {
       if (!session.activationPhase && activationMessage) {
         throw new RuntimeClientOperationError("machine_activation_context_required");
       }
-      const output = await this.backend.execute(session, message);
+      const output = await this.backend.execute(session, message).catch((error: unknown) => {
+        superseded = supersededMachineDaemonConnection(error);
+        throw error;
+      });
       this.sockets.sendOutput(ws, output);
       const receipt = activationReceiptFromOutput(output);
       if (receipt) session.activationPhase = receipt.phase;
@@ -521,6 +525,11 @@ export class MachineDaemonRuntimeTransport {
         this.onConfirmedInstanceStop?.(message.instanceId.trim());
       }
     });
+    // Nothing this connection sends can pass the epoch fence again. Close it as
+    // the replaced connection it is; the newer one keeps the route online.
+    if (superseded && this.sockets.has(ws)) {
+      this.evictRouteSocket(ws, MACHINE_DAEMON_ROUTE_CLOSE.replacedByConnect);
+    }
   }
 
   private async refresh(ws: WebSocket, message: Message<"refresh_auth">): Promise<void> {

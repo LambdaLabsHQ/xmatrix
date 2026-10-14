@@ -1134,6 +1134,10 @@ pub struct CommandEffect {
     pub admitted_monotonic_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_committed_monotonic_ms: Option<u64>,
+    /// Wall-clock receipt (Unix milliseconds). It only ages an effect out of
+    /// the bounded journal; Hub stays the authority on command expiry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub received_unix_ms: Option<u64>,
 }
 
 impl CommandEffect {
@@ -1209,6 +1213,7 @@ impl CommandEffectJournal {
             received_monotonic_ms: Some(process_monotonic_millis()),
             admitted_monotonic_ms: None,
             effect_committed_monotonic_ms: None,
+            received_unix_ms: Some(unix_millis()),
         };
         let stable_id = candidate.stable_id();
         if let Some(existing) = payload.effects.get(&stable_id) {
@@ -1366,7 +1371,12 @@ impl CommandEffectJournal {
         self.load_or_empty()?
             .effects
             .into_values()
-            .filter(|effect| effect.phase == EffectPhase::EffectCommitted)
+            // Hub refuses an expired probe's result; replaying it after a
+            // restart is only refused again.
+            .filter(|effect| {
+                effect.phase == EffectPhase::EffectCommitted
+                    && !expired_quota_probe(effect, unix_millis())
+            })
             .map(|effect| {
                 effect.result.ok_or(ContinuityError::Invalid(
                     "committed command effect has no result",
@@ -1440,17 +1450,72 @@ impl CommandEffectJournal {
         }
     }
 
+    /// Write the journal within its size budget. Quota probes past their
+    /// window are dropped on every write. Over budget, acknowledged effects
+    /// and quota probes an older CLI journaled (no receipt time; a probe only
+    /// reads, so answering it again is harmless) go next, oldest first. Any
+    /// other unacknowledged effect is never dropped: it fences a redelivery
+    /// against running twice.
     fn store(&self, payload: &EffectJournalPayload) -> Result<(), ContinuityError> {
-        let envelope = EffectJournalEnvelope {
-            checksum_sha256: payload_checksum(payload)?,
-            payload: payload.clone(),
-        };
-        let bytes = serde_json::to_vec_pretty(&envelope)?;
-        if bytes.len() > MAX_EFFECT_JOURNAL_BYTES {
-            return Err(ContinuityError::FrameTooLarge(bytes.len()));
+        let mut payload = payload.clone();
+        let now = unix_millis();
+        payload
+            .effects
+            .retain(|_, effect| !expired_quota_probe(effect, now));
+        loop {
+            let envelope = EffectJournalEnvelope {
+                checksum_sha256: payload_checksum(&payload)?,
+                payload: payload.clone(),
+            };
+            let bytes = serde_json::to_vec_pretty(&envelope)?;
+            if bytes.len() <= MAX_EFFECT_JOURNAL_BYTES {
+                return atomic_replace(&self.path, &bytes);
+            }
+            let mut evictable = payload
+                .effects
+                .iter()
+                .filter(|(_, effect)| {
+                    effect.phase == EffectPhase::HubCompletionAcked
+                        || effect.received_unix_ms.is_none() && quota_probe(effect)
+                })
+                .map(|(id, effect)| (effect.received_unix_ms.unwrap_or(0), id.clone()))
+                .collect::<Vec<_>>();
+            if evictable.is_empty() {
+                return Err(ContinuityError::FrameTooLarge(bytes.len()));
+            }
+            evictable.sort();
+            let evict = (evictable.len() / 8).max(1);
+            for (_, id) in evictable.into_iter().take(evict) {
+                payload.effects.remove(&id);
+            }
         }
-        atomic_replace(&self.path, &bytes)
     }
+}
+
+/// A quota probe answers for one connection and Hub refuses its result once
+/// it expires (under a minute), so its effect is only kept for an hour. Other
+/// actions can keep renewing their lease and report late, so they stay until
+/// Hub acknowledges them.
+const QUOTA_PROBE_EFFECT_TTL_MS: u64 = 60 * 60 * 1000;
+
+fn quota_probe(effect: &CommandEffect) -> bool {
+    // A profile daemon journals `<profile>:<type>`.
+    effect.command_type.rsplit(':').next() == Some("quota_probe")
+}
+
+fn expired_quota_probe(effect: &CommandEffect, now_unix_ms: u64) -> bool {
+    quota_probe(effect)
+        && effect
+            .received_unix_ms
+            .is_some_and(|at| now_unix_ms.saturating_sub(at) > QUOTA_PROBE_EFFECT_TTL_MS)
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            elapsed.as_millis().try_into().unwrap_or(u64::MAX)
+        })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2151,6 +2216,130 @@ mod tests {
             EffectPhase::HubCompletionAcked
         );
         assert!(journal.pending_completion_results().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn effect_journal_ages_out_quota_probes_but_keeps_renewable_actions() {
+        let root = std::env::temp_dir().join(format!(
+            "xmatrix-effect-journal-age-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let journal = CommandEffectJournal::new(root.join("effects.json"));
+        for (index, command_type) in ["p:quota_probe", "harness_action", "spawn"]
+            .iter()
+            .enumerate()
+        {
+            let effect = journal
+                .receive(&format!("old-{index}"), command_type, &"a".repeat(64))
+                .unwrap();
+            journal.admit(&effect.stable_id()).unwrap();
+            journal
+                .commit_result(&effect.stable_id(), serde_json::json!({"index": index}))
+                .unwrap();
+        }
+        // Age every effect past the window, as an unacknowledged result sits.
+        let mut payload = journal.load_or_empty().unwrap();
+        for effect in payload.effects.values_mut() {
+            effect.received_unix_ms = Some(unix_millis() - QUOTA_PROBE_EFFECT_TTL_MS - 1);
+        }
+        journal.store(&payload).unwrap();
+        journal
+            .receive("fresh", "quota_probe", &"b".repeat(64))
+            .unwrap();
+        let kept = journal
+            .load_or_empty()
+            .unwrap()
+            .effects
+            .into_values()
+            .map(|effect| effect.control_id)
+            .collect::<BTreeSet<_>>();
+        // A harness action may still hold a renewed lease and a spawn may be
+        // redelivered, so both stay until Hub acknowledges them.
+        assert_eq!(
+            kept,
+            BTreeSet::from([
+                "old-1".to_string(),
+                "old-2".to_string(),
+                "fresh".to_string()
+            ])
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_full_effect_journal_drops_older_cli_quota_probes_but_keeps_other_fences() {
+        let root = std::env::temp_dir().join(format!(
+            "xmatrix-effect-journal-full-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let journal = CommandEffectJournal::new(root.join("effects.json"));
+        let bulk = "x".repeat(MAX_EFFECT_JOURNAL_BYTES / 5);
+        let commit = |control_id: &str, command_type: &str| {
+            let effect = journal.receive(control_id, command_type, &"a".repeat(64))?;
+            journal.admit(&effect.stable_id())?;
+            journal.commit_result(&effect.stable_id(), serde_json::json!({"bulk": bulk}))
+        };
+        commit("spawn-1", "spawn").unwrap();
+        commit("spawn-2", "spawn").unwrap();
+        for index in 0..2 {
+            commit(&format!("probe-{index}"), "quota_probe").unwrap();
+        }
+        // Journaled by an older CLI: no wall-clock receipt.
+        let mut payload = journal.load_or_empty().unwrap();
+        for effect in payload.effects.values_mut() {
+            if effect.command_type == "quota_probe" {
+                effect.received_unix_ms = None;
+            }
+        }
+        journal.store(&payload).unwrap();
+        // Older-CLI actions of unknown age may have acted; they stay.
+        let mut payload = journal.load_or_empty().unwrap();
+        for (control_id, command_type) in [
+            ("harness-old", "harness_action"),
+            ("worktree-old", "worktree_action"),
+        ] {
+            let effect = CommandEffect {
+                control_id: control_id.into(),
+                command_type: command_type.into(),
+                payload_digest: "c".repeat(64),
+                phase: EffectPhase::Admitted,
+                result_digest: None,
+                result: None,
+                received_monotonic_ms: None,
+                admitted_monotonic_ms: None,
+                effect_committed_monotonic_ms: None,
+                received_unix_ms: None,
+            };
+            payload.effects.insert(effect.stable_id(), effect);
+        }
+        journal.store(&payload).unwrap();
+        commit("probe-new", "quota_probe").unwrap();
+        commit("probe-newer", "quota_probe").unwrap();
+        let kept = journal
+            .load_or_empty()
+            .unwrap()
+            .effects
+            .into_values()
+            .map(|effect| effect.control_id)
+            .collect::<BTreeSet<_>>();
+        assert!(kept.contains("spawn-1") && kept.contains("spawn-2"));
+        assert!(kept.contains("harness-old") && kept.contains("worktree-old"));
+        assert!(kept.contains("probe-newer"));
+        assert!(!kept.contains("probe-0"));
+        // With nothing safe left to drop, a command is refused, never a fence lost.
+        assert!(matches!(
+            commit("spawn-3", "spawn"),
+            Err(ContinuityError::FrameTooLarge(_))
+        ));
+        let replayed = journal
+            .receive("spawn-1", "spawn", &"a".repeat(64))
+            .unwrap();
+        assert_eq!(replayed.phase, EffectPhase::EffectCommitted);
+        assert!(
+            fs::metadata(root.join("effects.json")).unwrap().len()
+                <= MAX_EFFECT_JOURNAL_BYTES as u64
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
