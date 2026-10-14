@@ -542,11 +542,6 @@ fn codex_goal_status_from_get_response(value: &Value) -> Option<protocol::AgentG
         .map(codex_goal_status_from_value)
 }
 
-fn codex_goal_is_paused(goal: Option<&protocol::AgentGoalStatus>) -> bool {
-    goal.and_then(|goal| goal.status.as_deref())
-        .is_some_and(|status| status.eq_ignore_ascii_case("paused"))
-}
-
 fn codex_goal_is_active(goal: Option<&protocol::AgentGoalStatus>) -> bool {
     goal.is_some_and(|goal| match goal.active {
         Some(active) => active,
@@ -555,19 +550,6 @@ fn codex_goal_is_active(goal: Option<&protocol::AgentGoalStatus>) -> bool {
             .as_deref()
             .is_some_and(|status| status.eq_ignore_ascii_case("active")),
     })
-}
-
-fn codex_paused_goal_notice(goal: Option<&protocol::AgentGoalStatus>) -> String {
-    let objective = goal
-        .and_then(|goal| goal.objective.as_deref())
-        .map(str::trim)
-        .filter(|objective| !objective.is_empty());
-    match objective {
-        Some(objective) => {
-            format!("Goal is paused: {objective}\nSend `/goal resume` to continue it.")
-        }
-        None => "Goal is paused. Send `/goal resume` to continue it.".to_string(),
-    }
 }
 
 fn codex_goal_status_from_app_event(value: &Value) -> Option<protocol::AgentGoalStatus> {
