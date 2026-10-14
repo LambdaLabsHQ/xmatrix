@@ -13,7 +13,8 @@ export interface ChannelMessageArrival {
   activity: boolean;
 }
 
-function time(value: string | undefined): number {
+/** A timestamp in ms; 0 when absent or unreadable. */
+export function time(value: string | undefined): number {
   const parsed = value ? Date.parse(value) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : 0;
 }
