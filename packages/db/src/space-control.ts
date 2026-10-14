@@ -627,6 +627,11 @@ async function releaseChannelTreeForMove(
     values: [channelIds, at], maxRows: 0,
   });
   await transaction.query({
+    name: "channel_move_remove_gmail_notifications_v1",
+    text: "DELETE FROM data.app_gmail_routes WHERE channel_id=ANY($1::text[])",
+    values: [channelIds], maxRows: 0,
+  });
+  await transaction.query({
     name: "channel_move_remove_app_relations_v1",
     text: "DELETE FROM data.app_source_relations WHERE channel_id=ANY($1::text[])",
     values: [channelIds], maxRows: 0,

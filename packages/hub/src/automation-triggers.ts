@@ -135,13 +135,15 @@ export function connectorTriggerMatches(trigger: AutomationTrigger, event: { pro
  * that connection's Space whose event trigger concerns it. The ingress already
  * authenticated the delivery to the connection, so no further check is needed.
  */
-export async function fireConnectorAutomationTriggers(env: Env, input: { spaceId: string; provider: string;
+export async function fireConnectorAutomationTriggers(env: Env, input: { spaceId: string; provider: string; authorizedUserId?: string;
   event: { eventId: string; sourceRef: string; feature: string; summary: string; url?: string } }): Promise<number> {
+  if (input.provider === "gmail" && !input.authorizedUserId) return 0;
   const source = input.event.sourceRef.slice(input.provider.length + 1);
   const fired: FiredEvent = { id: `${input.provider}:${input.event.eventId}`.slice(0, 200), kind: "event",
     summary: input.event.summary, ...(input.event.url ? { url: input.event.url } : {}) };
   return fireAcrossShards(env, { trigger: { kind: "event", provider: input.provider }, spaceId: input.spaceId },
-    async (candidate) => (candidate.triggers as AutomationTrigger[]).some((trigger) => connectorTriggerMatches(trigger,
+    async (candidate) => (!input.authorizedUserId || candidate.authorityRootUserId === input.authorizedUserId) &&
+      (candidate.triggers as AutomationTrigger[]).some((trigger) => connectorTriggerMatches(trigger,
       { provider: input.provider, source, feature: input.event.feature })) ? fired : undefined);
 }
 

@@ -24,6 +24,12 @@ pub(crate) struct RegisteredAuthor {
     instance_id: String,
 }
 
+impl RegisteredAuthor {
+    pub(crate) fn is_instance(&self, instance_id: &str) -> bool {
+        self.instance_id == instance_id
+    }
+}
+
 /// The author registration assigned, when it assigned one.
 ///
 /// `None` when registration named no Instance. That connection has nothing in

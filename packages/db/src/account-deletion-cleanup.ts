@@ -3,6 +3,7 @@ import type { DatabaseTransaction } from "./contracts.js";
 // Only private account/control material. Shared work, billing evidence, and
 // audit history stay with their Space; scheduled Space purges run independently.
 const PRIVATE_ROWS = [
+  ["data.app_gmail_routes", "created_by"],
   ["data.human_profiles", "user_id"],
   ["data.user_space_locale_preferences", "user_id"],
   ["data.user_space_channel_view_preferences", "user_id"],

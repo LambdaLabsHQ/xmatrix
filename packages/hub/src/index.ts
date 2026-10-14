@@ -1,3 +1,5 @@
+import { registerGmailNotificationRoutes } from "./index-routes-gmail-notifications";
+import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 // First, so that error reporting is open before anything else loads.
 import "./error-reporting";
 import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
@@ -112,6 +114,7 @@ registerConnectorRoutes(app);
 registerConnectorOAuthRoutes(app);
 registerGooglePickerRoutes(app);
 registerGmailMailboxRoutes(app);
+registerGmailNotificationRoutes(app);
 registerSentryInstallationRoutes(app);
 registerChannelTransferRoutes(app);
 registerMachineNameRoutes(app);
@@ -137,6 +140,7 @@ export default {
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
     run("Account deletion maintenance", () => maintainAccountDeletions(env));
     run("Sentry event recovery", () => drainSentryEvents(env));
+    run("Gmail notification recovery and renewal", () => drainGmailNotifications(env));
     run("Harness release watch", () => watchHarnessReleasesBesidePostgres(env));
     run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
     for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {

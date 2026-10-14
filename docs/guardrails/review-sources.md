@@ -1,5 +1,13 @@
 # Guardrail Review Sources
 
+- 2026-10-14 Channel retry instructions: maintainer direction requires the
+  continuation itself to be a durable Channel message. Reviewed append replay,
+  canonical history/live identity, reserved metadata, exact pending-report
+  consumption, expiry, ordinary acknowledgements and capability rollout.
+  Private receipts acknowledge stops only; message publication owns retry
+  delivery and cannot wake unrelated Instances. See
+  [capacity recovery](../operations/codex-capacity-retry.md).
+
 - 2026-10-13 scope authorization evidence: production preflight correctly failed
   closed for v1.0.367 when successful request jobs exposed no step metadata, in
   three attempts before any production build/deploy. Reviewed the request writer,
