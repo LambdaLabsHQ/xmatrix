@@ -12,7 +12,6 @@ const FOCUSED_INSTANCES = 10;
 const nativeSocket = process.env.XMATRIX_PERF_TRANSPORT !== "cdp";
 
 test.use({ ...E2E_DESKTOP_CONTEXT, trace: "off" });
-const space = workingAgentsSpace(AGENTS, "k", { focusedInstances: FOCUSED_INSTANCES, intent: "Review channels and message performance" });
 const messages = channelHistory(40, "k-message", (row) => `Row ${row}: a **status** update with \`code\` and a list:\n\n- one\n- two`);
 
 type Traffic = { counting: boolean; reports: number; snapshots: number; last: number };
@@ -22,14 +21,17 @@ type Traffic = { counting: boolean; reports: number; snapshots: number; last: nu
  * 100 reports/s for a full minute. Ten percent of reports target the open
  * Channel, the rest exercise the thousand-Channel catalog. Each ten-second
  * window must meet the same budget: neither idle subtraction nor a long drain
- * can disguise sustained work or socket loss. Playwright DOM snapshots are
+ * can disguise sustained work or socket loss. Both bursts and evenly spaced
+ * arrivals exercise the same budget: one flush per burst must not hide a
+ * whole-catalog scan repeated on every ordinary 16ms window. Playwright DOM snapshots are
  * excluded because they walk the whole page on every test action. Native TCP
  * WebSocket delivery measures the product path; XMATRIX_PERF_TRANSPORT=cdp keeps
  * the old injected transport available for diagnostic comparisons. CDP still
  * accounts for all product script, style, layout and native renderer work.
  */
-test("a thousand Agents stay below ten percent sustained main-thread work", async ({ page }) => {
+for (const ticksPerSecond of [10, 100]) test(`a thousand Agents stay below ten percent with ${ticksPerSecond === 100 ? "even" : "burst"} reports`, async ({ page }) => {
   test.setTimeout(150_000);
+  const space = workingAgentsSpace(AGENTS, "k", { focusedInstances: FOCUSED_INSTANCES, intent: "Review channels and message performance" });
   await installRenderCounter(page);
   if (!nativeSocket) await page.addInitScript(() => {
     const traffic: Traffic = { counting: false, reports: 0, snapshots: 0, last: -1 };
@@ -70,22 +72,22 @@ test("a thousand Agents stay below ten percent sustained main-thread work", asyn
   let sent = 0;
   let otherReports = 0;
   const windows: number[] = [];
-  for (let tick = 0; tick < SECONDS * 10; tick += 1) {
-    for (let burst = 0; burst < REPORTS_PER_SECOND / 10; burst += 1) {
+  for (let tick = 0; tick < SECONDS * ticksPerSecond; tick += 1) {
+    for (let burst = 0; burst < REPORTS_PER_SECOND / ticksPerSecond; burst += 1) {
       const index = sent % 10 === 0 ? (sent / 10) % FOCUSED_INSTANCES :
         FOCUSED_INSTANCES + (otherReports++ % (AGENTS - FOCUSED_INSTANCES));
       for (const frame of space.report(index, `Step ${sent}`)) send(frame);
       sent += 1;
     }
     // Node's deadline avoids browser-side timers/actions becoming the load.
-    await delay(Math.max(0, startedAt + (tick + 1) * 100 - Date.now()));
-    if ((tick + 1) % 100 === 0) {
+    await delay(Math.max(0, startedAt + (tick + 1) * (1000 / ticksPerSecond) - Date.now()));
+    if ((tick + 1) % (10 * ticksPerSecond) === 0) {
       const current = await metrics();
       windows.push((current.TaskDuration - windowBefore.TaskDuration) / (current.Timestamp - windowBefore.Timestamp));
       windowBefore = current;
     }
   }
-  // The final burst has a full 100ms to arrive and flush before this read.
+  // The final report has the normal inter-arrival interval before this read.
   const after = await metrics();
   const elapsed = after.Timestamp - before.Timestamp;
   const nativeTraffic = nativeSocket ? await readNativeHumanSocketTraffic(page) : null;
@@ -97,6 +99,7 @@ test("a thousand Agents stay below ten percent sustained main-thread work", asyn
   const busy = (after.TaskDuration - before.TaskDuration) / elapsed;
   console.log(`[thousand-agents] ${sent} reports in ${elapsed.toFixed(1)}s: ${JSON.stringify({
     transport: nativeSocket ? "native-websocket" : "cdp-injected",
+    reportsPerTick: REPORTS_PER_SECOND / ticksPerSecond,
     mainThreadBusy: Number(busy.toFixed(3)),
     windows: windows.map(value => Number(value.toFixed(3))),
     script: Number((after.ScriptDuration - before.ScriptDuration).toFixed(2)),

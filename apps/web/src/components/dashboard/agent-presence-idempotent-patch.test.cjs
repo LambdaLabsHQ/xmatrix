@@ -222,6 +222,50 @@ test("alternating cards and snapshots reuse routing without revisiting unrelated
   assert.equal(updated[999], channels[999], "unreported Channels retain identity");
 });
 
+test("consecutive published runs do not reread unrelated Channel rosters", () => {
+  const counted = countedChannelSpace();
+  let channels = counted.channels;
+  let previous;
+  for (let index = 0; index < 100; index += 1) {
+    const batch = createChannelPresenceBatch(channels, previous?.takeRouting(channels));
+    batch.applyPresence([{ ...heartbeatAgent(), id: `agent:${index}`, instances: [{
+      ...workingInstance(), id: `instance-${index}`, channelId: `channel-${index}`, activity: `Step ${index}`,
+    }] }]);
+    channels = batch.getCommit().items;
+    previous = batch;
+  }
+  assert.ok(counted.reads() < 5_000, `separate flushes inspected unrelated presence ${counted.reads()} times`);
+  assert.equal(channels[99].memberPresence["agent:99"].instances[0].activity, "Step 99");
+  assert.equal(channels[999], counted.channels[999]);
+});
+
+test("routing transfers once and rebuilds after a catalog replacement or cleared session", () => {
+  const first = createChannelPresenceBatch(channelsWithAgentPresence());
+  first.applyPresence([heartbeatAgent()]);
+  const published = first.getCommit();
+  const second = createChannelPresenceBatch(published.items, first.takeRouting(published.items));
+  assert.equal(first.takeRouting(published.items), undefined, "a routing index has only one successor");
+  assert.throws(() => second.applyChannel({ ...published.items[0], memberPresence: {
+    malformed: { kind: "agent", instances: {} },
+  } }), /Invalid realtime Instance collection/);
+  second.applyPresence([{ ...heartbeatAgent(), instances: [{ ...workingInstance(), activity: "After rejection" }] }]);
+  const next = second.getCommit();
+  assert.equal(next.items[0].memberPresence["agent:claude"].instances[0].activity, "After rejection");
+  const replacement = [{ ...next.items[0], memberPresence: {
+    replacement: { kind: "agent", instances: [{ ...workingInstance(), id: "catalog-instance" }] },
+  } }];
+  const routing = second.takeRouting(replacement);
+  assert.equal(routing, undefined, "an external catalog write cannot inherit the old routes");
+  const third = createChannelPresenceBatch(replacement, routing);
+  const report = { ...workingInstance(), id: "catalog-instance", activity: "New catalog Run" };
+  delete report.channelId;
+  third.applyPresence([{ ...heartbeatAgent(), id: "different-principal", instances: [report] }]);
+  const current = third.getCommit();
+  assert.equal(current.items[0].memberPresence.replacement.instances[0].activity, "New catalog Run");
+  assert.equal(third.takeRouting([]), undefined, "an account reset discards routing");
+  assert.equal(third.takeRouting(current.items), undefined, "a rejected basis cannot be replayed later");
+});
+
 test("partial snapshots retain cursors, tags and quotas across an ordered state run", () => {
   const channel = channelsWithAgentPresence()[0];
   channel.readSequence = 15;
@@ -280,8 +324,15 @@ test("snapshots keep sidebar ordering and cannot cross an explicitly published s
   const batch = createChannelPresenceBatch([older]);
   batch.applyChannel({ id: "channel-2", name: "later", updatedAt: "2026-09-19T11:00:00.000Z" });
   batch.applyPresence([{ ...heartbeatAgent(), instances: [{ ...workingInstance(), activity: "Before message" }] }]);
-  const beforeMessage = batch.getSnapshot();
+  const published = batch.getCommit();
+  const beforeMessage = published.items;
   assert.deepEqual(beforeMessage.map(channel => channel.id), ["channel-2", "channel-1"]);
+  assert.equal(batch.getSnapshot(), beforeMessage, "the transferred snapshot stays stable");
+  assert.throws(() => batch.applyPresence([{ ...heartbeatAgent(), instances: [{
+    ...workingInstance(), activity: "Cannot rewrite published state",
+  }] }]), /published presence batch/);
+  assert.equal(published.byId.get(older.id).memberPresence["agent:claude"].instances[0].activity,
+    "Before message", "a completed batch cannot mutate the published key index");
   const after = createChannelPresenceBatch(beforeMessage);
   after.applyPresence([{ ...heartbeatAgent(), instances: [{ ...workingInstance(), activity: "After message" }] }]);
   assert.equal(beforeMessage[1].memberPresence["agent:claude"].instances[0].activity, "Before message");
