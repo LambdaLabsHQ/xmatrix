@@ -1371,11 +1371,11 @@ impl CommandEffectJournal {
         self.load_or_empty()?
             .effects
             .into_values()
-            // Hub has expired a short-lived command; replaying its result
-            // after a restart is only refused again.
+            // Hub refuses an expired probe's result; replaying it after a
+            // restart is only refused again.
             .filter(|effect| {
                 effect.phase == EffectPhase::EffectCommitted
-                    && !expired_short_lived(effect, unix_millis())
+                    && !expired_quota_probe(effect, unix_millis())
             })
             .map(|effect| {
                 effect.result.ok_or(ContinuityError::Invalid(
@@ -1450,8 +1450,8 @@ impl CommandEffectJournal {
         }
     }
 
-    /// Write the journal within its size budget. Short-lived effects Hub has
-    /// expired are dropped on every write. Over budget, acknowledged effects
+    /// Write the journal within its size budget. Quota probes past their
+    /// window are dropped on every write. Over budget, acknowledged effects
     /// and quota probes an older CLI journaled (no receipt time; a probe only
     /// reads, so answering it again is harmless) go next, oldest first. Any
     /// other unacknowledged effect is never dropped: it fences a redelivery
@@ -1461,7 +1461,7 @@ impl CommandEffectJournal {
         let now = unix_millis();
         payload
             .effects
-            .retain(|_, effect| !expired_short_lived(effect, now));
+            .retain(|_, effect| !expired_quota_probe(effect, now));
         loop {
             let envelope = EffectJournalEnvelope {
                 checksum_sha256: payload_checksum(&payload)?,
@@ -1476,8 +1476,7 @@ impl CommandEffectJournal {
                 .iter()
                 .filter(|(_, effect)| {
                     effect.phase == EffectPhase::HubCompletionAcked
-                        || effect.received_unix_ms.is_none()
-                            && effect.command_type.rsplit(':').next() == Some("quota_probe")
+                        || effect.received_unix_ms.is_none() && quota_probe(effect)
                 })
                 .map(|(id, effect)| (effect.received_unix_ms.unwrap_or(0), id.clone()))
                 .collect::<Vec<_>>();
@@ -1493,27 +1492,22 @@ impl CommandEffectJournal {
     }
 }
 
-/// Command types Hub expires within minutes and never leases again; their
-/// effects only answer a redelivery inside that window.
-const SHORT_LIVED_COMMANDS: [&str; 4] = [
-    "quota_probe",
-    "harness_action",
-    "text_task",
-    "worktree_action",
-];
-const SHORT_LIVED_EFFECT_TTL_MS: u64 = 60 * 60 * 1000;
+/// A quota probe answers for one connection and Hub refuses its result once
+/// it expires (under a minute), so its effect is only kept for an hour. Other
+/// actions can keep renewing their lease and report late, so they stay until
+/// Hub acknowledges them.
+const QUOTA_PROBE_EFFECT_TTL_MS: u64 = 60 * 60 * 1000;
 
-fn short_lived(effect: &CommandEffect) -> bool {
+fn quota_probe(effect: &CommandEffect) -> bool {
     // A profile daemon journals `<profile>:<type>`.
-    let command_type = effect.command_type.rsplit(':').next().unwrap_or_default();
-    SHORT_LIVED_COMMANDS.contains(&command_type)
+    effect.command_type.rsplit(':').next() == Some("quota_probe")
 }
 
-fn expired_short_lived(effect: &CommandEffect, now_unix_ms: u64) -> bool {
-    short_lived(effect)
+fn expired_quota_probe(effect: &CommandEffect, now_unix_ms: u64) -> bool {
+    quota_probe(effect)
         && effect
             .received_unix_ms
-            .is_some_and(|at| now_unix_ms.saturating_sub(at) > SHORT_LIVED_EFFECT_TTL_MS)
+            .is_some_and(|at| now_unix_ms.saturating_sub(at) > QUOTA_PROBE_EFFECT_TTL_MS)
 }
 
 fn unix_millis() -> u64 {
@@ -2226,7 +2220,7 @@ mod tests {
     }
 
     #[test]
-    fn effect_journal_ages_out_short_lived_effects_hub_will_not_redeliver() {
+    fn effect_journal_ages_out_quota_probes_but_keeps_renewable_actions() {
         let root = std::env::temp_dir().join(format!(
             "xmatrix-effect-journal-age-{}",
             uuid::Uuid::new_v4()
@@ -2247,7 +2241,7 @@ mod tests {
         // Age every effect past the window, as an unacknowledged result sits.
         let mut payload = journal.load_or_empty().unwrap();
         for effect in payload.effects.values_mut() {
-            effect.received_unix_ms = Some(unix_millis() - SHORT_LIVED_EFFECT_TTL_MS - 1);
+            effect.received_unix_ms = Some(unix_millis() - QUOTA_PROBE_EFFECT_TTL_MS - 1);
         }
         journal.store(&payload).unwrap();
         journal
@@ -2260,16 +2254,21 @@ mod tests {
             .into_values()
             .map(|effect| effect.control_id)
             .collect::<BTreeSet<_>>();
-        // A spawn may still be redelivered, so it stays until Hub acknowledges it.
+        // A harness action may still hold a renewed lease and a spawn may be
+        // redelivered, so both stay until Hub acknowledges them.
         assert_eq!(
             kept,
-            BTreeSet::from(["old-2".to_string(), "fresh".to_string()])
+            BTreeSet::from([
+                "old-1".to_string(),
+                "old-2".to_string(),
+                "fresh".to_string()
+            ])
         );
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn a_full_effect_journal_drops_older_cli_short_lived_effects_but_keeps_spawn_fences() {
+    fn a_full_effect_journal_drops_older_cli_quota_probes_but_keeps_other_fences() {
         let root = std::env::temp_dir().join(format!(
             "xmatrix-effect-journal-full-{}",
             uuid::Uuid::new_v4()
