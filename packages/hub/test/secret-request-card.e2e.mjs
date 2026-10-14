@@ -11,7 +11,12 @@ async function withSecretSpace(work) {
     RELAY_POSTGRES_SHARD_ID: "shard-0" };
   try {
     await work(f, { id: f.ids.owner, email: "owner@example.test" },
-      command => postgresMessageAppend(env, f.ids.channel, command, { spaceId: f.ids.space }));
+      // The receipt: who a first append reaches is read beside it, and a replay has none.
+      async command => {
+        const { liveRouting: _liveRouting, ...receipt } =
+          await postgresMessageAppend(env, f.ids.channel, command, { spaceId: f.ids.space });
+        return receipt;
+      });
   } finally {
     for (const table of ["idempotency_keys", "outbox", "message_mutations", "messages", "channel_content_counters",
       "message_sequence_reservations", "channel_message_sequences", "space_billing_usage", "space_storage_usage"]) {

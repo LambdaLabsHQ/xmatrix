@@ -18,7 +18,8 @@ function time(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function samePreview(left: SerializedChannel["lastMessage"], right: SerializedChannel["lastMessage"]): boolean {
+/** Whether two previews say the same about the same message. */
+export function samePreview(left: SerializedChannel["lastMessage"], right: SerializedChannel["lastMessage"]): boolean {
   return left === right || Boolean(left && right && left.messageId === right.messageId &&
     left.sentAt === right.sentAt && left.bodyPreview === right.bodyPreview && left.recalledAt === right.recalledAt);
 }
