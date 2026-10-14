@@ -45,14 +45,16 @@ function captureReadingAnchor(root: HTMLElement): ReadingAnchor | null {
   return null;
 }
 
-/* Everything whose size places the timeline's rows. Border boxes, three levels
-   down: the virtualizer's scroller, its viewport, and the header, list, and
-   footer inside it. A list padding change (rows swapped for spacer) moves the
-   rows without changing any content box. */
+/* Everything whose size places the timeline's rows. Border boxes, three layout
+   levels down: the virtualizer's scroller, its viewport, and the header, list,
+   and footer inside its visual layer. That layer does not consume a level.
+   A list padding change (rows swapped for spacer) moves the rows without
+   changing any content box. */
 export function observeTimelineBoxes(root: Element, observer: ResizeObserver, depth = 3) {
   for (const child of root.children) {
     observer.observe(child, { box: "border-box" });
-    if (depth > 1) observeTimelineBoxes(child, observer, depth - 1);
+    const remaining = child.hasAttribute("data-timeline-rise-content") ? depth : depth - 1;
+    if (remaining > 0) observeTimelineBoxes(child, observer, remaining);
   }
 }
 

@@ -157,11 +157,10 @@ test("a minute of messages into a thousand conversations costs each of them once
   expect(elapsed).toBeGreaterThanOrEqual(SECONDS);
   expect(elapsed).toBeLessThan(SECONDS + 1);
 
-  // The open conversation rendered each new row. Following its tail mounts a
-  // row or two at the other edge of the list; the rows on screen are not
-  // rendered again for a message.
-  expect(renders.messageRows).toBeGreaterThanOrEqual(toOpen);
-  expect(renders.messageRows).toBeLessThanOrEqual(4 * toOpen);
+  // Following the tail renders each new row once. The visual rise must not
+  // feed an animated viewport offset into the virtualizer and remount rows
+  // that were already on screen.
+  expect(renders.messageRows).toBe(toOpen);
   // A message never reads the list again; Channels nobody knew are asked for once a window.
   expect(listReads).toBe(0);
   expect(resolves).toBeLessThanOrEqual((SECONDS * 1000) / CATALOG_WINDOW_MS + 5);

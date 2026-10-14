@@ -143,6 +143,7 @@ import {
   type TimelineOpeningMeasure,
 } from "./timeline-opening-tail";
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
+import { TimelineVirtuosoScroller } from "./timeline-virtuoso-scroller";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, beginTimelineSendRise, isJustSentRow, playSentRowEntrance } from "./timeline-send-rise";
 import { FoldedActivityRow } from "./conversation-activity-row";
 import {
@@ -453,6 +454,7 @@ interface TimelineVirtuosoContext {
 const TIMELINE_VIRTUOSO_COMPONENTS: VirtuosoComponents<TimelineItem, TimelineVirtuosoContext> = {
   Header: ({ context }) => context.header,
   Footer: ({ context }) => context.footer,
+  Scroller: TimelineVirtuosoScroller,
 };
 
 export const MessageTimeline = memo(function MessageTimeline({
