@@ -6,6 +6,7 @@ import { LoadingImage } from "@/components/dashboard/content-skeleton";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { useAnimationVisibility } from "@/components/ui/animation-visibility";
 import { cn } from "@/lib/utils";
+import { useDecorationAnimation } from "../ui/decoration-animation";
 
 type IdentityKind = "agent" | "app" | "human" | "machine" | "system";
 type IdentityAvatarSize = "xs" | "sm" | "md" | "lg";
@@ -92,7 +93,8 @@ export function IdentityAvatar({
   const imageSrc = avatarImageSrc(imageUrl);
   const tone = avatarTone(label);
   const rest = identityRestStatus(status);
-  const animationRef = useAnimationVisibility(status === "busy" || rest === "waking");
+  const animationRef = useAnimationVisibility(rest === "waking");
+  const statusAnimationRef = useDecorationAnimation("pulse", status === "busy" || rest === "waking");
   const imageFallback = initials
     ? initials
     : <Icon className={iconSizeClasses[size]} />;
@@ -158,6 +160,7 @@ export function IdentityAvatar({
         </span>
       ) : status && status !== "offline" && (
         <span
+          ref={statusAnimationRef}
           className={cn(
             "identity-avatar-status absolute -right-0.5 -top-0.5 rounded-full border border-background",
             statusSizeClasses[size],
@@ -236,10 +239,10 @@ export function identityRestStatus(
  * (docs/design/agent-status.md).
  */
 export function identityStatusDotClass(status: string): string {
-  if (status === "busy") return "bg-amber-500 text-amber-500 motion-safe:animate-pulse";
+  if (status === "busy") return "bg-amber-500 text-amber-500";
   if (status === "waiting") return "bg-amber-500 text-amber-500 app-status-dot-ring";
   if (status === "online" || status === "idle") return "bg-emerald-500 text-emerald-500";
-  if (status === "waking") return "bg-muted-foreground text-muted-foreground app-status-dot-ring motion-safe:animate-pulse";
+  if (status === "waking") return "bg-muted-foreground text-muted-foreground app-status-dot-ring";
   if (status === "machine offline") return "bg-red-500 text-red-500";
   return "bg-muted-foreground text-muted-foreground";
 }

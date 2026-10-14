@@ -39,15 +39,13 @@ test("runtime symptoms use the same status and safe wording for every harness", 
   assert.equal(agentRuntimeNoticePhrase({severity:"unknown",sinceMillis:1}),"Agent notice");
 });
 
-test("work in hand is yellow: working breathes, waiting is a still ring", () => {
+test("work in hand is yellow: working is solid, waiting is a ring", () => {
   const working = identityStatusDotClass("busy");
   const waiting = identityStatusDotClass("waiting");
   assert.match(working, /\bbg-amber-500\b/);
-  assert.match(working, /motion-safe:animate-pulse/);
   assert.doesNotMatch(working, /app-status-dot-ring/);
   assert.match(waiting, /\bbg-amber-500\b/);
   assert.match(waiting, /\bapp-status-dot-ring\b/);
-  assert.doesNotMatch(waiting, /animate-pulse/);
 });
 
 test("online and idle are one free green, and no dot is blue any more", () => {
