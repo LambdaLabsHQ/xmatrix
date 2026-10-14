@@ -171,7 +171,9 @@ async fn cmd_external_inner(
     );
     let mut runtime_capabilities = goal_runtime_capabilities(tool, cmd, cmd_args);
     runtime_capabilities.push("harness_parameters_v1".to_string());
-    if use_codex_app_backend(tool) { runtime_capabilities.push("agent_turn_retry".into()); }
+    if use_codex_app_backend(tool) {
+        runtime_capabilities.extend(["agent_turn_retry".into(), "agent_turn_retry_channel_message".into()]);
+    }
     relay.set_runtime_capabilities(runtime_capabilities);
     let auto_join_channel_id = non_empty_env("XMATRIX_AUTO_JOIN_CHANNEL_ID");
     // Every backend receives the channel through its own delivery, so the join

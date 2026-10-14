@@ -1,4 +1,4 @@
-import { assert, execFileSync, mkdtempSync, rmSync, writeFileSync, tmpdir, path, test } from "./script-test-fixture.mjs";
+import { assert, disableDetachedGitMaintenance, execFileSync, gitMaintenanceCloneArgs, mkdtempSync, removeTemporaryDirectory, writeFileSync, tmpdir, path, test } from "./script-test-fixture.mjs";
 import {
   productionTagFromVersion,
   productionVersionFromTag,
@@ -47,7 +47,7 @@ test("production refuses mismatched tags, SHAs, and downgrades", () => {
 
 test("remote production tag verification detects movement", (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), "xmatrix-production-tag-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  t.after(() => removeTemporaryDirectory(directory));
   const origin = path.join(directory, "origin.git");
   const seed = path.join(directory, "seed");
   const checkout = path.join(directory, "checkout");
@@ -55,6 +55,8 @@ test("remote production tag verification detects movement", (t) => {
 
   execFileSync("git", ["init", "--bare", origin], { stdio: "pipe" });
   execFileSync("git", ["init", seed], { stdio: "pipe" });
+  disableDetachedGitMaintenance(origin);
+  disableDetachedGitMaintenance(seed);
   git(seed, "config", "user.name", "Release Test");
   git(seed, "config", "user.email", "release-test@example.invalid");
   writeFileSync(path.join(seed, "version.json"), '{"version":"0.16.3"}\n');
@@ -64,7 +66,7 @@ test("remote production tag verification detects movement", (t) => {
   git(seed, "tag", "-a", "xmatrix-v0.16.3", "-m", "candidate");
   git(seed, "remote", "add", "origin", origin);
   git(seed, "push", "origin", "HEAD:main", "refs/tags/xmatrix-v0.16.3");
-  execFileSync("git", ["clone", origin, checkout], { stdio: "pipe" });
+  execFileSync("git", ["clone", ...gitMaintenanceCloneArgs(), origin, checkout], { stdio: "pipe" });
 
   assert.deepEqual(
     verifyRemoteProductionTag(checkout, "xmatrix-v0.16.3", candidateSha),

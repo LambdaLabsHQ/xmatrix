@@ -295,9 +295,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
       const message = plainObject(payload?.message);
       if (!payload || !["runId", "instanceId", "ownerUserId", "channelId"].every(key => boundedId(payload[key], 300)) ||
           !message || message.type !== "agent_turn_retry_decision" ||
-          !["retry", "stop"].includes(String(message.action)) ||
+          message.action !== "stop" ||
           !["requestId", "operationId", "threadId", "turnId", "attemptToken"].every(key => boundedId(message[key], 160)) ||
-          (message.action === "retry" && (typeof message.input !== "string" || message.input.length > 500)))
+          message.input !== undefined)
         return Response.json({ error: "Invalid retry delivery" }, { status: 400 });
       return Response.json({ delivered: this.productAdapter?.deliverAgentTurnRetry(payload as unknown as
         Parameters<RelayRuntimeProductCallbackAdapter["deliverAgentTurnRetry"]>[0]) ?? false });

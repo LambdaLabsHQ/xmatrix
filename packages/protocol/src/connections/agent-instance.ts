@@ -342,3 +342,18 @@ export type AgentInstanceServerMessage =
   | { type: "enhanced_presence"; agent: SerializedAgent }
   | { type: "rate_limited"; requestId?: string; retryAfterMs: number; message: string }
   | { type: "observable_event"; event: ObservabilityEvent };
+
+/** Hub-authored Channel message binding, stored under reserved xmatrixTurnRetry metadata.
+ * The instruction is exclusively the canonical message body, never a private input field. */
+export interface ChannelTurnRetry {
+  version: 1;
+  state: "issued";
+  runId: string;
+  instanceId: string;
+  ownerUserId: string;
+  operationId: string;
+  requestId: string;
+  attemptToken: string;
+  attempt: number;
+  expiresAt: number;
+}

@@ -97,7 +97,7 @@ test("an ordinary socket message keeps caller metadata but never Hub-only keys",
   await port.execute(session, {
     type: "channel_message", requestId: "r-2", channelId: "channel", body: "hello",
     metadata: { kind: "xmatrix.questionnaire.v1", xmatrixProvenance: "system_fact",
-      xmatrixActivity: { kind: "plan" }, crossChannelReply: { sourceChannelId: "elsewhere" } },
+      xmatrixActivity: { kind: "plan" }, xmatrixTurnRetry: { version: 1, state: "issued" }, crossChannelReply: { sourceChannelId: "elsewhere" } },
   });
   const [{ input }] = commands;
   assert.equal(input.messageKind, undefined);

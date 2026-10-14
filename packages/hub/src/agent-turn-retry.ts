@@ -1,7 +1,8 @@
+import { dispatchProductMessageAppend } from "./product-message-append";
 import { RuntimeAuthorityOperationError } from "./runtime-transport/runtime-operation-failure";
 import type { AuthorityDatabase, DatabaseTransaction } from "@xmatrix/db";
 import type { QueryResultRow } from "pg";
-import type { AgentInstanceServerMessage, AgentInstanceTurnRetryMessage } from "@xmatrix/protocol/connections/agent-instance";
+import type { AgentInstanceServerMessage, AgentInstanceTurnRetryMessage, ChannelTurnRetry } from "@xmatrix/protocol/connections/agent-instance";
 import type { AgentInstanceRuntimeSession } from "./runtime-transport/agent-instance-port";
 import type { Env } from "./types";
 import { runtimeRepository } from "./runtime";
@@ -33,8 +34,7 @@ async function save(tx: DatabaseTransaction, runId: string, state: HubTurnRetry,
 function decision(r: HubTurnRetry): RetryDecision {
   return { type: "agent_turn_retry_decision", requestId: r.requestId, operationId: r.operationId,
     threadId: r.threadId, turnId: r.turnId, attemptToken: r.attemptToken,
-    action: r.state === "issued" ? "retry" : "stop",
-    ...(r.state === "issued" ? { input: CAPACITY_CONTINUATION } : { reason: r.state }) };
+    action: "stop", reason: r.state };
 }
 
 /** Authenticated reports reach this owning authority; the host never supplies
@@ -43,6 +43,9 @@ export async function reportAgentTurnRetry(env: Env, session: Readonly<AgentInst
   report: AgentInstanceTurnRetryMessage): Promise<RetryDecision | undefined> {
   if (!reportIsValid(report) || session.run.kind !== "channel-instance" || !session.principal.channelWriteAllowed)
     throw new Error("Invalid model-capacity retry report");
+  if (report.action === "failed" && !session.clientCapabilities?.includes("agent_turn_retry_channel_message"))
+    return { type: "agent_turn_retry_decision", requestId: report.requestId!, operationId: report.operationId,
+      threadId: report.threadId!, turnId: report.turnId!, attemptToken: "none", action: "stop", reason: "unsupported" };
   const now = Date.now();
   const state = await runtimeRepository(env).capacityRetryTransaction({
     requestId: report.requestId!, actorUserId: session.principal.ownerUserId,
@@ -64,8 +67,8 @@ export async function reportAgentTurnRetry(env: Env, session: Readonly<AgentInst
     operationId: report.operationId, threadId: "none", turnId: "none", attemptToken: "none", action: "stop", reason: "not_pending" };
   // Durable work is handed to its Channel before the report may acknowledge.
   await wakeAgentLaunchCoordinator(env, session.run.channelId, ["turnRetry"]);
-  // Duplicate issued reports need the same permit, never another attempt.
-  if (state.state === "issued" || !active(state)) return { ...decision(state), requestId: report.requestId! };
+  // An issued retry is replayed through its committed Channel message, never a private input.
+  if (!active(state)) return { ...decision(state), requestId: report.requestId! };
 }
 
 async function deliver(env: Env, run: QueryResultRow, message: RetryDecision): Promise<void> {
@@ -133,7 +136,23 @@ export async function reconcileAgentTurnRetries(env: Env, database: AuthorityDat
           await save(tx, String(run.run_id), { ...current, notice: "" }, current.state === "waiting" ? current.dueAt : active(current) ? now + TURN_RETRY_DELIVERY_RECHECK_MS : null);
       });
     }
-    if (state.state === "issued") await deliver(env, run, decision(state));
+    if (state.state === "issued") {
+      const id = runtimeCommandId("capacity-retry-message", `${run.run_id}:${state.attemptToken}`);
+      // The instruction itself is a durable Channel message. Reusing this
+      // command republishes the exact committed message through normal fanout.
+      // A commit/publication failure leaves the Run due for bounded recovery.
+      const published = await dispatchProductMessageAppend(env, channelId, { commandId: runtimeCommandId("agent-append", id), messageId: id,
+        channelId, body: `${CAPACITY_CONTINUATION}\n\n${turnRetryNotice(state)}`,
+        messageKind: "xmatrix.capacity-retry", principal: { kind: "user", id: String(run.owner_user_id) },
+        xmatrixAuthor: true,
+        residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
+          xmatrixTurnRetry: { version: 1, state: "issued", attempt: state.attempt,
+            runId: String(run.run_id), instanceId: String(run.instance_id), ownerUserId: String(run.owner_user_id),
+            operationId: state.operationId, requestId: state.requestId, attemptToken: state.attemptToken,
+            expiresAt: state.expiresAt } satisfies ChannelTurnRetry } },
+      });
+      if (!published.ok) throw new Error("Channel retry message commit is unavailable");
+    }
     else if (!active(state)) await deliver(env, run, decision(state));
   }
 }
