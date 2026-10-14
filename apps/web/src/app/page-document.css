@@ -195,25 +195,10 @@ a.page-section-claim:hover { text-decoration: underline; }
 .page-document :is(h1, h2, h3, h4, h5, h6):hover .page-heading-tools,
 .page-document .page-heading-current .page-heading-tools,
 .page-heading-tools:focus-within { opacity: 1; pointer-events: auto; }
-/* On a phone, one "⋯" always at hand beside the heading; it opens the tools, named, under the heading,
-   pushing the text down as a tapped message's actions do. */
-.page-heading-tools.is-phone { display: contents; opacity: 1; pointer-events: auto; }
-.page-heading-tools.is-phone .page-heading-more {
-  float: right;
-  width: 2.25rem;
-  height: 2.25rem;
-  margin-top: -0.25rem;
-  border-radius: 999px;
-}
+/* On a phone the heading of the section the reader is in carries one quiet "⋯"; its menu names each action. */
+.page-heading-tools.is-phone { margin-top: -0.1em; }
+.page-heading-tools.is-phone .page-heading-more { width: 2.25rem; height: 2.25rem; border-radius: 999px; }
 .page-heading-tools.is-phone .page-heading-more[aria-expanded="true"] { background: var(--muted); color: var(--foreground); }
-.page-heading-menu {
-  display: block;
-  clear: both;
-  font-size: 1rem;
-  font-weight: 400;
-  letter-spacing: normal;
-  line-height: normal;
-}
 
 /* A discussion anchored in the text (§4.3): the passage, and a bubble that opens its conversation. */
 .page-discussion {
@@ -388,25 +373,6 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   width: 1rem;
   height: 1rem;
 }
-/* An Agent with a face wears it at the top of its caret, ringed in its colour; it stays when the name
-   fades, in place of the square, and the name sits beside it while it shows. */
-.ProseMirror-yjs-cursor.has-face::before { content: none; }
-.ProseMirror-yjs-cursor .page-cursor-face {
-  position: absolute;
-  top: -20px;
-  left: -9px;
-  width: 16px;
-  height: 16px;
-  max-width: none;
-  border-radius: 999px;
-  background: var(--background);
-  box-shadow: 0 0 0 1.5px currentColor;
-  object-fit: contain;
-  pointer-events: none;
-  user-select: none;
-}
-.ProseMirror-yjs-cursor.has-face > div { top: -20px; left: 11px; border-radius: 4px; }
-.ProseMirror-yjs-cursor.is-idle .page-cursor-face { opacity: 0.55; }
 /* An Agent's caret label opens the conversation it works from. */
 .ProseMirror-yjs-cursor > [data-conversation] { cursor: pointer; }
 .page-section-owed {
@@ -541,19 +507,34 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
 }
 
 /*
- * What changed since this reader last read the page (§3.1), as a diff that stays until they tick it
- * viewed: new text on a tint, text taken out struck where it stood.
+ * What changed since this reader last read the page (§3.1), until they tick it viewed. It is marked as a
+ * proofreader marks paper, in ink and never in a tinted box: new words underlined in brass, a new block
+ * barred in the margin, words taken out struck through in faint ink where they stood. Brass is the app's
+ * one accent, kept for what a person has yet to do; reading a change is that.
  */
-.page-document .page-reader-change {
-  border-radius: 2px;
-  background-color: color-mix(in oklab, var(--primary) 18%, transparent);
+.page-document .page-reader-change:not(.is-block) {
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklab, var(--m-ink-attention, var(--accent)) 85%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.24em;
+  text-decoration-skip-ink: none;
 }
-.page-document .page-reader-change.is-block { border-radius: 6px; }
+.page-document :is(.page-reader-change, .page-reader-removed).is-block { position: relative; }
+.page-document :is(.page-reader-change, .page-reader-removed).is-block::after {
+  content: "";
+  position: absolute;
+  top: 0.2em;
+  bottom: 0.2em;
+  left: -14px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--m-ink-attention, var(--accent));
+  pointer-events: none;
+}
+.page-document li:is(.page-reader-change, .page-reader-removed).is-block::after { left: calc(-1.3em - 14px); }
 .page-document .page-reader-removed {
-  border-radius: 2px;
-  color: var(--destructive);
+  color: var(--m-ink-secondary, var(--muted-foreground));
   text-decoration: line-through;
-  background: color-mix(in oklab, var(--destructive) 10%, transparent);
   white-space: pre-wrap;
   user-select: none;
   pointer-events: none;
@@ -570,54 +551,97 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-com
   .page-offscreen-typing { animation: none; }
 }
 
-/* Someone editing the page, floating at its right edge on a phone: their face on the shared glass disc,
-   a halo of their caret's colour turning around it while they write. */
-.page-editor-disc {
-  display: grid;
-  place-items: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease;
-  animation: page-editor-arrive 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-  -webkit-tap-highlight-color: transparent;
+/* The capsule's mark is the brass the page marks its changes in, so the two read as one thing. */
+.page-reader-capsule-mark {
+  color: var(--m-ink-attention, var(--accent));
+  box-shadow: inset 0 0 0 1.5px currentColor;
 }
-.page-editor-disc > .identity-avatar { grid-area: 1 / 1; }
-.page-editor-disc .page-editor-face .identity-avatar-face {
-  box-shadow: 0 6px 16px -6px oklch(0 0 0 / 0.35);
-}
-.page-editor-halo {
-  grid-area: 1 / 1;
-  width: 100%;
-  height: 100%;
+
+/* The Agent a page is written with, on a phone: a wood button of the same stock and cast as the app's
+   other floating button, carrying the Agent's own face. Wood carries only glass, so the face keeps its
+   glass disc and nothing else is laid on the plank but the small ink "+" that says it calls. */
+.xmatrix-app.xmatrix-app.xmatrix-app .page-agent-button.page-agent-button {
+  padding: 0;
+  border: 0;
   overflow: visible;
-  animation: page-editor-halo 1.4s linear infinite;
+  color: oklch(0.2 0.04 58);
+  @apply app-wood-panel-recipe;
+  box-shadow: var(--app-wood-plank-cast);
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.page-editor-halo circle { fill: none; stroke: var(--page-editor-color); stroke-width: 2.5; }
-.page-editor-halo-track { opacity: 0.22; }
-/* A comet running round the face while they write. */
-.page-editor-halo-arc { stroke-linecap: round; stroke-dasharray: 34 66; }
-.page-editor-disc.is-idle .page-editor-halo { animation: none; }
-.page-editor-disc.is-idle .page-editor-halo-arc { display: none; }
-.page-editor-disc.is-idle .identity-avatar { opacity: 0.55; }
-.page-editor-way {
+.xmatrix-app .page-agent-button:active { transform: scale(0.94); }
+.page-agent-button-add {
   position: absolute;
-  right: -0.125rem;
-  bottom: -0.125rem;
+  right: 2px;
+  bottom: 2px;
   display: grid;
   place-items: center;
-  width: 1.125rem;
-  height: 1.125rem;
+  width: 1.25rem;
+  height: 1.25rem;
   border-radius: 999px;
-  background: var(--page-editor-color);
-  color: white;
-  box-shadow: 0 0 0 2px var(--background);
+  background: oklch(0.2 0.04 58);
+  color: oklch(0.97 0.01 85);
 }
-@keyframes page-editor-halo { to { transform: rotate(1turn); } }
-@keyframes page-editor-arrive {
-  from { opacity: 0; scale: 0.4; }
-  to { opacity: 1; scale: 1; }
+
+/* Where the Agent's pen is, when the reader has scrolled away from it. Its dots run only while it writes. */
+.page-writer-dots { display: inline-flex; gap: 2px; }
+.page-writer-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: page-writer-dot 1.2s ease-in-out infinite;
+}
+.page-writer-dots i:nth-child(2) { animation-delay: 0.15s; }
+.page-writer-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes page-writer-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-1.5px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .page-editor-disc { transition: none; animation: none; }
-  .page-editor-halo { animation: none; }
+  .page-writer-dots i { animation: none; opacity: 0.7; }
+}
+
+/* An Agent's face in the left margin beside the line its pen is at, on a phone. Sticky both ways, so the
+   page's own scroll is all that moves it: it rides with its line, and waits at the top or bottom of the
+   margin, clear of the button and capsule there, while the line is out of view, a chevron pointing to it. */
+.page-pen {
+  position: sticky;
+  top: 12px;
+  /* Above the article's own bottom padding, which already clears the home indicator. */
+  bottom: 52px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 22px;
+  -webkit-tap-highlight-color: transparent;
+}
+.page-pen .page-pen-face .identity-avatar-face { width: 20px; height: 20px; }
+.page-pen.is-idle .page-pen-face { opacity: 0.5; }
+.page-pen-way {
+  position: absolute;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  color: var(--foreground);
+}
+.page-pen[data-away="above"] .page-pen-way { top: -12px; }
+.page-pen[data-away="below"] .page-pen-way { bottom: -12px; }
+
+/* Calling an Agent to write: the field is a well in the glass panel, rounded like the chips beside it;
+   the text box inside it draws nothing of its own. */
+.page-write-field {
+  border-radius: 22px;
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+}
+.xmatrix-app.xmatrix-app .page-write-field textarea {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.xmatrix-app .page-write-with .identity-avatar-face {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }

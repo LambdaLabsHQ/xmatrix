@@ -24,7 +24,6 @@ import { automationChips } from "./page-automation-chips";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
 import { markdownShortcuts, syntaxPlugin, typoraKeymap } from "./page-editor-syntax";
-import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
 import { mountHeadingMenu, type HeadingMenu } from "./page-heading-menu";
 import { mountSectionAgents, type SectionAgent } from "./page-section-agents";
 
@@ -352,8 +351,10 @@ export interface HeadingActions {
   attach?: (blockId: string) => void;
   /** Lists the section's conversations, the quiet ones too. */
   showConversations?: (blockId: string) => void;
-  /** On a phone the tools open under the heading from one "⋯", each with its name. */
+  /** On a phone the tools open from one "⋯" as a menu of named actions. */
   phone?: boolean;
+  /** Asks an Agent to write the section with this person, named in the menu ("Write with claude"). */
+  write?: { label: string; run: (blockId: string) => void };
 }
 
 export const sectionsKey = new PluginKey<{ notes: Map<string, SectionNote>; decorations: DecorationSet }>("page-sections");
@@ -393,33 +394,31 @@ const unmountAgents = new WeakMap<Element, () => void>();
 
 const unmountMenus = new WeakMap<Element, () => void>();
 
-/** A phone's heading tools: one "⋯" that opens them, named, under the heading. */
+/** A phone's heading tools: one "⋯" that opens them as a menu of named actions. */
 function phoneHeadingTools(tools: HTMLElement, blockId: string, title: string, current: HeadingActions,
   claim: SectionNote["claim"] | null): HTMLElement {
   tools.classList.add("is-phone");
   const menu: HeadingMenu = {};
+  if (current.canEdit && current.write) menu.write = { label: current.write.label, run: () => current.write!.run(blockId) };
   if (current.discuss) menu.discuss = () => current.discuss!(blockId);
   if (current.copyLink) menu.copyLink = () => current.copyLink!(blockId);
   if (current.canEdit && claim?.mine && current.release) menu.claim = { label: "Release", run: () => current.release!(claim.claimId) };
   else if (current.canEdit && !claim && current.claim) menu.claim = { label: "Claim", run: () => current.claim!(blockId) };
   if (current.canEdit && current.attach) menu.attach = () => current.attach!(blockId);
+  const holder = document.createElement("span");
   const close = () => {
-    const open = tools.querySelector(".page-heading-menu");
-    if (!open) return;
-    unmountMenus.get(open)?.();
-    open.remove();
+    unmountMenus.get(holder)?.();
+    unmountMenus.delete(holder);
     more.setAttribute("aria-expanded", "false");
   };
   const more = control("page-heading-more", `Actions for ${title}`, () => {
-    if (tools.querySelector(".page-heading-menu")) return close();
-    const holder = document.createElement("span");
-    holder.className = "page-heading-menu";
-    unmountMenus.set(holder, mountHeadingMenu(holder, title, menu, close));
-    tools.append(holder);
+    if (unmountMenus.has(holder)) return close();
+    unmountMenus.set(holder, mountHeadingMenu(holder, more, title, menu, close));
     more.setAttribute("aria-expanded", "true");
   }, icon("more", 18));
   more.setAttribute("aria-expanded", "false");
-  tools.append(more);
+  more.setAttribute("aria-haspopup", "menu");
+  tools.append(more, holder);
   return tools;
 }
 
@@ -499,10 +498,9 @@ function sectionDecorations(doc: DocNode, notes: Map<string, SectionNote>,
       }
       return tools;
     }, { side: 2, ignoreSelection: true,
-      key: `tools:${block.id}:${claim?.claimId ?? ""}:${String(claim?.mine)}:${String(actions().canEdit)}:${String(actions().phone)}`,
+      key: `tools:${block.id}:${claim?.claimId ?? ""}:${String(claim?.mine)}:${String(actions().canEdit)}:${String(actions().phone)}:${actions().write?.label ?? ""}`,
       destroy: (node) => {
-        const menu = (node as HTMLElement).querySelector(".page-heading-menu");
-        if (menu) unmountMenus.get(menu)?.();
+        for (const holder of (node as HTMLElement).querySelectorAll(":scope > span")) unmountMenus.get(holder)?.();
       } }));
   });
   return DecorationSet.create(doc, decorations);
@@ -682,8 +680,6 @@ export function scrollToSection(view: EditorView, blockId: string): void {
  * its Run is live; a person's is idle while their page sits in a hidden tab.
  */
 export type CursorPresence = (state: object) => "active" | "idle" | null;
-/** The face an Agent's caret wears: the avatar of the Run it writes from, when it has one. */
-export type CursorAvatar = (state: object) => string | undefined;
 
 /**
  * Someone else's caret with their name on it, as in Google Docs: the name
@@ -691,7 +687,7 @@ export type CursorAvatar = (state: object) => string | undefined;
  * caret with a square at its top; hovering the caret shows the name again.
  */
 function namedCursor(user: { name?: string; color?: string; kind?: string; conversationId?: string | null },
-  clientId: number, idle: boolean, avatar: string | undefined): HTMLElement {
+  clientId: number, idle: boolean): HTMLElement {
   const cursor = document.createElement("span");
   cursor.className = `ProseMirror-yjs-cursor is-active${idle ? " is-idle" : ""}`;
   cursor.dataset.client = String(clientId);
@@ -700,18 +696,6 @@ function namedCursor(user: { name?: string; color?: string; kind?: string; conve
   const label = document.createElement("div");
   label.style.backgroundColor = user.color ?? "#888";
   label.textContent = user.name ?? "Someone";
-  // An Agent with a face wears it on its caret where it writes, and keeps it once the name has gone.
-  const src = avatarImageSrc(avatar);
-  if (src) {
-    cursor.classList.add("has-face");
-    const face = document.createElement("img");
-    face.className = "page-cursor-face";
-    face.src = src;
-    face.alt = "";
-    face.draggable = false;
-    face.referrerPolicy = "no-referrer";
-    cursor.append(face);
-  }
   // An Agent's caret names the conversation it works from; its label opens it beside the page.
   if (user.kind === "agent" && user.conversationId) {
     label.dataset.conversation = user.conversationId;
@@ -955,6 +939,18 @@ function readerChanges(fragment: Y.XmlFragment): Plugin {
 }
 
 /**
+ * Where a change that is all of one paragraph starts as a block: the paragraph, or the list item or
+ * list that holds nothing else. A new paragraph is marked in the margin, not word by word.
+ */
+function wholeBlockAt(doc: DocNode, from: number, to: number): number | null {
+  const start = doc.resolve(from);
+  if (!start.parent.isTextblock || from !== start.start() || to !== start.end()) return null;
+  let depth = start.depth;
+  while (depth > 1 && start.node(depth - 1).childCount === 1) depth -= 1;
+  return start.before(depth);
+}
+
+/**
  * Shows what changed since the revision the reader last read, given as its
  * markdown, against the document the editor holds now, and says how many
  * changes that is. Without a baseline the page is shown as it is.
@@ -963,11 +959,14 @@ export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, bas
   const mapping = yMapping(view.state);
   if (!mapping) return 0;
   const relative = (pos: number) => absolutePositionToRelativePosition(pos, fragment, mapping as never);
-  const changes = baseline === null ? [] : pageDocChanges(markdownToPageDoc(baseline), view.state.doc).map((change, id): ReaderChange =>
-    change.kind === "added"
-      ? { id, kind: "added", block: change.block, from: relative(change.from), to: change.block ? null : relative(change.to),
-        text: "" }
-      : { id, kind: "removed", block: change.block, from: relative(change.at), to: null, text: change.text });
+  const doc = view.state.doc;
+  const changes = baseline === null ? [] : pageDocChanges(markdownToPageDoc(baseline), doc).map((change, id): ReaderChange => {
+    if (change.kind === "removed") return { id, kind: "removed", block: change.block, from: relative(change.at), to: null, text: change.text };
+    const block = change.block ? null : wholeBlockAt(doc, change.from, change.to);
+    if (block !== null) return { id, kind: "added", block: true, from: relative(block), to: null, text: "" };
+    return { id, kind: "added", block: change.block, from: relative(change.from), to: change.block ? null : relative(change.to),
+      text: "" };
+  });
   view.dispatch(view.state.tr.setMeta(readerChangesKey, changes));
   return changes.length;
 }
@@ -1003,7 +1002,6 @@ export function editorPlugins(input: {
   focusConversation: (conversationId: string) => void;
   headingActions: () => HeadingActions;
   cursorPresence: () => CursorPresence;
-  cursorAvatar: () => CursorAvatar | undefined;
   /** Reads a GitHub file the page embeds; without it an embed only links to GitHub. */
   readGitHubFile: () => ReadGitHubFile | undefined;
   /** What `page:<id>` and `channel:<id>` in the text name and open. */
@@ -1017,10 +1015,7 @@ export function editorPlugins(input: {
     ySyncPlugin(input.fragment),
     yCursorPlugin(input.awareness, {
       awarenessStateFilter: (own: number, clientId: number) => own !== clientId && presenceOf(clientId) !== null,
-      cursorBuilder: (user, clientId) => {
-        const state = input.awareness.getStates().get(clientId);
-        return namedCursor(user, clientId, presenceOf(clientId) === "idle", state ? input.cursorAvatar()?.(state) : undefined);
-      },
+      cursorBuilder: (user, clientId) => namedCursor(user, clientId, presenceOf(clientId) === "idle"),
     }),
     cursorActivity(input.awareness),
     cursorIdle(presenceOf),

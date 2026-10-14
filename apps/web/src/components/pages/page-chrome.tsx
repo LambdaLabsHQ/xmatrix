@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { pageAuthorColor, pageAuthorLabel, pageLineDiff, type PageLineDiff } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
-import { ArrowDown, ArrowLeft, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
 import {
   CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader,
 } from "@/components/dashboard/centered-dialog-shell";
@@ -45,6 +45,8 @@ export interface PresentPerson {
   editing: boolean;
   /** Away from the page, or an Agent whose Run is not working: dimmed, as Google Docs dims idle people. */
   idle?: boolean;
+  /** The conversation an Agent works from, where it is talked to. */
+  conversationId?: string | null;
 }
 
 /** Everyone on the page, as in Google Docs: hover says who and where, a click goes there. */
@@ -123,58 +125,34 @@ export function PageOffscreenPeople({ above, below, onJump }: {
   return <>{edge("above", above)}{edge("below", below)}</>;
 }
 
-/** Someone editing the page, and where their line is in the visible page, in pixels from its top. */
-export interface PageEditor { person: PresentPerson; top: number }
-
-const EDITOR_DISC = 44;
+/** An Agent on the page, by the line it is at: its top in the document column, and whether that is out of view. */
+export interface PagePen { person: PresentPerson; top: number; away: "above" | "below" | null }
 
 /**
- * On a phone, everyone changing the page floats at its right edge (§3.2): each a disc with their face,
- * haloed in their caret's colour while they write, gliding beside their line as the page scrolls and
- * held at the top or bottom edge, pointing the way, while their line is out of view. A tap goes there.
+ * On a phone, each Agent on the page is its face in the left margin, beside the line its pen is at, as
+ * Paper and Quip name who is on a line (§3.2). The face travels with the text, and when the line is
+ * scrolled out of view it stays at the top or bottom of the margin, pointing the way; a tap goes back.
  */
-export function PageEditorsRail({ editors, height, bottomInset, onJump }: {
-  editors: PageEditor[]; height: number; bottomInset: number; onJump: (person: PresentPerson) => void;
-}) {
-  if (editors.length === 0 || !height) return null;
-  const min = 12;
-  const max = height - bottomInset - EDITOR_DISC - 12;
-  // Discs held at one edge stack inward instead of covering each other.
-  const placed: { editor: PageEditor; y: number; edge: "above" | "below" | null }[] = [];
-  for (const editor of [...editors].sort((a, b) => a.top - b.top)) {
-    const wanted = editor.top - EDITOR_DISC / 2;
-    const edge = editor.top < 0 ? "above" : editor.top > height - bottomInset ? "below" : null;
-    placed.push({ editor, y: Math.min(max, Math.max(min, wanted)), edge });
-  }
-  for (let index = 1; index < placed.length; index++) {
-    placed[index]!.y = Math.max(placed[index]!.y, placed[index - 1]!.y + EDITOR_DISC + 8);
-  }
-  for (let index = placed.length - 2; index >= 0; index--) {
-    if (placed[index + 1]!.y > max) placed[index + 1]!.y = max;
-    placed[index]!.y = Math.min(placed[index]!.y, placed[index + 1]!.y - EDITOR_DISC - 8);
-  }
+export function PagePens({ pens, onJump }: { pens: PagePen[]; onJump: (person: PresentPerson) => void }) {
+  if (pens.length === 0) return null;
   return (
-    <div className="pointer-events-none absolute inset-y-0 right-3 z-20 w-11" data-testid="page-editors">
-      {placed.map(({ editor: { person }, y, edge }) => {
-        const Arrow = edge === "above" ? ArrowUp : ArrowDown;
-        const where = edge ? ` ${edge}` : "";
+    <div className="page-pens pointer-events-none absolute inset-y-0 -left-6 w-6" data-testid="page-pens">
+      {pens.map(({ person, top, away }) => {
+        const Chevron = away === "above" ? ChevronUp : ChevronDown;
         return (
-          <button key={person.key} type="button" onClick={() => onJump(person)}
-            aria-label={`${person.name} is ${person.idle ? "on this page" : "editing"}${where}`}
-            title={`${person.name} · ${person.detail}`}
-            className={cn("page-editor-disc pointer-events-auto absolute right-0 rounded-full", person.idle && "is-idle")}
-            style={{ transform: `translate3d(0, ${y}px, 0)`, ["--page-editor-color" as string]: person.color }}>
-            <svg className="page-editor-halo" viewBox="0 0 44 44" aria-hidden="true">
-              <circle className="page-editor-halo-track" cx="22" cy="22" r="20.5" />
-              <circle className="page-editor-halo-arc" cx="22" cy="22" r="20.5" pathLength="100" />
-            </svg>
-            <IdentityAvatar kind={person.agent ? "agent" : "human"} label={person.name} imageUrl={person.avatarUrl}
-              initials={!person.agent || person.avatarUrl ? avatarInitials(person.name) : undefined}
-              size="md" shape="circle" className="page-editor-face rounded-full" />
-            {edge && (
-              <span className="page-editor-way" aria-hidden="true"><Arrow className="size-3" /></span>
-            )}
-          </button>
+          // A spacer, not a margin, sets the line: a sticky face may not leave its own margin box.
+          <div key={person.key} className="absolute inset-0">
+            <div style={{ height: Math.max(0, top) }} />
+            <button type="button" onClick={() => onJump(person)} data-away={away ?? undefined}
+              className={cn("page-pen pointer-events-auto", person.idle && "is-idle")}
+              aria-label={`${person.name} is ${person.editing ? "writing" : "here"}${away ? `, ${away}` : ""}`}
+              title={`${person.name} · ${person.detail}`}>
+              <IdentityAvatar kind="agent" label={person.name} imageUrl={person.avatarUrl}
+                initials={person.avatarUrl ? avatarInitials(person.name) : undefined} size="xs" shape="circle"
+                className="page-pen-face pointer-events-none rounded-full" />
+              {away && <Chevron className="page-pen-way" aria-hidden="true" strokeWidth={2.5} />}
+            </button>
+          </div>
         );
       })}
     </div>

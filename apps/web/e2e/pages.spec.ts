@@ -99,6 +99,17 @@ async function stubPageConversation(browser: Page, channel: typeof E2E_CHANNEL, 
     anchor: null, resolvedAt: null } }, { method: "POST" });
 }
 
+/** The runtimes the Space can start, which a page's reader may call to write with them. */
+async function stubWriters(browser: Page, harnesses: string[]) {
+  const registrations = harnesses.map((harness) => ({
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "owner", machineId: "machine", harness },
+    displayName: harness, ownerName: "Owner", machineName: "Workstation", version: 1, state: "enabled",
+    models: [], routingReady: true, canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
+  }));
+  await fixtureJson(browser, "registration-catalog", "**/agent-registrations", { registrations,
+    capabilities: registrations.map((registration) => ({ harness: registration.key.harness, models: [], locations: [registration] })) });
+}
+
 /** Opens Pages on a page whose live session holds `body`, and returns its editor. */
 async function openLivePage(browser: Page, session: Y.Doc | string = BODY) {
   await servePageSession(browser, typeof session === "string" ? pageDocument(session) : session);
@@ -375,53 +386,93 @@ test.describe("on a phone", () => {
     await expect(browser).toHaveURL(/\/pages\?page=p-relay/u);
   });
 
-  test("what changed is walked and ticked viewed from a floating bar under the thumb", async ({ page: browser }) => {
+  test("what changed since the reader last read waits in a capsule under the thumb until it is viewed", async ({ page: browser }) => {
     const editor = await openChangedPage(browser);
     // A phone opens on the list of pages.
     await browser.getByRole("button", { name: /^Relay/u }).click();
-    const bar = browser.getByRole("toolbar", { name: "Changes since you last read this page" });
-    await expect(bar).toContainText("3 changes"); // one stop per changed paragraph
-    const box = (await bar.boundingBox())!;
+    const capsule = browser.getByRole("toolbar", { name: "Changes since you last read this page" });
+    await expect(capsule).toContainText("4 changes");
+    await expect(capsule).toContainText("since you last read");
+    const box = (await capsule.boundingBox())!;
     expect(box.y + box.height, "it floats at the bottom of the screen").toBeGreaterThan(852 - 48);
-    const viewed = bar.getByRole("button", { name: "Viewed" });
-    expect((await viewed.boundingBox())!.height, "a thumb-sized target").toBeGreaterThanOrEqual(44);
-    await bar.getByRole("button", { name: "Next change" }).click();
-    await expect(bar).toContainText("1 of 3");
-    await bar.getByRole("button", { name: "Previous change" }).click();
-    await expect(bar).toContainText("3 of 3");
-    await expect(editor.locator(".page-reader-change").filter({ hasText: "Late reviews" })).toBeInViewport();
+    // A paragraph that is all new is marked in the margin, even beside one whose words changed.
+    await expect(editor.locator(".page-reader-change.is-block", { hasText: "The second region is next" })).toHaveCount(1);
+    await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "The second region" })).toHaveCount(0);
+    await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "Shipped" })).toHaveCount(1);
+    await capsule.getByRole("button", { name: "Next change" }).click();
+    await expect(capsule).toContainText("Change 1 of 4");
     await browser.screenshot({ path: test.info().outputPath("pages-reader-changes-phone.png") });
     expect(await fixtureRequestBodies(browser, "page-mark-read")).toEqual([]);
 
-    await viewed.click();
-    await expect(bar).toBeHidden();
+    await capsule.getByRole("button", { name: "Viewed" }).click();
+    await expect(capsule).toBeHidden();
     await expect(editor.locator(".page-reader-change")).toHaveCount(0);
     await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))
       .toContain(3);
   });
 
-  test("a heading's tools open under it, each with its name, from one ⋯", async ({ page: browser }) => {
+  test("the page's button calls the Agent its reader writes with, and the reader stays on the page", async ({ page: browser }) => {
     await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
     await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await stubWriters(browser, ["claude", "codex"]);
+    const writing = { ...E2E_CHANNEL, id: "channel-write", name: "Write: the risks" };
+    await stubPageConversation(browser, writing, { linkId: "l-write", blockId: "" });
+    await fixtureJson(browser, "write-message", /\/api\/xmatrix\/channels\/channel-write\/messages$/u, { message: {} },
+      { method: "POST" });
+    await openLivePage(browser);
+    await browser.getByRole("button", { name: /^Relay/u }).click();
+    await expect(browser.getByTestId("page-editor")).toContainText("In progress");
+
+    const call = browser.getByRole("button", { name: "Write with claude" });
+    await expect(call.locator("img")).toHaveAttribute("src", /claude\.svg/u);
+    await call.click();
+    const panel = browser.getByTestId("page-write-with");
+    await panel.getByRole("radio", { name: "codex" }).click();
+    await expect(panel.getByRole("radio", { name: "codex" })).toHaveAttribute("aria-checked", "true");
+    await panel.getByLabel("What should codex write?").fill("Draft the risks");
+    await browser.keyboard.press("Enter");
+
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
+      /^@codex launch:force Draft the risks\n\nWe're writing page:p-relay together/u);
+    expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ conversationId: writing.id, pageId: "p-relay" });
+    // The reader stays on the page to watch it write; the button is the Agent now, starting.
+    await expect(panel).toBeHidden();
+    await expect(browser).not.toHaveURL(/conversation=/u);
+    await expect(browser.getByRole("button", { name: "codex is starting" })).toBeVisible();
+    await expect(browser.getByRole("button", { name: "Talk to codex" })).toBeVisible();
+  });
+
+  test("a heading's actions are named in one menu, and Write with asks for that section", async ({ page: browser }) => {
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+    await stubWriters(browser, ["claude"]);
+    const writing = { ...E2E_CHANNEL, id: "channel-write", name: "Write: status" };
+    await stubPageConversation(browser, writing, { linkId: "l-write", blockId: "status" });
+    await fixtureJson(browser, "write-message", /\/api\/xmatrix\/channels\/channel-write\/messages$/u, { message: {} },
+      { method: "POST" });
     await servePageSession(browser, pageDocument(BODY));
     await browser.goto("/app", { waitUntil: "domcontentloaded" });
     await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
     await browser.getByRole("button", { name: /^Relay/u }).click();
     const editor = browser.getByTestId("page-editor");
     const status = editor.locator("h2", { hasText: "Status" });
-    // No row of bare icons by the heading.
+    await status.click();
+    // No row of bare icons by the heading: one "⋯", whose menu names each action.
     await expect(status.getByRole("button", { name: "Copy a link to this section" })).toHaveCount(0);
     await status.getByRole("button", { name: "Actions for Status" }).click();
-    const menu = browser.getByRole("toolbar", { name: "Actions for Status" });
-    for (const name of ["Discuss", "Copy link", "Claim", "Schedule"]) {
-      await expect(menu.getByRole("button", { name })).toBeVisible();
-    }
+    const menu = browser.getByRole("menu", { name: "Actions for Status" });
+    await expect(menu.getByRole("menuitem")).toHaveText(["Write with claude", "Discuss", "Copy link", "Claim", "Schedule"]);
     await browser.screenshot({ path: test.info().outputPath("pages-heading-menu-phone.png") });
-    await menu.getByRole("button", { name: "Copy link" }).click();
-    await expect(menu).toHaveCount(0);
+
+    await menu.getByRole("menuitem", { name: "Write with claude" }).click();
+    await expect(menu).toBeHidden();
+    await browser.getByTestId("page-write-with").getByRole("button", { name: "Write this section" }).click();
+    await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
+      /^@claude launch:force Write the Status section\.\n\nWe're writing page:p-relay \(section #status\) together/u);
+    expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ blockId: "status" });
   });
 
-  test("an Agent editing out of view floats at the right edge, pointing the way, and a tap goes to its line", async ({ page: browser }) => {
+  test("an Agent writing out of view waits in the margin, pointing the way, and a tap goes to its line", async ({ page: browser }) => {
     const filler = Array.from({ length: 40 }, (_, index) => `Background paragraph ${index + 1}.`).join("\n\n");
     const server = pageDocument(`# Relay\n\n## Status\n\nIn progress\n\n${filler}\n\n## Notes\n\nnone\n`);
     const AGENT = 1_234_567;
@@ -445,34 +496,28 @@ test.describe("on a phone", () => {
     push(awarenessFrom(server, AGENT, 1, { user: { name: "claude:2", color: "#7c3aed", kind: "agent",
       conversationId: E2E_CHANNEL.id }, activity: "editing", block: "notes" }, "shipping Friday"));
 
-    const disc = browser.getByTestId("page-editors").getByRole("button", { name: "claude:2 is editing below" });
-    await expect(disc).toBeVisible();
-    // It pops in, then rests as a thumb-sized face at the right edge, not a chip on the heading.
-    await expect.poll(async () => (await disc.boundingBox())?.width).toBeGreaterThanOrEqual(44);
-    // Held inside the screen at its bottom edge.
-    await expect.poll(async () => { const at = (await disc.boundingBox())!; return at.y + at.height; })
-      .toBeLessThanOrEqual(852 - 16);
-    const box = (await disc.boundingBox())!;
-    expect(box.x + box.width, "at the right edge").toBeGreaterThan(393 - 24);
-    // It replaces the edge pill for the one editing, rather than saying it twice.
+    // Its face waits at the bottom of the margin, clear of the text, pointing down to its line.
+    const pens = browser.getByTestId("page-pens");
+    const away = pens.getByRole("button", { name: "claude:2 is writing, below" });
+    await expect(away).toBeInViewport();
+    await expect(away.locator("img")).toHaveAttribute("src", /claude\.svg/u);
+    const textLeft = (await editor.getByText("In progress").boundingBox())!.x;
+    expect((await away.boundingBox())!.x + 24, "in the margin, not over the text").toBeLessThanOrEqual(textLeft + 1);
+    // It is not named twice: no edge pill for it, and the page's button is it, to talk to.
     await expect(browser.getByTestId("page-people-below")).toHaveCount(0);
-    // Writing through its caret, it shows the face of the Run it writes from.
-    await expect(disc.locator("img")).toHaveAttribute("src", /claude\.svg/u);
-    await browser.screenshot({ path: test.info().outputPath("pages-editor-floating-below.png") });
+    await expect(browser.getByRole("button", { name: "Talk to claude:2" })).toBeVisible();
+    await browser.screenshot({ path: test.info().outputPath("pages-pen-away.png") });
 
-    await disc.click();
-    await expect(editor.getByText("none yet, shipping Friday")).toBeInViewport();
-    const beside = browser.getByTestId("page-editors").getByRole("button", { name: "claude:2 is editing", exact: true });
-    await expect(beside).toBeVisible();
-    // Beside its line now: the disc glides there with the page.
-    const line = (await editor.getByText("none yet, shipping Friday").boundingBox())!;
+    await away.click();
+    const line = editor.getByText("none yet, shipping Friday");
+    await expect(line).toBeInViewport();
+    // Back beside its line, where it travels with the text.
+    const beside = pens.getByRole("button", { name: "claude:2 is writing", exact: true });
     await expect.poll(async () => {
-      const at = (await beside.boundingBox())!;
-      return Math.abs(at.y + at.height / 2 - (line.y + line.height / 2));
-    }).toBeLessThan(40);
-    // Where it writes, its caret wears the same face.
-    await expect(editor.locator(".ProseMirror-yjs-cursor .page-cursor-face")).toHaveAttribute("src", /claude\.svg/u);
-    await browser.screenshot({ path: test.info().outputPath("pages-editor-floating-beside.png") });
+      const [face, text] = [(await beside.boundingBox())!, (await line.boundingBox())!];
+      return Math.abs(face.y + face.height / 2 - (text.y + text.height / 2));
+    }).toBeLessThan(16);
+    await browser.screenshot({ path: test.info().outputPath("pages-pen-beside.png") });
   });
 });
 
@@ -770,7 +815,7 @@ async function openChangedPage(browser: Page) {
     ...page("p-relay", null, "Relay", "V"), body: "# Relay\n\n## Status\n\nPlanned for next week\n\n## Notes\n\nnone\n",
     revisionInfo: { revision: 2, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
   return openLivePage(browser,
-    "# Relay\n\n## Status\n\nShipped this week\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n");
+    "# Relay\n\n## Status\n\nShipped this week\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n");
 }
 
 test("what changed since the reader last read the page stays as a diff until it is ticked viewed, and the page is then read", async ({ page: browser }) => {

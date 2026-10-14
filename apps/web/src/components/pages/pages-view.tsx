@@ -26,13 +26,16 @@ import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
-import type { CursorAvatar, CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
+import type { CursorPresence, Discussion, HeadingActions, PageSectionActions, SectionNote } from "./page-editor";
 import { PageAttached, type PageScheduleInput } from "./page-attached";
 import {
-  ConversationList, DeletePageDialog, PageDialog, PageEditorsRail, PageHistory, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PageEditor as FloatingEditor, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageDialog, PageHistory, PagePens, PageOffscreenPeople, PageScrollMarks, PresenceStack, ShareDialog, type OffscreenPerson, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin } from "./page-margin";
+import { PagePhoneDock, type DockWriter } from "./page-phone-dock";
 import { PageReaderChangesBar } from "./page-reader-changes-bar";
+import { PageWriteWith } from "./page-write-with";
+import { usePageWriters } from "./page-writers";
 import { marginConversations, sectionConversationCounts, withOpenConversation, type LiveConversation } from "./page-margin-model";
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
@@ -445,6 +448,12 @@ function liveAgents(channel: SerializedChannel): LiveConversation["agents"] {
   });
 }
 
+/** Room at the bottom of a phone's page that its button and capsule cover, so a line there counts as out of view. */
+const PEN_BOTTOM_ROOM = 110;
+
+/** How long an Agent called to write shows on the page's button before its Run is on the page. */
+const CALLED_SHOWS_MS = 3 * 60_000;
+
 /** The document column at its narrowest beside the margin, plus the margin and the gap between them. */
 const MARGIN_ROOM_PX = 640 + 24 + 320;
 
@@ -452,7 +461,8 @@ type PageDialogState =
   | "share"
   | "delete"
   | { kind: "conversations"; blockId: string | null }
-  | { kind: "attach"; blockId: string };
+  | { kind: "attach"; blockId: string }
+  | { kind: "write"; blockId: string | null };
 
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, activeConversationId = null,
   renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation, onDiscuss, onConnectGitHub, canMigrate, layout = "desktop", focusSection = null,
@@ -478,7 +488,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   /** Opens a conversation beside the page (pages-live-document.md §4.4). */
   onOpenConversation: (conversationId: string) => void;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
-    anchor?: PageLinkAnchor; firstMessage?: string; draft?: string }) => Promise<unknown>;
+    anchor?: PageLinkAnchor; firstMessage?: string; draft?: string; open?: boolean }) => Promise<unknown>;
   /** Subscribes a conversation of its own, linked to a section, to a repository's issues and pull requests. */
   onConnectGitHub?: (input: { spaceId: string; pageId: string; blockId: string; repository: string;
     restricted: boolean }) => Promise<void>;
@@ -799,6 +809,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // the tree; a live session only shows an Agent at the moment it reads or edits (§3.2).
   const pageAgents = usePageAgents(spaceId, token);
   const liveOnPage = useMemo(() => pageAgents.data?.agents.get(pageId ?? "") ?? [], [pageAgents.data, pageId]);
+  // Who this person can call to write the page with them, and the one they last called.
+  const writers = usePageWriters(spaceId, token, Boolean(page) && canEdit);
+  // An Agent just called, from the moment it is asked until it shows on the page.
+  const [called, setCalled] = useState<{ pageId: string; harness: string; conversationId: string; blockId: string | null;
+    at: number } | null>(null);
+  // It is on the page once its conversation's Run is: from then on it shows as itself. One that never
+  // arrives stops showing as called after a while; its conversation says why.
+  useEffect(() => {
+    if (!called) return;
+    if (liveOnPage.some((agent) => agent.conversationId === called.conversationId)) { setCalled(null); return; }
+    const timer = window.setTimeout(() => setCalled(null), Math.max(0, called.at + CALLED_SHOWS_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [called, liveOnPage]);
   const staying = useMemo(() => liveOnPage.filter((agent) =>
     !presence.some(({ state }) => liveRunOf(state, [agent]))), [liveOnPage, presence]);
   // An Agent's caret rests at its last edit while its Run lives, dimmed while the Run is not working;
@@ -809,7 +832,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const run = liveRunOf(present, liveOnPage);
     return !run ? null : run.status === "busy" ? "active" : "idle";
   }, [liveOnPage]);
-  const cursorAvatar = useCallback<CursorAvatar>((state) => {
+  // An Agent writing through its caret shows the face of the Run it writes from.
+  const cursorAvatar = useCallback((state: object) => {
     const present = state as PagePresenceState;
     return present.user?.kind === "agent" ? liveRunOf(present, liveOnPage)?.avatarUrl : undefined;
   }, [liveOnPage]);
@@ -1003,6 +1027,22 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       throw cause;
     }
   };
+  // Writing with an Agent: a conversation of its own, linked to the page or section, whose first message
+  // calls the chosen runtime. The page stays open, and the Agent's cursor shows where it writes.
+  const writeWith = async (prompt: string, blockId: string | null) => {
+    const harness = writers.favourite;
+    if (!page || !harness) return;
+    const where = `page:${page.pageId}${blockId ? ` (section #${blockId})` : ""}`;
+    const firstMessage = `@${harness} launch:force ${prompt}\n\nWe're writing ${where} together: I have it open and ` +
+      "see each edit land. Read it with `xmatrix page read` and write in it with `xmatrix page edit`, a section at a " +
+      "time so I can follow, then tell me here what you did or what you need from me.";
+    const conversationId = await onDiscuss({ spaceId, pageId: page.pageId, blockId: blockId ?? "", restricted,
+      name: `Write: ${prompt.slice(0, 60)}`, firstMessage, open: false });
+    if (typeof conversationId === "string") {
+      setCalled({ pageId: page.pageId, harness, conversationId, blockId, at: Date.now() });
+    }
+    void links.refetch();
+  };
   const claim = (blockId: string) => (claimable(blockId) ? void claimBlock(blockId)
     : setNotice("Someone is already on this section."));
   // What selecting text offers, for the section the selection is in.
@@ -1031,6 +1071,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     attach: (blockId: string) => setDialog({ kind: "attach", blockId }),
     showConversations: (blockId) => setDialog({ kind: "conversations", blockId }),
     phone,
+    ...(writers.favourite ? { write: { label: `Write with ${writers.favourite}`,
+      run: (blockId: string) => setDialog({ kind: "write", blockId }) } } : {}),
   };
   const whereDetail = (activity: string, blockId: string, conversationId: string | null | undefined) => {
     const section = blocks.find((block) => block.id === blockId)?.title;
@@ -1041,17 +1083,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const people: PresentPerson[] = [
     ...present.map(({ clientId, state }) => ({ key: `client:${clientId}`, name: state.user!.name,
       color: state.user!.color, agent: state.user!.kind === "agent", blockId: state.block ?? "",
-      // An Agent writing through its caret shows the face of the Run it writes from.
       avatarUrl: cursorAvatar(state),
       idle: cursorPresence(state) === "idle",
       // Placed by their caret where they have one, so the edge hints point at the line.
       anchor: anchorTops.has(`client:${clientId}`) ? `client:${clientId}` : sectionAnchor(state.block ?? ""),
-      editing: state.activity === "editing",
+      editing: state.activity === "editing", conversationId: state.user!.conversationId ?? null,
       detail: whereDetail(state.activity ?? "viewing", state.block ?? "", state.user!.conversationId) })),
     ...staying.map((agent) => ({ key: `agent:${agent.instanceId}:${agent.conversationId}`, name: agent.name,
       color: pageAuthorColor({ kind: "agent", id: agent.instanceId }), agent: true, avatarUrl: agent.avatarUrl, blockId: agent.blockId,
       idle: agent.status !== "busy",
-      anchor: sectionAnchor(agent.blockId), editing: agent.status === "busy",
+      anchor: sectionAnchor(agent.blockId), editing: agent.status === "busy", conversationId: agent.conversationId,
       detail: whereDetail(agent.status === "busy" ? `${agent.activity}, working` : agent.activity, agent.blockId,
         agent.conversationId) })),
   ];
@@ -1090,25 +1131,43 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (top === null || !article) return followBlock(person.blockId);
     article.scrollTo({ top: Math.max(0, top - article.clientHeight / 3), behavior: "smooth" });
   };
-  // On a phone, whoever is editing floats at the right edge beside their line, wherever it is.
-  const floatingEditors = ((): FloatingEditor[] => {
-    if (!phone || mode !== "page" || !drawn || !viewport.height) return [];
-    const editors: FloatingEditor[] = [];
-    for (const person of people) {
-      const top = person.editing ? contentTop(person.anchor) : null;
-      if (top !== null) editors.push({ person, top: top - viewport.top });
-    }
-    return editors;
-  })();
-  const floating = new Set(floatingEditors.map((editor) => editor.person.key));
   // Who is out of view above or below, at the page's edges (§3.2). A line of room keeps
   // someone on the very edge counted as seen.
+  // On a phone each Agent on the page is its face in the margin beside its line (§3.2).
+  const pens = ((): PagePen[] => {
+    if (!phone || mode !== "page" || !drawn) return [];
+    return people.filter((person) => person.agent).flatMap((person) => {
+      const top = anchorTops.get(person.anchor);
+      const at = contentTop(person.anchor);
+      if (top === undefined || at === null) return [];
+      const away = !viewport.height ? null
+        : at < viewport.top ? "above" : at > viewport.top + viewport.height - PEN_BOTTOM_ROOM ? "below" : null;
+      return [{ person, top: top + 2, away }];
+    });
+  })();
+  const penned = new Set(pens.map((pen) => pen.person.key));
+  // The Agent the page's button is: the one writing, else the one on the page, else the one just called.
+  const writer = ((): (DockWriter & { conversationId: string | null }) | null => {
+    if (!phone || mode !== "page" || !drawn) return null;
+    const person = people.find((entry) => entry.agent && entry.editing && !entry.idle)
+      ?? people.find((entry) => entry.agent && !entry.idle);
+    if (person) {
+      return { conversationId: person.conversationId ?? null,
+        agent: { name: person.name, ...(person.avatarUrl ? { avatarUrl: person.avatarUrl } : {}) } };
+    }
+    // Called and not on the page yet: its face is on the button while its Run starts.
+    if (!called || called.pageId !== pageId) return null;
+    const avatarUrl = writers.agents.find((agent) => agent.harness === called.harness)?.avatarUrl;
+    return { conversationId: called.conversationId, starting: true,
+      agent: { name: called.harness, ...(avatarUrl ? { avatarUrl } : {}) } };
+  })();
   const offscreen = ((): { above: OffscreenPerson[]; below: OffscreenPerson[] } => {
     const above: OffscreenPerson[] = [];
     const below: OffscreenPerson[] = [];
     if (mode !== "page" || !drawn || !viewport.height) return { above, below };
     for (const person of people) {
-      const top = floating.has(person.key) ? null : contentTop(person.anchor);
+      if (penned.has(person.key)) continue;
+      const top = contentTop(person.anchor);
       if (top === null) continue;
       if (top < viewport.top + 8) above.push({ person, distance: viewport.top - top });
       else if (top > viewport.top + viewport.height - 24) below.push({ person, distance: top - viewport.top - viewport.height });
@@ -1144,6 +1203,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return marks;
   })();
   const listSection = dialog && typeof dialog === "object" && dialog.kind === "conversations" ? dialog : null;
+  const writeTarget = dialog && typeof dialog === "object" && dialog.kind === "write" ? dialog : null;
 
   const hasChildren = pages.some((item) => item.parentPageId === pageId);
   const removePage = async () => {
@@ -1160,7 +1220,16 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const phoneDiff = phone && mode === "page" && drawn && !diffViewed && !!readerChanges;
   const controls = (
     <>
-      <PresenceStack people={people} onFollow={jumpTo} />
+      {/* On a phone an Agent is its face in the margin and on the page's button; the stack names the people. */}
+      <PresenceStack people={phone ? people.filter((person) => !person.agent) : people} onFollow={jumpTo} />
+      {!phone && canEdit && writers.agents[0] && (
+        <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "write", blockId: null })}
+          title={`Write with ${writers.agents[0].harness}`}>
+          <IdentityAvatar kind="agent" label={writers.agents[0].harness} imageUrl={writers.agents[0].avatarUrl} size="xs"
+            shape="circle" glass={false} className="pointer-events-none rounded-full" />
+          Write with {writers.agents[0].harness}
+        </Button>
+      )}
       <Button variant="ghost" size="sm" onClick={() => setDialog({ kind: "conversations", blockId: null })}
         title="Conversations about this page" aria-label={`${conversations.length} conversations about this page`}>
         <MessageSquare /> {liveCount || conversations.length || ""}
@@ -1187,8 +1256,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       <PageScrollMarks marks={scrollMarks} />
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <PageOffscreenPeople above={offscreen.above} below={offscreen.below} onJump={jumpTo} />
-        <PageEditorsRail editors={floatingEditors} height={viewport.height} bottomInset={phoneDiff ? 76 : 16}
-          onJump={jumpTo} />
         <article ref={measureArticle} className={phone ? cn("app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6",
           phoneDiff && "has-reader-changes") : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-12"}>
           <div className={cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]")}>
@@ -1228,7 +1295,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                   query.queryKey.includes("page-tree") })} />
             ) : (
               <div className="flex gap-6">
-                <div ref={docColumn} className="min-w-0 max-w-3xl flex-1">
+                <div ref={docColumn} className="relative min-w-0 max-w-3xl flex-1">
+                  <PagePens pens={pens} onJump={jumpTo} />
                   {!drawn && document.data && (
                     // Where the editor's host holds its height.
                     <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
@@ -1252,7 +1320,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       follow={follow} onOpenConversation={openConversation} discussions={discussions}
                       automations={automationsById} references={references}
                       focusedConversationId={activeConversationId ?? focused} onFocusConversation={setFocused}
-                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} cursorAvatar={cursorAvatar} readGitHubFile={readGitHubFile} />}
+                      onAnchorOffsets={setAnchorTops} cursorPresence={cursorPresence} readGitHubFile={readGitHubFile} />}
                   </div>
                 </div>
                 {/* The margin holds its room from the start, so the text does not reflow when the page has synced;
@@ -1273,10 +1341,24 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           </div>
         </article>
       </div>
-      {phoneDiff && <PageReaderChangesBar document={docColumn} changes={readerChanges ?? 0} onViewed={viewDiff} />}
+      {phone && mode === "page" && drawn && (
+        <PagePhoneDock writer={writer}
+          caller={canEdit && writers.agents[0] ? { name: writers.agents[0].harness,
+            ...(writers.agents[0].avatarUrl ? { avatarUrl: writers.agents[0].avatarUrl } : {}) } : null}
+          onCall={() => setDialog({ kind: "write", blockId: null })}
+          onTalk={() => writer?.conversationId && openConversation(writer.conversationId)}
+          review={phoneDiff ? <PageReaderChangesBar document={docColumn} changes={readerChanges ?? 0} onViewed={viewDiff} />
+            : null} />
+      )}
       {docked && renderConversation?.("dock")}
       {page && (
         <>
+          {writeTarget && writers.favourite && (
+            <PageWriteWith agents={writers.agents} chosen={writers.favourite} onChoose={writers.choose}
+              target={{ blockId: writeTarget.blockId,
+                section: writeTarget.blockId ? blocks.find((block) => block.id === writeTarget.blockId)?.title ?? null : null }}
+              onSend={(prompt) => writeWith(prompt, writeTarget.blockId)} onClose={() => setDialog(null)} />
+          )}
           <DeletePageDialog open={dialog === "delete"} title={page.title} hasChildren={hasChildren}
             onClose={() => setDialog(null)} onDelete={removePage} />
           <ShareDialog open={dialog === "share"} onClose={() => setDialog(null)} canPublish={canMigrate}

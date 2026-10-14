@@ -1210,8 +1210,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onCloseConversation={closePageConversation}
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId) => openPageConversation(conversationId)}
-      onDiscuss={({ firstMessage, draft, ...input }) => startPageConversation(input,
-        { ...(firstMessage ? { firstMessage } : {}), ...(draft ? { draft } : {}) })}
+      onDiscuss={({ firstMessage, draft, open, ...input }) => startPageConversation(input,
+        { ...(firstMessage ? { firstMessage } : {}), ...(draft ? { draft } : {}), ...(open === false ? { open } : {}) })}
       onConnectGitHub={async (input) => {
         // The repository's issues and pull requests arrive in a conversation linked to the page.
         await startPageConversation({ spaceId: input.spaceId, pageId: input.pageId, blockId: input.blockId,
