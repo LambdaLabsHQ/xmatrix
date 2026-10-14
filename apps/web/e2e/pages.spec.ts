@@ -127,6 +127,14 @@ async function stubSuggestion(browser: Page) {
     { reviewedThrough: 5 }, { method: "POST" });
 }
 
+/** claude:2 on Relay from a live Run of the general conversation, writing in Notes. */
+async function stubClaudeWritingNotes(browser: Page) {
+  await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+    pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
+      conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", avatarUrl: "/agent-vendors/claude.svg" }] }],
+  });
+}
+
 /** On a phone Pages opens on its list: this opens Relay from it, its live session holding `session`. */
 async function openRelayOnPhone(browser: Page, session: Y.Doc, on: Parameters<typeof servePageSession>[2] = {}) {
   await servePageSession(browser, session, on);
@@ -560,10 +568,7 @@ test.describe("on a phone", () => {
       conversations: [talk(E2E_CHANNEL.id, E2E_CHANNEL.name, { instanceId: "i-claude", name: "claude:2" }),
         talk(plan.id, plan.name, { instanceId: "i-codex", name: "codex:1" })],
     });
-    await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
-      pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
-        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", avatarUrl: "/agent-vendors/claude.svg" }] }],
-    });
+    await stubClaudeWritingNotes(browser);
     const editor = await openRelayOnPhone(browser, pageDocument(BODY));
     await expect(browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing" })).toBeVisible();
     // The heading keeps only the Agent working on the section from a conversation, off the page.
@@ -579,10 +584,7 @@ test.describe("on a phone", () => {
     let push: (data: Uint8Array) => void = () => {};
     await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
     await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
-    await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
-      pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
-        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", avatarUrl: "/agent-vendors/claude.svg" }] }],
-    });
+    await stubClaudeWritingNotes(browser);
     const editor = await openRelayOnPhone(browser, server, { connect: (send) => { push = send; } });
     await expect(editor).toContainText("In progress");
     const own = server.clientID;
