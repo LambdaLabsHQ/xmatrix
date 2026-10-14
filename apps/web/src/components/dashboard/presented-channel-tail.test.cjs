@@ -2,29 +2,27 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
-const { channelNotAheadOfTimeline, createPresentedChannelTail } = require("./presented-channel-tail.ts");
+const { channelAsTimelineShows, createPresentedChannelTail } = require("./presented-channel-tail.ts");
 
 const preview = (messageId, sentAt, bodyPreview = messageId) => ({ messageId, sentAt, bodyPreview, from: { label: "Agent" } });
-const channel = (id, lastMessage) => ({ id, spaceId: "space", name: id, lastMessage });
+const channel = (id, lastMessage, messageCount) => ({ id, spaceId: "space", name: id, lastMessage, messageCount });
 
-test("the open conversation's row waits for its timeline to show a newer message", () => {
+test("the open conversation's row says what its timeline shows, not what a snapshot says", () => {
   const tail = { channelId: "open", sequence: 1, preview: preview("m1", "2026-10-14T09:00:00.000Z") };
-  const ahead = { ...channel("open", preview("m2", "2026-10-14T09:00:01.000Z")), messageCount: 2 };
-  const held = channelNotAheadOfTimeline(ahead, tail);
-  assert.deepEqual(held.lastMessage, tail.preview);
-  assert.equal(held.messageCount, 1, "nor counts it unread");
-  // Once the timeline shows it, the row shows it, as the Channel it was.
-  const caughtUp = { channelId: "open", sequence: 2, preview: preview("m2", "2026-10-14T09:00:01.000Z") };
-  assert.equal(channelNotAheadOfTimeline(ahead, caughtUp), ahead);
+  const ahead = channel("open", preview("m2", "2026-10-14T09:00:01.000Z"), 2);
+  const shown = channelAsTimelineShows(ahead, tail);
+  assert.deepEqual(shown.lastMessage, tail.preview);
+  assert.equal(shown.messageCount, 1, "nor counts a message the timeline does not show");
+  // When both say the same, the row keeps the Channel it was given.
+  const caughtUp = { channelId: "open", sequence: 2, preview: { ...ahead.lastMessage } };
+  assert.equal(channelAsTimelineShows(ahead, caughtUp), ahead);
 });
 
-test("every other row, and a row whose timeline is not painted, shows what the Channel says", () => {
-  const other = channel("other", preview("m9", "2026-10-14T09:05:00.000Z"));
+test("every other row shows what its Channel says", () => {
+  const other = channel("other", preview("m9", "2026-10-14T09:05:00.000Z"), 9);
   const tail = { channelId: "open", sequence: 1, preview: preview("m1", "2026-10-14T09:00:00.000Z") };
-  assert.equal(channelNotAheadOfTimeline(other, tail), other);
-  assert.equal(channelNotAheadOfTimeline(other, null), other);
-  const older = channel("open", preview("m0", "2026-10-14T08:59:00.000Z"));
-  assert.equal(channelNotAheadOfTimeline(older, tail), older);
+  assert.equal(channelAsTimelineShows(other, tail), other);
+  assert.equal(channelAsTimelineShows(other, null), other);
 });
 
 test("a row hears only a change to its own Channel's tail", () => {

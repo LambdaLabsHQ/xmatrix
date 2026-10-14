@@ -2650,9 +2650,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const presentedHead = selectedChannelId && history.at(-1)?.channelId === selectedChannelId
     ? latestSequence(history)
     : 0;
-  // The open conversation's list row previews no message its timeline does not
-  // show yet (presented-channel-tail.ts). Published before paint, so the row and
-  // the timeline change in the same frame.
+  // The open conversation's list row previews the timeline's newest message
+  // (presented-channel-tail.ts). Published before paint, so the row and the
+  // timeline change in the same frame.
   const presentedEntry = selectedChannelId && history.at(-1)?.channelId === selectedChannelId
     ? latestHistoryEntry(history)
     : undefined;
