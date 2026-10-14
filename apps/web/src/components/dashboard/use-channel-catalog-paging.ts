@@ -35,6 +35,7 @@ import {
 import {
   NO_CATALOG_LEASES,
   createCatalogRefreshThrottle,
+  leasedResolveQuery,
   nextCatalogLeases,
   observeSpaceCatalogRevision,
   readChannelsIntoStore,
@@ -46,6 +47,7 @@ import {
   type ChannelCatalogChangeDetail,
 } from "./channel-catalog-refresh";
 import { exactChannelIdFromRouteKey, routeEntityTokenFromKey } from "./channel-links";
+import { readAskedNow } from "./channel-message-summary";
 import { mergeChannelListHydratedFields } from "./workspace-admin-views";
 import { listenForForegroundRefresh } from "./foreground-refresh";
 import { userErrorMessage } from "../../lib/user-facing-error";
@@ -116,24 +118,28 @@ const INERT_SPACE_CATALOG: SpaceChannelCatalog = Object.freeze({
 
 /** What a read for this reader does to a Channel once merged (`ViewerReads.settle`). */
 type SettleViewerRead = (channel: SerializedChannel) => SerializedChannel;
+/** Whether a copy of a Channel was read before the Hub last answered the reader's read state (`ViewerReads.outdated`). */
+type OutdatedViewerRead = (channel: SerializedChannel) => boolean;
 
 /**
  * A catalog read answers as of when the Hub made it. What the socket has said
  * of the Channel since stays: its count, its head and its activity time only
  * move forward.
  */
-function aheadOfRead(live: SerializedChannel, read: SerializedChannel): SerializedChannel {
+function aheadOfRead(live: SerializedChannel, read: SerializedChannel, outdated = false): SerializedChannel {
   const messageCount = (live.messageCount ?? 0) > (read.messageCount ?? 0) ? live.messageCount : read.messageCount;
   const historyHeadSequence = (live.historyHeadSequence ?? 0) > (read.historyHeadSequence ?? 0)
     ? live.historyHeadSequence : read.historyHeadSequence;
   const updatedAt = Date.parse(live.updatedAt) > Date.parse(read.updatedAt) ? live.updatedAt : read.updatedAt;
   // The reader's own cursor only moves forward as well. A read from before it
-  // moved says nothing newer about what waits on them either, unless it names
-  // a message past where they have read: what an acknowledgement cleared
-  // stays cleared, and a later mention still shows.
-  const behind = live.readSequence !== undefined && (read.readSequence ?? 0) < live.readSequence;
-  const readSequence = behind ? live.readSequence : read.readSequence;
-  const attention = behind && (read.attention?.lastMessageSequence ?? 0) <= live.readSequence!
+  // moved, or asked before the Hub last answered what they have read
+  // (`outdated`: their Done clears what waits on them without moving the
+  // cursor), says nothing newer about what waits on them either, unless it
+  // names a message past where they have read: what an acknowledgement
+  // cleared stays cleared, and a later mention still shows.
+  const behind = outdated || (live.readSequence !== undefined && (read.readSequence ?? 0) < live.readSequence);
+  const readSequence = behind && (live.readSequence ?? 0) > (read.readSequence ?? 0) ? live.readSequence : read.readSequence;
+  const attention = behind && (read.attention?.lastMessageSequence ?? 0) <= (live.readSequence ?? 0)
     ? live.attention : read.attention;
   if (messageCount === read.messageCount && historyHeadSequence === read.historyHeadSequence &&
       updatedAt === read.updatedAt && readSequence === read.readSequence && attention === read.attention) {
@@ -153,6 +159,7 @@ function mergeChannels(
   current: SerializedChannel[],
   incoming: readonly SerializedChannel[],
   settle: SettleViewerRead = (channel) => channel,
+  outdated: OutdatedViewerRead = () => false,
 ) {
   const byId = new Map(current.map((channel) => [channel.id, channel]));
   for (const channel of incoming) {
@@ -163,7 +170,7 @@ function mergeChannels(
     // They race live messages too: the ones that got ahead of this read are
     // applied to what it says, in the order they came.
     const read = settle(mergeChannelListHydratedFields(prior, channel));
-    byId.set(channel.id, prior ? aheadOfRead(prior, read) : read);
+    byId.set(channel.id, prior ? aheadOfRead(prior, read, outdated(channel)) : read);
   }
   return [...byId.values()];
 }
@@ -174,6 +181,7 @@ function commitCatalogChannels(
   incoming: readonly SerializedChannel[],
   unapplied: ReadonlySet<SerializedChannel>,
   settle?: SettleViewerRead,
+  outdated?: OutdatedViewerRead,
 ): SerializedChannel[] {
   const present = new Set(current.map((channel) => channel.id));
   // A row made from the entity table's own Channel (a conversation a message
@@ -181,7 +189,7 @@ function commitCatalogChannels(
   const held = new Set(current);
   const next = incoming.filter((channel) => !held.has(channel) &&
     (unapplied.has(channel) || !present.has(channel.id)));
-  return next.length > 0 ? mergeChannels(current, next, settle) : current;
+  return next.length > 0 ? mergeChannels(current, next, settle, outdated) : current;
 }
 
 function catalogOptions(input: {
@@ -194,10 +202,16 @@ function catalogOptions(input: {
     queryKey: xmatrixQueryKeys.channelCatalog({
       userId: input.userId, spaceId: input.spaceId, ...input.query,
     }) as QueryKey,
-    queryFn: ({ pageParam, signal }) => fetchChannelCatalogPage({
-      token: input.token, spaceId: input.spaceId, query: input.query,
-      cursor: pageParam, signal,
-    }),
+    queryFn: async ({ pageParam, signal }) => {
+      // Each row's Channel is as old as when this page was asked for.
+      const asked = readAskedNow();
+      const page = await fetchChannelCatalogPage({
+        token: input.token, spaceId: input.spaceId, query: input.query,
+        cursor: pageParam, signal,
+      });
+      for (const row of page.rows) asked(row.channel);
+      return page;
+    },
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     staleTime: 15_000,
@@ -281,7 +295,7 @@ export function useChannelCatalogPaging(input: {
   /** Tells `channels`' readers what live reports changed since they last heard. */
   promoteCatalog?: () => void;
   /** What reads made for a reader have brought them (channel-message-summary.ts). */
-  viewerReads?: (userId: string) => { has(channelId: string): boolean; settle: SettleViewerRead };
+  viewerReads?: (userId: string) => { has(channelId: string): boolean; settle: SettleViewerRead; outdated: OutdatedViewerRead };
   setSelectedChannelId: Dispatch<SetStateAction<string | null>>;
 }): ChannelCatalogPagingModel {
   const {
@@ -328,6 +342,10 @@ export function useChannelCatalogPaging(input: {
     (channel) => (userId && viewerReads ? viewerReads(userId).settle(channel) : channel),
     [userId, viewerReads],
   );
+  const outdatedViewerRead = useCallback<OutdatedViewerRead>(
+    (channel) => Boolean(userId && viewerReads?.(userId).outdated(channel)),
+    [userId, viewerReads],
+  );
 
   // Every cache write hands over all of a Space's cached rows, and a message
   // only moves its row, keeping the Channel it was read with. Applying such a
@@ -339,8 +357,8 @@ export function useChannelCatalogPaging(input: {
     const applied = appliedChannelsRef.current;
     const unapplied = new Set(incoming.filter((channel) => !applied.has(channel)));
     for (const channel of incoming) applied.add(channel);
-    setChannels((current) => commitCatalogChannels(current, incoming, unapplied, settleViewerRead));
-  }, [setChannels, settleViewerRead]);
+    setChannels((current) => commitCatalogChannels(current, incoming, unapplied, settleViewerRead, outdatedViewerRead));
+  }, [outdatedViewerRead, setChannels, settleViewerRead]);
 
   const roots = useMemo(() => createElement(
     Fragment,
@@ -428,18 +446,21 @@ export function useChannelCatalogPaging(input: {
     const lease = leases.bySpace.get(spaceId);
     return readChannelsIntoStore({
       authorized: () => lease !== undefined && leaseOf(spaceId) === lease,
-      read: () => client.fetchQuery({
+      read: () => client.fetchQuery(leasedResolveQuery({
         queryKey: xmatrixQueryKeys.channelResolve({
           userId, spaceId, channelIds: ids, routeToken, includeParticipants: true,
         }),
-        queryFn: ({ signal }) => fetchChannelCatalogResolve({
+        lease,
+        fresh,
+        asked: readAskedNow,
+        read: (signal) => fetchChannelCatalogResolve({
           token, spaceId, channelIds: ids, routeToken, includeParticipants: true, signal,
         }),
-        staleTime: fresh ? 0 : 30_000,
-      }),
-      commit: (resolved) => setChannels((current) => mergeChannels(current, resolved, settleViewerRead)),
+      })),
+      commit: (resolved) => setChannels((current) =>
+        mergeChannels(current, resolved, settleViewerRead, outdatedViewerRead)),
     });
-  }, [client, leaseOf, leases, setChannels, settleViewerRead, token, userId]);
+  }, [client, leaseOf, leases, outdatedViewerRead, setChannels, settleViewerRead, token, userId]);
 
   const resolvedRouteKeyRef = useRef<string | null>(null);
 
