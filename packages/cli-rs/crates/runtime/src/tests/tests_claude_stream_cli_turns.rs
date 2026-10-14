@@ -548,7 +548,7 @@ async fn claude_reports_a_long_tool_call_and_its_background_tasks_as_waits() {
         .expect("a background wait outlives the turn");
     let waiting = between.waiting.expect("waiting");
     assert_eq!(waiting.kind, "background");
-    assert_eq!(waiting.label.as_deref(), Some("1 task"));
+    assert_eq!(waiting.count, Some(1));
     assert_eq!(waiting.details, vec!["Tail the deploy log".to_string()]);
 
     // The task's own turn starts: nothing is waited on any more.

@@ -92,6 +92,7 @@ impl ToolWaits {
             .filter(|tool| now.saturating_duration_since(tool.opened) >= self.threshold)?;
         Some(protocol::AgentRuntimeWaiting {
             kind: "tool".into(),
+            count: None,
             label: Some(tool.wait.label.clone()),
             details: tool.wait.details.clone(),
             since_millis: tool.opened_millis,
@@ -108,11 +109,9 @@ pub(crate) fn background_wait(
 ) -> Option<protocol::AgentRuntimeWaiting> {
     (count > 0).then(|| protocol::AgentRuntimeWaiting {
         kind: "background".into(),
-        label: Some(if count == 1 {
-            "1 task".into()
-        } else {
-            format!("{count} tasks")
-        }),
+        // The fact; clients word it ("2 tasks").
+        label: None,
+        count: Some(count),
         details: descriptions
             .iter()
             .filter_map(|description| one_line(description, DETAIL_MAX_CHARS))
@@ -279,6 +278,7 @@ mod tests {
         let tracker = crate::AgentRuntimeStateTracker::new("test");
         let turn = tracker.begin_turn(Some("channel-1"), None);
         let ci = protocol::AgentRuntimeWaiting {
+            count: None,
             kind: "tool".into(),
             label: Some("gh pr checks 1 --watch".into()),
             details: Vec::new(),
@@ -306,10 +306,7 @@ mod tests {
             .waiting_snapshot()
             .expect("background tasks outlive the turn");
         assert_eq!(between.status, "idle");
-        assert_eq!(
-            between.waiting.and_then(|w| w.label).as_deref(),
-            Some("2 tasks")
-        );
+        assert_eq!(between.waiting.and_then(|w| w.count), Some(2));
     }
 
     #[test]
@@ -317,12 +314,12 @@ mod tests {
         assert_eq!(background_wait(0, &[], 5), None);
         let one = background_wait(1, &["Watch CI\n for  PR #3781"], 5).expect("a wait");
         assert_eq!(
-            (one.kind.as_str(), one.label.as_deref(), one.since_millis),
-            ("background", Some("1 task"), 5)
+            (one.kind.as_str(), one.count, one.label.as_deref(), one.since_millis),
+            ("background", Some(1), None, 5)
         );
         assert_eq!(one.details, vec!["Watch CI for PR #3781"]);
         let many = background_wait(6, &["", "a", "b", "c", "d", "e"], 5).expect("a wait");
-        assert_eq!(many.label.as_deref(), Some("6 tasks"));
+        assert_eq!(many.count, Some(6));
         assert_eq!(many.details, vec!["a", "b", "c", "d"]);
     }
 

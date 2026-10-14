@@ -96,6 +96,9 @@ test("the island names what is waited on as the runtime says it, with its kind's
   assert.deepEqual(subject({ kind: "tool", label: "Wait for CI on PR #3781" }), { word: "Wait for CI on PR #3781", icon: "SquareTerminal" });
   assert.deepEqual(subject({ kind: "tool" }), { word: "a tool call", icon: "SquareTerminal" });
   assert.deepEqual(subject({ kind: "background", label: "2 tasks" }), { word: "2 tasks", icon: "Layers" });
+  // A runtime reports the count; the client words it.
+  assert.deepEqual(subject({ kind: "background", count: 1 }), { word: "1 task", icon: "Layers" });
+  assert.deepEqual(subject({ kind: "background", count: 3 }), { word: "3 tasks", icon: "Layers" });
 });
 
 test("a failed wake rests visibly and says what resumes it", () => {

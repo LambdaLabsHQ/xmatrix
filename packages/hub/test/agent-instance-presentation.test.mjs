@@ -44,6 +44,13 @@ test("a runtime's wait passes through bounded, and a malformed one is dropped", 
     agentRuntimePresentation({ status: "idle", waiting: { kind: "background", sinceMillis: 5 } }),
     { status: "idle", waiting: { kind: "background", sinceMillis: 5 } },
   );
+  // A background wait carries its task count as a fact, bounded.
+  assert.deepEqual(
+    agentRuntimePresentation({ status: "idle", waiting: { kind: "background", count: 2, sinceMillis: 5 } }),
+    { status: "idle", waiting: { kind: "background", count: 2, sinceMillis: 5 } },
+  );
+  assert.equal(agentRuntimePresentation({ status: "idle", waiting: { kind: "background", count: -1, sinceMillis: 5 } })
+    .waiting.count, undefined);
   // The rest of what the harness says: at most four details, each bounded.
   assert.deepEqual(
     agentRuntimePresentation({ status: "idle", waiting: { kind: "background", sinceMillis: 5,

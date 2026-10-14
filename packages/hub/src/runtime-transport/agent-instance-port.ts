@@ -145,6 +145,8 @@ export interface AgentInstanceControlSwitchBinding {
 export interface AgentInstanceControlSwitchResult {
   value?: string;
   error?: string;
+  /** The switch cancelled a turn that was running. */
+  interruptedTurn?: boolean;
 }
 
 export type AgentInstanceControlSwitchOutcome = import("../product-agent-model-effort").ProductAgentControlOutcome;
@@ -517,18 +519,23 @@ export class AgentInstanceRuntimeTransport {
         message: error instanceof Error ? error.message : String(error),
       };
     }
-    if (result.error?.trim()) return { status: "error", message: result.error.trim() };
+    // A switch that cancelled a running turn owes that turn a continuation,
+    // refused or not; Hub commits it once every switch in the message landed.
+    const continuation = result.interruptedTurn
+      ? { continuation: { instanceId: session.run.instanceId, requestId } } : {};
+    if (result.error?.trim()) return { status: "error", message: result.error.trim(), ...continuation };
     const confirmed = result.value?.trim();
     if (!confirmed) {
-      return { status: "error", message: "The instance did not confirm a selection." };
+      return { status: "error", message: "The instance did not confirm a selection.", ...continuation };
     }
     if (confirmed.toLowerCase() !== selected.toLowerCase()) {
       return {
         status: "error",
         message: `the instance confirmed \`${confirmed}\` instead of \`${selected}\`.`,
+        ...continuation,
       };
     }
-    return { status: "switched", selected: confirmed };
+    return { status: "switched", selected: confirmed, ...continuation };
   }
 
   requestTraceHistory(

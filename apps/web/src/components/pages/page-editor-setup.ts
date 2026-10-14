@@ -881,12 +881,37 @@ interface ReaderChange {
 
 const readerChangesKey = new PluginKey<DecorationSet>("page-reader-changes");
 
+/**
+ * Room at the right edge beside a change, where what to do with it stands over the text's edge on a phone
+ * or a narrow window: the lines beside it end short of it, so no word runs under it.
+ */
+export function edgeRoom(beside: "suggestion" | "reader-change"): HTMLElement {
+  const element = document.createElement("span");
+  element.className = `page-edge-room is-${beside}`;
+  element.contentEditable = "false";
+  element.setAttribute("aria-hidden", "true");
+  return element;
+}
+
+/** That room, where the first line of text from `from` to `to` starts. */
+export function edgeRoomAt(doc: DocNode, from: number, to: number, beside: "suggestion" | "reader-change"): Decoration[] {
+  let first: number | null = null;
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (node.isTextblock) first ??= pos + 1;
+    return first === null;
+  });
+  return first === null ? [] : [Decoration.widget(first, () => edgeRoom(beside), {
+    side: -1, ignoreSelection: true, marks: [], key: `${beside}-room`,
+  })];
+}
+
 function removedWidget(change: ReaderChange): HTMLElement {
   const element = document.createElement(change.block ? "div" : "span");
   element.className = `page-reader-removed${change.block ? " is-block" : ""}`;
   element.contentEditable = "false";
   element.setAttribute("aria-hidden", "true");
   element.textContent = change.text;
+  if (change.block) element.prepend(edgeRoom("reader-change"));
   return element;
 }
 
@@ -902,9 +927,20 @@ function readerDecorations(state: EditorState, fragment: Y.XmlFragment, changes:
     }
   };
   const decorations: Decoration[] = [];
+  // Each block with a change keeps room at its edge for the mark that walks the changes on a phone.
+  const rooms = new Set<number>();
+  const keepRoom = (pos: number) => {
+    const at = state.doc.resolve(pos);
+    const start = at.depth > 0 ? at.before(1) : pos;
+    const block = state.doc.nodeAt(start);
+    if (!block || rooms.has(start)) return;
+    rooms.add(start);
+    decorations.push(...edgeRoomAt(state.doc, start, start + block.nodeSize, "reader-change"));
+  };
   for (const change of changes) {
     const from = resolve(change.from);
     if (from === null || from > size) continue;
+    if (!(change.kind === "removed" && change.block)) keepRoom(from);
     if (change.kind === "removed") {
       decorations.push(Decoration.widget(from, () => removedWidget(change), {
         side: -1, ignoreSelection: true, marks: [], key: `reader-removed-${change.id}`,
