@@ -177,7 +177,6 @@ import {
   resolveCurrentSpaceId,
   spacesAuthorityReady,
   channelsAfterAgentInstanceOffline,
-  replaceAgents,
   sameChannelCatalogState,
   replaceBrowserPath,
   placeChannel,
@@ -455,7 +454,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [agentTraceReplicas, setAgentTraceReplicas] = useState<AgentTraceReplica[]>([]);
 
-  const [realtimeAgents] = useState(() => createRealtimeCollection<SerializedAgent>());
+  const [realtimeAgents] = useState(() => createRealtimeCollection<SerializedAgent>([], agent => agent.name));
   const agents = useSyncExternalStore(
     view === "messages" || view === "pages" ? realtimeAgents.subscribeCatalog : realtimeAgents.subscribe,
     view === "messages" || view === "pages" ? realtimeAgents.getCatalogSnapshot : realtimeAgents.getSnapshot,
@@ -1486,6 +1485,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
     // Presence and activity from many working Agents land as one commit per
     // flush window instead of one per frame (realtime-frame-batcher.ts).
+    let routedBatch: ReturnType<typeof createChannelPresenceBatch> | undefined;
     const relayFrames = createRealtimeFrameBatcher<HumanServerMessage>({
       batchKey: humanFrameBatchKey,
       apply: (frames) => {
@@ -1493,7 +1493,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         let agents: SerializedAgent[] = [];
         let presence: SerializedAgent[] = [];
         const events: ObservabilityEvent[] = [];
-        const channels = () => channelBatch ??= createChannelPresenceBatch(realtimeChannels.getSnapshot());
+        const channels = () => {
+          if (channelBatch) return channelBatch;
+          const previous = routedBatch;
+          routedBatch = undefined;
+          const current = realtimeChannels.getSnapshot();
+          return channelBatch = createChannelPresenceBatch(current, previous?.takeRouting(current));
+        };
         const flushPresence = () => {
           const incoming = presence;
           presence = [];
@@ -1501,10 +1507,17 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         };
         const flushState = (kind: "live" | "catalog" = "live") => {
           flushPresence();
-          if (agents.length) realtimeAgents.set(current => replaceAgents(current, agents), "live");
+          const incomingAgents = agents;
           agents = [];
-          if (channelBatch) realtimeChannels.set(channelBatch.getSnapshot(), kind);
+          if (incomingAgents.length) realtimeAgents.receive(incomingAgents);
+          const completed = channelBatch;
           channelBatch = null;
+          if (completed) {
+            const liveUpdates = kind === "live" ? completed.getLiveUpdates() : undefined;
+            if (liveUpdates) realtimeChannels.receive(liveUpdates, completed.acceptLiveSnapshot);
+            else realtimeChannels.commit(completed.getCommit(), kind);
+            routedBatch = completed;
+          }
         };
         for (const frame of frames) {
           try {

@@ -1124,7 +1124,8 @@
     scrollbar-color: oklch(0.4 0 0 / 0.4) transparent;
   }
 
-  .light .xmatrix-app ::selection {
+  /* Avatars cannot be selected; skip their animated dots' highlight styles. */
+  .light .xmatrix-app :not(:where(.identity-avatar, .identity-avatar *))::selection {
     background: oklch(0.3 0 0 / 0.18);
   }
 

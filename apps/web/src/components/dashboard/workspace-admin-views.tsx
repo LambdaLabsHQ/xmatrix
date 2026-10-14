@@ -9,6 +9,7 @@ import { spaceSummary, TeamNewSpace, TeamOtherSpace } from "./team-spaces";
 import { SpaceDangerZone } from "./space-deletion-panel";
 import { SpaceOpenParticipation } from "./space-open-participation";
 import { withChannelReadState, type ChannelReadStateUpdate } from "./channel-read-state";
+import type { RealtimeCollectionCommit } from "./realtime-collection";
 import type {
   AgentConfigForm,
 } from "./workspace-shell-agent-config-types";
@@ -2189,16 +2190,48 @@ export function mergeChannelMemberPresencePreferringQuotas(
   return merged;
 }
 
+type ChannelPresenceRouting = {
+  byMember: Map<string, Set<string>>;
+  byInstance: Map<string, Set<string>>;
+  positions: ReadonlyMap<string, number>;
+  ordered: boolean;
+};
+
 /** Apply ordered presence and partial snapshots in one state-frame run. The
  * Channel table and routing indices are built once, rather than once per
  * alternating Agent/Channel pair. Snapshots still merge in their socket order. */
-export function createChannelPresenceBatch(channels: SerializedChannel[]) {
-  const byId = new Map(channels.map(channel => [channel.id, channel]));
-  const changed = new Set<string>();
-  const byMember = new Map<string, Set<string>>();
-  const byInstance = new Map<string, Set<string>>();
-  let indexed = false;
-  let needsSort = false;
+export function createChannelPresenceBatch(channels: SerializedChannel[], routing?: ChannelPresenceRouting) {
+  const positionsFor = (items: SerializedChannel[]) => {
+    const positions = new Map<string, number>();
+    items.forEach((channel, index) => positions.set(channel.id, index));
+    return positions;
+  };
+  // The position index is immutable and belongs to this exact input array.
+  // Ordinary reports stage only changed cards, without copying the catalog.
+  const channelPositions = routing?.positions ?? positionsFor(channels);
+  const updates = new Map<string, SerializedChannel>();
+  const get = (id: string) => {
+    const updated = updates.get(id);
+    if (updated) return updated;
+    const position = channelPositions.get(id);
+    return position === undefined ? undefined : channels[position];
+  };
+  const values = function* () {
+    for (const id of channelPositions.keys()) yield get(id)!;
+    for (const [id, channel] of updates) if (!channelPositions.has(id)) yield channel;
+  };
+  let committed: RealtimeCollectionCommit<SerializedChannel> | undefined;
+  let liveUpdates: SerializedChannel[] | undefined;
+  let published: SerializedChannel[] | undefined;
+  let publishedFromBasis = true;
+  let sealed = false;
+  const byMember = routing?.byMember ?? new Map<string, Set<string>>();
+  const byInstance = routing?.byInstance ?? new Map<string, Set<string>>();
+  let indexed = routing !== undefined;
+  let routesTaken = false;
+  const inputOrdered = routing?.ordered ?? false;
+  let outputOrdered = inputOrdered;
+  const reordered = new Set<string>();
   const routes = (channel: SerializedChannel) => {
     const members: string[] = [];
     const instances: string[] = [];
@@ -2232,7 +2265,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
     for (const instance of keys.instances) update(byInstance, instance);
   };
   const put = (channel: SerializedChannel, rankMayChange = false) => {
-    const previous = byId.get(channel.id);
+    const previous = get(channel.id);
     if (previous === channel) return;
     // Validate the sort inputs too, including a new Channel: a later sort may
     // otherwise fail outside this frame's error boundary after staging it.
@@ -2244,14 +2277,54 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
     if (indexed) route(channel.id, after, true);
     // Presence leaves the sidebar rank alone. A new or renamed/reordered
     // snapshot gets the same comparator as replaceChannel, once at publication.
-    if (rankChanged) needsSort = true;
-    byId.set(channel.id, channel);
-    changed.add(channel.id);
+    if (rankChanged) reordered.add(channel.id);
+    updates.set(channel.id, channel);
+  };
+  const snapshot = () => {
+    if (published) return published;
+    if (!updates.size) return channels;
+    const next = channelPositions.size === channels.length ? channels.slice() : [...values()];
+    if (channelPositions.size === channels.length) {
+      for (const [id, channel] of updates) {
+        const position = channelPositions.get(id);
+        if (position === undefined) next.push(channel);
+        else next[position] = channel;
+      }
+    }
+    if (!reordered.size) return next;
+    outputOrdered = true;
+    if (!inputOrdered || reordered.size > Math.max(8, next.length / 16)) return sortChannels(next);
+    // The inherited order is already sorted. Move only the added/re-ranked
+    // rows, keeping the full comparator and its original stable tie order.
+    const ordered = next.filter(channel => !reordered.has(channel.id));
+    let positions: Map<string, number> | undefined;
+    const compare = (left: SerializedChannel, right: SerializedChannel) => {
+      const rank = compareChannelsForSidebar(left, right);
+      if (rank) return rank;
+      positions ??= new Map(next.map((channel, index) => [channel.id, index]));
+      return positions.get(left.id)! - positions.get(right.id)!;
+    };
+    for (const id of reordered) {
+      const channel = get(id)!;
+      let low = 0;
+      let high = ordered.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (compare(ordered[middle], channel) <= 0) low = middle + 1;
+        else high = middle;
+      }
+      ordered.splice(low, 0, channel);
+    }
+    return ordered;
+  };
+  const requireUnpublished = () => {
+    if (sealed) throw new Error("A published presence batch cannot be changed");
   };
   return {
     applyChannel(channel: SerializedChannel,
       beforeApply?: (previous: SerializedChannel | undefined, updated: SerializedChannel) => void) {
-      const previous = byId.get(channel.id);
+      requireUnpublished();
+      const previous = get(channel.id);
       const updated = mergeChannelListHydratedFields(previous, channel);
       // Classification and access/history invalidation may fail. Keep the
       // prior state in that case, as replaceChannel's unpublished array did.
@@ -2260,9 +2333,10 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
       return { previous, updated };
     },
     applyPresence(agents: readonly SerializedAgent[]) {
+      requireUnpublished();
       if (!agents.length) return;
       if (!indexed) {
-        for (const channel of byId.values()) {
+        for (const channel of values()) {
           try {
             route(channel.id, routes(channel), true);
           } catch {
@@ -2275,7 +2349,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
       const positions = new Map<string, Set<number>>();
       const sharedQuotas = new Map<string, SerializedAgent>();
       const target = (id: string, position?: number) => {
-        if (!byId.has(id)) return;
+        if (!get(id)) return;
         let reports = positions.get(id);
         if (!reports) positions.set(id, reports = new Set());
         if (position !== undefined) reports.add(position);
@@ -2297,7 +2371,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
         for (const id of byMember.get(member) ?? []) target(id);
       }
       for (const [id, reports] of positions) {
-        const channel = byId.get(id)!;
+        const channel = get(id)!;
         let patched = channel;
         // Set insertion order is the report order, including reports routed
         // through a legacy member key or through a globally unique Instance.
@@ -2310,10 +2384,44 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
         put(patched);
       }
     },
-    getSnapshot() {
-      if (!changed.size) return channels;
-      const next = [...byId.values()];
-      return needsSort ? sortChannels(next) : next;
+    getSnapshot: snapshot,
+    /** Seal a rank-preserving live run for the collection's keyed receive. */
+    getLiveUpdates(): readonly SerializedChannel[] | undefined {
+      if (liveUpdates) return liveUpdates;
+      requireUnpublished();
+      if (reordered.size) return undefined;
+      sealed = true;
+      return liveUpdates = [...updates.values()];
+    },
+    /** Called by receive before subscribers: reentrant writes cannot change
+     * which immutable snapshot this run's routing belongs to. */
+    acceptLiveSnapshot(items: SerializedChannel[], previous: SerializedChannel[]) {
+      if (!liveUpdates || published) throw new Error("A live presence snapshot must be accepted once after sealing");
+      // Another collection can synchronously notify a writer before this run
+      // reaches receive. Its result is valid, but the old routes/positions are
+      // no longer an index of the snapshot against which receive merged.
+      publishedFromBasis = previous === channels;
+      published = items;
+    },
+    /** Catalog/rank changes retain a complete, immutable indexed fallback. */
+    getCommit() {
+      if (committed) return committed;
+      requireUnpublished();
+      const items = snapshot();
+      const byId = new Map(items.map(channel => [channel.id, channel]));
+      committed = { basis: channels, items, byId, changedKeys: [...updates.keys()] };
+      published = items;
+      sealed = true;
+      return committed;
+    },
+    /** Only the exact next live snapshot can inherit a completed run's routes.
+     * Taking consumes them even on mismatch; other writers force a rebuild. */
+    takeRouting(basis: SerializedChannel[]) {
+      const reusable = !routesTaken && indexed && publishedFromBasis && published === basis;
+      routesTaken = true;
+      if (!reusable) return undefined;
+      const positions = !reordered.size && basis.length === channels.length ? channelPositions : positionsFor(basis);
+      return { byMember, byInstance, positions, ordered: outputOrdered };
     },
   };
 }
@@ -2693,16 +2801,6 @@ export function replaceSpace(spaces: SerializedSpace[], space: SerializedSpace):
       )
     : [...spaces, space];
   return sortSpaces(next);
-}
-
-export function replaceAgents(agents: SerializedAgent[], incoming: readonly SerializedAgent[]): SerializedAgent[] {
-  if (!incoming.length) return agents;
-  const byId = new Map(agents.map(agent => [agent.id, agent]));
-  for (const agent of incoming) byId.set(agent.id, agent);
-  const next = [...byId.values()];
-  return byId.size !== agents.length || agents.some(agent => byId.get(agent.id)!.name !== agent.name)
-    ? next.sort((left, right) => left.name.localeCompare(right.name))
-    : next;
 }
 
 export function replaceWorkspace(
