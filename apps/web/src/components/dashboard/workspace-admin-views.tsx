@@ -9,6 +9,7 @@ import { spaceSummary, TeamNewSpace, TeamOtherSpace } from "./team-spaces";
 import { SpaceDangerZone } from "./space-deletion-panel";
 import { SpaceOpenParticipation } from "./space-open-participation";
 import { withChannelReadState, type ChannelReadStateUpdate } from "./channel-read-state";
+import type { RealtimeCollectionCommit } from "./realtime-collection";
 import type {
   AgentConfigForm,
 } from "./workspace-shell-agent-config-types";
@@ -2170,12 +2171,19 @@ export function mergeChannelMemberPresencePreferringQuotas(
 /** Apply ordered presence and partial snapshots in one state-frame run. The
  * Channel table and routing indices are built once, rather than once per
  * alternating Agent/Channel pair. Snapshots still merge in their socket order. */
-export function createChannelPresenceBatch(channels: SerializedChannel[]) {
+type ChannelPresenceRouting = {
+  byMember: Map<string, Set<string>>;
+  byInstance: Map<string, Set<string>>;
+};
+
+export function createChannelPresenceBatch(channels: SerializedChannel[], routing?: ChannelPresenceRouting) {
   const byId = new Map(channels.map(channel => [channel.id, channel]));
   const changed = new Set<string>();
-  const byMember = new Map<string, Set<string>>();
-  const byInstance = new Map<string, Set<string>>();
-  let indexed = false;
+  let committed: RealtimeCollectionCommit<SerializedChannel> | undefined;
+  const byMember = routing?.byMember ?? new Map<string, Set<string>>();
+  const byInstance = routing?.byInstance ?? new Map<string, Set<string>>();
+  let indexed = routing !== undefined;
+  let routesTaken = false;
   let needsSort = false;
   const routes = (channel: SerializedChannel) => {
     const members: string[] = [];
@@ -2226,9 +2234,19 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
     byId.set(channel.id, channel);
     changed.add(channel.id);
   };
+  const snapshot = () => {
+    if (committed) return committed.items;
+    if (!changed.size) return channels;
+    const next = [...byId.values()];
+    return needsSort ? sortChannels(next) : next;
+  };
+  const requireUnpublished = () => {
+    if (committed) throw new Error("A published presence batch cannot be changed");
+  };
   return {
     applyChannel(channel: SerializedChannel,
       beforeApply?: (previous: SerializedChannel | undefined, updated: SerializedChannel) => void) {
+      requireUnpublished();
       const previous = byId.get(channel.id);
       const updated = mergeChannelListHydratedFields(previous, channel);
       // Classification and access/history invalidation may fail. Keep the
@@ -2238,6 +2256,7 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
       return { previous, updated };
     },
     applyPresence(agents: readonly SerializedAgent[]) {
+      requireUnpublished();
       if (!agents.length) return;
       if (!indexed) {
         for (const channel of byId.values()) {
@@ -2288,10 +2307,17 @@ export function createChannelPresenceBatch(channels: SerializedChannel[]) {
         put(patched);
       }
     },
-    getSnapshot() {
-      if (!changed.size) return channels;
-      const next = [...byId.values()];
-      return needsSort ? sortChannels(next) : next;
+    getSnapshot: snapshot,
+    /** Transfer the finished index once; later batches own fresh mutable maps. */
+    getCommit() {
+      return committed ??= { items: snapshot(), byId, changedKeys: [...changed] };
+    },
+    /** Only the exact next live snapshot can inherit a completed run's routes.
+     * Taking consumes them even on mismatch; other writers force a rebuild. */
+    takeRouting(basis: SerializedChannel[]) {
+      const reusable = !routesTaken && indexed && committed?.items === basis;
+      routesTaken = true;
+      return reusable ? { byMember, byInstance } : undefined;
     },
   };
 }
@@ -2671,16 +2697,6 @@ export function replaceSpace(spaces: SerializedSpace[], space: SerializedSpace):
       )
     : [...spaces, space];
   return sortSpaces(next);
-}
-
-export function replaceAgents(agents: SerializedAgent[], incoming: readonly SerializedAgent[]): SerializedAgent[] {
-  if (!incoming.length) return agents;
-  const byId = new Map(agents.map(agent => [agent.id, agent]));
-  for (const agent of incoming) byId.set(agent.id, agent);
-  const next = [...byId.values()];
-  return byId.size !== agents.length || agents.some(agent => byId.get(agent.id)!.name !== agent.name)
-    ? next.sort((left, right) => left.name.localeCompare(right.name))
-    : next;
 }
 
 export function replaceWorkspace(

@@ -46,7 +46,10 @@ dock panes, so tabs never reload or rebuild. See the [iOS shell](../../apps/ios/
 The shared shell subscribes to live Channel presence by Channel key; catalog
 and message-reference snapshots stay stable across presence-only changes.
 Ordered Instance/card/snapshot batches share member/global Instance routing
-and publish once before message, history and control barriers. A Run's
+and publish once before message, history and control barriers. Completed runs
+transfer their existing keyed index and changed IDs without a second full
+collection reconciliation; a published producer cannot write that index again.
+A Run's
 presentation stays in its own Channel while account quota remains shared.
 See [live Instance load](../performance/channel-startup.md#live-instance-load).
 

@@ -277,6 +277,18 @@ access. Snapshots of unloaded Channels hydrate live keys without repeatedly
 refetching the entire catalog; its own pages, create/delete frames and revision
 watermarks discover navigation rows.
 
+A completed state run transfers its ordered rows, keyed index and changed IDs
+directly to the live collection. Publication checks the final references for
+those IDs instead of rebuilding the same index and diffing every Channel again.
+The producer rejects further writes after that transfer, and later runs build
+their own index; catalog and previous live snapshots remain immutable. Ordinary
+catalog, read-state and account-reset writes retain full reconciliation.
+The next run may take the completed run's member/Instance routes once, only
+when its input is the exact published snapshot. Any intervening writer or a
+failed publication discards that handoff and rebuilds from current state.
+Agent cards use the same indexed publication contract while retaining their
+complete-replacement, last-card-wins and name-ordering behavior.
+
 A Run's activity, intent, token counters and last-seen clock stay in its Channel.
 Only account quota travels to sibling Channels, and repeated quota readings
 reuse unchanged objects. The work dock shares unchanged item references and
@@ -298,8 +310,10 @@ in `live-agent-load-render-scope.spec.ts`, including cards and whole-Channel
 snapshots. The presence owner tests cover sibling-Run isolation, unchanged quota,
 and a 1,000-report digest with a bounded number of Channel inspections. The
 thousand-Agent browser benchmark sends 100 legacy two-frame reports per second
-for 60 seconds, including ten working Instances with live intent text in the
-open Channel. It checks receipt counts, the final
+for 60 seconds per cadence, both ten-report bursts every 100 ms and single
+reports every 10 ms, including ten working Instances with live intent text in
+the open Channel. Performance cases run one worker at a time so another load
+generator cannot contaminate a renderer's wall-clock budget. Each cadence checks receipt counts, the final
 report, the last focused Instance activity in the real trace window, one
 uninterrupted socket and the delivery deadline, plus absolute renderer
 `TaskDuration / elapsed` below 10% overall and in every ten-second window. Normal
