@@ -1,4 +1,5 @@
 import type { HumanServerMessage } from "@xmatrix/protocol";
+import { HUMAN_PACKET_MS, isDeferredHumanFrame } from "../../lib/connectivity/human-frame-packets";
 
 /**
  * Applies a burst of realtime frames as one update.
@@ -23,7 +24,7 @@ export type RealtimeFrameBatcher<T> = {
   dispose(): void;
 };
 
-export const REALTIME_FLUSH_MS = 16;
+export const REALTIME_FLUSH_MS = HUMAN_PACKET_MS;
 
 export function createRealtimeFrameBatcher<T>(options: {
   apply: (frames: T[]) => void;
@@ -89,12 +90,9 @@ export function humanFrameBatchKey(frame: HumanServerMessage): string | null {
       const instanceIds = (frame.agent.instances ?? []).map((instance) => instance.id).sort().join(",");
       return `presence:${frame.agent.id}:${instanceIds}`;
     }
-    case "observable_event":
-    case "agent_lifecycle":
-    case "channel_updated":
+    default:
+      if (!isDeferredHumanFrame(frame)) return null;
       unkeyedFrame += 1;
       return `${frame.type}:${unkeyedFrame}`;
-    default:
-      return null;
   }
 }

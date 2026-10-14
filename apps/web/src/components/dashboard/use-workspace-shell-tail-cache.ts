@@ -1,3 +1,4 @@
+import type { SocketTransport } from "@/lib/connectivity/reconnecting-socket";
 // Product tail cache engine for the workspace shell (peeled by semantic
 // domain from use-workspace-shell-state.ts). Owns the durable bounded-tail
 // candidate store, the catalog-manifest admission gate, write-through
@@ -39,7 +40,7 @@ export function useWorkspaceShellTailCache(deps: {
   hasOlderMessagesRef: React.MutableRefObject<boolean>;
   latestHistorySequenceRef: React.MutableRefObject<number>;
   relayPushConnectedRef: React.MutableRefObject<boolean>;
-  relaySocketRef: React.MutableRefObject<WebSocket | null>;
+  relaySocketRef: React.MutableRefObject<SocketTransport | null>;
   setHistory: (messages: ChannelMessage[]) => void;
   setHasOlderMessages: (value: boolean) => void;
   setLoadingHistory: (value: boolean) => void;

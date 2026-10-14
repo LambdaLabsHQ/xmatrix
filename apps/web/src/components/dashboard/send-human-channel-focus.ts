@@ -1,16 +1,17 @@
+import type { SocketTransport } from "@/lib/connectivity/reconnecting-socket";
 import type { MutableRefObject } from "react";
 
 import { INITIAL_HISTORY_LIMIT } from "./workspace-shell-constants";
 
 export type HumanChannelFocusRequest = {
-  socket: WebSocket;
+  socket: SocketTransport;
   channelId: string | null;
   sentAt: number;
 };
 
 type SendHumanChannelFocusInput = {
   channelId: string | null;
-  socket: WebSocket | null | undefined;
+  socket: SocketTransport | null | undefined;
   connected: boolean;
   selectedChannelIdRef: MutableRefObject<string | null>;
   historyChannelIdRef: MutableRefObject<string | null>;
