@@ -3,7 +3,7 @@ import type { AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, listAppConnections } from "../apps";
 import { getChannel } from "../spaces";
-import type { ConnectorAction, ConnectorCommandInput } from "./provider";
+import type { ConnectorCommandInput } from "./provider";
 
 /* What every connector command needs around its own work: the Channel's
    Space connection, an execution record, and one receipt per message. */
