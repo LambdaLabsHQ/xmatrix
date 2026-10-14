@@ -25,12 +25,11 @@ async function execute(outcome) {
     assert.fail(`unexpected import: ${name}`);
   });
   let attempts = 0;
-  const { toolResult: result, receipt } = await support.withExecution({ id: "sentry", name: "Sentry" },
+  const result = await support.withExecution({ id: "sentry", name: "Sentry" },
     { messageId: "read-fixture", channelId: "channel", actorUserId: "human" },
     { authority: {}, principal: { kind: "user", id: "human" }, connectionId: "connection" },
     { id: "read_issue", label: "Read issue", key: "" }, async () => { attempts++; return outcome; });
   assert.equal(attempts, 1);
-  assert.equal(receipt, result, "public actions retain the same receipt and tool result");
   assert.deepEqual(commands.map(c => c.command), ["record-execution", "finalize-execution"]);
   assert.equal(commands[1].input.expectedVersion, 1);
   return { result, finalized: commands[1].input };
@@ -58,7 +57,7 @@ test("a Sentry read with multibyte stack metadata finalizes and returns the enti
   assert.ok(Buffer.byteLength(finalized.resultSummary) <= 1000);
   assert.ok(summary.startsWith(finalized.resultSummary));
   assert.ok(!finalized.resultSummary.includes("\ufffd"));
-  assert.ok(result.includes(summary), "persisted excerpt does not truncate the tool's context");
+  assert.ok(result.includes(summary), "the persisted excerpt does not truncate the receipt");
 });
 
 test("failed and blocked multibyte reasons respect the existing 500-byte authority bound", async () => {

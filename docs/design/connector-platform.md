@@ -46,7 +46,7 @@ use the connector registry. The later sections define provider-specific bounds.
 | --- | --- | --- |
 | Manifest | `APP_CONNECTOR_PROVIDER_MANIFESTS` in `@xmatrix/protocol` | Provider IDs, OAuth, credential fields, action effects/usage and default policies are shared with clients |
 | Executor | `ConnectorProvider` and `platform-providers.ts` | Provider-owned parse/prepare/execute, authenticated Check and bounded outbound HTTP |
-| Commands and MCP | `connector-commands.ts`, `connectors/mcp.ts` | Both paths resolve the current Space/Channel/Run authority and use the same action policy |
+| Commands | `connector-commands.ts`, `connectors/usage.ts` | A command runs only from a committed Channel message, whoever wrote it; Agents read what they can send with `xmatrix connector list` |
 | Policy and approval | Scoped connector repositories and approval routes | Channel allow/ask/disallow, frozen per-request approval and fresh authorization before writes; Agents cannot change policy |
 | Credentials | Encrypted connector credential repository | Per-Space provider grants; company app secrets remain Hub-held, and OAuth refresh failures do not become wider grants |
 | Inbound | Generic event ingress plus provider-specific native routes | Authenticated deliveries normalize to typed source/event identities and route through explicit subscriptions |
@@ -67,10 +67,10 @@ native event/serving evidence remain distinct acceptance requirements.
 inbound:  provider webhook ─► Ingress route ─► verify ─► normalize ─► ConnectorEvent
                                                    ├─► relation routing ─► Channel message (app author)
                                                    └─► Automation trigger {kind:"event"}
-outbound: @provider:action text ─┐
-          Agent tool call (MCP) ──┼─► ConnectorActionRequest ─► policy(channel×action) ─► allow ─► execute ─► execution record + receipt
-          Web UI button ─────────┘                                       ├─► approve ─► approval card ─► execute
-                                                                         └─► deny
+outbound: Channel message "@provider:action text" (a person, or an Agent's `xmatrix send`)
+            ─► parse ─► policy(channel×action) ─► allow ─► execute ─► execution record + receipt replying to the message
+                                                  ├─► ask ─► approval card ─► execute
+                                                  └─► disallow
 ```
 
 ### 3.1 Provider module contract
@@ -84,7 +84,7 @@ interface ConnectorProvider {
   completion?: ConnectorCompletionSource;
 }
 interface ConnectorAction<I = unknown> {
-  input: JsonSchema;                // bounded; this is also the MCP tool schema
+  input: JsonSchema;                // bounded
   effect: "read" | "write";         // sets the default policy
   parseCommand(text: string, ctx): I | ParseError;   // `@provider:action …` → input
   execute(ctx: ConnectorActionContext, input: I): Promise<ConnectorActionResult>;
@@ -432,17 +432,11 @@ matching messages (id, received time, sender, subject, snippet) and
 reduced to text, truncated at 8,000 characters) and every distinct http(s)
 link the message contains, fenced as untrusted content.
 
-Gmail `search` and `read` declare caller-only result visibility. Their full
-answers, including headers, snippets, body, links, query and provider error
-details, are returned only in the calling MCP tool response. Channel status
-messages and execution result summaries/reasons retain only the action and
-outcome, with a pointer to the Gmail MCP tool. Direct Channel commands also
-publish only that status; use the Agent's MCP tool to retrieve mail content.
-This separation is enforced before persistence and message append, including
-parse failures and blocked/failed executions; it does not depend on recognizing
-verification-code patterns. Other actions retain their existing result visibility.
-The MCP search shape is `{"target":"*","text":"<Gmail query>"}` (or a connected
-mailbox address as target), never the whole `@gmail:search` command in target.
+Gmail `search` and `read` answer like every other action: the receipt that
+replies to the command's message carries what they found, and the execution
+record keeps its bounded excerpt. Whoever can read the Channel reads the mail,
+so read mail in a Channel only the people who may see it are in. Search is
+`@gmail:search:* <Gmail query>`, or a connected mailbox address in place of `*`.
 
 Inline
 `multipart/mixed` body segments retain their order, choosing plain text or
@@ -500,7 +494,7 @@ OAuth attempts expire after ten minutes and bounded maintenance removes them.
 
 Durable Gmail-ID receipts coalesce duplicate signals and make conversation
 append idempotent. Notifications contain only a mail ID reference, never sender,
-subject, snippet or body. Reads still pass through the existing caller-only tool.
+subject, snippet or body. Reading one is an ordinary `@gmail:read:<id>` command.
 The private `automationEvents` manifest allows `gmail:message.received:<id>`
 Page Automations without exposing the private source as a generic Channel
 subscription. Only Automations whose authority root is the mailbox owner fire.
@@ -886,7 +880,7 @@ GitHub triggers may use either spelling.
   version and invalidate ask. This avoids rewriting rows or relaxing constraints.
 - `data.app_connector_action_requests` owns encrypted, immutable request input
   and its 24-hour expiry, account generation and credential version. Channel
-  commands and MCP stage the same flow. The Pending approvals card fetches
+  commands from people and Agents stage the same flow. The Pending approvals card fetches
   previews through a current Human admin session and displays Gmail's actual
   from/to/subject/body, including a reply's resolved recipient and headers.
   None of that private payload enters the approval receipt or caller metadata.
@@ -909,18 +903,22 @@ GitHub triggers may use either spelling.
   `(connection, channel, action, allow)` row.
   - The migration is idempotent and bounded per connection.
   - The old fields are read as a fallback for one release, then dropped.
-- Agent entry point: `POST /api/connectors/mcp` (streamable HTTP MCP).
-  - Authenticated with the Agent Instance credential and scoped to the Run's
-    Channel.
-  - Tools list the Space's configured providers' executable actions. The
-    shared action catalog admits only manifest-declared actions with an own
-    executor whose read/write effect matches the declaration. MCP listing,
-    calls and generic Channel commands use that catalog; prototype properties
-    and undeclared executors are unknown actions. GitHub retains its specialized
-    command handler and is not exposed through this generic MCP catalog.
-  - Tool inputs are `target` and optional `text`, parsed by the same executor
-    as a Channel command. Channel access, connection credentials and live
-    action policy are checked at execution; a listed tool grants no authority.
+- Agents act the way people do: every connector command is a Channel message,
+  parsed after it commits, so nothing calls a provider out of the Channel's
+  sight. An Agent sends one with `xmatrix send`; its identity, Channel and
+  Space are those of any message it sends.
+  - The launch prompt names the Space's connected apps (`connectedApps` on the
+    spawn, names only). `xmatrix connector list` reads
+    `GET /api/connectors/usage` with the Run's credential: each configured
+    provider of the Run's Channel's Space and the commands its manifest
+    declares. The listing grants nothing; execution checks Channel access,
+    credentials and live policy again.
+  - The generic Channel command handler admits only manifest-declared actions
+    with an own executor whose read/write effect matches the declaration;
+    prototype properties and undeclared executors are unknown actions. GitHub
+    keeps its specialized command handler for the same `@github:` commands.
+  - The receipt is a system fact replying to the command's message: context
+    for every Instance, never a turn, so it cannot interrupt the sender's turn.
 - Staging ask writes one request and a Channel receipt. The approved dispatch
   writes the normal `app_connector_executions` row and a separate terminal receipt.
 
@@ -964,8 +962,8 @@ or generates a webhook secret in the Apps view.
       credential store.
     - `@openconnector:search:<service>` (read) lists a service's actions.
     - `@openconnector:run:<service.action>[@alias] <json>` (write) runs one
-      action. It goes through the same channel policy, execution record,
-      receipt and agent MCP tool.
+      action. It goes through the same channel policy, execution record and
+      receipt.
     - The result preview is bounded, and mentions in it are shielded.
     - Check authenticates `/v1/health` and confirms `oomol-connect` health;
       provider connections and action availability need separate evidence.
@@ -991,7 +989,7 @@ or generates a webhook secret in the Apps view.
 4. **Generic Webhook provider.** This proves the pipeline end to end.
 5. **Providers.** Then Sentry, Linear, PagerDuty, GitLab, Slack, Jira, Vercel,
    Cloudflare, Notion, Discord and Feishu, in that order.
-6. **Agent access.** The MCP endpoint and the CLI shim.
+6. **Agent access.** Connected app names in the launch prompt and `xmatrix connector list`.
 7. **Web Apps view.** A generic connect form driven by the manifest (token
    fields, webhook URL and secret display, per-Channel policy editor).
 

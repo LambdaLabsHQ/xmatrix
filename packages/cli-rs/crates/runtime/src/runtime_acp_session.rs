@@ -361,7 +361,7 @@ impl AcpSession {
                     serde_json::json!({
                         "sessionId": session_id,
                         "cwd": workspace_path.clone(),
-                        "mcpServers": crate::runtime_connector_mcp::acp_connector_mcp_servers(),
+                        "mcpServers": [],
                     }),
                 )
                 .await

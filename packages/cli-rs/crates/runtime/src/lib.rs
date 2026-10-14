@@ -104,7 +104,7 @@ mod runtime_claude_stream_io;
 mod runtime_claude_stream_session;
 mod runtime_claude_turn;
 mod runtime_codex_turn_errors;
-mod runtime_connector_mcp;
+mod runtime_connector;
 mod runtime_harness_questions;
 mod runtime_headless_runs;
 mod runtime_presence_updates;
@@ -122,9 +122,9 @@ use runtime_codex_turn_errors::{
     codex_auth_failure_requires_exit, codex_reconnect_attempts, codex_reconnect_wait_timeout_error,
     codex_turn_error_message, codex_turn_error_requires_restart,
     codex_turn_error_retryable_before_start, goal_updated_at, report_turn_failure,
-    report_turn_failure_with_usage_limit, resend_pending_turn_failure, send_codex_turn_failed_trace,
-    zcode_app_error_message, zcode_goal_active_input_id, zcode_goal_state_from_value,
-    zcode_is_session_event, zcode_message_id_matches,
+    report_turn_failure_with_usage_limit, resend_pending_turn_failure,
+    send_codex_turn_failed_trace, zcode_app_error_message, zcode_goal_active_input_id,
+    zcode_goal_state_from_value, zcode_is_session_event, zcode_message_id_matches,
 };
 use runtime_headless_runs::{run_claude_print_external, run_headless_external};
 use runtime_presence_updates::{TurnTrace, send_llm_trace, send_llm_trace_with_source};

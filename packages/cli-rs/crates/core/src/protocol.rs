@@ -27,7 +27,7 @@ impl HubRoutes {
     #[allow(dead_code)]
     pub const SECRETS: &str = "/api/secrets";
     pub const RUN_SECRETS: &str = "/api/run-secrets";
-    pub const CONNECTORS_MCP: &str = "/api/connectors/mcp";
+    pub const CONNECTOR_USAGE: &str = "/api/connectors/usage";
     pub const SECRET_REQUESTS: &str = "/api/secret-requests";
     pub const DAEMON_CONTROL: &str = "/api/daemon/control";
     pub const DAEMON_COMMAND_LEASE_RENEW: &str = "/api/daemon/command-lease/renew";
@@ -814,7 +814,10 @@ pub fn channel_switch_continuation(message: &ChannelMessage) -> Option<ChannelSw
         && instruction_instance_id(&continuation.instance_id)
         && !continuation.request_ids.is_empty()
         && continuation.request_ids.len() <= 16
-        && continuation.request_ids.iter().all(|id| instruction_token(id)))
+        && continuation
+            .request_ids
+            .iter()
+            .all(|id| instruction_token(id)))
     .then_some(continuation)
 }
 

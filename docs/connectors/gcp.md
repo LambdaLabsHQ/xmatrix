@@ -38,10 +38,10 @@ without a credential fallback. External Testing users and Google consent-screen
 verification remain separate prerequisites. No new platform secret or direct
 Worker mutation is needed.
 
-## Commands and MCP
+## Commands
 
-Commands also appear through `xmatrix-connectors` MCP and per-action Channel
-policies. Use an explicit project ID or number and Cloud Run region:
+Commands run from Channel messages, under per-action Channel policies. Use an
+explicit project ID or number and Cloud Run region:
 
 Region numbers can have two digits, such as `europe-west10` and `europe-west12`.
 Zones, wildcards and paths are not region names. See

@@ -810,15 +810,10 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         }
         Some(Commands::Goal { command }) => cmd_goal(command),
         Some(Commands::Connector {
-            command: xmatrix_cli_args::ConnectorCliCommand::Mcp,
+            command: xmatrix_cli_args::ConnectorCliCommand::List,
         }) => {
-            let token_override = cli.token.clone();
-            crate::runtime_connector_mcp::cmd_connector_mcp(&hub_url, || {
-                let hub_url = hub_url.clone();
-                let token_override = token_override.clone();
-                async move { resolve_auth_token(token_override.as_deref(), &hub_url).await }
-            })
-            .await
+            let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
+            crate::runtime_connector::cmd_connector_list(&hub_url, &token).await
         }
         Some(Commands::Send(args)) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;

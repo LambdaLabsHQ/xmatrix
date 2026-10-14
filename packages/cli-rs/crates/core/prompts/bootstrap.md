@@ -27,6 +27,7 @@ Talk:
 - `xmatrix channel react <channel-id> <messageId> <emoji>` — add your reaction to a message, or remove it if it is already there. Any message in a channel you can act in, not only your own.
 - `xmatrix channel subscribe <channel-id> <pull-request-url>` — subscribe a conversation to a pull request: its CI verdict, reviews, comments and merge arrive there as messages. It answers whether the conversation is subscribed now, so run it before you stop watching a pull request; repeating it is harmless.
 - `xmatrix channel delete-message <channel-id> <messageId> [--permanent]` — recall a message you sent, or remove it permanently. You can change only your own messages.
+{connected_apps}
 
 Conversations:
 - `xmatrix channel create --mode open|closed [--topic <text>] <channel-name>` — start a conversation (a channel) in your Space; the default is public/open. It is recorded as created by you. How work is organized lives in pages, not in channels.

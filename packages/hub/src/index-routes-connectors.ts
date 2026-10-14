@@ -23,10 +23,10 @@ import { registerTelegramRoutes } from "./index-routes-telegram";
 import { registerWeComRoutes } from "./index-routes-wecom";
 import { registerFeishuRoutes } from "./index-routes-feishu";
 import { registerGoogleChatRoutes } from "./index-routes-googlechat";
-import { handleConnectorMcp } from "./connectors/mcp";
 import { isPolicyAction } from "./connectors/connector-commands";
 import { connectorActionCatalog } from "./connectors/action-catalog";
 import { connectorProvider } from "./connectors/registry";
+import { connectorUsage } from "./connectors/usage";
 import { connectorHubOrigin, readBoundedRequestBody, requestErrorStatus, requireAuth, requireHumanAuth, requireLiveAgentRun } from "./index-shared";
 import type { AuthUser } from "./auth";
 import type { Env } from "./types";
@@ -108,19 +108,13 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
     }
   });
 
-  app.post(HUB_ROUTES.connectors_mcp, async (c) => {
+  app.get(HUB_ROUTES.connector_usage, async (c) => {
     try {
       const authenticated = await requireAuth(c.req.raw, c.env);
-      if (!authenticated.agentRun) return c.json({ error: "Connector tools are for Agent Runs" }, 403);
+      if (!authenticated.agentRun) return c.json({ error: "Connector usage is for Agent Runs" }, 403);
       const run = await requireLiveAgentRun(c.env, authenticated);
-      const bytes = await readBoundedRequestBody(c.req.raw, MAX_CREDENTIAL_REQUEST_BYTES);
-      if (!bytes) return c.json({ error: "Request is too large" }, 413);
-      let body: unknown;
-      try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch {
-        return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
-      }
-      return await handleConnectorMcp(c.env, { ownerUserId: run.ownerUserId, agentId: run.agentId, channelId: run.channelId,
-        runId: run.runId, spaceId: run.spaceId }, body);
+      const connectors = await connectorUsage(c.env, { ownerUserId: run.ownerUserId, channelId: run.channelId });
+      return c.json({ connectors }, 200, { "cache-control": "private, no-store" });
     } catch (error) {
       return errorResponse(error);
     }

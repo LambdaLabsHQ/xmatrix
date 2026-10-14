@@ -13,6 +13,7 @@ pub fn channel_collaboration_policy(channel_id: &str) -> String {
 // The prompt text lives in `prompts/*.md` so it can be read and reviewed as
 // documents; see `prompts/README.md` for the slots each one fills.
 const BOOTSTRAP: &str = include_str!("../prompts/bootstrap.md");
+const CONNECTED_APPS: &str = include_str!("../prompts/connected-apps.md");
 const CHANNEL_CONTRACT: &str = include_str!("../prompts/channel-contract.md");
 const GOAL_COMMAND: &str = include_str!("../prompts/goal-command.md");
 const SPACE_RULES: &str = include_str!("../prompts/space-rules.md");
@@ -21,6 +22,30 @@ const WORKING_MODE_CAUTIOUS: &str = include_str!("../prompts/working-mode-cautio
 
 /// The Space's rules page, set by the daemon from the Hub's launch data.
 pub const SPACE_RULES_PAGE_ENV: &str = "XMATRIX_SPACE_RULES_PAGE_ID";
+
+/// The Space's connected apps, one name per line, set by the daemon from the
+/// Hub's launch data.
+pub const CONNECTED_APPS_ENV: &str = "XMATRIX_CONNECTED_APPS";
+
+/// An app name sits in the prompt as written: one short line of text.
+pub fn is_app_name(value: &str) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= 80 && !value.chars().any(char::is_control)
+}
+
+fn connected_apps_context() -> String {
+    let Some(apps) = trimmed_env(CONNECTED_APPS_ENV) else {
+        return String::new();
+    };
+    let names: Vec<&str> = apps
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    if let Some(name) = names.iter().find(|name| !is_app_name(name)) {
+        panic!("{CONNECTED_APPS_ENV} names `{name}`, which is not a short single-line name");
+    }
+    render_prompt(CONNECTED_APPS, &[("apps", &names.join(", "))])
+}
 
 /// A page id is opaque: letters, digits and dashes only, so it can sit in
 /// the prompt and in the `xmatrix page read` command it names.
@@ -111,6 +136,7 @@ pub fn bootstrap_prompt(
             ("goal_context", goal_command_context(supports_self_goal)),
             ("channel_collaboration_policy", &channel_policy),
             ("space_rules", &space_rules_context()),
+            ("connected_apps", &connected_apps_context()),
             ("working_mode", WorkingMode::from_env().prompt()),
         ],
     ))
@@ -188,6 +214,10 @@ fn agent_identity_context() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The launch env is process-wide: tests that set it take turns, so one
+    /// test's value never lands in another's prompt.
+    static LAUNCH_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn builds_default_prompt_for_any_launcher() {
@@ -283,7 +313,34 @@ mod tests {
     }
 
     #[test]
+    fn connected_apps_are_named_with_the_way_to_use_them_only_when_set() {
+        let _env = LAUNCH_ENV
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // SAFETY: test-only env mutation, as in the other bootstrap tests.
+        unsafe { std::env::remove_var(CONNECTED_APPS_ENV) };
+        let without = bootstrap_prompt("claude", "a", "", true).unwrap();
+        assert!(!without.contains("Apps connected to this Space"));
+
+        unsafe { std::env::set_var(CONNECTED_APPS_ENV, "Gmail\nApp Store Connect") };
+        let with = bootstrap_prompt("claude", "a", "", true).unwrap();
+        unsafe { std::env::remove_var(CONNECTED_APPS_ENV) };
+        assert!(with.contains(
+            "- Apps connected to this Space: Gmail, App Store Connect. `xmatrix connector list`"
+        ));
+        assert!(with.contains("sending its command with `xmatrix send`"));
+
+        assert!(is_app_name("Google Search Console"));
+        for bad in ["", "  ", "a\nb", &"x".repeat(81)] {
+            assert!(!is_app_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
     fn space_rules_page_is_named_before_the_working_mode_only_when_set() {
+        let _env = LAUNCH_ENV
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // SAFETY: test-only env mutation, as in the other bootstrap tests.
         unsafe { std::env::remove_var(SPACE_RULES_PAGE_ENV) };
         let without = bootstrap_prompt("claude", "a", "", true).unwrap();

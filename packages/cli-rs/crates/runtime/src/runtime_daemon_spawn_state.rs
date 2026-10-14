@@ -125,6 +125,27 @@ fn apply_spawn_space_rules(
     Ok(local_env)
 }
 
+/// Names the Space's connected apps for the Run's launch prompt, replacing
+/// any value a local profile left behind. Each name sits in the prompt as
+/// written, so a name that is blank, long or not a single line fails the
+/// launch.
+fn apply_spawn_connected_apps(
+    mut local_env: BTreeMap<String, String>,
+    apps: &[String],
+) -> error::Result<BTreeMap<String, String>> {
+    use xmatrix_cli_core::bootstrap::{CONNECTED_APPS_ENV, is_app_name};
+    local_env.remove(CONNECTED_APPS_ENV);
+    if let Some(name) = apps.iter().find(|name| !is_app_name(name)) {
+        return Err(CliError::Launch(format!(
+            "the connected app name `{name}` is not a short single-line name"
+        )));
+    }
+    if !apps.is_empty() {
+        local_env.insert(CONNECTED_APPS_ENV.to_string(), apps.join("\n"));
+    }
+    Ok(local_env)
+}
+
 fn write_initial_message_attachments_file(
     attachments: Option<&[protocol::ChannelAttachment]>,
 ) -> error::Result<Option<PathBuf>> {

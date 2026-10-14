@@ -1442,15 +1442,13 @@ fn codex_transport_kind() -> CodexTransportKind {
 }
 
 fn codex_app_spawn_args(transport: CodexTransportKind, listen: Option<&str>) -> Vec<String> {
-    // Global `-c` overrides go before the subcommand: the Space's connector
-    // actions as an MCP server for this Run.
-    let mut args = crate::runtime_connector_mcp::codex_connector_mcp_overrides();
-    // Outside Plan mode Codex withholds request_user_input unless this
-    // feature is on; with it, its questions reach the channel as cards.
-    args.extend([
+    // Global `-c` overrides go before the subcommand. Outside Plan mode Codex
+    // withholds request_user_input unless this feature is on; with it, its
+    // questions reach the channel as cards.
+    let mut args = vec![
         "-c".to_string(),
         "features.default_mode_request_user_input=true".to_string(),
-    ]);
+    ];
     args.push("app-server".to_string());
     match transport {
         CodexTransportKind::Stdio => {

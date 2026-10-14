@@ -270,26 +270,20 @@ for persistence, additive rollout and API contracts.
 
 Persisted completion summaries are limited to 1,000 UTF-8 bytes, and failure or
 blocked reasons to 500 UTF-8 bytes. The Hub truncates these excerpts at complete
-Unicode code points; the action's full bounded context remains in the tool
-result and, for public actions, Channel receipt. Multibyte issue titles and stack metadata therefore
+Unicode code points; the action's full bounded context remains in the Channel
+receipt. Multibyte issue titles and stack metadata therefore
 do not prevent an otherwise successful read from finalizing.
 
-Gmail search/read are caller-only actions: Channel receipts and stored completion
-summaries or failure reasons contain only the action and status, never mail
-headers, snippets, bodies, links, query or provider error details. Use the Agent's
-MCP tool for the private answer; direct Channel read commands also emit status
-only. For search, MCP arguments are `{"target":"*","text":"<Gmail query>"}` or
-one connected mailbox address as target. Do not put the command prefix or query
-in target. Verify this boundary with synthetic mail, checking both the tool
-response and Channel receipt without copying real verification codes into logs.
+Gmail search/read answer in the Channel receipt that replies to the command,
+like every other action, so everyone who can read the Channel reads the mail.
+Read mail in a Channel only the people who may see it are in. Search is
+`@gmail:search:* <Gmail query>` or `@gmail:search:<connected mailbox> <Gmail query>`.
 
 **Agents.**
-- An Agent can post the command itself with `xmatrix send`.
-- An Agent's harness also gets the actions as MCP tools automatically.
-  - Claude Code gets them through `--mcp-config`, Codex through `-c mcp_servers.xmatrix_connectors.*`, and ACP harnesses through the session's `mcpServers`.
-  - Each one runs `xmatrix connector mcp`, a stdio proxy to `POST /api/connectors/mcp` that uses the Run's current credential.
-  - The tools are named `<provider>__<action>`. `tools/list` offers only the providers the Space has connected. Each call runs as the Agent in its Run's channel under the same policy.
-  - Set `XMATRIX_CONNECTOR_MCP=0` on a Run to leave them out.
+- An Agent acts only by posting the command with `xmatrix send`, so every call is a
+  message the Channel sees, parsed like anyone's, and its receipt replies to it.
+- The launch prompt names the Space's connected apps. `xmatrix connector list`
+  prints each one's commands for the Run's Channel.
 
 **Automations.** `--on <connector>:<event|*>[:<source>]` fires a page
 Automation on a connector event in the same Space, for example

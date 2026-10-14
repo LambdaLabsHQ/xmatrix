@@ -1551,6 +1551,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         role_initial_prompt: None,
         working_mode: None,
         space_rules_page_id: None,
+        connected_apps: Vec::new(),
         resume: false,
         resume_instance_id: None,
         resume_session_key: Some("session-a".to_string()),
