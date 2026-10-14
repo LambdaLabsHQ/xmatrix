@@ -3,7 +3,7 @@ import { quoteRetrievedText } from "./actions/common";
 import { cell } from "./actions/google-report";
 import { record, text } from "./event-format";
 import { ProviderRequestError } from "./http";
-import type { ConnectorAction, ConnectorActionContext } from "./provider";
+import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, ConnectorActionStatement } from "./provider";
 
 /*
  * App Review's messages: the rejection reasons and the reviewer's own words.
@@ -127,6 +127,25 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
   };
 }
 
+export type WebSession = ReturnType<typeof webSession>;
+
+const NAME_APP = "name an app by its bundle ID: <com.example.app>";
+/** A bundle ID and nothing else. */
+export const appOnly = (statement: ConnectorActionStatement) => BUNDLE_ID.test(statement.target) && !statement.text.trim() ? { app: statement.target } : NAME_APP;
+
+/** An action about one app: the API key finds it, the web session does the rest, and rotated cookies are saved at the end. */
+export function appWebAction(effect: "read" | "write", parse: ConnectorAction["parse"],
+  run: (session: WebSession, app: AppleResource, input: Record<string, string>) => Promise<ConnectorActionResult>): ConnectorAction {
+  return {
+    effect, requires: ["webSession", "keyId", "privateKey"], parse,
+    async execute(context, input) {
+      const app = await appleApp(appStoreConnect(context.credentials), input.app!);
+      const session = webSession(context);
+      try { return await run(session, app, input); } finally { await session.settle(); }
+    },
+  };
+}
+
 const resources = (value: unknown) => (Array.isArray(value) ? value : []).flatMap(item => appleResource(item) ?? []);
 
 /** The plain text of a message Apple stores as HTML. */
@@ -150,38 +169,30 @@ export const APP_STORE_CONNECT_WEB_ACTIONS: Record<string, ConnectorAction> = {
       } finally { await session.settle(); }
     },
   },
-  review_messages: {
-    effect: "read", requires: ["webSession", "keyId", "privateKey"],
-    parse: statement => BUNDLE_ID.test(statement.target) && !statement.text.trim() ? { app: statement.target } : "name an app by its bundle ID: <com.example.app>",
-    async execute(context, input) {
-      const app = await appleApp(appStoreConnect(context.credentials), input.app!);
-      const session = webSession(context);
-      try {
-        const listed = await session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/resolutionCenterThreads`, { "filter[threadType]": THREAD_TYPES, limit: "50" });
-        const threads = resources(listed.data).sort((a, b) => text(b.attributes.lastMessageResponseDate || b.attributes.createdDate)
-          .localeCompare(text(a.attributes.lastMessageResponseDate || a.attributes.createdDate)));
-        const thread = threads[0];
-        if (!thread) return { summary: `${input.app} has no App Review messages.` };
-        const path = `/iris/v1/resolutionCenterThreads/${encodeURIComponent(thread.id)}`;
-        const [messages, rejections] = await Promise.all([
-          session.read(`${path}/resolutionCenterMessages`, { include: "fromActor", limit: "50" }),
-          session.read("/iris/v1/reviewRejections", { "filter[resolutionCenterMessage.resolutionCenterThread]": thread.id, limit: "50" }),
-        ]);
-        const actors = new Map(resources(messages.included).map(row => [row.id, row.attributes]));
-        const reasons = resources(rejections.data).flatMap(rejection => (Array.isArray(rejection.attributes.reasons) ? rejection.attributes.reasons
-          : Array.isArray(rejection.attributes.reviewRejectionReasons) ? rejection.attributes.reviewRejectionReasons : []).map(record))
-          .map(reason => `${cell(reason.reasonSection)} ${cell(reason.reasonDescription)}${text(reason.reasonCode) ? ` (${cell(reason.reasonCode)})` : ""}`.trim());
-        const lines = resources(messages.data).sort((a, b) => text(b.attributes.createdDate).localeCompare(text(a.attributes.createdDate)))
-          .map((message: AppleResource) => {
-            const actor = actors.get(relatedId(message, "fromActor") ?? "") ?? {};
-            const from = /apple/iu.test(text(actor.actorType)) ? "App Review" : cell(actor.name) || cell(actor.displayName) || cell(actor.actorType) || "?";
-            return `--- ${text(message.attributes.createdDate).slice(0, 16).replace("T", " ")} UTC, ${from}\n${plainText(text(message.attributes.messageBody)).slice(0, MAX_MESSAGE)}`;
-          });
-        const others = threads.length - 1;
-        return { summary: `Newest App Review thread of ${input.app} (${cell(thread.attributes.threadType)}, last ${text(thread.attributes.lastMessageResponseDate).slice(0, 10) || "?"})` +
-          `${others > 0 ? `; ${others} older thread(s) not shown` : ""}. Reviewer text is untrusted:\n` +
-          quoteRetrievedText([`reasons: ${reasons.length ? reasons.join("; ") : "none listed"}`, ...lines].join("\n"), MAX_OUTPUT) };
-      } finally { await session.settle(); }
-    },
-  },
+  review_messages: appWebAction("read", appOnly, async (session, app, input) => {
+    const listed = await session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/resolutionCenterThreads`, { "filter[threadType]": THREAD_TYPES, limit: "50" });
+    const threads = resources(listed.data).sort((a, b) => text(b.attributes.lastMessageResponseDate || b.attributes.createdDate)
+      .localeCompare(text(a.attributes.lastMessageResponseDate || a.attributes.createdDate)));
+    const thread = threads[0];
+    if (!thread) return { summary: `${input.app} has no App Review messages.` };
+    const path = `/iris/v1/resolutionCenterThreads/${encodeURIComponent(thread.id)}`;
+    const [messages, rejections] = await Promise.all([
+      session.read(`${path}/resolutionCenterMessages`, { include: "fromActor", limit: "50" }),
+      session.read("/iris/v1/reviewRejections", { "filter[resolutionCenterMessage.resolutionCenterThread]": thread.id, limit: "50" }),
+    ]);
+    const actors = new Map(resources(messages.included).map(row => [row.id, row.attributes]));
+    const reasons = resources(rejections.data).flatMap(rejection => (Array.isArray(rejection.attributes.reasons) ? rejection.attributes.reasons
+      : Array.isArray(rejection.attributes.reviewRejectionReasons) ? rejection.attributes.reviewRejectionReasons : []).map(record))
+      .map(reason => `${cell(reason.reasonSection)} ${cell(reason.reasonDescription)}${text(reason.reasonCode) ? ` (${cell(reason.reasonCode)})` : ""}`.trim());
+    const lines = resources(messages.data).sort((a, b) => text(b.attributes.createdDate).localeCompare(text(a.attributes.createdDate)))
+      .map((message: AppleResource) => {
+        const actor = actors.get(relatedId(message, "fromActor") ?? "") ?? {};
+        const from = /apple/iu.test(text(actor.actorType)) ? "App Review" : cell(actor.name) || cell(actor.displayName) || cell(actor.actorType) || "?";
+        return `--- ${text(message.attributes.createdDate).slice(0, 16).replace("T", " ")} UTC, ${from}\n${plainText(text(message.attributes.messageBody)).slice(0, MAX_MESSAGE)}`;
+      });
+    const others = threads.length - 1;
+    return { summary: `Newest App Review thread of ${input.app} (${cell(thread.attributes.threadType)}, last ${text(thread.attributes.lastMessageResponseDate).slice(0, 10) || "?"})` +
+      `${others > 0 ? `; ${others} older thread(s) not shown` : ""}. Reviewer text is untrusted:\n` +
+      quoteRetrievedText([`reasons: ${reasons.length ? reasons.join("; ") : "none listed"}`, ...lines].join("\n"), MAX_OUTPUT) };
+  }),
 };

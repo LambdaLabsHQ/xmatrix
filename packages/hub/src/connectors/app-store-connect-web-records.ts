@@ -1,5 +1,5 @@
-import { appStoreConnect, appleApp, appleResource, BUNDLE_ID, relatedId, type AppleResource, type AppStoreConnectApi } from "./app-store-connect-api";
-import { webSession } from "./app-store-connect-web";
+import { appStoreConnect, appleResource, BUNDLE_ID, relatedId, type AppleResource, type AppStoreConnectApi } from "./app-store-connect-api";
+import { appOnly, appWebAction, webSession, type WebSession } from "./app-store-connect-web";
 import { jsonFields, LOCALE, textFieldProblem } from "./actions/app-store-connect";
 import { cell } from "./actions/google-report";
 import { record, text } from "./event-format";
@@ -41,7 +41,7 @@ async function registeredBundleId(api: AppStoreConnectApi, identifier: string): 
 }
 
 /** Apple's current ids for a privacy list (categories or purposes), which the website adds to over time. */
-async function knownIds(session: ReturnType<typeof webSession>, path: string): Promise<Set<string>> {
+async function knownIds(session: WebSession, path: string): Promise<Set<string>> {
   const listed = await session.read(path, { limit: "200" });
   return new Set((Array.isArray(listed.data) ? listed.data : []).map(row => text(record(row).id)).filter(Boolean));
 }
@@ -113,98 +113,84 @@ export const APP_STORE_CONNECT_WEB_RECORD_ACTIONS: Record<string, ConnectorActio
         });
         const id = text(record(created.data).id);
         return { summary: `Created the app record ${input.name} for ${input.app}${id ? ` (Apple id ${id})` : ""}, with version ${input.version} to prepare. ` +
-          "read_app lists what it needs before its first submission; privacy answers App Privacy." };
+          "read_app lists what it needs before its first submission; set_privacy answers App Privacy." };
       } finally { await session.settle(); }
     },
   },
-  privacy: {
-    effect: "read", requires: ["webSession", "keyId", "privateKey"],
-    parse: statement => BUNDLE_ID.test(statement.target) && !statement.text.trim() ? { app: statement.target } : "name an app by its bundle ID: <com.example.app>",
-    async execute(context, input) {
-      const app = await appleApp(appStoreConnect(context.credentials), input.app!);
-      const session = webSession(context);
-      try {
-        const [usages, state] = await Promise.all([
-          session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/dataUsages`, { include: "category,purpose,dataProtection", limit: "500" }),
-          session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/dataUsagePublishState`),
-        ]);
-        const rows = (Array.isArray(usages.data) ? usages.data : []).flatMap(row => appleResource(row) ?? []);
-        const published = record(record(state.data).attributes).published === true;
-        if (!rows.length) return { summary: `${input.app} has not answered App Privacy yet; set_privacy answers it.` };
-        const byCategory = new Map<string, { purposes: Set<string>; protections: Set<string> }>();
-        for (const row of rows) {
-          const protection = relatedId(row, "dataProtection") ?? "";
-          if (protection === NOT_COLLECTED) return { summary: `${input.app}: App Privacy says no data is collected (${published ? "published" : "not published yet"}).` };
-          const category = relatedId(row, "category") ?? "?";
-          const entry = byCategory.get(category) ?? { purposes: new Set<string>(), protections: new Set<string>() };
-          const purpose = relatedId(row, "purpose");
-          if (purpose) entry.purposes.add(purpose);
-          if (protection) entry.protections.add(protection);
-          byCategory.set(category, entry);
-        }
-        const lines = [...byCategory].map(([category, entry]) => `- ${category}: ${[...entry.purposes].join(", ") || "no purpose"}; ` +
-          `${entry.protections.has(LINKED) ? "linked to the user" : entry.protections.has(NOT_LINKED) ? "not linked" : "linkage not answered"}` +
-          `${entry.protections.has(TRACKING) ? "; used to track" : ""}`);
-        return { summary: `${input.app} App Privacy (${published ? "published" : "not published yet"}), ${byCategory.size} data type(s):\n${lines.join("\n")}` };
-      } finally { await session.settle(); }
-    },
-  },
-  set_privacy: {
-    effect: "write", requires: ["webSession", "keyId", "privateKey"],
-    parse(statement) {
-      const json = statement.text.trim();
-      const fields = BUNDLE_ID.test(statement.target) && json && json.length <= MAX_TEXT ? jsonFields(json) : undefined;
-      if (!fields) return privacyUsage;
-      const { data, publish = true, ...rest } = fields;
-      if (Object.keys(rest).length || typeof publish !== "boolean") return privacyUsage;
-      const types = dataTypes(data);
-      if (typeof types === "string") return types;
-      const answers = types.reduce((sum, type) => sum + type.purposes.length * (type.tracking ? 2 : 1), 0);
-      if (answers > MAX_ANSWERS) return `that is ${answers} answers; at most ${MAX_ANSWERS} are sent in one run`;
-      return { app: statement.target, types: JSON.stringify(types), publish: publish ? "yes" : "no" };
-    },
-    async execute(context, input) {
-      const app = await appleApp(appStoreConnect(context.credentials), input.app!);
-      const types = JSON.parse(input.types!) as DataType[];
-      const session = webSession(context);
-      let removed = 0, added = 0;
-      try {
-        if (types.length) {
-          const [categories, purposes] = await Promise.all([knownIds(session, "/iris/v1/appDataUsageCategories"), knownIds(session, "/iris/v1/appDataUsagePurposes")]);
-          const unknownCategory = categories.size ? types.find(type => !categories.has(type.category)) : undefined;
-          if (unknownCategory) throw new ProviderRequestError(400, `${unknownCategory.category} is not one of Apple's data types: ${[...categories].sort().join(", ")}`);
-          const unknownPurpose = purposes.size ? types.flatMap(type => type.purposes).find(purpose => !purposes.has(purpose)) : undefined;
-          if (unknownPurpose) throw new ProviderRequestError(400, `${unknownPurpose} is not one of Apple's purposes: ${[...purposes].sort().join(", ")}`);
-        }
-        const existing = await session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/dataUsages`, { limit: "500" });
-        for (const row of Array.isArray(existing.data) ? existing.data : []) {
-          const id = text(record(row).id);
-          if (!id) continue;
-          await session.send("DELETE", `/iris/v1/appDataUsages/${encodeURIComponent(id)}`);
-          removed += 1;
-        }
-        const answers = types.length ? types.flatMap(type => type.purposes.flatMap(purpose =>
-          [type.linked ? LINKED : NOT_LINKED, ...(type.tracking ? [TRACKING] : [])].map(protection => usage(app.id, type.category, purpose, protection))))
-          : [usage(app.id, undefined, undefined, NOT_COLLECTED)];
-        for (const answer of answers) {
-          await session.send("POST", "/iris/v1/appDataUsages", answer);
-          added += 1;
-        }
-        let published = "left unpublished, as asked";
-        if (input.publish === "yes") {
-          const state = record((await session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/dataUsagePublishState`)).data);
-          const stateId = text(state.id);
-          if (!stateId) throw new ProviderRequestError(502, "App Store Connect did not say where App Privacy is published");
-          await session.send("PATCH", `/iris/v1/appDataUsagesPublishState/${encodeURIComponent(stateId)}`,
-            { data: { type: "appDataUsagesPublishState", id: stateId, attributes: { published: true } } });
-          published = "published";
-        }
-        return { summary: `${input.app} App Privacy now says ${types.length ? `${types.length} data type(s) are collected (${types.map(type => type.category).join(", ")})` : "no data is collected"}; ` +
-          `${added} answer(s) sent, ${removed} earlier one(s) replaced, ${published}.` };
-      } catch (error) {
-        if (!(error instanceof ProviderRequestError) || (!removed && !added)) throw error;
-        throw new ProviderRequestError(error.status, `${error.message}. App Privacy is part way: ${removed} earlier answer(s) removed and ${added} sent; run set_privacy again to answer it whole`);
-      } finally { await session.settle(); }
-    },
-  },
+  privacy: appWebAction("read", appOnly, async (session, app, input) => {
+    const [usages, state] = await Promise.all([
+      session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/dataUsages`, { include: "category,purpose,dataProtection", limit: "500" }),
+      session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/dataUsagePublishState`),
+    ]);
+    const rows = (Array.isArray(usages.data) ? usages.data : []).flatMap(row => appleResource(row) ?? []);
+    const published = record(record(state.data).attributes).published === true;
+    if (!rows.length) return { summary: `${input.app} has not answered App Privacy yet; set_privacy answers it.` };
+    const byCategory = new Map<string, { purposes: Set<string>; protections: Set<string> }>();
+    for (const row of rows) {
+      const protection = relatedId(row, "dataProtection") ?? "";
+      if (protection === NOT_COLLECTED) return { summary: `${input.app}: App Privacy says no data is collected (${published ? "published" : "not published yet"}).` };
+      const category = relatedId(row, "category") ?? "?";
+      const entry = byCategory.get(category) ?? { purposes: new Set<string>(), protections: new Set<string>() };
+      const purpose = relatedId(row, "purpose");
+      if (purpose) entry.purposes.add(purpose);
+      if (protection) entry.protections.add(protection);
+      byCategory.set(category, entry);
+    }
+    const lines = [...byCategory].map(([category, entry]) => `- ${category}: ${[...entry.purposes].join(", ") || "no purpose"}; ` +
+      `${entry.protections.has(LINKED) ? "linked to the user" : entry.protections.has(NOT_LINKED) ? "not linked" : "linkage not answered"}` +
+      `${entry.protections.has(TRACKING) ? "; used to track" : ""}`);
+    return { summary: `${input.app} App Privacy (${published ? "published" : "not published yet"}), ${byCategory.size} data type(s):\n${lines.join("\n")}` };
+  }),
+  set_privacy: appWebAction("write", statement => {
+    const json = statement.text.trim();
+    const fields = BUNDLE_ID.test(statement.target) && json && json.length <= MAX_TEXT ? jsonFields(json) : undefined;
+    if (!fields) return privacyUsage;
+    const { data, publish = true, ...rest } = fields;
+    if (Object.keys(rest).length || typeof publish !== "boolean") return privacyUsage;
+    const types = dataTypes(data);
+    if (typeof types === "string") return types;
+    const answers = types.reduce((sum, type) => sum + type.purposes.length * (type.tracking ? 2 : 1), 0);
+    if (answers > MAX_ANSWERS) return `that is ${answers} answers; at most ${MAX_ANSWERS} are sent in one run`;
+    return { app: statement.target, types: JSON.stringify(types), publish: publish ? "yes" : "no" };
+  }, async (session, app, input) => {
+    const types = JSON.parse(input.types!) as DataType[];
+    let removed = 0, added = 0;
+    try {
+      if (types.length) {
+        const [categories, purposes] = await Promise.all([knownIds(session, "/iris/v1/appDataUsageCategories"), knownIds(session, "/iris/v1/appDataUsagePurposes")]);
+        const unknownCategory = categories.size ? types.find(type => !categories.has(type.category)) : undefined;
+        if (unknownCategory) throw new ProviderRequestError(400, `${unknownCategory.category} is not one of Apple's data types: ${[...categories].sort().join(", ")}`);
+        const unknownPurpose = purposes.size ? types.flatMap(type => type.purposes).find(purpose => !purposes.has(purpose)) : undefined;
+        if (unknownPurpose) throw new ProviderRequestError(400, `${unknownPurpose} is not one of Apple's purposes: ${[...purposes].sort().join(", ")}`);
+      }
+      const existing = await session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/dataUsages`, { limit: "500" });
+      for (const row of Array.isArray(existing.data) ? existing.data : []) {
+        const id = text(record(row).id);
+        if (!id) continue;
+        await session.send("DELETE", `/iris/v1/appDataUsages/${encodeURIComponent(id)}`);
+        removed += 1;
+      }
+      const answers = types.length ? types.flatMap(type => type.purposes.flatMap(purpose =>
+        [type.linked ? LINKED : NOT_LINKED, ...(type.tracking ? [TRACKING] : [])].map(protection => usage(app.id, type.category, purpose, protection))))
+        : [usage(app.id, undefined, undefined, NOT_COLLECTED)];
+      for (const answer of answers) {
+        await session.send("POST", "/iris/v1/appDataUsages", answer);
+        added += 1;
+      }
+      let published = "left unpublished, as asked";
+      if (input.publish === "yes") {
+        const state = record((await session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/dataUsagePublishState`)).data);
+        const stateId = text(state.id);
+        if (!stateId) throw new ProviderRequestError(502, "App Store Connect did not say where App Privacy is published");
+        await session.send("PATCH", `/iris/v1/appDataUsagesPublishState/${encodeURIComponent(stateId)}`,
+          { data: { type: "appDataUsagesPublishState", id: stateId, attributes: { published: true } } });
+        published = "published";
+      }
+      return { summary: `${input.app} App Privacy now says ${types.length ? `${types.length} data type(s) are collected (${types.map(type => type.category).join(", ")})` : "no data is collected"}; ` +
+        `${added} answer(s) sent, ${removed} earlier one(s) replaced, ${published}.` };
+    } catch (error) {
+      if (!(error instanceof ProviderRequestError) || (!removed && !added)) throw error;
+      throw new ProviderRequestError(error.status, `${error.message}. App Privacy is part way: ${removed} earlier answer(s) removed and ${added} sent; run set_privacy again to answer it whole`);
+    }
+  }),
 };
