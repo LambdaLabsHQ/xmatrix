@@ -507,7 +507,9 @@ export function pageDocBlockAt(doc: DocNode, pos: number): string {
 /**
  * What changed between a revision a reader last had on screen and the document
  * now (pages-live-document.md §3.1), in the current document's positions: text
- * and blocks that are new, and what was taken out, at where it was.
+ * and blocks that are new, and what was taken out, at where it was. Text taken
+ * out of a line keeps the space that parted it from the words beside it, so it
+ * reads as it did drawn back in at `at`.
  */
 export type PageDocChange =
   | { kind: "added"; from: number; to: number; block: boolean }
@@ -570,8 +572,9 @@ function unitTokens(units: readonly DocUnit[]): DocToken[] {
   return tokens;
 }
 
+/** Text that is not in the document, as it read: runs of space as one, and a space at its edge kept. */
 function removedText(tokens: readonly DocToken[]): string {
-  return tokens.map((token) => token.text).join("").replace(/\s+/gu, " ").trim();
+  return tokens.map((token) => token.text).join("").replace(/\s+/gu, " ");
 }
 
 /**
@@ -606,7 +609,7 @@ export function pageDocChanges(before: DocNode, after: DocNode): PageDocChange[]
     const removed = old.slice(removedStart, removedStart + removedLength);
     const added = now.slice(addedStart, addedStart + addedLength);
     if (!added.length) {
-      const text = removedText(unitTokens(removed));
+      const text = removedText(unitTokens(removed)).trim();
       if (text) changes.push({ kind: "removed", at: blockGap(addedStart), text, block: true });
       continue;
     }
@@ -639,9 +642,10 @@ export function pageDocChanges(before: DocNode, after: DocNode): PageDocChange[]
       for (const range of shown) changes.push({ kind: "added", from: range.from, to: range.to, block: false });
       const text = removedText(a.slice(takenStart, takenStart + takenLength));
       // A word that only changed its marks shows as new, not as also taken out.
-      if (text && text !== removedText(put)) {
+      if (text.trim() && text.trim() !== removedText(put).trim()) {
         const at = putStart > 0 ? b[putStart - 1]!.to : b[0]!.from;
-        changes.push({ kind: "removed", at, text, block: false });
+        // Beside what took its place it reads whole; alone, it keeps the space that parts it from its neighbours.
+        changes.push({ kind: "removed", at, text: put.length ? text.trim() : text, block: false });
       }
     }
     // The blocks changed only in kind or place, as a paragraph that became a list item.

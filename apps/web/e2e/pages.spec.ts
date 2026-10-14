@@ -436,6 +436,10 @@ test.describe("on a phone", () => {
       (await editor.locator(".page-reader-change").first().boundingBox())!];
     expect(markBox.x + markBox.width).toBeGreaterThan(393 - 8);
     expect(markBox.y).toBeLessThan(changeBox.y + changeBox.height);
+    // The changed paragraph keeps room at the edge for it, so no word runs under it.
+    const roomBox = (await editor.locator(".page-edge-room.is-reader-change").first().boundingBox())!;
+    expect(roomBox.x).toBeLessThanOrEqual(markBox.x);
+    expect(roomBox.y + roomBox.height).toBeGreaterThanOrEqual(markBox.y + markBox.height - 2);
     // A paragraph that is all new is marked in the margin, even beside one whose words changed.
     await expect(editor.locator(".page-reader-change.is-block", { hasText: "The second region is next" })).toHaveCount(1);
     await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "The second region" })).toHaveCount(0);
@@ -521,6 +525,12 @@ test.describe("on a phone", () => {
     const [takeBox, lineBox] = [(await take.boundingBox())!, (await marked.boundingBox())!];
     expect(takeBox.x + takeBox.width).toBeGreaterThan(393 - 12);
     expect(Math.abs(takeBox.y - lineBox.y)).toBeLessThan(24);
+    // It keeps room at the edge beside the change, so neither the words nor the pen run under it.
+    const [markBox, roomBox] = [(await mark.boundingBox())!,
+      (await editor.locator(".page-edge-room.is-suggestion").boundingBox())!];
+    expect(roomBox.x).toBeLessThanOrEqual(markBox.x);
+    expect(roomBox.y + roomBox.height).toBeGreaterThanOrEqual(markBox.y + markBox.height - 2);
+    expect(faceBox.x + faceBox.width).toBeLessThanOrEqual(markBox.x);
     await browser.screenshot({ path: test.info().outputPath("pages-suggestions-phone.png") });
 
     await mark.getByRole("button", { name: "Take this change" }).click();
@@ -536,6 +546,30 @@ test.describe("on a phone", () => {
     await expect(editor).toContainText("Late reviews");
     await expect(editor).toContainText("DNS is ready.");
     await expect(editor).not.toContainText("drain the queue");
+  });
+
+  test("an Agent on the page is its face at the right edge, not again on its section's heading", async ({ page: browser }) => {
+    const plan = { ...E2E_CHANNEL, id: "channel-plan", name: "Plan the move" };
+    await stubPages(browser, [page("p-relay", null, "Relay", "V")], [E2E_CHANNEL, plan]);
+    const talk = (conversationId: string, name: string, agent: { instanceId: string; name: string }) => ({
+      conversationId, name, activityAt: NOW, headSequence: 1, readSequence: 1, lastMessage: null,
+      agents: [{ ...agent, status: "busy" }] });
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+      links: [E2E_CHANNEL.id, plan.id].map((conversationId) => ({ linkId: `l-${conversationId}`, conversationId,
+        pageId: "p-relay", blockId: "notes", source: "edit", createdAt: NOW, lastSeenAt: NOW })),
+      conversations: [talk(E2E_CHANNEL.id, E2E_CHANNEL.name, { instanceId: "i-claude", name: "claude:2" }),
+        talk(plan.id, plan.name, { instanceId: "i-codex", name: "codex:1" })],
+    });
+    await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+      pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-claude", name: "claude:2", status: "busy",
+        conversationId: E2E_CHANNEL.id, activity: "editing", blockId: "notes", avatarUrl: "/agent-vendors/claude.svg" }] }],
+    });
+    const editor = await openRelayOnPhone(browser, pageDocument(BODY));
+    await expect(browser.getByTestId("page-pens").getByRole("button", { name: "claude:2 is writing" })).toBeVisible();
+    // The heading keeps only the Agent working on the section from a conversation, off the page.
+    const working = editor.locator("h2", { hasText: "Notes" }).locator(".page-section-working");
+    await expect(working).toHaveCount(1);
+    await expect(working).toHaveAttribute("title", "codex:1 · Working · in Plan the move");
   });
 
   test("an Agent writing out of view waits at the right edge, pointing the way, and a tap goes to its line", async ({ page: browser }) => {

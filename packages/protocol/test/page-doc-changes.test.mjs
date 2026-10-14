@@ -55,3 +55,21 @@ test("a rewritten page stays bounded", () => {
 test("a rewritten phrase is one change, not word by word around the spaces it kept", () => {
   assert.deepEqual(described("Planned for next week\n", "Shipped this week\n"), ["+Shipped this", "-Planned for next@"]);
 });
+
+test("text taken out of a line reads as it did, drawn back in where it was", () => {
+  // The document's text with each piece taken out back in its place, in brackets.
+  const reread = (before, after) => {
+    const doc = markdownToPageDoc(after);
+    let text = "";
+    let from = 0;
+    for (const change of pageDocChanges(markdownToPageDoc(before), doc)) {
+      if (change.kind !== "removed") continue;
+      text += `${doc.textBetween(from, change.at)}[${change.text}]`;
+      from = change.at;
+    }
+    return text + doc.textBetween(from, doc.content.size);
+  };
+  assert.equal(reread("Ship it now\n", "Ship it\n"), "Ship it[ now]");
+  assert.equal(reread("Ship the relay now\n", "Ship now\n").replace(/[[\]]/gu, ""), "Ship the relay now");
+  assert.equal(reread("Status: next\n", "Status: shipped\n"), "Status: [next]shipped");
+});
