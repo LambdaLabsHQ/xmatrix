@@ -153,36 +153,63 @@ async function paintedLoopFrames(decoration: Locator, times: [number, number]): 
   }
 }
 
-test("a working face pulses, follows motion preferences, and stops its clock when it leaves", async ({ page }) => {
-  const space = workingAgentsSpace(1, "decoration-pulse");
-  const send = await openWorkingAgentsSpace(page, space, channelHistory(1, "decoration-pulse", () => "Working now"),
-    "Working now");
-  const dot = page.locator(".app-agent-work-dock .identity-avatar-status");
-  await expect(dot).toBeVisible();
-  await expect.poll(() => runningLoops(dot)).toBe(1);
-  const [bright, dim] = await paintedLoopFrames(dot, [0, 1_000]);
-  expect(bright.equals(dim)).toBe(false);
-
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect.poll(() => runningLoops(dot)).toBe(0);
-  const resting = await dot.screenshot({ animations: "allow" });
-  await page.waitForTimeout(150);
-  expect(resting.equals(await dot.screenshot({ animations: "allow" }))).toBe(true);
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect.poll(() => runningLoops(dot)).toBe(1);
-
-  // Keep the real clock and DOM node across the roster update: inspecting a
-  // replacement node could miss an animation left alive by its old ref.
-  const previous = await dot.evaluateHandle(node => ({ node, animations: node.getAnimations() }));
+test("avatar status stays still while live work and rest states change", async ({ page }) => {
+  const space = workingAgentsSpace(1, "static-status");
   const agent = space.agents[0]!;
+  const messages = channelHistory(1, "static-status", () => "Working now").map(message => ({ ...message,
+    from: { kind: "agent", identityId: agent.id, label: agent.name, userId: agent.userId, email: agent.email,
+      instanceId: agent.instances[0]!.id, instanceLabel: agent.instances[0]!.label, channelInstanceId: "1" },
+  }));
+  const send = await openWorkingAgentsSpace(page, space, messages, "Working now");
+  const avatar = page.locator(".app-message-timeline .message-author-avatar");
+  const dot = avatar.locator(".identity-avatar-status");
+  const face = avatar.locator(".identity-avatar-face");
+  const still = async () => {
+    await expect.poll(() => avatar.evaluate(node =>
+      Array.from(node.querySelectorAll(".identity-avatar-face, .identity-avatar-status"))
+        .flatMap(element => element.getAnimations())
+        .filter(animation => animation.effect?.getTiming().iterations === Infinity).length)).toBe(0);
+    await expect(dot).toHaveCSS("opacity", "1");
+  };
+  const report = (status: string, extra: object = {}) => {
+    const instance = { ...agent.instances[0]!, status, ...extra, lastSeenAt: new Date().toISOString() };
+    send({ type: "enhanced_presence", agent: { ...agent, status, instances: [instance] } });
+    send({ type: "channel_updated", channel: { ...space.channels[0], memberPresence: {
+      [agent.id]: { kind: "agent", label: agent.name, status, instances: [instance] },
+    } } });
+  };
+
+  await expect(dot).toBeVisible();
+  await expect(avatar).toHaveAttribute("aria-label", /busy/);
+  await expect(dot).toHaveCSS("background-color", "oklch(0.769 0.188 70.08)");
+  await still();
+  report("busy", { runtimeState: { status: "running", waiting: { kind: "tool", sinceMillis: Date.now() } } });
+  await expect(avatar).toHaveAttribute("aria-label", /waiting on a tool/);
+  expect(await dot.evaluate(node => getComputedStyle(node).boxShadow)).not.toBe("none");
+  await still();
+
+  report("offline", { rest: "waking" });
+  await expect(avatar).toHaveAttribute("data-rest", "waking");
+  await expect(face).toHaveCSS("opacity", "0.55");
+  expect(await dot.evaluate(node => getComputedStyle(node).boxShadow)).not.toBe("none");
+  expect(await face.evaluate(node => getComputedStyle(node).filter)).toContain("grayscale(1)");
+  await still();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await still();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await still();
+
+  report("idle");
+  await expect(avatar).toHaveAttribute("aria-label", /idle/);
+  await expect(dot).toHaveCSS("background-color", "oklch(0.696 0.17 162.48)");
+  await expect(face).toHaveCSS("opacity", "1");
+  await expect(face).toHaveCSS("filter", "none");
+  await still();
   send({ type: "channel_updated", channel: { ...space.channels[0], memberPresence: {} } });
   send({ type: "agent_lifecycle", channelId: space.channelId(0), agentId: agent.id,
     instanceId: agent.instances[0]!.id, status: "offline", layer: "agent", ts: new Date().toISOString() });
+  await expect(avatar).toBeVisible();
   await expect(dot).toHaveCount(0);
-  await expect.poll(() => previous.evaluate(({ node, animations }) => ({
-    connected: node.isConnected, running: animations.some(animation => animation.playState === "running"),
-  }))).toEqual({ connected: false, running: false });
-  await previous.dispose();
 });
 
 test("a waiting Instance grows into an island that says what it waits on and for how long", async ({ page }) => {

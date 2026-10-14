@@ -135,7 +135,8 @@ reaches the closing socket rather than a resting Instance; it is caught up by
 the next wake, not the current one.
 
 A wake puts no chip on the waking message: that message did not ask for it.
-The Instance's own avatar pulses while it wakes.
+The Instance's own avatar stays greyed with a hollow grey status mark while
+it wakes.
 
 ## Launch requests are not broadcast assignments
 
@@ -171,8 +172,8 @@ The Web work dock (`buildAgentWorkItems`) and the Channel list avatars
 (`channelOnlineAgentAvatarItems`) use one predicate, `isChannelResidentInstance`
 (live, or resting). Resting avatars keep their birth-order position, render
 greyed with a moon (sleeping), amber warning (interrupted) or red warning
-(wake failed) badge, and pulse while waking. Their tooltip says that any message wakes them. Stopped Instances leave
-both surfaces.
+(wake failed) badge, and a hollow grey status mark while waking. Their tooltip
+says that any message wakes them. Stopped Instances leave both surfaces.
 
 ## 6. Worktree reclaim and rehydrate
 
