@@ -14,6 +14,8 @@ type ChannelReadSyncEntry = {
   desiredSequence: number;
   attentionSequence: number;
   attemptedAttentionSequence: number;
+  /** How far this device has read the Channel since the last reset. */
+  readHere: number;
   inFlight: boolean;
   failureCount: number;
   timer?: TimerHandle;
@@ -62,6 +64,33 @@ export class ChannelReadSyncCoordinator<T extends ChannelReadSyncResult> {
     this.schedule(channelId, entry, 0);
   }
 
+  /** A read made on this device: no Hub answer takes its count below it (readCountsFromHub). */
+  noteRead(channelId: string, sequence: number): void {
+    if (!channelId || !validSequence(sequence)) return;
+    const entry = this.entry(channelId);
+    entry.readHere = Math.max(entry.readHere, sequence);
+  }
+
+  /** How far this device has read the Channel since the last reset. */
+  readHere(channelId: string): number {
+    return this.entries.get(channelId)?.readHere ?? 0;
+  }
+
+  /**
+   * The reader is done with the Channel, read to `sequence`: `send` asks the
+   * Hub. Its answer belongs to the session that asked. A reset while it is
+   * on its way (signed out, another account, even the same one back) ends
+   * that session, and the answer comes back as null, to be written nowhere.
+   * Only an answer the Hub gave counts as a read made here.
+   */
+  async respond<A>(channelId: string, sequence: number, send: () => Promise<A | undefined>): Promise<{ answer: A | undefined } | null> {
+    const generation = this.generation;
+    const answer = await send();
+    if (generation !== this.generation) return null;
+    if (answer) this.noteRead(channelId, sequence);
+    return { answer };
+  }
+
   reset(): void {
     this.generation += 1;
     for (const entry of this.entries.values()) this.clearTimer(entry);
@@ -76,6 +105,7 @@ export class ChannelReadSyncCoordinator<T extends ChannelReadSyncResult> {
       desiredSequence: 0,
       attentionSequence: 0,
       attemptedAttentionSequence: 0,
+      readHere: 0,
       inFlight: false,
       failureCount: 0,
     };
