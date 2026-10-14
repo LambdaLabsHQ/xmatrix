@@ -50,18 +50,22 @@ chosen registration lists an authorized repository, Jev chooses its workspace
 among the repositories only, and the launch evidence names the chosen
 repository. Only when no repository is listed are registered directories and,
 for input that needs no repository, a private managed directory offered. An
-explicit `pwd:` still names its own directory. A Space management
-Run (the @xMatrix delegate) is only ever offered that directory, which the daemon opens
-as the Space management workspace; its Run metadata carries the management
-Space and configuration generation, and authorization binds the Run's own
-Instance rather than a configured Agent Profile.
+explicit `pwd:` still names its own directory.
 
-No Space configures a management Agent. Each Space has its own management
-prompt, written like a summon: a leading `@auto` or `@<harness>` with
-`machine:`, `harness:`, `model:` and `effort:` conditions constrains which
-registration Jev may choose for the @xMatrix delegate and Channel About. A
-management Run always works in its Space management directory, so
-`repo:` and `pwd:` are refused when the prompt is saved.
+Ordinary `@<harness>`, registration and `@auto` summons without `repo:` or
+`pwd:` offer the same private managed directory as other input launches. An
+owner need not register or grant a local directory before the first conversation.
+The Hub still admits the current Space registration, model and daemon capability
+(`registration_managed_v1`), then issues a bounded managed key. The daemon creates
+the cwd under `~/.xmatrix-management/`; it grants no registered local directory
+and does not create a Space management projection. Explicit repository or
+`pwd:` targets retain their authorization checks and cannot silently become an
+internal cwd. Replaying the message reuses its original Run and managed key.
+
+The management Agent and `@xMatrix` delegate are retired. Channel About uses an
+invisible channel-scoped session on an enabled ordinary registration, with its
+own managed cwd and channel-only projection. It reads channel facts on demand;
+ordinary conversation Runs do not acquire that projection or a Space mirror.
 
 Registered workspace references may also name a canonical repository as
 `repo:<repository-reference>`. Such a reference must be present in the Space

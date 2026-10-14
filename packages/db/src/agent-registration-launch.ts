@@ -673,12 +673,16 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         }
         // Read alongside the candidates: the repository list comes from GitHub.
         const repositoryCatalog = summonRepositoryCatalog(this.repositoryReader, actorUserId, options.tags.repo);
-        const listed = await this.candidatesFor(selection.target.kind === "registration"
+        // A conversation without a requested repository/directory can start in
+        // a daemon-owned cwd, even before the owner registers any workspaces.
+        const managedWorkspace = !options.tags.repo && !options.tags.pwd;
+        const target = selection.target.kind === "registration"
           ? parseSpaceAgentRegistrationKey(selection.target.key)
           : selection.target.kind === "capability" ? { harness: selection.target.harness }
           // `@auto` reaches every registration its conditions allow.
           : { ...(options.tags.harness ? { harness: canonicalRegistrationHarness(options.tags.harness) } : {}),
-            ...(options.tags.machine?.startsWith("machine:") ? { machineId: options.tags.machine } : {}) }, repositoryCatalog);
+            ...(options.tags.machine?.startsWith("machine:") ? { machineId: options.tags.machine } : {}) };
+        const listed = await this.candidatesFor({ ...target, managedWorkspace }, repositoryCatalog);
         const candidates = listed.offered;
         if (!candidates.length) {
           const code = listed.offlineOnly ? "registration_daemon_offline"
@@ -691,7 +695,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         }
         let selected: Awaited<ReturnType<RegistrationLaunchChooser>>;
         try {
-          selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates,
+          selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates, managedWorkspace,
             blocked: listed.blocked,
             tags: input.forceMention !== undefined ? { ...options.tags, launch: "force" } : options.tags,
             summon: { text: summonText(selection), start: selection.start, end: options.end, authorKind: source.authorKind,
@@ -707,8 +711,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           continue;
         }
         const candidate = candidates.find(item => sameAgentRegistration(item.key, selected.key) && item.key.spaceId === selected.key.spaceId);
-        if (!candidate || !selectedModelGranted(candidate, selected) || selected.workspaceReference === undefined ||
-            !candidate.workspaceReferences.includes(selected.workspaceReference)) {
+        if (!candidate || !selectedModelGranted(candidate, selected) || (selected.workspaceReference === undefined
+            ? !managedWorkspace : !candidate.workspaceReferences.includes(selected.workspaceReference))) {
           throw new RegistrationAccessError("registration_selection_invalid", 409);
         }
         validateSelectedHarnessParameters(candidate, selected, options.tags);

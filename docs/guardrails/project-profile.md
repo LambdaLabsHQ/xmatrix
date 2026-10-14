@@ -55,6 +55,13 @@ second-week activity counts. External users require explicit classification;
 unknown accounts stay separate from team/test accounts. See
 [activation report](../operations/activation-report.md).
 
+Ordinary Agent summons can start in a daemon-owned internal cwd before a new
+user registers a local folder. The same registration admission and managed-cwd
+capability fence applies as for other input launches. Explicit repository and
+local-directory targets remain separately authorized; ordinary internal cwd
+Runs carry no Space management projection. See
+[Space agent routing](../architecture/space-agent-routing.md).
+
 The public user guide includes a local-folder walkthrough for creating and
 updating a first project wiki with Claude Code or Codex, linked from the homepage.
 Its source is [the project wiki guide](../guide/project-wiki.md).
