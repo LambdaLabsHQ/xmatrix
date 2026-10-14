@@ -532,6 +532,9 @@ pub struct AgentRuntimeWaiting {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub label: Option<String>,
+    /// For background tasks, how many are still running; clients word it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub count: Option<u32>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub details: Vec<String>,
     pub since_millis: u64,

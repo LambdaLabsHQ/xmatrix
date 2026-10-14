@@ -477,7 +477,9 @@ function cleanRuntimeWaiting(value: unknown): AgentRuntimeWaiting | undefined {
   if (sinceMillis === undefined) return undefined;
   const label = cleanText(value.label, 160);
   const details = cleanTextList(value.details, 4, 300);
-  return { kind: value.kind, ...(label ? { label } : {}), ...(details ? { details } : {}), sinceMillis };
+  const count = cleanNonnegativeInteger(value.count);
+  return { kind: value.kind, ...(label ? { label } : {}), ...(count !== undefined && count <= 100_000 ? { count } : {}),
+    ...(details ? { details } : {}), sinceMillis };
 }
 
 function cleanGoal(value: unknown): AgentGoalStatus | undefined {
