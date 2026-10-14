@@ -199,6 +199,7 @@ import {
 import { useDesktopSidebarLayout } from "./use-desktop-sidebar-layout";
 import { useShellDialogs } from "./use-shell-dialogs";
 import { useChannelPins } from "./use-channel-pins";
+import { readCountsFromHub } from "./channel-read-sync";
 import { useChannelReadSync } from "./use-channel-read-sync";
 import { createRealtimeFrameBatcher, humanFrameBatchKey } from "./realtime-frame-batcher";
 import { patchChannelsRegistrationQuota } from "./registration-quota-patch";
@@ -1055,6 +1056,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     markChannelResponded,
     markChannelReadToSequence,
     observeChannelReadSequence,
+    readOnThisDevice,
     resetChannelReadSync,
   } = useChannelReadSync({
     accessTokenRef,
@@ -2276,29 +2278,15 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     if (!user || channels.length === 0) return;
     if (channelReadStateUserIdRef.current !== user.id) return;
 
-    updateChannelReadCounts((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const channel of channels) {
-        const hubReadSequence = channel.readSequence;
-        if (hubReadSequence !== undefined) {
-          observeChannelReadSequence(channel.id, hubReadSequence);
-          if (next[channel.id] === hubReadSequence) continue;
-          next[channel.id] = hubReadSequence;
-          changed = true;
-          continue;
-        }
-        if (channel.messageCount === undefined || next[channel.id] !== undefined) continue;
-        // Legacy/single-channel payloads can omit the user-scoped hydration.
-        // Keep the local first-sight baseline until an authoritative list or
-        // realtime read update supplies readSequence.
-        next[channel.id] = channel.messageCount;
-        changed = true;
-      }
-      return changed ? next : current;
-    });
+    for (const channel of channels) {
+      if (channel.readSequence !== undefined) observeChannelReadSequence(channel.id, channel.readSequence);
+    }
+    // Legacy/single-channel payloads can omit the user-scoped hydration: such a
+    // Channel keeps the local first-sight baseline until an authoritative list
+    // or realtime read update supplies readSequence.
+    updateChannelReadCounts((current) => readCountsFromHub(current, channels, readOnThisDevice));
     setChannelReadCountsBaselineReady(true);
-  }, [channels, observeChannelReadSequence, updateChannelReadCounts, user]);
+  }, [channels, observeChannelReadSequence, readOnThisDevice, updateChannelReadCounts, user]);
 
   // Who may read the selected Channel's history; a change re-reads it. The
   // Channel object itself changes on every message, so it is not a dependency.

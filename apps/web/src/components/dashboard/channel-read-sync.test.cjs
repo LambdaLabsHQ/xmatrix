@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
-const { ChannelReadSyncCoordinator } = require("./channel-read-sync.ts");
+const { ChannelReadSyncCoordinator, readCountsFromHub } = require("./channel-read-sync.ts");
 
 function controlledTimers() {
   let nextId = 1;
@@ -154,4 +154,33 @@ test("reset cancels delayed work and ignores an older in-flight result", async (
 
   assert.deepEqual(successes, []);
   assert.equal(timers.pending().length, 0);
+});
+
+test("a read made on this device stands against a Hub answer given before it reached the Hub", () => {
+  const readHere = { "channel-a": 42 };
+  const current = { "channel-a": 42, "channel-b": 7 };
+  // A message moved the Channel while the read was on its way: the Hub's last answer is older.
+  const counts = readCountsFromHub(current, [
+    { id: "channel-a", readSequence: 40, messageCount: 42 },
+    { id: "channel-b", readSequence: 7, messageCount: 7 },
+  ], (channelId) => readHere[channelId] ?? 0);
+  assert.equal(counts, current, "nothing changed, so nothing is copied or written");
+  // The Hub's answer stands again once it has gone past the read.
+  assert.deepEqual(
+    readCountsFromHub(current, [{ id: "channel-a", readSequence: 43, messageCount: 43 }], (channelId) => readHere[channelId] ?? 0),
+    { "channel-a": 43, "channel-b": 7 },
+  );
+});
+
+test("the Hub's answer replaces a count the device remembered without reading here", () => {
+  assert.deepEqual(
+    readCountsFromHub({ "channel-a": 50, "channel-b": 7 }, [{ id: "channel-a", readSequence: 45, messageCount: 50 }], () => 0),
+    { "channel-a": 45, "channel-b": 7 },
+  );
+});
+
+test("a Channel without read state starts from its message count and then keeps its count", () => {
+  const first = readCountsFromHub({}, [{ id: "channel-a", messageCount: 5 }, { id: "channel-b" }], () => 0);
+  assert.deepEqual(first, { "channel-a": 5 });
+  assert.equal(readCountsFromHub(first, [{ id: "channel-a", messageCount: 9 }], () => 0), first);
 });

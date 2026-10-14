@@ -47,6 +47,8 @@ export function useChannelReadSync({
   onReadStateAnswered,
 }: UseChannelReadSyncOptions) {
   const lastSyncedReadSequenceRef = useRef<Record<string, number>>({});
+  // How far this device has read each Channel: no Hub answer takes it back (readCountsFromHub).
+  const readHereRef = useRef<Record<string, number>>({});
   const coordinatorRef = useRef<ChannelReadSyncCoordinator<ChannelReadStateUpdate> | null>(null);
   const queryClient = useQueryClient();
   // The coordinator is built once, so the acknowledgement handler reads the
@@ -102,6 +104,7 @@ export function useChannelReadSync({
     const readState = await syncChannelReadCursor(accessToken, channelId, sequence, true);
     // The Hub omits a cleared attention summary, and that absence is the answer.
     if (readState) applyReadState(channelId, { attention: readState.attention, readSequence: readState.readSequence });
+    readHereRef.current[channelId] = Math.max(readHereRef.current[channelId] || 0, sequence);
     updateChannelReadCounts((current) => (current[channelId] || 0) >= sequence
       ? current : { ...current, [channelId]: sequence });
   }, [accessTokenRef, applyReadState, channelsRef, updateChannelReadCounts]);
@@ -121,6 +124,7 @@ export function useChannelReadSync({
       !document.hasFocus()
     ) return;
 
+    readHereRef.current[channelId] = Math.max(readHereRef.current[channelId] || 0, sequence);
     const accessToken = accessTokenRef.current;
     const channelAttentionUnread = channelsRef.current.find((channel) => channel.id === channelId)
       ?.attention?.unreadAttentionCount || 0;
@@ -152,12 +156,16 @@ export function useChannelReadSync({
   const resetChannelReadSync = useCallback(() => {
     coordinatorRef.current?.reset();
     lastSyncedReadSequenceRef.current = {};
+    readHereRef.current = {};
   }, []);
+
+  const readOnThisDevice = useCallback((channelId: string) => readHereRef.current[channelId] || 0, []);
 
   return {
     markChannelResponded,
     markChannelReadToSequence,
     observeChannelReadSequence,
+    readOnThisDevice,
     resetChannelReadSync,
   };
 }
