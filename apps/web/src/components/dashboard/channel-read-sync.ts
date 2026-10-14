@@ -143,3 +143,28 @@ export class ChannelReadSyncCoordinator<T extends ChannelReadSyncResult> {
 function validSequence(value: number | undefined): value is number {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0;
 }
+
+/**
+ * The read counts the Channels' Hub read state gives. The Hub's answer
+ * replaces what the device remembered, but not what it has read since: the
+ * Hub's cursor only moves forward, so an answer short of that read was given
+ * before the read reached it. A Channel without read state keeps its count, or
+ * starts from its message count. The same object comes back when nothing
+ * changed.
+ */
+export function readCountsFromHub(
+  current: Record<string, number>,
+  channels: readonly { id: string; readSequence?: number; messageCount?: number }[],
+  readHere: (channelId: string) => number,
+): Record<string, number> {
+  let next: Record<string, number> | undefined;
+  for (const channel of channels) {
+    const known = (next ?? current)[channel.id];
+    const count = channel.readSequence !== undefined
+      ? Math.max(channel.readSequence, readHere(channel.id))
+      : known === undefined ? channel.messageCount : known;
+    if (count === undefined || count === known) continue;
+    (next ??= { ...current })[channel.id] = count;
+  }
+  return next ?? current;
+}
