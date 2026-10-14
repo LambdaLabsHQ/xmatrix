@@ -85,19 +85,22 @@ for (const { ticksPerSecond, seconds: SECONDS } of [{ ticksPerSecond: 10, second
     if (sent === REPORTS_PER_SECOND * SECONDS) send({ type: "pong", requestId: "performance-complete" });
     // Node's deadline avoids browser-side timers/actions becoming the load.
     await delay(Math.max(0, startedAt + (tick + 1) * (1000 / ticksPerSecond) - Date.now()));
-    if ((tick + 1) % (10 * ticksPerSecond) === 0) {
+    if ((tick + 1) % (10 * ticksPerSecond) === 0 && tick + 1 < SECONDS * ticksPerSecond) {
       const current = await metrics();
       windows.push((current.TaskDuration - windowBefore.TaskDuration) / (current.Timestamp - windowBefore.Timestamp));
       windowBefore = current;
     }
   }
   // The final report has the normal inter-arrival interval before this read.
-  const after = await metrics();
-  const elapsed = after.Timestamp - before.Timestamp;
   const nativeTraffic = nativeSocket ? await readNativeHumanSocketTraffic(page) : null;
   const traffic: Traffic = nativeTraffic ? { counting: nativeTraffic.counting, reports: nativeTraffic.byType.enhanced_presence ?? 0,
     snapshots: nativeTraffic.byType.channel_updated ?? 0, last: nativeTraffic.lastStep } :
     await page.evaluate(() => (window as unknown as { __loadTraffic: Traffic }).__loadTraffic);
+  // Witness receipts before the CPU cutoff. This is one snapshot, never a
+  // drain/poll, and its own main-thread cost remains in the final window.
+  const after = await metrics();
+  const elapsed = after.Timestamp - before.Timestamp;
+  windows.push((after.TaskDuration - windowBefore.TaskDuration) / (after.Timestamp - windowBefore.Timestamp));
   const renders = await page.evaluate(() =>
     (window as unknown as { __renderCounts: { workspaceViews: number; messageRows: number } }).__renderCounts);
   const busy = (after.TaskDuration - before.TaskDuration) / elapsed;
