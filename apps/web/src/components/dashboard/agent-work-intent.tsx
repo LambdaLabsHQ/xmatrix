@@ -20,7 +20,7 @@ export const INTENT_STALE_MS = 5 * 60 * 1000;
 const TICK_MS = 30_000;
 
 /** When each Instance's current intent was first seen by this client. */
-export function useIntentSince(items: readonly AgentWorkItem[]): ReadonlyMap<string, number> {
+export function useIntentSince(items: readonly Pick<AgentWorkItem, "key" | "intent">[]): ReadonlyMap<string, number> {
   const seen = useRef(new Map<string, { intent: string; since: number }>());
   const [since, setSince] = useState<ReadonlyMap<string, number>>(() => new Map());
   useEffect(() => {

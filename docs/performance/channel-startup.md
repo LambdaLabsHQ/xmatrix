@@ -310,8 +310,13 @@ draft.
 
 A Run's activity, intent, token counters and last-seen clock stay in its Channel.
 Only account quota travels to sibling Channels, and repeated quota readings
-reuse unchanged objects. The work dock shares unchanged item references and
-memoizes Instance cards, so a sibling's report leaves those controls intact.
+reuse unchanged objects. The work dock selects its visible presentation, including
+trace-derived status, intent, waiting details, notices, quota verdicts and control
+capabilities. Activity-only reports retain the selected array and Instance cards;
+new event/query inputs also share equal views. The view contains no actionable
+Instance snapshot: Trace, Stop, Reborn and Handoff resolve the exact current key
+from the live Channel at execution, including the second confirmation press.
+Removed keys do not fall back to an older catalog item.
 Unchanged intents retain their age without dispatching a no-op state update.
 Channel ordering parses timestamps once per immutable snapshot; replacements
 receive fresh keys and discarded snapshots are held only weakly.
@@ -324,7 +329,7 @@ shared Channel event slice instead of scanning the catalog for each message.
 Head catch-up still probes the socket after successfully applying missed rows,
 even when that application synchronously commits and cleans up the read effect.
 
-Regression coverage counts workspace, conversation-row and message-row renders
+Regression coverage counts workspace, conversation-row, work-dock, Instance-card and message-row renders
 in `live-agent-load-render-scope.spec.ts`, including cards and whole-Channel
 snapshots. The presence owner tests cover sibling-Run isolation, unchanged quota,
 and a 1,000-report digest with a bounded number of Channel inspections. The
