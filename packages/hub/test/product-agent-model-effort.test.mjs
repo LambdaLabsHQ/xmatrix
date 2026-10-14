@@ -190,3 +190,42 @@ test("multi-statement control messages still deliver as context", () => {
   assert.equal(intent("@claude:1 /model fable\n@claude:1 /effort high"), "context");
   assert.equal(intent("@claude:1 /model fable\nand then ship it"), "work");
 });
+
+/**
+ * A switch that cancels a running turn owes it a continuation. Hub decides it
+ * and commits one instruction per Instance once every statement has landed,
+ * worded by the Hub, rather than the Instance resuming itself.
+ */
+function continuationPort(outcomes) {
+  const continuations = [];
+  const port = {
+    async switchControl(input) { return outcomes.shift()(input); },
+    async publishSystemNotice() {},
+    async publishContinuation(_channelId, input) { continuations.push(input); },
+  };
+  return { port, continuations };
+}
+
+test("the switches that cancelled a turn commit one continuation naming what was selected", async () => {
+  const { port, continuations } = continuationPort([
+    () => ({ status: "switched", selected: "fable", continuation: { instanceId: "instance-1", requestId: "switch-1" } }),
+    () => ({ status: "switched", selected: "high" }),
+  ]);
+  await orchestrateProductAgentControlCommands({ channelId: "channel", body: "@claude:1 /model fable\n@claude:1 /effort high", port });
+  assert.equal(continuations.length, 1);
+  assert.equal(continuations[0].instanceId, "instance-1");
+  assert.deepEqual(continuations[0].requestIds, ["switch-1"]);
+  assert.match(continuations[0].body, /so that the switch to model `fable` and effort `high` took effect at once/u);
+  assert.match(continuations[0].body, /no person interrupted or rejected anything/u);
+});
+
+test("a refused switch that cancelled the turn still continues it; one that cancelled nothing does not", async () => {
+  const refused = continuationPort([
+    () => ({ status: "error", message: "not offered", continuation: { instanceId: "instance-1", requestId: "switch-1" } }),
+  ]);
+  await orchestrateProductAgentControlCommands({ channelId: "channel", body: "@claude:1 /model nope", port: refused.port });
+  assert.match(refused.continuations[0].body, /for a model or effort switch, which was not applied/u);
+  const idle = continuationPort([() => ({ status: "switched", selected: "fable" })]);
+  await orchestrateProductAgentControlCommands({ channelId: "channel", body: "@claude:1 /model fable", port: idle.port });
+  assert.deepEqual(idle.continuations, []);
+});

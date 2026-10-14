@@ -43,6 +43,8 @@ export interface AgentInstanceControlResultBinding {
 export interface AgentInstanceControlResult extends AgentInstanceControlResultBinding {
   value?: string;
   error?: string;
+  /** The switch cancelled a turn that was running. */
+  interruptedTurn?: boolean;
 }
 
 export class AgentInstanceControlWaiterError extends Error {
@@ -138,10 +140,12 @@ export class AgentInstanceRuntimeSignalRouter {
           ...(message.runtimeState ? { runtimeState: agentRuntimePresentation(message.runtimeState) } : {}) });
         return;
       case "agent_model_switch_result":
-        await this.completeControl(session, "model", message.requestId, message.model, message.error);
+        await this.completeControl(session, "model", message.requestId, message.model, message.error,
+          message.interruptedTurn === true);
         return;
       case "agent_effort_switch_result":
-        await this.completeControl(session, "effort", message.requestId, message.effort, message.error);
+        await this.completeControl(session, "effort", message.requestId, message.effort, message.error,
+          message.interruptedTurn === true);
         return;
       case "agent_lifecycle":
         if (message.channelId) this.assertChannel(session, message.channelId);
@@ -166,6 +170,7 @@ export class AgentInstanceRuntimeSignalRouter {
     requestId: string,
     value: string | undefined,
     error: string | undefined,
+    interruptedTurn: boolean,
   ): Promise<void> {
     if ((!value || !value.trim()) && (!error || !error.trim())) {
       throw new Error(`${kind} switch result requires a value or error`);
@@ -179,6 +184,7 @@ export class AgentInstanceRuntimeSignalRouter {
       requestId,
       ...(value ? { value } : {}),
       ...(error ? { error } : {}),
+      ...(interruptedTurn ? { interruptedTurn } : {}),
     });
   }
 }
