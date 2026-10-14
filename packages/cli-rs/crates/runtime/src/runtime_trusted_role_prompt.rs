@@ -52,10 +52,6 @@ pub(crate) fn claude_stream_extra_args(
     {
         args.extend(["--append-system-prompt".to_string(), prompt.to_string()]);
     }
-    // The Space's connector actions, as MCP tools for this Run's harness.
-    if let Some(config) = crate::runtime_connector_mcp::claude_connector_mcp_config() {
-        args.extend(["--mcp-config".to_string(), config]);
-    }
     if let Some(session_id) = resume_id.map(str::trim).filter(|value| !value.is_empty()) {
         args.extend(["--resume".to_string(), session_id.to_string()]);
     }

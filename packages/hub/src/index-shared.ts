@@ -534,6 +534,9 @@ export function agentRunHttpRouteAllowed(
   // Ask a Space admin, on a card in its Channel, for a secret it may not read yet.
   if (request.method === "POST" && path === HUB_ROUTES.secret_requests &&
       principal.channelWriteAllowed !== false) return true;
+  // Its Channel's connected apps and their commands; acting is sending one.
+  if (request.method === "GET" && path === HUB_ROUTES.connector_usage &&
+      principal.channelWriteAllowed !== false) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   // Channel memory authorizes the exact Run in the repository: read where both

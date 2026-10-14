@@ -1704,9 +1704,9 @@ pub enum SecretCommand {
 
 #[derive(Subcommand)]
 pub enum ConnectorCliCommand {
-    /// Serve this Space's connector actions as MCP tools over stdio, for the
-    /// harness an Agent Run drives (it is configured automatically)
-    Mcp,
+    /// The apps connected to this Run's Channel and each action's command;
+    /// act by sending one with `xmatrix send`
+    List,
 }
 
 #[derive(Subcommand)]

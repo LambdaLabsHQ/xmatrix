@@ -3020,7 +3020,7 @@ struct AcpSession {
 fn acp_session_new_params(workspace_path: &str, trusted_rules: Option<&str>) -> Value {
     let mut params = serde_json::json!({
         "cwd": workspace_path,
-        "mcpServers": crate::runtime_connector_mcp::acp_connector_mcp_servers(),
+        "mcpServers": [],
     });
     if let Some(rules) = trusted_rules
         .map(str::trim)

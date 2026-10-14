@@ -26,7 +26,8 @@ import { registerGoogleChatRoutes } from "./index-routes-googlechat";
 import { isPolicyAction } from "./connectors/connector-commands";
 import { connectorActionCatalog } from "./connectors/action-catalog";
 import { connectorProvider } from "./connectors/registry";
-import { connectorHubOrigin, readBoundedRequestBody, requestErrorStatus, requireAuth, requireHumanAuth } from "./index-shared";
+import { connectorUsage } from "./connectors/usage";
+import { connectorHubOrigin, readBoundedRequestBody, requestErrorStatus, requireAuth, requireHumanAuth, requireLiveAgentRun } from "./index-shared";
 import type { AuthUser } from "./auth";
 import type { Env } from "./types";
 
@@ -104,6 +105,18 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
     } catch (error) {
       console.error("Connector ingress failed", error instanceof Error ? error.message : "unknown");
       return Response.json({ error: "Connector ingress is unavailable" }, { status: 503 });
+    }
+  });
+
+  app.get(HUB_ROUTES.connector_usage, async (c) => {
+    try {
+      const authenticated = await requireAuth(c.req.raw, c.env);
+      if (!authenticated.agentRun) return c.json({ error: "Connector usage is for Agent Runs" }, 403);
+      const run = await requireLiveAgentRun(c.env, authenticated);
+      const connectors = await connectorUsage(c.env, { ownerUserId: run.ownerUserId, channelId: run.channelId });
+      return c.json({ connectors }, 200, { "cache-control": "private, no-store" });
+    } catch (error) {
+      return errorResponse(error);
     }
   });
 
