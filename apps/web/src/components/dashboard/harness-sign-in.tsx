@@ -48,7 +48,7 @@ export function harnessSignInView(input: {
     installed: item?.installed,
     daemon,
     blocker: !daemon ? "Connect this machine to sign in from here."
-      : !capable ? "Update this machine&apos;s xMatrix daemon to sign in from here."
+      : !capable ? "Update this machine's xMatrix daemon to sign in from here."
         : item && !item.installed ? "Install this harness on the machine first." : undefined,
   };
 }
