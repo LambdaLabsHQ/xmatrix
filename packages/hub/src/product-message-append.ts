@@ -1,5 +1,5 @@
 import { messagePublicationEvidence } from "@xmatrix/protocol";
-import { appendChannelMessage, channelMessageResult, publishChannelLiveDelivery } from "./channel-messages";
+import { appendChannelMessage, channelMessageResult, committedLiveRouting, publishChannelLiveDelivery } from "./channel-messages";
 import { productMessageSenderPresentation } from "./message-sender-presentation";
 import type { Env } from "./types";
 
@@ -45,7 +45,7 @@ export async function deliverCommittedProductMessage(
       ...(metadata ? { metadata } : {}),
       ...(Array.isArray(committed.attachments) && committed.attachments.length
         ? { attachments: committed.attachments } : {}),
-    });
+    }, undefined, committedLiveRouting(committed));
   } catch (error) {
     console.error("Product message live delivery failed", {
       channelId, messageId, error: error instanceof Error ? error.message : String(error),

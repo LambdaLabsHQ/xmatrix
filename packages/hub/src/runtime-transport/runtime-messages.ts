@@ -6,6 +6,7 @@ import {
   acknowledgeChannelMessage,
   appendChannelMessage,
   channelMessageHistory,
+  committedLiveRouting,
   publishChannelLiveDelivery,
 } from "../channel-messages";
 import { productMessageSenderPresentation } from "../message-sender-presentation";
@@ -73,7 +74,7 @@ export function runtimeMessages(
           ...(isRecord(input.residual) && isRecord(input.residual.appMetadata)
             ? { metadata: input.residual.appMetadata }
             : {}),
-        }, self)
+        }, self, committedLiveRouting(payload))
         .catch((error: unknown) => {
           console.error("Channel family Agent live delivery failed", {
             channelId,
