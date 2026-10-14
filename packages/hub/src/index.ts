@@ -1,7 +1,6 @@
-import { registerGmailNotificationRoutes } from "./index-routes-gmail-notifications";
-import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 // First, so that error reporting is open before anything else loads.
 import "./error-reporting";
+import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
@@ -114,7 +113,6 @@ registerConnectorRoutes(app);
 registerConnectorOAuthRoutes(app);
 registerGooglePickerRoutes(app);
 registerGmailMailboxRoutes(app);
-registerGmailNotificationRoutes(app);
 registerSentryInstallationRoutes(app);
 registerChannelTransferRoutes(app);
 registerMachineNameRoutes(app);

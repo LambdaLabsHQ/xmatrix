@@ -1396,6 +1396,14 @@ pub enum AgentInstanceClientMessage {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         error: Option<String>,
     },
+    /// The harness withdrew a question it asked on a card; Hub settles the card.
+    HarnessQuestionClosed {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        request_id: Option<String>,
+        channel_id: String,
+        /// The request id the card was posted with, which names its message.
+        card_request_id: String,
+    },
     AgentLifecycle {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         request_id: Option<String>,

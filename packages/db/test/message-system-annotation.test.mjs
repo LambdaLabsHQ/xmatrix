@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { connectionString, integration, seedTestSpacePlacement, integrationAuthority } from "./postgres-database.fixture.mjs";
+import { connectionString, integration, seedMessageSpace, integrationAuthority } from "./postgres-database.fixture.mjs";
 
 import { Client } from "pg";
 
@@ -19,20 +19,9 @@ async function seed() {
   const client = new Client({ connectionString });
   await client.connect();
   try {
-    for (const table of ["data.outbox", "data.message_mutations", "data.idempotency_keys",
-      "data.message_annotations", "data.messages", "data.channels", "data.spaces"]) {
-      await client.query(`DELETE FROM ${table} WHERE space_id=$1`, [SPACE]);
-    }
-    await client.query(`DELETE FROM control.space_placement WHERE space_id=$1`, [SPACE]);
-    await seedTestSpacePlacement(client, SPACE, now);
-    await client.query(`INSERT INTO data.spaces
-      (space_id,owner_user_id,name,search_rank_sequence,version,metadata_json,created_at,updated_at)
-      VALUES ($2,'owner','Annotations','space-rank-annotations',1,'{}',$1,$1)`, [now, SPACE]);
-    await client.query(`INSERT INTO data.channels
-      (channel_id,space_id,name,name_key,mode,search_rank_sequence,version,metadata_json,
-       created_at,updated_at,activity_at)
-      VALUES ('conversation',$2,'Conversation','conversation','open','rank-conv',1,'{}',$1,$1,$1)`,
-      [now, SPACE]);
+    await seedMessageSpace(client, { space: SPACE, channel: "conversation", at: now,
+      tables: ["data.outbox", "data.message_mutations", "data.idempotency_keys",
+      "data.message_annotations", "data.messages", "data.channels", "data.spaces"] });
     for (const [messageId, sequence, recalled] of [["status", 1, false], ["recalled", 2, true]]) {
       await client.query(`INSERT INTO data.messages
         (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { recordingAgentInstancePort } from "./support/agent-instance-port.mjs";
+import { channelInstanceSession, recordingAgentInstancePort } from "./support/agent-instance-port.mjs";
 import { parameterControlNotice } from "../src/runtime-transport/postgres-agent-instance-port.ts";
 
 /**
@@ -10,11 +10,7 @@ import { parameterControlNotice } from "../src/runtime-transport/postgres-agent-
  * the notice and posts it as its own fact replying to the control, rather than
  * the Instance posting prose as its speech.
  */
-const session = {
-  principal: { ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1",
-    agentName: "codex", runId: "run-1", executionKey: "execution-1", channelWriteAllowed: true },
-  run: { kind: "channel-instance", instanceId: "instance-1", channelId: "channel", channelInstanceId: "2" },
-};
+const session = channelInstanceSession();
 const result = { type: "agent_parameter_control_result", channelId: "channel", sourceMessageId: "control-1",
   parameter: "fast", action: "toggle", current: "on", choices: ["on", "off"] };
 

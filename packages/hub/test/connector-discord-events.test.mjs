@@ -108,6 +108,7 @@ test('the actual shared Hono dispatch reaches signed Discord PING before generic
     './connectors/event-ingress': { async handleAppConnectorDelivery() { generic++; return new Response(null, { status: 404 }); } },
     './connectors/registry': { connectorProvider: () => undefined },
     './index-routes-connector-approvals': { registerConnectorApprovalRoutes: noop },
+    './index-routes-gmail-notifications': { registerGmailNotificationRoutes: noop },
     './index-routes-googlechat': { registerGoogleChatRoutes: noop },
     './index-routes-teams': { registerTeamsRoutes: noop },
     './index-routes-feishu': { registerFeishuRoutes: noop },

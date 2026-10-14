@@ -50,7 +50,10 @@ Space, mailbox, PKCE proof and single-use attempt; no forwarding setup is needed
 The Hub renews watch daily. Copy the notification ID to configure an event Page
 Automation with `--on gmail:message.received:<notification-id>`.
 
-Before public activation, verify a dedicated test mailbox end to end: authorize,
+Before public activation, probe the deployed push endpoint: no native configuration
+returns 503; configured ingress without a Bearer token returns 401. A generic
+connector 404 means the native handler is shadowed and must be fixed before use.
+Then verify a dedicated test mailbox end to end: authorize,
 receive a new inbox message, see exactly one ID notification, read via the existing
 private Gmail tool, verify a duplicate push cannot duplicate the message, and
 stop. Verify a foreign service account, wrong audience, malformed payload,

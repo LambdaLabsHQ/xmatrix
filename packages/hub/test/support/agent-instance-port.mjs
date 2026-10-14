@@ -9,7 +9,7 @@ import {
  * in `commands` and answers it with `respond`; history is inert.
  */
 export function recordingAgentInstancePort({ respond = () => ({}), signals = { async publish() {} },
-  pullRequestOpened } = {}) {
+  pullRequestOpened, settleQuestionnaire } = {}) {
   const commands = [];
   const port = new PostgresAgentInstancePort({
     atomicInstanceConnect: true,
@@ -37,6 +37,19 @@ export function recordingAgentInstancePort({ respond = () => ({}), signals = { a
     },
     signals,
     ...(pullRequestOpened ? { pullRequestOpened } : {}),
+    ...(settleQuestionnaire ? { settleQuestionnaire: async (input) => {
+      commands.push({ family: "settle-questionnaire", input });
+      return settleQuestionnaire(input);
+    } } : {}),
   });
   return { port, commands };
+}
+
+/** A writing Channel Instance session of a Run named codex:2, owned by "owner". */
+export function channelInstanceSession() {
+  return {
+    principal: { ownerUserId: "owner", spaceId: "space", channelId: "channel", agentId: "agent-1",
+      agentName: "codex", runId: "run-1", executionKey: "execution-1", channelWriteAllowed: true },
+    run: { kind: "channel-instance", instanceId: "instance-1", channelId: "channel", channelInstanceId: "2" },
+  };
 }

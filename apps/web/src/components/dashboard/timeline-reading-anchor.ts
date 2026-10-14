@@ -26,6 +26,14 @@ const READING_ANCHOR_SETTLE_MS = 750;
    quiet-period timer still releases an ordinarily settled prepend. */
 const READING_ANCHOR_MAX_MS = 10_000;
 
+/* Where the virtualizer keeps rows in place without scrolling while the reader
+   scrolls (react-virtuoso's own iOS test). A scroll written during an iOS
+   momentum scroll interrupts it and shows the place it lands on before it is
+   painted: a blank band across the timeline (user 2026-10-14: "上滑的时候，消息会突然空白").
+   There the anchor holds only until someone else scrolls. */
+const SCROLLING_MOVES_NO_ROWS = typeof navigator !== "undefined" &&
+  /iP(ad|od|hone)/i.test(navigator.userAgent) && /WebKit/i.test(navigator.userAgent);
+
 /* The row wrapper carries the anchor id; its last child is the message row
    itself, below any day divider the wrapper also renders. */
 function readingAnchorContent(root: HTMLElement, rowId: string): HTMLElement | null {
@@ -142,6 +150,11 @@ export function useTimelineReadingAnchor(root: HTMLElement | null) {
        the first correction: until then the layout still carries the drift the
        prepend introduced. */
     const onScroll = () => {
+      // The anchor's own correction leaves the timeline where it was held.
+      if (SCROLLING_MOVES_NO_ROWS && root.scrollTop !== heldScrollTop) {
+        release();
+        return;
+      }
       if (!corrected) return;
       const top = anchorTop();
       if (top === null) {

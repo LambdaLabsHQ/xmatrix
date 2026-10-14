@@ -19,6 +19,7 @@ import type {
   ChannelMessage,
   ChannelReaction,
   ObservabilityEvent,
+  QuestionnaireState,
   SerializedAgentInstance,
   SerializedChannel,
 } from "@xmatrix/protocol";
@@ -245,6 +246,8 @@ export type TimelineItem = {
   reservedSystemAgent?: boolean;
   /** The later message from the same sender the Hub judged makes this one obsolete. */
   supersededBy?: string;
+  /** A questionnaire card's state as the Hub settled it: answered or withdrawn. */
+  questionnaireState?: QuestionnaireState;
   /**
    * A folded row: the activity entries and superseded reports of one run of the
    * same sender, oldest first (conversation-activity-rows.ts). Never a message.
@@ -417,6 +420,7 @@ export function timelineMessagesEqual(previous: TimelineItem, next: TimelineItem
     previous.isEvent === next.isEvent &&
     previous.eventType === next.eventType &&
     previous.supersededBy === next.supersededBy &&
+    previous.questionnaireState?.state === next.questionnaireState?.state &&
     previous.continuation === next.continuation &&
     previous.retagged?.keys.join() === next.retagged?.keys.join() &&
     previous.retagged?.previous.id === next.retagged?.previous.id &&

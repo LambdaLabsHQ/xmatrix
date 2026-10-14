@@ -106,3 +106,33 @@ test("an answered card stays closed and shows its answer", async ({ page }) => {
   await expect(card.getByRole("button", { name: "Send answer" })).toHaveCount(0);
   await expect(card.getByRole("textbox")).toHaveCount(0);
 });
+
+test("a card the Hub settled shows its answer though the answer message is not loaded", async ({ page }) => {
+  await openChannel(page, [{ ...questionCard, questionnaireState: { state: "answered", answers: { branch: ["main"] } } }]);
+  const card = page.locator('[data-questionnaire-card="answered"]');
+  await expect(card.getByRole("radio", { name: /main/ })).toBeChecked();
+  await expect(card.getByRole("button", { name: "Send answer" })).toHaveCount(0);
+});
+
+test("a withdrawn card takes no answer", async ({ page }) => {
+  await openChannel(page, [{ ...questionCard, questionnaireState: { state: "cancelled" } }]);
+  const card = page.locator('[data-questionnaire-card="withdrawn"]');
+  await expect(card.getByText("Withdrawn")).toBeVisible();
+  await expect(card.getByRole("button", { name: "Send answer" })).toHaveCount(0);
+});
+
+test("the Hub's withdrawal notice closes a card read before it", async ({ page }) => {
+  await openChannel(page, [questionCard, {
+    messageId: "questionnaire-withdrawn:message-question",
+    channelId: "channel-general",
+    sequence: 2,
+    body: "Codex withdrew this question and is no longer waiting for an answer here.",
+    sentAt: E2E_NOW,
+    replyToMessageId: "message-question",
+    from: { identityId: "user:owner", kind: "user", label: "xMatrix", userId: "owner", email: "owner@xmatrix.test" },
+    metadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
+      xmatrixQuestionnaireState: { messageId: "message-question", state: "cancelled" } },
+  }]);
+  await expect(page.locator('[data-questionnaire-card="withdrawn"]')).toBeVisible();
+  await expect(page.locator('[data-questionnaire-card="open"]')).toHaveCount(0);
+});

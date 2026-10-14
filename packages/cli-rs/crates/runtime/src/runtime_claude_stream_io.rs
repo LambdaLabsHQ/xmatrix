@@ -519,7 +519,7 @@ pub(crate) async fn claude_stream_reader(
                 let questions = claude_questions(&input);
                 match channel.filter(|_| !questions.is_empty()) {
                     Some(channel) => {
-                        publish_questionnaire(
+                        let card = publish_questionnaire(
                             &relay,
                             &channel,
                             questionnaire_message(
@@ -529,9 +529,11 @@ pub(crate) async fn claude_stream_reader(
                                 &questions,
                             ),
                         );
-                        model_state
-                            .questions
-                            .park(tool_use_id, ClaudeParkedQuestion { request_id, input });
+                        model_state.questions.park(
+                            tool_use_id,
+                            ClaudeParkedQuestion { request_id, input },
+                            card,
+                        );
                     }
                     None => {
                         let refusal = claude_permission_response(
