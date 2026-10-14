@@ -96,7 +96,8 @@ export class RelayPageSession extends DurableObject<Env> {
             pageId: this.need("page"), principal: pagePrincipalFromSession(principal), ...input });
           await tellPageAutomationChannels(this.env, result.automationChannels);
           return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision,
-            detachedAutomations: result.detachedAutomations, attachedAutomations: result.attachedAutomations };
+            detachedAutomations: result.detachedAutomations, attachedAutomations: result.attachedAutomations,
+            agentSuggestOnly: result.page.agentSuggestOnly };
         } catch (error) {
           if (error instanceof PageControlError && error.code === "page_revision_conflict") {
             throw new PageSessionConflict(Number(error.detail?.headRevision ?? 0), String(error.detail?.body ?? ""));

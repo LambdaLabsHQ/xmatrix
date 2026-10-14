@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { pageDocBlockAt, pageDocBlocks, pageSchema, type PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   BetweenHorizontalEnd, BetweenVerticalEnd, Code2, Columns3, FileCode2, Flag, Rows3, Trash2, Heading1, Heading2, Heading3, Link2,
@@ -21,6 +21,13 @@ import {
   sectionsKey, selectionAnchor, setBlockKind, setLink, slashKey, type BlockKind, type CursorPresence, type Discussion,
   type HeadingActions, type SectionNote, type SlashState,
 } from "./page-editor-setup";
+import {
+  currentSuggestionTop, leaveSuggestion, pageSuggestions, showSuggestions, stepSuggestion, suggestionsKey,
+  takeSuggestion, type PageSuggestion, type SuggestionsReport,
+} from "./page-suggestions";
+
+/** The page's own controls over the suggestions laid over it. */
+export interface SuggestionControl { take(): void; leave(): void; step(by: -1 | 0 | 1): void }
 
 export type { CursorPresence, Discussion, HeadingActions, SectionNote };
 
@@ -136,7 +143,8 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow,
   onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, readGitHubFile, references }: {
+  onAnchorOffsets, cursorPresence, onReady, readerBaseline = null, onReaderChanges, suggestions = null, onSuggestions,
+  suggestionControl, readGitHubFile, references }: {
   session: PageLiveSession;
   canEdit: boolean;
   onBlockChange?: (blockId: string) => void;
@@ -168,6 +176,12 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   onReady?: () => void;
   /** The page as this reader last read it, as markdown, and the revision to diff it against: what changed since is shown as a diff. */
   readerBaseline?: { body: string; head: number } | null;
+  /** Suggestions waiting on the page, laid over it change by change until the reader takes or leaves each. */
+  suggestions?: readonly PageSuggestion[] | null;
+  /** How many changes are left, which is in front of the reader, and whose. */
+  onSuggestions?: (report: SuggestionsReport) => void;
+  /** Lets the page's own controls take, leave or step through the changes. */
+  suggestionControl?: MutableRefObject<SuggestionControl | null>;
   /** How many changes that diff shows. */
   onReaderChanges?: (count: number) => void;
   /** Reads a GitHub file the page embeds, through the Hub. */
@@ -213,6 +227,9 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       if (!current || !frame.current || !anchorsChange.current) return;
       const offsets = anchorOffsets(current, session.fragment, frame.current, discussionList.current,
         session.awareness);
+      // The change in front of the reader, where the face of the Agent that suggested it stands.
+      const suggested = currentSuggestionTop(current);
+      if (suggested !== null) offsets.set("suggestion", suggested - frame.current.getBoundingClientRect().top);
       const key = JSON.stringify([...offsets].map(([anchor, top]) => [anchor, Math.round(top)]));
       if (key === lastOffsets.current) return;
       lastOffsets.current = key;
@@ -253,6 +270,12 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     if (!host.current) return;
     const handleKeyDown = (_view: EditorView, event: KeyboardEvent) => {
       const slash = menu.current.slash;
+      // As in Cursor: Tab takes the suggested change in front of the reader, Escape leaves it.
+      if (!slash && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
+        && suggestionsKey.getState(_view.state)?.hunks.length) {
+        if (event.key === "Tab") return takeSuggestion(_view);
+        if (event.key === "Escape") return leaveSuggestion(_view);
+      }
       if (!slash) return false;
       const items = matchingItems(slash.query);
       if (!items.length) return false;
@@ -282,7 +305,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
       blocksChange.current?.(blocks);
     };
     const editor = new EditorView(host.current, {
-      state: EditorState.create({ schema: pageSchema, plugins: editorPlugins({
+      state: EditorState.create({ schema: pageSchema, plugins: [...editorPlugins({
         fragment: session.fragment, awareness: session.awareness, handleKeyDown,
         placeholder: "Write the current state of this area…",
         onBlockChange: (blockId) => blockChange.current?.(blockId),
@@ -292,7 +315,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         cursorPresence: () => presenceOf.current,
         readGitHubFile: () => readFile.current,
         references: () => referenceTargets.current,
-      }) }),
+      }), pageSuggestions(() => suggestionReport.current)] }),
       nodeViews,
       editable: () => editable.current,
       attributes: { class: "page-document", spellcheck: "true", "data-editable": editable.current ? "true" : "false" },
@@ -372,6 +395,21 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     });
     return () => cancelAnimationFrame(frameId);
   }, [readerBody, readerHead, session]);
+
+  const suggestionReport = useRef(onSuggestions);
+  suggestionReport.current = onSuggestions;
+  useEffect(() => {
+    if (view.current) showSuggestions(view.current, suggestions ?? []);
+  }, [suggestions, session]);
+  useEffect(() => {
+    if (!suggestionControl) return;
+    suggestionControl.current = {
+      take: () => { if (view.current) takeSuggestion(view.current); },
+      leave: () => { if (view.current) leaveSuggestion(view.current); },
+      step: (by) => { if (view.current) stepSuggestion(view.current, by); },
+    };
+    return () => { suggestionControl.current = null; };
+  }, [suggestionControl, session]);
 
   useEffect(() => {
     // An Agent's Run going to sleep or waking changes whose carets show, with no awareness change.
