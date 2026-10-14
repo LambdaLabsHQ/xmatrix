@@ -5,6 +5,7 @@ const { loadWorkspaceShellModuleMap, loadShellFunctions } = require("./workspace
 const shellModules = loadWorkspaceShellModuleMap(__dirname, ["use-channel-catalog-paging.ts", "channel-viewer-state.ts"]);
 require("./typescript-require.cjs").installTypeScriptRequire();
 const { withChannelReadState } = require("./channel-read-state.ts");
+const { createViewerReads, readAskedNow } = require("./channel-message-summary.ts");
 
 // Pure helpers only — no React or workspace shell runtime.
 const ORDERING_FUNCTIONS = [
@@ -126,6 +127,70 @@ test("a read from before the reader caught up neither takes their cursor back no
     [{ ...stale, readSequence: 41 }]);
   assert.equal(cleared.readSequence, 41);
   assert.equal(cleared.attention.lastMessageSequence, 41);
+});
+
+test("a read asked before the reader answered a wait does not bring the wait back at the same cursor", () => {
+  const attentionAt = (sequence) => ({ channelId: "channel-1", unreadAttentionCount: 1, lastMessageId: `m${sequence}`,
+    lastMessageSequence: sequence, updatedAt: "2026-10-13T08:00:00Z" });
+  const reads = createViewerReads();
+  const read = (extra = {}) => ({ id: "channel-1", messageCount: 42, historyHeadSequence: 42, readSequence: 42,
+    attention: attentionAt(41), updatedAt: "2026-10-13T08:00:42Z", ...extra });
+  // The reader has read all 42; message 41 asked them something and still waits.
+  let channels = mergeChannels([], [read()], reads.settle, reads.outdated);
+  // A read of the Channel is asked. Before it answers, the reader marks the wait done:
+  // the Hub acknowledges at the same cursor, with nothing waiting any more.
+  const askedBefore = read();
+  readAskedNow()(askedBefore);
+  reads.answered("channel-1");
+  channels = channels.map((channel) => withChannelReadState(channel, { readSequence: 42, attention: undefined }));
+  const [afterOld] = mergeChannels(channels, [askedBefore], reads.settle, reads.outdated);
+  assert.equal(afterOld.readSequence, 42);
+  assert.equal(afterOld.attention, undefined);
+  // The same read may still tell of a mention past what they have read.
+  const mentionPast = read({ messageCount: 43, historyHeadSequence: 43, attention: attentionAt(43) });
+  const [afterMention] = mergeChannels(channels, [mentionPast], reads.settle, () => true);
+  assert.equal(afterMention.attention.lastMessageSequence, 43);
+  assert.equal(afterMention.readSequence, 42);
+  // A read asked after the answer is the Hub's word again: a wait it still reports is a wait.
+  const askedAfter = read();
+  readAskedNow()(askedAfter);
+  const [afterNew] = mergeChannels(channels, [askedAfter], reads.settle, reads.outdated);
+  assert.equal(afterNew.attention.lastMessageSequence, 41);
+});
+
+test("a read's answer taken again from the cache is as old as when it was asked", async () => {
+  const { QueryClient } = require("@tanstack/react-query");
+  const { leasedResolveQuery } = await import("./channel-catalog-refresh.ts");
+  const attentionAt = (sequence) => ({ channelId: "channel-1", unreadAttentionCount: 1, lastMessageId: `m${sequence}`,
+    lastMessageSequence: sequence, updatedAt: "2026-10-13T08:00:00Z" });
+  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+  const reads = createViewerReads();
+  const hub = { id: "channel-1", messageCount: 41, historyHeadSequence: 41, readSequence: 40,
+    updatedAt: "2026-10-13T08:00:41Z" };
+  // The hook's own read of one Channel under one authorization: a real fetchQuery of the leased query.
+  const read = (fresh) => client.fetchQuery(leasedResolveQuery({
+    queryKey: ["xmatrix", "hub", "user", "channels", "space", "resolve", ["channel-1"], null, true],
+    lease: { id: 1 }, fresh, asked: readAskedNow,
+    read: async () => ({ protocolVersion: 1, pathsByChannelId: {}, channels: [{ ...hub }] }),
+  }));
+  try {
+    let channels = mergeChannels([], (await read()).channels, reads.settle, reads.outdated);
+    // The same Channels are read again, and the Hub says more of this one: the reader at 42, message 41 waiting on them.
+    Object.assign(hub, { messageCount: 42, historyHeadSequence: 42, readSequence: 42, attention: attentionAt(41),
+      updatedAt: "2026-10-13T08:00:42Z" });
+    channels = mergeChannels(channels, (await read(true)).channels, reads.settle, reads.outdated);
+    assert.equal(channels[0].attention.lastMessageSequence, 41);
+    // The reader marks the wait done: the Hub acknowledges at the same cursor, with nothing waiting any more.
+    reads.answered("channel-1");
+    channels = channels.map((channel) => withChannelReadState(channel, { readSequence: 42, attention: undefined }));
+    // The answer is still fresh, so the next read takes it from the cache: it was asked before the acknowledgement.
+    const cached = (await read()).channels;
+    assert.equal(cached[0].attention.lastMessageSequence, 41);
+    assert.equal(reads.outdated(cached[0]), true);
+    const [after] = mergeChannels(channels, cached, reads.settle, reads.outdated);
+    assert.equal(after.readSequence, 42);
+    assert.equal(after.attention, undefined);
+  } finally { client.clear(); }
 });
 
 test("paged catalog refresh retains live labels and busy state, then accepts idle and removal", () => {

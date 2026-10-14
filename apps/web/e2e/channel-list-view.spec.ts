@@ -1,12 +1,14 @@
 import { expect, test } from "./fixtures";
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import {
   E2E_CHANNEL,
   E2E_DESKTOP_CONTEXT,
+  E2E_MOBILE_CONTEXT,
   E2E_SPACE,
   fixtureJson,
   fixtureRequestBodies,
   fixtureRule,
+  installWorkspaceStubs,
   openGeneralChannelWithHistory,
   openWorkspaceWithStubs,
   routeHumanSocket,
@@ -68,6 +70,64 @@ test("hovered channel rows stay on the sidebar compositor surface", async ({ pag
   });
   expect(hoverChrome.backdrop, JSON.stringify(hoverChrome)).toBe("none");
   expect(hoverChrome.afterContent === "none" || hoverChrome.afterContent === "").toBeTruthy();
+});
+
+/** What in a conversation row still filters its backdrop, and the fill and edge its first face is drawn with. */
+function rowGlass(row: Locator) {
+  return row.evaluate((element) => {
+    const face = getComputedStyle(element.querySelector(".identity-avatar-face")!);
+    return {
+      filtering: [element, ...Array.from(element.querySelectorAll("*"))]
+        .filter((node) => getComputedStyle(node).backdropFilter !== "none")
+        .map((node) => node.className.toString().split(" ").slice(0, 3).join(".")),
+      fill: face.backgroundColor,
+      edge: face.boxShadow,
+    };
+  });
+}
+
+test("nothing in a conversation row filters the paper behind it, on a phone as on the desktop", async ({ page }, testInfo) => {
+  // Five working Agents and two unread messages: the row carries three faces, a +2, their status dots and a count.
+  const crowded = { ...E2E_CHANNEL, id: "channel-crowded", name: "crowded", messageCount: 5, historyHeadSequence: 5, readSequence: 3,
+    memberPresence: { "agent:codex": { kind: "agent", label: "Codex", status: "busy", instances: [1, 2, 3, 4, 5].map((ordinal) => ({
+      id: `instance-codex-${ordinal}`, channelInstanceId: String(ordinal), label: `Codex:${ordinal}`, channelId: "channel-crowded",
+      status: "busy", connectedAt: E2E_CHANNEL.updatedAt, lastSeenAt: E2E_CHANNEL.updatedAt, activity: "Working",
+    })) } } };
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, crowded] });
+  for (const layout of ["phone", "desktop"] as const) {
+    await page.setViewportSize((layout === "phone" ? E2E_MOBILE_CONTEXT : E2E_DESKTOP_CONTEXT).viewport);
+    await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
+    const rowOf = (id: string) => page.locator(`:is([data-channel-row-id="${id}"], [data-mobile-channel-row-id="${id}"]):visible`);
+    const row = rowOf(crowded.id);
+    await expect(row.locator(".identity-avatar-face")).toHaveCount(3);
+    await expect(row.locator(".app-channel-presence-overflow")).toHaveText("+2");
+    await expect(row.locator(".app-count-pill-value")).toHaveText("2");
+    // Glass chips on paper keep their fill and edge. A filter of what is
+    // behind them would cost each a compositor layer for next to nothing.
+    const atRest = await rowGlass(row);
+    expect(atRest.filtering).toEqual([]);
+    expect(atRest.fill).not.toBe("rgba(0, 0, 0, 0)");
+    expect(atRest.edge).not.toBe("none");
+    await testInfo.attach(`${layout}-crowded-row`, { body: await row.screenshot(), contentType: "image/png" });
+
+    // Under the pointer, under the keyboard and once opened, the row is paper still.
+    await row.hover();
+    expect((await rowGlass(row)).filtering).toEqual([]);
+    await row.focus();
+    expect((await rowGlass(row)).filtering).toEqual([]);
+    if (layout === "phone") continue;
+    await row.click();
+    await expect(row).toHaveClass(/app-channel-row-active/);
+    expect((await rowGlass(row)).filtering).toEqual([]);
+    // Left again, it is drawn as it was.
+    await rowOf(E2E_CHANNEL.id).click();
+    await expect(row).not.toHaveClass(/app-channel-row-active/);
+    await page.mouse.move(E2E_DESKTOP_CONTEXT.viewport.width - 40, E2E_DESKTOP_CONTEXT.viewport.height / 2);
+    await expect.poll(() => rowGlass(row)).toEqual(atRest);
+    // Glass on wood is another matter: the reader's own face on the rail still bends the grain behind it.
+    expect(await page.locator(".app-rail .app-rail-user-avatar .identity-avatar-face")
+      .evaluate((face) => getComputedStyle(face).backdropFilter)).toContain("blur(");
+  }
 });
 
 test("hovered and selected rows take the conversation's paper, a shade off the list", async ({ page }) => {

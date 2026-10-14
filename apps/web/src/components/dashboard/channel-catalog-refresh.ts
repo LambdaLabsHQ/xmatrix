@@ -57,11 +57,15 @@ function sameValue(before: unknown, after: unknown): boolean {
   return replaceEqualDeep(before, after) === before;
 }
 
+/** One authorization to read a Space. Its number tells its reads from those of any other. */
+export interface CatalogLease { readonly id: number }
+let leaseSerial = 0;
+
 /** The authorization each loaded Space's reads stand on: one lease a Space, for one account on one Hub. */
 export interface CatalogLeases {
   key: string;
   session: string;
-  bySpace: Map<string, object>;
+  bySpace: Map<string, CatalogLease>;
 }
 
 export const NO_CATALOG_LEASES: CatalogLeases = { key: "", session: "", bySpace: new Map() };
@@ -78,7 +82,39 @@ export function nextCatalogLeases(held: CatalogLeases, session: string, spaceIds
   const key = spaceIds.length ? `${session}\u0000${spaceIds.join("\u0000")}` : "";
   if (held.key === key) return held;
   const kept = held.session === session ? held.bySpace : NO_CATALOG_LEASES.bySpace;
-  return { key, session, bySpace: new Map(spaceIds.map((id) => [id, kept.get(id) ?? {}])) };
+  return { key, session, bySpace: new Map(spaceIds.map((id) => [id, kept.get(id) ?? { id: (leaseSerial += 1) }])) };
+}
+
+/**
+ * One resolve read, as the query it is for the authorization asking.
+ *
+ * The lease is part of what the query is: a read still under way for an
+ * authorization that ended, or its answer still fresh in the cache, is never
+ * handed to another one that asks for the same Channels. The Channels it
+ * answers with are marked with when the read was asked, and the cache keeps
+ * those very objects: a copy made to share structure with an earlier answer
+ * would carry no mark and pass for a read asked just now.
+ */
+export function leasedResolveQuery(input: {
+  /** Who asks, in which Space, for which Channels. */
+  queryKey: QueryKey;
+  lease: CatalogLease | undefined;
+  fresh?: boolean;
+  read: (signal: AbortSignal) => Promise<ChannelCatalogResolveResult>;
+  /** Takes the order of a read asked now and gives back the mark for its Channels (`readAskedNow`). */
+  asked: () => (channel: SerializedChannel) => void;
+}) {
+  return {
+    queryKey: [...input.queryKey, input.lease?.id ?? 0] as QueryKey,
+    queryFn: async ({ signal }: { signal: AbortSignal }) => {
+      const mark = input.asked();
+      const result = await input.read(signal);
+      result.channels.forEach(mark);
+      return result;
+    },
+    staleTime: input.fresh ? 0 : 30_000,
+    structuralSharing: false as const,
+  };
 }
 
 export interface ChannelCatalogChangeDetail {
