@@ -70,9 +70,15 @@ time, the Hub writes `data.runs.idle_sleep_at` (migration
 - anything else (a new turn, a wait, a stop): the due time is withdrawn.
 
 The Channel's launch coordinator keeps its alarm at the earliest due time (the
-`idleSleep` step). When it fires, `reconcileIdleSleeps` takes the due rows
-atomically and issues one durable `sleep` machine command per Run, fenced by
-Run id, execution key and Instance id, with the idle time the Hub observed.
+`idleSleep` step). When it fires, `reconcileIdleSleeps` reads at most 100 due
+Runs and hands each sleep to the existing durable machine command queue,
+fenced by Run id, execution key and Instance id. The complete Run id and
+deadline name one resting period; retries repeat the same command and the
+same 30-minute minimum idle duration. Only acceptance clears that exact
+deadline. Failed or uncertain handoffs remain due for coordinator recovery;
+a late acceptance cannot clear a newer resting period. Ended Runs and
+offline or incapable daemons keep the existing behavior of discarding the
+due sleep without issuing work.
 
 **Execution.** A daemon that advertises `machine_sleep_agent_v1` claims the
 command and checks its own facts first (`verify_hub_sleep`): the Run is the
