@@ -5,6 +5,7 @@ import {
 import { DOMSerializer, type Node as DocNode } from "prosemirror-model";
 import { Plugin, PluginKey, type Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
+import { edgeRoom, edgeRoomAt } from "./page-editor-setup";
 
 /**
  * A suggestion waiting on the page (pages-live-document.md §4.2): the whole document an Agent proposed,
@@ -111,16 +112,7 @@ function writeOut(element: HTMLElement, writer: Writer, key: string): void {
   const walk = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   for (let node = walk.nextNode(); node; node = walk.nextNode()) nodes.push(node as Text);
   const caret = pen(writer);
-  const rest = () => {
-    (nodes[nodes.length - 1] ?? element).after(caret);
-    // Resting at the end of its block, the pen hangs past the words rather than taking a line of its own.
-    const block = caret.closest("p, h1, h2, h3, h4, h5, h6, li");
-    if (!block) return;
-    const after = document.createRange();
-    after.setStartAfter(caret);
-    after.setEndAfter(block.lastChild ?? block);
-    caret.classList.toggle("is-last", after.toString().trim() === "");
-  };
+  const rest = () => nodes[nodes.length - 1]!.after(caret);
   const words = nodes.map((node) => node.data);
   const total = words.reduce((sum, text) => sum + text.length, 0);
   if (written.has(key) || total === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -164,6 +156,7 @@ function ghostBlocks(hunk: PageDocHunk, current: boolean, writer: Writer, key: s
   element.append(serializer.serializeFragment(hunk.content));
   if (current) {
     inkBlocks(element);
+    element.querySelector("p, h1, h2, h3, h4, h5, h6")?.prepend(edgeRoom("suggestion"));
     writeOut(element, writer, key);
   }
   return element;
@@ -202,6 +195,8 @@ function decorate(doc: DocNode, hunks: readonly PageDocHunk[], current: number, 
         }
         return !node.isTextblock;
       });
+      // Room beside the change for what to do with it, so neither its words nor the pen run under that.
+      decorations.push(...edgeRoomAt(doc, hunk.from, hunk.to, "suggestion"));
     }
     const outs = hunk.changes.filter((change) => change.kind === "added");
     // A hunk that changes only how its blocks are laid out shows the blocks it replaces as taken out.
@@ -359,7 +354,7 @@ export function stepSuggestion(view: EditorView, by: -1 | 0 | 1): void {
 
 /**
  * Where the change in front of the reader starts: the top of the words marked for it, where what to do
- * with it stands, clear of the pen writing at its end.
+ * with it stands, in the room kept for it beside them.
  */
 export function currentSuggestionTop(view: EditorView): number | null {
   const value = suggestionsKey.getState(view.state);
